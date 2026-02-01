@@ -1,0 +1,209 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;800;900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Fluid Typography & Spacing */
+  --font-main: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-secondary: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* HSL Color System - Pluto Official Palette */
+  --pro-bg: 42 40% 96%;
+  /* Warm Cream #F8F5F0 */
+  --pro-text-main: 227 42% 18%;
+  /* Midnight Blue #1A2340 */
+  --pro-text-muted: 227 15% 42%;
+  /* Muted Midnight Blue */
+  --pro-accent: 37 49% 67%;
+  /* Champagne Gold #D4B483 */
+  --pro-accent-alt: 37 30% 80%;
+  /* Muted Gold */
+  --pro-border: 42 20% 88%;
+  /* Subtle Cream Border */
+  --pro-surface: 0 0% 100%;
+  /* Pure White */
+
+  /* Semantic Status Colors */
+  --pro-urgent: 0 84% 60%;
+  --pro-warning: 38 92% 50%;
+  --pro-success: 142 71% 45%;
+
+  /* Soft Premium Shadows */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.02);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.05);
+  --shadow-lg: 0 12px 24px -4px rgb(0 0 0 / 0.05);
+  --shadow-premium:
+    0 2px 8px 0 rgba(0, 0, 0, 0.02),
+    0 10px 30px 0 rgba(0, 0, 0, 0.03);
+
+  /* Proportional Corner System */
+  --radius-xl: 32px;
+  --radius-lg: 20px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+
+  /* Standard Spacing Tokens */
+  --space-unit: 4px;
+
+  background-color: hsl(var(--pro-bg));
+  color: hsl(var(--pro-text-main));
+  font-family: var(--font-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer base {
+  body {
+    @apply antialiased selection:bg-pro-accent/10 selection:text-pro-accent;
+  }
+}
+
+/* Premium Component Primitives */
+.glass {
+  background: hsla(var(--pro-bg) / 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid hsla(var(--pro-border) / 0.1);
+}
+
+.glass-dark {
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Advanced Animations */
+@keyframes nebula-float {
+
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate(5px, -8px) scale(1.02);
+  }
+}
+
+.nebula-glow {
+  filter: blur(100px);
+  animation: nebula-float 20s ease-in-out infinite;
+  opacity: 0.08;
+}
+
+/* Layout Utilities */
+.sidebar-mask {
+  mask-image: linear-gradient(to bottom, transparent, black 5%, black 95%, transparent);
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+/* Typography Enhancements */
+.heading-premium {
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, hsl(var(--pro-text-main)) 0%, hsl(var(--pro-accent)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Scrollbar Refinement */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--pro-text-muted) / 0.15);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--pro-text-muted) / 0.2);
+}
+
+/* Interactivity */
+.hover-lift {
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+}
+
+.active-push:active {
+  transform: scale(0.97);
+}
+
+/* Status Micro-shadows */
+.shadow-status-ok {
+  box-shadow: 0 0 20px -5px hsl(142 71% 45% / 0.3);
+}
+
+.shadow-status-warn {
+  box-shadow: 0 0 20px -5px hsl(38 92% 50% / 0.3);
+}
+
+.animate-in {
+  animation: enter 0.6s cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.slide-up {
+  animation: slide-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes neural-pulse {
+
+  0%,
+  100% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.4;
+    transform: scale(0.95);
+  }
+}
+
+.animate-neural {
+  animation: neural-pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
