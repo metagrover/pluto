@@ -220,128 +220,9 @@ function App() {
   return (
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
       {/* Search Bar - Global HUD */}
-      {searchVisible && (
-        <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] px-4 animate-in fade-in duration-300">
-           <div className="fixed inset-0 bg-pro-text-main/20 backdrop-blur-sm" onClick={() => setSearchVisible(false)} />
-           <div className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-pro-border relative z-10 overflow-hidden transform animate-in slide-in-from-top-4 duration-500">
-                <div className="p-6 flex items-center gap-4 border-b border-pro-border">
-                    <span className="text-xl">🔍</span>
-                    <input 
-                        autoFocus
-                        type="text" 
-                        placeholder="Search your second brain..." 
-                        className="flex-1 bg-transparent border-none outline-none text-lg font-medium text-pro-text-main placeholder:text-pro-text-muted/30"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                    <div className="flex items-center gap-2">
-                        <span className="px-2 py-1 rounded bg-pro-bg border border-pro-border text-[10px] font-bold text-pro-text-muted/40 uppercase tracking-widest">ESC</span>
-                    </div>
-                </div>
-                <div className="max-h-[60vh] overflow-y-auto p-4 space-y-2">
-                    {filteredMeetings.length > 0 ? filteredMeetings.map(m => (
-                        <button 
-                            key={m.id}
-                            onClick={() => { setSelectedMeetingId(m.id); setSearchVisible(false); }}
-                            className="w-full text-left p-4 rounded-2xl hover:bg-pro-bg transition-colors group flex items-center justify-between"
-                        >
-                            <div>
-                                <h4 className="font-bold text-pro-text-main group-hover:text-pro-accent transition-colors">{m.title || 'Untitled Session'}</h4>
-                                <p className="text-[11px] text-pro-text-muted font-medium mt-1 uppercase tracking-widest">{new Date(m.created_at).toLocaleDateString()}</p>
-                            </div>
-                            <span className="text-pro-text-muted opacity-0 group-hover:opacity-100 transition-opacity">→</span>
-                        </button>
-                    )) : (
-                        <div className="p-12 text-center">
-                            <p className="text-pro-text-muted font-medium italic">No matches found for your search.</p>
-                        </div>
-                    )}
-                </div>
-           </div>
-        </div>
-      )}
 
-      {/* Ask Pluto HUD */}
-      {askPlutoVisible && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-500">
-              <div className="fixed inset-0 bg-pro-text-main/40 backdrop-blur-md" onClick={() => setAskPlutoVisible(false)} />
-              <div className="w-full max-w-3xl bg-white rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(26,35,64,0.3)] border border-pro-border relative z-10 overflow-hidden transform animate-in zoom-in-95 duration-500 flex flex-col h-[85vh] md:h-[600px]">
-                  <div className="p-8 border-b border-pro-border bg-pro-bg/30">
-                      <div className="flex items-center gap-4 mb-6">
-                          <div className="w-10 h-10 rounded-xl bg-pro-text-main flex items-center justify-center text-xl shadow-lg">🧠</div>
-                          <div>
-                              <h2 className="text-xl font-black tracking-tight text-pro-text-main">Ask Pluto</h2>
-                              <p className="text-[10px] font-bold text-pro-text-muted/60 uppercase tracking-[.15em] mt-0.5">Neural Synthesis Engine · v1.0</p>
-                          </div>
-                          <button 
-                              onClick={() => setAskPlutoVisible(false)}
-                              className="ml-auto w-10 h-10 rounded-xl hover:bg-pro-text-main/5 flex items-center justify-center text-pro-text-muted transition-colors"
-                          >✕</button>
-                      </div>
-                      <div className="relative">
-                          <input 
-                              autoFocus
-                              type="text"
-                              value={query}
-                              onChange={(e) => setQuery(e.target.value)}
-                              onKeyDown={async (e) => {
-                                  if (e.key === 'Enter' && query) {
-                                      setPlutoResponse('Thinking...')
-                                      try {
-                                          const response = await window.ipcRenderer.invoke('ASK_PLUTO', { query, meetingId: selectedMeetingId })
-                                          setPlutoResponse(response)
-                                      } catch (err) {
-                                          setPlutoResponse('I encountered an error while processing your request. Please try again.')
-                                      }
-                                  }
-                              }}
-                              placeholder="Search deep memory or ask a question..."
-                              className="w-full h-16 px-6 bg-white border border-pro-border rounded-2xl text-lg font-medium outline-none shadow-inner-soft focus:ring-4 focus:ring-pro-accent/10 transition-all placeholder:text-pro-text-muted/20"
-                          />
-                          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                              <span className="text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-widest mr-2">Press Enter</span>
-                              <div className="w-8 h-8 rounded-lg bg-pro-bg border border-pro-border flex items-center justify-center">↵</div>
-                          </div>
-                      </div>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-12 bg-white flex flex-col custom-scrollbar">
-                      {plutoResponse ? (
-                          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-                               <div className="flex items-center gap-3">
-                                   <div className="w-1.5 h-1.5 rounded-full bg-pro-accent pulse-glow" />
-                                   <span className="text-[10px] font-black text-pro-accent uppercase tracking-widest">Synthesis Output</span>
-                               </div>
-                               <div className="text-lg leading-relaxed text-pro-text-main/90 font-medium whitespace-pre-wrap selection:bg-pro-accent/20">
-                                   {plutoResponse === 'Thinking...' ? (
-                                       <div className="flex flex-col gap-4">
-                                           <div className="h-4 w-3/4 bg-pro-bg rounded-lg animate-pulse" />
-                                           <div className="h-4 w-1/2 bg-pro-bg rounded-lg animate-pulse" />
-                                           <div className="h-4 w-5/6 bg-pro-bg rounded-lg animate-pulse" />
-                                       </div>
-                                   ) : plutoResponse}
-                               </div>
-                          </div>
-                      ) : (
-                          <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6 opacity-40">
-                              <div className="w-16 h-16 rounded-3xl bg-pro-bg flex items-center justify-center text-3xl">✨</div>
-                              <div className="space-y-1">
-                                  <p className="text-sm font-bold text-pro-text-main">Ready to assist.</p>
-                                  <p className="text-[11px] font-medium text-pro-text-muted">Ask about specific meetings, projects, or people.</p>
-                              </div>
-                          </div>
-                      )}
-                  </div>
-                  <div className="p-6 bg-pro-bg/50 border-t border-pro-border flex items-center justify-between">
-                      <div className="flex gap-2">
-                          {['Projects', 'Timeline', 'People'].map(tag => (
-                              <button key={tag} className="px-3 py-1.5 rounded-lg bg-white border border-pro-border text-[10px] font-bold text-pro-text-muted uppercase tracking-widest hover:border-pro-accent transition-colors">{tag}</button>
-                          ))}
-                      </div>
-                      <span className="text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-widest">Powered by {llmProvider}</span>
-                  </div>
-              </div>
-          </div>
-      )}
+
+
 
       {/* Settings Modal */}
       {/* Settings Modal (Placeholder for removal if duplicate exists) */}
@@ -1353,10 +1234,7 @@ function App() {
                           </div>
                       ) : (
                           <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center space-y-4">
-                               <div className="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-center">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                               </div>
-                               <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Intelligence Ready</p>
+                               <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] opacity-40 hover:opacity-100 transition-opacity">Intelligence Ready</p>
                           </div>
                       )}
                   </div>
