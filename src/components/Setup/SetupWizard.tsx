@@ -31,8 +31,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-pro-bg z-50 flex flex-col items-center justify-center p-8 selection:bg-pro-accent/20">
-      <div className="max-w-md w-full space-y-12 text-center">
+    <div className="fixed inset-0 bg-pro-bg z-50 overflow-y-auto selection:bg-pro-accent/20">
+      <div className="min-h-full flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto w-full space-y-12">
         {step === 1 && (
           <div className="animate-in fade-in slide-in-from-bottom-8 duration-1000">
             <div className="relative inline-block mb-10">
@@ -42,7 +42,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 </div>
                 <div className="absolute -bottom-2 -right-2 w-12 h-12 bg-pro-accent rounded-2xl flex items-center justify-center text-xl shadow-2xl shadow-pro-accent/40 animate-bounce cursor-default text-white">✨</div>
             </div>
-            <h1 className="text-5xl font-black tracking-tighter text-pro-text-main leading-tight">
+            <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-pro-text-main leading-tight">
                 Focus on the <span className="gradient-text">human.</span>
             </h1>
             <p className="mt-6 text-pro-text-muted/80 leading-relaxed font-bold text-lg max-w-sm mx-auto">
@@ -60,7 +60,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         {step === 2 && (
           <div className="animate-in fade-in slide-in-from-right-8 duration-700 space-y-10">
             <div className="space-y-4">
-                <h2 className="text-4xl font-black tracking-tighter text-pro-text-main">Local Engine</h2>
+                <h2 className="text-2xl md:text-4xl font-black tracking-tighter text-pro-text-main">Local Engine</h2>
                 <p className="text-base text-pro-text-muted/60 font-bold uppercase tracking-widest leading-relaxed">
                     Preparing your local high-performance compute.
                 </p>
@@ -118,7 +118,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         {step === 3 && (
           <div className="animate-in fade-in slide-in-from-right-8 duration-700 space-y-12">
             <div className="space-y-4">
-                <h2 className="text-4xl font-black tracking-tighter text-pro-text-main">Speaker ID</h2>
+                <h2 className="text-2xl md:text-4xl font-black tracking-tighter text-pro-text-main">Speaker ID</h2>
                 <p className="text-base text-pro-text-muted/60 font-bold uppercase tracking-widest leading-relaxed">
                     Optional diarization for identity tracking.
                 </p>
@@ -160,7 +160,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         {step === 4 && (
           <div className="animate-in fade-in slide-in-from-right-8 duration-700 space-y-12">
             <div className="space-y-4">
-                <h2 className="text-4xl font-black tracking-tighter text-pro-text-main">AI Model</h2>
+                <h2 className="text-2xl md:text-4xl font-black tracking-tighter text-pro-text-main">AI Model</h2>
                 <p className="text-base text-pro-text-muted/60 font-bold uppercase tracking-widest leadign-relaxed">
                     Choose your reasoning provider. 
                 </p>

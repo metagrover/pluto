@@ -265,7 +265,7 @@ function App() {
       {askPlutoVisible && (
           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-500">
               <div className="fixed inset-0 bg-pro-text-main/40 backdrop-blur-md" onClick={() => setAskPlutoVisible(false)} />
-              <div className="w-full max-w-3xl bg-white rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(26,35,64,0.3)] border border-pro-border relative z-10 overflow-hidden transform animate-in zoom-in-95 duration-500 flex flex-col h-[600px]">
+              <div className="w-full max-w-3xl bg-white rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(26,35,64,0.3)] border border-pro-border relative z-10 overflow-hidden transform animate-in zoom-in-95 duration-500 flex flex-col h-[85vh] md:h-[600px]">
                   <div className="p-8 border-b border-pro-border bg-pro-bg/30">
                       <div className="flex items-center gap-4 mb-6">
                           <div className="w-10 h-10 rounded-xl bg-pro-text-main flex items-center justify-center text-xl shadow-lg">🧠</div>
@@ -364,12 +364,16 @@ function App() {
       </div>
       
       {/* Sidebar - Navigation (Hidden in Zen Mode) */}
-      {!isRecording && (
+      {!isRecording && (<>
+      <div 
+        className={`fixed inset-0 bg-black/20 backdrop-blur-sm z-30 lg:hidden transition-opacity duration-300 ${sidebarVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} 
+        onClick={() => setSidebarVisible(false)}
+      />
       <aside 
         className={`
-            w-80 bg-pro-bg/50 backdrop-blur-xl border-r border-pro-border flex flex-col shrink-0 relative z-20 sidebar-transition
-            ${sidebarVisible ? 'translate-x-0' : '-translate-x-80'}
-            ${sidebarVisible ? '' : '-mr-80'}
+            w-[85vw] md:w-80 bg-pro-bg/95 backdrop-blur-xl border-r border-pro-border flex flex-col shrink-0 absolute lg:relative h-full z-40 transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none
+            ${sidebarVisible ? 'translate-x-0' : '-translate-x-full lg:-translate-x-80'}
+            ${sidebarVisible ? '' : 'lg:-mr-80'}
         `}
       >
         <div className="p-9 pb-8 flex items-center">
@@ -512,7 +516,7 @@ function App() {
             </div>
         </div>
       </aside>
-      )}
+      </>)}
        
        {/* ZEN MODE - Full-screen Granola-inspired interface */}
        {isRecording ? (
@@ -542,7 +546,7 @@ function App() {
                 <div className="flex-1 flex flex-col relative overflow-hidden">
                     {/* Primary: Note Editor (Granola-style) */}
                     <div className="flex-1 overflow-y-auto">
-                        <div className="max-w-3xl mx-auto px-8 py-12">
+                        <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 md:py-12">
                             <textarea
                                 autoFocus
                                 value={currentNotes}
@@ -626,7 +630,7 @@ function App() {
        ) : (<>
        <main className="flex-1 flex flex-col bg-pro-bg h-full relative z-10 rounded-l-[2.5rem] overflow-hidden content-shift border-l border-pro-border/10">
 
-         <header className="h-28 flex items-center justify-between px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20">
+         <header className="h-28 flex items-center justify-between px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20">
             <div className="flex items-center gap-8">
                 <button 
                     onClick={() => setSidebarVisible(prev => !prev)}
@@ -696,7 +700,7 @@ function App() {
          </header>
 
           {/* Scrollable Content Area */}
-          <div className="flex-1 overflow-y-auto px-12 md:px-20 py-16 space-y-20 flex flex-col scroll-smooth relative">
+          <div className="flex-1 overflow-y-auto px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20 flex flex-col scroll-smooth relative">
                {/* Global Atmosphere Glows */}
                <div className="fixed top-0 right-0 w-[800px] h-[800px] bg-pro-accent/5 rounded-full blur-[120px] -mr-96 -mt-96 pointer-events-none z-0" />
                <div className="fixed bottom-0 left-0 w-[600px] h-[600px] bg-pro-accent/5 rounded-full blur-[100px] -ml-40 -mb-40 pointer-events-none z-0" />
@@ -748,7 +752,7 @@ function App() {
                                           setEditingTitle(true)
                                           setTitleValue(selectedMeeting?.title || 'Untitled Session')
                                       }}
-                                      className="text-4xl font-extrabold tracking-tight text-pro-text-main leading-tight cursor-text hover:text-pro-accent/80 transition-colors"
+                                      className="text-2xl md:text-4xl font-extrabold tracking-tight text-pro-text-main leading-tight cursor-text hover:text-pro-accent/80 transition-colors"
                                   >
                                       {selectedMeeting?.title || 'Untitled Session'}
                                   </h1>
@@ -1008,7 +1012,7 @@ function App() {
                             {/* Main Intelligence Grid */}
                             <div className="grid grid-cols-12 gap-6 col-span-12">
                                 {/* Next Meeting Intelligence - SECONDARY (or HERO if no recording) */}
-                                <div className={`${!isRecording ? 'col-span-12 md:col-span-8' : 'col-span-6'} bg-white border border-pro-border rounded-[2.5rem] p-10 flex flex-col justify-between min-h-[420px] shadow-sm relative overflow-hidden group hover:border-pro-accent/40 card-hover-effect`}>
+                                <div className={`${!isRecording ? 'col-span-12 xl:col-span-8' : 'col-span-6'} bg-white border border-pro-border rounded-[2.5rem] p-10 flex flex-col justify-between min-h-[420px] shadow-sm relative overflow-hidden group hover:border-pro-accent/40 card-hover-effect`}>
                                     <div className="z-10 space-y-8">
                                         <div className="flex items-center justify-between">
                                             <div className="w-12 h-12 rounded-2xl bg-pro-bg border border-pro-border flex items-center justify-center text-xl shadow-soft group-hover:bg-pro-accent group-hover:text-white transition-all duration-700">📅</div>
@@ -1016,7 +1020,7 @@ function App() {
                                         </div>
                                         <div className="space-y-4">
                                             <div>
-                                                <h3 className="text-3xl font-black tracking-tight leading-tight">Product Alignment</h3>
+                                                <h3 className="text-2xl md:text-3xl font-black tracking-tight leading-tight">Product Alignment</h3>
                                                 <p className="text-[12px] text-pro-text-muted font-bold opacity-40 mt-1 uppercase tracking-widest">With Sarah Chen, Dave Miller + 2 others</p>
                                             </div>
                                             <div className="p-6 bg-pro-bg/50 rounded-3xl border border-pro-border/40 space-y-4">
@@ -1033,7 +1037,7 @@ function App() {
                                 </div>
 
                                 {/* Overdue / Pending Items - SECONDARY */}
-                                <div className={`${!isRecording ? 'col-span-12 md:col-span-4' : 'col-span-6'} glass-card border border-pro-border rounded-[2.5rem] p-10 min-h-[420px] shadow-sm flex flex-col space-y-8 card-hover-effect overflow-hidden relative`}>
+                                <div className={`${!isRecording ? 'col-span-12 xl:col-span-4' : 'col-span-6'} glass-card border border-pro-border rounded-[2.5rem] p-10 min-h-[420px] shadow-sm flex flex-col space-y-8 card-hover-effect overflow-hidden relative`}>
                                     <div className="flex items-center justify-between relative z-10">
                                         <h3 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
                                         ⚠️ Action Insights
@@ -1085,48 +1089,92 @@ function App() {
                                 </div>
                             </div>
 
-                            {/* Entity Spotlight Intelligence - Full Width for Phase 2 Grid Polish */}
-                            <div className="col-span-12 glass-card border border-pro-border rounded-[2.5rem] p-10 min-h-[280px] shadow-sm flex flex-col md:flex-row items-center justify-between gap-12 card-hover-effect relative overflow-hidden group">
-                                <div className="space-y-6 relative z-10 flex-1">
-                                    <div className="flex items-center gap-4">
-                                        <span className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">Contextual Spotlight</span>
-                                        <div className="w-1.5 h-1.5 rounded-full bg-pro-success shadow-status-ok" />
-                                    </div>
-                                    <div className="flex items-center gap-6">
-                                        <div className="w-20 h-20 rounded-2xl bg-white border border-pro-border flex items-center justify-center text-4xl shadow-soft group-hover:scale-110 transition-transform duration-700">👤</div>
-                                        <div>
-                                            <h4 className="text-3xl font-black tracking-tighter leading-none mb-2 uppercase">Sarah Chen</h4>
-                                            <p className="text-[11px] font-bold text-pro-accent uppercase tracking-[.25em]">Principal Engineering Lead</p>
+                            <div className="col-span-12 bg-pro-bg border border-pro-border rounded-[2.5rem] p-10 relative overflow-hidden group hover:border-pro-accent/40 card-hover-effect">
+                                {/* Background Effects (Shared) */}
+                                <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-pro-accent/5 rounded-full blur-[120px] -mr-40 -mt-40 pointer-events-none opacity-50" />
+                                <div className="absolute -left-20 -bottom-20 w-80 h-80 bg-pro-success/5 rounded-full blur-[100px] pointer-events-none" />
+
+                                {/* Layout 1: Vertical (Mobile -> Laptop) */}
+                                <div className="flex xl:hidden flex-col justify-between h-full relative z-10 gap-8">
+                                     <div className="space-y-8">
+                                        <div className="flex items-center justify-between">
+                                            <div className="w-12 h-12 rounded-2xl bg-white border border-pro-border flex items-center justify-center text-3xl shadow-soft">👤</div>
+                                            <div className="flex items-center gap-4">
+                                                <span className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">Contextual Spotlight</span>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-pro-success shadow-status-ok" />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-6">
+                                            <div>
+                                                <h4 className="text-3xl font-black tracking-tighter leading-none mb-2 uppercase text-pro-text-main">Sarah Chen</h4>
+                                                <p className="text-[11px] font-bold text-pro-accent uppercase tracking-[.25em]">Principal Engineering Lead</p>
+                                            </div>
+                                            <div className="p-8 bg-pro-bg/50 rounded-3xl border border-pro-border/40 space-y-6">
+                                                <div className="flex items-center justify-between border-b border-pro-border/20 pb-4">
+                                                    <span className="text-[9px] font-black text-pro-text-muted/40 uppercase tracking-widest">Smart Insight</span>
+                                                    <span className="text-[9px] font-black text-pro-accent uppercase tracking-widest">Sprint 1 Target</span>
+                                                </div>
+                                                <p className="text-[16px] font-medium text-pro-text-main leading-relaxed italic">
+                                                    "You haven't followed up on the schema design with Sarah in 3 days. Sarah is attending today's Product Alignment."
+                                                </p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {["API Migration", "Schema Design"].map((tag) => (
+                                                        <span key={tag} className="px-3 py-1.5 bg-white border border-pro-border rounded-lg text-[9px] font-black text-pro-text-main/60 uppercase tracking-tight">{tag}</span>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                                <div className="p-8 bg-pro-bg/50 rounded-3xl border border-pro-border/40 space-y-6 flex-1 max-w-md relative z-10">
-                                    <div className="flex items-center justify-between border-b border-pro-border/20 pb-4">
-                                        <span className="text-[9px] font-black text-pro-text-muted/40 uppercase tracking-widest">Smart Insight</span>
-                                        <span className="text-[9px] font-black text-pro-accent uppercase tracking-widest">Sprint 1 Target</span>
-                                    </div>
-                                    <p className="text-[13px] font-bold text-pro-text-main/80 leading-relaxed italic">
-                                        "You haven't followed up on the schema design with Sarah in 3 days. Sarah is attending today's Product Alignment."
-                                    </p>
-                                    <div className="flex gap-2">
-                                        {["API Migration", "Schema Design"].map((tag) => (
-                                            <span key={tag} className="px-3 py-1.5 bg-white border border-pro-border rounded-lg text-[9px] font-black text-pro-text-main/60 uppercase tracking-tight">{tag}</span>
-                                        ))}
+                                    <div className="flex gap-3 pt-4 mt-auto">
+                                        <button onClick={() => setActiveTab('people')} className="flex-1 py-4 rounded-xl bg-white border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-soft hover:bg-pro-bg transition-all active-push">View Biography</button>
+                                        <button className="flex-1 py-4 rounded-xl bg-[#2A2B32] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">Draft Follow-up</button>
                                     </div>
                                 </div>
-                                <div className="flex flex-col gap-3 relative z-10 min-w-[180px]">
-                                    <button 
-                                        onClick={() => { setActiveTab('people'); }}
-                                        className="w-full py-4 rounded-xl bg-white border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-soft hover:bg-pro-bg transition-all active-push"
-                                    >
-                                        View Biography
-                                    </button>
-                                    <button className="w-full py-4 rounded-xl bg-pro-text-main text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">
-                                        Draft Follow-up
-                                    </button>
+
+                                {/* Layout 2: 3-Column Specific Layout (Desktop XL+) - MATCHES USER SCREENSHOT */}
+                                <div className="hidden xl:flex relative z-10 w-full h-full items-center justify-between gap-12">
+                                     {/* Left: Identity */}
+                                     <div className="flex flex-col gap-6 w-[280px] shrink-0">
+                                         <span className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] px-1">Contextual Spotlight</span>
+                                         <div className="flex items-center gap-6">
+                                            <div className="w-24 h-24 rounded-[1.5rem] bg-white border border-pro-border/10 flex items-center justify-center text-pro-accent shadow-sm relative overflow-hidden group-hover:scale-105 transition-transform duration-500 shrink-0">
+                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-12 h-12 text-[#5E82A3]">
+                                                    <path fillRule="evenodd" d="M7.5 6a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM3.751 20.105a8.25 8.25 0 0116.498 0 .75.75 0 01-.437.695A18.683 18.683 0 0112 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 01-.437-.695z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                            <div className="space-y-1.5 flex-1 min-w-0">
+                                                <h4 className="text-2xl font-black text-pro-text-main tracking-tight uppercase leading-none break-words">Sarah Chen</h4>
+                                                <p className="text-[10px] font-bold text-pro-accent uppercase tracking-[0.25em] leading-relaxed">Principal Engineering Lead</p>
+                                            </div>
+                                         </div>
+                                     </div>
+
+                                     {/* Center: Insight Card */}
+                                     <div className="flex-1 bg-pro-bg rounded-[2.5rem] border border-pro-border/10 p-8 space-y-6 self-stretch flex flex-col justify-center max-w-2xl shadow-sm">
+                                         <div className="flex items-center justify-between">
+                                              <span className="text-[9px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">Smart Insight</span>
+                                              <span className="text-[9px] font-black text-pro-accent uppercase tracking-[0.2em]">Sprint 1 Target</span>
+                                         </div>
+                                         <p className="text-[13px] font-bold text-pro-text-main/80 leading-relaxed italic">
+                                             "You haven't followed up on the schema design with Sarah in 3 days. Sarah is attending today's Product Alignment."
+                                         </p>
+                                         <div className="flex gap-2">
+                                             {["API Migration", "Schema Design"].map(tag => (
+                                                 <span key={tag} className="px-3 py-1.5 bg-white border border-pro-border/10 rounded-lg text-[9px] font-bold text-pro-text-muted uppercase tracking-wider shadow-sm">{tag}</span>
+                                             ))}
+                                         </div>
+                                     </div>
+
+                                     {/* Right: Actions */}
+                                     <div className="flex flex-col gap-4 w-[200px] shrink-0">
+                                         <button onClick={() => setActiveTab('people')} className="w-full py-4 rounded-xl bg-white border border-pro-border/10 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-sm hover:bg-pro-bg transition-all active-push">
+                                             View Biography
+                                         </button>
+                                         <button className="w-full py-4 rounded-xl bg-[#1A1D26] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">
+                                             Draft Follow-up
+                                         </button>
+                                     </div>
                                 </div>
-                                <div className="absolute -right-20 -top-20 w-64 h-64 bg-pro-accent/5 rounded-full blur-[80px] pointer-events-none" />
-                                <div className="absolute -left-20 -bottom-20 w-64 h-64 bg-pro-success/5 rounded-full blur-[80px] pointer-events-none" />
                             </div>
                          </div>
  
@@ -1135,7 +1183,7 @@ function App() {
                                  <h2 className="text-xl font-black tracking-tight">Live Intelligence Documents</h2>
                                 <button className="text-[10px] font-black text-pro-accent uppercase tracking-[0.15em] hover:underline" onClick={() => setActiveTab('wiki')}>Library Hub</button>
                             </div>
-                            <div className="grid grid-cols-4 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                                  {[
                                      { title: "Engineering Standups", desc: "Accumulated team context across 14 sessions.", icon: "👥", count: "14 Sessions" },
                                      { title: "API Migration Space", desc: "Consolidated decisions and technical schema logic.", icon: "🏗️", count: "8 Decisions" },

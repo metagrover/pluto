@@ -40,7 +40,7 @@ export const PeopleTab: React.FC = () => {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
       {people.map(person => (
         <div key={person.id} className="p-6 bg-white border border-pro-border rounded-[2rem] shadow-sm hover:shadow-md transition-all group">
           <div className="flex items-start justify-between mb-4">
