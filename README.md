@@ -4,7 +4,7 @@ Electron + React + Vite desktop app with optional WhisperX transcription.
 
 ## Setup
 
-Run **together**: one command starts the app; the app starts the Python WhisperX server automatically. You don’t run the backend separately.
+Run **together**: one command starts the app; the app starts the Python WhisperX server automatically. You don't run the backend separately.
 
 ### 1. Node / Electron
 
@@ -14,15 +14,15 @@ npm install
 
 ### 2. Native modules (better-sqlite3, etc.)
 
-The app uses native Node addons. They must be built for Electron’s Node version, not your system Node.
+The app uses native Node addons. They must be built for Electron's Node version, not your system Node.
 
-**If you see** `NODE_MODULE_VERSION` / “compiled against a different Node.js version”:
+**If you see** `NODE_MODULE_VERSION` / "compiled against a different Node.js version":
 
 1. **Python for node-gyp** (needed to compile): If you use Python 3.12+, `distutils` was removed. Install setuptools so node-gyp works:
    ```bash
    pip3 install setuptools
    ```
-   (Or use your venv’s pip if you prefer.)
+   (Or use your venv's pip if you prefer.)
 
 2. **Rebuild native modules for Electron:**
    ```bash
@@ -35,7 +35,12 @@ Then run the app again (`npm run dev`).
 
 Only needed if you use transcription.
 
-- **Python 3.10+** and **ffmpeg** (e.g. `brew install ffmpeg` on macOS).
+- **Python 3.10+**
+- **ffmpeg** — required for loading/decoding audio. Install before using transcription:
+  ```bash
+  brew install ffmpeg
+  ```
+  (Linux: `apt install ffmpeg` / `dnf install ffmpeg`; Windows: [ffmpeg.org](https://ffmpeg.org/download.html) or `choco install ffmpeg`.)
 - From repo root:
 
 ```bash
@@ -61,7 +66,22 @@ So the app finds WhisperX, either:
 
 **Speaker diarization:** Create a [Hugging Face](https://huggingface.co) account, accept the pyannote model licenses ([segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0), [speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)), create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). The app will prompt for it when needed.
 
-### 4. Run
+### 4. Ollama (optional, local LLM)
+
+Used for meeting titles, summaries, and entity extraction (people, topics, action items). Default provider in Pluto.
+
+1. **Install:** [ollama.com](https://ollama.com) or `brew install ollama`
+2. **Run the server** (if not already running as a service):
+   ```bash
+   ollama serve
+   ```
+3. **Pull a model** Pluto uses `llama3.2:3b` by default (light on M1/M2):
+   ```bash
+   ollama pull llama3.2:3b
+   ```
+   Other options: `phi3:mini`, `mistral:7b`, `llama3.1:8b`. You can switch to Gemini/OpenAI/Claude in **Settings** if you prefer.
+
+### 5. Run
 
 ```bash
 npm run dev
@@ -69,55 +89,37 @@ npm run dev
 
 Backend runs inside the same process; no separate `python whisperx_server.py` needed.
 
-**First run:** WhisperX can take 1–2 minutes to start (model load, font cache). If you see “WhisperX failed to start” but the server is still loading in the terminal, wait a minute and try transcription—it often works. Later runs are faster.
+**First run:** WhisperX can take 1–2 minutes to start (model load, font cache). If you see "WhisperX failed to start" but the server is still loading in the terminal, wait a minute and try transcription—it often works. Later runs are faster.
 
 ---
 
 # React + TypeScript + Vite (template)
 
-Intelligent meeting assistant and "second brain" application.
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## 🚀 Getting Started
+Currently, two official plugins are available:
 
-### Prerequisites
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
-- **Node.js** (v18+)
-- **Python** (v3.9+ recommended)
-    - *Note: You do NOT need to install Python libraries globally. The project handles this for you.*
-- **FFmpeg** (`brew install ffmpeg` on macOS)
+## Expanding the ESLint configuration
 
-### Installation (for Contributors)
+If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
 
-1.  **Clone the repository**
-    ```bash
-    git clone https://github.com/your-org/pluto.git
-    cd pluto
-    ```
+- Configure the top-level `parserOptions` property like this:
 
-2.  **Install Dependencies**
-    This will install Node packages AND set up a local Python virtual environment automatically.
-    ```bash
-    npm install
-    ```
-
-3.  **Run the App**
-    ```bash
-    npm run dev
-    ```
-
-## 📦 Building for Production
-
-To create a DMG installer that includes the bundled Python environment (no client-side setup required):
-
-```bash
-npm run build
+```js
+export default {
+  // other rules...
+  parserOptions: {
+    ecmaVersion: 'latest',
+    sourceType: 'module',
+    project: ['./tsconfig.json', './tsconfig.node.json'],
+    tsconfigRootDir: __dirname,
+  },
+}
 ```
 
-The output DMG will be in `release/`.
-
-## 🛠 Project Structure
-
-- `src/` - React/Electron source code
-- `python/` - Python server (WhisperX) and requirements
-- `scripts/` - Build and setup automation scripts
-- `resources/` - Assets and bundled binaries
+- Replace `plugin:@typescript-eslint/recommended` to `plugin:@typescript-eslint/recommended-type-checked` or `plugin:@typescript-eslint/strict-type-checked`
+- Optionally add `plugin:@typescript-eslint/stylistic-type-checked`
+- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and add `plugin:react/recommended` & `plugin:react/jsx-runtime` to the `extends` list
