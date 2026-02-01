@@ -34,7 +34,6 @@ const initDb = () => {
       console.log('[DB] Migrating FTS table for UUID support...')
       db.exec('DROP TABLE IF EXISTS meetings_fts')
     }
-    db.exec('DROP TABLE IF EXISTS settings')
 
     // FTS5 Migration for Entities UUID support
     const entitiesFtsInfo = db.prepare("PRAGMA table_info(entities_fts)").all() as any[]

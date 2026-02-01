@@ -94,17 +94,23 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
               // Don't block, just continue with Mic
           }
           
-          // 2. Capture Microphone AFTER system audio (to ensure getDisplayMedia doesn't affect it)
+          // 2. Capture Microphone AFTER system audio (use saved device so user doesn't reselect every time)
           let micStream: MediaStream | null = null
+          const savedDeviceId = await window.ipcRenderer.invoke('GET_SETTING', 'audio_input_device_id') as string | undefined
           try {
               micStream = await navigator.mediaDevices.getUserMedia({
                   audio: {
-                      echoCancellation: false,  // Disable processing to get raw audio
+                      deviceId: savedDeviceId ? { ideal: savedDeviceId } : undefined,
+                      echoCancellation: false,
                       noiseSuppression: false,
                       autoGainControl: false
                   },
                   video: false
               })
+              const deviceId = micStream.getAudioTracks()[0]?.getSettings?.()?.deviceId
+              if (deviceId) {
+                  await window.ipcRenderer.invoke('SET_SETTING', { key: 'audio_input_device_id', value: deviceId })
+              }
               console.log('[Pluto] Microphone started successfully')
           } catch (micErr) {
               console.warn('[Pluto] Failed to capture microphone:', micErr)
