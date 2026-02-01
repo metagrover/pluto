@@ -42,6 +42,9 @@ function App() {
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [openaiApiKey, setOpenaiApiKey] = useState('')
   const [claudeApiKey, setClaudeApiKey] = useState('')
+    const [audioInputDeviceId, setAudioInputDeviceId] = useState<string>('')
+    const [audioInputDevices, setAudioInputDevices] = useState<{ deviceId: string; label: string }[]>([])
+    const [userDataPath, setUserDataPath] = useState<string>('')
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
   const [askPlutoVisible, setAskPlutoVisible] = useState(false)
@@ -98,6 +101,9 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'claude_api_key').then((val) => {
       if (val) setClaudeApiKey(val)
     })
+      window.ipcRenderer.invoke('GET_SETTING', 'audio_input_device_id').then((val) => {
+          if (val) setAudioInputDeviceId(val as string)
+      })
 
     // Keyboard Shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -127,6 +133,25 @@ function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+    useEffect(() => {
+        if (!settingsVisible) return
+        let cancelled = false
+        window.ipcRenderer.invoke('GET_USER_DATA_PATH').then((path: string) => {
+            if (!cancelled) setUserDataPath(path || '')
+        })
+            ; (async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                    stream.getTracks().forEach(t => t.stop())
+                } catch (_) { /* permission denied */ }
+                if (cancelled) return
+                const devices = await navigator.mediaDevices.enumerateDevices()
+                const inputs = devices.filter(d => d.kind === 'audioinput').map(d => ({ deviceId: d.deviceId, label: d.label || `Microphone ${d.deviceId.slice(0, 8)}` }))
+                setAudioInputDevices(inputs)
+            })()
+        return () => { cancelled = true }
+    }, [settingsVisible])
 
   const fetchMeetings = async () => {
     try {
@@ -1321,6 +1346,41 @@ function App() {
                   </div>
                   
                   <div className="p-10 space-y-12">
+                              {/* Preferred microphone */}
+                              <div className="space-y-4">
+                                  <label className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">Preferred microphone</label>
+                                  <select
+                                      value={audioInputDeviceId}
+                                      onChange={async (e) => {
+                                          const id = e.target.value
+                                          setAudioInputDeviceId(id)
+                                          await window.ipcRenderer.invoke('SET_SETTING', { key: 'audio_input_device_id', value: id })
+                                      }}
+                                      onFocus={async () => {
+                                          try {
+                                              const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+                                              stream.getTracks().forEach(t => t.stop())
+                                          } catch (_) { /* permission denied */ }
+                                          const devices = await navigator.mediaDevices.enumerateDevices()
+                                          const inputs = devices.filter(d => d.kind === 'audioinput').map(d => ({ deviceId: d.deviceId, label: d.label || `Microphone ${d.deviceId.slice(0, 8)}` }))
+                                          setAudioInputDevices(inputs)
+                                      }}
+                                      className="w-full p-4 rounded-2xl border-2 border-pro-border bg-white text-[14px] font-bold focus:border-pro-accent outline-none"
+                                  >
+                                      <option value="">Default (system)</option>
+                                      {audioInputDevices.map(d => (
+                                          <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+                                      ))}
+                                  </select>
+                                  <p className="text-[10px] text-pro-text-muted/60">Used for recording. Restart recording to apply.</p>
+                              </div>
+
+                              {/* Data location - so user can verify persistence */}
+                              <div className="space-y-2 pt-2 border-t border-pro-border/20">
+                                  <label className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]">Data stored at</label>
+                                  <p className="text-[11px] font-mono text-pro-text-muted/80 break-all">{userDataPath || '—'}</p>
+                              </div>
+
                       {/* Provider Selection */}
                       <div className="space-y-8">
                           <div className="flex items-center justify-between">

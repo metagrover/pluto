@@ -74,6 +74,9 @@ app.on('activate', () => {
   }
 })
 
+// Pin userData so dev and packaged app use the same data (must run before db)
+import './initUserData'
+
 // Module imports
 import * as db from './db'
 import { whisperX } from './whisperx'
@@ -249,6 +252,7 @@ app.whenReady().then(async () => {
   // Settings handlers
   ipcMain.handle('GET_SETTING', (_event, key) => db.getSetting(key))
   ipcMain.handle('SET_SETTING', (_event, { key, value }) => db.setSetting(key, value))
+  ipcMain.handle('GET_USER_DATA_PATH', () => app.getPath('userData'))
 
   // LLM handlers
   ipcMain.handle('GENERATE_SUMMARY', async (_event, { transcript, userNotes }) => {

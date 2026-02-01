@@ -128,6 +128,13 @@ main.initMain = initMain;
   }
 })(dist, dist.exports);
 var distExports = dist.exports;
+const appData = require$$0.app.getPath("appData");
+const plutoUserData = path.join(appData, "pluto");
+require$$0.app.setPath("userData", plutoUserData);
+if (!fs.existsSync(plutoUserData)) {
+  fs.mkdirSync(plutoUserData, { recursive: true });
+}
+console.log("[Pluto] User data directory:", plutoUserData);
 const dbPath = path.join(require$$0.app.getPath("userData"), "pluto.db");
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
@@ -147,7 +154,6 @@ const initDb = () => {
       console.log("[DB] Migrating FTS table for UUID support...");
       db.exec("DROP TABLE IF EXISTS meetings_fts");
     }
-    db.exec("DROP TABLE IF EXISTS settings");
     const entitiesFtsInfo = db.prepare("PRAGMA table_info(entities_fts)").all();
     if (entitiesFtsInfo.length > 0 && !entitiesFtsInfo.some((col) => col.name === "entity_id")) {
       console.log("[DB] Migrating Entities FTS table for UUID support...");
@@ -3292,6 +3298,7 @@ require$$0.app.whenReady().then(async () => {
   });
   require$$0.ipcMain.handle("GET_SETTING", (_event, key) => getSetting(key));
   require$$0.ipcMain.handle("SET_SETTING", (_event, { key, value }) => setSetting(key, value));
+  require$$0.ipcMain.handle("GET_USER_DATA_PATH", () => require$$0.app.getPath("userData"));
   require$$0.ipcMain.handle("GENERATE_SUMMARY", async (_event, { transcript, userNotes }) => {
     try {
       const settings = await getAllSettings(db$1);
