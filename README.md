@@ -35,7 +35,12 @@ Then run the app again (`npm run dev`).
 
 Only needed if you use transcription.
 
-- **Python 3.10+** and **ffmpeg** (e.g. `brew install ffmpeg` on macOS).
+- **Python 3.10+**
+- **ffmpeg** — required for loading/decoding audio. Install before using transcription:
+  ```bash
+  brew install ffmpeg
+  ```
+  (Linux: `apt install ffmpeg` / `dnf install ffmpeg`; Windows: [ffmpeg.org](https://ffmpeg.org/download.html) or `choco install ffmpeg`.)
 - From repo root:
 
 ```bash
@@ -61,7 +66,22 @@ So the app finds WhisperX, either:
 
 **Speaker diarization:** Create a [Hugging Face](https://huggingface.co) account, accept the pyannote model licenses ([segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0), [speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)), create a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). The app will prompt for it when needed.
 
-### 4. Run
+### 4. Ollama (optional, local LLM)
+
+Used for meeting titles, summaries, and entity extraction (people, topics, action items). Default provider in Pluto.
+
+1. **Install:** [ollama.com](https://ollama.com) or `brew install ollama`
+2. **Run the server** (if not already running as a service):
+   ```bash
+   ollama serve
+   ```
+3. **Pull a model** Pluto uses `llama3.2:3b` by default (light on M1/M2):
+   ```bash
+   ollama pull llama3.2:3b
+   ```
+   Other options: `phi3:mini`, `mistral:7b`, `llama3.1:8b`. You can switch to Gemini/OpenAI/Claude in **Settings** if you prefer.
+
+### 5. Run
 
 ```bash
 npm run dev
