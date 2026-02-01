@@ -668,8 +668,8 @@ const db$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty
 }, Symbol.toStringTag, { value: "Module" }));
 const WHISPERX_PORT = 5123;
 const WHISPERX_URL = `http://127.0.0.1:${WHISPERX_PORT}`;
-const HEALTH_CHECK_INTERVAL = 1e3;
-const MAX_HEALTH_CHECK_RETRIES = 30;
+const HEALTH_CHECK_INTERVAL = 2e3;
+const MAX_HEALTH_CHECK_RETRIES = 60;
 class WhisperXManager {
   constructor() {
     __publicField(this, "process", null);
