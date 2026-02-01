@@ -34,8 +34,16 @@ const initDb = () => {
       console.log('[DB] Migrating FTS table for UUID support...')
       db.exec('DROP TABLE IF EXISTS meetings_fts')
     }
+    db.exec('DROP TABLE IF EXISTS settings')
+
+    // FTS5 Migration for Entities UUID support
+    const entitiesFtsInfo = db.prepare("PRAGMA table_info(entities_fts)").all() as any[]
+    if (entitiesFtsInfo.length > 0 && !entitiesFtsInfo.some(col => col.name === 'entity_id')) {
+      console.log('[DB] Migrating Entities FTS table for UUID support...')
+      db.exec('DROP TABLE IF EXISTS entities_fts')
+    }
   } catch (e) {
-    // Table might not exist yet
+    // Table might not exist yet or other migration error
   }
 
   // Initialize Schema
@@ -72,6 +80,9 @@ const initDb = () => {
         user_notes,
         meeting_id UNINDEXED
       );
+
+      -- FTS5 meeting_id column migration (cleanup)
+      -- (Already handled by previous migration block)
 
       -- =============================================
       -- KNOWLEDGE GRAPH TABLES (Sprint 2)
@@ -131,11 +142,10 @@ const initDb = () => {
         FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
       );
 
-      -- Full-text search for entities
+      -- Full-text search for entities - Decoupled for UUID support
       CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(
         name,
-        content='entities',
-        content_rowid='rowid'
+        entity_id UNINDEXED
       );
     `)
 }
@@ -277,7 +287,7 @@ export const deleteMeeting = (id: string | number) => {
   try {
     db.prepare(`
       DELETE FROM entities_fts 
-      WHERE rowid NOT IN (SELECT id FROM entities)
+      WHERE entity_id NOT IN (SELECT id FROM entities)
     `).run()
   } catch (e) {
     // Ignore FTS cleanup errors
@@ -402,8 +412,8 @@ export const upsertEntity = (entity: {
 
   // Update FTS index
   db.prepare(`
-    INSERT INTO entities_fts (rowid, name) VALUES (?, ?)
-  `).run(id, entity.name)
+    INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)
+  `).run(entity.name, id)
 
   console.log(`[DB] Created entity: ${entity.type} - "${entity.name}"`)
   return db.prepare('SELECT * FROM entities WHERE id = ?').get(id) as Entity
@@ -436,7 +446,7 @@ export const getAllEntities = (): Entity[] => {
 export const searchEntities = (query: string): Entity[] => {
   return db.prepare(`
     SELECT entities.* FROM entities
-    JOIN entities_fts ON entities.id = entities_fts.rowid
+    JOIN entities_fts ON entities.id = entities_fts.entity_id
     WHERE entities_fts MATCH ?
     ORDER BY rank
   `).all(query) as Entity[]
@@ -466,6 +476,12 @@ export const updateEntityStatus = (id: string, status: EntityStatus): void => {
  */
 export const deleteEntity = (id: string): void => {
   db.prepare('DELETE FROM entities WHERE id = ?').run(id)
+
+  // Delete from FTS
+  try {
+    db.prepare('DELETE FROM entities_fts WHERE entity_id = ?').run(id)
+  } catch (e) { console.warn('Failed to delete entity from FTS', e) }
+
   // CASCADE will handle entity_links and meeting_entities
   console.log(`[DB] Deleted entity: ${id}`)
 }

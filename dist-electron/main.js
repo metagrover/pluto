@@ -147,6 +147,12 @@ const initDb = () => {
       console.log("[DB] Migrating FTS table for UUID support...");
       db.exec("DROP TABLE IF EXISTS meetings_fts");
     }
+    db.exec("DROP TABLE IF EXISTS settings");
+    const entitiesFtsInfo = db.prepare("PRAGMA table_info(entities_fts)").all();
+    if (entitiesFtsInfo.length > 0 && !entitiesFtsInfo.some((col) => col.name === "entity_id")) {
+      console.log("[DB] Migrating Entities FTS table for UUID support...");
+      db.exec("DROP TABLE IF EXISTS entities_fts");
+    }
   } catch (e) {
   }
   db.exec(`
@@ -182,6 +188,9 @@ const initDb = () => {
         user_notes,
         meeting_id UNINDEXED
       );
+
+      -- FTS5 meeting_id column migration (cleanup)
+      -- (Already handled by previous migration block)
 
       -- =============================================
       -- KNOWLEDGE GRAPH TABLES (Sprint 2)
@@ -241,11 +250,10 @@ const initDb = () => {
         FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
       );
 
-      -- Full-text search for entities
+      -- Full-text search for entities - Decoupled for UUID support
       CREATE VIRTUAL TABLE IF NOT EXISTS entities_fts USING fts5(
         name,
-        content='entities',
-        content_rowid='rowid'
+        entity_id UNINDEXED
       );
     `);
 };
@@ -351,7 +359,7 @@ const deleteMeeting = (id) => {
   try {
     db.prepare(`
       DELETE FROM entities_fts 
-      WHERE rowid NOT IN (SELECT id FROM entities)
+      WHERE entity_id NOT IN (SELECT id FROM entities)
     `).run();
   } catch (e) {
   }
@@ -405,8 +413,8 @@ const upsertEntity = (entity) => {
     entity.metadata ? JSON.stringify(entity.metadata) : null
   );
   db.prepare(`
-    INSERT INTO entities_fts (rowid, name) VALUES (?, ?)
-  `).run(id, entity.name);
+    INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)
+  `).run(entity.name, id);
   console.log(`[DB] Created entity: ${entity.type} - "${entity.name}"`);
   return db.prepare("SELECT * FROM entities WHERE id = ?").get(id);
 };
@@ -422,7 +430,7 @@ const getAllEntities = () => {
 const searchEntities = (query) => {
   return db.prepare(`
     SELECT entities.* FROM entities
-    JOIN entities_fts ON entities.id = entities_fts.rowid
+    JOIN entities_fts ON entities.id = entities_fts.entity_id
     WHERE entities_fts MATCH ?
     ORDER BY rank
   `).all(query);
@@ -440,6 +448,11 @@ const updateEntityStatus = (id, status) => {
 };
 const deleteEntity = (id) => {
   db.prepare("DELETE FROM entities WHERE id = ?").run(id);
+  try {
+    db.prepare("DELETE FROM entities_fts WHERE entity_id = ?").run(id);
+  } catch (e) {
+    console.warn("Failed to delete entity from FTS", e);
+  }
   console.log(`[DB] Deleted entity: ${id}`);
 };
 const linkEntities = (link) => {
