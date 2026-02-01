@@ -53,8 +53,8 @@ export interface HealthStatus {
 // Constants
 const WHISPERX_PORT = 5123
 const WHISPERX_URL = `http://127.0.0.1:${WHISPERX_PORT}`
-const HEALTH_CHECK_INTERVAL = 1000
-const MAX_HEALTH_CHECK_RETRIES = 30
+const HEALTH_CHECK_INTERVAL = 2000
+const MAX_HEALTH_CHECK_RETRIES = 60
 
 class WhisperXManager {
     private process: ChildProcess | null = null
