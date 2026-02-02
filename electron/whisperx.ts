@@ -69,6 +69,53 @@ class WhisperXManager {
      * Detect the best available Python path
      */
     /**
+     * Check if Python or bundled executable is available and functional
+     */
+    async checkPython(): Promise<{ available: boolean; version?: string; error?: string }> {
+        const executable = this.detectExecutable()
+
+        return new Promise((resolve) => {
+            // For bundled binary, we might not have --version working same way, 
+            // but for venv python it will.
+            const checkProcess = spawn(executable, ['--version'])
+            let output = ''
+
+            checkProcess.stdout?.on('data', (data) => {
+                output += data.toString()
+            })
+
+            checkProcess.stderr?.on('data', (data) => {
+                output += data.toString()
+            })
+
+            checkProcess.on('close', (code) => {
+                if (code === 0) {
+                    const version = output.trim() || (app.isPackaged ? 'Bundled Engine' : 'Python 3')
+                    resolve({ available: true, version })
+                } else if (app.isPackaged && code === 1 && output.includes('whisperx_server')) {
+                    // Some executables might exit with 1 on --version if not explicitly handled, 
+                    // but if it's packaged we can be more lenient if the file exists.
+                    resolve({ available: true, version: 'Bundled Engine' })
+                } else {
+                    resolve({ available: false, error: `Executable check failed with code ${code}: ${output}` })
+                }
+            })
+
+            checkProcess.on('error', (err) => {
+                resolve({ available: false, error: err.message })
+            })
+
+            // Timeout after 5 seconds
+            setTimeout(() => {
+                if (!checkProcess.killed) {
+                    checkProcess.kill()
+                    resolve({ available: false, error: 'Check timed out' })
+                }
+            }, 5000)
+        })
+    }
+
+    /**
      * Detect the best available Python path or bundled executable
      */
     private detectExecutable(): string {
