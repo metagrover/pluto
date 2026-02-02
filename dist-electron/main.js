@@ -675,35 +675,82 @@ class WhisperXManager {
     __publicField(this, "process", null);
     __publicField(this, "isStarting", false);
     __publicField(this, "pythonPath", "");
-    this.detectPython();
+    this.detectExecutable();
   }
   /**
    * Detect the best available Python path
    */
-  detectPython() {
-    if (this.pythonPath) return this.pythonPath;
-    if (process.env.PLUTO_PYTHON_PATH) {
-      console.log(`[WhisperX] Using Python from PLUTO_PYTHON_PATH: ${process.env.PLUTO_PYTHON_PATH}`);
-      this.pythonPath = process.env.PLUTO_PYTHON_PATH;
-      return this.pythonPath;
+  /**
+   * Check if Python or bundled executable is available and functional
+   */
+  async checkPython() {
+    const executable = this.detectExecutable();
+    return new Promise((resolve) => {
+      var _a, _b;
+      const checkProcess = child_process.spawn(executable, ["--version"]);
+      let output = "";
+      (_a = checkProcess.stdout) == null ? void 0 : _a.on("data", (data) => {
+        output += data.toString();
+      });
+      (_b = checkProcess.stderr) == null ? void 0 : _b.on("data", (data) => {
+        output += data.toString();
+      });
+      checkProcess.on("close", (code) => {
+        if (code === 0) {
+          const version = output.trim() || (require$$0.app.isPackaged ? "Bundled Engine" : "Python 3");
+          resolve({ available: true, version });
+        } else if (require$$0.app.isPackaged && code === 1 && output.includes("whisperx_server")) {
+          resolve({ available: true, version: "Bundled Engine" });
+        } else {
+          resolve({ available: false, error: `Executable check failed with code ${code}: ${output}` });
+        }
+      });
+      checkProcess.on("error", (err) => {
+        resolve({ available: false, error: err.message });
+      });
+      setTimeout(() => {
+        if (!checkProcess.killed) {
+          checkProcess.kill();
+          resolve({ available: false, error: "Check timed out" });
+        }
+      }, 5e3);
+    });
+  }
+  /**
+   * Detect the best available Python path or bundled executable
+   */
+  detectExecutable() {
+    if (require$$0.app.isPackaged) {
+      const bundledPath = path.join(process.resourcesPath, "bin", "whisperx_server", "whisperx_server");
+      console.log(`[WhisperX] Using bundled executable: ${bundledPath}`);
+      return bundledPath;
     }
+    const venvPython = path.join(this.getPythonDir(), "venv", "bin", "python");
+    if (fs.existsSync(venvPython)) {
+      console.log(`[WhisperX] Using local venv execution: ${venvPython}`);
+      this.pythonPath = venvPython;
+      return venvPython;
+    }
+    if (process.env.PLUTO_PYTHON_PATH) {
+      return process.env.PLUTO_PYTHON_PATH;
+    }
+    return this.detectSystemPython();
+  }
+  detectSystemPython() {
+    if (this.pythonPath) return this.pythonPath;
     const { execSync } = require("child_process");
     const tryNames = ["python3.12", "python3.11", "python3", "python"];
     for (const name of tryNames) {
       try {
         const path2 = execSync(`which ${name}`).toString().trim();
         if (path2) {
-          execSync(`${path2} -c "import whisperx"`);
-          console.log(`[WhisperX] Detected Python path with whisperx: ${path2}`);
           this.pythonPath = path2;
           return path2;
         }
       } catch (e) {
       }
     }
-    this.pythonPath = "python3";
-    console.warn(`[WhisperX] Could not detect Python with whisperx, falling back to: ${this.pythonPath}`);
-    return this.pythonPath;
+    return "python3";
   }
   /**
    * Get the path to the Python directory
@@ -715,33 +762,6 @@ class WhisperXManager {
     return path.join(require$$0.app.getAppPath(), "python");
   }
   /**
-   * Check if Python is available
-   */
-  async checkPython() {
-    return new Promise((resolve) => {
-      var _a, _b;
-      const python = child_process.spawn(this.pythonPath, ["--version"]);
-      let output = "";
-      (_a = python.stdout) == null ? void 0 : _a.on("data", (data) => {
-        output += data.toString();
-      });
-      (_b = python.stderr) == null ? void 0 : _b.on("data", (data) => {
-        output += data.toString();
-      });
-      python.on("close", (code) => {
-        if (code === 0) {
-          const version = output.trim().replace("Python ", "");
-          resolve({ available: true, version });
-        } else {
-          resolve({ available: false, error: "Python not found" });
-        }
-      });
-      python.on("error", (err) => {
-        resolve({ available: false, error: err.message });
-      });
-    });
-  }
-  /**
    * Start the WhisperX Python server
    */
   async start() {
@@ -751,20 +771,37 @@ class WhisperXManager {
       return;
     }
     this.isStarting = true;
-    this.detectPython();
     try {
-      const pythonDir = this.getPythonDir();
-      const serverPath = path.join(pythonDir, "whisperx_server.py");
-      if (!fs.existsSync(serverPath)) {
-        throw new Error(`WhisperX server not found at ${serverPath}`);
+      const executable = this.detectExecutable();
+      let spawnArgs = [];
+      let cwd = this.getPythonDir();
+      if (!require$$0.app.isPackaged) {
+        const serverPath = path.join(cwd, "whisperx_server.py");
+        if (!fs.existsSync(serverPath)) {
+          throw new Error(`WhisperX server script not found at ${serverPath}`);
+        }
+        spawnArgs = [serverPath];
+      } else {
+        cwd = path.dirname(executable);
       }
-      console.log(`[WhisperX] Starting server from ${serverPath}`);
+      console.log(`[WhisperX] Starting server using: ${executable} ${spawnArgs.join(" ")}`);
+      let ffmpegPath = "";
+      try {
+        ffmpegPath = require("ffmpeg-static");
+        if (require$$0.app.isPackaged) {
+          ffmpegPath = ffmpegPath.replace("app.asar", "app.asar.unpacked");
+        }
+        console.log(`[WhisperX] Using ffmpeg at: ${ffmpegPath}`);
+      } catch (e) {
+        console.warn("[WhisperX] Could not detect ffmpeg-static path", e);
+      }
       const env = {
         ...process.env,
-        WHISPERX_PORT: WHISPERX_PORT.toString()
+        WHISPERX_PORT: WHISPERX_PORT.toString(),
+        PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}:${process.env.PATH}` : process.env.PATH
       };
-      this.process = child_process.spawn(this.detectPython(), [serverPath], {
-        cwd: pythonDir,
+      this.process = child_process.spawn(executable, spawnArgs, {
+        cwd,
         env,
         stdio: ["ignore", "pipe", "pipe"]
       });

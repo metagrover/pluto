@@ -4,9 +4,12 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
+    "build": "tsc && vite build && npm run build-python && electron-builder",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "setup-python": "./scripts/setup_python.sh",
+    "build-python": "./scripts/build_python.sh",
+    "postinstall": "npm run setup-python"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
