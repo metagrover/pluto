@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "name": "git-pr-workflows-pr-enhance",
+  "platform": "antigravity",
+  "scope": "project",
+  "source": "rmyndharis/antigravity-skills/skills/git-pr-workflows-pr-enhance",
+  "sourceType": "degit-shorthand",
+  "installedAt": "2026-02-02T09:04:15.633Z",
+  "contentHash": "db75921bcd8c2857f2a2840dd80072cecd44c9b8fe1e0aa0a08fda36b6fe4653",
+  "hasSkillMd": true,
+  "skill": {
+    "frontmatter": {
+      "name": "git-pr-workflows-pr-enhance",
+      "description": "You are a PR optimization expert specializing in creating high-quality pull requests that facilitate efficient code reviews. Generate comprehensive PR descriptions, automate review processes, and ensu"
+    },
+    "validation": {
+      "ok": true,
+      "issues": [],
+      "frontmatter": {
+        "name": "git-pr-workflows-pr-enhance",
+        "description": "You are a PR optimization expert specializing in creating high-quality pull requests that facilitate efficient code reviews. Generate comprehensive PR descriptions, automate review processes, and ensu"
+      }
+    }
+  }
+}
