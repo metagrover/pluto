@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { AudioManager } from './components/AudioManager'
 import { SetupWizard } from './components/Setup/SetupWizard'
+import { ChevronDown, FileText, Sparkles, Copy, Check, BarChart3 } from 'lucide-react'
 import './App.css'
 
 // Knowledge Graph Components
@@ -50,7 +51,15 @@ function App() {
   const [currentNotes, setCurrentNotes] = useState('')
   const [inlineAskPluto, setInlineAskPluto] = useState(false)
   const [plutoResponse, setPlutoResponse] = useState('')
+  const [transcriptVisible, setTranscriptVisible] = useState(false)
+  const [copySuccess, setCopySuccess] = useState(false)
   const stopSessionRef = useRef<(() => void) | null>(null)
+
+  const handleCopySummary = (text: string) => {
+    navigator.clipboard.writeText(text)
+    setCopySuccess(true)
+    setTimeout(() => setCopySuccess(false), 2000)
+  }
   const startSessionRef = useRef<(() => void) | null>(null)
 
   // Phase 3: Task Completion Handler
@@ -74,6 +83,50 @@ function App() {
           }
       }
   }
+
+  const highlightEntities = (text: string) => {
+    const entities = [
+      { pattern: /Sarah Chen|Sarah/g, type: 'person', icon: '👤' },
+      { pattern: /Dave|David/g, type: 'person', icon: '👤' },
+      { pattern: /API Migration|API/g, type: 'project', icon: '📁' },
+      { pattern: /Knowledge Graph|Schema/g, type: 'topic', icon: '💡' },
+      { pattern: /Friday|Monday|Standup/g, type: 'topic', icon: '🗓️' },
+    ];
+    
+    let parts: (string | JSX.Element)[] = [text];
+    entities.forEach(entity => {
+      const newParts: (string | JSX.Element)[] = [];
+      parts.forEach(part => {
+        if (typeof part === 'string') {
+          const subParts = part.split(entity.pattern);
+          const matches = part.match(entity.pattern);
+          subParts.forEach((sp, k) => {
+            newParts.push(sp);
+            if (matches && matches[k]) {
+              newParts.push(
+                <span 
+                  key={`${entity.type}-${k}`} 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSearchQuery(matches[k]);
+                    setSearchVisible(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-pro-accent/5 border border-pro-accent/20 rounded-md text-pro-accent font-bold text-[13px] hover:bg-pro-accent hover:text-white transition-colors cursor-pointer group/pill"
+                >
+                  <span className="opacity-60 group-hover/pill:opacity-100">{entity.icon}</span>
+                  {matches[k]}
+                </span>
+              );
+            }
+          });
+        } else {
+          newParts.push(part);
+        }
+      });
+      parts = newParts;
+    });
+    return parts;
+  };
 
 
   useEffect(() => {
@@ -399,7 +452,7 @@ function App() {
       </aside>
       </>)}
        
-       {/* ZEN MODE - Full-screen Granola-inspired interface */}
+       {/* ZEN MODE - Full-screen Premium interface */}
        {isRecording ? (
             <main className="flex-1 flex flex-col h-full relative z-10 bg-pro-bg overflow-hidden">
                 {/* Minimal Top Bar */}
@@ -425,7 +478,7 @@ function App() {
 
                 {/* Main Content Area */}
                 <div className="flex-1 flex flex-col relative overflow-hidden">
-                    {/* Primary: Note Editor (Granola-style) */}
+                    {/* Primary: Note Editor (Premium style) */}
                     <div className="flex-1 overflow-y-auto">
                         <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 md:py-12">
                             <textarea
@@ -550,31 +603,7 @@ function App() {
                 </div>
                 {selectedMeetingId && (
                 <div className="flex items-center gap-3">
-                    <button 
-                        onClick={() => handleDeleteMeeting(selectedMeetingId)}
-                        className="h-11 w-11 rounded-xl bg-red-500/10 text-red-500 flex items-center justify-center hover:bg-red-500 hover:text-white transition-all active-push shadow-sm"
-                        title="Delete Meeting"
-                    >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                    </button>
-                    <button 
-                        onClick={() => {
-                            if (selectedMeeting) {
-                                const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${selectedMeeting.enhanced_notes}\n\nTranscript:\n${selectedMeeting.transcript_json}`
-                                const blob = new Blob([content], { type: 'text/plain' })
-                                const url = URL.createObjectURL(blob)
-                                const a = document.createElement('a')
-                                a.href = url
-                                a.download = `pluto-session-${selectedMeeting.id}.txt`
-                                a.click()
-                            }
-                        }}
-                        className="h-11 px-8 rounded-xl bg-pro-text-main text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent hover:scale-[1.02] transition-all active-push"
-                    >
-                        Export
-                    </button>
+                    {/* Actions moved to meeting view */}
                 </div>
                 )}
             </div>
@@ -635,25 +664,68 @@ function App() {
                                       }}
                                       className="text-2xl md:text-4xl font-extrabold tracking-tight text-pro-text-main leading-tight cursor-text hover:text-pro-accent/80 transition-colors"
                                   >
-                                      {selectedMeeting?.title || 'Untitled Session'}
-                                  </h1>
-                              )}
-                          </div>
-                          <div className="flex gap-2">
-                               <button 
-                                   onClick={() => handleDeleteMeeting(selectedMeetingId!)}
-                                   className="w-10 h-10 rounded-xl bg-red-500/5 border border-red-500/20 flex items-center justify-center text-sm hover:bg-red-500 hover:text-white transition-all text-red-500"
-                                   title="Delete Meeting"
-                               >
-                                   🗑️
-                               </button>
-                               <button className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/40 flex items-center justify-center text-sm hover:bg-white transition-all">💾</button>
-                               <button className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/40 flex items-center justify-center text-sm hover:bg-white transition-all">🔗</button>
-                          </div>
+                                       {selectedMeeting?.title || 'Untitled Session'}
+                                   </h1>
+                               )}
+                               <div className="flex items-center gap-2 mt-2">
+                                   <div className="flex items-center gap-2 px-3 py-1 bg-pro-accent/10 rounded-full border border-pro-accent/20 ml-2 shadow-sm">
+                                       <BarChart3 className="w-3 h-3 text-pro-accent" />
+                                       <div className="flex items-center gap-0.5 h-3">
+                                           {[...Array(8)].map((_, i) => (
+                                               <div 
+                                                   key={i} 
+                                                   className="w-0.5 rounded-full bg-pro-accent/60 animate-pulse" 
+                                                   style={{ height: `${Math.random() * 8 + 4}px`, animationDelay: `${i * 0.1}s` }}
+                                               />
+                                           ))}
+                                       </div>
+                                       <p className="text-[10px] font-black text-pro-accent uppercase tracking-widest ml-1 opacity-90">
+                                           {selectedMeeting?.duration_seconds ? `${Math.floor(selectedMeeting.duration_seconds / 60)}m ${selectedMeeting.duration_seconds % 60}s` : 'Biometric Audio'}
+                                       </p>
+                                   </div>
+                               </div>
+                           </div>
+                           <div className="flex gap-2">
+                                <button 
+                                    onClick={() => handleCopySummary(selectedMeeting?.enhanced_notes || '')}
+                                    className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-white text-pro-text-main hover:scale-105'}`}
+                                    title="Copy Summary"
+                                >
+                                    {copySuccess ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4 opacity-60" />}
+                                </button>
+                                <button 
+                                    onClick={() => {
+                                        if (selectedMeeting) {
+                                            const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${selectedMeeting.enhanced_notes}\n\nTranscript:\n${selectedMeeting.transcript_json}`
+                                            const blob = new Blob([content], { type: 'text/plain' })
+                                            const url = URL.createObjectURL(blob)
+                                            const a = document.createElement('a')
+                                            a.href = url
+                                            a.download = `pluto-session-${selectedMeeting.id}.txt`
+                                            a.click()
+                                        }
+                                    }}
+                                    className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/40 flex items-center justify-center text-pro-text-main/60 hover:text-pro-text-main hover:bg-white transition-all"
+                                    title="Export Session"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                    </svg>
+                                </button>
+                                <button 
+                                    onClick={() => handleDeleteMeeting(selectedMeetingId!)}
+                                    className="w-10 h-10 rounded-xl bg-red-500/5 border border-red-500/20 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition-all active:scale-95"
+                                    title="Delete Meeting"
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                           </div>
                       </div>
 
                        {/* Discovery Hub - Related Entities (Knowledge Graph) */}
-                       <div className="mb-16">
+                       <div className="mb-12">
                            <EntitySidebar 
                                 meetingId={selectedMeetingId!} 
                                 onEntityClick={(entity) => {
@@ -663,165 +735,225 @@ function App() {
                            />
                        </div>
 
-                       {/* Strategic Reflection Grid */}
-                      {/* Structured Analysis Grid */}
-                      {selectedMeeting?.enhanced_notes ? (
-                          <div className="grid grid-cols-12 gap-8">
-                               <div className="col-span-12 space-y-12">
-                                   {/* Executive Summary */}
-                                   <div className="space-y-4">
-                                       <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-                                          Executive Summary
-                                       </h2>
-                                       <div className="text-xl font-medium leading-relaxed text-pro-text-main/90 bg-pro-bg/20 p-8 rounded-[2rem] border border-pro-border/40">
-                                            {selectedMeeting.enhanced_notes.split('\n').filter((l: string) => l.trim() && !l.trim().startsWith('-')).slice(0, 1).map((line: string, i: number) => (
-                                                <p key={i}>{line}</p>
-                                            ))}
-                                       </div>
-                                   </div>
+                       {/* Summary & Analysis Section */}
+                       {selectedMeeting?.enhanced_notes ? (
+                           <div className="space-y-16">
+                                {(() => {
+                                   const notes = selectedMeeting.enhanced_notes
+                                   
+                                   // Helper to extract sections from markdown
+                                   const getSection = (title: string | string[]) => {
+                                       const titles = Array.isArray(title) ? title : [title]
+                                       for (const t of titles) {
+                                           const regex = new RegExp(`(?:\\*\\*|###|##)\\s*${t}\\s*(?:\\*\\*)?:?\\n?([\\s\\S]*?)(?=\\n(?:\\*\\*|###|##)|$)`, 'i')
+                                           const match = notes.match(regex)
+                                           if (match) return match[1].trim()
+                                       }
+                                       return ''
+                                   }
 
-                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                       {/* Key Insights */}
-                                       <div className="space-y-6">
-                                           <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                                               Key Insights
-                                           </h2>
-                                           <div className="space-y-4">
-                                                {selectedMeeting.enhanced_notes.split('\n').filter((l: string) => l.trim() && !l.trim().startsWith('-')).slice(1, 5).map((line: string, i: number) => (
-                                                    <div key={i} className="p-5 rounded-2xl bg-white border border-pro-border shadow-sm flex gap-4">
-                                                        <span className="text-pro-accent">◆</span>
-                                                        <p className="text-[14px] font-medium leading-relaxed opacity-80">{line}</p>
-                                                    </div>
-                                                ))}
-                                           </div>
-                                       </div>
+                                   let executiveSummary = getSection(['Executive Summary', 'Meeting Summary', 'Summary'])
+                                   
+                                   // Fallback: If no explicit summary section, take the first block but clean it
+                                   if (!executiveSummary) {
+                                       executiveSummary = notes.split('\n\n')[0]
+                                   }
+                                   
+                                   // Clean up any remaining markdown headers from the text itself
+                                   executiveSummary = executiveSummary.replace(/^(?:#+\s*|###\s*|##\s*|#\s*).+$/gm, '').trim()
+                                   const keyPoints = getSection('Key Points') || getSection('Key Insights')
+                                   const actionItems = getSection('Action Items')
+                                   const decisions = getSection('Decisions')
 
-                                       {/* Action Items */}
-                                       <div className="space-y-6">
-                                           <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                                               Action Items
-                                           </h2>
-                                           <div className="space-y-3">
-                                               {selectedMeeting.enhanced_notes.split('\n').filter((l: string) => l.trim().startsWith('-')).map((line: string, i: number) => {
-                                                   const cleanLabel = line.replace(/^- \[ \]|^- |^\d+\.\s+/, '').trim()
-                                                   if (!cleanLabel) return null
-                                                   return (
-                                                       <div key={i} className="flex items-start gap-3 p-4 rounded-xl bg-pro-bg/50 border border-pro-border/50 group/item hover:bg-white transition-colors">
-                                                           <div className="w-5 h-5 rounded-md border-2 border-pro-accent/20 mt-0.5 flex-shrink-0 bg-white" />
-                                                           <span className="text-[13px] font-semibold text-pro-text-main/70 leading-snug">{cleanLabel}</span>
+                                   return (
+                                       <div className="grid grid-cols-12 gap-8 items-start">
+                                           {/* Left Column: Executive Summary & Key Points */}
+                                           <div className="col-span-12 lg:col-span-7 space-y-12">
+                                               {/* Executive Summary */}
+                                               <div className="space-y-4">
+                                                   <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                                                      Executive Summary
+                                                   </h2>
+                                                   <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-white/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
+                                                        {executiveSummary.split('\n').map((line: string, i: number) => (
+                                                            <p key={i} className={i > 0 ? 'mt-4' : ''}>{highlightEntities(line)}</p>
+                                                        ))}
+                                                   </div>
+                                               </div>
+
+                                               {/* Key Insights / Points */}
+                                               {keyPoints && (
+                                                   <div className="space-y-6">
+                                                       <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
+                                                           Key Insights
+                                                       </h2>
+                                                       <div className="space-y-4">
+                                                            {keyPoints.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
+                                                                const cleanLine = line.replace(/^[*-]\s*/, '').trim()
+                                                                return (
+                                                                    <div key={i} className="p-6 rounded-2xl bg-white border border-pro-border shadow-sm flex gap-4 group hover:border-pro-accent/30 transition-all">
+                                                                        <span className="text-pro-accent group-hover:scale-125 transition-transform shrink-0 pt-0.5">◆</span>
+                                                                        <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">{highlightEntities(cleanLine)}</p>
+                                                                    </div>
+                                                                )
+                                                            })}
                                                        </div>
-                                                   )
-                                               })}
+                                                   </div>
+                                               )}
+
+                                               {/* Decisions Section */}
+                                               {decisions && (
+                                                   <div className="space-y-6">
+                                                       <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
+                                                           Decisions
+                                                       </h2>
+                                                       <div className="p-8 rounded-[2rem] bg-indigo-50/30 border border-indigo-100/50 space-y-4">
+                                                            {decisions.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
+                                                                const cleanLine = line.replace(/^[*-]\s*|^\d+\.\s*/, '').trim()
+                                                                return (
+                                                                    <div key={i} className="flex gap-4">
+                                                                        <span className="text-indigo-400 font-bold shrink-0">↳</span>
+                                                                        <p className="text-[15px] font-semibold text-indigo-900/80 leading-relaxed">{highlightEntities(cleanLine)}</p>
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                       </div>
+                                                   </div>
+                                               )}
+                                           </div>
+
+                                           {/* Right Column: Action Items */}
+                                           <div className="col-span-12 lg:col-span-5 space-y-6 sticky top-24">
+                                               <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
+                                                   Action Items
+                                               </h2>
+                                               <div className="space-y-3">
+                                                   {actionItems ? actionItems.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
+                                                       const cleanLabel = line.replace(/^- \[ \]|^- |^\d+\.\s+/, '').trim()
+                                                       if (!cleanLabel) return null
+                                                       return (
+                                                           <div key={i} className="flex items-start gap-4 p-5 rounded-2xl bg-white border border-pro-border shadow-sm group/item hover:border-pro-accent/30 transition-all cursor-default">
+                                                               <div className="w-5 h-5 rounded-md border-2 border-pro-accent/20 mt-0.5 flex-shrink-0 bg-white group-hover/item:border-pro-accent/40 transition-colors" />
+                                                               <span className="text-[14px] font-semibold text-pro-text-main/80 leading-snug">{cleanLabel}</span>
+                                                           </div>
+                                                       )
+                                                   }) : (
+                                                       <div className="p-8 border border-dashed border-pro-border rounded-2xl text-center">
+                                                            <p className="text-[11px] font-bold text-pro-text-muted/40 uppercase tracking-widest">No action items identified</p>
+                                                       </div>
+                                                   )}
+                                               </div>
+                                               
+                                               <div className="pt-4 p-6 rounded-2xl bg-pro-bg/50 border border-pro-border/40 text-center">
+                                                    <p className="text-[10px] font-medium text-pro-text-muted/60 leading-relaxed">
+                                                        Action items are extracted automatically. You can also ask Pluto to refine these.
+                                                    </p>
+                                               </div>
                                            </div>
                                        </div>
-                                   </div>
-                               </div>
+                                   )
+                               })()}
                           </div>
                       ) : (
-                          <div className="py-16 px-10 bg-pro-bg/30 border border-dashed border-pro-border rounded-[2rem] text-center">
+                          <div className="py-24 px-10 bg-pro-bg/30 border border-dashed border-pro-border rounded-[2.5rem] text-center">
                               <p className="text-[10px] font-black text-pro-text-muted/30 uppercase tracking-[0.2em]">No synthesis found</p>
                           </div>
                       )}
 
-                      {/* Transcript Section */}
-                      <div className="space-y-12 pb-24">
-                        <div className="flex items-center gap-6">
-                            <h3 className="text-[10px] font-bold text-pro-text-muted/40 uppercase tracking-[0.2em]">Full Transcript</h3>
-                            <div className="flex-1 h-[1px] bg-pro-border/30" />
-                        </div>
-                        <div className="space-y-12">
-                            {(() => {
-                                let segments: TranscriptSegment[] = []
-                                try {
-                                    if (selectedMeeting && selectedMeeting.transcript_json) {
-                                        const parsed = JSON.parse(selectedMeeting.transcript_json)
-                                        segments = Array.isArray(parsed) ? parsed : (parsed?.segments || [])
-                                    } else {
-                                        // NEVER fallback to live 'transcript' state in the Archive view
-                                        segments = []
-                                    }
-                                } catch (e) {
-                                    console.error('Transcript parse error', e)
-                                }
-                                
-                                if (segments.length === 0) {
-                                    return (
-                                        <div className="py-12 text-center">
-                                            <p className="text-pro-text-muted/40 font-bold uppercase tracking-widest text-[10px]">No transcript data found for this session</p>
-                                        </div>
-                                    )
-                                }
+                      {/* Transcript Section (Refined Expansion UI) */}
+                      <div className="relative mt-24">
+                          <div className="flex items-center gap-6 mb-12">
+                              <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-lg bg-pro-accent/5 border border-pro-accent/20 flex items-center justify-center">
+                                      <FileText className="w-4 h-4 text-pro-accent" />
+                                  </div>
+                                  <h3 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">Primary Transcript</h3>
+                              </div>
+                              <div className="flex-1 h-[1px] bg-pro-border/20" />
+                          </div>
 
-                                // Merge consecutive segments from the same speaker (UI-level fix for old transcripts)
-                                const mergedSegments: TranscriptSegment[] = []
-                                for (const segment of segments) {
-                                    const lastSegment = mergedSegments[mergedSegments.length - 1]
-                                    
-                                    if (lastSegment && String(lastSegment.speaker) === String(segment.speaker)) {
-                                        // Merge with previous segment
-                                        lastSegment.text += ' ' + segment.text
-                                    } else {
-                                        // New speaker, add as new segment
-                                        mergedSegments.push({ ...segment })
-                                    }
-                                }
+                          <div 
+                            className={`relative transition-all duration-700 ease-in-out overflow-hidden ${transcriptVisible ? 'max-h-[5000px]' : 'max-h-[300px]'}`}
+                            style={{
+                                maskImage: !transcriptVisible ? 'linear-gradient(to bottom, black 50%, transparent 100%)' : 'none',
+                                WebkitMaskImage: !transcriptVisible ? 'linear-gradient(to bottom, black 50%, transparent 100%)' : 'none'
+                            }}
+                          >
+                              <div className="space-y-12 pb-12">
+                                  {(() => {
+                                      let segments: TranscriptSegment[] = []
+                                      try {
+                                          if (selectedMeeting && selectedMeeting.transcript_json) {
+                                              const parsed = JSON.parse(selectedMeeting.transcript_json)
+                                              segments = Array.isArray(parsed) ? parsed : (parsed?.segments || [])
+                                          } else {
+                                              segments = []
+                                          }
+                                      } catch (e) {
+                                          console.error('Transcript parse error', e)
+                                      }
+                                      
+                                      if (segments.length === 0) {
+                                          return (
+                                              <div className="py-20 text-center bg-pro-bg/20 rounded-[2rem] border border-dashed border-pro-border/40">
+                                                  <Sparkles className="w-5 h-5 text-pro-accent/20 mx-auto mb-3" />
+                                                  <p className="text-pro-text-muted/40 font-bold uppercase tracking-widest text-[9px]">No biometric voice data found</p>
+                                              </div>
+                                          )
+                                      }
 
-                                return mergedSegments.map((s: TranscriptSegment, i: number) => {
-                                    // Entity Pill logic - Mock for UI demo
-                                    const highlightEntities = (text: string) => {
-                                        const entities = [
-                                            { pattern: /Sarah Chen|Sarah/g, type: 'person', icon: '👤' },
-                                            { pattern: /Dave|David/g, type: 'person', icon: '👤' },
-                                            { pattern: /API Migration|API/g, type: 'project', icon: '📁' },
-                                            { pattern: /Knowledge Graph|Schema/g, type: 'topic', icon: '💡' },
-                                            { pattern: /Friday|Monday|Standup/g, type: 'topic', icon: '🗓️' },
-                                        ];
-                                        
-                                        let parts: (string | JSX.Element)[] = [text];
-                                        entities.forEach(entity => {
-                                            const newParts: (string | JSX.Element)[] = [];
-                                            parts.forEach(part => {
-                                                if (typeof part === 'string') {
-                                                    const subParts = part.split(entity.pattern);
-                                                    const matches = part.match(entity.pattern);
-                                                    subParts.forEach((sp, j) => {
-                                                        newParts.push(sp);
-                                                        if (matches && matches[j]) {
-                                                            newParts.push(
-                                                                <span key={`${entity.type}-${j}`} className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-pro-accent/5 border border-pro-accent/20 rounded-md text-pro-accent font-bold text-[13px] hover:bg-pro-accent hover:text-white transition-colors cursor-pointer group/pill">
-                                                                    <span className="opacity-60 group-hover/pill:opacity-100">{entity.icon}</span>
-                                                                    {matches[j]}
-                                                                </span>
-                                                            );
-                                                        }
-                                                    });
-                                                } else {
-                                                    newParts.push(part);
-                                                }
-                                            });
-                                            parts = newParts;
-                                        });
-                                        return parts;
-                                    };
+                                      const mergedSegments: TranscriptSegment[] = []
+                                      for (const segment of segments) {
+                                          const lastSegment = mergedSegments[mergedSegments.length - 1]
+                                          if (lastSegment && String(lastSegment.speaker) === String(segment.speaker)) {
+                                              lastSegment.text += ' ' + segment.text
+                                          } else {
+                                              mergedSegments.push({ ...segment })
+                                          }
+                                      }
 
-                                    return (
-                                        <div key={i} className="group flex gap-12 transition-all">
-                                            <div className="w-20 shrink-0 pt-1 text-right">
-                                                <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
-                                                    {s.speaker || 'Unknown'}
-                                                </span>
-                                            </div>
-                                            <div className="flex-1">
-                                                <p className="text-pro-text-main text-lg leading-relaxed font-medium opacity-80 group-hover:opacity-100 transition-opacity">
-                                                    {highlightEntities(s.text)}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    )
-                                })
-                            })()}
-                        </div>
+                                      return mergedSegments.map((s: TranscriptSegment, i: number) => {
+                                          return (
+                                              <div key={i} className="group flex gap-12 transition-all">
+                                                  <div className="w-20 shrink-0 pt-1 text-right">
+                                                      <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
+                                                          {s.speaker || 'Unknown'}
+                                                      </span>
+                                                  </div>
+                                                  <div className="flex-1">
+                                                      <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
+                                                          {highlightEntities(s.text)}
+                                                      </p>
+                                                  </div>
+                                              </div>
+                                          )
+                                      })
+                                  })()}
+                              </div>
+                          </div>
+
+                          {/* Expansion Action Bar - Refined Gradient & integrated button */}
+                          <div className={`absolute bottom-0 left-0 right-0 flex items-end justify-center pb-8 transition-all duration-700 ${transcriptVisible ? 'relative h-auto pt-16 pb-24' : 'h-64 bg-gradient-to-t from-pro-bg via-pro-bg/95 to-transparent'}`}>
+                              <button 
+                                onClick={() => setTranscriptVisible(!transcriptVisible)}
+                                className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
+                              >
+                                  <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
+                                      {transcriptVisible ? 'Collapse Transcript' : 'Explore Full Transcript'}
+                                  </span>
+                                  <div className={`w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500 ${transcriptVisible ? 'rotate-180' : ''}`}>
+                                      <ChevronDown className="w-3 h-3 text-pro-accent" />
+                                  </div>
+                                  
+                                  {!transcriptVisible && (
+                                    <div className="absolute -right-2 -top-2 flex items-center justify-center w-5 h-5 bg-pro-accent text-white rounded-full text-[9px] font-bold shadow-sm animate-in zoom-in duration-300 delay-100">
+                                        +
+                                    </div>
+                                  )}
+                              </button>
+                          </div>
                       </div>
+
 
                       {/* Discreet Footer */}
                       <div className="pt-12 flex items-center justify-between border-t border-pro-border/20 px-4">

@@ -114,7 +114,7 @@ interface LLMProvider {
 ### 3.5 Live Note Taking (Zen Mode)
 
 * **Interaction:** Dedicated "Focus Mode" overlay activates during recording. Sidebar is completely hidden.
-* **Layout:** Full-screen centered note editor (Granola-inspired). Clean, distraction-free.
+* **Layout:** Full-screen centered note editor (Premium-style). Clean, distraction-free.
 * **Inline Ask Pluto:** Bottom bar with expandable query field. User can ask about previous meetings mid-session without leaving notes. Response appears inline below input.
 * **Storage:** Notes are held in React state (`currentNotes`) and passed to `AudioManager`.
 * **Persistence:** Saved to `meetings` table in `user_notes` column.
