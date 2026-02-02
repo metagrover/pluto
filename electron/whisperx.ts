@@ -62,45 +62,57 @@ class WhisperXManager {
     private pythonPath: string = ''
 
     constructor() {
-        this.detectPython()
+        this.detectExecutable()
     }
 
     /**
      * Detect the best available Python path
      */
-    private detectPython(): string {
-        if (this.pythonPath) return this.pythonPath
-
-        // 1. Check environment variable
-        if (process.env.PLUTO_PYTHON_PATH) {
-            console.log(`[WhisperX] Using Python from PLUTO_PYTHON_PATH: ${process.env.PLUTO_PYTHON_PATH}`)
-            this.pythonPath = process.env.PLUTO_PYTHON_PATH
-            return this.pythonPath
+    /**
+     * Detect the best available Python path or bundled executable
+     */
+    private detectExecutable(): string {
+        // 1. Production: Use bundled executable (directory build)
+        if (app.isPackaged) {
+            const bundledPath = path.join(process.resourcesPath, 'bin', 'whisperx_server', 'whisperx_server')
+            console.log(`[WhisperX] Using bundled executable: ${bundledPath}`)
+            return bundledPath
         }
 
-        const { execSync } = require('child_process')
+        // 2. Development: Use local venv
+        const venvPython = path.join(this.getPythonDir(), 'venv', 'bin', 'python')
+        if (fs.existsSync(venvPython)) {
+            console.log(`[WhisperX] Using local venv execution: ${venvPython}`)
+            this.pythonPath = venvPython
+            return venvPython // This will be used as the executable to spawn
+        }
 
-        // 2. Try common names and specific versions
+        // 3. Environment variable fallback
+        if (process.env.PLUTO_PYTHON_PATH) {
+            return process.env.PLUTO_PYTHON_PATH
+        }
+
+        // 4. Fallback to system python detection (legacy behavior, mostly for manual setups)
+        return this.detectSystemPython()
+    }
+
+    private detectSystemPython(): string {
+        if (this.pythonPath) return this.pythonPath
+
+        const { execSync } = require('child_process')
         const tryNames = ['python3.12', 'python3.11', 'python3', 'python']
         for (const name of tryNames) {
             try {
                 const path = execSync(`which ${name}`).toString().trim()
                 if (path) {
-                    // Check if whisperx is actually in this python
-                    execSync(`${path} -c "import whisperx"`)
-                    console.log(`[WhisperX] Detected Python path with whisperx: ${path}`)
                     this.pythonPath = path
                     return path
                 }
             } catch (e) {
-                // version doesn't exist or whisperx not installed
+                // ignore
             }
         }
-
-        // 3. Fallback
-        this.pythonPath = 'python3'
-        console.warn(`[WhisperX] Could not detect Python with whisperx, falling back to: ${this.pythonPath}`)
-        return this.pythonPath
+        return 'python3'
     }
 
     /**
@@ -114,37 +126,6 @@ class WhisperXManager {
     }
 
     /**
-     * Check if Python is available
-     */
-    async checkPython(): Promise<{ available: boolean; version?: string; error?: string }> {
-        return new Promise((resolve) => {
-            const python = spawn(this.pythonPath, ['--version'])
-            let output = ''
-
-            python.stdout?.on('data', (data) => {
-                output += data.toString()
-            })
-
-            python.stderr?.on('data', (data) => {
-                output += data.toString()
-            })
-
-            python.on('close', (code) => {
-                if (code === 0) {
-                    const version = output.trim().replace('Python ', '')
-                    resolve({ available: true, version })
-                } else {
-                    resolve({ available: false, error: 'Python not found' })
-                }
-            })
-
-            python.on('error', (err) => {
-                resolve({ available: false, error: err.message })
-            })
-        })
-    }
-
-    /**
      * Start the WhisperX Python server
      */
     async start(): Promise<void> {
@@ -154,27 +135,56 @@ class WhisperXManager {
         }
 
         this.isStarting = true
-        this.detectPython()
 
         try {
-            const pythonDir = this.getPythonDir()
-            const serverPath = path.join(pythonDir, 'whisperx_server.py')
+            const executable = this.detectExecutable()
+            let spawnArgs: string[] = []
+            let cwd = this.getPythonDir()
 
-            if (!fs.existsSync(serverPath)) {
-                throw new Error(`WhisperX server not found at ${serverPath}`)
+            // If in dev (using python interpreter), we need to pass the script script
+            if (!app.isPackaged) {
+                const serverPath = path.join(cwd, 'whisperx_server.py')
+                if (!fs.existsSync(serverPath)) {
+                    throw new Error(`WhisperX server script not found at ${serverPath}`)
+                }
+                spawnArgs = [serverPath]
+            } else {
+                // In production, the executable IS the server, so no args needed ideally, 
+                // but we might want to check if the bundled app needs cwd set specifically
+                // usually the bundled app self-extracts or runs from a temp dir.
+                // We kept the executable in resources/bin/
+                cwd = path.dirname(executable)
             }
 
-            console.log(`[WhisperX] Starting server from ${serverPath}`)
+            console.log(`[WhisperX] Starting server using: ${executable} ${spawnArgs.join(' ')}`)
+
+            // Detect ffmpeg path
+            let ffmpegPath = ''
+            try {
+                // In production, ffmpeg-static might be unpacked differently or we need to ensure it's found
+                // For now, let's try to get it from the module.
+                // NOTE: In a packaged app, require('ffmpeg-static') returns the fixed path in app.asar... 
+                // which is wrong if we need the unpacked binary.
+                // Usually electron-builder unpacks it.
+                ffmpegPath = require('ffmpeg-static')
+                if (app.isPackaged) {
+                    ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+                }
+                console.log(`[WhisperX] Using ffmpeg at: ${ffmpegPath}`)
+            } catch (e) {
+                console.warn('[WhisperX] Could not detect ffmpeg-static path', e)
+            }
 
             // Set environment variables
             const env = {
                 ...process.env,
                 WHISPERX_PORT: WHISPERX_PORT.toString(),
+                PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}:${process.env.PATH}` : process.env.PATH
             }
 
-            // Spawn the Python process
-            this.process = spawn(this.detectPython(), [serverPath], {
-                cwd: pythonDir,
+            // Spawn the process
+            this.process = spawn(executable, spawnArgs, {
+                cwd,
                 env,
                 stdio: ['ignore', 'pipe', 'pipe']
             })

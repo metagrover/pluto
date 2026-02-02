@@ -23,3 +23,15 @@ release
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+python/venv
+python/build
+python/dist
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Build Artifacts
+resources/bin
