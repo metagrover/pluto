@@ -13,13 +13,6 @@ dist-ssr
 *.local
 release
 
-# Binaries and Resources
-resources/
-python/build/
-python/venv/
-python/__pycache__/
-*.spec
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -30,5 +23,3 @@ python/__pycache__/
 *.njsproj
 *.sln
 *.sw?
-
-.venv
