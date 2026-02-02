@@ -146,8 +146,8 @@ const initDb = () => {
     if (ftsInfo.length > 0 && !ftsInfo.some((col) => col.name === "meeting_id")) {
       console.log("[DB] Migrating FTS table for UUID support...");
       db.exec("DROP TABLE IF EXISTS meetings_fts");
+      db.exec("DROP TABLE IF EXISTS settings");
     }
-    db.exec("DROP TABLE IF EXISTS settings");
     const entitiesFtsInfo = db.prepare("PRAGMA table_info(entities_fts)").all();
     if (entitiesFtsInfo.length > 0 && !entitiesFtsInfo.some((col) => col.name === "entity_id")) {
       console.log("[DB] Migrating Entities FTS table for UUID support...");
