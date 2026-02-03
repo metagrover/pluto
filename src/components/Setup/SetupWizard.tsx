@@ -11,6 +11,30 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [pythonStatus, setPythonStatus] = useState<{ available: boolean; version?: string; error?: string } | null>(null)
   const [hfToken, setHfToken] = useState('')
   const [llmProvider, setLlmProvider] = useState('ollama')
+  const [hydrated, setHydrated] = useState(false)
+
+  // Restore saved progress so user doesn't redo first screens
+  useEffect(() => {
+    const load = async () => {
+      const [setupComplete, savedStep, savedHf, savedLlm] = await Promise.all([
+        window.ipcRenderer.invoke('GET_SETTING', 'setup_complete'),
+        window.ipcRenderer.invoke('GET_SETTING', 'setup_step'),
+        window.ipcRenderer.invoke('GET_SETTING', 'hf_token'),
+        window.ipcRenderer.invoke('GET_SETTING', 'llm_provider'),
+      ])
+      if (setupComplete === 'true') {
+        onComplete()
+        return
+      }
+      const stepNum = savedStep ? Math.min(4, Math.max(1, Number(savedStep))) : 1
+      setStep(stepNum)
+      setHfToken(savedHf ?? '')
+      setLlmProvider(savedLlm ?? 'ollama')
+      setHydrated(true)
+    }
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
+  }, [])
 
   useEffect(() => {
     if (step === 2) {
@@ -23,11 +47,23 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     setPythonStatus(status)
   }
 
+  const persistStep = async (s: number) => {
+    await window.ipcRenderer.invoke('SET_SETTING', { key: 'setup_step', value: String(s) })
+  }
+
   const handleFinish = async () => {
     await window.ipcRenderer.invoke('SET_SETTING', { key: 'setup_complete', value: 'true' })
     await window.ipcRenderer.invoke('SET_SETTING', { key: 'hf_token', value: hfToken })
     await window.ipcRenderer.invoke('SET_SETTING', { key: 'llm_provider', value: llmProvider })
     onComplete()
+  }
+
+  if (!hydrated) {
+    return (
+      <div className="fixed inset-0 bg-pro-bg z-50 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-pro-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
   }
 
   return (
@@ -49,7 +85,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               Pluto is your personal second brain for deep focus and effortless recall.
             </p>
             <button
-              onClick={() => setStep(2)}
+              onClick={async () => { await persistStep(2); setStep(2) }}
               className="mt-14 w-full h-16 bg-pro-text-main text-white rounded-2xl font-bold text-xs uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all active:scale-[0.98]"
             >
               Get Started
@@ -105,7 +141,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 Go back
               </button>
               <button
-                onClick={() => setStep(3)}
+                onClick={async () => { await persistStep(3); setStep(3) }}
                 disabled={!pythonStatus?.available}
                 className="flex-[2] h-16 bg-pro-text-main text-white rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl transition-all disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed hover:scale-[1.02]"
               >
@@ -148,7 +184,11 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 Back
               </button>
               <button
-                onClick={() => setStep(4)}
+                onClick={async () => {
+                  await window.ipcRenderer.invoke('SET_SETTING', { key: 'hf_token', value: hfToken })
+                  await persistStep(4)
+                  setStep(4)
+                }}
                 className="flex-[2] h-16 bg-pro-text-main text-white rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
               >
                 {hfToken ? 'Continue' : 'Skip Step'}
@@ -174,7 +214,10 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               ].map(provider => (
                 <button
                   key={provider.id}
-                  onClick={() => setLlmProvider(provider.id)}
+                  onClick={() => {
+                    setLlmProvider(provider.id)
+                    window.ipcRenderer.invoke('SET_SETTING', { key: 'llm_provider', value: provider.id })
+                  }}
                   className={`w-full p-6 text-left border rounded-3xl transition-all duration-500 group relative overflow-hidden ${
                     llmProvider === provider.id 
                     ? 'border-pro-accent bg-white shadow-xl ring-2 ring-pro-accent/10' 
