@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, systemPreferences } from 'electron'
+import { app, BrowserWindow, ipcMain, desktopCapturer, systemPreferences, Tray, Menu, nativeImage } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -33,6 +33,7 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
 
 let win: BrowserWindow | null
+let tray: Tray | null = null
 
 function createWindow() {
   win = new BrowserWindow({
@@ -396,6 +397,61 @@ app.whenReady().then(async () => {
       console.error('[Pluto] Failed to request microphone access:', err)
     })
   }
+
+  // Create Tray Icon
+  const iconPath = path.join(process.env.VITE_PUBLIC, 'logo.png')
+  const dockIconPath = path.join(process.env.VITE_PUBLIC, 'dock-icon.png')
+
+  const icon = nativeImage.createFromPath(iconPath)
+
+  // Set Dock Icon for macOS
+  if (process.platform === 'darwin') {
+    const dockIcon = nativeImage.createFromPath(dockIconPath)
+    app.dock.setIcon(dockIcon)
+  }
+
+  const resizedIcon = icon.resize({ width: 16, height: 16 })
+
+  tray = new Tray(resizedIcon)
+  tray.setToolTip('Pluto')
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Show Pluto',
+      click: () => {
+        if (win) {
+          if (win.isVisible()) {
+            win.focus()
+          } else {
+            win.show()
+          }
+        } else {
+          createWindow()
+        }
+      }
+    },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() }
+  ])
+
+  tray.setContextMenu(contextMenu)
+
+  // Toggle window on click (macOS behavior often expects this)
+  tray.on('click', () => {
+    if (win) {
+      if (win.isVisible()) {
+        if (win.isFocused()) {
+          win.hide()
+        } else {
+          win.focus()
+        }
+      } else {
+        win.show()
+      }
+    } else {
+      createWindow()
+    }
+  })
 
   createWindow()
 })
