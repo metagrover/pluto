@@ -36,6 +36,10 @@ let win: BrowserWindow | null
 let tray: Tray | null = null
 
 function createWindow() {
+  const preloadPathMjs = path.join(__dirname, 'preload.mjs')
+  const preloadPathJs = path.join(__dirname, 'preload.js')
+  const preloadPath = fs.existsSync(preloadPathMjs) ? preloadPathMjs : preloadPathJs
+
   win = new BrowserWindow({
     title: 'Pluto',
     icon: path.join(process.env.VITE_PUBLIC, 'logo.png'),
@@ -44,7 +48,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.mjs'),
+      preload: preloadPath,
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
