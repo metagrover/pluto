@@ -254,6 +254,10 @@ app.whenReady().then(async () => {
   // LLM handlers
   ipcMain.handle('GENERATE_SUMMARY', async (_event, { transcript, userNotes }) => {
     try {
+      if (!transcript || !transcript.trim()) {
+        console.log('[LLM] Skipping summary generation for empty transcript')
+        return ''
+      }
       const settings = await getAllSettings(db)
       const provider = await getProvider(settings)
       console.log(`[LLM] Using provider: ${provider.name}`)
@@ -266,6 +270,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('EXTRACT_SPEAKER_IDENTITY', async (_event, { transcript }) => {
     try {
+      if (!transcript || !transcript.trim()) return null
       const settings = await getAllSettings(db)
       const provider = await getProvider(settings)
       console.log(`[LLM] Using provider: ${provider.name}`)
@@ -278,6 +283,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('GENERATE_TITLE', async (_event, { transcript }) => {
     try {
+      if (!transcript || !transcript.trim()) return 'New Meeting'
       const settings = await getAllSettings(db)
       const provider = await getProvider(settings)
       console.log(`[LLM] Generating title with provider: ${provider.name}`)
@@ -295,6 +301,15 @@ app.whenReady().then(async () => {
   // Extract entities from transcript (returns raw extraction result)
   ipcMain.handle('EXTRACT_ENTITIES', async (_event, { transcript }) => {
     try {
+      if (!transcript || !transcript.trim()) {
+        return {
+          people: [],
+          topics: [],
+          action_items: [],
+          decisions: [],
+          projects: []
+        }
+      }
       const settings = await getAllSettings(db)
       const provider = await getProvider(settings)
       console.log(`[LLM] Extracting entities with provider: ${provider.name}`)
@@ -314,6 +329,10 @@ app.whenReady().then(async () => {
   // Extract entities AND save them to the knowledge graph
   ipcMain.handle('EXTRACT_AND_PROCESS_ENTITIES', async (_event, { transcript, meetingId }) => {
     try {
+      if (!transcript || !transcript.trim()) {
+        console.log('[LLM] Skipping entity extraction for empty transcript')
+        return { created: 0, linked: 0 }
+      }
       const settings = await getAllSettings(db)
       const provider = await getProvider(settings)
       console.log(`[LLM] Extracting and processing entities for meeting ${meetingId}`)

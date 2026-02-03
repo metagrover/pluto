@@ -3,11 +3,15 @@ import { Mic, Loader2 } from 'lucide-react'
 
 interface AudioManagerProps {
     onTranscript: (text: string) => void
-    onSessionComplete: () => void
+    onSessionComplete: (meetingId?: string | number) => void
     onRecordingChange?: (isRecording: boolean) => void
+    onProcessingChange?: (isProcessing: boolean) => void
     userNotes?: string
+    userTitle?: string
+    participants?: string[]
     onStopSessionRef?: React.MutableRefObject<(() => void) | null>
     onStartSessionRef?: React.MutableRefObject<(() => void) | null>
+    onAnalyserReadyRef?: React.MutableRefObject<((analyser: AnalyserNode) => void) | null>
 }
 
 interface TranscriptionSegment {
@@ -18,7 +22,18 @@ interface TranscriptionSegment {
     speaker: string;
 }
 
-export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChange, userNotes = '', onStopSessionRef, onStartSessionRef }: AudioManagerProps) => {
+export const AudioManager = ({ 
+    onTranscript, 
+    onSessionComplete, 
+    onRecordingChange, 
+    onProcessingChange,
+    userNotes = '', 
+    userTitle = '',
+    participants = [],
+    onStopSessionRef, 
+    onStartSessionRef, 
+    onAnalyserReadyRef 
+}: AudioManagerProps) => {
   const [isRecording, setIsRecording] = useState(false)
   
   useEffect(() => {
@@ -47,7 +62,8 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
   
   useEffect(() => {
     isProcessingRef.current = isProcessing
-  }, [isProcessing])
+    onProcessingChange?.(isProcessing)
+  }, [isProcessing, onProcessingChange])
 
   // --- Native Capture Logic ---
   // Functions defined below, event listeners set up after
@@ -142,6 +158,10 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
           const visAnalyser = audioContext.createAnalyser()
           visAnalyser.fftSize = 256
           setAnalyser(visAnalyser)
+          // Expose to parent
+          if (onAnalyserReadyRef?.current) {
+               onAnalyserReadyRef.current(visAnalyser)
+          }
           
           const mixedSource = audioContext.createMediaStreamSource(visDestination.stream)
           mixedSource.connect(visAnalyser)
@@ -210,6 +230,19 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
       return firstText ? (firstText.substring(0, 30) + (firstText.length > 30 ? '...' : '')) : 'New Meeting'
   }
 
+  // Common Whisper Hallucinations to filter out
+  const INVALID_PHRASES = [
+      'you', 'thank you', 'thanks', 'mbc', 'subtitles by', 'captioned by', 
+      'watching', 'subscribe', 'copyright', 'all rights reserved'
+  ]
+
+  const isValidSegment = (text: string): boolean => {
+      const clean = text.toLowerCase().trim().replace(/[.,!?]/g, '')
+      if (clean.length < 2) return false // Too short
+      if (INVALID_PHRASES.includes(clean)) return false
+      return true
+  }
+
   const stopSession = async () => {
       console.log('[Pluto] Stopping session...')
       setIsProcessing(true)
@@ -274,13 +307,15 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
               })
               
               if (result?.segments) {
-                  micSegments = result.segments.map((s: { start: number; end: number; text: string }) => ({
-                      id: crypto.randomUUID(),
-                      startTime: s.start,
-                      endTime: s.end,
-                      text: s.text,
-                      speaker: 'You'
-                  }))
+                  micSegments = result.segments
+                      .filter((s: { text: string }) => isValidSegment(s.text))
+                      .map((s: { start: number; end: number; text: string }) => ({
+                          id: crypto.randomUUID(),
+                          startTime: s.start,
+                          endTime: s.end,
+                          text: s.text.trim(),
+                          speaker: 'You'
+                      }))
               }
               console.log(`[Pluto] Mic: ${micSegments.length} segments`)
           }
@@ -298,13 +333,15 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
               })
               
               if (result?.segments) {
-                  systemSegments = result.segments.map((s: { start: number; end: number; text: string }) => ({
-                      id: crypto.randomUUID(),
-                      startTime: s.start,
-                      endTime: s.end,
-                      text: s.text,
-                      speaker: 'Others'
-                  }))
+                  systemSegments = result.segments
+                      .filter((s: { text: string }) => isValidSegment(s.text))
+                      .map((s: { start: number; end: number; text: string }) => ({
+                          id: crypto.randomUUID(),
+                          startTime: s.start,
+                          endTime: s.end,
+                          text: s.text.trim(),
+                          speaker: 'Others'
+                      }))
               }
               console.log(`[Pluto] System: ${systemSegments.length} segments`)
           }
@@ -347,7 +384,9 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
               console.log('[Pluto] Generating strategic summary...')
               enhancedNotes = await window.ipcRenderer.invoke('GENERATE_SUMMARY', { 
                   transcript: fullTranscript,
-                  userNotes: userNotes
+                  userNotes: userNotes,
+                  participants: participants,
+                  meetingTitle: userTitle
               })
               
               // Extract speaker identity
@@ -377,16 +416,18 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
           const endTime = new Date().toISOString()
           
           // Generate intelligent title
-          let title = 'Meeting'
-          try {
-              const fullTranscript = labeledTranscription.map(s => `${s.speaker}: ${s.text}`).join('\n')
-              title = await window.ipcRenderer.invoke('GENERATE_TITLE', { 
-                  transcript: fullTranscript 
-              })
-              console.log(`[Pluto] Generated title: ${title}`)
-          } catch (titleErr) {
-              console.error('[Pluto] Title generation failed, using fallback:', titleErr)
-              title = extractTitle(labeledTranscription)
+          let title = userTitle || 'Meeting'
+          if (!userTitle) {
+              try {
+                  const fullTranscript = labeledTranscription.map(s => `${s.speaker}: ${s.text}`).join('\n')
+                  title = await window.ipcRenderer.invoke('GENERATE_TITLE', { 
+                      transcript: fullTranscript 
+                  })
+                  console.log(`[Pluto] Generated title: ${title}`)
+              } catch (titleErr) {
+                  console.error('[Pluto] Title generation failed, using fallback:', titleErr)
+                  title = extractTitle(labeledTranscription)
+              }
           }
           
           const meetingData = {
@@ -400,6 +441,7 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
               transcript_json: JSON.stringify(labeledTranscription),
               user_notes: userNotes,
               enhanced_notes: enhancedNotes,
+              participants: participants,
               folder_id: null,
               is_favorite: false
           }
@@ -422,7 +464,7 @@ export const AudioManager = ({ onTranscript, onSessionComplete, onRecordingChang
           }
           
           if (onSessionComplete) {
-              onSessionComplete()
+              onSessionComplete(meetingData.id)
           }
           
       } catch (e) {

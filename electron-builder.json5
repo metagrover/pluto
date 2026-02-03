@@ -7,10 +7,17 @@
   "directories": {
     "output": "release/${version}"
   },
+  "files": [
     "dist",
     "dist-electron",
-    "!python",
     "resources"
+  ],
+  "extraResources": [
+    {
+      "from": "resources/bin",
+      "to": "bin",
+      "filter": ["**/*"]
+    }
   ],
   "mac": {
     "target": [

@@ -673,8 +673,11 @@ const MAX_HEALTH_CHECK_RETRIES = 30;
 class WhisperXManager {
   constructor() {
     __publicField(this, "process", null);
-    __publicField(this, "isStarting", false);
     __publicField(this, "pythonPath", "");
+    /**
+     * Start the WhisperX Python server
+     */
+    __publicField(this, "startPromise", null);
     this.detectExecutable();
   }
   /**
@@ -765,65 +768,73 @@ class WhisperXManager {
    * Start the WhisperX Python server
    */
   async start() {
-    var _a, _b;
-    if (this.process || this.isStarting) {
-      console.log("[WhisperX] Server already running or starting");
-      return;
+    if (this.startPromise) {
+      return this.startPromise;
     }
-    this.isStarting = true;
-    try {
-      const executable = this.detectExecutable();
-      let spawnArgs = [];
-      let cwd = this.getPythonDir();
-      if (!require$$0.app.isPackaged) {
-        const serverPath = path.join(cwd, "whisperx_server.py");
-        if (!fs.existsSync(serverPath)) {
-          throw new Error(`WhisperX server script not found at ${serverPath}`);
-        }
-        spawnArgs = [serverPath];
-      } else {
-        cwd = path.dirname(executable);
+    this.startPromise = (async () => {
+      var _a, _b;
+      if (this.process) {
+        console.log("[WhisperX] Server already running");
+        return;
       }
-      console.log(`[WhisperX] Starting server using: ${executable} ${spawnArgs.join(" ")}`);
-      let ffmpegPath = "";
       try {
-        ffmpegPath = require("ffmpeg-static");
-        if (require$$0.app.isPackaged) {
-          ffmpegPath = ffmpegPath.replace("app.asar", "app.asar.unpacked");
+        const executable = this.detectExecutable();
+        let spawnArgs = [];
+        let cwd = this.getPythonDir();
+        if (!require$$0.app.isPackaged) {
+          const serverPath = path.join(cwd, "whisperx_server.py");
+          if (!fs.existsSync(serverPath)) {
+            throw new Error(`WhisperX server script not found at ${serverPath}`);
+          }
+          spawnArgs = [serverPath];
+        } else {
+          cwd = path.dirname(executable);
         }
-        console.log(`[WhisperX] Using ffmpeg at: ${ffmpegPath}`);
+        console.log(`[WhisperX] Starting server using: ${executable} ${spawnArgs.join(" ")}`);
+        let ffmpegPath = "";
+        try {
+          ffmpegPath = require("ffmpeg-static");
+          if (require$$0.app.isPackaged) {
+            ffmpegPath = ffmpegPath.replace("app.asar", "app.asar.unpacked");
+          }
+          console.log(`[WhisperX] Using ffmpeg at: ${ffmpegPath}`);
+        } catch (e) {
+          console.warn("[WhisperX] Could not detect ffmpeg-static path", e);
+        }
+        const env = {
+          ...process.env,
+          WHISPERX_PORT: WHISPERX_PORT.toString(),
+          PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}:${process.env.PATH}` : process.env.PATH
+        };
+        this.process = child_process.spawn(executable, spawnArgs, {
+          cwd,
+          env,
+          stdio: ["ignore", "pipe", "pipe"]
+        });
+        (_a = this.process.stdout) == null ? void 0 : _a.on("data", (data) => {
+          console.log(`[WhisperX] ${data.toString().trim()}`);
+        });
+        (_b = this.process.stderr) == null ? void 0 : _b.on("data", (data) => {
+          console.error(`[WhisperX] ${data.toString().trim()}`);
+        });
+        this.process.on("close", (code) => {
+          console.log(`[WhisperX] Server exited with code ${code}`);
+          this.process = null;
+          this.startPromise = null;
+        });
+        this.process.on("error", (err) => {
+          console.error(`[WhisperX] Failed to start server: ${err.message}`);
+          this.process = null;
+          this.startPromise = null;
+        });
+        await this.waitForServer();
+        console.log("[WhisperX] Server is ready");
       } catch (e) {
-        console.warn("[WhisperX] Could not detect ffmpeg-static path", e);
+        this.startPromise = null;
+        throw e;
       }
-      const env = {
-        ...process.env,
-        WHISPERX_PORT: WHISPERX_PORT.toString(),
-        PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}:${process.env.PATH}` : process.env.PATH
-      };
-      this.process = child_process.spawn(executable, spawnArgs, {
-        cwd,
-        env,
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      (_a = this.process.stdout) == null ? void 0 : _a.on("data", (data) => {
-        console.log(`[WhisperX] ${data.toString().trim()}`);
-      });
-      (_b = this.process.stderr) == null ? void 0 : _b.on("data", (data) => {
-        console.error(`[WhisperX] ${data.toString().trim()}`);
-      });
-      this.process.on("close", (code) => {
-        console.log(`[WhisperX] Server exited with code ${code}`);
-        this.process = null;
-      });
-      this.process.on("error", (err) => {
-        console.error(`[WhisperX] Failed to start server: ${err.message}`);
-        this.process = null;
-      });
-      await this.waitForServer();
-      console.log("[WhisperX] Server is ready");
-    } finally {
-      this.isStarting = false;
-    }
+    })();
+    return this.startPromise;
   }
   /**
    * Wait for the server to be ready
@@ -879,9 +890,7 @@ class WhisperXManager {
    * Transcribe an audio file
    */
   async transcribe(audioPath, options = {}) {
-    if (!this.isRunning()) {
-      await this.start();
-    }
+    await this.start();
     const response = await fetch(`${WHISPERX_URL}/transcribe`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3155,6 +3164,10 @@ require$$0.app.whenReady().then(async () => {
   require$$0.ipcMain.handle("SET_SETTING", (_event, { key, value }) => setSetting(key, value));
   require$$0.ipcMain.handle("GENERATE_SUMMARY", async (_event, { transcript, userNotes }) => {
     try {
+      if (!transcript || !transcript.trim()) {
+        console.log("[LLM] Skipping summary generation for empty transcript");
+        return "";
+      }
       const settings = await getAllSettings(db$1);
       const provider = await getProvider(settings);
       console.log(`[LLM] Using provider: ${provider.name}`);
@@ -3166,6 +3179,7 @@ require$$0.app.whenReady().then(async () => {
   });
   require$$0.ipcMain.handle("EXTRACT_SPEAKER_IDENTITY", async (_event, { transcript }) => {
     try {
+      if (!transcript || !transcript.trim()) return null;
       const settings = await getAllSettings(db$1);
       const provider = await getProvider(settings);
       console.log(`[LLM] Using provider: ${provider.name}`);
@@ -3177,6 +3191,7 @@ require$$0.app.whenReady().then(async () => {
   });
   require$$0.ipcMain.handle("GENERATE_TITLE", async (_event, { transcript }) => {
     try {
+      if (!transcript || !transcript.trim()) return "New Meeting";
       const settings = await getAllSettings(db$1);
       const provider = await getProvider(settings);
       console.log(`[LLM] Generating title with provider: ${provider.name}`);
@@ -3188,6 +3203,15 @@ require$$0.app.whenReady().then(async () => {
   });
   require$$0.ipcMain.handle("EXTRACT_ENTITIES", async (_event, { transcript }) => {
     try {
+      if (!transcript || !transcript.trim()) {
+        return {
+          people: [],
+          topics: [],
+          action_items: [],
+          decisions: [],
+          projects: []
+        };
+      }
       const settings = await getAllSettings(db$1);
       const provider = await getProvider(settings);
       console.log(`[LLM] Extracting entities with provider: ${provider.name}`);
@@ -3205,6 +3229,10 @@ require$$0.app.whenReady().then(async () => {
   });
   require$$0.ipcMain.handle("EXTRACT_AND_PROCESS_ENTITIES", async (_event, { transcript, meetingId }) => {
     try {
+      if (!transcript || !transcript.trim()) {
+        console.log("[LLM] Skipping entity extraction for empty transcript");
+        return { created: 0, linked: 0 };
+      }
       const settings = await getAllSettings(db$1);
       const provider = await getProvider(settings);
       console.log(`[LLM] Extracting and processing entities for meeting ${meetingId}`);
