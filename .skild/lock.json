@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-02-02T09:04:15.639Z",
+  "updatedAt": "2026-02-03T04:58:50.858Z",
   "entries": {
     "git-pr-workflows-pr-enhance": {
       "name": "git-pr-workflows-pr-enhance",
@@ -46,6 +46,15 @@
       "sourceType": "degit-shorthand",
       "installedAt": "2026-02-02T09:01:39.148Z",
       "contentHash": "2d3421ee4a50d85078258dc7b95d122f5eb3c683f79ed004677febc630071d0a"
+    },
+    "karpathy-guidelines": {
+      "name": "karpathy-guidelines",
+      "platform": "windsurf",
+      "scope": "project",
+      "source": "forrestchang/andrej-karpathy-skills/skills/karpathy-guidelines",
+      "sourceType": "degit-shorthand",
+      "installedAt": "2026-02-03T04:58:50.857Z",
+      "contentHash": "5e8a1677df986d47abaf3d42f1ce0c7427ea030f50370c52baf9ba1e2c7c3db9"
     }
   }
 }
