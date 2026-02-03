@@ -42,3 +42,6 @@ __pycache__
 
 # Build Artifacts
 resources/bin
+
+# Build Artifacts
+dist-electron/

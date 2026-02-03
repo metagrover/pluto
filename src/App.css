@@ -73,6 +73,15 @@
     background: rgba(0, 0, 0, 0.1);
 }
 
+.scrollbar-hidden {
+    scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
 .sidebar-mask {
     mask-image: linear-gradient(to bottom, transparent, black 5%, black 95%, transparent);
 }
