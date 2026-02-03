@@ -1,14 +1,16 @@
 export const getSummaryPrompt = (transcript: string, userNotes?: string): string => {
-    return `You are an intelligent meeting assistant. Analyze this conversation transcript${userNotes ? ' and the user\'s notes' : ''} to provide:
+    return `You are an intelligent meeting assistant. Analyze this conversation transcript${userNotes ? ' and the user\'s notes' : ''} and synthesize them into ONE cohesive summary. The notes are not a separate section; weave them into the narrative and bullet points as if they were part of the conversation.
 
 1. **Summary**: A concise 2-3 sentence overview. CRITICAL: Jump straight into the content. DO NOT start with "This transcript...", "The meeting...", "This conversation...", or similar meta-commentary.
-2. **Key Points**: Main topics and important information mentioned
+2. **Key Points**: Main topics and important information mentioned (blend notes + transcript)
 3. **Action Items**: Any tasks, follow-ups, or commitments mentioned (use "- [ ]" checkbox format)
 4. **Decisions**: Any decisions or conclusions reached
 
-${userNotes ? `\nUser Notes Context:\n${userNotes}\n` : ''}
+If notes conflict with the transcript, prefer the notes when they are explicit and practical.
 
-Format your response in clean markdown with clear sections.
+${userNotes ? `\nUser Notes:\n${userNotes}\n` : ''}
+
+Format your response in clean markdown with clear sections. Do not create a "Notes" section.
 
 Transcript:
 ${transcript}`

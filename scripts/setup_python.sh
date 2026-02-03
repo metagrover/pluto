@@ -17,23 +17,33 @@ command_exists () {
     type "$1" &> /dev/null ;
 }
 
-# 1. Prioritize System Python 3.9+ (stable)
-if [ -x "/usr/bin/python3" ]; then
-    PYTHON_CMD="/usr/bin/python3"
-    echo "Using System Python: $PYTHON_CMD"
-elif command_exists python3.11; then
-    PYTHON_CMD="python3.11"
-elif command_exists python3.10; then
-    PYTHON_CMD="python3.10"
-elif command_exists python3.12; then
-    PYTHON_CMD="python3.12"
-elif command_exists python3; then
-    PYTHON_CMD="python3"
-elif command_exists python; then
-    PYTHON_CMD="python"
+# Check for pyenv and install Python 3.10
+if command -v pyenv &> /dev/null; then
+    echo "Using pyenv..."
+    if ! pyenv versions | grep -q "3.10"; then
+        echo "Installing Python 3.10..."
+        pyenv install 3.10.13
+    fi
+    pyenv local 3.10.13
+    PYTHON_CMD=$(pyenv which python)
 else
-    echo "Error: Python 3 not found. Please install Python 3.9+."
+    echo "pyenv not found. Please install pyenv."
     exit 1
+fi
+
+# Fallback/Primary detection if pyenv didn't yield a specific python
+if [ -z "$PYTHON_CMD" ]; then
+    if [ -x "/usr/bin/python3" ]; then
+        PYTHON_CMD="/usr/bin/python3"
+        echo "Using System Python: $PYTHON_CMD"
+    elif command_exists python3.11; then
+        PYTHON_CMD="python3.11"
+    elif command_exists python3; then
+        PYTHON_CMD="python3"
+    else
+        echo "Error: Python 3 not found. Please install Python 3.9+ (3.11 recommended)."
+        exit 1
+    fi
 fi
 
 PYTHON_VERSION=$($PYTHON_CMD -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')

@@ -53,7 +53,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({ meetingId, onEntit
     return acc
   }, {} as Record<string, Entity[]>)
 
-  const typeOrder: Array<Entity['type']> = ['person', 'project', 'topic', 'action_item', 'decision']
+  const typeOrder: Array<Entity['type']> = ['person', 'project', 'topic']
 
   return (
     <div className="space-y-8">
@@ -64,9 +64,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({ meetingId, onEntit
         const labels: Record<string, string> = {
           person: 'People',
           project: 'Projects',
-          topic: 'Topics',
-          action_item: 'Action Items',
-          decision: 'Decisions'
+          topic: 'Topics'
         }
 
         return (
