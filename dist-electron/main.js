@@ -2996,6 +2996,7 @@ const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
 const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 let win;
+let tray = null;
 function createWindow() {
   win = new require$$0.BrowserWindow({
     title: "Pluto",
@@ -3274,6 +3275,50 @@ require$$0.app.whenReady().then(async () => {
       console.error("[Pluto] Failed to request microphone access:", err);
     });
   }
+  const iconPath = path.join(process.env.VITE_PUBLIC, "logo.png");
+  const dockIconPath = path.join(process.env.VITE_PUBLIC, "dock-icon.png");
+  const icon = require$$0.nativeImage.createFromPath(iconPath);
+  if (process.platform === "darwin") {
+    const dockIcon = require$$0.nativeImage.createFromPath(dockIconPath);
+    require$$0.app.dock.setIcon(dockIcon);
+  }
+  const resizedIcon = icon.resize({ width: 16, height: 16 });
+  tray = new require$$0.Tray(resizedIcon);
+  tray.setToolTip("Pluto");
+  const contextMenu = require$$0.Menu.buildFromTemplate([
+    {
+      label: "Show Pluto",
+      click: () => {
+        if (win) {
+          if (win.isVisible()) {
+            win.focus();
+          } else {
+            win.show();
+          }
+        } else {
+          createWindow();
+        }
+      }
+    },
+    { type: "separator" },
+    { label: "Quit", click: () => require$$0.app.quit() }
+  ]);
+  tray.setContextMenu(contextMenu);
+  tray.on("click", () => {
+    if (win) {
+      if (win.isVisible()) {
+        if (win.isFocused()) {
+          win.hide();
+        } else {
+          win.focus();
+        }
+      } else {
+        win.show();
+      }
+    } else {
+      createWindow();
+    }
+  });
   createWindow();
 });
 exports.MAIN_DIST = MAIN_DIST;
