@@ -58,7 +58,6 @@ const MAX_HEALTH_CHECK_RETRIES = 30
 
 class WhisperXManager {
     private process: ChildProcess | null = null
-    private isStarting = false
     private pythonPath: string = ''
 
     constructor() {
@@ -175,95 +174,100 @@ class WhisperXManager {
     /**
      * Start the WhisperX Python server
      */
+    private startPromise: Promise<void> | null = null
+
+    /**
+     * Start the WhisperX Python server
+     */
     async start(): Promise<void> {
-        if (this.process || this.isStarting) {
-            console.log('[WhisperX] Server already running or starting')
-            return
+        if (this.startPromise) {
+            return this.startPromise
         }
 
-        this.isStarting = true
-
-        try {
-            const executable = this.detectExecutable()
-            let spawnArgs: string[] = []
-            let cwd = this.getPythonDir()
-
-            // If in dev (using python interpreter), we need to pass the script script
-            if (!app.isPackaged) {
-                const serverPath = path.join(cwd, 'whisperx_server.py')
-                if (!fs.existsSync(serverPath)) {
-                    throw new Error(`WhisperX server script not found at ${serverPath}`)
-                }
-                spawnArgs = [serverPath]
-            } else {
-                // In production, the executable IS the server, so no args needed ideally, 
-                // but we might want to check if the bundled app needs cwd set specifically
-                // usually the bundled app self-extracts or runs from a temp dir.
-                // We kept the executable in resources/bin/
-                cwd = path.dirname(executable)
+        this.startPromise = (async () => {
+            if (this.process) {
+                console.log('[WhisperX] Server already running')
+                return
             }
 
-            console.log(`[WhisperX] Starting server using: ${executable} ${spawnArgs.join(' ')}`)
-
-            // Detect ffmpeg path
-            let ffmpegPath = ''
             try {
-                // In production, ffmpeg-static might be unpacked differently or we need to ensure it's found
-                // For now, let's try to get it from the module.
-                // NOTE: In a packaged app, require('ffmpeg-static') returns the fixed path in app.asar... 
-                // which is wrong if we need the unpacked binary.
-                // Usually electron-builder unpacks it.
-                ffmpegPath = require('ffmpeg-static')
-                if (app.isPackaged) {
-                    ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+                const executable = this.detectExecutable()
+                let spawnArgs: string[] = []
+                let cwd = this.getPythonDir()
+
+                // If in dev (using python interpreter), we need to pass the script script
+                if (!app.isPackaged) {
+                    const serverPath = path.join(cwd, 'whisperx_server.py')
+                    if (!fs.existsSync(serverPath)) {
+                        throw new Error(`WhisperX server script not found at ${serverPath}`)
+                    }
+                    spawnArgs = [serverPath]
+                } else {
+                    cwd = path.dirname(executable)
                 }
-                console.log(`[WhisperX] Using ffmpeg at: ${ffmpegPath}`)
+
+                console.log(`[WhisperX] Starting server using: ${executable} ${spawnArgs.join(' ')}`)
+
+                // Detect ffmpeg path
+                let ffmpegPath = ''
+                try {
+                    ffmpegPath = require('ffmpeg-static')
+                    if (app.isPackaged) {
+                        ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
+                    }
+                    console.log(`[WhisperX] Using ffmpeg at: ${ffmpegPath}`)
+                } catch (e) {
+                    console.warn('[WhisperX] Could not detect ffmpeg-static path', e)
+                }
+
+                // Set environment variables
+                const env = {
+                    ...process.env,
+                    WHISPERX_PORT: WHISPERX_PORT.toString(),
+                    PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}:${process.env.PATH}` : process.env.PATH
+                }
+
+                // Spawn the process
+                this.process = spawn(executable, spawnArgs, {
+                    cwd,
+                    env,
+                    stdio: ['ignore', 'pipe', 'pipe']
+                })
+
+                // Log stdout
+                this.process.stdout?.on('data', (data) => {
+                    console.log(`[WhisperX] ${data.toString().trim()}`)
+                })
+
+                // Log stderr
+                this.process.stderr?.on('data', (data) => {
+                    console.error(`[WhisperX] ${data.toString().trim()}`)
+                })
+
+                // Handle process exit
+                this.process.on('close', (code) => {
+                    console.log(`[WhisperX] Server exited with code ${code}`)
+                    this.process = null
+                    this.startPromise = null // Reset promise so it can be restarted
+                })
+
+                this.process.on('error', (err) => {
+                    console.error(`[WhisperX] Failed to start server: ${err.message}`)
+                    this.process = null
+                    this.startPromise = null
+                })
+
+                // Wait for server to be ready
+                await this.waitForServer()
+
+                console.log('[WhisperX] Server is ready')
             } catch (e) {
-                console.warn('[WhisperX] Could not detect ffmpeg-static path', e)
+                this.startPromise = null
+                throw e
             }
+        })()
 
-            // Set environment variables
-            const env = {
-                ...process.env,
-                WHISPERX_PORT: WHISPERX_PORT.toString(),
-                PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}:${process.env.PATH}` : process.env.PATH
-            }
-
-            // Spawn the process
-            this.process = spawn(executable, spawnArgs, {
-                cwd,
-                env,
-                stdio: ['ignore', 'pipe', 'pipe']
-            })
-
-            // Log stdout
-            this.process.stdout?.on('data', (data) => {
-                console.log(`[WhisperX] ${data.toString().trim()}`)
-            })
-
-            // Log stderr
-            this.process.stderr?.on('data', (data) => {
-                console.error(`[WhisperX] ${data.toString().trim()}`)
-            })
-
-            // Handle process exit
-            this.process.on('close', (code) => {
-                console.log(`[WhisperX] Server exited with code ${code}`)
-                this.process = null
-            })
-
-            this.process.on('error', (err) => {
-                console.error(`[WhisperX] Failed to start server: ${err.message}`)
-                this.process = null
-            })
-
-            // Wait for server to be ready
-            await this.waitForServer()
-
-            console.log('[WhisperX] Server is ready')
-        } finally {
-            this.isStarting = false
-        }
+        return this.startPromise
     }
 
     /**
@@ -330,10 +334,8 @@ class WhisperXManager {
      * Transcribe an audio file
      */
     async transcribe(audioPath: string, options: TranscribeOptions = {}): Promise<Transcript> {
-        // Ensure server is running
-        if (!this.isRunning()) {
-            await this.start()
-        }
+        // Ensure server is running and ready
+        await this.start()
 
         const response = await fetch(`${WHISPERX_URL}/transcribe`, {
             method: 'POST',

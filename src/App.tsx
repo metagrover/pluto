@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { AudioManager } from './components/AudioManager'
 import { SetupWizard } from './components/Setup/SetupWizard'
-import { ChevronDown, FileText, Sparkles, Copy, Check, BarChart3 } from 'lucide-react'
+import { ChevronDown, FileText, Sparkles, Copy, Check, BarChart3, Plus, X, Users, MessageSquare } from 'lucide-react'
 import './App.css'
 
 // Knowledge Graph Components
@@ -11,6 +11,7 @@ import { ProjectsTab } from './components/KnowledgeGraph/ProjectsTab'
 import { TasksTab } from './components/KnowledgeGraph/TasksTab'
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab'
 import { Logo } from './components/Brand/Logo'
+import { ZenVisualizer } from './components/ZenVisualizer'
 
 interface TranscriptSegment {
     text: string;
@@ -26,13 +27,19 @@ interface Meeting {
     meeting_type?: string;
     enhanced_notes?: string;
     transcript_json?: string;
+    user_notes?: string;
 }
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null)
+  const [isServerReady, setIsServerReady] = useState(false)
   const [meetings, setMeetings] = useState<Meeting[]>([])
+  const [meetingTitle, setMeetingTitle] = useState('')
+  const [meetingParticipants, setMeetingParticipants] = useState<string[]>([])
+  const [participantInput, setParticipantInput] = useState('')
 
   const [isRecording, setIsRecording] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | number | null>(null)
   const [activeTab, setActiveTab] = useState<'hub' | 'people' | 'projects' | 'wiki' | 'tasks'>('hub')
   const [sidebarVisible, setSidebarVisible] = useState(true)
@@ -61,6 +68,15 @@ function App() {
     setTimeout(() => setCopySuccess(false), 2000)
   }
   const startSessionRef = useRef<(() => void) | null>(null)
+  
+  // Phase 4: Zen Audio Viz
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
+  const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(null)
+  
+  // Connect the ref
+  onAnalyserReadyRef.current = (node) => {
+      setAnalyser(node)
+  }
 
   // Phase 3: Task Completion Handler
   const handleCompleteTask = (taskId: string) => {
@@ -151,6 +167,24 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'claude_api_key').then((val) => {
       if (val) setClaudeApiKey(val)
     })
+    window.ipcRenderer.invoke('GET_SETTING', 'claude_api_key').then((val) => {
+      if (val) setClaudeApiKey(val)
+    })
+
+    // Poll for Server Readiness
+    const checkServer = async () => {
+        try {
+            const health = await window.ipcRenderer.invoke('WHISPERX_HEALTH')
+            if (health.status === 'ok') {
+                setIsServerReady(true)
+            } else {
+                setTimeout(checkServer, 1000)
+            }
+        } catch (e) {
+            setTimeout(checkServer, 1000)
+        }
+    }
+    checkServer()
 
     // Keyboard Shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -204,6 +238,9 @@ function App() {
       // Only clear on NEW recording start (transition from false -> true)
       if (recording && !wasRecording) {
           setCurrentNotes('') // Clear notes
+          setMeetingTitle('')
+          setMeetingParticipants([])
+          setParticipantInput('')
           setSelectedMeetingId(null) // Switch to live view
       }
   }
@@ -267,38 +304,39 @@ function App() {
     return () => clearTimeout(timer)
   }, [setupNeeded])
 
-  if (setupNeeded === null) return <div className="h-screen w-screen bg-pro-bg flex items-center justify-center text-pro-text-muted/20 font-black uppercase tracking-[0.5em] animate-pulse text-xs">Loading Pluto...</div>
+  if (setupNeeded === null || (!setupNeeded && !isServerReady)) return (
+    <div className="h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-black uppercase tracking-[0.2em] animate-pulse text-xs">
+        <div className="w-8 h-8 rounded-full border-2 border-pro-accent border-t-transparent animate-spin mb-4" />
+        <span>Initializing Neural Engine...</span>
+    </div>
+  )
   if (setupNeeded) return <SetupWizard onComplete={() => setSetupNeeded(false)} />
 
   return (
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
-      {/* Search Bar - Global HUD */}
-
-
-
-
-      {/* Settings Modal */}
-      {/* Settings Modal (Placeholder for removal if duplicate exists) */}
-
-
-      {/* Main Content Area */}
-      <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
       {/* AudioManager - Always mounted, always hidden (handles audio in background) */}
       <div className="hidden">
         <AudioManager 
             onTranscript={handleTranscript} 
-            onSessionComplete={() => {
-                fetchMeetings()
+            onSessionComplete={async (meetingId) => {
+                await fetchMeetings()
+                if (meetingId) {
+                    setSelectedMeetingId(meetingId)
+                }
             }} 
             onRecordingChange={handleRecordingChange}
+            onProcessingChange={setIsProcessing}
             userNotes={currentNotes}
             onStopSessionRef={stopSessionRef}
             onStartSessionRef={startSessionRef}
+            onAnalyserReadyRef={onAnalyserReadyRef}
+            userTitle={meetingTitle}
+            participants={meetingParticipants}
         />
       </div>
       
       {/* Sidebar - Navigation (Hidden in Zen Mode) */}
-      {!isRecording && (<>
+      {!isRecording && !isProcessing && (<>
       <div 
         className={`fixed inset-0 bg-black/20 backdrop-blur-sm z-30 lg:hidden transition-opacity duration-300 ${sidebarVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} 
         onClick={() => setSidebarVisible(false)}
@@ -453,26 +491,34 @@ function App() {
       </>)}
        
        {/* ZEN MODE - Full-screen Premium interface */}
-       {isRecording ? (
+       {(isRecording || isProcessing) ? (
             <main className="flex-1 flex flex-col h-full relative z-10 bg-pro-bg overflow-hidden">
-                {/* Minimal Top Bar */}
-                <header className="h-14 flex items-center justify-between px-6 bg-white/60 backdrop-blur-xl border-b border-stone-200/60 shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-red-500/10">
-                            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                            <span className="text-[10px] font-semibold text-red-600 uppercase tracking-wide">Recording</span>
-                        </div>
+                {/* Minimal Top Bar - Added padding for Traffic Lights */}
+                <header className="h-20 flex items-center justify-between px-6 pl-24 bg-white/60 backdrop-blur-xl border-b border-stone-200/60 shrink-0 select-none drag-region">
+                    <div className="flex items-center gap-6 no-drag">
+                        <Logo size={28} showText={false} variant="default" />
+                        
+                        <div className="h-6 w-px bg-stone-200" />
+                        
+                        {/* Audio Visualizer */}
+                        <ZenVisualizer analyser={analyser} isProcessing={isProcessing} />
                     </div>
+                    
                     <button 
+                        disabled={isProcessing}
                         onClick={() => {
-                            console.log('[App] End Meeting clicked, ref:', stopSessionRef.current)
-                            if (stopSessionRef.current) {
+                            if (stopSessionRef.current && !isProcessing) {
                                 stopSessionRef.current()
                             }
                         }}
-                        className="px-4 py-1.5 rounded-lg bg-stone-900 text-white text-xs font-semibold hover:bg-stone-800 transition-colors"
+                        className={`no-drag px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 flex items-center gap-2
+                            ${isProcessing 
+                                ? 'bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200' 
+                                : 'bg-stone-900 text-white hover:bg-stone-800'
+                            }`}
                     >
-                        End Meeting
+                        {isProcessing && <div className="w-3 h-3 rounded-full border-2 border-stone-400 border-t-transparent animate-spin" />}
+                        {isProcessing ? 'Processing...' : 'End Meeting'}
                     </button>
                 </header>
 
@@ -480,12 +526,57 @@ function App() {
                 <div className="flex-1 flex flex-col relative overflow-hidden">
                     {/* Primary: Note Editor (Premium style) */}
                     <div className="flex-1 overflow-y-auto">
-                        <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 md:py-12">
+                        <div className="max-w-3xl mx-auto px-4 md:px-8 py-8 md:py-12 flex flex-col gap-8">
+                            {/* Metadata Editor */}
+                            <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-700">
+                                <input
+                                    type="text"
+                                    value={meetingTitle}
+                                    onChange={(e) => setMeetingTitle(e.target.value)}
+                                    placeholder="Add Meeting Title..."
+                                    className="text-4xl md:text-5xl font-extrabold tracking-tight text-pro-text-main bg-transparent outline-none placeholder:text-stone-300/50 w-full"
+                                />
+                                
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <div className="flex items-center gap-2 text-stone-400 mr-2">
+                                        <Users size={16} />
+                                        <span className="text-xs font-bold uppercase tracking-widest">Participants:</span>
+                                    </div>
+                                    {meetingParticipants.map((p, i) => (
+                                        <div key={i} className="flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-full bg-stone-100 border border-stone-200 text-sm font-medium text-stone-600 animate-in fade-in zoom-in group">
+                                            <span>{p}</span>
+                                            <button 
+                                                onClick={() => setMeetingParticipants(prev => prev.filter((_, idx) => idx !== i))}
+                                                className="text-stone-400 hover:text-red-500 transition-colors bg-stone-200/50 rounded-full p-0.5 hover:bg-stone-200"
+                                            >
+                                                <X size={10} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                    <div className="relative group">
+                                        <input
+                                            type="text"
+                                            value={participantInput}
+                                            onChange={(e) => setParticipantInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && participantInput.trim()) {
+                                                    setMeetingParticipants(prev => [...prev, participantInput.trim()])
+                                                    setParticipantInput('')
+                                                }
+                                            }}
+                                            placeholder="Add person..."
+                                            className="bg-transparent outline-none text-sm font-medium text-pro-text-main w-32 placeholder:text-stone-300/50 focus:placeholder-stone-300 transition-all"
+                                        />
+                                        <Plus size={12} className="absolute right-0 top-1/2 -translate-y-1/2 text-stone-300 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    </div>
+                                </div>
+                            </div>
+                            
                             <textarea
                                 autoFocus
                                 value={currentNotes}
                                 onChange={(e) => setCurrentNotes(e.target.value)}
-                                placeholder="Start typing your notes...\n\nPluto is listening in the background and will enhance these notes with context from the conversation."
+                                placeholder="Start typing your notes... Pluto is listening in the background and will enhance these notes with context from the conversation."
                                 className="w-full min-h-[50vh] resize-none outline-none text-lg text-stone-800 placeholder:text-stone-300 leading-relaxed bg-transparent font-['Georgia',serif]"
                                 spellCheck={false}
                             />
@@ -576,7 +667,7 @@ function App() {
                 </button>
                 <div>
                     <h2 className="text-sm font-black tracking-tight text-pro-text-main group cursor-default">
-                         {isRecording ? 'Capturing Intelligence' : selectedMeetingId ? selectedMeeting?.title || 'Review' : activeTab === 'hub' ? 'Dashboard' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+                         {isProcessing ? 'Processing Intelligence...' : isRecording ? 'Capturing Intelligence' : selectedMeetingId ? selectedMeeting?.title || 'Review' : activeTab === 'hub' ? 'Dashboard' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
                     </h2>
                     <div className="flex items-center gap-2 mt-0.5">
                         <div className={`w-1.5 h-1.5 rounded-full ${isRecording ? 'bg-red-500 animate-pulse' : 'bg-pro-accent/20'}`} />
@@ -809,152 +900,140 @@ function App() {
                                                        </h2>
                                                        <div className="p-8 rounded-[2rem] bg-indigo-50/30 border border-indigo-100/50 space-y-4">
                                                             {decisions.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
-                                                                const cleanLine = line.replace(/^[*-]\s*|^\d+\.\s*/, '').trim()
-                                                                return (
-                                                                    <div key={i} className="flex gap-4">
-                                                                        <span className="text-indigo-400 font-bold shrink-0">↳</span>
-                                                                        <p className="text-[15px] font-semibold text-indigo-900/80 leading-relaxed">{highlightEntities(cleanLine)}</p>
-                                                                    </div>
-                                                                )
-                                                            })}
-                                                       </div>
-                                                   </div>
-                                               )}
-                                           </div>
-
-                                           {/* Right Column: Action Items */}
-                                           <div className="col-span-12 lg:col-span-5 space-y-6 sticky top-24">
-                                               <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                                                   Action Items
-                                               </h2>
-                                               <div className="space-y-3">
-                                                   {actionItems ? actionItems.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
-                                                       const cleanLabel = line.replace(/^- \[ \]|^- |^\d+\.\s+/, '').trim()
-                                                       if (!cleanLabel) return null
-                                                       return (
-                                                           <div key={i} className="flex items-start gap-4 p-5 rounded-2xl bg-white border border-pro-border shadow-sm group/item hover:border-pro-accent/30 transition-all cursor-default">
-                                                               <div className="w-5 h-5 rounded-md border-2 border-pro-accent/20 mt-0.5 flex-shrink-0 bg-white group-hover/item:border-pro-accent/40 transition-colors" />
-                                                               <span className="text-[14px] font-semibold text-pro-text-main/80 leading-snug">{cleanLabel}</span>
-                                                           </div>
-                                                       )
-                                                   }) : (
-                                                       <div className="p-8 border border-dashed border-pro-border rounded-2xl text-center">
-                                                            <p className="text-[11px] font-bold text-pro-text-muted/40 uppercase tracking-widest">No action items identified</p>
-                                                       </div>
-                                                   )}
-                                               </div>
-                                               
-                                               <div className="pt-4 p-6 rounded-2xl bg-pro-bg/50 border border-pro-border/40 text-center">
-                                                    <p className="text-[10px] font-medium text-pro-text-muted/60 leading-relaxed">
-                                                        Action items are extracted automatically. You can also ask Pluto to refine these.
-                                                    </p>
-                                               </div>
-                                           </div>
-                                       </div>
-                                   )
-                               })()}
-                          </div>
-                      ) : (
-                          <div className="py-24 px-10 bg-pro-bg/30 border border-dashed border-pro-border rounded-[2.5rem] text-center">
-                              <p className="text-[10px] font-black text-pro-text-muted/30 uppercase tracking-[0.2em]">No synthesis found</p>
-                          </div>
-                      )}
-
-                      {/* Transcript Section (Refined Expansion UI) */}
-                      <div className="relative mt-24">
-                          <div className="flex items-center gap-6 mb-12">
-                              <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-lg bg-pro-accent/5 border border-pro-accent/20 flex items-center justify-center">
-                                      <FileText className="w-4 h-4 text-pro-accent" />
-                                  </div>
-                                  <h3 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">Primary Transcript</h3>
-                              </div>
-                              <div className="flex-1 h-[1px] bg-pro-border/20" />
-                          </div>
-
-                          <div 
-                            className={`relative transition-all duration-700 ease-in-out overflow-hidden ${transcriptVisible ? 'max-h-[5000px]' : 'max-h-[300px]'}`}
-                            style={{
-                                maskImage: !transcriptVisible ? 'linear-gradient(to bottom, black 50%, transparent 100%)' : 'none',
-                                WebkitMaskImage: !transcriptVisible ? 'linear-gradient(to bottom, black 50%, transparent 100%)' : 'none'
-                            }}
-                          >
-                              <div className="space-y-12 pb-12">
-                                  {(() => {
-                                      let segments: TranscriptSegment[] = []
-                                      try {
-                                          if (selectedMeeting && selectedMeeting.transcript_json) {
-                                              const parsed = JSON.parse(selectedMeeting.transcript_json)
-                                              segments = Array.isArray(parsed) ? parsed : (parsed?.segments || [])
-                                          } else {
-                                              segments = []
-                                          }
-                                      } catch (e) {
-                                          console.error('Transcript parse error', e)
-                                      }
-                                      
-                                      if (segments.length === 0) {
-                                          return (
-                                              <div className="py-20 text-center bg-pro-bg/20 rounded-[2rem] border border-dashed border-pro-border/40">
-                                                  <Sparkles className="w-5 h-5 text-pro-accent/20 mx-auto mb-3" />
-                                                  <p className="text-pro-text-muted/40 font-bold uppercase tracking-widest text-[9px]">No biometric voice data found</p>
-                                              </div>
-                                          )
-                                      }
-
-                                      const mergedSegments: TranscriptSegment[] = []
-                                      for (const segment of segments) {
-                                          const lastSegment = mergedSegments[mergedSegments.length - 1]
-                                          if (lastSegment && String(lastSegment.speaker) === String(segment.speaker)) {
-                                              lastSegment.text += ' ' + segment.text
-                                          } else {
-                                              mergedSegments.push({ ...segment })
-                                          }
-                                      }
-
-                                      return mergedSegments.map((s: TranscriptSegment, i: number) => {
-                                          return (
-                                              <div key={i} className="group flex gap-12 transition-all">
-                                                  <div className="w-20 shrink-0 pt-1 text-right">
-                                                      <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
-                                                          {s.speaker || 'Unknown'}
-                                                      </span>
-                                                  </div>
-                                                  <div className="flex-1">
-                                                      <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
-                                                          {highlightEntities(s.text)}
-                                                      </p>
-                                                  </div>
-                                              </div>
-                                          )
-                                      })
-                                  })()}
-                              </div>
-                          </div>
-
-                          {/* Expansion Action Bar - Refined Gradient & integrated button */}
-                          <div className={`absolute bottom-0 left-0 right-0 flex items-end justify-center pb-8 transition-all duration-700 ${transcriptVisible ? 'relative h-auto pt-16 pb-24' : 'h-64 bg-gradient-to-t from-pro-bg via-pro-bg/95 to-transparent'}`}>
-                              <button 
-                                onClick={() => setTranscriptVisible(!transcriptVisible)}
-                                className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
-                              >
-                                  <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
-                                      {transcriptVisible ? 'Collapse Transcript' : 'Explore Full Transcript'}
-                                  </span>
-                                  <div className={`w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500 ${transcriptVisible ? 'rotate-180' : ''}`}>
-                                      <ChevronDown className="w-3 h-3 text-pro-accent" />
-                                  </div>
-                                  
-                                  {!transcriptVisible && (
-                                    <div className="absolute -right-2 -top-2 flex items-center justify-center w-5 h-5 bg-pro-accent text-white rounded-full text-[9px] font-bold shadow-sm animate-in zoom-in duration-300 delay-100">
-                                        +
+                       {/* Empty State vs Content */}
+                       {(!selectedMeeting?.enhanced_notes && (!selectedMeeting?.transcript_json || selectedMeeting.transcript_json === '[]')) ? (
+                           <div className="flex-1 flex flex-col items-center justify-center p-20 text-center space-y-6 opacity-60">
+                               <div className="w-16 h-16 rounded-2xl bg-stone-100 flex items-center justify-center mb-4">
+                                   <FileText className="w-8 h-8 text-stone-300" />
+                               </div>
+                               <h3 className="text-xl font-bold text-pro-text-main">No Content Recorded</h3>
+                               <p className="text-sm text-pro-text-muted max-w-sm">
+                                   No audio was detected during this session, so no transcript or summary could be generated.
+                               </p>
+                           </div>
+                       ) : (
+                       <div className="flex-1 flex flex-col lg:flex-row h-full overflow-hidden">
+                          {/* Left: Enhanced Notes (Summary) - Premium Typography */}
+                          <div className={`flex-1 h-full overflow-y-auto custom-scrollbar p-8 md:p-12 md:max-w-[55%] transition-all duration-700 ${transcriptVisible ? 'opacity-40 scale-95 blur-[2px] pointer-events-none' : 'opacity-100 scale-100 blur-0'}`}>
+                              <div className="space-y-12 max-w-2xl mx-auto pb-32">
+                                  {/* User Notes Section - Distinct from AI Summary */}
+                                  {selectedMeeting?.user_notes && (
+                                    <div className="space-y-4 mb-8 p-6 rounded-2xl bg-stone-50 border border-stone-100">
+                                        <h3 className="text-[10px] font-black text-stone-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                                            <span className="w-1 h-1 rounded-full bg-stone-400" />
+                                            Your Notes
+                                        </h3>
+                                        <div className="prose prose-stone prose-sm max-w-none font-medium text-stone-600">
+                                            <p className="whitespace-pre-wrap">{selectedMeeting.user_notes}</p>
+                                        </div>
                                     </div>
                                   )}
-                              </button>
+
+                                  {/* AI Summary Content */}
+                                  <div className="prose prose-lg prose-stone max-w-none">
+                                      <div className="whitespace-pre-wrap font-serif text-[15px] leading-relaxed text-pro-text-main/90">
+                                          {selectedMeeting?.enhanced_notes || ''}
+                                      </div>
+                                  </div>
+                              </div>
                           </div>
-                      </div>
 
+                          {/* Right: Transcript (Collapsible) - Visual polish */}
+                          <div className={`absolute lg:relative inset-0 lg:inset-auto bg-pro-bg/95 backdrop-blur-xl lg:bg-transparent z-20 flex-1 h-full border-l border-pro-border/40 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] ${transcriptVisible ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 lg:translate-y-0 lg:opacity-100 lg:hidden'}`}>
+                              <div className="h-full flex flex-col">
+                                  <div className="p-6 border-b border-pro-border/40 flex items-center justify-between bg-white/50 backdrop-blur-md sticky top-0 z-10">
+                                      <div className="flex items-center gap-3">
+                                          <div className="w-8 h-8 rounded-full bg-pro-accent/10 flex items-center justify-center text-pro-accent">
+                                              <MessageSquare size={14} />
+                                          </div>
+                                          <div>
+                                              <h3 className="text-xs font-black uppercase tracking-[0.2em] text-pro-text-main">Transcript</h3>
+                                              <p className="text-[9px] font-bold text-pro-text-muted uppercase tracking-widest mt-0.5">Verbatim Record</p>
+                                          </div>
+                                      </div>
+                                      <button 
+                                        onClick={() => setTranscriptVisible(false)}
+                                        className="lg:hidden p-2 hover:bg-black/5 rounded-full transition-colors"
+                                      >
+                                          <ChevronDown className="w-5 h-5" />
+                                      </button>
+                                  </div>
+                                  
+                                  <div className="flex-1 overflow-y-auto custom-scrollbar p-8 bg-stone-50/30">
+                                      <div className="space-y-8 max-w-xl mx-auto pb-32">
+                                          {(() => {
+                                              if (!selectedMeeting?.transcript_json) return null
+                                              let segments = []
+                                              try {
+                                                  segments = JSON.parse(selectedMeeting.transcript_json)
+                                              } catch (e) {
+                                                  console.error('Failed to parse transcript', e)
+                                                  return null
+                                              }
+                                              
+                                              if (segments.length === 0) {
+                                                  return (
+                                                      <div className="flex flex-col items-center justify-center py-20 opacity-40">
+                                                          <Sparkles className="w-5 h-5 text-pro-accent/20 mx-auto mb-3" />
+                                                          <p className="text-pro-text-muted/40 font-bold uppercase tracking-widest text-[9px]">No biometric voice data found</p>
+                                                      </div>
+                                                  )
+                                              }
 
+                                              const mergedSegments: TranscriptSegment[] = []
+                                              for (const segment of segments) {
+                                                  const lastSegment = mergedSegments[mergedSegments.length - 1]
+                                                  if (lastSegment && String(lastSegment.speaker) === String(segment.speaker)) {
+                                                      lastSegment.text += ' ' + segment.text
+                                                  } else {
+                                                      mergedSegments.push({ ...segment })
+                                                  }
+                                              }
+
+                                              return mergedSegments.map((s: TranscriptSegment, i: number) => {
+                                                  return (
+                                                      <div key={i} className="group flex gap-12 transition-all">
+                                                          <div className="w-20 shrink-0 pt-1 text-right">
+                                                              <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
+                                                                  {s.speaker || 'Unknown'}
+                                                              </span>
+                                                          </div>
+                                                          <div className="flex-1">
+                                                              <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
+                                                                  {highlightEntities(s.text)}
+                                                              </p>
+                                                          </div>
+                                                      </div>
+                                                  )
+                                              })
+                                          })()}
+                                      </div>
+                                  </div>
+
+                                  {/* Expansion Action Bar - Refined Gradient & integrated button */}
+                                  <div className={`absolute bottom-0 left-0 right-0 flex items-end justify-center pb-8 transition-all duration-700 ${transcriptVisible ? 'relative h-auto pt-16 pb-24' : 'h-64 bg-gradient-to-t from-pro-bg via-pro-bg/95 to-transparent'}`}>
+                                      <button 
+                                        onClick={() => setTranscriptVisible(!transcriptVisible)}
+                                        className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
+                                      >
+                                          <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
+                                              {transcriptVisible ? 'Collapse Transcript' : 'Explore Full Transcript'}
+                                          </span>
+                                          <div className={`w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500 ${transcriptVisible ? 'rotate-180' : ''}`}>
+                                              <ChevronDown className="w-3 h-3 text-pro-accent" />
+                                          </div>
+                                          
+                                          {!transcriptVisible && (
+                                            <div className="absolute -right-2 -top-2 flex items-center justify-center w-5 h-5 bg-pro-accent text-white rounded-full text-[9px] font-bold shadow-sm animate-in zoom-in duration-300 delay-100">
+                                                +
+                                            </div>
+                                          )}
+                                      </button>
+                                  </div>
+                              </div>
+                          </div>
+                       </div>
+                       )}
                       {/* Discreet Footer */}
                       <div className="pt-12 flex items-center justify-between border-t border-pro-border/20 px-4">
                          <div className="flex items-center gap-8">
@@ -972,6 +1051,7 @@ function App() {
                          </div>
                       </div>
                     </div>
+
                  ) : activeTab === 'hub' ? (
                     <div className="max-w-5xl mx-auto w-full space-y-16 animate-in relative pb-32">
                          {/* Phase 1: Dynamic Hero Section */}
@@ -1265,11 +1345,12 @@ function App() {
                              <p className="text-[10px] font-black text-pro-text-muted/30 uppercase tracking-[0.3em]">Ready for M-Series Deployment</p>
                         </div>
                     </div>
-                )  }
-         </div>
+                )
+             }
+          </div>
         </main>
       </>
-      )}
+    )}
 
       {/* Global Overlays - High Z-Index, Viewport Fixed */}
       
