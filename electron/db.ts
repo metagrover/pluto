@@ -354,6 +354,7 @@ const generateId = (): string => {
  * Create or update an entity
  */
 export const upsertEntity = (entity: {
+  id?: string // Optional ID to force update on specific entity
   type: EntityType
   name: string
   status?: EntityStatus
@@ -362,11 +363,19 @@ export const upsertEntity = (entity: {
   metadata?: Record<string, any>
 }): Entity => {
   const normalizedName = normalizeEntityName(entity.name)
+  let existing: Entity | undefined
 
-  // Check if entity already exists (by type + normalized name)
-  const existing = db.prepare(`
-    SELECT * FROM entities WHERE type = ? AND normalized_name = ?
-  `).get(entity.type, normalizedName) as Entity | undefined
+  // 1. If ID provided, try to find by ID first
+  if (entity.id) {
+    existing = db.prepare('SELECT * FROM entities WHERE id = ?').get(entity.id) as Entity | undefined
+  }
+
+  // 2. If no ID or not found by ID, try normalization match
+  if (!existing) {
+    existing = db.prepare(`
+        SELECT * FROM entities WHERE type = ? AND normalized_name = ?
+      `).get(entity.type, normalizedName) as Entity | undefined
+  }
 
   if (existing) {
     // Update existing entity
@@ -394,7 +403,7 @@ export const upsertEntity = (entity: {
   }
 
   // Create new entity
-  const id = generateId()
+  const id = entity.id || generateId() // Use provided ID or generate new
   const stmt = db.prepare(`
     INSERT INTO entities (id, type, name, normalized_name, status, due_date, assigned_to, metadata)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
