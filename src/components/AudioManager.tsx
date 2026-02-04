@@ -54,6 +54,32 @@ export const AudioManager = ({
   const systemStreamRef = useRef<MediaStream | null>(null)
   const isRecordingRef = useRef(false)
   const isProcessingRef = useRef(false)
+
+  const isScreenPermissionGranted = (status: string) => {
+      return status === 'authorized' || status === 'granted'
+  }
+
+  const logAudioTracks = (label: string, stream: MediaStream | null) => {
+      if (!stream) {
+          console.log(`[Pluto][Audio] ${label}: no stream`)
+          return
+      }
+      const tracks = stream.getAudioTracks()
+      console.log(`[Pluto][Audio] ${label}: ${tracks.length} audio track(s)`)
+      tracks.forEach((track, index) => {
+          const settings = track.getSettings ? track.getSettings() : {}
+          const capabilities = track.getCapabilities ? track.getCapabilities() : {}
+          console.log(`[Pluto][Audio] ${label} track ${index}`, {
+              id: track.id,
+              label: track.label,
+              enabled: track.enabled,
+              muted: track.muted,
+              readyState: track.readyState,
+              settings,
+              capabilities
+          })
+      })
+  }
   
   // Keep state refs in sync
   useEffect(() => {
@@ -74,6 +100,22 @@ export const AudioManager = ({
           setIsRecording(true)
           
           console.log('[Pluto] Starting native capture session...')
+
+          // 0. Preflight permissions (macOS)
+          const screenStatus = await window.ipcRenderer.invoke('CHECK_SCREEN_PERMISSION')
+          const micStatus = await window.ipcRenderer.invoke('CHECK_MICROPHONE_PERMISSION')
+          console.log('[Pluto] Screen permission status:', screenStatus)
+          console.log('[Pluto] Microphone permission status:', micStatus)
+          if (!isScreenPermissionGranted(screenStatus) || micStatus !== 'granted') {
+              if (!isScreenPermissionGranted(screenStatus)) {
+                  await window.ipcRenderer.invoke('REQUEST_SCREEN_PERMISSION')
+              }
+              window.dispatchEvent(new CustomEvent('SHOW_PERMISSION_OVERLAY', {
+                  detail: { screenStatus, micStatus }
+              }))
+              setIsRecording(false)
+              return
+          }
           
           // 1. Capture System Audio FIRST (via Loopback API)
           let systemStream: MediaStream | null = null
@@ -99,12 +141,18 @@ export const AudioManager = ({
               
               if (systemStream.getAudioTracks().length === 0) {
                   console.warn('[Pluto] System stream has no audio tracks')
-                  alert('System Audio NOT captured! Please try again.')
+                  alert(
+                      'System audio was not captured.\n\n' +
+                      'Make sure "Share system audio" is enabled in the picker and that ' +
+                      'Pluto is allowed in Screen & System Audio Recording settings.'
+                  )
               } else {
                   console.log('[Pluto] System audio started successfully via Loopback')
               }
+              logAudioTracks('System', systemStream)
           } catch (sysErr) {
               console.warn('[Pluto] Failed to capture system audio:', sysErr)
+              console.warn('[Pluto] System audio error details:', sysErr instanceof Error ? sysErr.message : sysErr)
               // Ensure loopback is disabled if we errored
               try { await window.ipcRenderer.invoke('disable-loopback-audio') } catch (e) { console.error('Failed to disable loopback', e) }
               // Don't block, just continue with Mic
@@ -122,8 +170,10 @@ export const AudioManager = ({
                   video: false
               })
               console.log('[Pluto] Microphone started successfully')
+              logAudioTracks('Microphone', micStream)
           } catch (micErr) {
               console.warn('[Pluto] Failed to capture microphone:', micErr)
+              console.warn('[Pluto] Microphone error details:', micErr instanceof Error ? micErr.message : micErr)
           }
                     // Check if we have at least one source
           if (!systemStream && !micStream) {
