@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, systemPreferences, Tray, Menu, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, desktopCapturer, systemPreferences, Tray, Menu, nativeImage, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -386,6 +386,19 @@ app.whenReady().then(async () => {
       return true
     } catch (error) {
       console.error('Failed to request screen permission:', error)
+      return false
+    }
+  })
+
+  ipcMain.handle('OPEN_SYSTEM_SETTINGS_PRIVACY', async (_event, pane) => {
+    if (process.platform !== 'darwin') return false
+    try {
+      const target = pane === 'microphone' ? 'Privacy_Microphone' : 'Privacy_ScreenCapture'
+      const url = `x-apple.systempreferences:com.apple.preference.security?${target}`
+      await shell.openExternal(url)
+      return true
+    } catch (error) {
+      console.error('Failed to open System Settings:', error)
       return false
     }
   })

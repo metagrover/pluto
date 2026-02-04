@@ -20,6 +20,7 @@ import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab'
 // Overlay Components
 import { SearchOverlay } from './components/overlays/SearchOverlay'
 import { AskPlutoOverlay } from './components/overlays/AskPlutoOverlay'
+import { PermissionsOverlay } from './components/overlays/PermissionsOverlay'
 import { SettingsOverlay } from './components/overlays/SettingsOverlay'
 
 // Types
@@ -40,6 +41,8 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [searchVisible, setSearchVisible] = useState(false)
   const [settingsVisible, setSettingsVisible] = useState(false)
+  const [permissionsVisible, setPermissionsVisible] = useState(false)
+  const [permissionStatus, setPermissionStatus] = useState({ screen: 'unknown', mic: 'unknown' })
   const [searchQuery, setSearchQuery] = useState('')
   const [llmProvider, setLlmProvider] = useState<'ollama' | 'gemini' | 'openai' | 'claude'>('ollama')
   const [geminiApiKey, setGeminiApiKey] = useState('')
@@ -270,6 +273,36 @@ function App() {
   }
 
   const intelligence = getProactiveIntelligence()
+
+  useEffect(() => {
+    const handlePermissionsOverlay = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {}
+      setPermissionStatus({
+        screen: detail.screenStatus || 'unknown',
+        mic: detail.micStatus || 'unknown'
+      })
+      setPermissionsVisible(true)
+    }
+    window.addEventListener('SHOW_PERMISSION_OVERLAY', handlePermissionsOverlay)
+    return () => window.removeEventListener('SHOW_PERMISSION_OVERLAY', handlePermissionsOverlay)
+  }, [])
+
+  const refreshPermissions = async () => {
+    const screen = await window.ipcRenderer.invoke('CHECK_SCREEN_PERMISSION')
+    const mic = await window.ipcRenderer.invoke('CHECK_MICROPHONE_PERMISSION')
+    setPermissionStatus({ screen, mic })
+    return { screen, mic }
+  }
+
+  const retryRecordingIfReady = async () => {
+    const { screen, mic } = await refreshPermissions()
+    const screenOk = screen === 'authorized' || screen === 'granted'
+    const micOk = mic === 'granted'
+    if (screenOk && micOk) {
+      setPermissionsVisible(false)
+      window.dispatchEvent(new Event('START_RECORDING'))
+    }
+  }
 
   if (setupNeeded === null || (!setupNeeded && !isServerReady)) return (
     <div className="h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-black uppercase tracking-[0.2em] animate-pulse text-xs">
@@ -506,6 +539,18 @@ function App() {
         setClaudeApiKey={setClaudeApiKey}
         fetchMeetings={fetchMeetings}
         setSelectedMeetingId={setSelectedMeetingId}
+      />
+
+      <PermissionsOverlay
+        visible={permissionsVisible}
+        onClose={() => setPermissionsVisible(false)}
+        screenStatus={permissionStatus.screen}
+        micStatus={permissionStatus.mic}
+        onRecheck={refreshPermissions}
+        onRetry={retryRecordingIfReady}
+        onOpenSystemSettings={(pane) => {
+          window.ipcRenderer.invoke('OPEN_SYSTEM_SETTINGS_PRIVACY', pane)
+        }}
       />
     </div>
   )

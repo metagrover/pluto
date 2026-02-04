@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Meeting, TranscriptSegment } from '../../types'
 import { BarChart3, Check, Copy, FileText, Sparkles, MessageSquare, ChevronDown } from 'lucide-react'
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar'
@@ -32,6 +33,38 @@ export const MeetingView = ({
     setTranscriptVisible
 }: MeetingViewProps) => {
     if (!selectedMeeting) return null;
+
+    const transcriptBodyRef = useRef<HTMLDivElement>(null)
+    const [transcriptBodyHeight, setTranscriptBodyHeight] = useState(0)
+
+    useLayoutEffect(() => {
+        if (!transcriptVisible) {
+            setTranscriptBodyHeight(0)
+            return
+        }
+        const el = transcriptBodyRef.current
+        if (!el) return
+        setTranscriptBodyHeight(0)
+        const frame = requestAnimationFrame(() => {
+            setTranscriptBodyHeight(el.scrollHeight)
+        })
+        return () => cancelAnimationFrame(frame)
+    }, [
+        transcriptVisible,
+        selectedMeeting?.transcript_json,
+        selectedMeeting?.enhanced_notes,
+        selectedMeeting?.user_notes
+    ])
+
+    useEffect(() => {
+        if (!transcriptVisible) return
+        const handleResize = () => {
+            const el = transcriptBodyRef.current
+            if (el) setTranscriptBodyHeight(el.scrollHeight)
+        }
+        window.addEventListener('resize', handleResize)
+        return () => window.removeEventListener('resize', handleResize)
+    }, [transcriptVisible])
 
     return (
         <div key={selectedMeeting.id} className="max-w-4xl mx-auto w-full space-y-20 animate-in pb-32">
@@ -286,15 +319,18 @@ export const MeetingView = ({
                     </p>
                 </div>
             ) : (
-                <div className="flex-1 flex flex-col lg:flex-row h-auto overflow-visible relative">
+                <div className={`flex-1 flex flex-col ${transcriptVisible ? 'lg:flex-row' : 'lg:flex-col'} h-auto overflow-visible relative`}>
 
                     {/* Right: Transcript (Collapsible) - Visual polish */}
-                    <div className={`relative bg-pro-bg lg:bg-transparent z-20 flex-1 border-l border-pro-border/40 lg:border-l-0 transition-opacity duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] ${transcriptVisible ? 'opacity-100 -mt-10' : 'hidden'}`}>
-                        <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg z-20" />
+                    <div className="relative bg-pro-bg lg:bg-transparent z-20 flex-1 border-l border-pro-border/40 lg:border-l-0">
+                        {transcriptVisible && (
+                            <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg z-20" />
+                        )}
                         <div className="flex flex-col">
-                            <div className="sticky z-30 bg-pro-bg pt-6 pb-6" style={{ top: '-65px' }}>
+                            {transcriptVisible && (
+                            <div className="sticky z-30 bg-pro-bg pt-6" style={{ top: '-65px' }}>
                                 <div className="bg-white shadow-md overflow-hidden">
-                                    <div className="p-6 border-b border-pro-border/40 flex items-center justify-between">
+                                    <div className="p-6 flex items-center justify-between">
                                     <div className="flex items-center gap-3">
                                         <div className="w-8 h-8 rounded-full bg-pro-accent/10 flex items-center justify-center text-pro-accent">
                                             <MessageSquare size={14} />
@@ -313,9 +349,16 @@ export const MeetingView = ({
                                     </div>
                                 </div>
                             </div>
-                            
-                            <div className="px-8 pb-10 pt-6 bg-stone-50/30">
-                                <div className="space-y-8 max-w-xl mx-auto pb-32">
+                            )}
+
+                            <div
+                                className={`transition-[max-height,opacity] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] overflow-hidden ${
+                                    transcriptVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                                }`}
+                                style={{ maxHeight: transcriptVisible ? transcriptBodyHeight : 0 }}
+                            >
+                            <div ref={transcriptBodyRef} className="px-8 pb-10 pt-6 bg-stone-50/30">
+                                <div className="space-y-8 max-w-xl mx-auto pt-4">
                                     {(() => {
                                         if (!selectedMeeting?.transcript_json) return null
                                         let segments = []
@@ -364,27 +407,24 @@ export const MeetingView = ({
                                     })()}
                                 </div>
                             </div>
+                            </div>
 
                             {/* Expansion Action Bar - Refined Gradient & integrated button */}
-                            <div className={`absolute bottom-0 left-0 right-0 flex items-end justify-center pb-8 transition-all duration-700 ${transcriptVisible ? 'relative h-auto pt-16 pb-24' : 'h-64 bg-gradient-to-t from-pro-bg via-pro-bg/95 to-transparent'}`}>
-                                <button 
-                                    onClick={() => setTranscriptVisible(!transcriptVisible)}
-                                    className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
-                                >
-                                    <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
-                                        {transcriptVisible ? 'Collapse Transcript' : 'Explore Full Transcript'}
-                                    </span>
-                                    <div className={`w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500 ${transcriptVisible ? 'rotate-180' : ''}`}>
-                                        <ChevronDown className="w-3 h-3 text-pro-accent" />
-                                    </div>
-                                    
-                                    {!transcriptVisible && (
-                                        <div className="absolute -right-2 -top-2 flex items-center justify-center w-5 h-5 bg-pro-accent text-white rounded-full text-[9px] font-bold shadow-sm animate-in zoom-in duration-300 delay-100">
-                                            +
+                            {transcriptVisible && (
+                                <div className="relative flex items-end justify-center pb-8 transition-all duration-700 pt-16 pb-24">
+                                    <button 
+                                        onClick={() => setTranscriptVisible(!transcriptVisible)}
+                                        className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
+                                    >
+                                        <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
+                                            Collapse Transcript
+                                        </span>
+                                        <div className="w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500 rotate-180">
+                                            <ChevronDown className="w-3 h-3 text-pro-accent" />
                                         </div>
-                                    )}
-                                </button>
-                            </div>
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
 
