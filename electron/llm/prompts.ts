@@ -57,11 +57,14 @@ Analyze the following transcript and extract:
 4. **Decisions**: Explicit decisions or conclusions reached (include rationale if given)
 5. **Projects**: Project names or work streams mentioned
 
+6. **Relationships**: Connections between entities (e.g., "Person works on Project", "Decision impacts Topic")
+
 Rules:
 - Only include entities that are clearly mentioned or implied
 - For action items, "assignee" should be a name if mentioned, otherwise omit
 - For due dates, use the exact phrase from the transcript (e.g., "by Friday", "next week")
 - Be conservative - only extract what's clearly present, don't infer too much
+- IMPORTANT: When extracting relationships, valid types are: 'works_on', 'impacts', 'relates_to', 'involved_in', 'produced', 'assigned_to'
 
 Respond with valid JSON in this exact format:
 {
@@ -69,7 +72,8 @@ Respond with valid JSON in this exact format:
   "topics": [{"name": "string", "importance": "high|medium|low"}],
   "action_items": [{"description": "string", "assignee": "string or omit", "due_date": "string or omit"}],
   "decisions": [{"description": "string", "rationale": "string or omit"}],
-  "projects": [{"name": "string", "context": "string or omit"}]
+  "projects": [{"name": "string", "context": "string or omit"}],
+  "relationships": [{"source": "string", "target": "string", "relationship": "string", "context": "string or omit"}]
 }
 
 Transcript:

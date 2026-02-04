@@ -21,6 +21,12 @@ export interface ExtractedEntities {
         name: string
         context?: string // Brief description
     }>
+    relationships?: Array<{
+        source: string
+        target: string
+        relationship: 'works_on' | 'impacts' | 'relates_to' | 'involved_in' | 'produced' | 'assigned_to'
+        context?: string
+    }>
 }
 
 export interface LLMProvider {

@@ -344,10 +344,10 @@ For local embeddings (privacy-preserving):
 * [x] Action item lifecycle queries (active, overdue, stale)
 * [x] Knowledge graph stats API
 * [x] Renderer API module (`src/api/knowledgeGraph.ts`)
-* [ ] Entity extraction pipeline (people, topics, action items, decisions)
-* [ ] Entity resolution (fuzzy matching for deduplication)
-* [ ] Relationship inference from transcript context
-* [ ] Entity sidebar panel
+* [x] Entity extraction pipeline (people, topics, action items, decisions)
+* [x] Entity resolution (fuzzy matching for deduplication)
+* [x] Relationship inference from transcript context
+* [x] Entity sidebar panel
 * [ ] Entity detail view (all mentions across meetings)
 
 

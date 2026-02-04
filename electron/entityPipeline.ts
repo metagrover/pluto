@@ -420,6 +420,68 @@ export async function processExtractedEntities(
         }
     }
 
+    // 6. Process Explicit Relationships
+    if (extracted.relationships) {
+        for (const rel of extracted.relationships) {
+            // Find Source
+            let sourceEntity: db.Entity | undefined
+            // Try to find source in our just-processed list first (most likely context)
+            // But we don't know the type. So we have to search our 'entities' accumulator.
+            // Problem: 'entities' array has resolved objects.
+
+            // Heuristic A: Try to find match in 'entities' accumulator
+            // This is O(N) but N is small (entities in this meeting)
+            const sourceMatch = entities.find(e =>
+                normalizeForMatch(e.name) === normalizeForMatch(rel.source) ||
+                normalizeTokenSort(e.name) === normalizeTokenSort(rel.source)
+            )
+
+            if (sourceMatch) {
+                sourceEntity = sourceMatch
+            } else {
+                // Heuristic B: Search standard types in DB
+                // We don't know the type, so we might need to search globally or guess.
+                // Let's try Person, Project, Topic in that order.
+                sourceEntity = findSimilarEntity('person', rel.source, existingPeople, 0.85) ||
+                    findSimilarEntity('project', rel.source, existingProjects, 0.85) ||
+                    findSimilarEntity('topic', rel.source, existingTopics, 0.85)
+            }
+
+            // Find Target
+            let targetEntity: db.Entity | undefined
+            const targetMatch = entities.find(e =>
+                normalizeForMatch(e.name) === normalizeForMatch(rel.target) ||
+                normalizeTokenSort(e.name) === normalizeTokenSort(rel.target)
+            )
+
+            if (targetMatch) {
+                targetEntity = targetMatch
+            } else {
+                targetEntity = findSimilarEntity('person', rel.target, existingPeople, 0.85) ||
+                    findSimilarEntity('project', rel.target, existingProjects, 0.85) ||
+                    findSimilarEntity('topic', rel.target, existingTopics, 0.85)
+            }
+
+            if (sourceEntity && targetEntity) {
+                // Validate relationship type
+                const validTypes = ['works_on', 'impacts', 'relates_to', 'involved_in', 'produced', 'assigned_to']
+                const relationship = validTypes.includes(rel.relationship) ? rel.relationship : 'relates_to'
+
+                db.linkEntities({
+                    source_entity_id: sourceEntity.id,
+                    target_entity_id: targetEntity.id,
+                    relationship: relationship as any,
+                    meeting_id: meetingId,
+                    confidence: 0.85 // High confidence since explicit
+                })
+                linked++
+                console.log(`[EntityPipeline] Linked "${sourceEntity.name}" -> [${relationship}] -> "${targetEntity.name}"`)
+            } else {
+                console.log(`[EntityPipeline] Could not link "${rel.source}" to "${rel.target}" - entity not found`)
+            }
+        }
+    }
+
     console.log(`[EntityPipeline] Complete: ${created} created, ${updated} updated, ${linked} links`)
 
     return { created, updated, linked, entities }
