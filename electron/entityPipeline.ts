@@ -7,6 +7,7 @@
 
 import { ExtractedEntities } from './llm/provider'
 import * as db from './db'
+import levenshtein from 'fast-levenshtein'
 
 export interface ProcessedEntities {
     created: number
@@ -16,10 +17,91 @@ export interface ProcessedEntities {
 }
 
 /**
+ * Normalized string for comparison (alphanumeric only)
+ */
+export function normalizeForMatch(str: string): string {
+    return str.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "").trim()
+}
+
+/**
+ * Tokenize and sort string for bag-of-words comparison
+ * e.g. "Project Alpha" -> "alpha project"
+ */
+export function normalizeTokenSort(str: string): string {
+    return str.toLowerCase()
+        .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "")
+        .split(/\s+/)
+        .sort()
+        .join(" ")
+        .trim()
+}
+
+/**
+ * Find a similar entity using fuzzy matching
+ * Returns the best match if it exceeds the similarity threshold
+ */
+export function findSimilarEntity(
+    type: db.EntityType,
+    name: string,
+    existingEntities: db.Entity[],
+    threshold = 0.85
+): db.Entity | undefined {
+    const normalizedTarget = normalizeForMatch(name)
+    const sortedTarget = normalizeTokenSort(name)
+
+    let bestMatch: db.Entity | undefined
+    let highCharScore = 0
+
+    for (const entity of existingEntities) {
+        if (entity.type !== type) continue
+
+        const normalizedSource = normalizeForMatch(entity.name)
+        const sortedSource = normalizeTokenSort(entity.name)
+
+        // 1. Token Sort Match (handles "Project Alpha" vs "Alpha Project")
+        if (sortedTarget === sortedSource) {
+            return entity // High confidence match
+        }
+
+        // 2. Direct Substring Match (handles "Sarah" vs "Sarah Chen")
+        // We require the shorter string to be at least 4 chars to avoid matching "Sam" to "Samantha" too eagerly if unwanted,
+        // but generally for names it's okay.
+        if (normalizedTarget.length > 3 && normalizedSource.length > 3) {
+            if (normalizedSource.includes(normalizedTarget) || normalizedTarget.includes(normalizedSource)) {
+                // Return immediately or treat as very high score?
+                // Let's treat as very high confidence 0.95
+                if (0.95 > highCharScore) {
+                    highCharScore = 0.95
+                    bestMatch = entity
+                }
+                continue
+            }
+        }
+
+        // 3. Levenshtein Distance (typos)
+        const distance = levenshtein.get(normalizedTarget, normalizedSource)
+        const maxLength = Math.max(normalizedTarget.length, normalizedSource.length)
+        const similarity = 1 - (distance / maxLength)
+
+        if (similarity >= threshold) {
+            if (similarity > highCharScore) {
+                highCharScore = similarity
+                bestMatch = entity
+            }
+        }
+    }
+
+    // Special handling for People: Acronyms or First/Last name logic could go here
+    // For now, relies on high similarity or exact substring via normalization
+
+    return bestMatch
+}
+
+/**
  * Parse natural language due dates into ISO date strings
  * This is a simple implementation - could be enhanced with a date parsing library
  */
-function parseDueDate(dueDate: string): string | null {
+export function parseDueDate(dueDate: string): string | null {
     if (!dueDate) return null
 
     const now = new Date()
@@ -71,6 +153,22 @@ function parseDueDate(dueDate: string): string | null {
 }
 
 /**
+ * Determine if an entity should be updated with a new name (Enrichment)
+ * e.g. "Sarah" -> "Sarah Chen" is an enrichment
+ */
+export function shouldEnrichEntity(existingName: string, newName: string): boolean {
+    const normalizedExisting = normalizeForMatch(existingName)
+    const normalizedNew = normalizeForMatch(newName)
+
+    // Using length as a heuristic for "more complete"
+    // Only if the shorter one is effectively a substring/part of the longer one
+    if (normalizedNew.includes(normalizedExisting) && newName.length > existingName.length) {
+        return true
+    }
+    return false
+}
+
+/**
  * Process extracted entities and store them in the knowledge graph
  */
 export async function processExtractedEntities(
@@ -85,19 +183,50 @@ export async function processExtractedEntities(
     console.log(`[EntityPipeline] Processing entities for meeting ${meetingId}`)
     console.log(`[EntityPipeline] Found: ${extracted.people.length} people, ${extracted.topics.length} topics, ${extracted.action_items.length} action items, ${extracted.decisions.length} decisions`)
 
+    // Load existing entities for resolution
+    const existingPeople = db.getEntitiesByType('person')
+    const existingTopics = db.getEntitiesByType('topic')
+    const existingProjects = db.getEntitiesByType('project')
+
     // 1. Process People
     for (const person of extracted.people) {
-        const existing = db.findEntity('person', person.name)
-        const entity = db.upsertEntity({
-            type: 'person',
-            name: person.name,
-            metadata: person.role ? { role: person.role } : undefined
-        })
+        // Try to find a match
+        const similar = findSimilarEntity('person', person.name, existingPeople, 0.82)
+        let entity: db.Entity;
 
-        if (existing) {
-            updated++
+        if (similar) {
+            console.log(`[EntityPipeline] Resolved "${person.name}" to existing "${similar.name}"`)
+
+            // Enrichment logic
+            if (shouldEnrichEntity(similar.name, person.name)) {
+                console.log(`[EntityPipeline] Upgrading name "${similar.name}" -> "${person.name}"`)
+                entity = db.upsertEntity({
+                    ...similar, // Keep id
+                    name: person.name, // Update name
+                    metadata: person.role ? { ...JSON.parse(similar.metadata || '{}'), role: person.role } : undefined
+                })
+                updated++
+            } else {
+                entity = similar
+                // Still might want to update metadata if missing role
+                if (person.role && !JSON.parse(similar.metadata || '{}').role) {
+                    entity = db.upsertEntity({
+                        ...similar,
+                        metadata: { ...JSON.parse(similar.metadata || '{}'), role: person.role }
+                    })
+                    updated++
+                }
+            }
         } else {
+            // New entity
+            entity = db.upsertEntity({
+                type: 'person',
+                name: person.name,
+                metadata: person.role ? { role: person.role } : undefined
+            })
             created++
+            // Add to cache for next iterations in this loop
+            existingPeople.push(entity)
         }
 
         entities.push(entity)
@@ -113,17 +242,24 @@ export async function processExtractedEntities(
 
     // 2. Process Topics
     for (const topic of extracted.topics) {
-        const existing = db.findEntity('topic', topic.name)
-        const entity = db.upsertEntity({
-            type: 'topic',
-            name: topic.name,
-            metadata: { importance: topic.importance }
-        })
+        const similar = findSimilarEntity('topic', topic.name, existingTopics, 0.85)
+        let entity: db.Entity
 
-        if (existing) {
+        if (similar) {
+            // Use existing
+            entity = similar
+            // Update importance if current is high and existing wasn't? 
+            // Logic: Keep existing metadata mostly, unless we want to merge. 
+            // For topics, just linking is usually enough.
             updated++
         } else {
+            entity = db.upsertEntity({
+                type: 'topic',
+                name: topic.name,
+                metadata: { importance: topic.importance }
+            })
             created++
+            existingTopics.push(entity)
         }
 
         entities.push(entity)
@@ -166,7 +302,16 @@ export async function processExtractedEntities(
 
         // If there's an assignee, find/create that person and link
         if (actionItem.assignee) {
-            const assignee = db.findEntity('person', actionItem.assignee)
+            // Use our fuzzy finder on the already-loaded/updated list
+            const assigneeName = actionItem.assignee
+            const assigneeStart = db.findEntity('person', assigneeName) // Try exact first
+            let assignee = assigneeStart
+
+            if (!assignee) {
+                // Try fuzzy
+                assignee = findSimilarEntity('person', assigneeName, existingPeople, 0.82)
+            }
+
             if (assignee) {
                 db.linkEntities({
                     source_entity_id: entity.id,
@@ -179,8 +324,10 @@ export async function processExtractedEntities(
                 // Create the assignee as a person
                 const newAssignee = db.upsertEntity({
                     type: 'person',
-                    name: actionItem.assignee
+                    name: assigneeName
                 })
+                existingPeople.push(newAssignee) // Update cache
+
                 db.linkEntities({
                     source_entity_id: entity.id,
                     target_entity_id: newAssignee.id,
@@ -219,17 +366,27 @@ export async function processExtractedEntities(
     // 5. Process Projects
     if (extracted.projects) {
         for (const project of extracted.projects) {
-            const existing = db.findEntity('project', project.name)
-            const entity = db.upsertEntity({
-                type: 'project',
-                name: project.name,
-                metadata: project.context ? { context: project.context } : undefined
-            })
+            const similar = findSimilarEntity('project', project.name, existingProjects, 0.80)
+            let entity: db.Entity
 
-            if (existing) {
+            if (similar) {
+                entity = similar
+                if (project.context && !JSON.parse(similar.metadata || '{}').context) {
+                    // enrich context
+                    db.upsertEntity({
+                        ...similar,
+                        metadata: { ...JSON.parse(similar.metadata || '{}'), context: project.context }
+                    })
+                }
                 updated++
             } else {
+                entity = db.upsertEntity({
+                    type: 'project',
+                    name: project.name,
+                    metadata: project.context ? { context: project.context } : undefined
+                })
                 created++
+                existingProjects.push(entity)
             }
 
             entities.push(entity)
@@ -244,7 +401,11 @@ export async function processExtractedEntities(
 
             // Link topics that might belong to this project (heuristic: same meeting)
             for (const topic of extracted.topics) {
-                const topicEntity = db.findEntity('topic', topic.name)
+                // We need to find the specific topic entity we worked with/created above
+                // We can't just findByName because we might have resolved it to a different name
+                // So we search in our local 'entities' array or just re-resolve
+                const topicEntity = findSimilarEntity('topic', topic.name, existingTopics, 0.9) // Strong match since we just processed it
+
                 if (topicEntity) {
                     db.linkEntities({
                         source_entity_id: topicEntity.id,
