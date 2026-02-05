@@ -147,6 +147,11 @@ const initDb = () => {
         name,
         entity_id UNINDEXED
       );
+
+      -- Backfill FTS if needed (Self-healing)
+      INSERT INTO entities_fts (name, entity_id)
+      SELECT name, id FROM entities 
+      WHERE id NOT IN (SELECT entity_id FROM entities_fts);
     `)
 }
 
@@ -399,7 +404,17 @@ export const upsertEntity = (entity: {
     )
 
     // Return updated entity
-    return db.prepare('SELECT * FROM entities WHERE id = ?').get(existing.id) as Entity
+    const updated = db.prepare('SELECT * FROM entities WHERE id = ?').get(existing.id) as Entity
+
+    // Update FTS index
+    try {
+      db.prepare('DELETE FROM entities_fts WHERE entity_id = ?').run(existing.id)
+      db.prepare('INSERT INTO entities_fts (name, entity_id) VALUES (?, ?)').run(updated.name, existing.id)
+    } catch (e) {
+      console.warn('[DB] Failed to update FTS for entity:', existing.id, e)
+    }
+
+    return updated
   }
 
   // Create new entity
