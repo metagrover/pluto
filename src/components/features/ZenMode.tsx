@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { Logo } from '../Brand/Logo'
 import { ZenVisualizer } from '../ZenVisualizer'
 import { Users, X, Plus } from 'lucide-react'
@@ -41,6 +42,34 @@ export const ZenMode = ({
     setPlutoResponse,
     analyser
 }: ZenModeProps) => {
+    const [suggestions, setSuggestions] = useState<any[]>([])
+    const [showSuggestions, setShowSuggestions] = useState(false)
+
+    useEffect(() => {
+        const fetchSuggestions = async () => {
+             if (!participantInput || participantInput.length < 2) {
+                 setSuggestions([])
+                 setShowSuggestions(false)
+                 return
+             }
+             try {
+                // IPC call to search entities
+                const results = await (window as any).ipcRenderer.invoke('SEARCH_ENTITIES', participantInput) || []
+                
+                // Filter for people only and limit to 5
+                const people = results.filter((e: any) => e.type === 'person').slice(0, 5)
+                
+                setSuggestions(people)
+                setShowSuggestions(people.length > 0)
+             } catch (e) {
+                 console.error('Failed to fetch suggestions', e)
+             }
+        }
+        
+        const timeoutId = setTimeout(fetchSuggestions, 300) // Debounce
+        return () => clearTimeout(timeoutId)
+    }, [participantInput])
+
     return (
         <main className="flex-1 flex flex-col h-full relative z-10 bg-pro-bg overflow-hidden">
             {/* Minimal Top Bar - Added padding for Traffic Lights */}
@@ -108,12 +137,35 @@ export const ZenMode = ({
                                             if (e.key === 'Enter' && participantInput.trim()) {
                                                 setMeetingParticipants((prev: string[]) => [...prev, participantInput.trim()])
                                                 setParticipantInput('')
+                                                setShowSuggestions(false)
                                             }
                                         }}
+                                        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                                        onFocus={() => { if(suggestions.length > 0) setShowSuggestions(true) }}
                                         placeholder="Add person..."
                                         className="bg-transparent outline-none text-sm font-medium text-pro-text-main w-32 placeholder:text-stone-300/50 focus:placeholder-stone-300 transition-all"
                                     />
                                     <Plus size={12} className="absolute right-0 top-1/2 -translate-y-1/2 text-stone-300 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    
+                                    {/* Autocomplete Dropdown */}
+                                    {showSuggestions && (
+                                        <div className="absolute top-full left-0 mt-2 w-48 bg-white/90 backdrop-blur-md border border-pro-border rounded-xl shadow-premium z-50 overflow-hidden animate-in slide-in-from-top-1 fade-in duration-200">
+                                            {suggestions.map((person) => (
+                                                <button
+                                                    key={person.id}
+                                                    onClick={() => {
+                                                        setMeetingParticipants((prev: string[]) => [...prev, person.name])
+                                                        setParticipantInput('')
+                                                        setShowSuggestions(false)
+                                                    }}
+                                                    className="w-full text-left px-4 py-2 text-sm text-pro-text-main hover:bg-pro-accent/5 hover:text-pro-accent transition-colors flex items-center gap-2"
+                                                >
+                                                    <span className="opacity-50">👤</span>
+                                                    {person.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

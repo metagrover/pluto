@@ -453,12 +453,14 @@ export const getAllEntities = (): Entity[] => {
  * Search entities by name
  */
 export const searchEntities = (query: string): Entity[] => {
+  const sanitized = query.trim().replace(/[^\w\s]/gi, '')
+  if (!sanitized) return []
   return db.prepare(`
     SELECT entities.* FROM entities
     JOIN entities_fts ON entities.id = entities_fts.entity_id
     WHERE entities_fts MATCH ?
     ORDER BY rank
-  `).all(query) as Entity[]
+  `).all(`${sanitized}*`) as Entity[]
 }
 
 /**

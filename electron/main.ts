@@ -167,7 +167,36 @@ app.whenReady().then(async () => {
   ipcMain.handle('SAVE_MEETING', (_event, meeting) => {
     try {
       console.log(`[Pluto] Saving meeting: ${meeting.id} - ${meeting.title}`)
-      return db.saveMeeting(meeting)
+      const result = db.saveMeeting(meeting)
+
+      // Process manual participants as entities (Sprint 2 enhancement)
+      if (meeting.participants && Array.isArray(meeting.participants)) {
+        console.log(`[Pluto] Processing ${meeting.participants.length} manual participants...`)
+        for (const name of meeting.participants) {
+          if (!name || !name.trim()) continue
+
+          try {
+            // 1. Create/Get Person Entity
+            const entity = db.upsertEntity({
+              type: 'person',
+              name: name.trim(),
+              status: 'active'
+            })
+
+            // 2. Link to Meeting
+            db.addMeetingEntity({
+              meeting_id: String(meeting.id),
+              entity_id: entity.id,
+              mention_count: 1, // Default weight for manual addition
+              context: 'Manual participant'
+            })
+          } catch (err) {
+            console.error(`[Pluto] Failed to process participant: ${name}`, err)
+          }
+        }
+      }
+
+      return result
     } catch (e) {
       console.error('[Pluto] SAVE_MEETING failed:', e)
       throw e
