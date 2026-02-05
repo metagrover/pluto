@@ -160,6 +160,7 @@ export const deleteMeeting = async (id: string): Promise<void> => {
  * Create or update an entity
  */
 export const upsertEntity = async (entity: {
+    id?: string
     type: EntityType
     name: string
     status?: EntityStatus

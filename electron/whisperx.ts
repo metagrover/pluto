@@ -356,7 +356,7 @@ class WhisperXManager {
                 diarize: options.diarize,
                 hf_token: options.hfToken
             })
-        })
+        } as RequestInit & { dispatcher: typeof WHISPERX_FETCH_AGENT })
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))

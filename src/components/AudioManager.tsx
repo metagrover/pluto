@@ -213,12 +213,12 @@ export const AudioManager = ({
           // Visualization: mix both for visual feedback only
           const visDestination = audioContext.createMediaStreamDestination()
           
-          if (hasSystemStream) {
+          if (hasSystemStream && systemStream) {
               const systemSource = audioContext.createMediaStreamSource(systemStream)
               systemSource.connect(visDestination)
           }
           
-          if (hasMicStream) {
+          if (hasMicStream && micStream) {
               const micSource = audioContext.createMediaStreamSource(micStream)
               micSource.connect(visDestination)
           }
@@ -262,7 +262,7 @@ export const AudioManager = ({
               processingQueueRef.current = Promise.resolve()
               
               // Mic recorder
-              if (hasMicStream) {
+              if (hasMicStream && micStream) {
                   const micRecorder = new MediaRecorder(micStream, {
                       mimeType: 'audio/webm;codecs=opus'
                   })
@@ -278,7 +278,7 @@ export const AudioManager = ({
               }
               
               // System audio recorder
-              if (hasSystemStream) {
+              if (hasSystemStream && systemStream) {
                   const systemRecorder = new MediaRecorder(systemStream, {
                       mimeType: 'audio/webm;codecs=opus'
                   })
@@ -294,7 +294,7 @@ export const AudioManager = ({
               }
               
               // Chunk recorders (valid WebM per chunk)
-              if (hasMicStream) {
+              if (hasMicStream && micStream) {
                   startChunkRecorder({
                       stream: micStream,
                       label: 'mic',
@@ -306,7 +306,7 @@ export const AudioManager = ({
                   console.log('[Pluto] Mic chunk recording started')
               }
 
-              if (hasSystemStream) {
+              if (hasSystemStream && systemStream) {
                   startChunkRecorder({
                       stream: systemStream,
                       label: 'system',
@@ -512,7 +512,17 @@ export const AudioManager = ({
           } catch (e) {
               console.warn(`[Pluto] Failed to compute ${label} RMS data:`, e)
           }
-          const wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
+          let wavPath: string | null
+          try {
+              wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
+          } catch (e) {
+              console.warn(`[Pluto] Skip ${label} chunk (convert failed):`, (e as Error).message)
+              return { segments: [], rms }
+          }
+          if (!wavPath) {
+              console.warn(`[Pluto] Skip ${label} chunk (convert skipped: tiny buffer)`)
+              return { segments: [], rms }
+          }
           const result = await window.ipcRenderer.invoke('WHISPER_TRANSCRIBE', wavPath, {
               diarize: false,
               language: 'en'
@@ -536,12 +546,12 @@ export const AudioManager = ({
           processStream('Others', opts.systemBlob)
       ])
 
-      let micSegments = micResult.segments.map((s) => ({
+      let micSegments = micResult.segments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
           ...s,
           startTime: s.startTime - chunkStartSec,
           endTime: s.endTime - chunkStartSec
       }))
-      const systemSegments = systemResult.segments.map((s) => ({
+      const systemSegments = systemResult.segments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
           ...s,
           startTime: s.startTime - chunkStartSec,
           endTime: s.endTime - chunkStartSec
@@ -550,14 +560,14 @@ export const AudioManager = ({
       micSegments = suppressBleedSegments(micSegments, micResult.rms, systemResult.rms)
 
       processedMicSegmentsRef.current.push(
-          ...micSegments.map((s) => ({
+          ...micSegments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
               ...s,
               startTime: s.startTime + chunkStartSec,
               endTime: s.endTime + chunkStartSec
           }))
       )
       processedSystemSegmentsRef.current.push(
-          ...systemSegments.map((s) => ({
+          ...systemSegments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
               ...s,
               startTime: s.startTime + chunkStartSec,
               endTime: s.endTime + chunkStartSec
@@ -567,7 +577,7 @@ export const AudioManager = ({
 
   // Common Whisper Hallucinations to filter out
   const INVALID_PHRASES = [
-      'you', 'thank you', 'thanks', 'mbc', 'subtitles by', 'captioned by', 
+      'you', 'mbc', 'subtitles by', 'captioned by', 
       'watching', 'subscribe', 'copyright', 'all rights reserved'
   ]
 
@@ -685,39 +695,58 @@ export const AudioManager = ({
               console.log('[Pluto] Processing mixed audio for diarization...')
               const convertStart = performance.now()
               const buffer = await mixedBlob.arrayBuffer()
-              const wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
-              console.log(`[Pluto] Mixed conversion took ${Math.round(performance.now() - convertStart)}ms`)
-              primaryAudioPath = wavPath
-              
-              console.log('[Pluto] Transcribing mixed audio (diarization enabled)...')
-              const transcribeStart = performance.now()
-              const result = await window.ipcRenderer.invoke('WHISPER_TRANSCRIBE', wavPath, {
-                  diarize: true,
-                  hfToken,
-                  language: 'en'
-              })
-              console.log(`[Pluto] Mixed transcription took ${Math.round(performance.now() - transcribeStart)}ms`)
-              
-              if (result?.segments) {
-                  diarizedSegments = result.segments
-                      .filter((s: { text: string }) => isValidSegment(s.text))
-                      .map((s: { start: number; end: number; text: string; speaker?: string }) => ({
-                          id: crypto.randomUUID(),
-                          startTime: s.start,
-                          endTime: s.end,
-                          text: s.text.trim(),
-                          speaker: s.speaker || 'Speaker'
-                      }))
+              let wavPath: string | null
+              try {
+                  wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
+              } catch (e) {
+                  console.warn('[Pluto] Mixed convert failed, skipping diarization:', (e as Error).message)
+                  wavPath = ''
               }
-              console.log(`[Pluto] Diarized: ${diarizedSegments.length} segments`)
+              if (!wavPath) {
+                  console.warn('[Pluto] Mixed convert skipped (tiny buffer)')
+                  wavPath = ''
+              }
+              if (wavPath) {
+                  console.log(`[Pluto] Mixed conversion took ${Math.round(performance.now() - convertStart)}ms`)
+                  primaryAudioPath = wavPath
+                  console.log('[Pluto] Transcribing mixed audio (diarization enabled)...')
+                  const transcribeStart = performance.now()
+                  const result = await window.ipcRenderer.invoke('WHISPER_TRANSCRIBE', wavPath, {
+                      diarize: true,
+                      hfToken,
+                      language: 'en'
+                  })
+                  console.log(`[Pluto] Mixed transcription took ${Math.round(performance.now() - transcribeStart)}ms`)
+                  if (result?.segments) {
+                      diarizedSegments = result.segments
+                          .filter((s: { text: string }) => isValidSegment(s.text))
+                          .map((s: { start: number; end: number; text: string; speaker?: string }) => ({
+                              id: crypto.randomUUID(),
+                              startTime: s.start,
+                              endTime: s.end,
+                              text: s.text.trim(),
+                              speaker: s.speaker || 'Speaker'
+                          }))
+                  }
+                  console.log(`[Pluto] Diarized: ${diarizedSegments.length} segments`)
+              }
           }
 
           if (!diarizationEnabled) {
               // Store a single full audio file for playback
               const primaryBlob = micBlob || systemBlob
               if (primaryBlob && primaryBlob.size > 0) {
-                  const buffer = await primaryBlob.arrayBuffer()
-                  primaryAudioPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
+                  try {
+                      const buffer = await primaryBlob.arrayBuffer()
+                      const maybePath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
+                      if (maybePath) {
+                          primaryAudioPath = maybePath
+                      } else {
+                          console.warn('[Pluto] Primary convert skipped (tiny buffer)')
+                      }
+                  } catch (e) {
+                      console.warn('[Pluto] Primary convert failed:', (e as Error).message)
+                  }
               }
 
               // Wait for background chunk processing to finish
@@ -837,7 +866,7 @@ export const AudioManager = ({
           console.log('[Pluto] Session saved to DB with transcript segments:', labeledTranscription.length, 'summary length:', enhancedNotes.length)
           
           // 5. Extract & Process Entities for Knowledge Graph (Sprint 2)
-          const entityPromise = (async () => {
+          void (async () => {
               const runExtraction = async () => {
                   try {
                       console.log('[Pluto] Extracting entities for Knowledge Graph...')
