@@ -65,6 +65,7 @@ function App() {
   const startSessionRef = useRef<(() => void) | null>(null)
   const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(null)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
+  const [speakingSource, setSpeakingSource] = useState<'Me' | 'Them' | null>(null)
 
   // Connect the ref
   onAnalyserReadyRef.current = (node) => {
@@ -333,6 +334,7 @@ function App() {
             onStopSessionRef={stopSessionRef}
             onStartSessionRef={startSessionRef}
             onAnalyserReadyRef={onAnalyserReadyRef}
+            onSpeakingChange={setSpeakingSource}
             userTitle={meetingTitle}
             participants={meetingParticipants}
             hfToken={hfToken}
@@ -386,6 +388,7 @@ function App() {
           plutoResponse={plutoResponse}
           setPlutoResponse={setPlutoResponse}
           analyser={analyser}
+          speakingSource={speakingSource}
         />
       ) : (
        <main className="flex-1 flex flex-col bg-pro-bg h-full relative z-10 rounded-l-[2.5rem] overflow-hidden content-shift border-l border-pro-border/10">

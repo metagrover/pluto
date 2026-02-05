@@ -21,6 +21,7 @@ interface ZenModeProps {
     plutoResponse: string;
     setPlutoResponse: (val: string) => void;
     analyser: AnalyserNode | null;
+    speakingSource: 'Me' | 'Them' | null;
 }
 
 export const ZenMode = ({
@@ -40,7 +41,8 @@ export const ZenMode = ({
     setQuery,
     plutoResponse,
     setPlutoResponse,
-    analyser
+    analyser,
+    speakingSource
 }: ZenModeProps) => {
     const [suggestions, setSuggestions] = useState<any[]>([])
     const [showSuggestions, setShowSuggestions] = useState(false)
@@ -85,6 +87,12 @@ export const ZenMode = ({
                     
                     {/* Audio Visualizer */}
                     <ZenVisualizer analyser={analyser} isProcessing={isProcessing} />
+                    
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-pro-border/40 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
+                        <span className={`w-1.5 h-1.5 rounded-full ${speakingSource === 'Me' ? 'bg-pro-accent' : 'bg-stone-300'}`} />
+                        <span className={`w-1.5 h-1.5 rounded-full ${speakingSource === 'Them' ? 'bg-pro-accent' : 'bg-stone-300'}`} />
+                        <span>Speaking: {speakingSource ?? '—'}</span>
+                    </div>
                 </div>
                 
                 <button 

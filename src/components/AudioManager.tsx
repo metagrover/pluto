@@ -6,6 +6,7 @@ interface AudioManagerProps {
     onSessionComplete: (meetingId?: string | number) => void
     onRecordingChange?: (isRecording: boolean) => void
     onProcessingChange?: (isProcessing: boolean) => void
+    onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void
     userNotes?: string
     userTitle?: string
     participants?: string[]
@@ -34,7 +35,8 @@ export const AudioManager = ({
     hfToken = '',
     onStopSessionRef, 
     onStartSessionRef, 
-    onAnalyserReadyRef 
+    onAnalyserReadyRef,
+    onSpeakingChange
 }: AudioManagerProps) => {
   const [isRecording, setIsRecording] = useState(false)
   const diarizationEnabled = Boolean(hfToken && hfToken.trim().length > 0)
@@ -49,6 +51,11 @@ export const AudioManager = ({
   const micRecorderRef = useRef<MediaRecorder | null>(null)
   const systemRecorderRef = useRef<MediaRecorder | null>(null)
   const mixedRecorderRef = useRef<MediaRecorder | null>(null)
+  const micAnalyserRef = useRef<AnalyserNode | null>(null)
+  const systemAnalyserRef = useRef<AnalyserNode | null>(null)
+  const speakingLoopRef = useRef<number | null>(null)
+  const lastSpeakerRef = useRef<'Me' | 'Them' | null>(null)
+  const lastSpeakerTsRef = useRef<number>(0)
   const micChunkRecorderRef = useRef<MediaRecorder | null>(null)
   const systemChunkRecorderRef = useRef<MediaRecorder | null>(null)
   const micChunkTimerRef = useRef<number | null>(null)
@@ -185,8 +192,30 @@ export const AudioManager = ({
                   },
                   video: false
               })
+              if (!micStream || micStream.getAudioTracks().length === 0) {
+                  console.warn('[Pluto] Microphone stream has no audio tracks, retrying with default constraints...')
+                  micStream = await navigator.mediaDevices.getUserMedia({
+                      audio: true,
+                      video: false
+                  })
+              }
+          if (micStream && micStream.getAudioTracks().length > 0) {
+              micStream.getAudioTracks().forEach(t => { t.enabled = true })
               console.log('[Pluto] Microphone started successfully')
               logAudioTracks('Microphone', micStream)
+              try {
+                  const track = micStream.getAudioTracks()[0]
+                  console.log('[Pluto][Audio] Microphone track details', {
+                      label: track.label,
+                      settings: track.getSettings ? track.getSettings() : {},
+                      capabilities: track.getCapabilities ? track.getCapabilities() : {}
+                  })
+              } catch (e) {
+                  console.warn('[Pluto][Audio] Failed to log microphone track details:', e)
+              }
+          } else {
+              console.warn('[Pluto] Microphone stream still has no audio tracks after retry')
+          }
           } catch (micErr) {
               console.warn('[Pluto] Failed to capture microphone:', micErr)
               console.warn('[Pluto] Microphone error details:', micErr instanceof Error ? micErr.message : micErr)
@@ -201,6 +230,10 @@ export const AudioManager = ({
           systemStreamRef.current = systemStream
           const hasMicStream = Boolean(micStream && micStream.getAudioTracks().length > 0)
           const hasSystemStream = Boolean(systemStream && systemStream.getAudioTracks().length > 0)
+          console.log('[Pluto][Audio] Stream availability', {
+              hasMicStream,
+              hasSystemStream
+          })
           
           // 3. Create AudioContext for visualization only
           const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
@@ -234,6 +267,8 @@ export const AudioManager = ({
           const mixedSource = audioContext.createMediaStreamSource(visDestination.stream)
           mixedSource.connect(visAnalyser)
           visStreamRef.current = visDestination.stream
+          
+          startSpeakingMonitor(audioContext, micStream, systemStream)
           
           if (diarizationEnabled) {
               // Record MIXED stream for diarization
@@ -270,6 +305,7 @@ export const AudioManager = ({
                   
                   micRecorder.ondataavailable = (event) => {
                       if (event.data.size > 0) {
+                          console.log('[Pluto][Audio] Mic full recording chunk size', event.data.size)
                           micChunksRef.current.push(event.data)
                       }
                   }
@@ -286,6 +322,7 @@ export const AudioManager = ({
                   
                   systemRecorder.ondataavailable = (event) => {
                       if (event.data.size > 0) {
+                          console.log('[Pluto][Audio] System full recording chunk size', event.data.size)
                           systemChunksRef.current.push(event.data)
                       }
                   }
@@ -351,6 +388,9 @@ export const AudioManager = ({
   const RMS_WINDOW_SECONDS = 0.5
   const BLEED_SUPPRESSION_RATIO = 1.6
   const RMS_EPSILON = 1e-4
+  const SPEAKING_RMS_THRESHOLD = 0.012
+  const SPEAKING_RATIO = 1.25
+  const SPEAKING_MIN_INTERVAL_MS = 200
   const CHUNK_SECONDS = 20
   const CHUNK_MS = CHUNK_SECONDS * 1000
 
@@ -417,6 +457,82 @@ export const AudioManager = ({
       })
   }
 
+  const computeRmsFromAnalyser = (analyser: AnalyserNode): number => {
+      const bufferLength = analyser.fftSize
+      const data = new Uint8Array(bufferLength)
+      analyser.getByteTimeDomainData(data)
+      let sumSquares = 0
+      for (let i = 0; i < bufferLength; i++) {
+          const v = (data[i] - 128) / 128
+          sumSquares += v * v
+      }
+      return Math.sqrt(sumSquares / bufferLength)
+  }
+
+  const stopSpeakingMonitor = () => {
+      if (speakingLoopRef.current) {
+          cancelAnimationFrame(speakingLoopRef.current)
+          speakingLoopRef.current = null
+      }
+      micAnalyserRef.current = null
+      systemAnalyserRef.current = null
+      lastSpeakerRef.current = null
+      lastSpeakerTsRef.current = 0
+      onSpeakingChange?.(null)
+  }
+
+  const startSpeakingMonitor = (audioContext: AudioContext, micStream: MediaStream | null, systemStream: MediaStream | null) => {
+      stopSpeakingMonitor()
+      if (!micStream && !systemStream) return
+
+      if (micStream && micStream.getAudioTracks().length > 0) {
+          const micAnalyser = audioContext.createAnalyser()
+          micAnalyser.fftSize = 256
+          const micSource = audioContext.createMediaStreamSource(micStream)
+          micSource.connect(micAnalyser)
+          micAnalyserRef.current = micAnalyser
+      }
+      if (systemStream && systemStream.getAudioTracks().length > 0) {
+          const systemAnalyser = audioContext.createAnalyser()
+          systemAnalyser.fftSize = 256
+          const systemSource = audioContext.createMediaStreamSource(systemStream)
+          systemSource.connect(systemAnalyser)
+          systemAnalyserRef.current = systemAnalyser
+      }
+
+      const tick = () => {
+          const now = performance.now()
+          const micAnalyser = micAnalyserRef.current
+          const systemAnalyser = systemAnalyserRef.current
+          const micRms = micAnalyser ? computeRmsFromAnalyser(micAnalyser) : 0
+          const systemRms = systemAnalyser ? computeRmsFromAnalyser(systemAnalyser) : 0
+
+          let nextSpeaker: 'Me' | 'Them' | null = null
+          const micActive = micRms >= SPEAKING_RMS_THRESHOLD
+          const systemActive = systemRms >= SPEAKING_RMS_THRESHOLD
+
+          if (micActive && !systemActive) nextSpeaker = 'Me'
+          else if (!micActive && systemActive) nextSpeaker = 'Them'
+          else if (micActive && systemActive) {
+              if (micRms >= systemRms * SPEAKING_RATIO) nextSpeaker = 'Me'
+              else if (systemRms >= micRms * SPEAKING_RATIO) nextSpeaker = 'Them'
+              else nextSpeaker = lastSpeakerRef.current
+          } else {
+              nextSpeaker = null
+          }
+
+          if (now - lastSpeakerTsRef.current >= SPEAKING_MIN_INTERVAL_MS && nextSpeaker !== lastSpeakerRef.current) {
+              lastSpeakerRef.current = nextSpeaker
+              lastSpeakerTsRef.current = now
+              onSpeakingChange?.(nextSpeaker)
+          }
+
+          speakingLoopRef.current = requestAnimationFrame(tick)
+      }
+
+      speakingLoopRef.current = requestAnimationFrame(tick)
+  }
+
   const enqueueBackgroundJob = (job: () => Promise<void>) => {
       processingQueueRef.current = processingQueueRef.current.then(job).catch((e) => {
           console.error('[Pluto] Background transcription job failed:', e)
@@ -481,6 +597,7 @@ export const AudioManager = ({
           }
           if (chunks.length > 0) {
               const chunkBlob = new Blob(chunks, { type: 'audio/webm;codecs=opus' })
+              console.log(`[Pluto][Audio] ${opts.label} chunk size`, chunkBlob.size)
               handleChunkBlob(opts.label, chunkIndex, chunkBlob, opts.hasOtherStream)
           }
           opts.chunkIndexRef.current += 1
@@ -503,7 +620,7 @@ export const AudioManager = ({
       chunkIndex: number
   }) => {
       const chunkStartSec = opts.chunkIndex * CHUNK_SECONDS
-      const processStream = async (label: 'You' | 'Others', blob?: Blob) => {
+      const processStream = async (label: 'Me' | 'Them', blob?: Blob) => {
           if (!blob || blob.size === 0) return { segments: [], rms: null as RmsData | null }
           const buffer = await blob.arrayBuffer()
           let rms: RmsData | null = null
@@ -542,8 +659,8 @@ export const AudioManager = ({
       }
 
       const [micResult, systemResult] = await Promise.all([
-          processStream('You', opts.micBlob),
-          processStream('Others', opts.systemBlob)
+          processStream('Me', opts.micBlob),
+          processStream('Them', opts.systemBlob)
       ])
 
       let micSegments = micResult.segments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
@@ -652,6 +769,7 @@ export const AudioManager = ({
           mixedChunksRef.current = []
           
           // Cleanup visualization
+          stopSpeakingMonitor()
           if (audioContextRef.current) {
               audioContextRef.current.close()
               audioContextRef.current = null
@@ -668,7 +786,6 @@ export const AudioManager = ({
           let systemSegments: TranscriptionSegment[] = []
           let diarizedSegments: TranscriptionSegment[] = []
           let primaryAudioPath = ''
-
           if (!diarizationEnabled) {
               // Enqueue any remaining paired chunks
               for (const [chunkIndex, micBlob] of pendingMicChunksRef.current.entries()) {
@@ -788,7 +905,7 @@ export const AudioManager = ({
           // 3. Generate Strategic Summary & Extract Speaker Identity (LLM)
           const fullTranscript = newTranscription.map(s => `${s.speaker}: ${s.text}`).join('\n')
           let enhancedNotes = ''
-          let otherSpeakerName = 'Speaker' // Default fallback
+          let otherSpeakerName = 'Them' // Default fallback
           
           const summaryPromise = window.ipcRenderer.invoke('GENERATE_SUMMARY', { 
               transcript: fullTranscript,
@@ -799,9 +916,7 @@ export const AudioManager = ({
 
           const speakerPromise = diarizationEnabled
               ? Promise.resolve('')
-              : window.ipcRenderer.invoke('EXTRACT_SPEAKER_IDENTITY', {
-                    transcript: fullTranscript
-                })
+              : Promise.resolve('')
           
           const [summaryResult, speakerResult] = await Promise.allSettled([summaryPromise, speakerPromise])
           if (summaryResult.status === 'fulfilled') {
@@ -809,13 +924,8 @@ export const AudioManager = ({
           } else {
               console.error('[Pluto] Summary generation failed:', summaryResult.reason)
           }
-          if (!diarizationEnabled) {
-              if (speakerResult.status === 'fulfilled' && speakerResult.value) {
-                  otherSpeakerName = speakerResult.value
-                  console.log(`[Pluto] Identified other speaker as: ${otherSpeakerName}`)
-              } else if (speakerResult.status === 'rejected') {
-                  console.error('[Pluto] Speaker identity extraction failed:', speakerResult.reason)
-              }
+          if (!diarizationEnabled && speakerResult.status === 'rejected') {
+              console.error('[Pluto] Speaker identity extraction failed:', speakerResult.reason)
           }
 
           // Relabel transcript segments with actual speaker names
@@ -823,7 +933,7 @@ export const AudioManager = ({
               ? newTranscription
               : newTranscription.map(seg => ({
                   ...seg,
-                  speaker: seg.speaker === 'Others' ? otherSpeakerName : seg.speaker
+                  speaker: seg.speaker === 'Them' ? otherSpeakerName : seg.speaker
               }))
 
           // 4. Save to DB
