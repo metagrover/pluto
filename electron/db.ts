@@ -453,7 +453,7 @@ export const getAllEntities = (): Entity[] => {
  * Search entities by name
  */
 export const searchEntities = (query: string): Entity[] => {
-  const sanitized = query.trim().replace(/[^\w\s]/gi, '')
+  const sanitized = query.trim().replace(/[^\p{L}\p{N}\s]/gu, '')
   if (!sanitized) return []
   return db.prepare(`
     SELECT entities.* FROM entities

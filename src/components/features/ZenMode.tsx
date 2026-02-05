@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Logo } from '../Brand/Logo'
 import { ZenVisualizer } from '../ZenVisualizer'
 import { Users, X, Plus } from 'lucide-react'
@@ -44,9 +44,11 @@ export const ZenMode = ({
 }: ZenModeProps) => {
     const [suggestions, setSuggestions] = useState<any[]>([])
     const [showSuggestions, setShowSuggestions] = useState(false)
+    const suggestionsRequestId = useRef(0)
 
     useEffect(() => {
         const fetchSuggestions = async () => {
+             const requestId = ++suggestionsRequestId.current
              if (!participantInput || participantInput.length < 2) {
                  setSuggestions([])
                  setShowSuggestions(false)
@@ -55,10 +57,12 @@ export const ZenMode = ({
              try {
                 // IPC call to search entities
                 const results = await (window as any).ipcRenderer.invoke('SEARCH_ENTITIES', participantInput) || []
-                
+
                 // Filter for people only and limit to 5
                 const people = results.filter((e: any) => e.type === 'person').slice(0, 5)
-                
+
+                if (requestId !== suggestionsRequestId.current) return
+
                 setSuggestions(people)
                 setShowSuggestions(people.length > 0)
              } catch (e) {
