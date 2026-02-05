@@ -124,11 +124,16 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('WHISPER_TRANSCRIBE', async (_event, audioPath, options = {}) => {
     console.log('[Pluto] Transcribing file:', audioPath, options.diarize ? '(with diarization)' : '')
-    return await whisperX.transcribe(audioPath, options)
+    const start = Date.now()
+    const result = await whisperX.transcribe(audioPath, options)
+    const durationMs = Date.now() - start
+    console.log(`[Pluto] Transcription completed in ${durationMs}ms`)
+    return result
   })
 
   // Audio recording handlers
   ipcMain.handle('AUDIO_SAVE_AND_CONVERT', async (_event, arrayBuffer) => {
+    const start = Date.now()
     const buffer = Buffer.from(arrayBuffer)
     const tempId = Date.now().toString()
     const rawPath = path.join(app.getPath('temp'), `raw_${tempId}.webm`)
@@ -150,12 +155,16 @@ app.whenReady().then(async () => {
         .audioChannels(1)
         .audioFrequency(16000)
         .on('end', () => {
+          const durationMs = Date.now() - start
           console.log('[Pluto] Conversion complete.')
+          console.log(`[Pluto] Conversion completed in ${durationMs}ms`)
           if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath)
           resolve(wavPath)
         })
         .on('error', (err) => {
+          const durationMs = Date.now() - start
           console.error('[Pluto] Conversion failed:', err)
+          console.error(`[Pluto] Conversion failed after ${durationMs}ms`)
           if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath)
           reject(err)
         })
