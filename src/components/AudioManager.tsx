@@ -467,25 +467,25 @@ export const AudioManager = ({
               console.log(`[Pluto] Diarized: ${diarizedSegments.length} segments`)
           }
 
-          // Transcribe mic (label as "You")
-          if (!diarizationEnabled && micBlob && micBlob.size > 0) {
+          const processMic = async () => {
+              if (!micBlob || micBlob.size === 0) return null
               console.log('[Pluto] Processing mic audio...')
               const buffer = await micBlob.arrayBuffer()
+              let rms: RmsData | null = null
               try {
-                  micRms = await computeRmsData(buffer)
+                  rms = await computeRmsData(buffer)
               } catch (e) {
                   console.warn('[Pluto] Failed to compute mic RMS data:', e)
               }
               const wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
-              primaryAudioPath = wavPath
               
               console.log('[Pluto] Transcribing mic...')
               const result = await window.ipcRenderer.invoke('WHISPER_TRANSCRIBE', wavPath, {
                   diarize: false // No diarization needed - we know it's "You"
               })
               
-              if (result?.segments) {
-                  micSegments = result.segments
+              const segments = result?.segments
+                  ? result.segments
                       .filter((s: { text: string }) => isValidSegment(s.text))
                       .map((s: { start: number; end: number; text: string }) => ({
                           id: crypto.randomUUID(),
@@ -494,29 +494,31 @@ export const AudioManager = ({
                           text: s.text.trim(),
                           speaker: 'You'
                       }))
-              }
-              console.log(`[Pluto] Mic: ${micSegments.length} segments`)
+                  : []
+              
+              console.log(`[Pluto] Mic: ${segments.length} segments`)
+              return { segments, rms, wavPath }
           }
           
-          // Transcribe system audio (label as "Others")
-          if (!diarizationEnabled && systemBlob && systemBlob.size > 0) {
+          const processSystem = async () => {
+              if (!systemBlob || systemBlob.size === 0) return null
               console.log('[Pluto] Processing system audio...')
               const buffer = await systemBlob.arrayBuffer()
+              let rms: RmsData | null = null
               try {
-                  systemRms = await computeRmsData(buffer)
+                  rms = await computeRmsData(buffer)
               } catch (e) {
                   console.warn('[Pluto] Failed to compute system RMS data:', e)
               }
               const wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
-              if (!primaryAudioPath) primaryAudioPath = wavPath
               
               console.log('[Pluto] Transcribing system audio...')
               const result = await window.ipcRenderer.invoke('WHISPER_TRANSCRIBE', wavPath, {
                   diarize: false // No diarization needed - we know it's "Others"
               })
               
-              if (result?.segments) {
-                  systemSegments = result.segments
+              const segments = result?.segments
+                  ? result.segments
                       .filter((s: { text: string }) => isValidSegment(s.text))
                       .map((s: { start: number; end: number; text: string }) => ({
                           id: crypto.randomUUID(),
@@ -525,8 +527,19 @@ export const AudioManager = ({
                           text: s.text.trim(),
                           speaker: 'Others'
                       }))
-              }
-              console.log(`[Pluto] System: ${systemSegments.length} segments`)
+                  : []
+              
+              console.log(`[Pluto] System: ${segments.length} segments`)
+              return { segments, rms, wavPath }
+          }
+
+          if (!diarizationEnabled) {
+              const [micResult, systemResult] = await Promise.all([processMic(), processSystem()])
+              micSegments = micResult?.segments ?? []
+              systemSegments = systemResult?.segments ?? []
+              micRms = micResult?.rms ?? null
+              systemRms = systemResult?.rms ?? null
+              if (!primaryAudioPath) primaryAudioPath = micResult?.wavPath || systemResult?.wavPath || ''
           }
 
           // Suppress mic bleed-through when diarization is unavailable

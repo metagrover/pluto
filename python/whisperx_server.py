@@ -150,22 +150,7 @@ def transcribe(request: TranscribeRequest):
                 "duration": 0
             }
         
-        # 2. Align (improves timestamps)
-        model_a, metadata = whisperx.load_align_model(
-            language_code=detected_language, 
-            device=model_config["device"]
-        )
-        
-        result = whisperx.align(
-            result["segments"], 
-            model_a, 
-            metadata, 
-            request.audio_path, 
-            model_config["device"], 
-            return_char_alignments=False
-        )
-        
-        # 3. Diarize (optional)
+        # 2. Diarize (optional)
         if request.diarize and request.hf_token:
             if diarize_model is None:
                 logger.info("Loading diarization model...")
