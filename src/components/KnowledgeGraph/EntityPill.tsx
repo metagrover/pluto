@@ -30,6 +30,7 @@ export const EntityPill: React.FC<EntityPillProps> = ({
   return (
     <button
       onClick={onClick}
+      title={entity.name}
       className={`
         inline-flex items-center font-bold rounded-lg border transition-all
         ${onClick ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default'}

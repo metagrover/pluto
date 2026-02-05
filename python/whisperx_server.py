@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import json
 import logging
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -19,18 +20,19 @@ app = FastAPI(title="Pluto WhisperX Server")
 # Global state
 model = None
 diarize_model = None
+model_lock = threading.Lock()
 # Force CPU for PyTorch 2.0.1 compatibility (MPS not fully supported by WhisperX with this version)
 model_config = {
     "device": "cpu",
     "compute_type": "int8",  # Use int8 for faster CPU inference
     "model_name": "base",
-    "language": None
+    "language": "en"
 }
 
 class TranscribeRequest(BaseModel):
     audio_path: str
     model: Optional[str] = None
-    language: Optional[str] = None
+    language: Optional[str] = "en"
     diarize: Optional[bool] = False
     hf_token: Optional[str] = None
 
@@ -43,38 +45,43 @@ class ConfigRequest(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     logger.info(f"Starting WhisperX Server on {model_config['device']} ({model_config['compute_type']})")
+    try:
+        load_model_if_needed({})
+    except Exception as e:
+        logger.error(f"Failed to pre-load model: {e}")
 
 def load_model_if_needed(new_config):
     global model, model_config
     
-    needs_reload = False
-    if model is None:
-        needs_reload = True
-    elif new_config.get("model") != model_config["model_name"]:
-        needs_reload = True
-    elif new_config.get("device") != model_config["device"]:
-        needs_reload = True
-    elif new_config.get("compute_type") != model_config["compute_type"]:
-        needs_reload = True
-        
-    if needs_reload:
-        logger.info(f"Loading model {new_config.get('model', model_config['model_name'])}...")
-        
-        # Update config
-        if "model" in new_config: model_config["model_name"] = new_config["model"]
-        if "device" in new_config: model_config["device"] = new_config["device"]
-        if "compute_type" in new_config: model_config["compute_type"] = new_config["compute_type"]
-        
-        try:
-            model = whisperx.load_model(
-                model_config["model_name"], 
-                model_config["device"], 
-                compute_type=model_config["compute_type"]
-            )
-            logger.info("Model loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
+    with model_lock:
+        needs_reload = False
+        if model is None:
+            needs_reload = True
+        if "model" in new_config and new_config.get("model") != model_config["model_name"]:
+            needs_reload = True
+        if "device" in new_config and new_config.get("device") != model_config["device"]:
+            needs_reload = True
+        if "compute_type" in new_config and new_config.get("compute_type") != model_config["compute_type"]:
+            needs_reload = True
+            
+        if needs_reload:
+            logger.info(f"Loading model {new_config.get('model', model_config['model_name'])}...")
+            
+            # Update config
+            if "model" in new_config: model_config["model_name"] = new_config["model"]
+            if "device" in new_config: model_config["device"] = new_config["device"]
+            if "compute_type" in new_config: model_config["compute_type"] = new_config["compute_type"]
+            
+            try:
+                model = whisperx.load_model(
+                    model_config["model_name"], 
+                    model_config["device"], 
+                    compute_type=model_config["compute_type"]
+                )
+                logger.info("Model loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load model: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
 
 @app.get("/health")
 def health():
@@ -127,10 +134,12 @@ def transcribe(request: TranscribeRequest):
         
         # 1. Transcribe
         try:
+            language = "en"
+            logger.info(f"Transcribing {request.audio_path} (language={language})...")
             result = model.transcribe(
                 request.audio_path, 
                 batch_size=16, 
-                language=request.language or model_config.get("language")
+                language=language
             )
         except IndexError as e:
             logger.warning(f"No active speech detected or VAD error: {e}")
@@ -150,22 +159,7 @@ def transcribe(request: TranscribeRequest):
                 "duration": 0
             }
         
-        # 2. Align (improves timestamps)
-        model_a, metadata = whisperx.load_align_model(
-            language_code=detected_language, 
-            device=model_config["device"]
-        )
-        
-        result = whisperx.align(
-            result["segments"], 
-            model_a, 
-            metadata, 
-            request.audio_path, 
-            model_config["device"], 
-            return_char_alignments=False
-        )
-        
-        # 3. Diarize (optional)
+        # 2. Diarize (optional)
         if request.diarize and request.hf_token:
             if diarize_model is None:
                 logger.info("Loading diarization model...")
