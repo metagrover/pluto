@@ -3,6 +3,8 @@ interface SettingsOverlayProps {
     setSettingsVisible: (val: boolean) => void;
     llmProvider: 'ollama' | 'gemini' | 'openai' | 'claude';
     setLlmProvider: (val: 'ollama' | 'gemini' | 'openai' | 'claude') => void;
+    hfToken: string;
+    setHfToken: (val: string) => void;
     geminiApiKey: string;
     setGeminiApiKey: (val: string) => void;
     openaiApiKey: string;
@@ -18,6 +20,8 @@ export const SettingsOverlay = ({
     setSettingsVisible,
     llmProvider,
     setLlmProvider,
+    hfToken,
+    setHfToken,
     geminiApiKey,
     setGeminiApiKey,
     openaiApiKey,
@@ -121,6 +125,40 @@ export const SettingsOverlay = ({
                             </div>
                         </div>
                         )}
+                    </div>
+
+                    <div className="space-y-4 pt-2">
+                        <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">Speaker Diarization</label>
+                            <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full border tracking-widest ${hfToken ? 'text-green-600 bg-green-500/10 border-green-500/20' : 'text-pro-text-muted/60 bg-pro-bg/60 border-pro-border/60'}`}>
+                                {hfToken ? 'Enabled' : 'Disabled'}
+                            </span>
+                        </div>
+                        <input
+                            type="password"
+                            placeholder="Hugging Face token (optional)"
+                            value={hfToken}
+                            onChange={(e) => {
+                                const value = e.target.value
+                                setHfToken(value)
+                                ;(window as any).ipcRenderer.invoke('SET_SETTING', { key: 'hf_token', value })
+                            }}
+                            className="w-full p-5 rounded-2xl border-2 border-pro-border bg-white text-[15px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
+                        />
+                        <div className="p-6 bg-pro-bg/50 rounded-2xl border border-pro-border">
+                            <p className="text-[10px] text-pro-text-muted/60 font-bold uppercase tracking-[0.16em]">Optional</p>
+                            <p className="text-[11px] text-pro-text-muted/70 leading-relaxed mt-2">
+                                Adds real speaker labels. If you want this, create a token in your HF settings.
+                                <a
+                                    className="ml-2 text-pro-accent hover:underline font-bold"
+                                    href="https://huggingface.co/settings/tokens"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                >
+                                    Get token
+                                </a>
+                            </p>
+                        </div>
                     </div>
 
                     <div className="pt-10 border-t border-pro-border/20 flex items-center justify-between">

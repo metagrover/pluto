@@ -45,6 +45,7 @@ function App() {
   const [permissionStatus, setPermissionStatus] = useState({ screen: 'unknown', mic: 'unknown' })
   const [searchQuery, setSearchQuery] = useState('')
   const [llmProvider, setLlmProvider] = useState<'ollama' | 'gemini' | 'openai' | 'claude'>('ollama')
+  const [hfToken, setHfToken] = useState('')
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [openaiApiKey, setOpenaiApiKey] = useState('')
   const [claudeApiKey, setClaudeApiKey] = useState('')
@@ -157,6 +158,9 @@ function App() {
     
     window.ipcRenderer.invoke('GET_SETTING', 'llm_provider').then((val) => {
       if (val) setLlmProvider(val as 'ollama' | 'gemini' | 'openai' | 'claude')
+    })
+    window.ipcRenderer.invoke('GET_SETTING', 'hf_token').then((val) => {
+      if (val) setHfToken(val)
     })
     window.ipcRenderer.invoke('GET_SETTING', 'gemini_api_key').then((val) => {
       if (val) setGeminiApiKey(val)
@@ -331,6 +335,7 @@ function App() {
             onAnalyserReadyRef={onAnalyserReadyRef}
             userTitle={meetingTitle}
             participants={meetingParticipants}
+            hfToken={hfToken}
         />
       </div>
       
@@ -531,6 +536,8 @@ function App() {
         setSettingsVisible={setSettingsVisible}
         llmProvider={llmProvider}
         setLlmProvider={setLlmProvider}
+        hfToken={hfToken}
+        setHfToken={setHfToken}
         geminiApiKey={geminiApiKey}
         setGeminiApiKey={setGeminiApiKey}
         openaiApiKey={openaiApiKey}
