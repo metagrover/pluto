@@ -1,9 +1,9 @@
 
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-# Stable Torch 2.3.1
-torch==2.3.1
-torchaudio==2.3.1
+# Torch >= 2.4 required by current transformers/whisperx stack
+torch==2.4.1
+torchaudio==2.4.1
 # WhisperX v3.3.1 supports faster-whisper 1.x and standard torch
 git+https://github.com/m-bain/whisperx.git@v3.3.1
 # Pin numpy < 2.0 for broad compatibility with ML ecostystem (ctranslate2 < 4.5.0)

@@ -134,12 +134,21 @@ app.whenReady().then(async () => {
   // Audio recording handlers
   ipcMain.handle('AUDIO_SAVE_AND_CONVERT', async (_event, arrayBuffer) => {
     const start = Date.now()
-    const buffer = Buffer.from(arrayBuffer)
+    const buffer = Buffer.from(arrayBuffer ?? [])
     const tempId = Date.now().toString()
     const rawPath = path.join(app.getPath('temp'), `raw_${tempId}.webm`)
     const wavPath = path.join(app.getPath('userData'), 'meetings', `${tempId}.wav`)
 
     console.log(`[Pluto] Received buffer of ${buffer.length} bytes`)
+
+    if (buffer.length === 0) {
+      return Promise.reject(new Error('AUDIO_SAVE_AND_CONVERT: empty buffer (recording may be too short or blob not finalized)'))
+    }
+    // Truncated webm often causes "End of file" in ffmpeg
+    if (buffer.length < 1024) {
+      console.warn(`[Pluto] Skipping convert: buffer too small (${buffer.length} bytes)`)
+      return null
+    }
 
     // Ensure directory exists
     const meetingsDir = path.join(app.getPath('userData'), 'meetings')
@@ -479,7 +488,7 @@ app.whenReady().then(async () => {
   const icon = nativeImage.createFromPath(iconPath)
 
   // Set Dock Icon for macOS
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && app.dock) {
     const dockIcon = nativeImage.createFromPath(dockIconPath)
     app.dock.setIcon(dockIcon)
   }
