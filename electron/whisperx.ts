@@ -7,6 +7,8 @@ import { spawn, ChildProcess } from 'child_process'
 import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { Agent } = require('undici') as { Agent: new (opts: { headersTimeout: number; bodyTimeout: number }) => any }
 
 // Types
 export interface WhisperXConfig {
@@ -55,6 +57,12 @@ const WHISPERX_PORT = 5123
 const WHISPERX_URL = `http://127.0.0.1:${WHISPERX_PORT}`
 const HEALTH_CHECK_INTERVAL = 1000
 const MAX_HEALTH_CHECK_RETRIES = 30
+const WHISPERX_FETCH_AGENT = new Agent({
+    // WhisperX transcription can be long-running; increase headers/body timeouts
+    // so undici doesn't fail before the server responds.
+    headersTimeout: 30 * 60 * 1000,
+    bodyTimeout: 30 * 60 * 1000
+})
 
 class WhisperXManager {
     private process: ChildProcess | null = null
@@ -340,6 +348,7 @@ class WhisperXManager {
         const response = await fetch(`${WHISPERX_URL}/transcribe`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            dispatcher: WHISPERX_FETCH_AGENT,
             body: JSON.stringify({
                 audio_path: audioPath,
                 model: options.model,
