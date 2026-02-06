@@ -16,6 +16,9 @@ release
 # Binaries and Resources
 resources/
 !resources/
+resources/swift/
+resources/swift/**
+resources/bin/
 !resources/sounds/
 !resources/sounds/boot.mp3
 python/build/
