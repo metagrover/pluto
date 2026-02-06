@@ -4,6 +4,7 @@ import io
 import torch
 import whisperx
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List
@@ -15,7 +16,16 @@ import threading
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("whisperx_server")
 
-app = FastAPI(title="Pluto WhisperX Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(f"Starting WhisperX Server on {model_config['device']} ({model_config['compute_type']})")
+    try:
+        load_model_if_needed({})
+    except Exception as e:
+        logger.error(f"Failed to pre-load model: {e}")
+    yield
+
+app = FastAPI(title="Pluto WhisperX Server", lifespan=lifespan)
 
 # Global state
 model = None
@@ -41,14 +51,6 @@ class ConfigRequest(BaseModel):
     device: Optional[str] = None
     compute_type: Optional[str] = None
     language: Optional[str] = None
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info(f"Starting WhisperX Server on {model_config['device']} ({model_config['compute_type']})")
-    try:
-        load_model_if_needed({})
-    except Exception as e:
-        logger.error(f"Failed to pre-load model: {e}")
 
 def load_model_if_needed(new_config):
     global model, model_config

@@ -151,7 +151,7 @@ graph TB
 
 | Requirement | Details |
 |-------------|---------|
-| System Audio | ScreenCaptureKit (macOS) for Zoom/Meet/Teams |
+| System Audio | AudioCap (CoreAudio process tap) for Zoom/Meet/Teams |
 | Microphone | Separate capture for speaker identification |
 | Transcription | WhisperX (local, with speaker diarization) |
 | Offline | 100% functional without internet |

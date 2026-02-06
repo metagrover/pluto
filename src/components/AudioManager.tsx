@@ -1,15 +1,18 @@
 import { useState, useRef, useEffect } from 'react'
 import { Mic, Loader2 } from 'lucide-react'
+import { createWavBlob, computeRms } from '../utils/audio'
 
 interface AudioManagerProps {
     onTranscript: (text: string) => void
     onSessionComplete: (meetingId?: string | number) => void
     onRecordingChange?: (isRecording: boolean) => void
     onProcessingChange?: (isProcessing: boolean) => void
+    onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void
     userNotes?: string
     userTitle?: string
     participants?: string[]
-    hfToken?: string
+    systemAudioStatus?: string
+
     onStopSessionRef?: React.MutableRefObject<(() => void) | null>
     onStartSessionRef?: React.MutableRefObject<(() => void) | null>
     onAnalyserReadyRef?: React.MutableRefObject<((analyser: AnalyserNode) => void) | null>
@@ -31,13 +34,14 @@ export const AudioManager = ({
     userNotes = '', 
     userTitle = '',
     participants = [],
-    hfToken = '',
     onStopSessionRef, 
     onStartSessionRef, 
-    onAnalyserReadyRef 
+    onAnalyserReadyRef,
+    onSpeakingChange,
+    systemAudioStatus = 'unknown'
 }: AudioManagerProps) => {
   const [isRecording, setIsRecording] = useState(false)
-  const diarizationEnabled = Boolean(hfToken && hfToken.trim().length > 0)
+
   
   useEffect(() => {
     onRecordingChange?.(isRecording)
@@ -47,55 +51,42 @@ export const AudioManager = ({
   
   // Refs - Dual Recording for source-based speaker labeling
   const micRecorderRef = useRef<MediaRecorder | null>(null)
-  const systemRecorderRef = useRef<MediaRecorder | null>(null)
-  const mixedRecorderRef = useRef<MediaRecorder | null>(null)
-  const micChunkRecorderRef = useRef<MediaRecorder | null>(null)
-  const systemChunkRecorderRef = useRef<MediaRecorder | null>(null)
-  const micChunkTimerRef = useRef<number | null>(null)
-  const systemChunkTimerRef = useRef<number | null>(null)
+
+  
   const micChunksRef = useRef<Blob[]>([])
   const systemChunksRef = useRef<Blob[]>([])
-  const mixedChunksRef = useRef<Blob[]>([])
+  
   const micChunkIndexRef = useRef(0)
   const systemChunkIndexRef = useRef(0)
+
+  const systemPcmChunksRef = useRef<Float32Array[]>([]) 
+  const nativeAudioListenerRef = useRef<((event: any, chunk: any) => void) | null>(null)
+  const systemAudioChunkSeenRef = useRef(false)
+  
+  const speakingLoopRef = useRef<number | null>(null)
+  const lastSpeakerRef = useRef<'Me' | 'Them' | null>(null)
+  const lastSpeakerTsRef = useRef<number>(0)
+  const micAnalyserRef = useRef<AnalyserNode | null>(null)
+  const systemAnalyserRef = useRef<AnalyserNode | null>(null) // Capture system audio levels
+
+  const hasMicRecorderRef = useRef(false)
+  const hasSystemRecorderRef = useRef(false)
+  
   const pendingMicChunksRef = useRef(new Map<number, Blob>())
   const pendingSystemChunksRef = useRef(new Map<number, Blob>())
+  const systemRmsRef = useRef<number>(0)
   const processingQueueRef = useRef(Promise.resolve())
   const processedMicSegmentsRef = useRef<TranscriptionSegment[]>([])
-  const processedSystemSegmentsRef = useRef<TranscriptionSegment[]>([])
   const startTimeRef = useRef<number>(0)
   const audioContextRef = useRef<AudioContext | null>(null)
   const visStreamRef = useRef<MediaStream | null>(null)
   const micStreamRef = useRef<MediaStream | null>(null)
-  const systemStreamRef = useRef<MediaStream | null>(null)
+
+
   const isRecordingRef = useRef(false)
   const isProcessingRef = useRef(false)
 
-  const isScreenPermissionGranted = (status: string) => {
-      return status === 'authorized' || status === 'granted'
-  }
 
-  const logAudioTracks = (label: string, stream: MediaStream | null) => {
-      if (!stream) {
-          console.log(`[Pluto][Audio] ${label}: no stream`)
-          return
-      }
-      const tracks = stream.getAudioTracks()
-      console.log(`[Pluto][Audio] ${label}: ${tracks.length} audio track(s)`)
-      tracks.forEach((track, index) => {
-          const settings = track.getSettings ? track.getSettings() : {}
-          const capabilities = track.getCapabilities ? track.getCapabilities() : {}
-          console.log(`[Pluto][Audio] ${label} track ${index}`, {
-              id: track.id,
-              label: track.label,
-              enabled: track.enabled,
-              muted: track.muted,
-              readyState: track.readyState,
-              settings,
-              capabilities
-          })
-      })
-  }
   
   // Keep state refs in sync
   useEffect(() => {
@@ -103,7 +94,6 @@ export const AudioManager = ({
   }, [isRecording])
   
   useEffect(() => {
-    isProcessingRef.current = isProcessing
     onProcessingChange?.(isProcessing)
   }, [isProcessing, onProcessingChange])
 
@@ -115,230 +105,225 @@ export const AudioManager = ({
           startTimeRef.current = Date.now()
           setIsRecording(true)
           
-          console.log('[Pluto] Starting native capture session...')
+          console.log('[Pluto] Starting session (Robust Mic First)...')
 
-          // 0. Preflight permissions (macOS)
-          const screenStatus = await window.ipcRenderer.invoke('CHECK_SCREEN_PERMISSION')
+          // 0. Preflight Permissions (Mic only)
           const micStatus = await window.ipcRenderer.invoke('CHECK_MICROPHONE_PERMISSION')
-          console.log('[Pluto] Screen permission status:', screenStatus)
-          console.log('[Pluto] Microphone permission status:', micStatus)
-          if (!isScreenPermissionGranted(screenStatus) || micStatus !== 'granted') {
-              if (!isScreenPermissionGranted(screenStatus)) {
-                  await window.ipcRenderer.invoke('REQUEST_SCREEN_PERMISSION')
-              }
+          if (micStatus !== 'granted') {
               window.dispatchEvent(new CustomEvent('SHOW_PERMISSION_OVERLAY', {
-                  detail: { screenStatus, micStatus }
+                  detail: { micStatus }
               }))
               setIsRecording(false)
               return
           }
-          
-          // 1. Capture System Audio FIRST (via Loopback API)
-          let systemStream: MediaStream | null = null
-          try {
-              // Enable loopback mode (activates Chromium's hidden flags)
-              console.log('[Pluto] Enabling audio loopback...')
-              await window.ipcRenderer.invoke('enable-loopback-audio')
-              
-              // Get stream with system audio
-              systemStream = await navigator.mediaDevices.getDisplayMedia({
-                  video: true,
-                  audio: true
-              })
-              
-              // Remove video tracks (we only need audio)
-              systemStream.getVideoTracks().forEach(track => {
-                  track.stop()
-                  systemStream!.removeTrack(track)
-              })
-              
-              // Disable loopback mode (restore normal getDisplayMedia)
-              await window.ipcRenderer.invoke('disable-loopback-audio')
-              
-              if (systemStream.getAudioTracks().length === 0) {
-                  console.warn('[Pluto] System stream has no audio tracks')
-                  alert(
-                      'System audio was not captured.\n\n' +
-                      'Make sure "Share system audio" is enabled in the picker and that ' +
-                      'Pluto is allowed in Screen & System Audio Recording settings.'
-                  )
-              } else {
-                  console.log('[Pluto] System audio started successfully via Loopback')
-              }
-              logAudioTracks('System', systemStream)
-          } catch (sysErr) {
-              console.warn('[Pluto] Failed to capture system audio:', sysErr)
-              console.warn('[Pluto] System audio error details:', sysErr instanceof Error ? sysErr.message : sysErr)
-              // Ensure loopback is disabled if we errored
-              try { await window.ipcRenderer.invoke('disable-loopback-audio') } catch (e) { console.error('Failed to disable loopback', e) }
-              // Don't block, just continue with Mic
+
+          // 1. System Audio Verification (Block start if unavailable)
+          if (systemAudioStatus !== 'granted') {
+              window.dispatchEvent(new CustomEvent('SHOW_PERMISSION_OVERLAY', {
+                  detail: { micStatus: 'granted', systemAudioStatus: 'needs-audio' }
+              }))
+              setIsRecording(false)
+              return
           }
-          
-          // 2. Capture Microphone AFTER system audio (to ensure getDisplayMedia doesn't affect it)
+
+          // 2. Acquire Microphone Stream (Critical Path)
           let micStream: MediaStream | null = null
           try {
               micStream = await navigator.mediaDevices.getUserMedia({
                   audio: {
-                      echoCancellation: false,  // Disable processing to get raw audio
+                      echoCancellation: false, 
                       noiseSuppression: false,
                       autoGainControl: false
                   },
                   video: false
               })
-              console.log('[Pluto] Microphone started successfully')
-              logAudioTracks('Microphone', micStream)
+              if (!micStream || micStream.getAudioTracks().length === 0) {
+                   micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+              }
           } catch (micErr) {
               console.warn('[Pluto] Failed to capture microphone:', micErr)
-              console.warn('[Pluto] Microphone error details:', micErr instanceof Error ? micErr.message : micErr)
-          }
-                    // Check if we have at least one source
-          if (!systemStream && !micStream) {
-              throw new Error('No audio sources available. Please check Microphone and Screen Recording permissions.')
+              alert('Failed to access microphone. Please check permissions.')
+              setIsRecording(false)
+              return
           }
           
-          // Store streams for cleanup
           micStreamRef.current = micStream
-          systemStreamRef.current = systemStream
-          const hasMicStream = Boolean(micStream && micStream.getAudioTracks().length > 0)
-          const hasSystemStream = Boolean(systemStream && systemStream.getAudioTracks().length > 0)
-          
-          // 3. Create AudioContext for visualization only
+
+          // 3. Setup Audio Context & Visualizer (Immediate Feedback)
           const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
           audioContextRef.current = audioContext
-          
-          if (audioContext.state === 'suspended') {
-              await audioContext.resume()
-          }
-          
-          // Visualization: mix both for visual feedback only
-          const visDestination = audioContext.createMediaStreamDestination()
-          
-          if (hasSystemStream && systemStream) {
-              const systemSource = audioContext.createMediaStreamSource(systemStream)
-              systemSource.connect(visDestination)
-          }
-          
-          if (hasMicStream && micStream) {
-              const micSource = audioContext.createMediaStreamSource(micStream)
-              micSource.connect(visDestination)
-          }
-          
+          if (audioContext.state === 'suspended') await audioContext.resume()
+           
           const visAnalyser = audioContext.createAnalyser()
           visAnalyser.fftSize = 256
           setAnalyser(visAnalyser)
-          // Expose to parent
-          if (onAnalyserReadyRef?.current) {
-               onAnalyserReadyRef.current(visAnalyser)
+           
+          if (micStream) {
+              const micSource = audioContext.createMediaStreamSource(micStream)
+              micSource.connect(visAnalyser)
           }
-          
-          const mixedSource = audioContext.createMediaStreamSource(visDestination.stream)
-          mixedSource.connect(visAnalyser)
-          visStreamRef.current = visDestination.stream
-          
-          if (diarizationEnabled) {
-              // Record MIXED stream for diarization
-              mixedChunksRef.current = []
-              const mixedRecorder = new MediaRecorder(visDestination.stream, {
-                  mimeType: 'audio/webm;codecs=opus'
-              })
-              mixedRecorderRef.current = mixedRecorder
-              mixedRecorder.ondataavailable = (event) => {
-                  if (event.data.size > 0) {
-                      mixedChunksRef.current.push(event.data)
-                  }
-              }
-              mixedRecorder.start(1000)
-              console.log('[Pluto] Mixed recording started (diarization enabled)')
-          } else {
-              // 4. Record SEPARATELY - Dual Recording for source-based labeling
-              micChunksRef.current = []
-              systemChunksRef.current = []
-              micChunkIndexRef.current = 0
-              systemChunkIndexRef.current = 0
-              pendingMicChunksRef.current = new Map()
-              pendingSystemChunksRef.current = new Map()
-              processedMicSegmentsRef.current = []
-              processedSystemSegmentsRef.current = []
-              processingQueueRef.current = Promise.resolve()
-              
-              // Mic recorder
-              if (hasMicStream && micStream) {
-                  const micRecorder = new MediaRecorder(micStream, {
-                      mimeType: 'audio/webm;codecs=opus'
-                  })
-                  micRecorderRef.current = micRecorder
-                  
-                  micRecorder.ondataavailable = (event) => {
-                      if (event.data.size > 0) {
-                          micChunksRef.current.push(event.data)
-                      }
-                  }
-                  micRecorder.start()
-                  console.log('[Pluto] Mic recording started (full)')
-              }
-              
-              // System audio recorder
-              if (hasSystemStream && systemStream) {
-                  const systemRecorder = new MediaRecorder(systemStream, {
-                      mimeType: 'audio/webm;codecs=opus'
-                  })
-                  systemRecorderRef.current = systemRecorder
-                  
-                  systemRecorder.ondataavailable = (event) => {
-                      if (event.data.size > 0) {
-                          systemChunksRef.current.push(event.data)
-                      }
-                  }
-                  systemRecorder.start()
-                  console.log('[Pluto] System audio recording started (full)')
-              }
-              
-              // Chunk recorders (valid WebM per chunk)
-              if (hasMicStream && micStream) {
-                  startChunkRecorder({
-                      stream: micStream,
-                      label: 'mic',
-                      chunkIndexRef: micChunkIndexRef,
-                      recorderRef: micChunkRecorderRef,
-                      timerRef: micChunkTimerRef,
-                      hasOtherStream: hasSystemStream
-                  })
-                  console.log('[Pluto] Mic chunk recording started')
-              }
+           
+          if (onAnalyserReadyRef?.current) onAnalyserReadyRef.current(visAnalyser)
+          startSpeakingMonitor(audioContext, micStream)
 
-              if (hasSystemStream && systemStream) {
-                  startChunkRecorder({
-                      stream: systemStream,
-                      label: 'system',
-                      chunkIndexRef: systemChunkIndexRef,
-                      recorderRef: systemChunkRecorderRef,
-                      timerRef: systemChunkTimerRef,
-                      hasOtherStream: hasMicStream
-                  })
-                  console.log('[Pluto] System chunk recording started')
+          // 4. System Audio: Native AudioCap
+          console.log('[Pluto] Starting Native AudioCap...')
+          try {
+              await window.ipcRenderer.invoke('NATIVE_AUDIO_START')
+              hasSystemRecorderRef.current = true
+              systemAudioChunkSeenRef.current = false
+              
+              // Setup Listener
+              const handler = (_: any, chunk: any) => {
+                  if (chunk && chunk.byteLength > 0) {
+                     systemAudioChunkSeenRef.current = true
+                     // chunk.buffer is the underlying ArrayBuffer
+                     const floatData = new Float32Array(chunk.buffer, chunk.byteOffset, chunk.byteLength / 4)
+                     systemPcmChunksRef.current.push(floatData)
+                      const rms = computeRms(floatData)
+                      systemRmsRef.current = rms
+                   }
               }
-
-              console.log('[Pluto] Dual recording started')
+              nativeAudioListenerRef.current = handler
+              window.ipcRenderer.on('NATIVE_AUDIO_CHUNK', handler)
+              console.log('[Pluto] Native AudioCap started & listening.')
+              
+          } catch (sysErr) {
+              console.warn('[Pluto] System audio failed:', sysErr)
           }
 
+          // 5. Start Recorders Synced
+          micChunksRef.current = []
+          systemChunksRef.current = []
+          micChunkIndexRef.current = 0
+          systemChunkIndexRef.current = 0
+          pendingMicChunksRef.current = new Map()
+          pendingSystemChunksRef.current = new Map()
+          processedMicSegmentsRef.current = []
+          
+          if (micStream) {
+               const micRecorder = new MediaRecorder(micStream, getRecorderOptions())
+               micRecorderRef.current = micRecorder
+               
+
+               micRecorder.ondataavailable = (event) => {
+                   if (event.data && event.data.size > 0) {
+                       const index = micChunkIndexRef.current++
+                       micChunksRef.current.push(event.data)
+                       
+                       // Package System Audio for this interval
+                       let systemBlob: Blob | undefined
+                       // Flatten pending float chunks
+                       const floatChunks = systemPcmChunksRef.current
+                       if (floatChunks.length > 0) {
+                           const totalLen = floatChunks.reduce((acc, c) => acc + c.length, 0)
+                           const merged = new Float32Array(totalLen)
+                           let offset = 0
+                           floatChunks.forEach(c => {
+                               merged.set(c, offset)
+                               offset += c.length
+                           })
+                           systemBlob = createWavBlob(merged)
+                           // Clear for next chunk
+                           systemPcmChunksRef.current = []
+                       }
+                       
+                       // Manually handle chunks
+                       handleChunkBlob('mic', index, event.data)
+                       if (systemBlob) {
+                           handleChunkBlob('system', index, systemBlob)
+                       } else {
+                           // If no system audio, effectively "silence" - handleChunkBlob logic
+                           // expects to wait if hasSystemRecorderRef is true.
+                           // But for native capture, we might have pure silence if no output.
+                           // Send empty blob or nothing?
+                           // If we send nothing, 'handleChunkBlob' might hang waiting for it.
+                           // Let's create an empty 1-second silence WAV to keep pipeline flowing?
+                           // Or simpler: handleChunkBlob checks "micBlob && (systemBlob || !hasSystemRecorderRef)".
+                           // If hasSystemRecorderRef is true, we MUST provide a systemBlob.
+                           // So create dummy silence.
+                           const silence = new Float32Array(48000 * 1) // 1 sec silence
+                           systemBlob = createWavBlob(silence)
+                           handleChunkBlob('system', index, systemBlob) 
+                       }
+                   }
+               }
+               
+               micRecorder.start(CHUNK_SECONDS * 1000)
+               console.log('[Pluto] Microphone recording started.')
+          }
+          
+
+
+          // 6. No restart loop needed
+           
       } catch (e) {
-          console.error('[Pluto] Failed to start native session', e)
-          alert(`Failed to start recording: ${(e as Error).message}`)
+          console.error('[Pluto] Failed to start session', e)
           setIsRecording(false)
       }
   }
 
-  // --- Helpers ---
-  const stopAllTracks = () => {
-      if (micStreamRef.current) {
-          micStreamRef.current.getTracks().forEach(t => t.stop())
-          micStreamRef.current = null
+  // Effect cleared - logic handled in standard recorder flow now
+  useEffect(() => {
+      // Intentionally empty - we removed IPC listener
+  }, [])
+  
+  const startSpeakingMonitor = (audioContext: AudioContext, micStream: MediaStream | null) => {
+      stopSpeakingMonitor()
+      
+      let micAnalyser: AnalyserNode | null = null
+      if (micStream && micStream.getAudioTracks().length > 0) {
+           micAnalyser = audioContext.createAnalyser()
+           micAnalyser.fftSize = 256
+           const s = audioContext.createMediaStreamSource(micStream)
+           s.connect(micAnalyser)
+           micAnalyserRef.current = micAnalyser
       }
-      if (systemStreamRef.current) {
-          systemStreamRef.current.getTracks().forEach(t => t.stop())
-          systemStreamRef.current = null
+      
+      const tick = () => {
+           const now = performance.now()
+           const micRms = micAnalyser ? computeRmsFromAnalyser(micAnalyser) : 0
+           const systemRms = systemAnalyserRef.current ? computeRmsFromAnalyser(systemAnalyserRef.current) : 0
+           systemRmsRef.current = systemRms
+           
+           // ... logic same ...
+           let nextSpeaker: 'Me' | 'Them' | null = null
+           const micActive = micRms >= SPEAKING_RMS_THRESHOLD
+           const systemActive = systemRms >= SPEAKING_RMS_THRESHOLD
+           
+           if (micActive && !systemActive) nextSpeaker = 'Me'
+           else if (!micActive && systemActive) nextSpeaker = 'Them'
+           else if (micActive && systemActive) {
+               if (micRms >= systemRms * SPEAKING_RATIO) nextSpeaker = 'Me'
+               else if (systemRms >= micRms * SPEAKING_RATIO) nextSpeaker = 'Them'
+               else nextSpeaker = lastSpeakerRef.current
+           } else {
+               nextSpeaker = null
+           }
+           
+           if (now - lastSpeakerTsRef.current >= SPEAKING_MIN_INTERVAL_MS && nextSpeaker !== lastSpeakerRef.current) {
+               lastSpeakerRef.current = nextSpeaker
+               lastSpeakerTsRef.current = now
+               onSpeakingChange?.(nextSpeaker)
+           }
+           speakingLoopRef.current = requestAnimationFrame(tick)
       }
+      speakingLoopRef.current = requestAnimationFrame(tick)
   }
+  
+  const stopAllTracks = () => {
+        if (speakingLoopRef.current) {
+            cancelAnimationFrame(speakingLoopRef.current)
+            speakingLoopRef.current = null
+        }
+        if (micStreamRef.current) {
+            micStreamRef.current.getTracks().forEach(t => t.stop())
+            micStreamRef.current = null
+        }
+  }
+
+  // --- Helpers ---
+
 
   const extractTitle = (segments: TranscriptionSegment[]): string => {
       if (segments.length === 0) return 'New Meeting'
@@ -349,10 +334,29 @@ export const AudioManager = ({
   type RmsData = { windowSec: number; rms: number[] }
 
   const RMS_WINDOW_SECONDS = 0.5
-  const BLEED_SUPPRESSION_RATIO = 1.6
-  const RMS_EPSILON = 1e-4
+  const SPEAKING_RMS_THRESHOLD = 0.012
+  const SPEAKING_RATIO = 1.25
+  const SPEAKING_MIN_INTERVAL_MS = 200
   const CHUNK_SECONDS = 20
-  const CHUNK_MS = CHUNK_SECONDS * 1000
+
+
+
+  const getRecorderOptions = (): MediaRecorderOptions | undefined => {
+      const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/ogg;codecs=opus'
+      ]
+      for (const mimeType of candidates) {
+          if (MediaRecorder.isTypeSupported(mimeType)) {
+              return { mimeType }
+          }
+      }
+      return undefined
+  }
+
+
+
 
   const computeRmsData = async (audioBuffer: ArrayBuffer): Promise<RmsData> => {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -388,34 +392,34 @@ export const AudioManager = ({
       }
   }
 
-  const averageRmsInRange = (data: RmsData | null, startSec: number, endSec: number): number => {
-      if (!data || data.rms.length === 0) return 0
-      const windowSec = data.windowSec
-      const startIdx = Math.max(0, Math.floor(startSec / windowSec))
-      const endIdx = Math.min(data.rms.length - 1, Math.ceil(endSec / windowSec) - 1)
-      if (endIdx < startIdx) return 0
-      let sum = 0
-      let count = 0
-      for (let i = startIdx; i <= endIdx; i++) {
-          sum += data.rms[i]
-          count++
+
+
+
+
+  const computeRmsFromAnalyser = (analyser: AnalyserNode): number => {
+      const bufferLength = analyser.fftSize
+      const data = new Uint8Array(bufferLength)
+      analyser.getByteTimeDomainData(data)
+      let sumSquares = 0
+      for (let i = 0; i < bufferLength; i++) {
+          const v = (data[i] - 128) / 128
+          sumSquares += v * v
       }
-      return count > 0 ? sum / count : 0
+      return Math.sqrt(sumSquares / bufferLength)
   }
 
-  const suppressBleedSegments = (
-      micSegments: TranscriptionSegment[],
-      micRms: RmsData | null,
-      systemRms: RmsData | null
-  ): TranscriptionSegment[] => {
-      if (!micRms || !systemRms) return micSegments
-      return micSegments.filter((seg) => {
-          const micEnergy = averageRmsInRange(micRms, seg.startTime, seg.endTime)
-          const systemEnergy = averageRmsInRange(systemRms, seg.startTime, seg.endTime)
-          if (systemEnergy < RMS_EPSILON) return true
-          return micEnergy / systemEnergy >= BLEED_SUPPRESSION_RATIO
-      })
+  const stopSpeakingMonitor = () => {
+      if (speakingLoopRef.current) {
+          cancelAnimationFrame(speakingLoopRef.current)
+          speakingLoopRef.current = null
+      }
+      micAnalyserRef.current = null
+      lastSpeakerRef.current = null
+      lastSpeakerTsRef.current = 0
+      onSpeakingChange?.(null)
   }
+
+
 
   const enqueueBackgroundJob = (job: () => Promise<void>) => {
       processingQueueRef.current = processingQueueRef.current.then(job).catch((e) => {
@@ -423,157 +427,111 @@ export const AudioManager = ({
       })
   }
 
-  const handleChunkBlob = (label: 'mic' | 'system', chunkIndex: number, chunkBlob: Blob, hasOtherStream: boolean) => {
-      if (label === 'mic') {
-          pendingMicChunksRef.current.set(chunkIndex, chunkBlob)
-          if (!hasOtherStream) {
-              pendingMicChunksRef.current.delete(chunkIndex)
-              enqueueBackgroundJob(() => transcribeChunkPair({ micBlob: chunkBlob, chunkIndex }))
-              return
-          }
-          if (pendingSystemChunksRef.current.has(chunkIndex)) {
-              const systemBlob = pendingSystemChunksRef.current.get(chunkIndex)
-              pendingSystemChunksRef.current.delete(chunkIndex)
-              pendingMicChunksRef.current.delete(chunkIndex)
-              enqueueBackgroundJob(() => transcribeChunkPair({ micBlob: chunkBlob, systemBlob, chunkIndex }))
-          }
-      } else {
-          pendingSystemChunksRef.current.set(chunkIndex, chunkBlob)
-          if (!hasOtherStream) {
-              pendingSystemChunksRef.current.delete(chunkIndex)
-              enqueueBackgroundJob(() => transcribeChunkPair({ systemBlob: chunkBlob, chunkIndex }))
-              return
-          }
-          if (pendingMicChunksRef.current.has(chunkIndex)) {
-              const micBlob = pendingMicChunksRef.current.get(chunkIndex)
-              pendingMicChunksRef.current.delete(chunkIndex)
-              pendingSystemChunksRef.current.delete(chunkIndex)
-              enqueueBackgroundJob(() => transcribeChunkPair({ micBlob, systemBlob: chunkBlob, chunkIndex }))
-          }
-      }
+  const handleChunkBlob = (type: 'mic' | 'system', chunkIndex: number, chunkBlob: Blob) => {
+       if (type === 'mic') pendingMicChunksRef.current.set(chunkIndex, chunkBlob)
+       else pendingSystemChunksRef.current.set(chunkIndex, chunkBlob)
+       
+       // Try to process pair
+       // Simple strategy: If we have both (or if system isn't running and we have mic), process.
+       // But 'system' might be silent/empty? No, blob is blob.
+       
+       const micBlob = pendingMicChunksRef.current.get(chunkIndex)
+       const systemBlob = pendingSystemChunksRef.current.get(chunkIndex)
+       
+       if (micBlob && (systemBlob || !hasSystemRecorderRef.current)) {
+           pendingMicChunksRef.current.delete(chunkIndex)
+           if (systemBlob) pendingSystemChunksRef.current.delete(chunkIndex)
+           
+           enqueueBackgroundJob(() => transcribeChunkPair({ 
+               micBlob, 
+               systemBlob, 
+               chunkIndex 
+           }))
+       }
   }
 
-  const startChunkRecorder = (opts: {
-      stream: MediaStream
-      label: 'mic' | 'system'
-      chunkIndexRef: React.MutableRefObject<number>
-      recorderRef: React.MutableRefObject<MediaRecorder | null>
-      timerRef: React.MutableRefObject<number | null>
-      hasOtherStream: boolean
-  }) => {
-      const recorder = new MediaRecorder(opts.stream, {
-          mimeType: 'audio/webm;codecs=opus'
-      })
-      const chunks: Blob[] = []
-      const chunkIndex = opts.chunkIndexRef.current
-      opts.recorderRef.current = recorder
+   const transcribeChunkPair = async (opts: {
+       micBlob: Blob
+       systemBlob?: Blob
+       chunkIndex: number
+   }) => {
+       const chunkStartSec = opts.chunkIndex * CHUNK_SECONDS
+       
+       const processStream = async (label: 'Me' | 'Them', blob?: Blob, format: 'webm' | 'wav' = 'webm') => {
+           if (!blob || blob.size < 1024) { 
+             return { segments: [], rms: null as RmsData | null }
+           }
+           const buffer = await blob.arrayBuffer()
+           let rms: RmsData | null = null
+           try {
+               // Only compute RMS if we can decode (might fail for raw chunks if no header, but ours have headers)
+               // System WAV has header now. Mic WebM has header.
+               rms = await computeRmsData(buffer)
+           } catch (e) {
+               console.warn(`[Pluto] Failed to compute ${label} RMS data:`, e instanceof Error ? e.message : e)
+           }
 
-      recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-              chunks.push(event.data)
-          }
-      }
+           let wavPath: string | null
+           try {
+               wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer, format)
+           } catch (e) {
+               console.warn(`[Pluto] Skip ${label} chunk (convert failed):`, (e as Error).message)
+               return { segments: [], rms }
+           }
+           if (!wavPath) return { segments: [], rms }
+           
+           const result = await window.ipcRenderer.invoke('WHISPER_TRANSCRIBE', wavPath, {
+               diarize: false,
+               language: 'en'
+           })
+           // ... (rest of mapping logic same as before)
+           const segments = result?.segments
+               ? result.segments
+                     .filter((s: { text: string }) => isValidSegment(s.text))
+                     .map((s: { start: number; end: number; text: string }) => ({
+                         id: crypto.randomUUID(),
+                         startTime: s.start + chunkStartSec,
+                         endTime: s.end + chunkStartSec,
+                         text: s.text.trim(),
+                         speaker: label
+                     }))
+               : []
+           return { segments, rms }
+       }
 
-      recorder.onstop = () => {
-          if (opts.timerRef.current) {
-              window.clearTimeout(opts.timerRef.current)
-              opts.timerRef.current = null
-          }
-          if (chunks.length > 0) {
-              const chunkBlob = new Blob(chunks, { type: 'audio/webm;codecs=opus' })
-              handleChunkBlob(opts.label, chunkIndex, chunkBlob, opts.hasOtherStream)
-          }
-          opts.chunkIndexRef.current += 1
-          if (isRecordingRef.current && !diarizationEnabled) {
-              startChunkRecorder(opts)
-          }
-      }
+       const [micResult, systemResult] = await Promise.all([
+           processStream('Me', opts.micBlob, 'webm'),
+           processStream('Them', opts.systemBlob, 'wav')
+       ])
 
-      recorder.start()
-      opts.timerRef.current = window.setTimeout(() => {
-          if (recorder.state === 'recording') {
-              recorder.stop()
-          }
-      }, CHUNK_MS)
-  }
-
-  const transcribeChunkPair = async (opts: {
-      micBlob?: Blob
-      systemBlob?: Blob
-      chunkIndex: number
-  }) => {
-      const chunkStartSec = opts.chunkIndex * CHUNK_SECONDS
-      const processStream = async (label: 'You' | 'Others', blob?: Blob) => {
-          if (!blob || blob.size === 0) return { segments: [], rms: null as RmsData | null }
-          const buffer = await blob.arrayBuffer()
-          let rms: RmsData | null = null
-          try {
-              rms = await computeRmsData(buffer)
-          } catch (e) {
-              console.warn(`[Pluto] Failed to compute ${label} RMS data:`, e)
-          }
-          let wavPath: string | null
-          try {
-              wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
-          } catch (e) {
-              console.warn(`[Pluto] Skip ${label} chunk (convert failed):`, (e as Error).message)
-              return { segments: [], rms }
-          }
-          if (!wavPath) {
-              console.warn(`[Pluto] Skip ${label} chunk (convert skipped: tiny buffer)`)
-              return { segments: [], rms }
-          }
-          const result = await window.ipcRenderer.invoke('WHISPER_TRANSCRIBE', wavPath, {
-              diarize: false,
-              language: 'en'
-          })
-          const segments = result?.segments
-              ? result.segments
-                    .filter((s: { text: string }) => isValidSegment(s.text))
-                    .map((s: { start: number; end: number; text: string }) => ({
-                        id: crypto.randomUUID(),
-                        startTime: s.start + chunkStartSec,
-                        endTime: s.end + chunkStartSec,
-                        text: s.text.trim(),
-                        speaker: label
-                    }))
-              : []
-          return { segments, rms }
-      }
-
-      const [micResult, systemResult] = await Promise.all([
-          processStream('You', opts.micBlob),
-          processStream('Others', opts.systemBlob)
-      ])
-
-      let micSegments = micResult.segments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
-          ...s,
-          startTime: s.startTime - chunkStartSec,
-          endTime: s.endTime - chunkStartSec
-      }))
-      const systemSegments = systemResult.segments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
-          ...s,
-          startTime: s.startTime - chunkStartSec,
-          endTime: s.endTime - chunkStartSec
-      }))
-
-      micSegments = suppressBleedSegments(micSegments, micResult.rms, systemResult.rms)
-
-      processedMicSegmentsRef.current.push(
-          ...micSegments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
-              ...s,
-              startTime: s.startTime + chunkStartSec,
-              endTime: s.endTime + chunkStartSec
-          }))
-      )
-      processedSystemSegmentsRef.current.push(
-          ...systemSegments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
-              ...s,
-              startTime: s.startTime + chunkStartSec,
-              endTime: s.endTime + chunkStartSec
-          }))
-      )
-  }
+       const micSegments = micResult.segments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
+           ...s,
+           startTime: s.startTime - chunkStartSec,
+           endTime: s.endTime - chunkStartSec
+       }))
+       
+       const systemSegments = systemResult.segments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
+           ...s,
+           startTime: s.startTime - chunkStartSec,
+           endTime: s.endTime - chunkStartSec
+       }))
+       
+       // Here we could apply bleed suppression if we had it, but we removed it.
+       // Just merge raw for now to verify capture.
+       
+       processedMicSegmentsRef.current.push(
+           ...micSegments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
+               ...s,
+               startTime: s.startTime + chunkStartSec,
+               endTime: s.endTime + chunkStartSec
+           })),
+           ...systemSegments.map((s: { startTime: number; endTime: number;[k: string]: unknown }) => ({
+               ...s,
+               startTime: s.startTime + chunkStartSec,
+               endTime: s.endTime + chunkStartSec
+           }))
+       )
+   }
 
   // Common Whisper Hallucinations to filter out
   const INVALID_PHRASES = [
@@ -595,7 +553,10 @@ export const AudioManager = ({
       try {
           // Helper to stop a recorder and get its blob
           const stopRecorder = async (recorder: MediaRecorder | null, chunks: Blob[]): Promise<Blob | null> => {
-              if (!recorder || recorder.state !== 'recording') return null
+              if (!recorder || recorder.state === 'inactive') {
+                  if (chunks.length > 0) return new Blob(chunks, { type: 'audio/webm;codecs=opus' })
+                  return null
+              }
               
               const stopped = new Promise<void>((resolve) => {
                   recorder.onstop = () => resolve()
@@ -607,51 +568,44 @@ export const AudioManager = ({
               return new Blob(chunks, { type: 'audio/webm;codecs=opus' })
           }
           
-          // Stop recorders
-          const [micBlob, systemBlob, mixedBlob] = await Promise.all([
-              stopRecorder(micRecorderRef.current, micChunksRef.current),
-              stopRecorder(systemRecorderRef.current, systemChunksRef.current),
-              stopRecorder(mixedRecorderRef.current, mixedChunksRef.current)
-          ])
-
-          const stopChunkRecorder = async (recorder: MediaRecorder | null, timerRef: React.MutableRefObject<number | null>) => {
-              if (!recorder || recorder.state !== 'recording') return
-              await new Promise<void>((resolve) => {
-                  const prev = recorder.onstop
-                  recorder.onstop = (event) => {
-                      if (prev) prev.call(recorder, event as any)
-                      resolve()
-                  }
-                  recorder.stop()
-              })
-              if (timerRef.current) {
-                  window.clearTimeout(timerRef.current)
-                  timerRef.current = null
+          // Stop Mic Recorder
+          const micBlob = await stopRecorder(micRecorderRef.current, micChunksRef.current)
+          
+          // Stop Native Capture
+          await window.ipcRenderer.invoke('NATIVE_AUDIO_STOP')
+          if (nativeAudioListenerRef.current) {
+              window.ipcRenderer.off('NATIVE_AUDIO_CHUNK', nativeAudioListenerRef.current)
+              nativeAudioListenerRef.current = null
+          }
+          
+          // Finalize System Audio
+          let systemBlob: Blob | undefined
+          if (systemPcmChunksRef.current.length > 0) {
+              // Merge remaining
+              let totalLen = 0
+              for(const c of systemPcmChunksRef.current) totalLen += c.length
+              const merged = new Float32Array(totalLen)
+              let offset = 0
+              for(const c of systemPcmChunksRef.current) {
+                  merged.set(c, offset)
+                  offset += c.length
               }
+              systemBlob = createWavBlob(merged)
+              systemPcmChunksRef.current = []
+              console.log(`[Pluto] Finalized System Audio: ${systemBlob.size} bytes`)
           }
 
-          // Stop chunk recorders (background transcription)
-          await Promise.all([
-              stopChunkRecorder(micChunkRecorderRef.current, micChunkTimerRef),
-              stopChunkRecorder(systemChunkRecorderRef.current, systemChunkTimerRef)
-          ])
-          
           // Stop all tracks
           stopAllTracks()
           
           // Reset refs
           micRecorderRef.current = null
-          systemRecorderRef.current = null
-          mixedRecorderRef.current = null
-          micChunkRecorderRef.current = null
-          systemChunkRecorderRef.current = null
-          micChunkTimerRef.current = null
-          systemChunkTimerRef.current = null
           micChunksRef.current = []
-          systemChunksRef.current = []
-          mixedChunksRef.current = []
+          hasMicRecorderRef.current = false
+          hasSystemRecorderRef.current = false
           
           // Cleanup visualization
+          stopSpeakingMonitor()
           if (audioContextRef.current) {
               audioContextRef.current.close()
               audioContextRef.current = null
@@ -663,103 +617,39 @@ export const AudioManager = ({
           setAnalyser(null)
           setIsRecording(false)
           
-          // Convert and transcribe each source separately
-          let micSegments: TranscriptionSegment[] = []
-          let systemSegments: TranscriptionSegment[] = []
-          let diarizedSegments: TranscriptionSegment[] = []
-          let primaryAudioPath = ''
-
-          if (!diarizationEnabled) {
-              // Enqueue any remaining paired chunks
-              for (const [chunkIndex, micBlob] of pendingMicChunksRef.current.entries()) {
-                  if (pendingSystemChunksRef.current.has(chunkIndex)) {
-                      const systemBlob = pendingSystemChunksRef.current.get(chunkIndex)
-                      pendingSystemChunksRef.current.delete(chunkIndex)
-                      pendingMicChunksRef.current.delete(chunkIndex)
-                      enqueueBackgroundJob(() => transcribeChunkPair({ micBlob, systemBlob, chunkIndex }))
-                  }
-              }
-              // Enqueue any unpaired leftovers
-              for (const [chunkIndex, micBlob] of pendingMicChunksRef.current.entries()) {
-                  enqueueBackgroundJob(() => transcribeChunkPair({ micBlob, chunkIndex }))
-              }
-              for (const [chunkIndex, systemBlob] of pendingSystemChunksRef.current.entries()) {
-                  enqueueBackgroundJob(() => transcribeChunkPair({ systemBlob, chunkIndex }))
-              }
-              pendingMicChunksRef.current.clear()
-              pendingSystemChunksRef.current.clear()
+          // Process final chunks
+          for (const [chunkIndex, micB] of pendingMicChunksRef.current.entries()) {
+              const sysB = pendingSystemChunksRef.current.get(chunkIndex)
+              enqueueBackgroundJob(() => transcribeChunkPair({ micBlob: micB, systemBlob: sysB, chunkIndex }))
           }
+          pendingMicChunksRef.current.clear()
+          pendingSystemChunksRef.current.clear()
           
-          // Transcribe mixed audio with diarization when enabled
-          if (diarizationEnabled && mixedBlob && mixedBlob.size > 0) {
-              console.log('[Pluto] Processing mixed audio for diarization...')
-              const convertStart = performance.now()
-              const buffer = await mixedBlob.arrayBuffer()
-              let wavPath: string | null
+          // Wait for queue
+          await processingQueueRef.current
+
+          // Store a single full audio file for playback
+          let primaryAudioPath = ''
+          const primaryBlob = micBlob // Default to mic
+          if (primaryBlob && primaryBlob.size > 0) {
               try {
-                  wavPath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
+                  const buffer = await primaryBlob.arrayBuffer()
+                  const maybePath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
+                  if (maybePath) primaryAudioPath = maybePath
               } catch (e) {
-                  console.warn('[Pluto] Mixed convert failed, skipping diarization:', (e as Error).message)
-                  wavPath = ''
-              }
-              if (!wavPath) {
-                  console.warn('[Pluto] Mixed convert skipped (tiny buffer)')
-                  wavPath = ''
-              }
-              if (wavPath) {
-                  console.log(`[Pluto] Mixed conversion took ${Math.round(performance.now() - convertStart)}ms`)
-                  primaryAudioPath = wavPath
-                  console.log('[Pluto] Transcribing mixed audio (diarization enabled)...')
-                  const transcribeStart = performance.now()
-                  const result = await window.ipcRenderer.invoke('WHISPER_TRANSCRIBE', wavPath, {
-                      diarize: true,
-                      hfToken,
-                      language: 'en'
-                  })
-                  console.log(`[Pluto] Mixed transcription took ${Math.round(performance.now() - transcribeStart)}ms`)
-                  if (result?.segments) {
-                      diarizedSegments = result.segments
-                          .filter((s: { text: string }) => isValidSegment(s.text))
-                          .map((s: { start: number; end: number; text: string; speaker?: string }) => ({
-                              id: crypto.randomUUID(),
-                              startTime: s.start,
-                              endTime: s.end,
-                              text: s.text.trim(),
-                              speaker: s.speaker || 'Speaker'
-                          }))
-                  }
-                  console.log(`[Pluto] Diarized: ${diarizedSegments.length} segments`)
+                  console.warn('[Pluto] Save failed:', e)
               }
           }
+          // Notify completion
+          // ... (rest of logic)
 
-          if (!diarizationEnabled) {
-              // Store a single full audio file for playback
-              const primaryBlob = micBlob || systemBlob
-              if (primaryBlob && primaryBlob.size > 0) {
-                  try {
-                      const buffer = await primaryBlob.arrayBuffer()
-                      const maybePath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
-                      if (maybePath) {
-                          primaryAudioPath = maybePath
-                      } else {
-                          console.warn('[Pluto] Primary convert skipped (tiny buffer)')
-                      }
-                  } catch (e) {
-                      console.warn('[Pluto] Primary convert failed:', (e as Error).message)
-                  }
-              }
 
-              // Wait for background chunk processing to finish
-              await processingQueueRef.current
-              micSegments = processedMicSegmentsRef.current
-              systemSegments = processedSystemSegmentsRef.current
-          }
+          // Wait for background chunk processing to finish
+          await processingQueueRef.current
+          const micSegments = processedMicSegmentsRef.current
 
           // Merge by timestamp
-          const sortedSegments = diarizationEnabled
-              ? [...diarizedSegments]
-              : [...micSegments, ...systemSegments]
-              .sort((a, b) => a.startTime - b.startTime)
+          const sortedSegments = [...micSegments].sort((a, b) => a.startTime - b.startTime)
           
           // Merge consecutive segments from the same speaker
           const newTranscription: TranscriptionSegment[] = []
@@ -788,7 +678,6 @@ export const AudioManager = ({
           // 3. Generate Strategic Summary & Extract Speaker Identity (LLM)
           const fullTranscript = newTranscription.map(s => `${s.speaker}: ${s.text}`).join('\n')
           let enhancedNotes = ''
-          let otherSpeakerName = 'Speaker' // Default fallback
           
           const summaryPromise = window.ipcRenderer.invoke('GENERATE_SUMMARY', { 
               transcript: fullTranscript,
@@ -797,34 +686,15 @@ export const AudioManager = ({
               meetingTitle: userTitle
           })
 
-          const speakerPromise = diarizationEnabled
-              ? Promise.resolve('')
-              : window.ipcRenderer.invoke('EXTRACT_SPEAKER_IDENTITY', {
-                    transcript: fullTranscript
-                })
-          
-          const [summaryResult, speakerResult] = await Promise.allSettled([summaryPromise, speakerPromise])
+          const [summaryResult] = await Promise.allSettled([summaryPromise])
           if (summaryResult.status === 'fulfilled') {
               enhancedNotes = summaryResult.value
           } else {
               console.error('[Pluto] Summary generation failed:', summaryResult.reason)
           }
-          if (!diarizationEnabled) {
-              if (speakerResult.status === 'fulfilled' && speakerResult.value) {
-                  otherSpeakerName = speakerResult.value
-                  console.log(`[Pluto] Identified other speaker as: ${otherSpeakerName}`)
-              } else if (speakerResult.status === 'rejected') {
-                  console.error('[Pluto] Speaker identity extraction failed:', speakerResult.reason)
-              }
-          }
 
           // Relabel transcript segments with actual speaker names
-          const labeledTranscription = diarizationEnabled
-              ? newTranscription
-              : newTranscription.map(seg => ({
-                  ...seg,
-                  speaker: seg.speaker === 'Others' ? otherSpeakerName : seg.speaker
-              }))
+          const labeledTranscription = newTranscription
 
           // 4. Save to DB
           const duration = (Date.now() - (startTimeRef.current || 0)) / 1000

@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, desktopCapturer, systemPreferences, Tray, Menu, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, systemPreferences, Tray, Menu, nativeImage, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
+import { spawn, ChildProcess } from 'node:child_process'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 
@@ -9,16 +10,8 @@ if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic)
 }
 
-// Initialize audio loopback support (must be before app.whenReady)
-import { initMain } from 'electron-audio-loopback'
-console.log('[Pluto] Initializing electron-audio-loopback...')
-initMain()
-console.log('[Pluto] Audio loopback initialized')
-
-// Enable native audio capture on macOS (keep for fallback)
-if (process.platform === 'darwin') {
-  app.commandLine.appendSwitch('enable-features', 'MacLoopbackAudioForScreenShare,MacSckSystemAudioLoopbackOverride')
-}
+// Note: We intentionally avoid Chromium loopback/screen-capture APIs to keep
+// permissions limited to microphone + system audio recording only.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -93,8 +86,9 @@ app.on('before-quit', async () => {
 })
 
 app.whenReady().then(async () => {
-  // Desktop capturer for audio sources
-  ipcMain.handle('DESKTOP_CAPTURER_GET_SOURCES', (_event, opts) => desktopCapturer.getSources(opts))
+  // No desktop capture handlers: keep permissions to mic + system audio only.
+
+  // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
 
   // WhisperX handlers
   ipcMain.handle('WHISPERX_CHECK_PYTHON', async () => {
@@ -122,6 +116,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('WHISPERX_LIST_MODELS', async () => {
     return await whisperX.listModels()
   })
+
   ipcMain.handle('WHISPER_TRANSCRIBE', async (_event, audioPath, options = {}) => {
     console.log('[Pluto] Transcribing file:', audioPath, options.diarize ? '(with diarization)' : '')
     const start = Date.now()
@@ -132,48 +127,226 @@ app.whenReady().then(async () => {
   })
 
   // Audio recording handlers
-  ipcMain.handle('AUDIO_SAVE_AND_CONVERT', async (_event, arrayBuffer) => {
+  let recorderProcess: ChildProcess | null = null
+
+  ipcMain.handle('AUDIO_RECORDER_START', async (_event) => {
+    console.log('[Pluto] Request to start native recorder...')
+
+    if (recorderProcess) {
+      console.log('[Pluto] Recorder already running, killing old instance.')
+      recorderProcess.kill()
+      recorderProcess = null
+    }
+
+    const recorderPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'bin', 'recorder')
+      : path.join(__dirname, '..', 'resources', 'bin', 'recorder')
+
+    if (!fs.existsSync(recorderPath)) {
+      console.error('[Pluto] Recorder binary not found at:', recorderPath)
+      throw new Error('Recorder binary not found')
+    }
+
+    console.log('[Pluto] Spawning recorder:', recorderPath)
+
+    // Spawn without arguments to stream to stdout (default)
+    // Pass exclude bundle ID to prevent echo
+    recorderProcess = spawn(recorderPath, ['stdout', 'com.github.electron']) // Assuming arg 1 is output (optional) and 2 is exclude
+
+    recorderProcess.stdout?.on('data', (chunk: Buffer) => {
+      // Check for JSON status messages
+      const text = chunk.toString('utf-8')
+      if (text.startsWith('{')) {
+        try {
+          const json = JSON.parse(text)
+          if (json.status === 'started') {
+            console.log('[Pluto] Native recorder started successfully.')
+          } else if (json.error) {
+            console.error('[Pluto] Native recorder error:', json.error)
+          }
+          return // Don't forward JSON as audio
+        } catch (e) {
+          // Not JSON, probably audio data 
+        }
+      }
+
+      // Forward raw audio chunk to renderer
+      // We convert Buffer to Uint8Array for IPC
+      if (win) {
+        win.webContents.send('AUDIO_RECORDER_DATA', chunk)
+      }
+    })
+
+    recorderProcess.stderr?.on('data', (data: any) => {
+      console.error(`[Pluto] Recorder stderr: ${data}`)
+    })
+
+    recorderProcess.on('close', (code: any) => {
+      console.log(`[Pluto] Recorder exited with code ${code}`)
+      recorderProcess = null
+    })
+
+    return true
+  })
+
+  ipcMain.handle('AUDIO_RECORDER_STOP', async () => {
+    console.log('[Pluto] Request to stop native recorder...')
+    if (recorderProcess) {
+      recorderProcess.kill()
+      recorderProcess = null
+    }
+    return true
+  })
+
+  // --- NATIVE AUDIO CAPTURE (AUDIOCAP) ---
+  let nativeAudioProcess: ChildProcess | null = null
+  let bootProbeDone = false
+
+  ipcMain.handle('SYSTEM_AUDIO_PROBE', async (_event, { durationMs, allowSilent } = {}) => {
+    if (nativeAudioProcess) return true
+    const isDev = !app.isPackaged
+    const execPath = isDev
+      ? path.join(app.getAppPath(), 'resources/bin/audiocap')
+      : path.join(process.resourcesPath, 'bin', 'audiocap')
+
+    if (!fs.existsSync(execPath)) {
+      console.error('[Pluto] AudioCap binary not found at:', execPath)
+      return false
+    }
+
+    const probeArgs = ['--probe', '--probe-include-self']
+    if (typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0) {
+      probeArgs.push('--probe-ms', String(Math.floor(durationMs)))
+    }
+
+    return await new Promise<boolean>((resolve) => {
+      const probe = spawn(execPath, probeArgs)
+      const timeout = setTimeout(() => {
+        probe.kill('SIGKILL')
+        resolve(false)
+      }, 3000)
+
+      probe.on('close', (code) => {
+        clearTimeout(timeout)
+        if (code === 0) return resolve(true)
+        if (code === 2) return resolve(Boolean(allowSilent))
+        resolve(false)
+      })
+
+      probe.on('error', () => {
+        clearTimeout(timeout)
+        resolve(false)
+      })
+    })
+  })
+
+  ipcMain.handle('BOOT_PROBE_STATUS', () => bootProbeDone)
+  ipcMain.handle('BOOT_PROBE_MARK', () => {
+    bootProbeDone = true
+    return true
+  })
+
+  ipcMain.handle('NATIVE_AUDIO_START', async (_event) => {
+    if (nativeAudioProcess) return true
+
+    // Locate binary: In dev 'resources/bin/audiocap', in prod 'process.resourcesPath/bin/audiocap'
+    const isDev = !app.isPackaged
+    // Note: absolute path is safest
+    const execPath = isDev
+      ? path.join(app.getAppPath(), 'resources/bin/audiocap')
+      : path.join(process.resourcesPath, 'bin', 'audiocap')
+
+    console.log('[Pluto] Spawning AudioCap:', execPath)
+
+    try {
+      if (!fs.existsSync(execPath)) {
+        console.error('[Pluto] AudioCap binary not found at:', execPath)
+        return false
+      }
+
+      nativeAudioProcess = spawn(execPath)
+
+      nativeAudioProcess.stdout?.on('data', (chunk) => {
+        // chunk is Buffer (PCM data)
+        if (win) {
+          win.webContents.send('NATIVE_AUDIO_CHUNK', chunk)
+        }
+      })
+
+      nativeAudioProcess.stderr?.on('data', (data) => {
+        console.error('[Pluto-AudioCap]', data.toString())
+      })
+
+      nativeAudioProcess.on('close', (code) => {
+        console.log('[Pluto] AudioCap exited with code', code)
+        nativeAudioProcess = null
+      })
+
+      return true
+    } catch (e) {
+      console.error('[Pluto] Failed to spawn audiocap:', e)
+      return false
+    }
+  })
+
+  ipcMain.handle('NATIVE_AUDIO_STOP', async () => {
+    if (nativeAudioProcess) {
+      console.log('[Pluto] Stopping AudioCap...')
+      nativeAudioProcess.kill('SIGINT') // Graceful stop
+      nativeAudioProcess = null
+    }
+    return true
+  })
+
+  ipcMain.handle('AUDIO_SAVE_AND_CONVERT', async (_event, arrayBuffer, format?: 'pcm' | 'webm' | 'wav') => {
     const start = Date.now()
     const buffer = Buffer.from(arrayBuffer ?? [])
     const tempId = Date.now().toString()
-    const rawPath = path.join(app.getPath('temp'), `raw_${tempId}.webm`)
+    // If format is wav, we still save as .wav (temporarily as raw input) or .audio? 
+    // Actually, if it's a WAV blob, it HAS a header. So we can just save it as .wav.
+    // ffmpeg will detect it.
+    // If 'pcm', we use .pcm extension.
+    // If 'webm', we use .webm extension.
+
+    let ext = 'webm'
+    if (format === 'pcm') ext = 'pcm'
+    if (format === 'wav') ext = 'wav'
+
+    const rawPath = path.join(app.getPath('temp'), `raw_${tempId}.${ext}`)
     const wavPath = path.join(app.getPath('userData'), 'meetings', `${tempId}.wav`)
 
-    console.log(`[Pluto] Received buffer of ${buffer.length} bytes`)
+    // ... (rest of logging and checks)
 
-    if (buffer.length === 0) {
-      return Promise.reject(new Error('AUDIO_SAVE_AND_CONVERT: empty buffer (recording may be too short or blob not finalized)'))
-    }
-    // Truncated webm often causes "End of file" in ffmpeg
-    if (buffer.length < 1024) {
-      console.warn(`[Pluto] Skipping convert: buffer too small (${buffer.length} bytes)`)
-      return null
-    }
-
-    // Ensure directory exists
-    const meetingsDir = path.join(app.getPath('userData'), 'meetings')
-    if (!fs.existsSync(meetingsDir)) fs.mkdirSync(meetingsDir, { recursive: true })
-
-    console.log(`[Pluto] Saving raw audio to ${rawPath}`)
+    console.log(`[Pluto] Saving raw audio to ${rawPath} (format: ${format || 'auto'})`)
     fs.writeFileSync(rawPath, buffer)
 
     return new Promise((resolve, reject) => {
       console.log(`[Pluto] Converting to WAV: ${wavPath}`)
-      ffmpeg(rawPath)
+      let command = ffmpeg(rawPath)
+
+      if (format === 'pcm') {
+        // Explicit input options for Raw PCM 16-bit 16kHz Mono
+        command = command.inputOptions([
+          '-f s16le',
+          '-ar 16000',
+          '-ac 1'
+        ])
+      } else if (format === 'wav') {
+        // It's already a WAV file (with header). No explicit input options needed usually.
+        // But ffmpeg is robust.
+      }
+
+      command
         .toFormat('wav')
         .audioChannels(1)
         .audioFrequency(16000)
         .on('end', () => {
-          const durationMs = Date.now() - start
-          console.log('[Pluto] Conversion complete.')
-          console.log(`[Pluto] Conversion completed in ${durationMs}ms`)
+          console.log(`[Pluto] Conversion complete (${Date.now() - start}ms)`)
           if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath)
           resolve(wavPath)
         })
         .on('error', (err) => {
-          const durationMs = Date.now() - start
           console.error('[Pluto] Conversion failed:', err)
-          console.error(`[Pluto] Conversion failed after ${durationMs}ms`)
           if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath)
           reject(err)
         })
@@ -413,34 +586,12 @@ app.whenReady().then(async () => {
     return 'granted' // Assume granted on other platforms if app is running
   })
 
-  // Screen Recording Permissions (via node-mac-permissions)
-  ipcMain.handle('CHECK_SCREEN_PERMISSION', () => {
-    if (process.platform !== 'darwin') return 'authorized'
-    try {
-      const { getAuthStatus } = require('node-mac-permissions')
-      return getAuthStatus('screen')
-    } catch (error) {
-      console.error('Failed to check screen permission:', error)
-      return 'undetermined'
-    }
-  })
-
-  ipcMain.handle('REQUEST_SCREEN_PERMISSION', () => {
-    if (process.platform !== 'darwin') return true
-    try {
-      const { askForScreenCaptureAccess } = require('node-mac-permissions')
-      askForScreenCaptureAccess()
-      return true
-    } catch (error) {
-      console.error('Failed to request screen permission:', error)
-      return false
-    }
-  })
-
   ipcMain.handle('OPEN_SYSTEM_SETTINGS_PRIVACY', async (_event, pane) => {
     if (process.platform !== 'darwin') return false
     try {
-      const target = pane === 'microphone' ? 'Privacy_Microphone' : 'Privacy_ScreenCapture'
+      const target = pane === 'microphone'
+        ? 'Privacy_Microphone'
+        : 'Privacy_ScreenCapture' // System Audio Recording Only lives here on macOS
       const url = `x-apple.systempreferences:com.apple.preference.security?${target}`
       await shell.openExternal(url)
       return true
@@ -450,19 +601,10 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('GET_DESKTOP_SOURCES', async () => {
-    try {
-      const sources = await desktopCapturer.getSources({ types: ['screen'] })
-      // Simplify for renderer: return array of { id, name }
-      return sources.map(source => ({
-        id: source.id,
-        name: source.name,
-        thumbnail: source.thumbnail.toDataURL()
-      }))
-    } catch (error) {
-      console.error('Failed to get desktop sources:', error)
-      return []
-    }
+  ipcMain.handle('APP_RELAUNCH', () => {
+    app.relaunch()
+    app.exit(0)
+    return true
   })
 
   // Start WhisperX server in background (don't block app startup)

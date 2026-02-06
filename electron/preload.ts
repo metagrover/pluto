@@ -23,8 +23,3 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
   // ...
 })
 
-// Audio Loopback Control API
-contextBridge.exposeInMainWorld('audioLoopback', {
-  enable: () => ipcRenderer.invoke('enable-loopback-audio'),
-  disable: () => ipcRenderer.invoke('disable-loopback-audio')
-})
