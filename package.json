@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vite",
     "build-swift": "mkdir -p resources/bin && swiftc resources/swift/main.swift resources/swift/AudioRecorder.swift -o resources/bin/recorder && codesign --sign - --entitlements resources/swift/entitlements.plist --force resources/bin/recorder",
+    "build-native": "npm run build-swift && npm run build:audio-cap",
     "build": "tsc && vite build && npm run build-python && electron-builder",
     "build:audio-cap": "mkdir -p resources/bin && swiftc resources/swift/audiocap/*.swift -o resources/bin/audiocap -framework CoreAudio -framework AudioToolbox -framework AVFoundation",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
