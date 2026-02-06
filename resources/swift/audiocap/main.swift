@@ -81,7 +81,7 @@ class AudioCapCLI {
                 // Callback is on a realtime thread. Keep it light.
                 // inInputData is AudioBufferList.
                 // inInputData is UnsafePointer<AudioBufferList>
-                let mutableInputData = UnsafeMutablePointer(mutating: inInputData)
+                let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
                 let bufferList = UnsafeMutableAudioBufferListPointer(mutableInputData)
                 for buffer in bufferList {
                     if let data = buffer.mData {
@@ -112,7 +112,7 @@ class AudioCapCLI {
         do {
             try tap.activate()
             try tap.start(on: queue) { (_inNow, inInputData, _inInputTime, _outOutputData, _inOutputTime) in
-                let mutableInputData = UnsafeMutablePointer(mutating: inInputData)
+                let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
                 let bufferList = UnsafeMutableAudioBufferListPointer(mutableInputData)
                 for buffer in bufferList {
                     if let data = buffer.mData, buffer.mDataByteSize > 0 {
