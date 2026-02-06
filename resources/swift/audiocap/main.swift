@@ -151,6 +151,7 @@ class AudioCapCLI {
     }
 
     private func playProbeTone(durationMs: Int, frequency: Double, volume: Float) {
+        if playProbeFileIfAvailable() { return }
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
         engine.attach(player)
@@ -182,6 +183,40 @@ class AudioCapCLI {
             self.player = player
         } catch {
             // Best-effort; probe still runs even if tone fails
+        }
+    }
+
+    private func playProbeFileIfAvailable() -> Bool {
+        let execPath = CommandLine.arguments.first ?? ""
+        let execURL = URL(fileURLWithPath: execPath)
+        let soundsDir = execURL.deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("sounds")
+        let wavURL = soundsDir.appendingPathComponent("boot.wav")
+        let mp3URL = soundsDir.appendingPathComponent("boot.mp3")
+        let soundsURL = FileManager.default.fileExists(atPath: wavURL.path) ? wavURL : mp3URL
+
+        guard FileManager.default.fileExists(atPath: soundsURL.path) else { return false }
+
+        do {
+            let file = try AVAudioFile(forReading: soundsURL)
+            let engine = AVAudioEngine()
+            let player = AVAudioPlayerNode()
+            engine.attach(player)
+
+            let format = file.processingFormat
+            engine.connect(player, to: engine.mainMixerNode, format: format)
+            player.volume = 0.25
+
+            try engine.start()
+            player.play()
+            player.scheduleFile(file, at: nil, completionHandler: nil)
+
+            self.engine = engine
+            self.player = player
+            return true
+        } catch {
+            return false
         }
     }
 
