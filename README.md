@@ -10,6 +10,7 @@ Intelligent meeting assistant and "second brain" application.
 - **Python** (v3.9+ recommended)
     - *Note: You do NOT need to install Python libraries globally. The project handles this for you.*
 - **FFmpeg** (`brew install ffmpeg` on macOS)
+- **macOS only:** Xcode Command Line Tools (`xcode-select --install`) for Swift builds
 
 ### Installation (for Contributors)
 
@@ -25,10 +26,24 @@ Intelligent meeting assistant and "second brain" application.
     npm install
     ```
 
-3.  **Run the App**
+3.  **Build native audio tools (macOS)**
+    This builds the Swift binaries used for microphone + system audio capture.
+    ```bash
+    npm run build-native
+    ```
+
+4.  **Run the App**
     ```bash
     npm run dev
     ```
+
+### macOS Permissions
+
+Pluto requires:
+- **Microphone** access
+- **System Audio Recording Only** (Privacy & Security → Screen & System Audio Recording)
+
+If permissions change, macOS requires a full app restart.
 
 ## 📦 Building for Production
 
@@ -45,4 +60,4 @@ The output DMG will be in `release/`.
 - `src/` - React/Electron source code
 - `python/` - Python server (WhisperX) and requirements
 - `scripts/` - Build and setup automation scripts
-- `resources/` - Assets and bundled binaries
+- `resources/` - Assets and bundled binaries (built by `npm run build-native`)
