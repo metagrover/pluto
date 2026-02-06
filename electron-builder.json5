@@ -26,7 +26,8 @@
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}",
     "extendInfo": {
       "NSMicrophoneUsageDescription": "Pluto needs microphone access to record and transcribe your meetings.",
-      "NSCameraUsageDescription": "Pluto needs camera access for screen sharing and meeting contexts."
+      "NSCameraUsageDescription": "Pluto needs camera access for screen sharing and meeting contexts.",
+      "NSAudioCaptureUsageDescription": "Pluto needs permission to capture system audio for transcription."
     }
   },
   "win": {

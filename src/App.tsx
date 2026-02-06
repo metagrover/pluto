@@ -42,7 +42,7 @@ function App() {
   const [searchVisible, setSearchVisible] = useState(false)
   const [settingsVisible, setSettingsVisible] = useState(false)
   const [permissionsVisible, setPermissionsVisible] = useState(false)
-  const [permissionStatus, setPermissionStatus] = useState({ screen: 'unknown', mic: 'unknown' })
+  const [permissionStatus, setPermissionStatus] = useState({ mic: 'unknown', systemAudio: 'unknown' })
   const [searchQuery, setSearchQuery] = useState('')
   const [llmProvider, setLlmProvider] = useState<'ollama' | 'gemini' | 'openai' | 'claude'>('ollama')
   const [hfToken, setHfToken] = useState('')
@@ -279,12 +279,38 @@ function App() {
 
   const intelligence = getProactiveIntelligence()
 
+  const checkSystemAudioPermission = async (micStatus: string, allowSilent: boolean) => {
+    try {
+      const ok = await window.ipcRenderer.invoke('SYSTEM_AUDIO_PROBE', { durationMs: 1500, allowSilent })
+      const systemAudioStatus = ok ? 'granted' : 'needs-audio'
+      setPermissionStatus(prev => ({ ...prev, mic: micStatus, systemAudio: systemAudioStatus }))
+      return { systemAudioStatus }
+    } catch {
+      setPermissionStatus(prev => ({ ...prev, mic: micStatus, systemAudio: 'needs-audio' }))
+      return { systemAudioStatus: 'needs-audio' }
+    }
+  }
+
   useEffect(() => {
+    const probeOnBoot = async () => {
+      const alreadyDone = await window.ipcRenderer.invoke('BOOT_PROBE_STATUS')
+      if (alreadyDone) return
+      await window.ipcRenderer.invoke('BOOT_PROBE_MARK')
+      const micStatus = await window.ipcRenderer.invoke('CHECK_MICROPHONE_PERMISSION')
+      const { systemAudioStatus } = await checkSystemAudioPermission(micStatus, false)
+      if (micStatus !== 'granted' || systemAudioStatus !== 'granted') {
+        window.dispatchEvent(new CustomEvent('SHOW_PERMISSION_OVERLAY', {
+          detail: { micStatus, systemAudioStatus }
+        }))
+      }
+    }
+
+    void probeOnBoot()
     const handlePermissionsOverlay = (event: Event) => {
       const detail = (event as CustomEvent).detail || {}
       setPermissionStatus({
-        screen: detail.screenStatus || 'unknown',
-        mic: detail.micStatus || 'unknown'
+        mic: detail.micStatus || 'unknown',
+        systemAudio: detail.systemAudioStatus || 'unknown'
       })
       setPermissionsVisible(true)
     }
@@ -292,21 +318,13 @@ function App() {
     return () => window.removeEventListener('SHOW_PERMISSION_OVERLAY', handlePermissionsOverlay)
   }, [])
 
-  const refreshPermissions = async () => {
-    const screen = await window.ipcRenderer.invoke('CHECK_SCREEN_PERMISSION')
-    const mic = await window.ipcRenderer.invoke('CHECK_MICROPHONE_PERMISSION')
-    setPermissionStatus({ screen, mic })
-    return { screen, mic }
+  const retryRecordingIfReady = async () => {
+    await window.ipcRenderer.invoke('APP_RELAUNCH')
   }
 
-  const retryRecordingIfReady = async () => {
-    const { screen, mic } = await refreshPermissions()
-    const screenOk = screen === 'authorized' || screen === 'granted'
-    const micOk = mic === 'granted'
-    if (screenOk && micOk) {
-      setPermissionsVisible(false)
-      window.dispatchEvent(new Event('START_RECORDING'))
-    }
+  const refreshPermissions = async () => {
+    // No-op now; macOS requires app relaunch after permission changes.
+    return { mic: permissionStatus.mic }
   }
 
   if (setupNeeded === null || (!setupNeeded && !isServerReady)) return (
@@ -330,6 +348,7 @@ function App() {
             }} 
             onRecordingChange={handleRecordingChange}
             onProcessingChange={setIsProcessing}
+            systemAudioStatus={permissionStatus.systemAudio}
             userNotes={currentNotes}
             onStopSessionRef={stopSessionRef}
             onStartSessionRef={startSessionRef}
@@ -554,9 +573,8 @@ function App() {
       <PermissionsOverlay
         visible={permissionsVisible}
         onClose={() => setPermissionsVisible(false)}
-        screenStatus={permissionStatus.screen}
         micStatus={permissionStatus.mic}
-        onRecheck={refreshPermissions}
+        systemAudioStatus={permissionStatus.systemAudio}
         onRetry={retryRecordingIfReady}
         onOpenSystemSettings={(pane) => {
           window.ipcRenderer.invoke('OPEN_SYSTEM_SETTINGS_PRIVACY', pane)

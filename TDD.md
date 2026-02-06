@@ -30,7 +30,7 @@ Pluto follows the standard Electron **Multi-Process Architecture**, with Python 
 | --- | --- | --- |
 | **Shell** | **Electron** | Primary desktop wrapper. |
 | **UI Framework** | **React + Tailwind** | For a modern, responsive dashboard. |
-| **Audio Routing** | **electron-audio-loopback** | Chromium-native loopback for system audio capture. |
+| **Audio Routing** | **AudioCap (CoreAudio)** | Native process tap for system audio capture. |
 | **STT Engine** | **WhisperX** | Python-based Whisper with speaker diarization via pyannote. |
 | **LLM** | **Configurable** | Default: Ollama (local). Optional: Gemini, OpenAI, Claude. |
 | **Storage** | **Better-SQLite3** | Local relational database with FTS5 for search. |
@@ -44,7 +44,7 @@ Pluto follows the standard Electron **Multi-Process Architecture**, with Python 
 
 To capture meeting audio (Zoom/Google Meet) without virtual drivers:
 
-* **System Audio:** `electron-audio-loopback` enables Chromium's hidden loopback flags, then `getDisplayMedia` captures system audio.
+* **System Audio:** Native CoreAudio process tap via AudioCap (no screen capture).
 * **Microphone:** Standard `getUserMedia` for local mic input.
 * **Mixing:** Both streams mixed via `AudioContext` → `MediaStreamDestination`.
 * **Output:** WebM recorded via `MediaRecorder`, converted to WAV (16-bit, 16kHz) via FFmpeg.
@@ -324,7 +324,7 @@ For local embeddings (privacy-preserving):
 ### Sprint 1: Foundation ✅
 * [x] Project rename to Pluto
 * [x] Remove old Whisper.cpp dependencies
-* [x] System audio capture (electron-audio-loopback)
+* [x] System audio capture (AudioCap)
 * [x] Microphone capture + mixing
 * [x] Basic UI + sidebar
 * [x] Python WhisperX HTTP server
