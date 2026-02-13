@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useReducer } from 'react'
 import { AudioManager } from './components/AudioManager'
 import { SetupWizard } from './components/Setup/SetupWizard'
 import './App.css'
@@ -25,6 +25,22 @@ import { SettingsOverlay } from './components/overlays/SettingsOverlay'
 
 // Types
 import { Meeting } from './types'
+
+type CallAlertVisibilityState = {
+  visible: boolean
+}
+
+type CallAlertVisibilityEvent = {
+  type: 'SHOW' | 'HIDE'
+}
+
+const callAlertVisibilityReducer = (
+  _state: CallAlertVisibilityState,
+  event: CallAlertVisibilityEvent
+): CallAlertVisibilityState => {
+  if (event.type === 'SHOW') return { visible: true }
+  return { visible: false }
+}
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null)
@@ -64,8 +80,14 @@ function App() {
   const stopSessionRef = useRef<(() => void) | null>(null)
   const startSessionRef = useRef<(() => void) | null>(null)
   const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(null)
+  const activeCallAlertInFlightRef = useRef<string | null>(null)
+  const alertVisibilityAutoResetRef = useRef<number | null>(null)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
   const [speakingSource, setSpeakingSource] = useState<'Me' | 'Them' | null>(null)
+  const [, dispatchCallAlertVisibility] = useReducer(
+    callAlertVisibilityReducer,
+    { visible: false }
+  )
 
   // Connect the ref
   onAnalyserReadyRef.current = (node) => {
@@ -237,6 +259,26 @@ function App() {
       }
   }
 
+  const setCallAlertVisibility = async (visible: boolean, appName?: string) => {
+      dispatchCallAlertVisibility({ type: visible ? 'SHOW' : 'HIDE' })
+
+      if (alertVisibilityAutoResetRef.current !== null) {
+          window.clearTimeout(alertVisibilityAutoResetRef.current)
+          alertVisibilityAutoResetRef.current = null
+      }
+
+      if (visible) {
+          await window.ipcRenderer.invoke('SHOW_ACTIVE_CALL_ALERT', { appName: appName || 'Call' })
+          alertVisibilityAutoResetRef.current = window.setTimeout(() => {
+              dispatchCallAlertVisibility({ type: 'HIDE' })
+              alertVisibilityAutoResetRef.current = null
+          }, 16000)
+          return
+      }
+
+      await window.ipcRenderer.invoke('HIDE_ACTIVE_CALL_ALERT')
+  }
+
   const safeMeetings = Array.isArray(meetings) ? meetings : []
   const selectedMeeting = safeMeetings.find(m => String(m.id) === String(selectedMeetingId))
 
@@ -318,13 +360,71 @@ function App() {
     return () => window.removeEventListener('SHOW_PERMISSION_OVERLAY', handlePermissionsOverlay)
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    let intervalId: number | null = null
+
+    const pollActiveCall = async () => {
+      if (setupNeeded !== false || isRecording || isProcessing) {
+        activeCallAlertInFlightRef.current = null
+        await setCallAlertVisibility(false)
+        return
+      }
+
+      try {
+        const result = await window.ipcRenderer.invoke('DETECT_ACTIVE_CALL')
+        if (cancelled) return
+
+        const appName = typeof result?.appName === 'string' ? result.appName : null
+        const isActive = Boolean(result?.active) && Boolean(appName)
+
+        if (!isActive || !appName) {
+          activeCallAlertInFlightRef.current = null
+          return
+        }
+
+        if (activeCallAlertInFlightRef.current !== appName) {
+          activeCallAlertInFlightRef.current = appName
+          await setCallAlertVisibility(true, appName)
+        }
+      } catch {
+        activeCallAlertInFlightRef.current = null
+      }
+    }
+
+    void pollActiveCall()
+    intervalId = window.setInterval(() => {
+      void pollActiveCall()
+    }, 12000)
+
+    return () => {
+      cancelled = true
+      if (intervalId !== null) window.clearInterval(intervalId)
+    }
+  }, [setupNeeded, isRecording, isProcessing])
+
+  useEffect(() => {
+    return () => {
+      if (alertVisibilityAutoResetRef.current !== null) {
+        window.clearTimeout(alertVisibilityAutoResetRef.current)
+        alertVisibilityAutoResetRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleTakeNotesFromAlert = () => {
+      if (startSessionRef.current && !isRecording && !isProcessing) {
+        startSessionRef.current()
+      }
+    }
+
+    window.ipcRenderer.on('ACTIVE_CALL_TAKE_NOTES', handleTakeNotesFromAlert)
+    return () => window.ipcRenderer.off('ACTIVE_CALL_TAKE_NOTES', handleTakeNotesFromAlert)
+  }, [isRecording, isProcessing])
+
   const retryRecordingIfReady = async () => {
     await window.ipcRenderer.invoke('APP_RELAUNCH')
-  }
-
-  const refreshPermissions = async () => {
-    // No-op now; macOS requires app relaunch after permission changes.
-    return { mic: permissionStatus.mic }
   }
 
   if (setupNeeded === null || (!setupNeeded && !isServerReady)) return (
@@ -356,7 +456,6 @@ function App() {
             onSpeakingChange={setSpeakingSource}
             userTitle={meetingTitle}
             participants={meetingParticipants}
-            hfToken={hfToken}
         />
       </div>
       
