@@ -82,12 +82,19 @@ function App() {
   const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(null)
   const activeCallAlertInFlightRef = useRef<string | null>(null)
   const alertVisibilityAutoResetRef = useRef<number | null>(null)
+  const isRecordingRef = useRef(false)
+  const isProcessingRef = useRef(false)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
   const [speakingSource, setSpeakingSource] = useState<'Me' | 'Them' | null>(null)
   const [, dispatchCallAlertVisibility] = useReducer(
     callAlertVisibilityReducer,
     { visible: false }
   )
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording
+    isProcessingRef.current = isProcessing
+  }, [isRecording, isProcessing])
 
   // Connect the ref
   onAnalyserReadyRef.current = (node) => {
@@ -414,14 +421,14 @@ function App() {
 
   useEffect(() => {
     const handleTakeNotesFromAlert = () => {
-      if (startSessionRef.current && !isRecording && !isProcessing) {
+      if (startSessionRef.current && !isRecordingRef.current && !isProcessingRef.current) {
         startSessionRef.current()
       }
     }
 
     window.ipcRenderer.on('ACTIVE_CALL_TAKE_NOTES', handleTakeNotesFromAlert)
     return () => window.ipcRenderer.off('ACTIVE_CALL_TAKE_NOTES', handleTakeNotesFromAlert)
-  }, [isRecording, isProcessing])
+  }, [])
 
   const retryRecordingIfReady = async () => {
     await window.ipcRenderer.invoke('APP_RELAUNCH')

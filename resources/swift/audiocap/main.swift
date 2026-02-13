@@ -102,7 +102,7 @@ class AudioCapCLI {
         }
     }
 
-    func probe(durationMs: Int) {
+    func probe(durationMs: Int, emitProbeTone: Bool) {
         let queue = DispatchQueue(label: "AudioCapProbeQueue")
         var sawNonZero = false
         do {
@@ -128,7 +128,9 @@ class AudioCapCLI {
                 return
             }
 
-            playProbeTone(durationMs: durationMs, frequency: 440, volume: 0.08)
+            if emitProbeTone {
+                playProbeTone(durationMs: durationMs, frequency: 440, volume: 0.08)
+            }
 
             let start = Date()
             while Date().timeIntervalSince(start) < Double(durationMs) / 1000.0 {
@@ -251,6 +253,7 @@ func parseTargetPids(arguments: [String]) -> [Int32] {
 }
 
 let includeSelf = CommandLine.arguments.contains("--probe-include-self")
+let probeSilent = CommandLine.arguments.contains("--probe-silent")
 let targetPids = parseTargetPids(arguments: CommandLine.arguments)
 let cli = AudioCapCLI(includeSelf: includeSelf, targetPids: targetPids.isEmpty ? nil : targetPids)
 if CommandLine.arguments.contains("--probe") {
@@ -260,7 +263,7 @@ if CommandLine.arguments.contains("--probe") {
             durationMs = parsed
         }
     }
-    cli.probe(durationMs: durationMs)
+    cli.probe(durationMs: durationMs, emitProbeTone: !probeSilent)
 } else {
     cli.start()
 }

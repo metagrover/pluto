@@ -565,12 +565,14 @@ app.whenReady().then(async () => {
     durationMs = 1500,
     allowSilent = false,
     includeSelf = true,
-    targetPids
+    targetPids,
+    silentProbe = false
   }: {
     durationMs?: number
     allowSilent?: boolean
     includeSelf?: boolean
     targetPids?: number[]
+    silentProbe?: boolean
   } = {}) => {
     if (nativeAudioProcess) return true
 
@@ -582,6 +584,7 @@ app.whenReady().then(async () => {
 
     const probeArgs = ['--probe']
     if (includeSelf) probeArgs.push('--probe-include-self')
+    if (silentProbe) probeArgs.push('--probe-silent')
     const uniqueTargetPids = Array.from(new Set((targetPids || []).filter(pid => Number.isInteger(pid) && pid > 0)))
     for (const pid of uniqueTargetPids) {
       probeArgs.push('--pid', String(pid))
@@ -667,16 +670,16 @@ app.whenReady().then(async () => {
     }
 
     const processes = await getRunningProcesses()
-    const matched = CALL_APP_MATCHERS
+    const matchedApps = CALL_APP_MATCHERS
       .map(matcher => ({
         label: matcher.label,
         pids: processes
           .filter(proc => matcher.patterns.some(pattern => pattern.test(proc.name)))
           .map(proc => proc.pid)
       }))
-      .find(entry => entry.pids.length > 0)
+      .filter(entry => entry.pids.length > 0)
 
-    if (!matched || matched.pids.length === 0) {
+    if (matchedApps.length === 0) {
       return {
         active: false,
         appName: null,
@@ -685,27 +688,30 @@ app.whenReady().then(async () => {
       }
     }
 
-    const externalAudioActive = await runAudioProbe({
-      durationMs: 1200,
-      includeSelf: false,
-      allowSilent: false,
-      targetPids: matched.pids
-    })
+    for (const matched of matchedApps) {
+      const externalAudioActive = await runAudioProbe({
+        durationMs: 1200,
+        includeSelf: false,
+        allowSilent: false,
+        targetPids: matched.pids,
+        silentProbe: true
+      })
 
-    if (!externalAudioActive) {
-      return {
-        active: false,
-        appName: matched.label,
-        confidence: 'low',
-        reason: 'call-app-running-without-target-audio'
+      if (externalAudioActive) {
+        return {
+          active: true,
+          appName: matched.label,
+          confidence: 'high',
+          reason: 'call-app-running-with-active-audio'
+        }
       }
     }
 
     return {
-      active: true,
-      appName: matched.label,
-      confidence: 'high',
-      reason: 'call-app-running-with-active-audio'
+      active: false,
+      appName: matchedApps[0]?.label || null,
+      confidence: 'low',
+      reason: 'call-app-running-without-target-audio'
     }
   }
 
