@@ -43,6 +43,7 @@ type RunningProcessInfo = {
 
 const CALL_APP_MATCHERS: Array<{ label: string; patterns: RegExp[] }> = [
   { label: 'FaceTime', patterns: [/facetime/i] },
+  { label: 'Chrome', patterns: [/google chrome/i, /chrome helper/i, /\bchromium\b/i] },
   { label: 'Zoom', patterns: [/zoom\.us/i, /\bzoom\b/i, /cpthost/i] },
   { label: 'Microsoft Teams', patterns: [/microsoft teams/i, /\bteams\b/i] },
   { label: 'Webex', patterns: [/webex/i, /cisco webex/i] }
