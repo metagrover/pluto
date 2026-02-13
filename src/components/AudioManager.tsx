@@ -51,6 +51,7 @@ export const AudioManager = ({
   
   // Refs - Dual Recording for source-based speaker labeling
   const micRecorderRef = useRef<MediaRecorder | null>(null)
+  const micMimeTypeRef = useRef<string | null>(null)
 
   
   const micChunksRef = useRef<Blob[]>([])
@@ -204,6 +205,8 @@ export const AudioManager = ({
           if (micStream) {
                const micRecorder = new MediaRecorder(micStream, getRecorderOptions())
                micRecorderRef.current = micRecorder
+               micMimeTypeRef.current = micRecorder.mimeType || null
+               console.log(`[Pluto] Mic recorder MIME: ${micRecorder.mimeType || 'unknown'}, format: ${getMicFormat()}`)
                
 
                micRecorder.ondataavailable = (event) => {
@@ -355,6 +358,12 @@ export const AudioManager = ({
       return undefined
   }
 
+  const getMicFormat = (): 'webm' | 'ogg' => {
+      const mimeType = micMimeTypeRef.current || micRecorderRef.current?.mimeType || ''
+      if (mimeType.includes('ogg')) return 'ogg'
+      return 'webm'
+  }
+
 
 
 
@@ -450,14 +459,14 @@ export const AudioManager = ({
        }
   }
 
-   const transcribeChunkPair = async (opts: {
+  const transcribeChunkPair = async (opts: {
        micBlob: Blob
        systemBlob?: Blob
        chunkIndex: number
    }) => {
        const chunkStartSec = opts.chunkIndex * CHUNK_SECONDS
        
-       const processStream = async (label: 'Me' | 'Them', blob?: Blob, format: 'webm' | 'wav' = 'webm') => {
+       const processStream = async (label: 'Me' | 'Them', blob?: Blob, format: 'webm' | 'ogg' | 'wav' = 'webm') => {
            if (!blob || blob.size < 1024) { 
              return { segments: [], rms: null as RmsData | null }
            }
@@ -500,7 +509,7 @@ export const AudioManager = ({
        }
 
        const [micResult, systemResult] = await Promise.all([
-           processStream('Me', opts.micBlob, 'webm'),
+           processStream('Me', opts.micBlob, getMicFormat()),
            processStream('Them', opts.systemBlob, 'wav')
        ])
 
@@ -552,9 +561,16 @@ export const AudioManager = ({
       
       try {
           // Helper to stop a recorder and get its blob
-          const stopRecorder = async (recorder: MediaRecorder | null, chunks: Blob[]): Promise<Blob | null> => {
+          const stopRecorder = async (
+              recorder: MediaRecorder | null,
+              chunks: Blob[],
+              mimeTypeOverride?: string | null
+          ): Promise<Blob | null> => {
               if (!recorder || recorder.state === 'inactive') {
-                  if (chunks.length > 0) return new Blob(chunks, { type: 'audio/webm;codecs=opus' })
+                  if (chunks.length > 0) {
+                      const type = mimeTypeOverride || recorder?.mimeType || 'audio/webm;codecs=opus'
+                      return new Blob(chunks, { type })
+                  }
                   return null
               }
               
@@ -565,11 +581,12 @@ export const AudioManager = ({
               await stopped
               
               if (chunks.length === 0) return null
-              return new Blob(chunks, { type: 'audio/webm;codecs=opus' })
+              const type = mimeTypeOverride || recorder?.mimeType || 'audio/webm;codecs=opus'
+              return new Blob(chunks, { type })
           }
           
           // Stop Mic Recorder
-          const micBlob = await stopRecorder(micRecorderRef.current, micChunksRef.current)
+          const micBlob = await stopRecorder(micRecorderRef.current, micChunksRef.current, micMimeTypeRef.current)
           
           // Stop Native Capture
           await window.ipcRenderer.invoke('NATIVE_AUDIO_STOP')
@@ -600,6 +617,7 @@ export const AudioManager = ({
           
           // Reset refs
           micRecorderRef.current = null
+          micMimeTypeRef.current = null
           micChunksRef.current = []
           hasMicRecorderRef.current = false
           hasSystemRecorderRef.current = false
@@ -634,7 +652,7 @@ export const AudioManager = ({
           if (primaryBlob && primaryBlob.size > 0) {
               try {
                   const buffer = await primaryBlob.arrayBuffer()
-                  const maybePath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer)
+                  const maybePath = await window.ipcRenderer.invoke('AUDIO_SAVE_AND_CONVERT', buffer, getMicFormat())
                   if (maybePath) primaryAudioPath = maybePath
               } catch (e) {
                   console.warn('[Pluto] Save failed:', e)

@@ -298,7 +298,7 @@ app.whenReady().then(async () => {
     return true
   })
 
-  ipcMain.handle('AUDIO_SAVE_AND_CONVERT', async (_event, arrayBuffer, format?: 'pcm' | 'webm' | 'wav') => {
+  ipcMain.handle('AUDIO_SAVE_AND_CONVERT', async (_event, arrayBuffer, format?: 'pcm' | 'webm' | 'ogg' | 'wav') => {
     const start = Date.now()
     const buffer = Buffer.from(arrayBuffer ?? [])
     const tempId = Date.now().toString()
@@ -310,6 +310,7 @@ app.whenReady().then(async () => {
 
     let ext = 'webm'
     if (format === 'pcm') ext = 'pcm'
+    if (format === 'ogg') ext = 'ogg'
     if (format === 'wav') ext = 'wav'
 
     const rawPath = path.join(app.getPath('temp'), `raw_${tempId}.${ext}`)
