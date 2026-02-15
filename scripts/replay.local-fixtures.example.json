@@ -1,0 +1,19 @@
+{
+  "defaultSet": "private_meeting",
+  "sets": {
+    "private_meeting": {
+      "label": "Private local meeting regression",
+      "meetingId": "PUT_MEETING_ID_HERE",
+      "expectedTurns": [
+        {
+          "speaker": "Me",
+          "text": "Expected first Me turn."
+        },
+        {
+          "speaker": "Them",
+          "text": "Expected first Them turn."
+        }
+      ]
+    }
+  }
+}

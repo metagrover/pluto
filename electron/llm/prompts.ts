@@ -1,18 +1,101 @@
+import type { ExtractionPriorityHints, InternalSignalDocument } from './provider'
+
 export const getSummaryPrompt = (transcript: string, userNotes?: string): string => {
-    return `You are an intelligent meeting assistant. Analyze this conversation transcript${userNotes ? ' and the user\'s notes' : ''} and synthesize them into ONE cohesive summary. The notes are not a separate section; weave them into the narrative and bullet points as if they were part of the conversation.
+    return `You are a rigorous conversation analyst producing user-facing meeting analysis for Pluto.
 
-1. **Summary**: A concise 2-3 sentence overview. CRITICAL: Jump straight into the content. DO NOT start with "This transcript...", "The meeting...", "This conversation...", or similar meta-commentary.
-2. **Key Points**: Main topics and important information mentioned (blend notes + transcript)
-3. **Action Items**: Any tasks, follow-ups, or commitments mentioned (use "- [ ]" checkbox format)
-4. **Decisions**: Any decisions or conclusions reached
+Analyze this transcript${userNotes ? ' and user notes' : ''} and produce polished, natural-language output.
 
-If notes conflict with the transcript, prefer the notes when they are explicit and practical.
+Non-negotiable requirements:
+- Use only transcript${userNotes ? ' and user-note' : ''} details. Never invent facts.
+- Keep technical meaning exact (do not flip problem/solution, attack/defense, or cause/effect).
+- Do not include internal taxonomies or field labels in user text (forbidden: "Observation:", "Why it matters:", "Supporting detail:", "Evidence:", "Pluto use:").
+- If content is mostly monologue/interview/video, reflect that instead of fabricating team consensus.
+- Distinguish implemented choices already made from future commitments.
+- Output only these four sections, in order, with markdown headings.
 
-${userNotes ? `\nUser Notes:\n${userNotes}\n` : ''}
+Write exactly:
 
-Format your response in clean markdown with clear sections. Do not create a "Notes" section.
+## Summary
+- 2-3 concise sentences, direct and specific.
+
+## Key Points
+- 4-6 bullets.
+- Each bullet should be natural prose in one coherent statement.
+- No inline meta labels.
+
+## Action Items
+- Use checkbox bullets only: - [ ] ...
+- Include only explicit committed next steps.
+- If none, write: - [ ] No concrete action items were explicitly committed.
+
+## Decisions
+- List explicit decisions and implemented choices.
+- If none, write: - No explicit decisions were made.
+
+${userNotes ? `\nUser Notes (high-priority context):\n${userNotes}\n` : ''}
 
 Transcript:
+${transcript}`
+}
+
+export const getSummaryRepairPrompt = (
+    transcript: string,
+    invalidOutput: string,
+    userNotes?: string
+): string => {
+    return `Repair this draft analysis into Pluto's required structure.
+
+Rules:
+- Preserve factual meaning from draft/transcript${userNotes ? '/notes' : ''}; do not invent.
+- Remove internal field labels and formatting noise.
+- Keep natural prose bullets (no "Observation:" style prefixes).
+- Return only the corrected markdown with the required sections.
+
+Required sections in order:
+## Summary
+## Key Points
+## Action Items
+## Decisions
+
+Draft to repair:
+${invalidOutput}
+
+${userNotes ? `User Notes:\n${userNotes}\n` : ''}Transcript:
+${transcript}`
+}
+
+export const getValueSignalsPrompt = (transcript: string, summary?: string): string => {
+    return `You are extracting hidden internal signals for Pluto's backend graph/connectivity systems.
+
+Goal:
+- Capture compact, reusable signal metadata for continuity, accountability, and decision impact.
+- Output is internal JSON only (never user-facing phrasing).
+
+Rules:
+- Use only transcript${summary ? ' and summary' : ''} details.
+- Keep each signal concrete and specific.
+- Avoid duplicates and near-duplicates.
+- Do not invent tasks, owners, or deadlines.
+- If a category has no strong signal, return an empty array for it.
+- Core signal arrays: max 3 items each.
+- Free-form tags: normalize to lowercase kebab-case, dedupe, max 8.
+- Confidence must be between 0 and 1.
+
+Return valid JSON only in this exact shape:
+{
+  "continuity": ["string"],
+  "accountability_risks": ["string"],
+  "decision_impacts": ["string"],
+  "extra_tags": [{"tag": "string", "confidence": 0.0}]
+}
+
+Signal definitions:
+- continuity: durable context to carry forward (projects, constraints, unresolved themes, operating principles).
+- accountability_risks: missing ownership/timing, single-threaded execution risk, weak disclosure workflow, or other execution risks.
+- decision_impacts: explicit decisions/implemented choices with meaningful downstream impact.
+- extra_tags: high-signal topical labels that can help backend ranking and connectivity.
+
+${summary ? `Summary context:\n${summary}\n\n` : ''}Transcript:
 ${transcript}`
 }
 
@@ -46,8 +129,50 @@ Transcript:
 ${transcript.substring(0, 1000)}`
 }
 
-export const getEntitiesPrompt = (transcript: string): string => {
-    return `You are an expert at extracting structured information from meeting transcripts.
+export const getEntitiesPrompt = (
+    transcript: string,
+    context?: {
+        summary?: string
+        valueSignals?: InternalSignalDocument
+        priorityHints?: ExtractionPriorityHints
+    }
+): string => {
+    const valueSignals = context?.valueSignals
+    const priorityHints = context?.priorityHints
+    const hasSignals = !!valueSignals && (
+        valueSignals.continuity.length > 0 ||
+        valueSignals.accountability_risks.length > 0 ||
+        valueSignals.decision_impacts.length > 0 ||
+        valueSignals.extra_tags.length > 0
+    )
+    const hasHints = !!priorityHints && (
+        priorityHints.prioritized_terms.length > 0 ||
+        Object.keys(priorityHints.relationship_bias || {}).length > 0
+    )
+
+    const contextBlock = [
+        context?.summary?.trim()
+            ? `Summary context (auxiliary, do not treat as new facts):\n${context.summary.trim()}`
+            : '',
+        hasSignals
+            ? `Value-gain signals (auxiliary prioritization hints, not standalone evidence):
+- Continuity: ${valueSignals?.continuity.join(' | ') || 'none'}
+- Accountability risks: ${valueSignals?.accountability_risks.join(' | ') || 'none'}
+- Decision impacts: ${valueSignals?.decision_impacts.join(' | ') || 'none'}
+- Extra tags: ${valueSignals?.extra_tags.map((item) => `${item.tag}:${item.confidence.toFixed(2)}`).join(' | ') || 'none'}`
+            : '',
+        hasHints
+            ? `Deterministic extraction hints:
+- Prioritized terms: ${priorityHints?.prioritized_terms.join(' | ') || 'none'}
+- Relationship bias: ${Object.entries(priorityHints?.relationship_bias || {}).map(([k, v]) => `${k}:${v}`).join(' | ') || 'none'}`
+            : ''
+    ].filter(Boolean).join('\n\n')
+
+    return `You are an expert at extracting graph-ready structured information from meeting transcripts for Pluto's knowledge graph.
+
+Goal:
+- Convert raw conversation into durable entities and relationships that remain useful across future meetings.
+- Prefer precision and canonical naming over volume.
 
 Analyze the following transcript and extract:
 
@@ -61,9 +186,16 @@ Analyze the following transcript and extract:
 
 Rules:
 - Only include entities that are clearly mentioned or implied
+- If summary/signals context is provided, use it only to prioritize what to extract from transcript text; never invent entities not grounded in the transcript
+- Use canonical names:
+  - People: prefer full names when available (e.g., "Sarah Chen" over "Sarah")
+  - Projects/topics: keep wording consistent and specific (avoid vague labels like "the project")
+- Resolve pronouns/nicknames to the canonical entity only when confidence is high; otherwise omit
 - For action items, "assignee" should be a name if mentioned, otherwise omit
 - For due dates, use the exact phrase from the transcript (e.g., "by Friday", "next week")
 - Be conservative - only extract what's clearly present, don't infer too much
+- For relationships, include only high-confidence links where both source and target are identifiable entities in the transcript
+- Put a short evidence phrase in relationship "context" when available
 - IMPORTANT: When extracting relationships, valid types are: 'works_on', 'impacts', 'relates_to', 'involved_in', 'produced', 'assigned_to'
 
 Respond with valid JSON in this exact format:
@@ -76,6 +208,6 @@ Respond with valid JSON in this exact format:
   "relationships": [{"source": "string", "target": "string", "relationship": "string", "context": "string or omit"}]
 }
 
-Transcript:
+${contextBlock ? `${contextBlock}\n\n` : ''}Transcript:
 ${transcript}`
 }

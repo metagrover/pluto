@@ -65,6 +65,7 @@ function App() {
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [openaiApiKey, setOpenaiApiKey] = useState('')
   const [claudeApiKey, setClaudeApiKey] = useState('')
+  const [ollamaModel, setOllamaModel] = useState('')
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
   const [askPlutoVisible, setAskPlutoVisible] = useState(false)
@@ -201,6 +202,9 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'claude_api_key').then((val) => {
       if (val) setClaudeApiKey(val)
     })
+    window.ipcRenderer.invoke('GET_SETTING', 'ollama_model').then((val) => {
+      if (val) setOllamaModel(val)
+    })
 
     const checkServer = async () => {
         try {
@@ -328,7 +332,7 @@ function App() {
 
   const intelligence = getProactiveIntelligence()
 
-  const checkSystemAudioPermission = async (micStatus: string, allowSilent: boolean) => {
+  const checkSystemAudioPermission = async (micStatus: string, allowSilent = true) => {
     try {
       const ok = await window.ipcRenderer.invoke('SYSTEM_AUDIO_PROBE', { durationMs: 1500, allowSilent })
       const systemAudioStatus = ok ? 'granted' : 'needs-audio'
@@ -346,7 +350,7 @@ function App() {
       if (alreadyDone) return
       await window.ipcRenderer.invoke('BOOT_PROBE_MARK')
       const micStatus = await window.ipcRenderer.invoke('CHECK_MICROPHONE_PERMISSION')
-      const { systemAudioStatus } = await checkSystemAudioPermission(micStatus, false)
+      const { systemAudioStatus } = await checkSystemAudioPermission(micStatus)
       if (micStatus !== 'granted' || systemAudioStatus !== 'granted') {
         window.dispatchEvent(new CustomEvent('SHOW_PERMISSION_OVERLAY', {
           detail: { micStatus, systemAudioStatus }
@@ -366,6 +370,14 @@ function App() {
     window.addEventListener('SHOW_PERMISSION_OVERLAY', handlePermissionsOverlay)
     return () => window.removeEventListener('SHOW_PERMISSION_OVERLAY', handlePermissionsOverlay)
   }, [])
+
+  useEffect(() => {
+    const micGranted = permissionStatus.mic === 'granted' || permissionStatus.mic === 'authorized'
+    const systemGranted = permissionStatus.systemAudio === 'granted' || permissionStatus.systemAudio === 'authorized'
+    if (micGranted && systemGranted) {
+      setPermissionsVisible(false)
+    }
+  }, [permissionStatus])
 
   useEffect(() => {
     let cancelled = false
@@ -672,6 +684,8 @@ function App() {
         setOpenaiApiKey={setOpenaiApiKey}
         claudeApiKey={claudeApiKey}
         setClaudeApiKey={setClaudeApiKey}
+        ollamaModel={ollamaModel}
+        setOllamaModel={setOllamaModel}
         fetchMeetings={fetchMeetings}
         setSelectedMeetingId={setSelectedMeetingId}
       />

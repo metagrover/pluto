@@ -7,6 +7,7 @@ import { spawn, ChildProcess } from 'child_process'
 import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
+import net from 'node:net'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Agent } = require('undici') as { Agent: new (opts: { headersTimeout: number; bodyTimeout: number }) => any }
 
@@ -53,8 +54,7 @@ export interface HealthStatus {
 }
 
 // Constants
-const WHISPERX_PORT = 5123
-const WHISPERX_URL = `http://127.0.0.1:${WHISPERX_PORT}`
+const WHISPERX_DEFAULT_PORT = 5123
 const HEALTH_CHECK_INTERVAL = 1000
 const MAX_HEALTH_CHECK_RETRIES = 30
 const WHISPERX_FETCH_AGENT = new Agent({
@@ -67,6 +67,8 @@ const WHISPERX_FETCH_AGENT = new Agent({
 class WhisperXManager {
     private process: ChildProcess | null = null
     private pythonPath: string = ''
+    private port: number = WHISPERX_DEFAULT_PORT
+    private externalServer: boolean = false
 
     constructor() {
         this.detectExecutable()
@@ -169,6 +171,55 @@ class WhisperXManager {
         return 'python3'
     }
 
+    private getBaseUrl(port: number = this.port): string {
+        return `http://127.0.0.1:${port}`
+    }
+
+    private async healthOnPort(port: number, timeoutMs: number = 1000): Promise<HealthStatus> {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), timeoutMs)
+        try {
+            const response = await fetch(`${this.getBaseUrl(port)}/health`, {
+                signal: controller.signal
+            } as RequestInit)
+            if (!response.ok) {
+                return { status: 'error', error: `HTTP ${response.status}` }
+            }
+            return await response.json()
+        } catch (e) {
+            return { status: 'error', error: (e as Error).message }
+        } finally {
+            clearTimeout(timeout)
+        }
+    }
+
+    private async isPortAvailable(port: number): Promise<boolean> {
+        return new Promise((resolve) => {
+            const server = net.createServer()
+            server.once('error', (err: NodeJS.ErrnoException) => {
+                if (err.code === 'EADDRINUSE') {
+                    resolve(false)
+                } else {
+                    resolve(false)
+                }
+            })
+            server.once('listening', () => {
+                server.close(() => resolve(true))
+            })
+            server.listen(port, '127.0.0.1')
+        })
+    }
+
+    private async findAvailablePort(preferredPort: number, maxAttempts: number = 20): Promise<number> {
+        for (let i = 0; i < maxAttempts; i++) {
+            const candidate = preferredPort + i
+            if (await this.isPortAvailable(candidate)) {
+                return candidate
+            }
+        }
+        throw new Error('No available port found for WhisperX server')
+    }
+
     /**
      * Get the path to the Python directory
      */
@@ -193,12 +244,22 @@ class WhisperXManager {
         }
 
         this.startPromise = (async () => {
-            if (this.process) {
+            if (this.process || this.externalServer) {
                 console.log('[WhisperX] Server already running')
                 return
             }
 
             try {
+                const existingHealth = await this.healthOnPort(WHISPERX_DEFAULT_PORT)
+                if (existingHealth.status === 'ok') {
+                    this.port = WHISPERX_DEFAULT_PORT
+                    this.externalServer = true
+                    console.log(`[WhisperX] Using existing server on port ${this.port}`)
+                    return
+                }
+
+                this.port = await this.findAvailablePort(WHISPERX_DEFAULT_PORT)
+
                 const executable = this.detectExecutable()
                 let spawnArgs: string[] = []
                 let cwd = this.getPythonDir()
@@ -214,7 +275,7 @@ class WhisperXManager {
                     cwd = path.dirname(executable)
                 }
 
-                console.log(`[WhisperX] Starting server using: ${executable} ${spawnArgs.join(' ')}`)
+                console.log(`[WhisperX] Starting server using: ${executable} ${spawnArgs.join(' ')} (port ${this.port})`)
 
                 // Detect ffmpeg path
                 let ffmpegPath = ''
@@ -231,7 +292,7 @@ class WhisperXManager {
                 // Set environment variables
                 const env = {
                     ...process.env,
-                    WHISPERX_PORT: WHISPERX_PORT.toString(),
+                    WHISPERX_PORT: this.port.toString(),
                     PATH: ffmpegPath ? `${path.dirname(ffmpegPath)}:${process.env.PATH}` : process.env.PATH
                 }
 
@@ -257,12 +318,14 @@ class WhisperXManager {
                     console.log(`[WhisperX] Server exited with code ${code}`)
                     this.process = null
                     this.startPromise = null // Reset promise so it can be restarted
+                    this.externalServer = false
                 })
 
                 this.process.on('error', (err) => {
                     console.error(`[WhisperX] Failed to start server: ${err.message}`)
                     this.process = null
                     this.startPromise = null
+                    this.externalServer = false
                 })
 
                 // Wait for server to be ready
@@ -300,6 +363,10 @@ class WhisperXManager {
      * Stop the WhisperX server
      */
     async stop(): Promise<void> {
+        if (this.externalServer && !this.process) {
+            console.log('[WhisperX] External server in use; skipping stop')
+            return
+        }
         if (this.process) {
             console.log('[WhisperX] Stopping server')
             this.process.kill('SIGTERM')
@@ -320,22 +387,14 @@ class WhisperXManager {
      * Check if the server is running
      */
     isRunning(): boolean {
-        return this.process !== null && !this.process.killed
+        return (this.process !== null && !this.process.killed) || this.externalServer
     }
 
     /**
      * Health check
      */
     async health(): Promise<HealthStatus> {
-        try {
-            const response = await fetch(`${WHISPERX_URL}/health`)
-            if (!response.ok) {
-                return { status: 'error', error: `HTTP ${response.status}` }
-            }
-            return await response.json()
-        } catch (e) {
-            return { status: 'error', error: (e as Error).message }
-        }
+        return await this.healthOnPort(this.port, 2000)
     }
 
     /**
@@ -345,7 +404,7 @@ class WhisperXManager {
         // Ensure server is running and ready
         await this.start()
 
-        const response = await fetch(`${WHISPERX_URL}/transcribe`, {
+        const response = await fetch(`${this.getBaseUrl()}/transcribe`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             dispatcher: WHISPERX_FETCH_AGENT,
@@ -370,7 +429,7 @@ class WhisperXManager {
      * Update server configuration
      */
     async setConfig(config: Partial<WhisperXConfig>): Promise<void> {
-        const response = await fetch(`${WHISPERX_URL}/config`, {
+        const response = await fetch(`${this.getBaseUrl()}/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -391,7 +450,7 @@ class WhisperXManager {
      * List available models
      */
     async listModels(): Promise<Array<{ id: string; size: string; speed: string; quality: string }>> {
-        const response = await fetch(`${WHISPERX_URL}/models`)
+        const response = await fetch(`${this.getBaseUrl()}/models`)
         if (!response.ok) {
             throw new Error(`Failed to list models: ${response.status}`)
         }

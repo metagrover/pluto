@@ -85,6 +85,22 @@ export interface ExtractedEntities {
     }>
 }
 
+export interface ValueGainSignals {
+    analysis_schema_version?: number
+    continuity: string[]
+    accountability_risks: string[]
+    decision_impacts: string[]
+    extra_tags?: Array<{
+        tag: string
+        confidence: number
+    }>
+}
+
+export interface ExtractionPriorityHints {
+    prioritized_terms: string[]
+    relationship_bias: Record<string, number>
+}
+
 export interface ProcessedEntities {
     created: number
     updated: number
@@ -121,8 +137,20 @@ const invoke = (channel: string, ...args: any[]): Promise<any> => {
 /**
  * Extract entities from a transcript (returns raw LLM extraction)
  */
-export const extractEntities = async (transcript: string): Promise<ExtractedEntities> => {
-    return invoke('EXTRACT_ENTITIES', { transcript })
+export const extractEntities = async (
+    transcript: string,
+    context?: {
+        summary?: string
+        valueSignals?: ValueGainSignals
+        priorityHints?: ExtractionPriorityHints
+    }
+): Promise<ExtractedEntities> => {
+    return invoke('EXTRACT_ENTITIES', {
+        transcript,
+        summary: context?.summary,
+        valueSignals: context?.valueSignals,
+        priorityHints: context?.priorityHints
+    })
 }
 
 /**
@@ -130,9 +158,20 @@ export const extractEntities = async (transcript: string): Promise<ExtractedEnti
  */
 export const extractAndProcessEntities = async (
     transcript: string,
-    meetingId: string
+    meetingId: string,
+    context?: {
+        summary?: string
+        valueSignals?: ValueGainSignals
+        priorityHints?: ExtractionPriorityHints
+    }
 ): Promise<ProcessedEntities> => {
-    return invoke('EXTRACT_AND_PROCESS_ENTITIES', { transcript, meetingId })
+    return invoke('EXTRACT_AND_PROCESS_ENTITIES', {
+        transcript,
+        meetingId,
+        summary: context?.summary,
+        valueSignals: context?.valueSignals,
+        priorityHints: context?.priorityHints
+    })
 }
 
 /**

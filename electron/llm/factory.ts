@@ -1,8 +1,5 @@
 import { LLMProvider, ProviderType, LLMSettings } from './provider'
-import { OllamaProvider } from './ollama'
-import { GeminiProvider } from '../gemini'
-import { OpenAIProvider } from './openai'
-import { ClaudeProvider } from './claude'
+import { UnifiedLLMProvider } from './unifiedProvider'
 
 export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
     const providerType: ProviderType = settings.llm_provider || 'ollama'
@@ -11,7 +8,7 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
 
     switch (providerType) {
         case 'ollama': {
-            const ollama = new OllamaProvider()
+            const ollama = new UnifiedLLMProvider('ollama', settings)
             if (await ollama.isAvailable()) {
                 console.log('[LLM Factory] Ollama is available')
                 return ollama
@@ -21,15 +18,15 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
             // Fallback to cloud provider if available
             if (settings.gemini_api_key) {
                 console.log('[LLM Factory] Falling back to Gemini')
-                return new GeminiProvider(settings.gemini_api_key)
+                return new UnifiedLLMProvider('gemini', settings)
             }
             if (settings.openai_api_key) {
                 console.log('[LLM Factory] Falling back to OpenAI')
-                return new OpenAIProvider(settings.openai_api_key)
+                return new UnifiedLLMProvider('openai', settings)
             }
             if (settings.claude_api_key) {
                 console.log('[LLM Factory] Falling back to Claude')
-                return new ClaudeProvider(settings.claude_api_key)
+                return new UnifiedLLMProvider('claude', settings)
             }
 
             throw new Error('Ollama is not running and no cloud API keys configured. Please install Ollama or add an API key in settings.')
@@ -39,21 +36,21 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
             if (!settings.gemini_api_key) {
                 throw new Error('Gemini API key not configured')
             }
-            return new GeminiProvider(settings.gemini_api_key)
+            return new UnifiedLLMProvider('gemini', settings)
         }
 
         case 'openai': {
             if (!settings.openai_api_key) {
                 throw new Error('OpenAI API key not configured')
             }
-            return new OpenAIProvider(settings.openai_api_key)
+            return new UnifiedLLMProvider('openai', settings)
         }
 
         case 'claude': {
             if (!settings.claude_api_key) {
                 throw new Error('Claude API key not configured')
             }
-            return new ClaudeProvider(settings.claude_api_key)
+            return new UnifiedLLMProvider('claude', settings)
         }
 
         default:
@@ -61,11 +58,26 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
     }
 }
 
-export async function getAllSettings(db: any): Promise<LLMSettings> {
+export async function getAllSettings(db: { getSetting: (key: string) => unknown }): Promise<LLMSettings> {
+    const getStringSetting = (key: string): string | undefined => {
+        const value = db.getSetting(key)
+        return typeof value === 'string' ? value : undefined
+    }
+    const providerValue = db.getSetting('llm_provider')
+    const allowedProviders: ProviderType[] = ['ollama', 'gemini', 'openai', 'claude']
+    const llmProvider = (typeof providerValue === 'string' && allowedProviders.includes(providerValue as ProviderType))
+        ? providerValue as ProviderType
+        : 'ollama'
+
     return {
-        llm_provider: db.getSetting('llm_provider') as ProviderType || 'ollama',
-        gemini_api_key: db.getSetting('gemini_api_key') || undefined,
-        openai_api_key: db.getSetting('openai_api_key') || undefined,
-        claude_api_key: db.getSetting('claude_api_key') || undefined
+        llm_provider: llmProvider,
+        gemini_api_key: getStringSetting('gemini_api_key'),
+        openai_api_key: getStringSetting('openai_api_key'),
+        claude_api_key: getStringSetting('claude_api_key'),
+        llm_model: getStringSetting('llm_model'),
+        ollama_model: getStringSetting('ollama_model'),
+        gemini_model: getStringSetting('gemini_model'),
+        openai_model: getStringSetting('openai_model'),
+        claude_model: getStringSetting('claude_model')
     }
 }
