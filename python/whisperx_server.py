@@ -139,15 +139,15 @@ def transcribe(request: TranscribeRequest):
             language = "en"
             logger.info(f"Transcribing {request.audio_path} (language={language})...")
             result = model.transcribe(
-                request.audio_path, 
-                batch_size=16, 
+                request.audio_path,
+                batch_size=16,
                 language=language
             )
         except IndexError as e:
             logger.warning(f"No active speech detected or VAD error: {e}")
             return {
                 "segments": [],
-                "language": request.language or "en",
+                "language": "en",
                 "duration": 0
             }
         

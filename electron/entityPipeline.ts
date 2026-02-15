@@ -5,7 +5,7 @@
  * Handles entity resolution, relationship creation, and meeting associations.
  */
 
-import { ExtractedEntities } from './llm/provider'
+import { EntityExtractionContext, ExtractedEntities } from './llm/provider'
 import * as db from './db'
 import levenshtein from 'fast-levenshtein'
 
@@ -16,10 +16,25 @@ export interface ProcessedEntities {
     entities: db.Entity[]
 }
 
+const NON_PERSON_LABELS = new Set(['me', 'them', 'you', 'i', 'myself', 'speaker'])
+
+const clamp = (value: number, min: number, max: number): number => {
+    return Math.min(max, Math.max(min, value))
+}
+
+const getRelationshipBias = (context: EntityExtractionContext | undefined, relationship: string): number => {
+    const raw = context?.priorityHints?.relationship_bias?.[relationship]
+    if (typeof raw !== 'number' || Number.isNaN(raw)) {
+        return 0
+    }
+    return clamp(raw, -0.2, 0.3)
+}
+
 /**
  * Normalized string for comparison (alphanumeric only)
  */
-export function normalizeForMatch(str: string): string {
+export function normalizeForMatch(str: string | null | undefined): string {
+    if (typeof str !== 'string') return ''
     return str.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "").trim()
 }
 
@@ -27,13 +42,55 @@ export function normalizeForMatch(str: string): string {
  * Tokenize and sort string for bag-of-words comparison
  * e.g. "Project Alpha" -> "alpha project"
  */
-export function normalizeTokenSort(str: string): string {
+export function normalizeTokenSort(str: string | null | undefined): string {
+    if (typeof str !== 'string') return ''
     return str.toLowerCase()
         .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "")
         .split(/\s+/)
         .sort()
         .join(" ")
         .trim()
+}
+
+function isPersonGroundedInTranscript(name: string, transcript: string): boolean {
+    const normalizedName = normalizeForMatch(name)
+    if (!normalizedName || NON_PERSON_LABELS.has(normalizedName)) {
+        return false
+    }
+
+    const normalizedTranscript = normalizeForMatch(transcript)
+    if (!normalizedTranscript) {
+        return false
+    }
+
+    if (normalizedTranscript.includes(normalizedName)) {
+        return true
+    }
+
+    // Fallback: all meaningful tokens must be present in transcript words
+    const transcriptTokens = new Set(normalizedTranscript.split(/\s+/).filter(Boolean))
+    const nameTokens = normalizedName.split(/\s+/).filter((token) => token.length >= 3)
+    if (nameTokens.length === 0) {
+        return false
+    }
+
+    return nameTokens.every((token) => transcriptTokens.has(token))
+}
+
+function filterUngroundedPeople(
+    people: ExtractedEntities['people'],
+    transcript: string
+): ExtractedEntities['people'] {
+    const grounded: ExtractedEntities['people'] = []
+    for (const person of people) {
+        if (!person?.name || typeof person.name !== 'string') continue
+        if (isPersonGroundedInTranscript(person.name, transcript)) {
+            grounded.push(person)
+            continue
+        }
+        console.log(`[EntityPipeline] Dropping ungrounded person entity "${person.name}" (not supported by transcript text)`)
+    }
+    return grounded
 }
 
 /**
@@ -48,6 +105,7 @@ export function findSimilarEntity(
 ): db.Entity | undefined {
     const normalizedTarget = normalizeForMatch(name)
     const sortedTarget = normalizeTokenSort(name)
+    if (!normalizedTarget || !sortedTarget) return undefined
 
     let bestMatch: db.Entity | undefined
     let highCharScore = 0
@@ -57,6 +115,7 @@ export function findSimilarEntity(
 
         const normalizedSource = normalizeForMatch(entity.name)
         const sortedSource = normalizeTokenSort(entity.name)
+        if (!normalizedSource || !sortedSource) continue
 
         // 1. Token Sort Match (handles "Project Alpha" vs "Alpha Project")
         if (sortedTarget === sortedSource) {
@@ -102,7 +161,7 @@ export function findSimilarEntity(
  * This is a simple implementation - could be enhanced with a date parsing library
  */
 export function parseDueDate(dueDate: string): string | null {
-    if (!dueDate) return null
+    if (!dueDate || typeof dueDate !== 'string') return null
 
     const now = new Date()
     const lower = dueDate.toLowerCase().trim()
@@ -159,6 +218,7 @@ export function parseDueDate(dueDate: string): string | null {
 export function shouldEnrichEntity(existingName: string, newName: string): boolean {
     const normalizedExisting = normalizeForMatch(existingName)
     const normalizedNew = normalizeForMatch(newName)
+    if (!normalizedExisting || !normalizedNew) return false
 
     // Using length as a heuristic for "more complete"
     // Only if the shorter one is effectively a substring/part of the longer one
@@ -173,7 +233,9 @@ export function shouldEnrichEntity(existingName: string, newName: string): boole
  */
 export async function processExtractedEntities(
     extracted: ExtractedEntities,
-    meetingId: string
+    meetingId: string,
+    context?: EntityExtractionContext,
+    transcriptForGrounding?: string
 ): Promise<ProcessedEntities> {
     let created = 0
     let updated = 0
@@ -190,6 +252,7 @@ export async function processExtractedEntities(
 
     // 1. Process People
     for (const person of extracted.people) {
+        if (!person?.name || typeof person.name !== 'string') continue
         // Try to find a match
         const similar = findSimilarEntity('person', person.name, existingPeople, 0.82)
         let entity: db.Entity;
@@ -242,6 +305,7 @@ export async function processExtractedEntities(
 
     // 2. Process Topics
     for (const topic of extracted.topics) {
+        if (!topic?.name || typeof topic.name !== 'string') continue
         const similar = findSimilarEntity('topic', topic.name, existingTopics, 0.85)
         let entity: db.Entity
 
@@ -275,6 +339,7 @@ export async function processExtractedEntities(
 
     // 3. Process Action Items
     for (const actionItem of extracted.action_items) {
+        if (!actionItem?.description || typeof actionItem.description !== 'string') continue
         // Action items are always created fresh (not deduplicated by name)
         const dueDate = parseDueDate(actionItem.due_date || '')
 
@@ -302,6 +367,10 @@ export async function processExtractedEntities(
 
         // If there's an assignee, find/create that person and link
         if (actionItem.assignee) {
+            if (transcriptForGrounding && !isPersonGroundedInTranscript(actionItem.assignee, transcriptForGrounding)) {
+                console.log(`[EntityPipeline] Skipping ungrounded assignee "${actionItem.assignee}" for action item`)
+                continue
+            }
             // Use our fuzzy finder on the already-loaded/updated list
             const assigneeName = actionItem.assignee
             const assigneeStart = db.findEntity('person', assigneeName) // Try exact first
@@ -313,11 +382,13 @@ export async function processExtractedEntities(
             }
 
             if (assignee) {
+                const confidence = clamp(0.9 + getRelationshipBias(context, 'assigned_to'), 0.5, 0.98)
                 db.linkEntities({
                     source_entity_id: entity.id,
                     target_entity_id: assignee.id,
                     relationship: 'assigned_to',
-                    meeting_id: meetingId
+                    meeting_id: meetingId,
+                    confidence
                 })
                 linked++
             } else {
@@ -328,11 +399,13 @@ export async function processExtractedEntities(
                 })
                 existingPeople.push(newAssignee) // Update cache
 
+                const confidence = clamp(0.9 + getRelationshipBias(context, 'assigned_to'), 0.5, 0.98)
                 db.linkEntities({
                     source_entity_id: entity.id,
                     target_entity_id: newAssignee.id,
                     relationship: 'assigned_to',
-                    meeting_id: meetingId
+                    meeting_id: meetingId,
+                    confidence
                 })
                 created++
                 linked++
@@ -342,6 +415,7 @@ export async function processExtractedEntities(
 
     // 4. Process Decisions
     for (const decision of extracted.decisions) {
+        if (!decision?.description || typeof decision.description !== 'string') continue
         const entity = db.upsertEntity({
             type: 'decision',
             name: decision.description.substring(0, 100), // Truncate for name
@@ -366,6 +440,7 @@ export async function processExtractedEntities(
     // 5. Process Projects
     if (extracted.projects) {
         for (const project of extracted.projects) {
+            if (!project?.name || typeof project.name !== 'string') continue
             const similar = findSimilarEntity('project', project.name, existingProjects, 0.80)
             let entity: db.Entity
 
@@ -407,12 +482,13 @@ export async function processExtractedEntities(
                 const topicEntity = findSimilarEntity('topic', topic.name, existingTopics, 0.9) // Strong match since we just processed it
 
                 if (topicEntity) {
+                    const confidence = clamp(0.7 + getRelationshipBias(context, 'belongs_to'), 0.5, 0.95)
                     db.linkEntities({
                         source_entity_id: topicEntity.id,
                         target_entity_id: entity.id,
                         relationship: 'belongs_to',
                         meeting_id: meetingId,
-                        confidence: 0.7 // Lower confidence since it's inferred
+                        confidence // Lower confidence since it's inferred
                     })
                     linked++
                 }
@@ -423,6 +499,7 @@ export async function processExtractedEntities(
     // 6. Process Explicit Relationships
     if (extracted.relationships) {
         for (const rel of extracted.relationships) {
+            if (!rel || typeof rel.source !== 'string' || typeof rel.target !== 'string') continue
             // Find Source
             let sourceEntity: db.Entity | undefined
             // Try to find source in our just-processed list first (most likely context)
@@ -462,17 +539,36 @@ export async function processExtractedEntities(
                     findSimilarEntity('topic', rel.target, existingTopics, 0.85)
             }
 
+            if (
+                transcriptForGrounding &&
+                sourceEntity?.type === 'person' &&
+                !isPersonGroundedInTranscript(rel.source, transcriptForGrounding)
+            ) {
+                console.log(`[EntityPipeline] Skipping ungrounded relationship source "${rel.source}"`)
+                sourceEntity = undefined
+            }
+
+            if (
+                transcriptForGrounding &&
+                targetEntity?.type === 'person' &&
+                !isPersonGroundedInTranscript(rel.target, transcriptForGrounding)
+            ) {
+                console.log(`[EntityPipeline] Skipping ungrounded relationship target "${rel.target}"`)
+                targetEntity = undefined
+            }
+
             if (sourceEntity && targetEntity) {
                 // Validate relationship type
                 const validTypes = ['works_on', 'impacts', 'relates_to', 'involved_in', 'produced', 'assigned_to']
                 const relationship = validTypes.includes(rel.relationship) ? rel.relationship : 'relates_to'
+                const confidence = clamp(0.85 + getRelationshipBias(context, relationship), 0.5, 0.98)
 
                 db.linkEntities({
                     source_entity_id: sourceEntity.id,
                     target_entity_id: targetEntity.id,
                     relationship: relationship as any,
                     meeting_id: meetingId,
-                    confidence: 0.85 // High confidence since explicit
+                    confidence
                 })
                 linked++
                 console.log(`[EntityPipeline] Linked "${sourceEntity.name}" -> [${relationship}] -> "${targetEntity.name}"`)
@@ -491,12 +587,17 @@ export async function processExtractedEntities(
  * Extract and process entities from a transcript in one step
  */
 export async function extractAndProcessEntities(
-    provider: { extractEntities: (transcript: string) => Promise<ExtractedEntities> },
+    provider: { extractEntities: (transcript: string, context?: EntityExtractionContext) => Promise<ExtractedEntities> },
     transcript: string,
-    meetingId: string
+    meetingId: string,
+    context?: EntityExtractionContext
 ): Promise<ProcessedEntities> {
     console.log(`[EntityPipeline] Starting extraction for meeting ${meetingId}`)
 
-    const extracted = await provider.extractEntities(transcript)
-    return processExtractedEntities(extracted, meetingId)
+    const extracted = await provider.extractEntities(transcript, context)
+    const groundedExtraction: ExtractedEntities = {
+        ...extracted,
+        people: filterUngroundedPeople(extracted.people || [], transcript)
+    }
+    return processExtractedEntities(groundedExtraction, meetingId, context, transcript)
 }

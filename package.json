@@ -10,10 +10,13 @@
     "build:audio-cap": "mkdir -p resources/bin && swiftc resources/swift/audiocap/*.swift -o resources/bin/audiocap -framework CoreAudio -framework AudioToolbox -framework AVFoundation",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
+    "test:synthetic-attribution": "vitest run tests/unit/speakerAttribution.synthetic.test.ts",
     "setup-python": "./scripts/setup_python.sh",
     "build-python": "./scripts/build_python.sh",
     "postinstall": "npm run setup-python",
-    "test": "vitest"
+    "test": "vitest",
+    "replay:meeting": "node scripts/replay_meeting_attribution.js",
+    "test:meeting-regression": "node scripts/replay_meeting_attribution.js --fixture-file scripts/replay.local-fixtures.json --attempts 1 --require-expected --all-sets"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

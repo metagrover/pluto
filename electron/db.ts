@@ -60,6 +60,12 @@ const initDb = () => {
         transcript_json TEXT,
         user_notes TEXT,
         enhanced_notes TEXT,
+        analysis_json TEXT,
+        analysis_schema_version INTEGER,
+        analysis_format_pass BOOLEAN,
+        analysis_retry_count INTEGER DEFAULT 0,
+        analysis_fallback_used BOOLEAN DEFAULT 0,
+        value_signals_json TEXT,
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -153,6 +159,37 @@ const initDb = () => {
       SELECT name, id FROM entities 
       WHERE id NOT IN (SELECT entity_id FROM entities_fts);
     `)
+
+  // Additive migration for newer optional columns
+  try {
+    const meetingColumns = db.prepare("PRAGMA table_info(meetings)").all() as Array<{ name: string }>
+    if (!meetingColumns.some(col => col.name === 'analysis_json')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_json TEXT')
+      console.log('[DB] Added meetings.analysis_json column')
+    }
+    if (!meetingColumns.some(col => col.name === 'analysis_schema_version')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_schema_version INTEGER')
+      console.log('[DB] Added meetings.analysis_schema_version column')
+    }
+    if (!meetingColumns.some(col => col.name === 'analysis_format_pass')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_format_pass BOOLEAN')
+      console.log('[DB] Added meetings.analysis_format_pass column')
+    }
+    if (!meetingColumns.some(col => col.name === 'analysis_retry_count')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_retry_count INTEGER DEFAULT 0')
+      console.log('[DB] Added meetings.analysis_retry_count column')
+    }
+    if (!meetingColumns.some(col => col.name === 'analysis_fallback_used')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_fallback_used BOOLEAN DEFAULT 0')
+      console.log('[DB] Added meetings.analysis_fallback_used column')
+    }
+    if (!meetingColumns.some(col => col.name === 'value_signals_json')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN value_signals_json TEXT')
+      console.log('[DB] Added meetings.value_signals_json column')
+    }
+  } catch (e) {
+    console.warn('[DB] Optional column migration failed:', e)
+  }
 }
 
 initDb()
@@ -180,8 +217,9 @@ export const saveMeeting = (meeting: any) => {
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO meetings (
       id, title, meeting_type, started_at, ended_at, duration_seconds, 
-      audio_path, transcript_json, user_notes, enhanced_notes, folder_id, is_favorite, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+      audio_path, transcript_json, user_notes, enhanced_notes, analysis_json, analysis_schema_version,
+      analysis_format_pass, analysis_retry_count, analysis_fallback_used, value_signals_json, folder_id, is_favorite, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
   `)
 
   const result = stmt.run(
@@ -195,6 +233,16 @@ export const saveMeeting = (meeting: any) => {
     meeting.transcript_json,
     meeting.user_notes || '',
     meeting.enhanced_notes || '',
+    meeting.analysis_json || null,
+    meeting.analysis_schema_version || null,
+    typeof meeting.analysis_format_pass === 'boolean'
+      ? (meeting.analysis_format_pass ? 1 : 0)
+      : null,
+    Number.isFinite(meeting.analysis_retry_count) ? meeting.analysis_retry_count : 0,
+    typeof meeting.analysis_fallback_used === 'boolean'
+      ? (meeting.analysis_fallback_used ? 1 : 0)
+      : 0,
+    meeting.value_signals_json || null,
     meeting.folder_id,
     meeting.is_favorite ? 1 : 0,
     meeting.created_at
@@ -205,7 +253,15 @@ export const saveMeeting = (meeting: any) => {
   try {
     if (meeting.transcript_json) {
       const transcript = JSON.parse(meeting.transcript_json)
-      transcriptText = transcript.segments?.map((s: any) => s.text).join(' ') || ''
+      const segments = Array.isArray(transcript)
+        ? transcript
+        : Array.isArray(transcript?.segments)
+          ? transcript.segments
+          : []
+      transcriptText = segments
+        .map((segment: any) => typeof segment?.text === 'string' ? segment.text.trim() : '')
+        .filter((text: string) => text.length > 0)
+        .join(' ')
     }
   } catch (e) {
     console.warn('Failed to parse transcript_json for FTS', e)
@@ -233,6 +289,34 @@ export const getMeetings = () => {
 
 export const getMeeting = (id: string | number) => {
   return db.prepare('SELECT * FROM meetings WHERE id = ?').get(String(id))
+}
+
+export const getAnalysisQualityStats = () => {
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS total_v2_meetings,
+      SUM(CASE WHEN analysis_format_pass = 1 THEN 1 ELSE 0 END) AS format_pass_count,
+      SUM(CASE WHEN analysis_retry_count > 0 THEN 1 ELSE 0 END) AS retried_count,
+      SUM(CASE WHEN analysis_fallback_used = 1 THEN 1 ELSE 0 END) AS fallback_count
+    FROM meetings
+    WHERE analysis_schema_version = 2
+  `).get() as {
+    total_v2_meetings: number | null
+    format_pass_count: number | null
+    retried_count: number | null
+    fallback_count: number | null
+  }
+
+  const total = Number(row.total_v2_meetings || 0)
+  const formatPassCount = Number(row.format_pass_count || 0)
+
+  return {
+    total_v2_meetings: total,
+    format_pass_count: formatPassCount,
+    format_pass_rate: total > 0 ? formatPassCount / total : 0,
+    retried_count: Number(row.retried_count || 0),
+    fallback_count: Number(row.fallback_count || 0)
+  }
 }
 
 export const searchMeetings = (query: string) => {
