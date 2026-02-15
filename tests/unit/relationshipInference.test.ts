@@ -103,4 +103,60 @@ describe('Relationship Inference', () => {
 
         expect(db.linkEntities).not.toHaveBeenCalled()
     })
+
+    it('should apply soft confidence bias from priority hints', async () => {
+        const extracted: ExtractedEntities = {
+            people: [{ name: 'Alice' }],
+            topics: [],
+            action_items: [],
+            decisions: [],
+            projects: [{ name: 'Project X' }],
+            relationships: [
+                { source: 'Alice', target: 'Project X', relationship: 'works_on' }
+            ]
+        }
+
+        await processExtractedEntities(extracted, 'meeting-5', {
+            priorityHints: {
+                prioritized_terms: ['project x'],
+                relationship_bias: { works_on: 0.1 }
+            }
+        })
+
+        expect(db.linkEntities).toHaveBeenCalledWith(expect.objectContaining({
+            relationship: 'works_on',
+            meeting_id: 'meeting-5',
+            confidence: 0.95
+        }))
+    })
+
+    it('should not link ungrounded person relationships even if person exists in DB', async () => {
+        const existingPerson = { id: 'p-sarah', type: 'person', name: 'Sarah Chen', created_at: '', updated_at: '' }
+        vi.mocked(db.getEntitiesByType).mockImplementation((type) => {
+            if (type === 'person') return [existingPerson] as any
+            return []
+        })
+
+        const extracted: ExtractedEntities = {
+            people: [],
+            topics: [{ name: 'open call exploration', importance: 'medium' }],
+            action_items: [],
+            decisions: [],
+            projects: [],
+            relationships: [
+                { source: 'Sarah Chen', target: 'open call exploration', relationship: 'impacts' }
+            ]
+        }
+
+        await processExtractedEntities(
+            extracted,
+            'meeting-6',
+            undefined,
+            'So there is a lot of programmers and builders who draw inspiration for your story.'
+        )
+
+        expect(db.linkEntities).not.toHaveBeenCalledWith(expect.objectContaining({
+            source_entity_id: 'p-sarah'
+        }))
+    })
 })

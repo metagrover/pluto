@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Meeting, TranscriptSegment } from '../../types'
 import { BarChart3, Check, Copy, FileText, Sparkles, MessageSquare, ChevronDown } from 'lucide-react'
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar'
+import { analysisDocumentToMarkdown, resolveMeetingAnalysisDocument } from '../../utils/analysisDocument'
 
 interface MeetingViewProps {
     selectedMeeting: Meeting | undefined;
@@ -65,6 +66,17 @@ export const MeetingView = ({
         window.addEventListener('resize', handleResize)
         return () => window.removeEventListener('resize', handleResize)
     }, [transcriptVisible])
+
+    const analysisDoc = resolveMeetingAnalysisDocument(selectedMeeting)
+    const canonicalAnalysisMarkdown = analysisDoc
+        ? analysisDocumentToMarkdown(analysisDoc)
+        : (selectedMeeting.enhanced_notes || selectedMeeting.user_notes || '')
+    const summaryParagraphs = analysisDoc?.summary.length
+        ? analysisDoc.summary
+        : ['No summary was generated for this meeting.']
+    const keyPoints = analysisDoc?.key_points || []
+    const actionItems = analysisDoc?.action_items || []
+    const decisions = analysisDoc?.decisions || []
 
     return (
         <div key={selectedMeeting.id} className="max-w-4xl mx-auto w-full space-y-20 animate-in pb-32">
@@ -137,7 +149,7 @@ export const MeetingView = ({
                 </div>
                 <div className="flex gap-2">
                     <button 
-                        onClick={() => handleCopySummary(selectedMeeting?.enhanced_notes || selectedMeeting?.user_notes || '')}
+                        onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
                         className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-white text-pro-text-main hover:scale-105'}`}
                         title="Copy Summary"
                     >
@@ -146,7 +158,7 @@ export const MeetingView = ({
                     <button 
                         onClick={() => {
                             if (selectedMeeting) {
-                                const summaryText = selectedMeeting.enhanced_notes || selectedMeeting.user_notes || ''
+                                const summaryText = canonicalAnalysisMarkdown
                                 const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${summaryText}\n\nTranscript:\n${selectedMeeting.transcript_json}`
                                 const blob = new Blob([content], { type: 'text/plain' })
                                 const url = URL.createObjectURL(blob)
@@ -187,128 +199,78 @@ export const MeetingView = ({
             </div>
 
             {/* Summary & Analysis Section */}
-            {selectedMeeting?.enhanced_notes ? (
+            {analysisDoc ? (
                 <div className="space-y-16">
-                    {(() => {
-                        const notes = selectedMeeting.enhanced_notes || selectedMeeting.user_notes || ''
-                        
-                        // Helper to extract sections from markdown
-                        const getSection = (title: string | string[]) => {
-                            const titles = Array.isArray(title) ? title : [title]
-                            for (const t of titles) {
-                                const regex = new RegExp(`(?:\\*\\*|###|##)\\s*${t}\\s*(?:\\*\\*)?:?\\n?([\\s\\S]*?)(?=\\n(?:\\*\\*|###|##)|$)`, 'i')
-                                const match = notes.match(regex)
-                                if (match) return match[1].trim()
-                            }
-                            return ''
-                        }
-
-                        let executiveSummary = getSection(['Executive Summary', 'Meeting Summary', 'Summary'])
-                        
-                        // Fallback: If no explicit summary section, take the first block but clean it
-                        if (!executiveSummary) {
-                            executiveSummary = notes.split('\n\n')[0]
-                        }
-                        
-                        // Clean up any remaining markdown headers from the text itself
-                        executiveSummary = executiveSummary.replace(/^(?:#+\s*|###\s*|##\s*|#\s*).+$/gm, '').trim()
-                        const keyPoints = getSection('Key Points') || getSection('Key Insights')
-                        const actionItems = getSection('Action Items')
-                        const decisions = getSection('Decisions')
-
-                        return (
-                            <div className="grid grid-cols-12 gap-8 items-start overflow-visible">
-                                {/* Left Column: Executive Summary & Key Points */}
-                                <div className="col-span-12 lg:col-span-7 space-y-12">
-                                    {/* Executive Summary */}
-                                    <div className="space-y-4">
-                                        <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-                                            Executive Summary
-                                        </h2>
-                                        <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-white/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
-                                            {executiveSummary.split('\n').map((line: string, i: number) => (
-                                                <p key={i} className={i > 0 ? 'mt-4' : ''}>{highlightEntities(line)}</p>
-                                            ))}
-                                        </div>
-                                    </div>
-
-                                    {/* Key Insights / Points */}
-                                    {keyPoints && (
-                                        <div className="space-y-6">
-                                            <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                                                Key Insights
-                                            </h2>
-                                            <div className="space-y-4">
-                                                {keyPoints.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
-                                                    const cleanLine = line.replace(/^[*-]\s*/, '').trim()
-                                                    return (
-                                                        <div key={i} className="p-6 rounded-2xl bg-white border border-pro-border shadow-sm flex gap-4 group hover:border-pro-accent/30 transition-all">
-                                                            <span className="text-pro-accent group-hover:scale-125 transition-transform shrink-0 pt-0.5">◆</span>
-                                                            <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">{highlightEntities(cleanLine)}</p>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Decisions Section */}
-                                    {decisions && (
-                                        <div className="space-y-6">
-                                            <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                                                Decisions
-                                            </h2>
-                                            <div className="p-8 rounded-[2rem] bg-indigo-50/30 border border-indigo-100/50 space-y-4">
-                                                {decisions.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
-                                                    const cleanLine = line.replace(/^[*-]\s*/, '').trim()
-                                                    return (
-                                                        <div key={i} className="flex gap-3 items-baseline">
-                                                            <span className="text-indigo-500 font-bold leading-none -translate-y-[3px]">↳</span>
-                                                            <p className="text-[14px] font-semibold text-indigo-900/80 leading-relaxed">{highlightEntities(cleanLine)}</p>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Right Column: Action Items */}
-                                <div className="col-span-12 lg:col-span-5 space-y-12 lg:sticky lg:top-24 lg:self-start">
-                                    {actionItems && (
-                                        <div className="space-y-6">
-                                            <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-                                                Action Items
-                                            </h2>
-                                            <div className="space-y-4">
-                                                {actionItems.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
-                                                    const cleanLine = line
-                                                        .trim()
-                                                        .replace(/^[-*]\s*\[\s*[xX]?\s*\]\s*/, '')
-                                                        .replace(/^[*-]\s*/, '')
-                                                        .replace(/^\[\s*[xX]?\s*\]\s*/, '')
-                                                        .trim()
-                                                    return (
-                                                        <div key={i} className="p-6 rounded-2xl bg-white border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect">
-                                                            <div className="w-6 h-6 rounded-lg border border-pro-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-pro-accent group-hover:bg-pro-accent/5 transition-all">
-                                                                <Check className="w-3.5 h-3.5 text-pro-accent opacity-0 group-hover:opacity-100 transition-opacity" />
-                                                            </div>
-                                                            <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">{highlightEntities(cleanLine)}</p>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
+                    <div className="grid grid-cols-12 gap-8 items-start overflow-visible">
+                        {/* Left Column: Executive Summary & Key Points */}
+                        <div className="col-span-12 lg:col-span-7 space-y-12">
+                            {/* Executive Summary */}
+                            <div className="space-y-4">
+                                <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                                    Executive Summary
+                                </h2>
+                                <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-white/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
+                                    {summaryParagraphs.map((line, i) => (
+                                        <p key={i} className={i > 0 ? 'mt-4' : ''}>{highlightEntities(line)}</p>
+                                    ))}
                                 </div>
                             </div>
-                        )
-                    })()}
+
+                            {/* Key Insights / Points */}
+                            <div className="space-y-6">
+                                <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
+                                    Key Insights
+                                </h2>
+                                <div className="space-y-4">
+                                    {(keyPoints.length > 0 ? keyPoints : ['No key points were captured.']).map((item, i) => (
+                                        <div key={i} className="p-6 rounded-2xl bg-white border border-pro-border shadow-sm flex gap-4 group hover:border-pro-accent/30 transition-all">
+                                            <span className="text-pro-accent group-hover:scale-125 transition-transform shrink-0 pt-0.5">◆</span>
+                                            <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">{highlightEntities(item)}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Decisions Section */}
+                            <div className="space-y-6">
+                                <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
+                                    Decisions
+                                </h2>
+                                <div className="p-8 rounded-[2rem] bg-indigo-50/30 border border-indigo-100/50 space-y-4">
+                                    {(decisions.length > 0 ? decisions : ['No explicit decisions were made.']).map((item, i) => (
+                                        <div key={i} className="flex gap-3 items-baseline">
+                                            <span className="text-indigo-500 font-bold leading-none -translate-y-[3px]">↳</span>
+                                            <p className="text-[14px] font-semibold text-indigo-900/80 leading-relaxed">{highlightEntities(item)}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Right Column: Action Items */}
+                        <div className="col-span-12 lg:col-span-5 space-y-12 lg:sticky lg:top-24 lg:self-start">
+                            <div className="space-y-6">
+                                <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                                    Action Items
+                                </h2>
+                                <div className="space-y-4">
+                                    {(actionItems.length > 0 ? actionItems : ['No concrete action items were explicitly committed.']).map((item, i) => (
+                                        <div key={i} className="p-6 rounded-2xl bg-white border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect">
+                                            <div className="w-6 h-6 rounded-lg border border-pro-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-pro-accent group-hover:bg-pro-accent/5 transition-all">
+                                                <Check className="w-3.5 h-3.5 text-pro-accent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                            </div>
+                                            <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">{highlightEntities(item)}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             ) : null}
 
             {/* Empty State vs Content */}
-            {(!selectedMeeting?.enhanced_notes && !selectedMeeting?.user_notes && (!selectedMeeting?.transcript_json || selectedMeeting.transcript_json === '[]')) ? (
+            {(!analysisDoc && !selectedMeeting?.enhanced_notes && !selectedMeeting?.user_notes && (!selectedMeeting?.transcript_json || selectedMeeting.transcript_json === '[]')) ? (
                 <div className="flex-1 flex flex-col items-center justify-center p-20 text-center space-y-6 opacity-60">
                     <div className="w-16 h-16 rounded-2xl bg-stone-100 flex items-center justify-center mb-4">
                         <FileText className="w-8 h-8 text-stone-300" />

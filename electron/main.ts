@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, systemPreferences, Tray, Menu, nativeImage, shell } from 'electron'
 import { fileURLToPath } from 'node:url'
+import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import fs from 'node:fs'
 import { spawn, ChildProcess } from 'node:child_process'
@@ -77,6 +78,9 @@ import * as db from './db'
 import { whisperX } from './whisperx'
 import { getProvider, getAllSettings } from './llm/factory'
 import { extractAndProcessEntities, processExtractedEntities } from './entityPipeline'
+import type { AnalysisArtifacts, InternalSignalDocument } from './llm/provider'
+import { mapValueSignalsToPriorityHints } from './valueSignalMapping'
+import { cleanTranscriptSegments, TranscriptCleanupStats } from './transcriptCleanup'
 
 
 // Cleanup on quit
@@ -298,10 +302,18 @@ app.whenReady().then(async () => {
     return true
   })
 
-  ipcMain.handle('AUDIO_SAVE_AND_CONVERT', async (_event, arrayBuffer, format?: 'pcm' | 'webm' | 'ogg' | 'wav') => {
+  ipcMain.handle('AUDIO_SAVE_AND_CONVERT', async (_event, arrayBuffer, format?: 'pcm' | 'webm' | 'ogg' | 'wav', sourceHint?: string) => {
     const start = Date.now()
     const buffer = Buffer.from(arrayBuffer ?? [])
-    const tempId = Date.now().toString()
+    if (!buffer.length) {
+      console.warn('[Pluto] Skipping conversion: empty audio buffer')
+      return null
+    }
+    const sourceTag = (typeof sourceHint === 'string' ? sourceHint : 'audio')
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, '')
+      .slice(0, 24) || 'audio'
+    const tempId = `${Date.now()}_${randomUUID()}`
     // If format is wav, we still save as .wav (temporarily as raw input) or .audio? 
     // Actually, if it's a WAV blob, it HAS a header. So we can just save it as .wav.
     // ffmpeg will detect it.
@@ -313,16 +325,16 @@ app.whenReady().then(async () => {
     if (format === 'ogg') ext = 'ogg'
     if (format === 'wav') ext = 'wav'
 
-    const rawPath = path.join(app.getPath('temp'), `raw_${tempId}.${ext}`)
-    const wavPath = path.join(app.getPath('userData'), 'meetings', `${tempId}.wav`)
+    const rawPath = path.join(app.getPath('temp'), `raw_${sourceTag}_${tempId}.${ext}`)
+    const wavPath = path.join(app.getPath('userData'), 'meetings', `${sourceTag}_${tempId}.wav`)
 
     // ... (rest of logging and checks)
 
-    console.log(`[Pluto] Saving raw audio to ${rawPath} (format: ${format || 'auto'})`)
+    console.log(`[Pluto] Saving ${sourceTag} raw audio to ${rawPath} (format: ${format || 'auto'})`)
     fs.writeFileSync(rawPath, buffer)
 
-    return new Promise((resolve, reject) => {
-      console.log(`[Pluto] Converting to WAV: ${wavPath}`)
+    return new Promise<string | null>((resolve) => {
+      console.log(`[Pluto] Converting ${sourceTag} to WAV: ${wavPath}`)
       let command = ffmpeg(rawPath)
 
       if (format === 'pcm') {
@@ -347,17 +359,62 @@ app.whenReady().then(async () => {
           resolve(wavPath)
         })
         .on('error', (err) => {
-          console.error('[Pluto] Conversion failed:', err)
+          console.warn('[Pluto] Conversion failed, skipping chunk:', err instanceof Error ? err.message : err)
           if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath)
-          reject(err)
+          if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath)
+          resolve(null)
         })
         .save(wavPath)
     })
   })
 
   // Database handlers
+  const cleanupTranscriptJson = (transcriptJson: unknown): {
+    cleanedTranscriptJson: string
+    changed: boolean
+    stats: TranscriptCleanupStats
+  } | null => {
+    if (typeof transcriptJson !== 'string' || !transcriptJson.trim()) {
+      return null
+    }
+
+    try {
+      const parsed = JSON.parse(transcriptJson) as unknown
+      if (!Array.isArray(parsed)) {
+        return null
+      }
+
+      const result = cleanTranscriptSegments(parsed as Array<{ text: string }>)
+      const cleanedTranscriptJson = JSON.stringify(result.segments)
+      return {
+        cleanedTranscriptJson,
+        changed: cleanedTranscriptJson !== transcriptJson,
+        stats: result.stats
+      }
+    } catch (e) {
+      console.warn('[Pluto] Failed to parse transcript_json for cleanup:', e)
+      return null
+    }
+  }
+
   ipcMain.handle('SAVE_MEETING', (_event, meeting) => {
     try {
+      const shouldRunTranscriptCleanup = meeting?.run_transcript_cleanup === true
+      if (shouldRunTranscriptCleanup) {
+        const cleanup = cleanupTranscriptJson(meeting?.transcript_json)
+        if (cleanup) {
+          meeting.transcript_json = cleanup.cleanedTranscriptJson
+          if (cleanup.stats.dropped_duplicates > 0 || cleanup.stats.merged_pairs > 0) {
+            console.log(
+              `[Pluto] Transcript cleanup on save: dropped=${cleanup.stats.dropped_duplicates}, merged=${cleanup.stats.merged_pairs}`
+            )
+          }
+        }
+      }
+      if (meeting && typeof meeting === 'object' && 'run_transcript_cleanup' in meeting) {
+        delete meeting.run_transcript_cleanup
+      }
+
       console.log(`[Pluto] Saving meeting: ${meeting.id} - ${meeting.title}`)
       const result = db.saveMeeting(meeting)
 
@@ -398,6 +455,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_MEETINGS', () => db.getMeetings())
   ipcMain.handle('GET_MEETING', (_event, id) => db.getMeeting(id))
   ipcMain.handle('SEARCH_MEETINGS', (_event, query) => db.searchMeetings(query))
+  ipcMain.handle('GET_ANALYSIS_QUALITY_STATS', () => db.getAnalysisQualityStats())
   ipcMain.handle('DELETE_MEETING', (_event, id) => {
     try {
       return db.deleteMeeting(id)
@@ -477,6 +535,141 @@ app.whenReady().then(async () => {
   ipcMain.handle('SET_SETTING', (_event, { key, value }) => db.setSetting(key, value))
 
   // LLM handlers
+  const emptyValueSignals = (): InternalSignalDocument => ({
+    analysis_schema_version: 2,
+    continuity: [],
+    accountability_risks: [],
+    decision_impacts: [],
+    extra_tags: []
+  })
+
+  const normalizeValueSignals = (value: unknown): InternalSignalDocument => {
+    if (!value || typeof value !== 'object') {
+      return emptyValueSignals()
+    }
+    const record = value as Record<string, unknown>
+    const normalizeSignalList = (raw: unknown): string[] => {
+      if (!Array.isArray(raw)) return []
+      return raw
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 3)
+    }
+    const normalizeTags = (raw: unknown): InternalSignalDocument['extra_tags'] => {
+      if (!Array.isArray(raw)) return []
+      const tags = raw
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') return null
+          const item = entry as Record<string, unknown>
+          const tag = typeof item.tag === 'string' ? item.tag.trim().toLowerCase() : ''
+          const confidence = typeof item.confidence === 'number' ? item.confidence : 0.5
+          if (!tag) return null
+          return {
+            tag,
+            confidence: Math.max(0, Math.min(1, confidence))
+          }
+        })
+        .filter((entry): entry is { tag: string; confidence: number } => !!entry)
+
+      const dedupe = new Map<string, number>()
+      for (const tag of tags) {
+        const prev = dedupe.get(tag.tag)
+        if (prev === undefined || tag.confidence > prev) {
+          dedupe.set(tag.tag, tag.confidence)
+        }
+      }
+
+      return Array.from(dedupe.entries())
+        .map(([tag, confidence]) => ({ tag, confidence }))
+        .slice(0, 8)
+    }
+
+    return {
+      analysis_schema_version: 2,
+      continuity: normalizeSignalList(record.continuity),
+      accountability_risks: normalizeSignalList(record.accountability_risks),
+      decision_impacts: normalizeSignalList(record.decision_impacts),
+      extra_tags: normalizeTags(record.extra_tags)
+    }
+  }
+
+  const mergePriorityHints = (mapped: ReturnType<typeof mapValueSignalsToPriorityHints>, incoming?: unknown) => {
+    if (!incoming || typeof incoming !== 'object') {
+      return mapped
+    }
+    const record = incoming as Record<string, unknown>
+    const incomingTerms = Array.isArray(record.prioritized_terms)
+      ? record.prioritized_terms.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : []
+    const incomingBiasRecord = (record.relationship_bias && typeof record.relationship_bias === 'object')
+      ? (record.relationship_bias as Record<string, unknown>)
+      : {}
+    const incomingBias: Record<string, number> = {}
+    for (const [key, rawValue] of Object.entries(incomingBiasRecord)) {
+      if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+        incomingBias[key] = rawValue
+      }
+    }
+
+    return {
+      prioritized_terms: Array.from(new Set([...mapped.prioritized_terms, ...incomingTerms])).slice(0, 20),
+      relationship_bias: {
+        ...mapped.relationship_bias,
+        ...incomingBias
+      }
+    }
+  }
+
+  const fallbackAnalysisArtifacts = (): AnalysisArtifacts => ({
+    markdown: [
+      '## Summary',
+      'Conversation captured. Key themes and follow-ups are summarized below.',
+      '',
+      '## Key Points',
+      '- Review transcript details for nuance where precise phrasing matters.',
+      '',
+      '## Action Items',
+      '- [ ] No concrete action items were explicitly committed.',
+      '',
+      '## Decisions',
+      '- No explicit decisions were made.'
+    ].join('\n'),
+    analysis: {
+      analysis_schema_version: 2,
+      summary: ['Conversation captured. Key themes and follow-ups are summarized below.'],
+      key_points: ['Review transcript details for nuance where precise phrasing matters.'],
+      action_items: [],
+      decisions: [],
+      quality: {
+        format_pass: false,
+        retry_count: 1,
+        fallback_used: true,
+        issues: ['Analysis generation failed in main-process fallback.']
+      }
+    },
+    signals: emptyValueSignals()
+  })
+
+  ipcMain.handle('GENERATE_ANALYSIS_V2', async (_event, { transcript, userNotes }) => {
+    try {
+      if (!transcript || !transcript.trim()) {
+        return fallbackAnalysisArtifacts()
+      }
+      const settings = await getAllSettings(db)
+      const provider = await getProvider(settings)
+      console.log(`[LLM] Generating V2 analysis with provider: ${provider.name}`)
+      const artifacts = await provider.generateAnalysisArtifacts(transcript, userNotes)
+      return {
+        ...artifacts,
+        signals: normalizeValueSignals(artifacts.signals)
+      }
+    } catch (error) {
+      console.error('[LLM] V2 analysis generation failed:', error)
+      return fallbackAnalysisArtifacts()
+    }
+  })
+
   ipcMain.handle('GENERATE_SUMMARY', async (_event, { transcript, userNotes }) => {
     try {
       if (!transcript || !transcript.trim()) {
@@ -519,12 +712,28 @@ app.whenReady().then(async () => {
     }
   })
 
+  ipcMain.handle('EXTRACT_VALUE_SIGNALS', async (_event, { transcript, summary }) => {
+    try {
+      if (!transcript || !transcript.trim()) {
+        return emptyValueSignals()
+      }
+      const settings = await getAllSettings(db)
+      const provider = await getProvider(settings)
+      console.log(`[LLM] Extracting value signals with provider: ${provider.name}`)
+      const signals = await provider.extractValueSignals(transcript, summary)
+      return normalizeValueSignals(signals)
+    } catch (error) {
+      console.error('[LLM] Value signal extraction failed:', error)
+      return emptyValueSignals()
+    }
+  })
+
   // =============================================
   // ENTITY EXTRACTION HANDLERS (Sprint 2)
   // =============================================
 
   // Extract entities from transcript (returns raw extraction result)
-  ipcMain.handle('EXTRACT_ENTITIES', async (_event, { transcript }) => {
+  ipcMain.handle('EXTRACT_ENTITIES', async (_event, { transcript, summary, valueSignals, priorityHints }) => {
     try {
       if (!transcript || !transcript.trim()) {
         return {
@@ -532,13 +741,23 @@ app.whenReady().then(async () => {
           topics: [],
           action_items: [],
           decisions: [],
-          projects: []
+          projects: [],
+          relationships: []
         }
       }
       const settings = await getAllSettings(db)
       const provider = await getProvider(settings)
+      const normalizedSignals = normalizeValueSignals(valueSignals)
+      const mergedPriorityHints = mergePriorityHints(
+        mapValueSignalsToPriorityHints(normalizedSignals),
+        priorityHints
+      )
       console.log(`[LLM] Extracting entities with provider: ${provider.name}`)
-      return await provider.extractEntities(transcript)
+      return await provider.extractEntities(transcript, {
+        summary,
+        valueSignals: normalizedSignals,
+        priorityHints: mergedPriorityHints
+      })
     } catch (error) {
       console.error('[LLM] Entity extraction failed:', error)
       return {
@@ -546,13 +765,14 @@ app.whenReady().then(async () => {
         topics: [],
         action_items: [],
         decisions: [],
-        projects: []
+        projects: [],
+        relationships: []
       }
     }
   })
 
   // Extract entities AND save them to the knowledge graph
-  ipcMain.handle('EXTRACT_AND_PROCESS_ENTITIES', async (_event, { transcript, meetingId }) => {
+  ipcMain.handle('EXTRACT_AND_PROCESS_ENTITIES', async (_event, { transcript, meetingId, summary, valueSignals, priorityHints }) => {
     try {
       if (!transcript || !transcript.trim()) {
         console.log('[LLM] Skipping entity extraction for empty transcript')
@@ -560,8 +780,17 @@ app.whenReady().then(async () => {
       }
       const settings = await getAllSettings(db)
       const provider = await getProvider(settings)
+      const normalizedSignals = normalizeValueSignals(valueSignals)
+      const mergedPriorityHints = mergePriorityHints(
+        mapValueSignalsToPriorityHints(normalizedSignals),
+        priorityHints
+      )
       console.log(`[LLM] Extracting and processing entities for meeting ${meetingId}`)
-      return await extractAndProcessEntities(provider, transcript, meetingId)
+      return await extractAndProcessEntities(provider, transcript, meetingId, {
+        summary,
+        valueSignals: normalizedSignals,
+        priorityHints: mergedPriorityHints
+      })
     } catch (error) {
       console.error('[LLM] Entity extraction and processing failed:', error)
       throw error

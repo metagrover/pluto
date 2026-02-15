@@ -1,5 +1,5 @@
 
-export function createWavBlob(samples: Float32Array, sampleRate: number = 48000, numChannels: number = 2): Blob {
+export function createWavBlob(samples: Float32Array, sampleRate: number = 48000, numChannels: number = 1): Blob {
     const buffer = new ArrayBuffer(44 + samples.length * 4);
     const view = new DataView(buffer);
 
@@ -35,6 +35,38 @@ export function createWavBlob(samples: Float32Array, sampleRate: number = 48000,
     floatView.set(samples);
 
     return new Blob([buffer], { type: 'audio/wav' });
+}
+
+export function decodeFloat32PcmChunk(
+    chunkBytes: Uint8Array,
+    carryoverBytes: Uint8Array = new Uint8Array(0)
+): { samples: Float32Array; carryoverBytes: Uint8Array } {
+    if (chunkBytes.length === 0) {
+        return { samples: new Float32Array(0), carryoverBytes }
+    }
+
+    const totalLength = carryoverBytes.length + chunkBytes.length
+    const combined = new Uint8Array(totalLength)
+    if (carryoverBytes.length > 0) combined.set(carryoverBytes, 0)
+    combined.set(chunkBytes, carryoverBytes.length)
+
+    const alignedLength = totalLength - (totalLength % 4)
+    if (alignedLength === 0) {
+        return { samples: new Float32Array(0), carryoverBytes: combined }
+    }
+
+    const sampleCount = alignedLength / 4
+    const view = new DataView(combined.buffer, 0, alignedLength)
+    const samples = new Float32Array(sampleCount)
+    for (let i = 0; i < sampleCount; i++) {
+        samples[i] = view.getFloat32(i * 4, true)
+    }
+
+    const nextCarryover = alignedLength < totalLength
+        ? combined.slice(alignedLength)
+        : new Uint8Array(0)
+
+    return { samples, carryoverBytes: nextCarryover }
 }
 
 function writeString(view: DataView, offset: number, string: string) {

@@ -6,13 +6,10 @@ import OSLog
 
 let logger = Logger(subsystem: "com.metagrover.pluto.audiocap", category: "CLI")
 
-// Configuration
-let targetProcessNames = ["zoom.us", "Google Chrome", "Safari", "Firefox", "Slack", "Discord", "YouTube Music", "Spotify"] 
-// For "System Audio", ideally we tap *everything* except ourselves.
-// But ProcessTap requires explicit PIDs.
-// We can scan for all processes that have AudioObjects.
+// For "System Audio", tap every audio process except ourselves.
+// ProcessTap requires explicit PIDs, so we scan the process object list.
 
-func getAudioProcesses(includeSelf: Bool) -> [Int32] {
+func getAudioProcesses(includeSelf: Bool) -> (pids: [Int32], excluded: [Int32]) {
     var address = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyProcessObjectList,
         mScope: kAudioObjectPropertyScopeGlobal,
@@ -20,14 +17,16 @@ func getAudioProcesses(includeSelf: Bool) -> [Int32] {
     )
     var size: UInt32 = 0
     let err = AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size)
-    guard err == noErr else { return [] }
+    guard err == noErr else { return ([], []) }
     
     let count = Int(size) / MemoryLayout<AudioObjectID>.size
     var processIDs = [AudioObjectID](repeating: 0, count: count)
     AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &processIDs)
     
-    var pids: [Int32] = []
+    var candidatePids: [Int32] = []
     let myPid = ProcessInfo.processInfo.processIdentifier
+    let parentPid = getppid()
+    var excluded: [Int32] = []
     
     for pidObj in processIDs {
         var pidAddress = AudioObjectPropertyAddress(
@@ -39,14 +38,19 @@ func getAudioProcesses(includeSelf: Bool) -> [Int32] {
         var pidSize = UInt32(MemoryLayout<pid_t>.size)
         
         if AudioObjectGetPropertyData(pidObj, &pidAddress, 0, nil, &pidSize, &pid) == noErr {
-            // Exclude self (CLI) and Parent (Electron) likely?
-            // Actually, keep it simple: Include ALL except self.
-            if includeSelf || pid != myPid {
-               pids.append(pid)
+            if includeSelf {
+                candidatePids.append(pid)
+            } else {
+                if pid == myPid || pid == parentPid {
+                    excluded.append(pid)
+                } else {
+                    candidatePids.append(pid)
+                }
             }
         }
     }
-    return pids
+
+    return (candidatePids, excluded)
 }
 
 
@@ -55,15 +59,20 @@ class AudioCapCLI {
     let runLoop = CFRunLoopGetCurrent()
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
+    private var loggedMultiBufferWarning = false
     
     init(includeSelf: Bool) {
         // Dynamic discovery of PIDs
-        let pids = getAudioProcesses(includeSelf: includeSelf)
+        let processSelection = getAudioProcesses(includeSelf: includeSelf)
+        let pids = processSelection.pids
         logger.info("Found \(pids.count) audio processes to tap.")
         // Also print to stderr for Electron to see
         // We can't easily get names here in this scope without helpers, but we have pids.
         // Let's just print the PIDS
         fputs("[AudioCap] Found \(pids.count) processes: \(pids)\n", stderr)
+        if !processSelection.excluded.isEmpty {
+            fputs("[AudioCap] Excluded process PIDs: \(processSelection.excluded)\n", stderr)
+        }
       
         self.tap = ProcessTap(pids: pids)
     }
@@ -73,6 +82,16 @@ class AudioCapCLI {
         
         do {
             try tap.activate()
+            if let desc = tap.tapStreamDescription {
+                let flags = desc.mFormatFlags
+                let nonInterleaved = (flags & UInt32(kAudioFormatFlagIsNonInterleaved)) != 0
+                fputs(
+                    "[AudioCap] Tap format: sampleRate=\(Int(desc.mSampleRate)), channels=\(desc.mChannelsPerFrame), " +
+                    "bytesPerFrame=\(desc.mBytesPerFrame), bitsPerChannel=\(desc.mBitsPerChannel), " +
+                    "nonInterleaved=\(nonInterleaved)\n",
+                    stderr
+                )
+            }
             
             // Standard Output Handle
             let stdout = FileHandle.standardOutput
@@ -83,15 +102,18 @@ class AudioCapCLI {
                 // inInputData is UnsafePointer<AudioBufferList>
                 let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
                 let bufferList = UnsafeMutableAudioBufferListPointer(mutableInputData)
-                for buffer in bufferList {
-                    if let data = buffer.mData {
-                        let size = Int(buffer.mDataByteSize)
-                        if size > 0 {
-                            let pcmData = Data(bytes: data, count: size)
-                            // Writing to FileHandle might block? 
-                            // In high-perf, we use a ring buffer. For CLI, explicit write is 'okay' usually.
-                            try? stdout.write(contentsOf: pcmData)
-                        }
+                if bufferList.count > 1 && !self.loggedMultiBufferWarning {
+                    self.loggedMultiBufferWarning = true
+                    fputs("[AudioCap] Multiple channel buffers detected (\(bufferList.count)); streaming first buffer only.\n", stderr)
+                }
+                if let buffer = bufferList.first(where: { $0.mData != nil && $0.mDataByteSize > 0 }),
+                   let data = buffer.mData {
+                    let size = Int(buffer.mDataByteSize)
+                    if size > 0 {
+                        let pcmData = Data(bytes: data, count: size)
+                        // Writing to FileHandle might block?
+                        // In high-perf, we use a ring buffer. For CLI, explicit write is 'okay' usually.
+                        try? stdout.write(contentsOf: pcmData)
                     }
                 }
                 return

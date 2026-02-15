@@ -208,7 +208,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             
             <div className="space-y-4">
               {[
-                { id: 'ollama', name: 'Ollama Llama 3', desc: 'Private Local Reasoning', icon: '🏠' },
+                { id: 'ollama', name: 'Ollama (Local Model)', desc: 'Private Local Reasoning', icon: '🏠' },
                 { id: 'gemini', name: 'Gemini 1.5 Pro', desc: 'Powerful Cloud Model', icon: '✨' },
                 { id: 'openai', name: 'GPT-4o', desc: 'Standard Cloud Model', icon: '☁️' }
               ].map(provider => (

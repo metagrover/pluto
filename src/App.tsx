@@ -49,6 +49,7 @@ function App() {
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [openaiApiKey, setOpenaiApiKey] = useState('')
   const [claudeApiKey, setClaudeApiKey] = useState('')
+  const [ollamaModel, setOllamaModel] = useState('')
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState('')
   const [askPlutoVisible, setAskPlutoVisible] = useState(false)
@@ -171,6 +172,9 @@ function App() {
     })
     window.ipcRenderer.invoke('GET_SETTING', 'claude_api_key').then((val) => {
       if (val) setClaudeApiKey(val)
+    })
+    window.ipcRenderer.invoke('GET_SETTING', 'ollama_model').then((val) => {
+      if (val) setOllamaModel(val)
     })
 
     const checkServer = async () => {
@@ -318,13 +322,16 @@ function App() {
     return () => window.removeEventListener('SHOW_PERMISSION_OVERLAY', handlePermissionsOverlay)
   }, [])
 
+  useEffect(() => {
+    const micGranted = permissionStatus.mic === 'granted' || permissionStatus.mic === 'authorized'
+    const systemGranted = permissionStatus.systemAudio === 'granted' || permissionStatus.systemAudio === 'authorized'
+    if (micGranted && systemGranted) {
+      setPermissionsVisible(false)
+    }
+  }, [permissionStatus])
+
   const retryRecordingIfReady = async () => {
     await window.ipcRenderer.invoke('APP_RELAUNCH')
-  }
-
-  const refreshPermissions = async () => {
-    // No-op now; macOS requires app relaunch after permission changes.
-    return { mic: permissionStatus.mic }
   }
 
   if (setupNeeded === null || (!setupNeeded && !isServerReady)) return (
@@ -356,7 +363,6 @@ function App() {
             onSpeakingChange={setSpeakingSource}
             userTitle={meetingTitle}
             participants={meetingParticipants}
-            hfToken={hfToken}
         />
       </div>
       
@@ -566,6 +572,8 @@ function App() {
         setOpenaiApiKey={setOpenaiApiKey}
         claudeApiKey={claudeApiKey}
         setClaudeApiKey={setClaudeApiKey}
+        ollamaModel={ollamaModel}
+        setOllamaModel={setOllamaModel}
         fetchMeetings={fetchMeetings}
         setSelectedMeetingId={setSelectedMeetingId}
       />

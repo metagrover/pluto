@@ -11,6 +11,8 @@ interface SettingsOverlayProps {
     setOpenaiApiKey: (val: string) => void;
     claudeApiKey: string;
     setClaudeApiKey: (val: string) => void;
+    ollamaModel: string;
+    setOllamaModel: (val: string) => void;
     fetchMeetings: () => void;
     setSelectedMeetingId: (id: string | number | null) => void;
 }
@@ -28,6 +30,8 @@ export const SettingsOverlay = ({
     setOpenaiApiKey,
     claudeApiKey,
     setClaudeApiKey,
+    ollamaModel,
+    setOllamaModel,
     fetchMeetings,
     setSelectedMeetingId
 }: SettingsOverlayProps) => {
@@ -71,7 +75,7 @@ export const SettingsOverlay = ({
                                 key={p.id}
                                 onClick={() => {
                                     setLlmProvider(p.id as 'ollama' | 'gemini' | 'openai' | 'claude');
-                                    (window as any).ipcRenderer.invoke('SET_SETTING', { key: 'llm_provider', value: p.id });
+                                    window.ipcRenderer.invoke('SET_SETTING', { key: 'llm_provider', value: p.id });
                                 }}
                                 className={`p-6 rounded-[1.5rem] border-2 transition-all flex flex-col gap-3 text-left group ${llmProvider === p.id ? 'border-pro-accent bg-pro-accent/5 shadow-premium' : 'border-pro-border hover:border-pro-accent/20 bg-white'}`}
                                 >
@@ -98,13 +102,13 @@ export const SettingsOverlay = ({
                                 const value = e.target.value;
                                 if (llmProvider === 'gemini') {
                                     setGeminiApiKey(value);
-                                    (window as any).ipcRenderer.invoke('SET_SETTING', { key: 'gemini_api_key', value });
+                                    window.ipcRenderer.invoke('SET_SETTING', { key: 'gemini_api_key', value });
                                 } else if (llmProvider === 'openai') {
                                     setOpenaiApiKey(value);
-                                    (window as any).ipcRenderer.invoke('SET_SETTING', { key: 'openai_api_key', value });
+                                    window.ipcRenderer.invoke('SET_SETTING', { key: 'openai_api_key', value });
                                 } else if (llmProvider === 'claude') {
                                     setClaudeApiKey(value);
-                                    (window as any).ipcRenderer.invoke('SET_SETTING', { key: 'claude_api_key', value });
+                                    window.ipcRenderer.invoke('SET_SETTING', { key: 'claude_api_key', value });
                                 }
                             }}
                             className="w-full p-5 rounded-2xl border-2 border-pro-border bg-white text-[15px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
@@ -113,15 +117,34 @@ export const SettingsOverlay = ({
                         )}
                         
                         {llmProvider === 'ollama' && (
-                        <div className="p-6 bg-indigo-500/5 rounded-2xl border border-indigo-500/10 flex gap-4 items-start">
-                            <span className="text-xl">🛡️</span>
-                            <div>
-                            <p className="text-[12px] font-bold text-pro-text-main leading-relaxed">
-                                Privacy-First Local Deployment
-                            </p>
-                            <p className="text-[11px] text-pro-text-muted/70 leading-relaxed mt-1">
-                                Neural weights are processed exclusively on your machine. Zero data egress.
-                            </p>
+                        <div className="space-y-4">
+                            <div className="p-6 bg-indigo-500/5 rounded-2xl border border-indigo-500/10 flex gap-4 items-start">
+                                <span className="text-xl">🛡️</span>
+                                <div>
+                                <p className="text-[12px] font-bold text-pro-text-main leading-relaxed">
+                                    Privacy-First Local Deployment
+                                </p>
+                                <p className="text-[11px] text-pro-text-muted/70 leading-relaxed mt-1">
+                                    Neural weights are processed exclusively on your machine. Zero data egress.
+                                </p>
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]">Local Model (Optional)</label>
+                                <input
+                                    type="text"
+                                    placeholder="Auto-detect installed model (e.g. llama3.2)"
+                                    value={ollamaModel}
+                                    onChange={(e) => {
+                                        const value = e.target.value
+                                        setOllamaModel(value)
+                                        window.ipcRenderer.invoke('SET_SETTING', { key: 'ollama_model', value })
+                                    }}
+                                    className="w-full p-5 rounded-2xl border-2 border-pro-border bg-white text-[15px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
+                                />
+                                <p className="text-[11px] text-pro-text-muted/70 leading-relaxed">
+                                    Leave blank to auto-use the first installed Ollama model.
+                                </p>
                             </div>
                         </div>
                         )}
@@ -141,7 +164,7 @@ export const SettingsOverlay = ({
                             onChange={(e) => {
                                 const value = e.target.value
                                 setHfToken(value)
-                                ;(window as any).ipcRenderer.invoke('SET_SETTING', { key: 'hf_token', value })
+                                window.ipcRenderer.invoke('SET_SETTING', { key: 'hf_token', value })
                             }}
                             className="w-full p-5 rounded-2xl border-2 border-pro-border bg-white text-[15px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
                         />
@@ -167,7 +190,7 @@ export const SettingsOverlay = ({
                         onClick={async () => {
                             if (confirm('Are you sure you want to reset all knowledge? This action is irreversible.')) {
                                 try {
-                                    await (window as any).ipcRenderer.invoke('RESET_KNOWLEDGE')
+                                    await window.ipcRenderer.invoke('RESET_KNOWLEDGE')
                                     fetchMeetings()
                                     setSelectedMeetingId(null)
                                     setSettingsVisible(false)

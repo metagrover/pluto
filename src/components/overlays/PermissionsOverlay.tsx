@@ -7,8 +7,10 @@ interface PermissionsOverlayProps {
     onOpenSystemSettings: (pane: 'microphone' | 'system-audio') => void;
 }
 
+const isGrantedStatus = (status: string) => status === 'authorized' || status === 'granted'
+
 const statusLabel = (status: string) => {
-    if (status === 'authorized' || status === 'granted') return 'Granted'
+    if (isGrantedStatus(status)) return 'Granted'
     if (status === 'denied' || status === 'restricted') return 'Blocked'
     if (status === 'needs-audio') return 'Verify'
     if (status === 'not-determined' || status === 'undetermined') return 'Check Settings'
@@ -16,7 +18,7 @@ const statusLabel = (status: string) => {
 }
 
 const statusTone = (status: string) => {
-    if (status === 'authorized' || status === 'granted') return 'text-emerald-600 bg-emerald-50 border-emerald-200'
+    if (isGrantedStatus(status)) return 'text-emerald-600 bg-emerald-50 border-emerald-200'
     if (status === 'denied' || status === 'restricted') return 'text-rose-600 bg-rose-50 border-rose-200'
     if (status === 'needs-audio') return 'text-amber-700 bg-amber-50 border-amber-200'
     return 'text-amber-700 bg-amber-50 border-amber-200'
@@ -30,7 +32,8 @@ export const PermissionsOverlay = ({
     onRetry,
     onOpenSystemSettings
 }: PermissionsOverlayProps) => {
-    if (!visible) return null
+    const bothGranted = isGrantedStatus(micStatus) && isGrantedStatus(systemAudioStatus)
+    if (!visible || bothGranted) return null
 
     const handleCheckAgain = () => {
         onRetry()
@@ -71,7 +74,7 @@ export const PermissionsOverlay = ({
                             System Settings → Privacy & Security → Microphone.
                         </p>
                         <button
-                            onClick={() => onOpenSystemSettings('system-audio')}
+                            onClick={() => onOpenSystemSettings('microphone')}
                             className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-white hover:border-pro-accent/40 transition-all active-push"
                         >
                             Open System Settings
@@ -89,7 +92,7 @@ export const PermissionsOverlay = ({
                             System Settings → Privacy & Security → Screen &amp; System Audio Recording → System Audio Recording Only.
                         </p>
                         <button
-                            onClick={() => onOpenSystemSettings('microphone')}
+                            onClick={() => onOpenSystemSettings('system-audio')}
                             className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-white hover:border-pro-accent/40 transition-all active-push"
                         >
                             Open System Settings
