@@ -88,7 +88,11 @@ fi
 # 3. Install Requirements
 echo "Installing/Updating requirements..."
 source "$VENV_DIR/bin/activate"
-pip install --upgrade pip
+PIP_CONSTRAINT_FILE="$PYTHON_DIR/constraints.txt"
+if [ -f "$PIP_CONSTRAINT_FILE" ]; then
+    export PIP_CONSTRAINT="$PIP_CONSTRAINT_FILE"
+fi
+pip install --upgrade pip "setuptools<82" wheel
 
 if [ -f "$PYTHON_DIR/requirements.txt" ]; then
     pip install -r "$PYTHON_DIR/requirements.txt"

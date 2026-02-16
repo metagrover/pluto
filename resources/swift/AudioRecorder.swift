@@ -100,10 +100,4 @@ class AudioRecorder: NSObject, SCStreamOutput, SCStreamDelegate {
         fflush(stdout)
         exit(1)
     }
-    
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        print("{\"error\": \"stream_stopped\", \"details\": \"\(error.localizedDescription)\"}")
-        fflush(stdout)
-        exit(1)
-    }
 }
