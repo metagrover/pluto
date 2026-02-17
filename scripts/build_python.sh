@@ -18,7 +18,7 @@ echo "Building WhisperX Server Executable..."
 if [ -f "$VENV_DIR/bin/activate" ]; then
     source "$VENV_DIR/bin/activate"
 else
-    echo "Error: Virtual environment not found. Run 'npm run setup-python' first."
+    echo "Error: Virtual environment not found. Run 'pnpm run setup-python' first."
     exit 1
 fi
 
