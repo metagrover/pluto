@@ -42,6 +42,8 @@ const callAlertVisibilityReducer = (
   return { visible: false }
 }
 
+const ACTIVE_CALL_ALERT_COOLDOWN_MS = 30_000
+
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null)
   const [isServerReady, setIsServerReady] = useState(false)
@@ -82,6 +84,10 @@ function App() {
   const startSessionRef = useRef<(() => void) | null>(null)
   const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(null)
   const activeCallAlertInFlightRef = useRef<string | null>(null)
+  const activeCallAlertCooldownRef = useRef<Map<string, number>>(new Map())
+  const callMonitorInitializedRef = useRef(false)
+  const callMonitorWasActiveRef = useRef(false)
+  const callMonitorLastAppRef = useRef<string | null>(null)
   const alertVisibilityAutoResetRef = useRef<number | null>(null)
   const isRecordingRef = useRef(false)
   const isProcessingRef = useRef(false)
@@ -270,7 +276,7 @@ function App() {
       }
   }
 
-  const setCallAlertVisibility = async (visible: boolean, appName?: string) => {
+  const setCallAlertVisibility = async (visible: boolean, appName?: string): Promise<boolean> => {
       dispatchCallAlertVisibility({ type: visible ? 'SHOW' : 'HIDE' })
 
       if (alertVisibilityAutoResetRef.current !== null) {
@@ -279,15 +285,19 @@ function App() {
       }
 
       if (visible) {
-          await window.ipcRenderer.invoke('SHOW_ACTIVE_CALL_ALERT', { appName: appName || 'Call' })
+          const shown = await window.ipcRenderer.invoke('SHOW_ACTIVE_CALL_ALERT', { appName: appName || 'Call' })
+          if (!shown) {
+              return false
+          }
           alertVisibilityAutoResetRef.current = window.setTimeout(() => {
               dispatchCallAlertVisibility({ type: 'HIDE' })
               alertVisibilityAutoResetRef.current = null
           }, 16000)
-          return
+          return true
       }
 
       await window.ipcRenderer.invoke('HIDE_ACTIVE_CALL_ALERT')
+      return true
   }
 
   const safeMeetings = Array.isArray(meetings) ? meetings : []
@@ -386,6 +396,9 @@ function App() {
     const pollActiveCall = async () => {
       if (setupNeeded !== false || isRecording || isProcessing) {
         activeCallAlertInFlightRef.current = null
+        callMonitorInitializedRef.current = false
+        callMonitorWasActiveRef.current = false
+        callMonitorLastAppRef.current = null
         await setCallAlertVisibility(false)
         return
       }
@@ -395,19 +408,54 @@ function App() {
         if (cancelled) return
 
         const appName = typeof result?.appName === 'string' ? result.appName : null
+        const confidence = result?.confidence === 'high' || result?.confidence === 'medium'
+          ? result.confidence
+          : 'low'
         const isActive = Boolean(result?.active) && Boolean(appName)
 
-        if (!isActive || !appName) {
-          activeCallAlertInFlightRef.current = null
+        // Establish startup baseline: do not alert for calls that were already active
+        // before monitoring began.
+        if (!callMonitorInitializedRef.current) {
+          const baselineActive = isActive && confidence === 'high'
+          callMonitorInitializedRef.current = true
+          callMonitorWasActiveRef.current = baselineActive
+          callMonitorLastAppRef.current = baselineActive ? appName : null
+          activeCallAlertInFlightRef.current = baselineActive ? appName : null
           return
         }
 
-        if (activeCallAlertInFlightRef.current !== appName) {
+        if (!isActive || !appName) {
+          activeCallAlertInFlightRef.current = null
+          callMonitorWasActiveRef.current = false
+          callMonitorLastAppRef.current = null
+          return
+        }
+
+        const previousApp = callMonitorLastAppRef.current
+        const isFreshJoin = !callMonitorWasActiveRef.current || previousApp !== appName
+        callMonitorWasActiveRef.current = true
+        callMonitorLastAppRef.current = appName
+
+        if (isFreshJoin && activeCallAlertInFlightRef.current !== appName) {
+          const now = Date.now()
+          const lastShownAt = activeCallAlertCooldownRef.current.get(appName) ?? 0
+          if (now - lastShownAt < ACTIVE_CALL_ALERT_COOLDOWN_MS) {
+            activeCallAlertInFlightRef.current = appName
+            return
+          }
+
           activeCallAlertInFlightRef.current = appName
-          await setCallAlertVisibility(true, appName)
+          activeCallAlertCooldownRef.current.set(appName, now)
+          const shown = await setCallAlertVisibility(true, appName)
+          if (!shown) {
+            activeCallAlertInFlightRef.current = null
+          }
         }
       } catch {
         activeCallAlertInFlightRef.current = null
+        callMonitorInitializedRef.current = false
+        callMonitorWasActiveRef.current = false
+        callMonitorLastAppRef.current = null
       }
     }
 

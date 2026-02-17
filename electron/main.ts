@@ -229,7 +229,9 @@ app.whenReady().then(async () => {
   let nativeAudioProcess: ChildProcess | null = null
   let bootProbeDone = false
   const activeCallAlertController = createActiveCallAlertController({
-    preloadPath: getPreloadPath()
+    preloadPath: getPreloadPath(),
+    devServerUrl: VITE_DEV_SERVER_URL,
+    rendererDist: RENDERER_DIST
   })
 
   const getAudioCapExecPath = () => {
@@ -273,15 +275,25 @@ app.whenReady().then(async () => {
 
     return await new Promise<boolean>((resolve) => {
       const probe = spawn(execPath, probeArgs)
+      let stderr = ''
       const timeout = setTimeout(() => {
         probe.kill('SIGKILL')
         resolve(false)
       }, Math.max(3000, Math.floor(durationMs + 1500)))
 
+      probe.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
+
       probe.on('close', (code) => {
         clearTimeout(timeout)
         if (code === 0) return resolve(true)
-        if (code === 2) return resolve(Boolean(allowSilent))
+        if (code === 2) {
+          if (!allowSilent) return resolve(false)
+          const foundMatch = stderr.match(/\[AudioCap\] Found (\d+) processes/i)
+          const foundCount = foundMatch ? Number.parseInt(foundMatch[1], 10) : 0
+          return resolve(foundCount > 0)
+        }
         resolve(false)
       })
 
@@ -381,6 +393,27 @@ app.whenReady().then(async () => {
           appName: matched.label,
           confidence: 'high',
           reason: 'call-app-running-with-active-audio'
+        }
+      }
+    }
+
+    // Silent fallback: treat as active only when target audio processes exist,
+    // even if no non-zero samples were observed during probe window.
+    for (const matched of matchedApps) {
+      const silentButAttached = await runAudioProbe({
+        durationMs: 1200,
+        includeSelf: false,
+        allowSilent: true,
+        targetPids: matched.pids,
+        silentProbe: true
+      })
+
+      if (silentButAttached) {
+        return {
+          active: true,
+          appName: matched.label,
+          confidence: 'medium',
+          reason: 'call-app-running-silent-fallback'
         }
       }
     }
