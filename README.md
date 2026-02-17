@@ -7,6 +7,7 @@ Intelligent meeting assistant and "second brain" application.
 ### Prerequisites
 
 - **Node.js** (v18+)
+- **pnpm** (enable via `corepack enable` or install directly)
 - **Python** (v3.9+ recommended)
     - *Note: You do NOT need to install Python libraries globally. The project handles this for you.*
 - **FFmpeg** (`brew install ffmpeg` on macOS)
@@ -23,18 +24,18 @@ Intelligent meeting assistant and "second brain" application.
 2.  **Install Dependencies**
     This will install Node packages AND set up a local Python virtual environment automatically.
     ```bash
-    npm install
+    pnpm install
     ```
 
 3.  **Build native audio tools (macOS)**
     This builds the Swift binaries used for microphone + system audio capture.
     ```bash
-    npm run build-native
+    pnpm run build-native
     ```
 
 4.  **Run the App**
     ```bash
-    npm run dev
+    pnpm run dev
     ```
 
 ### macOS Permissions
@@ -50,7 +51,7 @@ If permissions change, macOS requires a full app restart.
 To create a DMG installer that includes the bundled Python environment (no client-side setup required):
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 The output DMG will be in `release/`.
@@ -60,4 +61,4 @@ The output DMG will be in `release/`.
 - `src/` - React/Electron source code
 - `python/` - Python server (WhisperX) and requirements
 - `scripts/` - Build and setup automation scripts
-- `resources/` - Assets and bundled binaries (built by `npm run build-native`)
+- `resources/` - Assets and bundled binaries (built by `pnpm run build-native`)
