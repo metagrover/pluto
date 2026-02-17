@@ -1,0 +1,183 @@
+:root {
+  color-scheme: light;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  --alert-surface: #f8f9fc;
+  --alert-text-main: #1b2548;
+  --alert-text-muted: #616b88;
+  --alert-progress-bg: #d4b483;
+  --alert-progress: #8793b9;
+  --pro-text-main: #1a2340;
+  --pro-accent: #d4b483;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+.active-call-alert {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: var(--alert-surface);
+  box-shadow:
+    0 2px 8px rgba(16, 26, 56, 0.1),
+    0 14px 28px rgba(12, 22, 48, 0.14);
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  min-height: 100%;
+  padding: 0 24px;
+}
+
+.close-alert {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  transform: scale(0.92);
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(160, 171, 198, 0.8);
+  background: rgba(245, 247, 252, 0.98);
+  color: var(--alert-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(20, 30, 58, 0.12);
+  z-index: 3;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.active-call-alert:hover .close-alert {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+.close-alert:hover {
+  color: var(--alert-text-main);
+  background: #fff;
+}
+
+.left-block {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  padding: 14px 0 12px;
+}
+
+.meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  font-size: 14px;
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--alert-text-main);
+  margin: 0;
+}
+
+.app-row {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app {
+  font-size: 12px;
+  line-height: 1.1;
+  color: var(--alert-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0;
+}
+
+.actions {
+  width: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.take-notes {
+  border: 0;
+  background: var(--pro-text-main);
+  color: #fff;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.2);
+  transition:
+    background-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.take-notes:hover {
+  background: var(--pro-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 15px 30px -8px rgba(0, 0, 0, 0.28);
+}
+
+.take-notes:active {
+  transform: scale(0.98);
+}
+
+.progress-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--alert-progress-bg);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  background: var(--alert-progress);
+  transform: scaleX(1);
+}

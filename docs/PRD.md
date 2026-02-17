@@ -2,8 +2,8 @@
 
 ## Pluto: Your Second Brain for Work
 
-**Version:** 3.0  
-**Last Updated:** January 30, 2026  
+**Version:** 3.1  
+**Last Updated:** February 13, 2026  
 **Status:** Active Development
 
 ---
@@ -224,6 +224,21 @@ Query your knowledge graph in natural language:
 | *"List action items from this week"* | Grouped by meeting/project |
 | *"Summarize my 1-on-1s with Alex"* | Synthesized overview |
 
+### 6.8 Active Call Detection & Alert (Retroactive Update)
+
+Pluto detects when a supported meeting app appears to be in an active call and shows a quick note-taking alert.
+
+| Requirement | Details |
+|-------------|---------|
+| Detection Method | Running-process scan (`ps`) + PID-targeted system-audio probe |
+| False-Positive Mitigation | App-open-without-audio does **not** trigger an alert |
+| Supported Apps (Current) | FaceTime, Zoom, Microsoft Teams, Webex |
+| Polling Interval | Every 12 seconds while idle (not recording/processing) |
+| Alert Window | Separate Electron `BrowserWindow`, always-on-top, 320x80 |
+| Alert Behavior | Auto-dismiss after 15s, visible progress bar, timer pauses on hover |
+| Primary CTA | **Take Notes** brings Pluto to focus and starts a recording/notes session |
+| Dismissal | Hover-revealed close button + auto-timeout |
+
 ---
 
 ## 7. LLM Strategy
@@ -281,7 +296,7 @@ gantt
 | Sprint | Focus | Key Deliverables |
 |--------|-------|------------------|
 | **1** | Foundation | WhisperX, reliable recording, basic UI |
-| **2** | Knowledge Graph | Entity extraction, resolution, graph storage |
+| **2** | Knowledge Graph | Entity extraction, resolution, graph storage, active-call detection + quick note alert |
 | **3** | Live Documents | Team Tracker, mind map visualization |
 | **4** | Accountability | Action item lifecycle, notifications |
 | **5** | Synthesis | Quarterly summaries, self-review, "Ask Pluto" |

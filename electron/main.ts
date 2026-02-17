@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import { spawn, ChildProcess } from 'node:child_process'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
+import { createActiveCallAlertController } from './windows/activeCallAlertWindow'
 
 if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic)
@@ -29,11 +30,33 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 let win: BrowserWindow | null
 let tray: Tray | null = null
 
-function createWindow() {
+type ActiveCallState = {
+  active: boolean
+  appName: string | null
+  confidence: 'low' | 'medium' | 'high'
+  reason: string
+}
+
+type RunningProcessInfo = {
+  pid: number
+  name: string
+}
+
+const CALL_APP_MATCHERS: Array<{ label: string; patterns: RegExp[] }> = [
+  { label: 'FaceTime', patterns: [/facetime/i] },
+  { label: 'Chrome', patterns: [/google chrome/i, /chrome helper/i, /\bchromium\b/i] },
+  { label: 'Zoom', patterns: [/zoom\.us/i, /\bzoom\b/i, /cpthost/i] },
+  { label: 'Microsoft Teams', patterns: [/microsoft teams/i, /\bteams\b/i] },
+  { label: 'Webex', patterns: [/webex/i, /cisco webex/i] }
+]
+
+const getPreloadPath = () => {
   const preloadPathMjs = path.join(__dirname, 'preload.mjs')
   const preloadPathJs = path.join(__dirname, 'preload.js')
-  const preloadPath = fs.existsSync(preloadPathMjs) ? preloadPathMjs : preloadPathJs
+  return fs.existsSync(preloadPathMjs) ? preloadPathMjs : preloadPathJs
+}
 
+function createWindow() {
   win = new BrowserWindow({
     title: 'Pluto',
     icon: path.join(process.env.VITE_PUBLIC, 'logo.png'),
@@ -42,7 +65,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     webPreferences: {
-      preload: preloadPath,
+      preload: getPreloadPath(),
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 16 },
@@ -205,35 +228,72 @@ app.whenReady().then(async () => {
   // --- NATIVE AUDIO CAPTURE (AUDIOCAP) ---
   let nativeAudioProcess: ChildProcess | null = null
   let bootProbeDone = false
+  const activeCallAlertController = createActiveCallAlertController({
+    preloadPath: getPreloadPath(),
+    devServerUrl: VITE_DEV_SERVER_URL,
+    rendererDist: RENDERER_DIST
+  })
 
-  ipcMain.handle('SYSTEM_AUDIO_PROBE', async (_event, { durationMs, allowSilent } = {}) => {
-    if (nativeAudioProcess) return true
+  const getAudioCapExecPath = () => {
     const isDev = !app.isPackaged
-    const execPath = isDev
+    return isDev
       ? path.join(app.getAppPath(), 'resources/bin/audiocap')
       : path.join(process.resourcesPath, 'bin', 'audiocap')
+  }
 
+  const runAudioProbe = async ({
+    durationMs = 1500,
+    allowSilent = false,
+    includeSelf = true,
+    targetPids,
+    silentProbe = false
+  }: {
+    durationMs?: number
+    allowSilent?: boolean
+    includeSelf?: boolean
+    targetPids?: number[]
+    silentProbe?: boolean
+  } = {}) => {
+    if (nativeAudioProcess) return true
+
+    const execPath = getAudioCapExecPath()
     if (!fs.existsSync(execPath)) {
       console.error('[Pluto] AudioCap binary not found at:', execPath)
       return false
     }
 
-    const probeArgs = ['--probe', '--probe-include-self']
+    const probeArgs = ['--probe']
+    if (includeSelf) probeArgs.push('--probe-include-self')
+    if (silentProbe) probeArgs.push('--probe-silent')
+    const uniqueTargetPids = Array.from(new Set((targetPids || []).filter(pid => Number.isInteger(pid) && pid > 0)))
+    for (const pid of uniqueTargetPids) {
+      probeArgs.push('--pid', String(pid))
+    }
     if (typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0) {
       probeArgs.push('--probe-ms', String(Math.floor(durationMs)))
     }
 
     return await new Promise<boolean>((resolve) => {
       const probe = spawn(execPath, probeArgs)
+      let stderr = ''
       const timeout = setTimeout(() => {
         probe.kill('SIGKILL')
         resolve(false)
-      }, 3000)
+      }, Math.max(3000, Math.floor(durationMs + 1500)))
+
+      probe.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
 
       probe.on('close', (code) => {
         clearTimeout(timeout)
         if (code === 0) return resolve(true)
-        if (code === 2) return resolve(Boolean(allowSilent))
+        if (code === 2) {
+          if (!allowSilent) return resolve(false)
+          const foundMatch = stderr.match(/\[AudioCap\] Found (\d+) processes/i)
+          const foundCount = foundMatch ? Number.parseInt(foundMatch[1], 10) : 0
+          return resolve(foundCount > 0)
+        }
         resolve(false)
       })
 
@@ -242,6 +302,165 @@ app.whenReady().then(async () => {
         resolve(false)
       })
     })
+  }
+
+  const getRunningProcesses = async (): Promise<RunningProcessInfo[]> => {
+    return await new Promise<RunningProcessInfo[]>((resolve) => {
+      let stdout = ''
+      let stderr = ''
+      const ps = spawn('ps', ['-axo', 'pid=,comm='])
+
+      ps.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+      })
+
+      ps.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
+
+      ps.on('close', (code) => {
+        if (code !== 0) {
+          console.error('[Pluto] Failed to read process list:', stderr)
+          return resolve([])
+        }
+        const processes = stdout
+          .split('\n')
+          .map(line => line.trim())
+          .filter(Boolean)
+          .map((line): RunningProcessInfo | null => {
+            const match = line.match(/^(\d+)\s+(.+)$/)
+            if (!match) return null
+            const pid = Number.parseInt(match[1], 10)
+            if (!Number.isInteger(pid) || pid <= 0) return null
+            const rawName = match[2].trim()
+            return {
+              pid,
+              name: path.basename(rawName).toLowerCase()
+            }
+          })
+          .filter((proc): proc is RunningProcessInfo => proc !== null)
+        resolve(processes)
+      })
+
+      ps.on('error', (err) => {
+        console.error('[Pluto] Failed to spawn process list probe:', err)
+        resolve([])
+      })
+    })
+  }
+
+  const detectActiveCall = async (): Promise<ActiveCallState> => {
+    if (process.platform !== 'darwin') {
+      return {
+        active: false,
+        appName: null,
+        confidence: 'low',
+        reason: 'unsupported-platform'
+      }
+    }
+
+    const processes = await getRunningProcesses()
+    const matchedApps = CALL_APP_MATCHERS
+      .map(matcher => ({
+        label: matcher.label,
+        pids: processes
+          .filter(proc => matcher.patterns.some(pattern => pattern.test(proc.name)))
+          .map(proc => proc.pid)
+      }))
+      .filter(entry => entry.pids.length > 0)
+
+    if (matchedApps.length === 0) {
+      return {
+        active: false,
+        appName: null,
+        confidence: 'low',
+        reason: 'no-call-app-running'
+      }
+    }
+
+    for (const matched of matchedApps) {
+      const externalAudioActive = await runAudioProbe({
+        durationMs: 1200,
+        includeSelf: false,
+        allowSilent: false,
+        targetPids: matched.pids,
+        silentProbe: true
+      })
+
+      if (externalAudioActive) {
+        return {
+          active: true,
+          appName: matched.label,
+          confidence: 'high',
+          reason: 'call-app-running-with-active-audio'
+        }
+      }
+    }
+
+    // Silent fallback: treat as active only when target audio processes exist,
+    // even if no non-zero samples were observed during probe window.
+    for (const matched of matchedApps) {
+      const silentButAttached = await runAudioProbe({
+        durationMs: 1200,
+        includeSelf: false,
+        allowSilent: true,
+        targetPids: matched.pids,
+        silentProbe: true
+      })
+
+      if (silentButAttached) {
+        return {
+          active: true,
+          appName: matched.label,
+          confidence: 'medium',
+          reason: 'call-app-running-silent-fallback'
+        }
+      }
+    }
+
+    return {
+      active: false,
+      appName: matchedApps[0]?.label || null,
+      confidence: 'low',
+      reason: 'call-app-running-without-target-audio'
+    }
+  }
+
+  ipcMain.handle('SYSTEM_AUDIO_PROBE', async (_event, { durationMs, allowSilent } = {}) => {
+    return await runAudioProbe({
+      durationMs,
+      allowSilent: Boolean(allowSilent),
+      includeSelf: true,
+      silentProbe: true
+    })
+  })
+
+  ipcMain.handle('DETECT_ACTIVE_CALL', async () => {
+    return await detectActiveCall()
+  })
+
+  ipcMain.handle('SHOW_ACTIVE_CALL_ALERT', async (_event, { appName } = {}) => {
+    if (typeof appName !== 'string') return false
+    const normalized = appName.trim()
+    if (!normalized) return false
+    activeCallAlertController.show(normalized)
+    return true
+  })
+
+  ipcMain.handle('HIDE_ACTIVE_CALL_ALERT', async () => {
+    activeCallAlertController.close()
+    return true
+  })
+
+  ipcMain.on('ACTIVE_CALL_ALERT_ACTION', (_event, payload?: { action?: string; appName?: string }) => {
+    if (payload?.action === 'take-notes') {
+      if (win) {
+        if (!win.isVisible()) win.show()
+        win.focus()
+        win.webContents.send('ACTIVE_CALL_TAKE_NOTES', { appName: payload?.appName || null })
+      }
+    }
+    activeCallAlertController.close()
   })
 
   ipcMain.handle('BOOT_PROBE_STATUS', () => bootProbeDone)
@@ -254,11 +473,7 @@ app.whenReady().then(async () => {
     if (nativeAudioProcess) return true
 
     // Locate binary: In dev 'resources/bin/audiocap', in prod 'process.resourcesPath/bin/audiocap'
-    const isDev = !app.isPackaged
-    // Note: absolute path is safest
-    const execPath = isDev
-      ? path.join(app.getAppPath(), 'resources/bin/audiocap')
-      : path.join(process.resourcesPath, 'bin', 'audiocap')
+    const execPath = getAudioCapExecPath()
 
     console.log('[Pluto] Spawning AudioCap:', execPath)
 

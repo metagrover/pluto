@@ -9,7 +9,7 @@ let logger = Logger(subsystem: "com.metagrover.pluto.audiocap", category: "CLI")
 // For "System Audio", tap every audio process except ourselves.
 // ProcessTap requires explicit PIDs, so we scan the process object list.
 
-func getAudioProcesses(includeSelf: Bool) -> (pids: [Int32], excluded: [Int32]) {
+func getAudioProcesses(includeSelf: Bool, targetPids: Set<Int32>? = nil) -> (pids: [Int32], excluded: [Int32]) {
     var address = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyProcessObjectList,
         mScope: kAudioObjectPropertyScopeGlobal,
@@ -38,14 +38,13 @@ func getAudioProcesses(includeSelf: Bool) -> (pids: [Int32], excluded: [Int32]) 
         var pidSize = UInt32(MemoryLayout<pid_t>.size)
         
         if AudioObjectGetPropertyData(pidObj, &pidAddress, 0, nil, &pidSize, &pid) == noErr {
-            if includeSelf {
+            let canIncludeSelf = includeSelf || (pid != myPid && pid != parentPid)
+            let passesTargetFilter = targetPids == nil || targetPids?.contains(pid) == true
+
+            if canIncludeSelf && passesTargetFilter {
                 candidatePids.append(pid)
-            } else {
-                if pid == myPid || pid == parentPid {
-                    excluded.append(pid)
-                } else {
-                    candidatePids.append(pid)
-                }
+            } else if !includeSelf && (pid == myPid || pid == parentPid) {
+                excluded.append(pid)
             }
         }
     }
@@ -61,11 +60,15 @@ class AudioCapCLI {
     private var player: AVAudioPlayerNode?
     private var loggedMultiBufferWarning = false
     
-    init(includeSelf: Bool) {
+    init(includeSelf: Bool, targetPids: [Int32]?) {
+        let targetSet = (targetPids != nil && !(targetPids?.isEmpty ?? true)) ? Set(targetPids!) : nil
         // Dynamic discovery of PIDs
-        let processSelection = getAudioProcesses(includeSelf: includeSelf)
+        let processSelection = getAudioProcesses(includeSelf: includeSelf, targetPids: targetSet)
         let pids = processSelection.pids
         logger.info("Found \(pids.count) audio processes to tap.")
+        if let targetSet {
+            fputs("[AudioCap] Requested target PIDs: \(Array(targetSet))\n", stderr)
+        }
         // Also print to stderr for Electron to see
         // We can't easily get names here in this scope without helpers, but we have pids.
         // Let's just print the PIDS
@@ -128,7 +131,7 @@ class AudioCapCLI {
         }
     }
 
-    func probe(durationMs: Int) {
+    func probe(durationMs: Int, emitProbeTone: Bool) {
         let queue = DispatchQueue(label: "AudioCapProbeQueue")
         var sawNonZero = false
         do {
@@ -154,7 +157,9 @@ class AudioCapCLI {
                 return
             }
 
-            playProbeTone(durationMs: durationMs, frequency: 440, volume: 0.08)
+            if emitProbeTone {
+                playProbeTone(durationMs: durationMs, frequency: 440, volume: 0.08)
+            }
 
             let start = Date()
             while Date().timeIntervalSince(start) < Double(durationMs) / 1000.0 {
@@ -256,8 +261,32 @@ signal(SIGINT) { _ in
     exit(0)
 }
 
+func parseTargetPids(arguments: [String]) -> [Int32] {
+    var parsed: [Int32] = []
+    var idx = 0
+    while idx < arguments.count {
+        let arg = arguments[idx]
+        if arg == "--pid", idx + 1 < arguments.count {
+            if let pid = Int32(arguments[idx + 1]) {
+                parsed.append(pid)
+            }
+            idx += 1
+        } else if arg == "--pids", idx + 1 < arguments.count {
+            let values = arguments[idx + 1]
+                .split(separator: ",")
+                .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
+            parsed.append(contentsOf: values)
+            idx += 1
+        }
+        idx += 1
+    }
+    return Array(Set(parsed))
+}
+
 let includeSelf = CommandLine.arguments.contains("--probe-include-self")
-let cli = AudioCapCLI(includeSelf: includeSelf)
+let probeSilent = CommandLine.arguments.contains("--probe-silent")
+let targetPids = parseTargetPids(arguments: CommandLine.arguments)
+let cli = AudioCapCLI(includeSelf: includeSelf, targetPids: targetPids.isEmpty ? nil : targetPids)
 if CommandLine.arguments.contains("--probe") {
     var durationMs = 1500
     if let idx = CommandLine.arguments.firstIndex(of: "--probe-ms"), idx + 1 < CommandLine.arguments.count {
@@ -265,7 +294,7 @@ if CommandLine.arguments.contains("--probe") {
             durationMs = parsed
         }
     }
-    cli.probe(durationMs: durationMs)
+    cli.probe(durationMs: durationMs, emitProbeTone: !probeSilent)
 } else {
     cli.start()
 }
