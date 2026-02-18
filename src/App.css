@@ -5,6 +5,10 @@
     --pro-shadow-premium: 0 20px 50px -12px rgba(0, 0, 0, 0.08);
 }
 
+.app-init-drag {
+    -webkit-app-region: drag;
+}
+
 .app-titlebar {
     -webkit-app-region: drag;
 }
