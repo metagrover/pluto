@@ -5,6 +5,18 @@
     --pro-shadow-premium: 0 20px 50px -12px rgba(0, 0, 0, 0.08);
 }
 
+.app-titlebar {
+    -webkit-app-region: drag;
+}
+
+.app-titlebar button,
+.app-titlebar a,
+.app-titlebar input,
+.app-titlebar textarea,
+.app-titlebar select {
+    -webkit-app-region: no-drag;
+}
+
 .glass-card {
     background: rgba(255, 255, 255, 0.4);
     backdrop-filter: blur(24px) saturate(180%);
