@@ -10,10 +10,16 @@
 }
 
 .app-titlebar button,
-.app-titlebar a,
-.app-titlebar input,
-.app-titlebar textarea,
-.app-titlebar select {
+.app-titlebar a {
+    -webkit-app-region: no-drag;
+}
+
+.app-sidebar {
+    -webkit-app-region: drag;
+}
+
+.app-sidebar button,
+.app-sidebar a {
     -webkit-app-region: no-drag;
 }
 
