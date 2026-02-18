@@ -495,7 +495,7 @@ function App() {
   }
 
   if (setupNeeded === null || (!setupNeeded && !isServerReady)) return (
-    <div className="h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-black uppercase tracking-[0.2em] animate-pulse text-xs">
+    <div className="app-init-drag h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-black uppercase tracking-[0.2em] animate-pulse text-xs">
         <div className="w-8 h-8 rounded-full border-2 border-pro-accent border-t-transparent animate-spin mb-4" />
         <span>Initializing Neural Engine...</span>
     </div>
