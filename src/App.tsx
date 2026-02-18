@@ -578,7 +578,7 @@ function App() {
       ) : (
        <main className="flex-1 flex flex-col bg-pro-bg h-full relative z-10 rounded-l-[2.5rem] overflow-hidden content-shift border-l border-pro-border/10">
 
-         <header className="h-28 flex items-center justify-between px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20">
+         <header className="app-titlebar h-28 flex items-center justify-between px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20">
             <div className="flex items-center gap-8">
                 <button 
                     onClick={() => setSidebarVisible(prev => !prev)}

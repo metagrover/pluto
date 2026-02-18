@@ -27,7 +27,7 @@ export const Sidebar = ({
     return (
         <aside 
             className={`
-                w-[85vw] md:w-80 bg-pro-bg/95 backdrop-blur-xl border-r border-pro-border flex flex-col shrink-0 absolute lg:relative h-full z-40 transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none
+                app-sidebar w-[85vw] md:w-80 bg-pro-bg/95 backdrop-blur-xl border-r border-pro-border flex flex-col shrink-0 absolute lg:relative h-full z-40 transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none
                 ${sidebarVisible ? 'translate-x-0' : '-translate-x-full lg:-translate-x-80'}
                 ${sidebarVisible ? '' : 'lg:-mr-80'}
             `}
