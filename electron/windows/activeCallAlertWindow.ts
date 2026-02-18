@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { BrowserWindow, screen } from 'electron'
+import type { Rectangle } from 'electron'
 
 const ALERT_WIDTH = 320
 const ALERT_HEIGHT = 80
@@ -27,10 +28,12 @@ export const createActiveCallAlertController = ({
     activeCallAlertWin = null
   }
 
-  const show = (appName: string) => {
+  const show = (appName: string, anchorBounds?: Rectangle) => {
     close()
 
-    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    const display = anchorBounds
+      ? screen.getDisplayMatching(anchorBounds)
+      : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const workArea = display.workArea
     const x = Math.round(workArea.x + workArea.width - ALERT_WIDTH - ALERT_MARGIN)
     const y = Math.round(workArea.y + ALERT_MARGIN)

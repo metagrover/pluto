@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useReducer } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AudioManager } from './components/AudioManager'
 import { SetupWizard } from './components/Setup/SetupWizard'
 import './App.css'
+import { useActiveCallMonitor } from './hooks/useActiveCallMonitor'
 
 // Layout Components
 import { Sidebar } from './components/layout/Sidebar'
@@ -25,24 +26,6 @@ import { SettingsOverlay } from './components/overlays/SettingsOverlay'
 
 // Types
 import { Meeting } from './types'
-
-type CallAlertVisibilityState = {
-  visible: boolean
-}
-
-type CallAlertVisibilityEvent = {
-  type: 'SHOW' | 'HIDE'
-}
-
-const callAlertVisibilityReducer = (
-  _state: CallAlertVisibilityState,
-  event: CallAlertVisibilityEvent
-): CallAlertVisibilityState => {
-  if (event.type === 'SHOW') return { visible: true }
-  return { visible: false }
-}
-
-const ACTIVE_CALL_ALERT_COOLDOWN_MS = 30_000
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null)
@@ -83,30 +66,20 @@ function App() {
   const stopSessionRef = useRef<(() => void) | null>(null)
   const startSessionRef = useRef<(() => void) | null>(null)
   const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(null)
-  const activeCallAlertInFlightRef = useRef<string | null>(null)
-  const activeCallAlertCooldownRef = useRef<Map<string, number>>(new Map())
-  const callMonitorInitializedRef = useRef(false)
-  const callMonitorWasActiveRef = useRef(false)
-  const callMonitorLastAppRef = useRef<string | null>(null)
-  const alertVisibilityAutoResetRef = useRef<number | null>(null)
-  const isRecordingRef = useRef(false)
-  const isProcessingRef = useRef(false)
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null)
   const [speakingSource, setSpeakingSource] = useState<'Me' | 'Them' | null>(null)
-  const [, dispatchCallAlertVisibility] = useReducer(
-    callAlertVisibilityReducer,
-    { visible: false }
-  )
-
-  useEffect(() => {
-    isRecordingRef.current = isRecording
-    isProcessingRef.current = isProcessing
-  }, [isRecording, isProcessing])
 
   // Connect the ref
   onAnalyserReadyRef.current = (node) => {
       setAnalyser(node)
   }
+
+  useActiveCallMonitor({
+    setupNeeded,
+    isRecording,
+    isProcessing,
+    startSessionRef
+  })
 
   const handleCopySummary = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -276,30 +249,6 @@ function App() {
       }
   }
 
-  const setCallAlertVisibility = async (visible: boolean, appName?: string): Promise<boolean> => {
-      dispatchCallAlertVisibility({ type: visible ? 'SHOW' : 'HIDE' })
-
-      if (alertVisibilityAutoResetRef.current !== null) {
-          window.clearTimeout(alertVisibilityAutoResetRef.current)
-          alertVisibilityAutoResetRef.current = null
-      }
-
-      if (visible) {
-          const shown = await window.ipcRenderer.invoke('SHOW_ACTIVE_CALL_ALERT', { appName: appName || 'Call' })
-          if (!shown) {
-              return false
-          }
-          alertVisibilityAutoResetRef.current = window.setTimeout(() => {
-              dispatchCallAlertVisibility({ type: 'HIDE' })
-              alertVisibilityAutoResetRef.current = null
-          }, 16000)
-          return true
-      }
-
-      await window.ipcRenderer.invoke('HIDE_ACTIVE_CALL_ALERT')
-      return true
-  }
-
   const safeMeetings = Array.isArray(meetings) ? meetings : []
   const selectedMeeting = safeMeetings.find(m => String(m.id) === String(selectedMeetingId))
 
@@ -388,107 +337,6 @@ function App() {
       setPermissionsVisible(false)
     }
   }, [permissionStatus])
-
-  useEffect(() => {
-    let cancelled = false
-    let intervalId: number | null = null
-
-    const pollActiveCall = async () => {
-      if (setupNeeded !== false || isRecording || isProcessing) {
-        activeCallAlertInFlightRef.current = null
-        callMonitorInitializedRef.current = false
-        callMonitorWasActiveRef.current = false
-        callMonitorLastAppRef.current = null
-        await setCallAlertVisibility(false)
-        return
-      }
-
-      try {
-        const result = await window.ipcRenderer.invoke('DETECT_ACTIVE_CALL')
-        if (cancelled) return
-
-        const appName = typeof result?.appName === 'string' ? result.appName : null
-        const confidence = result?.confidence === 'high' || result?.confidence === 'medium'
-          ? result.confidence
-          : 'low'
-        const isActive = Boolean(result?.active) && Boolean(appName)
-
-        // Establish startup baseline: do not alert for calls that were already active
-        // before monitoring began.
-        if (!callMonitorInitializedRef.current) {
-          const baselineActive = isActive && confidence === 'high'
-          callMonitorInitializedRef.current = true
-          callMonitorWasActiveRef.current = baselineActive
-          callMonitorLastAppRef.current = baselineActive ? appName : null
-          activeCallAlertInFlightRef.current = baselineActive ? appName : null
-          return
-        }
-
-        if (!isActive || !appName) {
-          activeCallAlertInFlightRef.current = null
-          callMonitorWasActiveRef.current = false
-          callMonitorLastAppRef.current = null
-          return
-        }
-
-        const previousApp = callMonitorLastAppRef.current
-        const isFreshJoin = !callMonitorWasActiveRef.current || previousApp !== appName
-        callMonitorWasActiveRef.current = true
-        callMonitorLastAppRef.current = appName
-
-        if (isFreshJoin && activeCallAlertInFlightRef.current !== appName) {
-          const now = Date.now()
-          const lastShownAt = activeCallAlertCooldownRef.current.get(appName) ?? 0
-          if (now - lastShownAt < ACTIVE_CALL_ALERT_COOLDOWN_MS) {
-            activeCallAlertInFlightRef.current = appName
-            return
-          }
-
-          activeCallAlertInFlightRef.current = appName
-          activeCallAlertCooldownRef.current.set(appName, now)
-          const shown = await setCallAlertVisibility(true, appName)
-          if (!shown) {
-            activeCallAlertInFlightRef.current = null
-          }
-        }
-      } catch {
-        activeCallAlertInFlightRef.current = null
-        callMonitorInitializedRef.current = false
-        callMonitorWasActiveRef.current = false
-        callMonitorLastAppRef.current = null
-      }
-    }
-
-    void pollActiveCall()
-    intervalId = window.setInterval(() => {
-      void pollActiveCall()
-    }, 12000)
-
-    return () => {
-      cancelled = true
-      if (intervalId !== null) window.clearInterval(intervalId)
-    }
-  }, [setupNeeded, isRecording, isProcessing])
-
-  useEffect(() => {
-    return () => {
-      if (alertVisibilityAutoResetRef.current !== null) {
-        window.clearTimeout(alertVisibilityAutoResetRef.current)
-        alertVisibilityAutoResetRef.current = null
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    const handleTakeNotesFromAlert = () => {
-      if (startSessionRef.current && !isRecordingRef.current && !isProcessingRef.current) {
-        startSessionRef.current()
-      }
-    }
-
-    window.ipcRenderer.on('ACTIVE_CALL_TAKE_NOTES', handleTakeNotesFromAlert)
-    return () => window.ipcRenderer.off('ACTIVE_CALL_TAKE_NOTES', handleTakeNotesFromAlert)
-  }, [])
 
   const retryRecordingIfReady = async () => {
     await window.ipcRenderer.invoke('APP_RELAUNCH')

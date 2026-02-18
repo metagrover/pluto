@@ -33,21 +33,25 @@ let tray: Tray | null = null
 type ActiveCallState = {
   active: boolean
   appName: string | null
+  pidCount: number | null
   confidence: 'low' | 'medium' | 'high'
   reason: string
 }
 
 type RunningProcessInfo = {
   pid: number
+  ppid: number
   name: string
+  command: string
 }
 
-const CALL_APP_MATCHERS: Array<{ label: string; patterns: RegExp[] }> = [
-  { label: 'FaceTime', patterns: [/facetime/i] },
-  { label: 'Chrome', patterns: [/google chrome/i, /chrome helper/i, /\bchromium\b/i] },
-  { label: 'Zoom', patterns: [/zoom\.us/i, /\bzoom\b/i, /cpthost/i] },
-  { label: 'Microsoft Teams', patterns: [/microsoft teams/i, /\bteams\b/i] },
-  { label: 'Webex', patterns: [/webex/i, /cisco webex/i] }
+const CALL_APP_MATCHERS: Array<{ label: string; patterns: RegExp[]; allowSilentFallback: boolean }> = [
+  { label: 'FaceTime', patterns: [/facetime/i], allowSilentFallback: false },
+  { label: 'WhatsApp', patterns: [/\bwhatsapp\b/i, /whatsapp helper/i], allowSilentFallback: false },
+  { label: 'Chrome', patterns: [/google chrome/i, /chrome helper/i, /\bchromium\b/i], allowSilentFallback: false },
+  { label: 'Zoom', patterns: [/zoom\.us/i, /\bzoom\b/i, /cpthost/i], allowSilentFallback: true },
+  { label: 'Microsoft Teams', patterns: [/microsoft teams/i, /\bteams\b/i], allowSilentFallback: true },
+  { label: 'Webex', patterns: [/webex/i, /cisco webex/i], allowSilentFallback: true }
 ]
 
 const getPreloadPath = () => {
@@ -308,7 +312,7 @@ app.whenReady().then(async () => {
     return await new Promise<RunningProcessInfo[]>((resolve) => {
       let stdout = ''
       let stderr = ''
-      const ps = spawn('ps', ['-axo', 'pid=,comm='])
+      const ps = spawn('ps', ['-axo', 'pid=,ppid=,comm='])
 
       ps.stdout.on('data', (chunk) => {
         stdout += String(chunk)
@@ -328,14 +332,18 @@ app.whenReady().then(async () => {
           .map(line => line.trim())
           .filter(Boolean)
           .map((line): RunningProcessInfo | null => {
-            const match = line.match(/^(\d+)\s+(.+)$/)
+            const match = line.match(/^(\d+)\s+(\d+)\s+(.+)$/)
             if (!match) return null
             const pid = Number.parseInt(match[1], 10)
+            const ppid = Number.parseInt(match[2], 10)
             if (!Number.isInteger(pid) || pid <= 0) return null
-            const rawName = match[2].trim()
+            if (!Number.isInteger(ppid) || ppid < 0) return null
+            const rawName = match[3].trim()
             return {
               pid,
-              name: path.basename(rawName).toLowerCase()
+              ppid,
+              name: path.basename(rawName).toLowerCase(),
+              command: rawName.toLowerCase()
             }
           })
           .filter((proc): proc is RunningProcessInfo => proc !== null)
@@ -349,30 +357,101 @@ app.whenReady().then(async () => {
     })
   }
 
+  const isGoogleMeetTabOpenInChrome = async (): Promise<boolean> => {
+    if (process.platform !== 'darwin') return false
+    const script = `tell application "Google Chrome"
+if it is not running then return "false"
+repeat with w in windows
+  repeat with t in tabs of w
+    set u to URL of t
+    if u contains "meet.google.com" then return "true"
+  end repeat
+end repeat
+return "false"
+end tell`
+
+    return await new Promise<boolean>((resolve) => {
+      const proc = spawn('osascript', ['-e', script])
+      let stdout = ''
+      let stderr = ''
+
+      proc.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+      })
+      proc.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          return resolve(false)
+        }
+        const isOpen = stdout.trim().toLowerCase() === 'true'
+        resolve(isOpen)
+      })
+      proc.on('error', () => {
+        resolve(false)
+      })
+    })
+  }
+
   const detectActiveCall = async (): Promise<ActiveCallState> => {
     if (process.platform !== 'darwin') {
       return {
         active: false,
         appName: null,
+        pidCount: null,
         confidence: 'low',
         reason: 'unsupported-platform'
       }
     }
 
     const processes = await getRunningProcesses()
+    const childrenByParent = new Map<number, number[]>()
+    for (const proc of processes) {
+      const children = childrenByParent.get(proc.ppid) ?? []
+      children.push(proc.pid)
+      childrenByParent.set(proc.ppid, children)
+    }
+    const expandWithDescendants = (rootPids: number[]) => {
+      const expanded = new Set<number>(rootPids)
+      const queue = [...rootPids]
+      while (queue.length > 0) {
+        const current = queue.shift()!
+        const children = childrenByParent.get(current) ?? []
+        for (const childPid of children) {
+          if (expanded.has(childPid)) continue
+          expanded.add(childPid)
+          queue.push(childPid)
+        }
+      }
+      return Array.from(expanded)
+    }
+
     const matchedApps = CALL_APP_MATCHERS
-      .map(matcher => ({
-        label: matcher.label,
-        pids: processes
-          .filter(proc => matcher.patterns.some(pattern => pattern.test(proc.name)))
+      .map(matcher => {
+        const directPids = processes
+          .filter(proc =>
+            matcher.patterns.some(pattern => pattern.test(proc.name) || pattern.test(proc.command))
+          )
           .map(proc => proc.pid)
-      }))
+        const pids = expandWithDescendants(directPids)
+        return {
+          label: matcher.label,
+          allowSilentFallback: matcher.allowSilentFallback,
+          directPidCount: directPids.length,
+          pids
+        }
+      })
       .filter(entry => entry.pids.length > 0)
+
+    const chromeMatched = matchedApps.some(app => app.label === 'Chrome')
+    const chromeMeetTabOpen = chromeMatched ? await isGoogleMeetTabOpenInChrome() : false
 
     if (matchedApps.length === 0) {
       return {
         active: false,
         appName: null,
+        pidCount: null,
         confidence: 'low',
         reason: 'no-call-app-running'
       }
@@ -391,6 +470,7 @@ app.whenReady().then(async () => {
         return {
           active: true,
           appName: matched.label,
+          pidCount: matched.pids.length,
           confidence: 'high',
           reason: 'call-app-running-with-active-audio'
         }
@@ -400,6 +480,8 @@ app.whenReady().then(async () => {
     // Silent fallback: treat as active only when target audio processes exist,
     // even if no non-zero samples were observed during probe window.
     for (const matched of matchedApps) {
+      const allowSilentFallback = matched.allowSilentFallback || (matched.label === 'Chrome' && chromeMeetTabOpen)
+      if (!allowSilentFallback) continue
       const silentButAttached = await runAudioProbe({
         durationMs: 1200,
         includeSelf: false,
@@ -409,11 +491,18 @@ app.whenReady().then(async () => {
       })
 
       if (silentButAttached) {
+        const displayLabel = matched.label === 'Chrome' && chromeMeetTabOpen
+          ? 'Google Meet (Chrome)'
+          : matched.label
+        const reason = matched.label === 'Chrome' && chromeMeetTabOpen
+          ? 'chrome-google-meet-tab-open-silent-fallback'
+          : 'call-app-running-silent-fallback'
         return {
           active: true,
-          appName: matched.label,
+          appName: displayLabel,
+          pidCount: matched.pids.length,
           confidence: 'medium',
-          reason: 'call-app-running-silent-fallback'
+          reason
         }
       }
     }
@@ -421,6 +510,7 @@ app.whenReady().then(async () => {
     return {
       active: false,
       appName: matchedApps[0]?.label || null,
+      pidCount: matchedApps[0]?.pids.length || null,
       confidence: 'low',
       reason: 'call-app-running-without-target-audio'
     }
@@ -443,7 +533,8 @@ app.whenReady().then(async () => {
     if (typeof appName !== 'string') return false
     const normalized = appName.trim()
     if (!normalized) return false
-    activeCallAlertController.show(normalized)
+    const anchorBounds = (win && !win.isDestroyed()) ? win.getBounds() : undefined
+    activeCallAlertController.show(normalized, anchorBounds)
     return true
   })
 
