@@ -56,6 +56,10 @@ type RunAudioProbeOptions = {
 
 type CreateActiveCallDetectorArgs = {
   runAudioProbe: (options: RunAudioProbeOptions) => Promise<boolean>
+  getRunningProcesses?: () => Promise<RunningProcessInfo[]>
+  detectBrowserCallProviders?: (
+    matchedApps: MatchedCallApp[]
+  ) => Promise<Map<string, CallProvider>>
 }
 
 const BROWSER_DISPLAY_LABELS: Record<string, string> = {
@@ -305,7 +309,9 @@ const detectBrowserCallProviders = async (
 }
 
 export const createActiveCallDetector = ({
-  runAudioProbe
+  runAudioProbe,
+  getRunningProcesses: getRunningProcessesOverride,
+  detectBrowserCallProviders: detectBrowserCallProvidersOverride
 }: CreateActiveCallDetectorArgs) => {
   return async (): Promise<ActiveCallState> => {
     if (process.platform !== 'darwin') {
@@ -318,7 +324,7 @@ export const createActiveCallDetector = ({
       }
     }
 
-    const processes = await getRunningProcesses()
+    const processes = await (getRunningProcessesOverride ?? getRunningProcesses)()
     const childrenByParent = new Map<number, number[]>()
     for (const proc of processes) {
       const children = childrenByParent.get(proc.ppid) ?? []
@@ -356,7 +362,7 @@ export const createActiveCallDetector = ({
         }
       })
       .filter(entry => entry.pids.length > 0)
-    const browserCallProviderByLabel = await detectBrowserCallProviders(matchedApps)
+    const browserCallProviderByLabel = await (detectBrowserCallProvidersOverride ?? detectBrowserCallProviders)(matchedApps)
 
     if (matchedApps.length === 0) {
       return {
@@ -369,6 +375,10 @@ export const createActiveCallDetector = ({
     }
 
     for (const matched of matchedApps) {
+      const hasBrowserCallTab = browserCallProviderByLabel.has(matched.label)
+      if (matched.browserId && !hasBrowserCallTab) {
+        continue
+      }
       const externalAudioActive = await runAudioProbe({
         durationMs: 1200,
         includeSelf: false,
