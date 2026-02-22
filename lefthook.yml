@@ -1,0 +1,5 @@
+pre-push:
+  commands:
+    audit:
+      run: pnpm run audit:high
+      files: git diff --name-only HEAD @{push}

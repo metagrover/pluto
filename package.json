@@ -8,12 +8,17 @@
     "build-native": "pnpm run build-swift && pnpm run build:audio-cap",
     "build": "tsc && vite build && pnpm run build-python && electron-builder",
     "build:audio-cap": "mkdir -p resources/bin && swiftc resources/swift/audiocap/*.swift -o resources/bin/audiocap -framework CoreAudio -framework AudioToolbox -framework AVFoundation",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "biome lint .",
+    "format": "biome format . --write",
+    "check": "biome check .",
+    "fix": "biome check . --write",
     "preview": "vite preview",
     "test:synthetic-attribution": "vitest run tests/unit/speakerAttribution.synthetic.test.ts",
     "setup-python": "./scripts/setup_python.sh",
     "build-python": "./scripts/build_python.sh",
     "postinstall": "pnpm run setup-python",
+    "prepare": "lefthook install",
+    "audit:high": "pnpm audit --audit-level high",
     "test": "vitest",
     "replay:meeting": "node scripts/replay_meeting_attribution.js",
     "test:meeting-regression": "node scripts/replay_meeting_attribution.js --fixture-file scripts/replay.local-fixtures.json --attempts 1 --require-expected --all-sets"
@@ -22,6 +27,7 @@
     "@google/generative-ai": "^0.24.1",
     "better-sqlite3": "^12.5.0",
     "cross-spawn": "^7.0.6",
+    "electron-builder": "^26.7.0",
     "fast-levenshtein": "^3.0.0",
     "ffmpeg-static": "^5.3.0",
     "ffprobe-static": "^3.1.0",
@@ -32,6 +38,7 @@
     "undici": "^6.19.8"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cross-spawn": "^6.0.6",
     "@types/fast-levenshtein": "^0.0.4",
@@ -40,20 +47,21 @@
     "@types/react-dom": "^18.2.21",
     "@typescript-eslint/eslint-plugin": "^7.1.1",
     "@typescript-eslint/parser": "^7.1.1",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.4.23",
-    "electron": "^40.0.0",
-    "electron-builder": "^24.13.3",
-    "eslint": "^8.57.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-react-refresh": "^0.4.5",
+    "electron": "40.4.1",
+    "@biomejs/biome": "^1.9.4",
+    "lefthook": "^1.7.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.2.2",
-    "vite": "^5.1.6",
+    "vite": "^7.3.1",
     "vite-plugin-electron": "^0.28.6",
     "vite-plugin-electron-renderer": "^0.14.5",
     "vitest": "^4.0.18"
   },
-  "main": "dist-electron/main.js"
+  "main": "dist-electron/main.js",
+  "volta": {
+    "node": "24.11.0"
+  }
 }

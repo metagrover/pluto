@@ -29,6 +29,7 @@ python/build/
 python/venv/
 python/__pycache__/
 *.spec
+python/constraints.txt
 
 # Editor directories and files
 .vscode/*
