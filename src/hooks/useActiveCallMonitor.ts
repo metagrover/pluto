@@ -1,21 +1,5 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import type { MutableRefObject } from 'react'
-
-type CallAlertVisibilityState = {
-  visible: boolean
-}
-
-type CallAlertVisibilityEvent = {
-  type: 'SHOW' | 'HIDE'
-}
-
-const callAlertVisibilityReducer = (
-  _state: CallAlertVisibilityState,
-  event: CallAlertVisibilityEvent
-): CallAlertVisibilityState => {
-  if (event.type === 'SHOW') return { visible: true }
-  return { visible: false }
-}
 
 const ACTIVE_CALL_ALERT_COOLDOWN_MS = 30_000
 const ACTIVE_CALL_POLL_INTERVAL_MS = 6_000
@@ -44,10 +28,6 @@ export const useActiveCallMonitor = ({
   const alertVisibilityAutoResetRef = useRef<number | null>(null)
   const isRecordingRef = useRef(false)
   const isProcessingRef = useRef(false)
-  const [, dispatchCallAlertVisibility] = useReducer(
-    callAlertVisibilityReducer,
-    { visible: false }
-  )
 
   useEffect(() => {
     isRecordingRef.current = isRecording
@@ -55,8 +35,6 @@ export const useActiveCallMonitor = ({
   }, [isRecording, isProcessing])
 
   const setCallAlertVisibility = async (visible: boolean, appName?: string): Promise<boolean> => {
-    dispatchCallAlertVisibility({ type: visible ? 'SHOW' : 'HIDE' })
-
     if (alertVisibilityAutoResetRef.current !== null) {
       window.clearTimeout(alertVisibilityAutoResetRef.current)
       alertVisibilityAutoResetRef.current = null
@@ -68,7 +46,6 @@ export const useActiveCallMonitor = ({
         return false
       }
       alertVisibilityAutoResetRef.current = window.setTimeout(() => {
-        dispatchCallAlertVisibility({ type: 'HIDE' })
         alertVisibilityAutoResetRef.current = null
       }, 16000)
       return true
@@ -203,9 +180,15 @@ export const useActiveCallMonitor = ({
 
   useEffect(() => {
     const handleTakeNotesFromAlert = () => {
-      if (startSessionRef.current && !isRecordingRef.current && !isProcessingRef.current) {
+      if (isRecordingRef.current || isProcessingRef.current) return
+
+      if (startSessionRef.current) {
         startSessionRef.current()
+        return
       }
+
+      // Fallback for cases where the ref hasn't been wired yet.
+      window.dispatchEvent(new Event('START_RECORDING'))
     }
 
     window.ipcRenderer.on('ACTIVE_CALL_TAKE_NOTES', handleTakeNotesFromAlert)
