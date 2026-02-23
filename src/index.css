@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;800;900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700;800;900&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -6,9 +6,9 @@
 
 :root {
   /* Fluid Typography & Spacing */
-  --font-main: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-secondary: 'Inter', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-main: "Inter", system-ui, -apple-system, sans-serif;
+  --font-secondary: "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
 
   /* HSL Color System - Pluto Official Palette */
   --pro-bg: 42 40% 96%;
@@ -35,9 +35,8 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.02);
   --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.05);
   --shadow-lg: 0 12px 24px -4px rgb(0 0 0 / 0.05);
-  --shadow-premium:
-    0 2px 8px 0 rgba(0, 0, 0, 0.02),
-    0 10px 30px 0 rgba(0, 0, 0, 0.03);
+  --shadow-premium: 0 2px 8px 0 rgba(0, 0, 0, 0.02), 0 10px 30px 0
+    rgba(0, 0, 0, 0.03);
 
   /* Proportional Corner System */
   --radius-xl: 32px;
@@ -76,7 +75,6 @@
 
 /* Advanced Animations */
 @keyframes nebula-float {
-
   0%,
   100% {
     transform: translate(0, 0) scale(1);
@@ -95,7 +93,13 @@
 
 /* Layout Utilities */
 .sidebar-mask {
-  mask-image: linear-gradient(to bottom, transparent, black 5%, black 95%, transparent);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 5%,
+    black 95%,
+    transparent
+  );
 }
 
 .content-grid {
@@ -112,7 +116,11 @@
 }
 
 .gradient-text {
-  background: linear-gradient(135deg, hsl(var(--pro-text-main)) 0%, hsl(var(--pro-accent)) 100%);
+  background: linear-gradient(
+    135deg,
+    hsl(var(--pro-text-main)) 0%,
+    hsl(var(--pro-accent)) 100%
+  );
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -191,7 +199,6 @@
 }
 
 @keyframes neural-pulse {
-
   0%,
   100% {
     opacity: 0.8;

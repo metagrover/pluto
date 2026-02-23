@@ -1,10 +1,14 @@
 /// <reference types="vite/client" />
 
 interface Window {
-    ipcRenderer: {
-        invoke: (channel: string, ...args: any[]) => Promise<any>
-        send: (channel: string, ...args: any[]) => void
-        on: (channel: string, listener: (event: any, ...args: any[]) => void) => void
-        off: (channel: string, listener: (...args: any[]) => void) => void
-    }
+  webkitAudioContext?: typeof AudioContext;
+  ipcRenderer: {
+    invoke: <T = unknown>(channel: string, ...args: unknown[]) => Promise<T>;
+    send: (channel: string, ...args: unknown[]) => void;
+    on: (
+      channel: string,
+      listener: (event: unknown, ...args: unknown[]) => void,
+    ) => void;
+    off: (channel: string, listener: (...args: unknown[]) => void) => void;
+  };
 }

@@ -1,9 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
@@ -17,15 +14,15 @@ export default {
         'pro-hover': '#F1ECE4', // Slightly darker cream for hover
       },
       boxShadow: {
-        'premium': '0 10px 30px -5px rgba(26, 35, 64, 0.1), 0 4px 10px -3px rgba(26, 35, 64, 0.05)',
+        premium:
+          '0 10px 30px -5px rgba(26, 35, 64, 0.1), 0 4px 10px -3px rgba(26, 35, 64, 0.05)',
         'inner-soft': 'inset 0 2px 4px 0 rgba(26, 35, 64, 0.03)',
       },
       borderRadius: {
         '2xl': '1.25rem',
         '3xl': '1.75rem',
-      }
+      },
     },
   },
   plugins: [],
-}
-
+};

@@ -1,5 +1,11 @@
-import ReactDOM from 'react-dom/client'
-import { ActiveCallAlertWindow } from './ActiveCallAlertWindow'
-import './activeCallAlert.css'
+import ReactDOM from 'react-dom/client';
+import { ActiveCallAlertWindow } from './ActiveCallAlertWindow';
+import './activeCallAlert.css';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<ActiveCallAlertWindow />)
+const rootElement = document.getElementById('root');
+
+if (!rootElement) {
+  throw new Error('Root element not found');
+}
+
+ReactDOM.createRoot(rootElement).render(<ActiveCallAlertWindow />);
