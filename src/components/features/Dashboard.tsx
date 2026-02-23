@@ -39,7 +39,8 @@ export const Dashboard = ({
           </p>
           {intelligence.actionLabel && (
             <div className="pt-4 flex items-center gap-4">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() =>
                   intelligence.meetingId &&
                   setSelectedMeetingId(intelligence.meetingId)
@@ -48,7 +49,10 @@ export const Dashboard = ({
               >
                 {intelligence.actionLabel}
               </button>
-              <button type="button" className="px-6 py-4 rounded-2xl bg-white border border-pro-border text-pro-text-muted font-black text-[11px] uppercase tracking-[.15em] hover:bg-pro-bg transition-all active-push">
+              <button
+                type="button"
+                className="px-6 py-4 rounded-2xl bg-white border border-pro-border text-pro-text-muted font-black text-[11px] uppercase tracking-[.15em] hover:bg-pro-bg transition-all active-push"
+              >
                 Ignore for now
               </button>
             </div>
@@ -69,7 +73,8 @@ export const Dashboard = ({
             .filter((cta) => cta.active || intelligence.type === 'default')
             .slice(0, 3)
             .map((action) => (
-              <button type="button"
+              <button
+                type="button"
                 key={action.label}
                 className="px-5 py-2.5 rounded-full bg-white border border-pro-border shadow-sm hover:border-pro-accent/40 hover:scale-[1.02] transition-all active-push flex items-center gap-2 group"
               >
@@ -122,10 +127,16 @@ export const Dashboard = ({
               </div>
             </div>
             <div className="flex gap-3 relative z-10 pt-8">
-              <button type="button" className="flex-1 py-4 rounded-xl bg-[#1E1F24] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl hover:bg-pro-accent transition-all active-push">
+              <button
+                type="button"
+                className="flex-1 py-4 rounded-xl bg-[#1E1F24] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl hover:bg-pro-accent transition-all active-push"
+              >
                 Prep Intel Card
               </button>
-              <button type="button" className="w-14 h-14 rounded-xl bg-white border border-pro-border flex items-center justify-center hover:bg-pro-bg transition-all active-push shadow-sm">
+              <button
+                type="button"
+                className="w-14 h-14 rounded-xl bg-white border border-pro-border flex items-center justify-center hover:bg-pro-bg transition-all active-push shadow-sm"
+              >
                 🔗
               </button>
             </div>
@@ -140,7 +151,8 @@ export const Dashboard = ({
               <h3 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
                 ⚠️ Action Insights
               </h3>
-              <button type="button"
+              <button
+                type="button"
                 className="h-8 px-4 rounded-lg bg-pro-bg border border-pro-border text-[9px] font-black text-pro-accent uppercase tracking-widest hover:bg-pro-accent hover:text-white transition-all active-push shadow-sm"
                 onClick={() => setActiveTab('tasks')}
               >
@@ -212,7 +224,8 @@ export const Dashboard = ({
                         <span className="text-[9px] font-bold text-pro-text-muted/30 uppercase tracking-widest">
                           Due {t.due}
                         </span>
-                        <button type="button"
+                        <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             console.log('Snooze');
@@ -292,13 +305,17 @@ export const Dashboard = ({
               </div>
             </div>
             <div className="flex gap-3 pt-4 mt-auto">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setActiveTab('people')}
                 className="flex-1 py-4 rounded-xl bg-white border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-soft hover:bg-pro-bg transition-all active-push"
               >
                 View Biography
               </button>
-              <button type="button" className="flex-1 py-4 rounded-xl bg-[#2A2B32] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">
+              <button
+                type="button"
+                className="flex-1 py-4 rounded-xl bg-[#2A2B32] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push"
+              >
                 Draft Follow-up
               </button>
             </div>
@@ -366,13 +383,17 @@ export const Dashboard = ({
 
             {/* Right: Actions */}
             <div className="flex flex-col gap-4 w-[200px] shrink-0">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setActiveTab('people')}
                 className="w-full py-4 rounded-xl bg-white border border-pro-border/10 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-sm hover:bg-pro-bg transition-all active-push"
               >
                 View Biography
               </button>
-              <button type="button" className="w-full py-4 rounded-xl bg-[#1A1D26] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">
+              <button
+                type="button"
+                className="w-full py-4 rounded-xl bg-[#1A1D26] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push"
+              >
                 Draft Follow-up
               </button>
             </div>
@@ -385,7 +406,8 @@ export const Dashboard = ({
           <h2 className="text-xl font-black tracking-tight">
             Live Intelligence Documents
           </h2>
-          <button type="button"
+          <button
+            type="button"
             className="text-[10px] font-black text-pro-accent uppercase tracking-[0.15em] hover:underline"
             onClick={() => setActiveTab('wiki')}
           >
@@ -419,7 +441,8 @@ export const Dashboard = ({
               count: '5 Key Shifts',
             },
           ].map((item) => (
-            <button type="button"
+            <button
+              type="button"
               key={item.title}
               className="text-left glass-card border border-pro-border rounded-[2rem] p-8 space-y-6 hover:border-pro-accent/40 transition-all group card-hover-effect"
             >

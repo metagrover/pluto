@@ -132,7 +132,10 @@ export const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 // IPC invoke helper
-const invoke = <T = unknown>(channel: string, ...args: unknown[]): Promise<T> => {
+const invoke = <T = unknown>(
+  channel: string,
+  ...args: unknown[]
+): Promise<T> => {
   return window.ipcRenderer.invoke(channel, ...args) as Promise<T>;
 };
 

@@ -1,20 +1,18 @@
 vi.mock('../../electron/db', () => ({
   getEntitiesByType: vi.fn(),
   findEntity: vi.fn(),
-  upsertEntity: vi
-    .fn()
-    .mockImplementation((e: Record<string, unknown>) => ({
-      ...e,
-      id: `mock-id-${Math.random()}`,
-    })),
+  upsertEntity: vi.fn().mockImplementation((e: Record<string, unknown>) => ({
+    ...e,
+    id: `mock-id-${Math.random()}`,
+  })),
   linkEntities: vi.fn().mockImplementation((l: unknown) => l),
   addMeetingEntity: vi.fn(),
 }));
 
 import * as db from '../../electron/db';
+import type { Entity } from '../../electron/db';
 import { processExtractedEntities } from '../../electron/entityPipeline';
 import type { ExtractedEntities } from '../../electron/llm/provider';
-import type { Entity } from '../../electron/db';
 
 describe('Relationship Inference', () => {
   beforeEach(() => {

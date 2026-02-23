@@ -78,7 +78,8 @@ export const SearchOverlay = ({
                   </h3>
                   <div className="grid grid-cols-2 gap-6">
                     {filteredMeetings.map((m) => (
-                      <button type="button"
+                      <button
+                        type="button"
                         key={m.id}
                         onClick={() => {
                           setSelectedMeetingId(m.id);

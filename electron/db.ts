@@ -957,15 +957,19 @@ export const getKnowledgeGraphStats = (): {
   total_meeting_connections: number;
 } => {
   const totalEntities = (
-    db.prepare('SELECT COUNT(*) as count FROM entities').get() as { count: number }
+    db.prepare('SELECT COUNT(*) as count FROM entities').get() as {
+      count: number;
+    }
   ).count;
   const totalLinks = (
-    db.prepare('SELECT COUNT(*) as count FROM entity_links').get() as { count: number }
+    db.prepare('SELECT COUNT(*) as count FROM entity_links').get() as {
+      count: number;
+    }
   ).count;
   const totalMeetingConnections = (
-    db
-      .prepare('SELECT COUNT(*) as count FROM meeting_entities')
-      .get() as { count: number }
+    db.prepare('SELECT COUNT(*) as count FROM meeting_entities').get() as {
+      count: number;
+    }
   ).count;
 
   const typeCounts = db

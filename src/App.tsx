@@ -504,7 +504,8 @@ function App() {
         <main className="flex-1 flex flex-col bg-pro-bg h-full relative z-10 rounded-l-[2.5rem] overflow-hidden content-shift border-l border-pro-border/10">
           <header className="app-titlebar h-28 flex items-center justify-between px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20">
             <div className="flex items-center gap-8">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setSidebarVisible((prev) => !prev)}
                 className="w-11 h-11 rounded-xl bg-white border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push group"
               >
@@ -547,7 +548,8 @@ function App() {
             </div>
 
             <div className="flex items-center gap-4">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setAskPlutoVisible(true)}
                 className="h-12 px-6 rounded-2xl bg-white border border-pro-border shadow-soft flex items-center gap-4 hover:border-pro-accent/40 transition-all active-push group"
               >
@@ -565,7 +567,8 @@ function App() {
                 </div>
               </button>
               <div className="w-[1px] h-6 bg-pro-border/20" />
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setSettingsVisible(true)}
                 className="w-11 h-11 rounded-xl bg-white border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push"
               >
@@ -670,7 +673,8 @@ function App() {
                   </p>
                 </div>
                 <div className="pt-10 flex flex-col items-center gap-6 relative z-10">
-                  <button type="button"
+                  <button
+                    type="button"
                     onClick={() => {
                       if (startSessionRef.current) startSessionRef.current();
                     }}

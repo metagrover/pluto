@@ -82,7 +82,10 @@ export const TasksTab: React.FC = () => {
             commitments
           </p>
         </div>
-        <button type="button" className="h-10 px-6 rounded-xl bg-pro-bg border border-pro-border text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all">
+        <button
+          type="button"
+          className="h-10 px-6 rounded-xl bg-pro-bg border border-pro-border text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all"
+        >
           Sync Linear
         </button>
       </div>
@@ -100,7 +103,8 @@ export const TasksTab: React.FC = () => {
                 ${isCompleted ? 'bg-pro-bg/30 border-pro-border/40 grayscale-[0.8] opacity-60' : 'bg-white border-pro-border shadow-sm hover:shadow-md hover:border-pro-accent/20'}
               `}
             >
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => toggleTask(task)}
                 className={`
                   mt-1 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0

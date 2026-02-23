@@ -8,6 +8,4 @@ if (!rootElement) {
   throw new Error('Root element not found');
 }
 
-ReactDOM.createRoot(rootElement).render(
-  <ActiveCallAlertWindow />,
-);
+ReactDOM.createRoot(rootElement).render(<ActiveCallAlertWindow />);

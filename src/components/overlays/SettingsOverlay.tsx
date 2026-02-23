@@ -64,7 +64,8 @@ export const SettingsOverlay = ({
               </p>
             </div>
           </div>
-          <button type="button"
+          <button
+            type="button"
             onClick={() => setSettingsVisible(false)}
             className="w-12 h-12 rounded-2xl hover:bg-pro-bg transition-all flex items-center justify-center text-sm border border-pro-border/40 shadow-sm active-push group"
           >
@@ -98,7 +99,8 @@ export const SettingsOverlay = ({
                   icon: '🎭',
                 },
               ].map((p) => (
-                <button type="button"
+                <button
+                  type="button"
                   key={p.id}
                   onClick={() => {
                     setLlmProvider(
@@ -270,7 +272,8 @@ export const SettingsOverlay = ({
           </div>
 
           <div className="pt-10 border-t border-pro-border/20 flex items-center justify-between">
-            <button type="button"
+            <button
+              type="button"
               className="text-[10px] font-black text-red-500/40 hover:text-red-500 uppercase tracking-widest transition-colors px-4 py-2 rounded-lg hover:bg-red-50 text-left"
               onClick={async () => {
                 if (
@@ -292,7 +295,8 @@ export const SettingsOverlay = ({
             >
               Reset Neural Fabric
             </button>
-            <button type="button"
+            <button
+              type="button"
               onClick={() => setSettingsVisible(false)}
               className="h-14 px-12 rounded-2xl bg-pro-text-main text-white font-black text-[12px] uppercase tracking-[0.2em] hover:bg-pro-accent transition-all active-push shadow-premium"
             >

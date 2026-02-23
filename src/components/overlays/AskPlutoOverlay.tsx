@@ -45,7 +45,8 @@ export const AskPlutoOverlay = ({
               Pluto Intelligence
             </h3>
           </div>
-          <button type="button"
+          <button
+            type="button"
             onClick={() => setAskPlutoVisible(false)}
             className="w-10 h-10 rounded-2xl bg-white/5 hover:bg-white/10 transition-all flex items-center justify-center group"
           >
@@ -92,7 +93,8 @@ export const AskPlutoOverlay = ({
                 'Action items for Sarah',
                 'Neptune status',
               ].map((tag) => (
-                <button type="button"
+                <button
+                  type="button"
                   key={tag}
                   onClick={() => setQuery(tag)}
                   className="px-4 py-2 bg-white/[0.04] border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 hover:text-white hover:bg-white/10 transition-all uppercase tracking-widest"
@@ -134,10 +136,16 @@ export const AskPlutoOverlay = ({
 
               {/* Primary Action Only */}
               <div className="pt-4 border-t border-white/5 flex items-center justify-between">
-                <button type="button" className="h-12 px-8 rounded-xl bg-pro-accent text-[#163758] font-black text-[10px] uppercase tracking-widest hover:bg-pro-accent-alt transition-all shadow-lg active-push">
+                <button
+                  type="button"
+                  className="h-12 px-8 rounded-xl bg-pro-accent text-[#163758] font-black text-[10px] uppercase tracking-widest hover:bg-pro-accent-alt transition-all shadow-lg active-push"
+                >
                   Create Action Item
                 </button>
-                <button type="button" className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest">
+                <button
+                  type="button"
+                  className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest"
+                >
                   Share Insight →
                 </button>
               </div>

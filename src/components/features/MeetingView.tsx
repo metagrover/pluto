@@ -7,7 +7,13 @@ import {
   MessageSquare,
   Sparkles,
 } from 'lucide-react';
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
   analysisDocumentToMarkdown,
@@ -172,14 +178,14 @@ export const MeetingView = ({
               <div className="flex items-center gap-0.5 h-3">
                 {Array.from({ length: 8 }, (_, barIndex) => barIndex).map(
                   (barIndex) => (
-                  <div
-                    key={barIndex}
-                    className="w-0.5 rounded-full bg-pro-accent/60 animate-pulse"
-                    style={{
-                      height: `${Math.random() * 8 + 4}px`,
-                      animationDelay: `${barIndex * 0.1}s`,
-                    }}
-                  />
+                    <div
+                      key={barIndex}
+                      className="w-0.5 rounded-full bg-pro-accent/60 animate-pulse"
+                      style={{
+                        height: `${Math.random() * 8 + 4}px`,
+                        animationDelay: `${barIndex * 0.1}s`,
+                      }}
+                    />
                   ),
                 )}
               </div>
@@ -192,7 +198,8 @@ export const MeetingView = ({
           </div>
         </div>
         <div className="flex gap-2">
-          <button type="button"
+          <button
+            type="button"
             onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
             className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-white text-pro-text-main hover:scale-105'}`}
             title="Copy Summary"
@@ -203,7 +210,8 @@ export const MeetingView = ({
               <Copy className="w-4 h-4 opacity-60" />
             )}
           </button>
-          <button type="button"
+          <button
+            type="button"
             onClick={() => {
               if (selectedMeeting) {
                 const summaryText = canonicalAnalysisMarkdown;
@@ -234,7 +242,8 @@ export const MeetingView = ({
               />
             </svg>
           </button>
-          <button type="button"
+          <button
+            type="button"
             onClick={() => handleDeleteMeeting(selectedMeeting.id)}
             className="w-10 h-10 rounded-xl bg-red-500/5 border border-red-500/20 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition-all active:scale-95"
             title="Delete Meeting"
@@ -281,7 +290,10 @@ export const MeetingView = ({
                 </h2>
                 <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-white/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
                   {summaryParagraphs.map((line, i) => (
-                    <p key={`${line}-${line.length}`} className={i > 0 ? 'mt-4' : ''}>
+                    <p
+                      key={`${line}-${line.length}`}
+                      className={i > 0 ? 'mt-4' : ''}
+                    >
                       {highlightEntities(line)}
                     </p>
                   ))}
@@ -323,7 +335,10 @@ export const MeetingView = ({
                     ? decisions
                     : ['No explicit decisions were made.']
                   ).map((item) => (
-                    <div key={`${item}-${item.length}`} className="flex gap-3 items-baseline">
+                    <div
+                      key={`${item}-${item.length}`}
+                      className="flex gap-3 items-baseline"
+                    >
                       <span className="text-indigo-500 font-bold leading-none -translate-y-[3px]">
                         ↳
                       </span>
@@ -414,7 +429,8 @@ export const MeetingView = ({
                           </p>
                         </div>
                       </div>
-                      <button type="button"
+                      <button
+                        type="button"
                         onClick={() => setTranscriptVisible(false)}
                         className="lg:hidden p-2 hover:bg-black/5 rounded-full transition-colors"
                       >
@@ -478,23 +494,23 @@ export const MeetingView = ({
 
                       return mergedSegments.map((s: TranscriptSegment) => {
                         const segmentKey = `${String(s.speaker ?? 'unknown')}-${s.start}-${s.end}-${s.text}`;
-                          return (
-                            <div
-                              key={segmentKey}
-                              className="group flex gap-12 transition-all"
-                            >
-                              <div className="w-20 shrink-0 pt-1 text-right">
-                                <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
-                                  {s.speaker || 'Unknown'}
-                                </span>
-                              </div>
-                              <div className="flex-1">
-                                <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
-                                  {highlightEntities(s.text)}
-                                </p>
-                              </div>
+                        return (
+                          <div
+                            key={segmentKey}
+                            className="group flex gap-12 transition-all"
+                          >
+                            <div className="w-20 shrink-0 pt-1 text-right">
+                              <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
+                                {s.speaker || 'Unknown'}
+                              </span>
                             </div>
-                          );
+                            <div className="flex-1">
+                              <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
+                                {highlightEntities(s.text)}
+                              </p>
+                            </div>
+                          </div>
+                        );
                       });
                     })()}
                   </div>
@@ -504,7 +520,8 @@ export const MeetingView = ({
               {/* Expansion Action Bar - Refined Gradient & integrated button */}
               {transcriptVisible && (
                 <div className="relative flex items-end justify-center pb-8 transition-all duration-700 pt-16 pb-24">
-                  <button type="button"
+                  <button
+                    type="button"
                     onClick={() => setTranscriptVisible(!transcriptVisible)}
                     className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
                   >
@@ -522,7 +539,8 @@ export const MeetingView = ({
 
           {!transcriptVisible && (
             <div className="flex w-full items-center justify-center py-6">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setTranscriptVisible(true)}
                 className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
               >

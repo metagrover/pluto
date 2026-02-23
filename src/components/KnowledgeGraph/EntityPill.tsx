@@ -33,7 +33,8 @@ export const EntityPill: React.FC<EntityPillProps> = ({
   const statusColor = status ? STATUS_COLORS[status] : null;
 
   return (
-    <button type="button"
+    <button
+      type="button"
       onClick={onClick}
       title={entity.name}
       className={`

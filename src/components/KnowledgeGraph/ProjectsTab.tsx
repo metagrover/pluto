@@ -78,10 +78,16 @@ export const ProjectsTab: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3 shrink-0">
-              <button type="button" className="px-6 py-2.5 rounded-xl bg-pro-text-main text-white text-[11px] font-black uppercase tracking-widest hover:bg-pro-accent transition-all active-push shadow-lg">
+              <button
+                type="button"
+                className="px-6 py-2.5 rounded-xl bg-pro-text-main text-white text-[11px] font-black uppercase tracking-widest hover:bg-pro-accent transition-all active-push shadow-lg"
+              >
                 View Workspace
               </button>
-              <button type="button" className="w-11 h-11 rounded-xl bg-pro-bg flex items-center justify-center hover:bg-white border border-transparent hover:border-pro-border transition-all">
+              <button
+                type="button"
+                className="w-11 h-11 rounded-xl bg-pro-bg flex items-center justify-center hover:bg-white border border-transparent hover:border-pro-border transition-all"
+              >
                 ⚙️
               </button>
             </div>

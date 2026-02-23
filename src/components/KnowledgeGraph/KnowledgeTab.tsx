@@ -96,7 +96,10 @@ export const KnowledgeTab: React.FC = () => {
                         year: 'numeric',
                       })}
                     </span>
-                    <button type="button" className="text-xs font-bold text-pro-accent hover:underline">
+                    <button
+                      type="button"
+                      className="text-xs font-bold text-pro-accent hover:underline"
+                    >
                       View Source
                     </button>
                   </div>

@@ -51,7 +51,8 @@ export const Sidebar = ({
               </p>
             </div>
 
-            <button type="button"
+            <button
+              type="button"
               onClick={onStartRecording}
               className="w-full h-10 rounded-xl bg-pro-text-main text-white text-[12px] font-bold hover:bg-pro-accent transition-all active:scale-[0.98] flex items-center justify-center gap-2"
             >
@@ -77,7 +78,8 @@ export const Sidebar = ({
               Overview
             </h3>
           </div>
-          <button type="button"
+          <button
+            type="button"
             onClick={() => {
               setActiveTab('hub');
               setSelectedMeetingId(null);
@@ -96,7 +98,8 @@ export const Sidebar = ({
               <div className="absolute left-[-12px] w-1 h-5 bg-pro-accent rounded-full" />
             )}
           </button>
-          <button type="button"
+          <button
+            type="button"
             onClick={() => {
               setActiveTab('tasks');
               setSelectedMeetingId(null);
@@ -122,12 +125,15 @@ export const Sidebar = ({
           <h3 className="px-4 text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-[0.2em] mb-3">
             Library
           </h3>
-          {([
-            { id: 'projects', name: 'Projects', icon: '📁' },
-            { id: 'people', name: 'People', icon: '👤' },
-            { id: 'wiki', name: 'Knowledge', icon: '🧠' },
-          ] as const).map((item) => (
-            <button type="button"
+          {(
+            [
+              { id: 'projects', name: 'Projects', icon: '📁' },
+              { id: 'people', name: 'People', icon: '👤' },
+              { id: 'wiki', name: 'Knowledge', icon: '🧠' },
+            ] as const
+          ).map((item) => (
+            <button
+              type="button"
               key={item.id}
               onClick={() => {
                 setActiveTab(item.id);
@@ -161,7 +167,8 @@ export const Sidebar = ({
           <div className="space-y-1.5">
             {safeMeetings.slice(0, 10).map((m, i) => (
               <div key={m.id} className="relative group">
-                <button type="button"
+                <button
+                  type="button"
                   onClick={() => {
                     setSelectedMeetingId(m.id);
                     setActiveTab('hub');
@@ -197,7 +204,8 @@ export const Sidebar = ({
                     })}
                   </span>
                 </button>
-                <button type="button"
+                <button
+                  type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDeleteMeeting(m.id);
@@ -227,7 +235,8 @@ export const Sidebar = ({
       </div>
 
       <div className="p-8 border-t border-pro-border/20 flex flex-col gap-4">
-        <button type="button"
+        <button
+          type="button"
           onClick={() => setSettingsVisible(true)}
           className="flex items-center gap-3 text-[11px] font-semibold text-pro-text-muted hover:text-pro-accent transition-all active-push group"
         >

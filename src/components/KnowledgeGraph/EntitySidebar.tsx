@@ -207,7 +207,8 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                     className="h-8 w-40 px-2.5 rounded-full border border-pro-border bg-white text-[12px] font-bold text-pro-text-main placeholder:text-pro-text-muted/40"
                   />
                 ) : (
-                  <button type="button"
+                  <button
+                    type="button"
                     onClick={() => {
                       setActiveAddType(type);
                       setAddName('');
@@ -230,7 +231,8 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                         onChange={(e) => setEditName(e.target.value)}
                         className="h-8 px-3 rounded-full border border-pro-border text-[12px] font-bold"
                       />
-                      <button type="button"
+                      <button
+                        type="button"
                         onClick={async () => {
                           if (!editName.trim()) return;
                           setSaving(true);
@@ -256,7 +258,8 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                       >
                         <Check size={12} />
                       </button>
-                      <button type="button"
+                      <button
+                        type="button"
                         onClick={() => {
                           setEditId(null);
                           setEditName('');
@@ -291,7 +294,8 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                           {entity.name}
                         </span>
                         <div className="flex items-center gap-2 opacity-30 group-hover:opacity-100 transition-opacity ml-2">
-                          <button type="button"
+                          <button
+                            type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               setEditId(entity.id);
@@ -302,7 +306,8 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                           >
                             <Pencil size={12} />
                           </button>
-                          <button type="button"
+                          <button
+                            type="button"
                             onClick={async (e) => {
                               e.stopPropagation();
                               if (!window.confirm('Delete this entity?'))

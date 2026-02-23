@@ -72,9 +72,7 @@ export const ZenMode = ({
           )) || [];
 
         // Filter for people only and limit to 5
-        const people = results
-          .filter((e) => e.type === 'person')
-          .slice(0, 5);
+        const people = results.filter((e) => e.type === 'person').slice(0, 5);
 
         if (requestId !== suggestionsRequestId.current) return;
 
@@ -112,7 +110,8 @@ export const ZenMode = ({
           </div>
         </div>
 
-        <button type="button"
+        <button
+          type="button"
           disabled={isProcessing}
           onClick={onEndMeeting}
           className={`no-drag px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 flex items-center gap-2
@@ -158,7 +157,8 @@ export const ZenMode = ({
                     className="flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-full bg-stone-100 border border-stone-200 text-sm font-medium text-stone-600 animate-in fade-in zoom-in group"
                   >
                     <span>{p}</span>
-                    <button type="button"
+                    <button
+                      type="button"
                       onClick={() =>
                         setMeetingParticipants((prev: string[]) =>
                           prev.filter((_, idx) => idx !== i),
@@ -203,7 +203,8 @@ export const ZenMode = ({
                   {showSuggestions && (
                     <div className="absolute top-full left-0 mt-2 w-48 bg-white/90 backdrop-blur-md border border-pro-border rounded-xl shadow-premium z-50 overflow-hidden animate-in slide-in-from-top-1 fade-in duration-200">
                       {suggestions.map((person) => (
-                        <button type="button"
+                        <button
+                          type="button"
                           key={person.id}
                           onClick={() => {
                             setMeetingParticipants((prev: string[]) => [
@@ -269,7 +270,8 @@ export const ZenMode = ({
                   placeholder="Ask about previous meetings, decisions, or context..."
                   className="flex-1 bg-transparent outline-none text-[15px] font-medium text-pro-text-main placeholder:text-pro-text-muted/30"
                 />
-                <button type="button"
+                <button
+                  type="button"
                   onClick={() => {
                     setInlineAskPluto(false);
                     setQuery('');
@@ -294,7 +296,8 @@ export const ZenMode = ({
             </div>
           ) : (
             <div className="max-w-3xl mx-auto px-8 py-5 flex items-center justify-between">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setInlineAskPluto(true)}
                 className="flex items-center gap-3 text-sm text-pro-text-muted/60 hover:text-pro-accent transition-all group"
               >

@@ -275,7 +275,11 @@ export const AudioManager = ({
   const micPcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const micPcmSinkRef = useRef<GainNode | null>(null);
   const nativeAudioListenerRef = useRef<
-    ((event: unknown, chunk: Uint8Array | ArrayBuffer | null | undefined) => void) | null
+    | ((
+        event: unknown,
+        chunk: Uint8Array | ArrayBuffer | null | undefined,
+      ) => void)
+    | null
   >(null);
   const systemAudioChunkSeenRef = useRef(false);
 
@@ -3680,10 +3684,10 @@ const WaveformVisualizer = ({
                 {/* Static Equalizer (reacts to hover only) */}
                 {Array.from({ length: 5 }, (_, barIndex) => barIndex).map(
                   (barIndex) => (
-                  <div
-                    key={barIndex}
-                    className="w-1 rounded-full bg-pro-text-main transition-all duration-500 ease-out h-1 group-hover:h-2"
-                  />
+                    <div
+                      key={barIndex}
+                      className="w-1 rounded-full bg-pro-text-main transition-all duration-500 ease-out h-1 group-hover:h-2"
+                    />
                   ),
                 )}
               </div>
@@ -3691,7 +3695,8 @@ const WaveformVisualizer = ({
           </div>
 
           {/* Primary Action Button */}
-          <button type="button"
+          <button
+            type="button"
             onClick={onToggle}
             disabled={isProcessing}
             className={`

@@ -106,7 +106,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               Pluto is your personal second brain for deep focus and effortless
               recall.
             </p>
-            <button type="button"
+            <button
+              type="button"
               onClick={async () => {
                 await persistStep(2);
                 setStep(2);
@@ -175,13 +176,15 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             </div>
 
             <div className="flex gap-6 mt-12">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setStep(1)}
                 className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
               >
                 Go back
               </button>
-              <button type="button"
+              <button
+                type="button"
                 onClick={async () => {
                   await persistStep(3);
                   setStep(3);
@@ -230,13 +233,15 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             </div>
 
             <div className="flex gap-6 mt-14">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setStep(2)}
                 className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
               >
                 Back
               </button>
-              <button type="button"
+              <button
+                type="button"
                 onClick={async () => {
                   await window.ipcRenderer.invoke('SET_SETTING', {
                     key: 'hf_token',
@@ -285,7 +290,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                   icon: '☁️',
                 },
               ].map((provider) => (
-                <button type="button"
+                <button
+                  type="button"
                   key={provider.id}
                   onClick={() => {
                     setLlmProvider(provider.id);
@@ -332,13 +338,15 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             </div>
 
             <div className="flex gap-6 mt-12">
-              <button type="button"
+              <button
+                type="button"
                 onClick={() => setStep(3)}
                 className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
               >
                 Go back
               </button>
-              <button type="button"
+              <button
+                type="button"
                 onClick={handleFinish}
                 className="flex-[2] h-16 bg-pro-text-main text-white rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
               >

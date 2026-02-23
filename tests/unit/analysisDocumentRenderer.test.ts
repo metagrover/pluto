@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import type { Meeting } from '../../src/types';
 import {
   analysisDocumentToMarkdown,
   parseAnalysisMarkdown,
   resolveMeetingAnalysisDocument,
 } from '../../src/utils/analysisDocument';
-import type { Meeting } from '../../src/types';
 
 describe('renderer analysis document utilities', () => {
   it('parses canonical markdown with multiline bullets without line fragmentation', () => {
