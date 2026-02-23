@@ -70,7 +70,7 @@ export const Sidebar = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-10 custom-scrollbar sidebar-mask">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-6 space-y-10 custom-scrollbar sidebar-mask no-drag">
         {/* Workspace Section */}
         <div className="space-y-1">
           <div className="flex items-center justify-between px-4 mb-3">
