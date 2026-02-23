@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import { spawn, ChildProcess } from 'node:child_process'
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
+import { createActiveCallDetector } from './activeCall/detector'
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow'
 
 if (ffmpegStatic) {
@@ -29,26 +30,6 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 
 let win: BrowserWindow | null
 let tray: Tray | null = null
-
-type ActiveCallState = {
-  active: boolean
-  appName: string | null
-  confidence: 'low' | 'medium' | 'high'
-  reason: string
-}
-
-type RunningProcessInfo = {
-  pid: number
-  name: string
-}
-
-const CALL_APP_MATCHERS: Array<{ label: string; patterns: RegExp[] }> = [
-  { label: 'FaceTime', patterns: [/facetime/i] },
-  { label: 'Chrome', patterns: [/google chrome/i, /chrome helper/i, /\bchromium\b/i] },
-  { label: 'Zoom', patterns: [/zoom\.us/i, /\bzoom\b/i, /cpthost/i] },
-  { label: 'Microsoft Teams', patterns: [/microsoft teams/i, /\bteams\b/i] },
-  { label: 'Webex', patterns: [/webex/i, /cisco webex/i] }
-]
 
 const getPreloadPath = () => {
   const preloadPathMjs = path.join(__dirname, 'preload.mjs')
@@ -304,127 +285,7 @@ app.whenReady().then(async () => {
     })
   }
 
-  const getRunningProcesses = async (): Promise<RunningProcessInfo[]> => {
-    return await new Promise<RunningProcessInfo[]>((resolve) => {
-      let stdout = ''
-      let stderr = ''
-      const ps = spawn('ps', ['-axo', 'pid=,comm='])
-
-      ps.stdout.on('data', (chunk) => {
-        stdout += String(chunk)
-      })
-
-      ps.stderr.on('data', (chunk) => {
-        stderr += String(chunk)
-      })
-
-      ps.on('close', (code) => {
-        if (code !== 0) {
-          console.error('[Pluto] Failed to read process list:', stderr)
-          return resolve([])
-        }
-        const processes = stdout
-          .split('\n')
-          .map(line => line.trim())
-          .filter(Boolean)
-          .map((line): RunningProcessInfo | null => {
-            const match = line.match(/^(\d+)\s+(.+)$/)
-            if (!match) return null
-            const pid = Number.parseInt(match[1], 10)
-            if (!Number.isInteger(pid) || pid <= 0) return null
-            const rawName = match[2].trim()
-            return {
-              pid,
-              name: path.basename(rawName).toLowerCase()
-            }
-          })
-          .filter((proc): proc is RunningProcessInfo => proc !== null)
-        resolve(processes)
-      })
-
-      ps.on('error', (err) => {
-        console.error('[Pluto] Failed to spawn process list probe:', err)
-        resolve([])
-      })
-    })
-  }
-
-  const detectActiveCall = async (): Promise<ActiveCallState> => {
-    if (process.platform !== 'darwin') {
-      return {
-        active: false,
-        appName: null,
-        confidence: 'low',
-        reason: 'unsupported-platform'
-      }
-    }
-
-    const processes = await getRunningProcesses()
-    const matchedApps = CALL_APP_MATCHERS
-      .map(matcher => ({
-        label: matcher.label,
-        pids: processes
-          .filter(proc => matcher.patterns.some(pattern => pattern.test(proc.name)))
-          .map(proc => proc.pid)
-      }))
-      .filter(entry => entry.pids.length > 0)
-
-    if (matchedApps.length === 0) {
-      return {
-        active: false,
-        appName: null,
-        confidence: 'low',
-        reason: 'no-call-app-running'
-      }
-    }
-
-    for (const matched of matchedApps) {
-      const externalAudioActive = await runAudioProbe({
-        durationMs: 1200,
-        includeSelf: false,
-        allowSilent: false,
-        targetPids: matched.pids,
-        silentProbe: true
-      })
-
-      if (externalAudioActive) {
-        return {
-          active: true,
-          appName: matched.label,
-          confidence: 'high',
-          reason: 'call-app-running-with-active-audio'
-        }
-      }
-    }
-
-    // Silent fallback: treat as active only when target audio processes exist,
-    // even if no non-zero samples were observed during probe window.
-    for (const matched of matchedApps) {
-      const silentButAttached = await runAudioProbe({
-        durationMs: 1200,
-        includeSelf: false,
-        allowSilent: true,
-        targetPids: matched.pids,
-        silentProbe: true
-      })
-
-      if (silentButAttached) {
-        return {
-          active: true,
-          appName: matched.label,
-          confidence: 'medium',
-          reason: 'call-app-running-silent-fallback'
-        }
-      }
-    }
-
-    return {
-      active: false,
-      appName: matchedApps[0]?.label || null,
-      confidence: 'low',
-      reason: 'call-app-running-without-target-audio'
-    }
-  }
+  const detectActiveCall = createActiveCallDetector({ runAudioProbe })
 
   ipcMain.handle('SYSTEM_AUDIO_PROBE', async (_event, { durationMs, allowSilent } = {}) => {
     return await runAudioProbe({
@@ -443,7 +304,8 @@ app.whenReady().then(async () => {
     if (typeof appName !== 'string') return false
     const normalized = appName.trim()
     if (!normalized) return false
-    activeCallAlertController.show(normalized)
+    const anchorBounds = (win && !win.isDestroyed()) ? win.getBounds() : undefined
+    activeCallAlertController.show(normalized, anchorBounds)
     return true
   })
 

@@ -3,7 +3,7 @@
 ## Pluto: Your Second Brain for Work
 
 **Version:** 3.1  
-**Last Updated:** February 13, 2026  
+**Last Updated:** February 22, 2026  
 **Status:** Active Development
 
 ---
@@ -226,18 +226,40 @@ Query your knowledge graph in natural language:
 
 ### 6.8 Active Call Detection & Alert (Retroactive Update)
 
-Pluto detects when a supported meeting app appears to be in an active call and shows a quick note-taking alert.
+Pluto uses a best-effort browser-agnostic model to detect active calls and show a quick note-taking alert.
 
 | Requirement | Details |
 |-------------|---------|
-| Detection Method | Running-process scan (`ps`) + PID-targeted system-audio probe |
-| False-Positive Mitigation | App-open-without-audio does **not** trigger an alert |
-| Supported Apps (Current) | FaceTime, Zoom, Microsoft Teams, Webex |
-| Polling Interval | Every 12 seconds while idle (not recording/processing) |
+| Detection Method | Running-process scan (`ps`) + PID-targeted system-audio probe + browser tab URL adapters where available |
+| Browser Coverage | Chrome, Edge, Brave, Safari use URL adapter + audio confirmation; Firefox uses a best-effort URL adapter + audio confirmation |
+| Provider URL Allowlist | Google Meet, Zoom, Teams, Slack |
+| False-Positive Mitigation | Browser URL match alone does not trigger an alert; audio confirmation is required |
+| Supported Apps (Current) | Slack, Zoom, Microsoft Teams, browser-hosted meeting tabs for Meet/Zoom/Teams/Slack |
+| Polling Interval | Every 6 seconds while idle (not recording/processing) |
 | Alert Window | Separate Electron `BrowserWindow`, always-on-top, 320x80 |
 | Alert Behavior | Auto-dismiss after 15s, visible progress bar, timer pauses on hover |
 | Primary CTA | **Take Notes** brings Pluto to focus and starts a recording/notes session |
 | Dismissal | Hover-revealed close button + auto-timeout |
+
+```mermaid
+flowchart TD
+    A["Idle Poll (6s)"] --> B["Scan running processes + PID groups"]
+    B --> C{"Target app/browser found?"}
+    C -- "No" --> Z["No alert"]
+    C -- "Yes" --> D{"Active audio on target PIDs?"}
+    D -- "Yes" --> E["Active call (high confidence)"]
+    D -- "No" --> F{"Browser with supported URL adapter?"}
+    F -- "No" --> Z
+    F -- "Yes" --> G{"URL matches provider allowlist?"}
+    G -- "No" --> Z
+    G -- "Yes" --> H{"Silent probe attached to target PIDs?"}
+    H -- "Yes" --> I["Active call (medium confidence)"]
+    H -- "No" --> Z
+    E --> J["Show alert: Take Notes"]
+    I --> J
+```
+
+Slack is included in the provider URL allowlist.
 
 ---
 
