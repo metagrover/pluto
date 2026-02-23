@@ -1,7 +1,13 @@
-import type { ExtractionPriorityHints, InternalSignalDocument } from './provider'
+import type {
+  ExtractionPriorityHints,
+  InternalSignalDocument,
+} from './provider';
 
-export const getSummaryPrompt = (transcript: string, userNotes?: string): string => {
-    return `You are a rigorous conversation analyst producing user-facing meeting analysis for Pluto.
+export const getSummaryPrompt = (
+  transcript: string,
+  userNotes?: string,
+): string => {
+  return `You are a rigorous conversation analyst producing user-facing meeting analysis for Pluto.
 
 Analyze this transcript${userNotes ? ' and user notes' : ''} and produce polished, natural-language output.
 
@@ -35,15 +41,15 @@ Write exactly:
 ${userNotes ? `\nUser Notes (high-priority context):\n${userNotes}\n` : ''}
 
 Transcript:
-${transcript}`
-}
+${transcript}`;
+};
 
 export const getSummaryRepairPrompt = (
-    transcript: string,
-    invalidOutput: string,
-    userNotes?: string
+  transcript: string,
+  invalidOutput: string,
+  userNotes?: string,
 ): string => {
-    return `Repair this draft analysis into Pluto's required structure.
+  return `Repair this draft analysis into Pluto's required structure.
 
 Rules:
 - Preserve factual meaning from draft/transcript${userNotes ? '/notes' : ''}; do not invent.
@@ -61,11 +67,14 @@ Draft to repair:
 ${invalidOutput}
 
 ${userNotes ? `User Notes:\n${userNotes}\n` : ''}Transcript:
-${transcript}`
-}
+${transcript}`;
+};
 
-export const getValueSignalsPrompt = (transcript: string, summary?: string): string => {
-    return `You are extracting hidden internal signals for Pluto's backend graph/connectivity systems.
+export const getValueSignalsPrompt = (
+  transcript: string,
+  summary?: string,
+): string => {
+  return `You are extracting hidden internal signals for Pluto's backend graph/connectivity systems.
 
 Goal:
 - Capture compact, reusable signal metadata for continuity, accountability, and decision impact.
@@ -96,11 +105,11 @@ Signal definitions:
 - extra_tags: high-signal topical labels that can help backend ranking and connectivity.
 
 ${summary ? `Summary context:\n${summary}\n\n` : ''}Transcript:
-${transcript}`
-}
+${transcript}`;
+};
 
 export const getSpeakerIdentityPrompt = (transcript: string): string => {
-    return `Analyze this conversation transcript and identify who the OTHER person is (not "You").
+  return `Analyze this conversation transcript and identify who the OTHER person is (not "You").
 
 Look for:
 - Names mentioned in introductions or conversation
@@ -111,11 +120,11 @@ If you can identify the other person, respond with ONLY their first name (e.g., 
 If you cannot identify them with confidence, respond with exactly: "Unknown"
 
 Transcript:
-${transcript}`
-}
+${transcript}`;
+};
 
 export const getTitlePrompt = (transcript: string): string => {
-    return `Analyze this conversation transcript and generate a concise, descriptive meeting title (max 5-7 words).
+  return `Analyze this conversation transcript and generate a concise, descriptive meeting title (max 5-7 words).
 
 The title should:
 - Capture the main topic or purpose
@@ -126,49 +135,55 @@ The title should:
 Respond with ONLY the title, nothing else.
 
 Transcript:
-${transcript.substring(0, 1000)}`
-}
+${transcript.substring(0, 1000)}`;
+};
 
 export const getEntitiesPrompt = (
-    transcript: string,
-    context?: {
-        summary?: string
-        valueSignals?: InternalSignalDocument
-        priorityHints?: ExtractionPriorityHints
-    }
+  transcript: string,
+  context?: {
+    summary?: string;
+    valueSignals?: InternalSignalDocument;
+    priorityHints?: ExtractionPriorityHints;
+  },
 ): string => {
-    const valueSignals = context?.valueSignals
-    const priorityHints = context?.priorityHints
-    const hasSignals = !!valueSignals && (
-        valueSignals.continuity.length > 0 ||
-        valueSignals.accountability_risks.length > 0 ||
-        valueSignals.decision_impacts.length > 0 ||
-        valueSignals.extra_tags.length > 0
-    )
-    const hasHints = !!priorityHints && (
-        priorityHints.prioritized_terms.length > 0 ||
-        Object.keys(priorityHints.relationship_bias || {}).length > 0
-    )
+  const valueSignals = context?.valueSignals;
+  const priorityHints = context?.priorityHints;
+  const hasSignals =
+    !!valueSignals &&
+    (valueSignals.continuity.length > 0 ||
+      valueSignals.accountability_risks.length > 0 ||
+      valueSignals.decision_impacts.length > 0 ||
+      valueSignals.extra_tags.length > 0);
+  const hasHints =
+    !!priorityHints &&
+    (priorityHints.prioritized_terms.length > 0 ||
+      Object.keys(priorityHints.relationship_bias || {}).length > 0);
 
-    const contextBlock = [
-        context?.summary?.trim()
-            ? `Summary context (auxiliary, do not treat as new facts):\n${context.summary.trim()}`
-            : '',
-        hasSignals
-            ? `Value-gain signals (auxiliary prioritization hints, not standalone evidence):
+  const contextBlock = [
+    context?.summary?.trim()
+      ? `Summary context (auxiliary, do not treat as new facts):\n${context.summary.trim()}`
+      : '',
+    hasSignals
+      ? `Value-gain signals (auxiliary prioritization hints, not standalone evidence):
 - Continuity: ${valueSignals?.continuity.join(' | ') || 'none'}
 - Accountability risks: ${valueSignals?.accountability_risks.join(' | ') || 'none'}
 - Decision impacts: ${valueSignals?.decision_impacts.join(' | ') || 'none'}
 - Extra tags: ${valueSignals?.extra_tags.map((item) => `${item.tag}:${item.confidence.toFixed(2)}`).join(' | ') || 'none'}`
-            : '',
-        hasHints
-            ? `Deterministic extraction hints:
+      : '',
+    hasHints
+      ? `Deterministic extraction hints:
 - Prioritized terms: ${priorityHints?.prioritized_terms.join(' | ') || 'none'}
-- Relationship bias: ${Object.entries(priorityHints?.relationship_bias || {}).map(([k, v]) => `${k}:${v}`).join(' | ') || 'none'}`
-            : ''
-    ].filter(Boolean).join('\n\n')
+- Relationship bias: ${
+          Object.entries(priorityHints?.relationship_bias || {})
+            .map(([k, v]) => `${k}:${v}`)
+            .join(' | ') || 'none'
+        }`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
-    return `You are an expert at extracting graph-ready structured information from meeting transcripts for Pluto's knowledge graph.
+  return `You are an expert at extracting graph-ready structured information from meeting transcripts for Pluto's knowledge graph.
 
 Goal:
 - Convert raw conversation into durable entities and relationships that remain useful across future meetings.
@@ -209,5 +224,5 @@ Respond with valid JSON in this exact format:
 }
 
 ${contextBlock ? `${contextBlock}\n\n` : ''}Transcript:
-${transcript}`
-}
+${transcript}`;
+};

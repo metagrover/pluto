@@ -29,9 +29,8 @@ body {
   box-sizing: border-box;
   border-radius: 12px;
   background: var(--alert-surface);
-  box-shadow:
-    0 2px 8px rgba(16, 26, 56, 0.1),
-    0 14px 28px rgba(12, 22, 48, 0.14);
+  box-shadow: 0 2px 8px rgba(16, 26, 56, 0.1), 0 14px 28px
+    rgba(12, 22, 48, 0.14);
   position: relative;
   display: flex;
   align-items: stretch;
@@ -145,10 +144,8 @@ body {
   align-items: center;
   justify-content: center;
   box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.2);
-  transition:
-    background-color 0.18s ease,
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
+  transition: background-color 0.18s ease, transform 0.18s ease, box-shadow
+    0.18s ease;
 }
 
 .take-notes:hover {

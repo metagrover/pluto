@@ -1,60 +1,65 @@
 /**
  * Knowledge Graph API
- * 
+ *
  * Typed wrapper for Knowledge Graph IPC calls.
  * Sprint 2: Entity extraction, resolution, and relationship management.
  */
 
 // Type definitions matching the database schema
-export type EntityType = 'person' | 'topic' | 'action_item' | 'decision' | 'project'
-export type EntityStatus = 'active' | 'completed' | 'stale' | 'overdue' | null
+export type EntityType =
+  | 'person'
+  | 'topic'
+  | 'action_item'
+  | 'decision'
+  | 'project';
+export type EntityStatus = 'active' | 'completed' | 'stale' | 'overdue' | null;
 export type RelationshipType =
-    | 'discussed'
-    | 'assigned_to'
-    | 'belongs_to'
-    | 'relates_to'
-    | 'attended'
-    | 'produced'
-    | 'impacts'
-    | 'works_on'
+  | 'discussed'
+  | 'assigned_to'
+  | 'belongs_to'
+  | 'relates_to'
+  | 'attended'
+  | 'produced'
+  | 'impacts'
+  | 'works_on';
 
 export interface Entity {
-    id: string
-    type: EntityType
-    name: string
-    normalized_name: string
-    status: EntityStatus
-    due_date: string | null
-    assigned_to: string | null
-    metadata: string | null // JSON string
-    created_at: string
-    updated_at: string
+  id: string;
+  type: EntityType;
+  name: string;
+  normalized_name: string;
+  status: EntityStatus;
+  due_date: string | null;
+  assigned_to: string | null;
+  metadata: string | null; // JSON string
+  created_at: string;
+  updated_at: string;
 }
 
 export interface EntityLink {
-    id: string
-    source_entity_id: string
-    target_entity_id: string
-    relationship: RelationshipType
-    meeting_id: string | null
-    confidence: number
-    created_at: string
+  id: string;
+  source_entity_id: string;
+  target_entity_id: string;
+  relationship: RelationshipType;
+  meeting_id: string | null;
+  confidence: number;
+  created_at: string;
 }
 
 export interface MeetingEntity {
-    meeting_id: string
-    entity_id: string
-    mention_count: number
-    first_mentioned_at: number | null
-    context: string | null
-    created_at: string
+  meeting_id: string;
+  entity_id: string;
+  mention_count: number;
+  first_mentioned_at: number | null;
+  context: string | null;
+  created_at: string;
 }
 
 export interface KnowledgeGraphStats {
-    total_entities: number
-    by_type: Record<EntityType, number>
-    total_links: number
-    total_meeting_connections: number
+  total_entities: number;
+  by_type: Record<EntityType, number>;
+  total_links: number;
+  total_meeting_connections: number;
 }
 
 // =============================================
@@ -62,73 +67,76 @@ export interface KnowledgeGraphStats {
 // =============================================
 
 export interface ExtractedEntities {
-    people: Array<{
-        name: string
-        role?: string
-    }>
-    topics: Array<{
-        name: string
-        importance: 'high' | 'medium' | 'low'
-    }>
-    action_items: Array<{
-        description: string
-        assignee?: string
-        due_date?: string
-    }>
-    decisions: Array<{
-        description: string
-        rationale?: string
-    }>
-    projects?: Array<{
-        name: string
-        context?: string
-    }>
+  people: Array<{
+    name: string;
+    role?: string;
+  }>;
+  topics: Array<{
+    name: string;
+    importance: 'high' | 'medium' | 'low';
+  }>;
+  action_items: Array<{
+    description: string;
+    assignee?: string;
+    due_date?: string;
+  }>;
+  decisions: Array<{
+    description: string;
+    rationale?: string;
+  }>;
+  projects?: Array<{
+    name: string;
+    context?: string;
+  }>;
 }
 
 export interface ValueGainSignals {
-    analysis_schema_version?: number
-    continuity: string[]
-    accountability_risks: string[]
-    decision_impacts: string[]
-    extra_tags?: Array<{
-        tag: string
-        confidence: number
-    }>
+  analysis_schema_version?: number;
+  continuity: string[];
+  accountability_risks: string[];
+  decision_impacts: string[];
+  extra_tags?: Array<{
+    tag: string;
+    confidence: number;
+  }>;
 }
 
 export interface ExtractionPriorityHints {
-    prioritized_terms: string[]
-    relationship_bias: Record<string, number>
+  prioritized_terms: string[];
+  relationship_bias: Record<string, number>;
 }
 
 export interface ProcessedEntities {
-    created: number
-    updated: number
-    linked: number
-    entities: Entity[]
+  created: number;
+  updated: number;
+  linked: number;
+  entities: Entity[];
 }
 
 // Entity emoji map for UI
 export const ENTITY_ICONS: Record<EntityType, string> = {
-    person: '👤',
-    topic: '💡',
-    action_item: '✅',
-    decision: '⚖️',
-    project: '📁'
-}
+  person: '👤',
+  topic: '💡',
+  action_item: '✅',
+  decision: '⚖️',
+  project: '📁',
+};
 
 // Status badge colors
 export const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-    active: { bg: 'bg-blue-500/20', text: 'text-blue-400' },
-    completed: { bg: 'bg-green-500/20', text: 'text-green-400' },
-    stale: { bg: 'bg-yellow-500/20', text: 'text-yellow-400' },
-    overdue: { bg: 'bg-red-500/20', text: 'text-red-400' }
-}
+  active: { bg: 'bg-blue-500/20', text: 'text-blue-400' },
+  completed: { bg: 'bg-green-500/20', text: 'text-green-400' },
+  stale: { bg: 'bg-yellow-500/20', text: 'text-yellow-400' },
+  overdue: { bg: 'bg-red-500/20', text: 'text-red-400' },
+};
 
 // IPC invoke helper
-const invoke = (channel: string, ...args: any[]): Promise<any> => {
-    return (window as any).ipcRenderer.invoke(channel, ...args)
-}
+const invoke = <T = unknown>(
+  channel: string,
+  ...args: unknown[]
+): Promise<T> => {
+  return window.ipcRenderer.invoke<T>(channel, ...args);
+};
 
 // =============================================
 // ENTITY EXTRACTION
@@ -138,58 +146,58 @@ const invoke = (channel: string, ...args: any[]): Promise<any> => {
  * Extract entities from a transcript (returns raw LLM extraction)
  */
 export const extractEntities = async (
-    transcript: string,
-    context?: {
-        summary?: string
-        valueSignals?: ValueGainSignals
-        priorityHints?: ExtractionPriorityHints
-    }
+  transcript: string,
+  context?: {
+    summary?: string;
+    valueSignals?: ValueGainSignals;
+    priorityHints?: ExtractionPriorityHints;
+  },
 ): Promise<ExtractedEntities> => {
-    return invoke('EXTRACT_ENTITIES', {
-        transcript,
-        summary: context?.summary,
-        valueSignals: context?.valueSignals,
-        priorityHints: context?.priorityHints
-    })
-}
+  return invoke('EXTRACT_ENTITIES', {
+    transcript,
+    summary: context?.summary,
+    valueSignals: context?.valueSignals,
+    priorityHints: context?.priorityHints,
+  });
+};
 
 /**
  * Extract entities from a transcript AND save them to the knowledge graph
  */
 export const extractAndProcessEntities = async (
-    transcript: string,
-    meetingId: string,
-    context?: {
-        summary?: string
-        valueSignals?: ValueGainSignals
-        priorityHints?: ExtractionPriorityHints
-    }
+  transcript: string,
+  meetingId: string,
+  context?: {
+    summary?: string;
+    valueSignals?: ValueGainSignals;
+    priorityHints?: ExtractionPriorityHints;
+  },
 ): Promise<ProcessedEntities> => {
-    return invoke('EXTRACT_AND_PROCESS_ENTITIES', {
-        transcript,
-        meetingId,
-        summary: context?.summary,
-        valueSignals: context?.valueSignals,
-        priorityHints: context?.priorityHints
-    })
-}
+  return invoke('EXTRACT_AND_PROCESS_ENTITIES', {
+    transcript,
+    meetingId,
+    summary: context?.summary,
+    valueSignals: context?.valueSignals,
+    priorityHints: context?.priorityHints,
+  });
+};
 
 /**
  * Process pre-extracted entities (save to knowledge graph)
  */
 export const processExtractedEntities = async (
-    entities: ExtractedEntities,
-    meetingId: string
+  entities: ExtractedEntities,
+  meetingId: string,
 ): Promise<ProcessedEntities> => {
-    return invoke('PROCESS_EXTRACTED_ENTITIES', { entities, meetingId })
-}
+  return invoke('PROCESS_EXTRACTED_ENTITIES', { entities, meetingId });
+};
 
 /**
  * Delete a meeting and all associated knowledge
  */
 export const deleteMeeting = async (id: string): Promise<void> => {
-    return invoke('DELETE_MEETING', id)
-}
+  return invoke('DELETE_MEETING', id);
+};
 
 // =============================================
 // ENTITY OPERATIONS
@@ -199,65 +207,73 @@ export const deleteMeeting = async (id: string): Promise<void> => {
  * Create or update an entity
  */
 export const upsertEntity = async (entity: {
-    id?: string
-    type: EntityType
-    name: string
-    status?: EntityStatus
-    due_date?: string | null
-    assigned_to?: string | null
-    metadata?: Record<string, any>
+  id?: string;
+  type: EntityType;
+  name: string;
+  status?: EntityStatus;
+  due_date?: string | null;
+  assigned_to?: string | null;
+  metadata?: Record<string, unknown>;
 }): Promise<Entity> => {
-    return invoke('UPSERT_ENTITY', entity)
-}
+  return invoke<Entity>('UPSERT_ENTITY', entity);
+};
 
 /**
  * Get entity by ID
  */
 export const getEntity = async (id: string): Promise<Entity | undefined> => {
-    return invoke('GET_ENTITY', id)
-}
+  return invoke('GET_ENTITY', id);
+};
 
 /**
  * Get all entities of a specific type
  */
-export const getEntitiesByType = async (type: EntityType): Promise<Entity[]> => {
-    return invoke('GET_ENTITIES_BY_TYPE', type)
-}
+export const getEntitiesByType = async (
+  type: EntityType,
+): Promise<Entity[]> => {
+  return invoke('GET_ENTITIES_BY_TYPE', type);
+};
 
 /**
  * Get all entities
  */
 export const getAllEntities = async (): Promise<Entity[]> => {
-    return invoke('GET_ALL_ENTITIES')
-}
+  return invoke('GET_ALL_ENTITIES');
+};
 
 /**
  * Search entities by name
  */
 export const searchEntities = async (query: string): Promise<Entity[]> => {
-    return invoke('SEARCH_ENTITIES', query)
-}
+  return invoke('SEARCH_ENTITIES', query);
+};
 
 /**
  * Find entity by type and name
  */
-export const findEntity = async (type: EntityType, name: string): Promise<Entity | undefined> => {
-    return invoke('FIND_ENTITY', { type, name })
-}
+export const findEntity = async (
+  type: EntityType,
+  name: string,
+): Promise<Entity | undefined> => {
+  return invoke('FIND_ENTITY', { type, name });
+};
 
 /**
  * Update entity status (for action items)
  */
-export const updateEntityStatus = async (id: string, status: EntityStatus): Promise<void> => {
-    return invoke('UPDATE_ENTITY_STATUS', { id, status })
-}
+export const updateEntityStatus = async (
+  id: string,
+  status: EntityStatus,
+): Promise<void> => {
+  return invoke('UPDATE_ENTITY_STATUS', { id, status });
+};
 
 /**
  * Delete an entity
  */
 export const deleteEntity = async (id: string): Promise<void> => {
-    return invoke('DELETE_ENTITY', id)
-}
+  return invoke('DELETE_ENTITY', id);
+};
 
 // =============================================
 // RELATIONSHIP OPERATIONS
@@ -267,30 +283,34 @@ export const deleteEntity = async (id: string): Promise<void> => {
  * Link two entities with a relationship
  */
 export const linkEntities = async (link: {
-    source_entity_id: string
-    target_entity_id: string
-    relationship: RelationshipType
-    meeting_id?: string
-    confidence?: number
+  source_entity_id: string;
+  target_entity_id: string;
+  relationship: RelationshipType;
+  meeting_id?: string;
+  confidence?: number;
 }): Promise<EntityLink> => {
-    return invoke('LINK_ENTITIES', link)
-}
+  return invoke('LINK_ENTITIES', link);
+};
 
 /**
  * Get all links for an entity (both directions)
  */
-export const getEntityLinks = async (entityId: string): Promise<EntityLink[]> => {
-    return invoke('GET_ENTITY_LINKS', entityId)
-}
+export const getEntityLinks = async (
+  entityId: string,
+): Promise<EntityLink[]> => {
+  return invoke('GET_ENTITY_LINKS', entityId);
+};
 
 /**
  * Get entities related to a specific entity
  */
 export const getRelatedEntities = async (
-    entityId: string
-): Promise<(Entity & { relationship: string; direction: 'outgoing' | 'incoming' })[]> => {
-    return invoke('GET_RELATED_ENTITIES', entityId)
-}
+  entityId: string,
+): Promise<
+  (Entity & { relationship: string; direction: 'outgoing' | 'incoming' })[]
+> => {
+  return invoke('GET_RELATED_ENTITIES', entityId);
+};
 
 // =============================================
 // MEETING-ENTITY ASSOCIATIONS
@@ -300,30 +320,32 @@ export const getRelatedEntities = async (
  * Associate an entity with a meeting
  */
 export const addMeetingEntity = async (meetingEntity: {
-    meeting_id: string
-    entity_id: string
-    mention_count?: number
-    first_mentioned_at?: number
-    context?: string
+  meeting_id: string;
+  entity_id: string;
+  mention_count?: number;
+  first_mentioned_at?: number;
+  context?: string;
 }): Promise<MeetingEntity> => {
-    return invoke('ADD_MEETING_ENTITY', meetingEntity)
-}
+  return invoke('ADD_MEETING_ENTITY', meetingEntity);
+};
 
 /**
  * Get all entities mentioned in a meeting
  */
 export const getMeetingEntities = async (
-    meetingId: string
+  meetingId: string,
 ): Promise<(Entity & { mention_count: number; context: string | null })[]> => {
-    return invoke('GET_MEETING_ENTITIES', meetingId)
-}
+  return invoke('GET_MEETING_ENTITIES', meetingId);
+};
 
 /**
  * Get all meetings where an entity was mentioned
  */
-export const getEntityMeetings = async (entityId: string): Promise<any[]> => {
-    return invoke('GET_ENTITY_MEETINGS', entityId)
-}
+export const getEntityMeetings = async (
+  entityId: string,
+): Promise<Record<string, unknown>[]> => {
+  return invoke<Record<string, unknown>[]>('GET_ENTITY_MEETINGS', entityId);
+};
 
 // =============================================
 // ACTION ITEM QUERIES
@@ -332,23 +354,27 @@ export const getEntityMeetings = async (entityId: string): Promise<any[]> => {
 /**
  * Get action items by status
  */
-export const getActionItemsByStatus = async (status: EntityStatus): Promise<Entity[]> => {
-    return invoke('GET_ACTION_ITEMS_BY_STATUS', status)
-}
+export const getActionItemsByStatus = async (
+  status: EntityStatus,
+): Promise<Entity[]> => {
+  return invoke('GET_ACTION_ITEMS_BY_STATUS', status);
+};
 
 /**
  * Get overdue action items
  */
 export const getOverdueActionItems = async (): Promise<Entity[]> => {
-    return invoke('GET_OVERDUE_ACTION_ITEMS')
-}
+  return invoke('GET_OVERDUE_ACTION_ITEMS');
+};
 
 /**
  * Get stale action items (not mentioned in N days)
  */
-export const getStaleActionItems = async (staleDays?: number): Promise<Entity[]> => {
-    return invoke('GET_STALE_ACTION_ITEMS', staleDays)
-}
+export const getStaleActionItems = async (
+  staleDays?: number,
+): Promise<Entity[]> => {
+  return invoke('GET_STALE_ACTION_ITEMS', staleDays);
+};
 
 // =============================================
 // KNOWLEDGE GRAPH STATS
@@ -357,9 +383,10 @@ export const getStaleActionItems = async (staleDays?: number): Promise<Entity[]>
 /**
  * Get knowledge graph statistics
  */
-export const getKnowledgeGraphStats = async (): Promise<KnowledgeGraphStats> => {
-    return invoke('GET_KNOWLEDGE_GRAPH_STATS')
-}
+export const getKnowledgeGraphStats =
+  async (): Promise<KnowledgeGraphStats> => {
+    return invoke('GET_KNOWLEDGE_GRAPH_STATS');
+  };
 
 // =============================================
 // HELPER FUNCTIONS
@@ -368,50 +395,54 @@ export const getKnowledgeGraphStats = async (): Promise<KnowledgeGraphStats> => 
 /**
  * Parse entity metadata JSON
  */
-export const parseMetadata = <T extends Record<string, any>>(entity: Entity): T | null => {
-    if (!entity.metadata) return null
-    try {
-        return JSON.parse(entity.metadata) as T
-    } catch {
-        return null
-    }
-}
+export const parseMetadata = <T extends Record<string, unknown>>(
+  entity: Entity,
+): T | null => {
+  if (!entity.metadata) return null;
+  try {
+    return JSON.parse(entity.metadata) as T;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Format entity for display
  */
 export const formatEntityDisplay = (entity: Entity): string => {
-    const icon = ENTITY_ICONS[entity.type]
-    return `${icon} ${entity.name}`
-}
+  const icon = ENTITY_ICONS[entity.type];
+  return `${icon} ${entity.name}`;
+};
 
 /**
  * Get human-readable entity type label
  */
 export const getEntityTypeLabel = (type: EntityType): string => {
-    const labels: Record<EntityType, string> = {
-        person: 'Person',
-        topic: 'Topic',
-        action_item: 'Action Item',
-        decision: 'Decision',
-        project: 'Project'
-    }
-    return labels[type]
-}
+  const labels: Record<EntityType, string> = {
+    person: 'Person',
+    topic: 'Topic',
+    action_item: 'Action Item',
+    decision: 'Decision',
+    project: 'Project',
+  };
+  return labels[type];
+};
 
 /**
  * Get human-readable relationship label
  */
-export const getRelationshipLabel = (relationship: RelationshipType): string => {
-    const labels: Record<RelationshipType, string> = {
-        discussed: 'discussed',
-        assigned_to: 'assigned to',
-        belongs_to: 'belongs to',
-        relates_to: 'relates to',
-        attended: 'attended',
-        produced: 'produced',
-        impacts: 'impacts',
-        works_on: 'works on'
-    }
-    return labels[relationship]
-}
+export const getRelationshipLabel = (
+  relationship: RelationshipType,
+): string => {
+  const labels: Record<RelationshipType, string> = {
+    discussed: 'discussed',
+    assigned_to: 'assigned to',
+    belongs_to: 'belongs to',
+    relates_to: 'relates to',
+    attended: 'attended',
+    produced: 'produced',
+    impacts: 'impacts',
+    works_on: 'works on',
+  };
+  return labels[relationship];
+};
