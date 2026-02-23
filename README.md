@@ -6,7 +6,7 @@ Intelligent meeting assistant and "second brain" application.
 
 ### Prerequisites
 
-- **Node.js** (v18+)
+- **Node.js** (v25.6+)
 - **pnpm** (enable via `corepack enable` or install directly)
 - **Python** (v3.9+ recommended)
     - *Note: You do NOT need to install Python libraries globally. The project handles this for you.*
