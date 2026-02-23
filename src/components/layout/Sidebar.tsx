@@ -1,12 +1,14 @@
+import type { Meeting } from '../../types'; // I'll create this type file if it doesn't exist, or just define it here for now
 import { Logo } from '../Brand/Logo';
-import { Meeting } from '../../types'; // I'll create this type file if it doesn't exist, or just define it here for now
+
+type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki' | 'tasks';
 
 interface SidebarProps {
   sidebarVisible: boolean;
-  activeTab: string;
-  setActiveTab: (tab: any) => void;
+  activeTab: ActiveTab;
+  setActiveTab: (tab: ActiveTab) => void;
   selectedMeetingId: string | number | null;
-  setSelectedMeetingId: (id: any) => void;
+  setSelectedMeetingId: (id: string | number | null) => void;
   safeMeetings: Meeting[];
   onStartRecording: () => void;
   handleDeleteMeeting: (id: string | number) => void;
@@ -49,7 +51,7 @@ export const Sidebar = ({
               </p>
             </div>
 
-            <button
+            <button type="button"
               onClick={onStartRecording}
               className="w-full h-10 rounded-xl bg-pro-text-main text-white text-[12px] font-bold hover:bg-pro-accent transition-all active:scale-[0.98] flex items-center justify-center gap-2"
             >
@@ -75,7 +77,7 @@ export const Sidebar = ({
               Overview
             </h3>
           </div>
-          <button
+          <button type="button"
             onClick={() => {
               setActiveTab('hub');
               setSelectedMeetingId(null);
@@ -94,7 +96,7 @@ export const Sidebar = ({
               <div className="absolute left-[-12px] w-1 h-5 bg-pro-accent rounded-full" />
             )}
           </button>
-          <button
+          <button type="button"
             onClick={() => {
               setActiveTab('tasks');
               setSelectedMeetingId(null);
@@ -120,15 +122,15 @@ export const Sidebar = ({
           <h3 className="px-4 text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-[0.2em] mb-3">
             Library
           </h3>
-          {[
+          {([
             { id: 'projects', name: 'Projects', icon: '📁' },
             { id: 'people', name: 'People', icon: '👤' },
             { id: 'wiki', name: 'Knowledge', icon: '🧠' },
-          ].map((item) => (
-            <button
+          ] as const).map((item) => (
+            <button type="button"
               key={item.id}
               onClick={() => {
-                setActiveTab(item.id as any);
+                setActiveTab(item.id);
                 setSelectedMeetingId(null);
               }}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === item.id && !selectedMeetingId ? 'bg-pro-text-main text-white shadow-premium' : 'text-pro-text-muted hover:bg-pro-text-main/5 hover:text-pro-text-main'}`}
@@ -159,7 +161,7 @@ export const Sidebar = ({
           <div className="space-y-1.5">
             {safeMeetings.slice(0, 10).map((m, i) => (
               <div key={m.id} className="relative group">
-                <button
+                <button type="button"
                   onClick={() => {
                     setSelectedMeetingId(m.id);
                     setActiveTab('hub');
@@ -195,7 +197,7 @@ export const Sidebar = ({
                     })}
                   </span>
                 </button>
-                <button
+                <button type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDeleteMeeting(m.id);
@@ -204,6 +206,7 @@ export const Sidebar = ({
                   title="Delete Session"
                 >
                   <svg
+                    aria-hidden="true"
                     className="w-4 h-4"
                     fill="none"
                     viewBox="0 0 24 24"
@@ -224,7 +227,7 @@ export const Sidebar = ({
       </div>
 
       <div className="p-8 border-t border-pro-border/20 flex flex-col gap-4">
-        <button
+        <button type="button"
           onClick={() => setSettingsVisible(true)}
           className="flex items-center gap-3 text-[11px] font-semibold text-pro-text-muted hover:text-pro-accent transition-all active-push group"
         >

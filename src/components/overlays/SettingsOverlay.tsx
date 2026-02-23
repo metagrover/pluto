@@ -42,6 +42,12 @@ export const SettingsOverlay = ({
       <div
         className="absolute inset-0 bg-slate-950/60 backdrop-blur-md"
         onClick={() => setSettingsVisible(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setSettingsVisible(false);
+          }
+        }}
       />
       <div className="w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center">
         <div className="p-10 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg/50">
@@ -58,7 +64,7 @@ export const SettingsOverlay = ({
               </p>
             </div>
           </div>
-          <button
+          <button type="button"
             onClick={() => setSettingsVisible(false)}
             className="w-12 h-12 rounded-2xl hover:bg-pro-bg transition-all flex items-center justify-center text-sm border border-pro-border/40 shadow-sm active-push group"
           >
@@ -72,9 +78,9 @@ export const SettingsOverlay = ({
           {/* Provider Selection */}
           <div className="space-y-8">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
+              <p className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
                 Cognitive Provider
-              </label>
+              </p>
               <span className="text-[10px] font-black text-pro-accent uppercase bg-pro-accent/5 px-3 py-1 rounded-full border border-pro-accent/10 tracking-widest">
                 {llmProvider === 'ollama' ? 'Local-First' : 'Cloud Hybrid'}
               </span>
@@ -92,7 +98,7 @@ export const SettingsOverlay = ({
                   icon: '🎭',
                 },
               ].map((p) => (
-                <button
+                <button type="button"
                   key={p.id}
                   onClick={() => {
                     setLlmProvider(
@@ -127,10 +133,14 @@ export const SettingsOverlay = ({
 
             {llmProvider !== 'ollama' && (
               <div className="space-y-4 pt-4 animate-in slide-in-from-top-4">
-                <label className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]">
+                <label
+                  htmlFor="settings-api-token"
+                  className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]"
+                >
                   Encryption Key / API Token
                 </label>
                 <input
+                  id="settings-api-token"
                   type="password"
                   placeholder={`Enter your ${llmProvider} credentials...`}
                   value={
@@ -182,10 +192,14 @@ export const SettingsOverlay = ({
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]">
+                  <label
+                    htmlFor="settings-ollama-model"
+                    className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]"
+                  >
                     Local Model (Optional)
                   </label>
                   <input
+                    id="settings-ollama-model"
                     type="text"
                     placeholder="Auto-detect installed model (e.g. llama3.2)"
                     value={ollamaModel}
@@ -209,7 +223,10 @@ export const SettingsOverlay = ({
 
           <div className="space-y-4 pt-2">
             <div className="flex items-center justify-between">
-              <label className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
+              <label
+                htmlFor="settings-hf-token"
+                className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]"
+              >
                 Speaker Diarization
               </label>
               <span
@@ -219,6 +236,7 @@ export const SettingsOverlay = ({
               </span>
             </div>
             <input
+              id="settings-hf-token"
               type="password"
               placeholder="Hugging Face token (optional)"
               value={hfToken}
@@ -252,7 +270,7 @@ export const SettingsOverlay = ({
           </div>
 
           <div className="pt-10 border-t border-pro-border/20 flex items-center justify-between">
-            <button
+            <button type="button"
               className="text-[10px] font-black text-red-500/40 hover:text-red-500 uppercase tracking-widest transition-colors px-4 py-2 rounded-lg hover:bg-red-50 text-left"
               onClick={async () => {
                 if (
@@ -274,7 +292,7 @@ export const SettingsOverlay = ({
             >
               Reset Neural Fabric
             </button>
-            <button
+            <button type="button"
               onClick={() => setSettingsVisible(false)}
               className="h-14 px-12 rounded-2xl bg-pro-text-main text-white font-black text-[12px] uppercase tracking-[0.2em] hover:bg-pro-accent transition-all active-push shadow-premium"
             >

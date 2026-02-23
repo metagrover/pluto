@@ -25,6 +25,12 @@ export const AskPlutoOverlay = ({
       <div
         className="absolute inset-0 bg-[#163758]/95 backdrop-blur-xl transition-all duration-1000"
         onClick={() => setAskPlutoVisible(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setAskPlutoVisible(false);
+          }
+        }}
       />
 
       <div className="w-full max-w-2xl bg-[#163758] rounded-[3rem] border border-white/10 overflow-hidden relative flex flex-col max-h-[85vh] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.8)] modal-glow transition-all duration-500 scale-in-center">
@@ -39,7 +45,7 @@ export const AskPlutoOverlay = ({
               Pluto Intelligence
             </h3>
           </div>
-          <button
+          <button type="button"
             onClick={() => setAskPlutoVisible(false)}
             className="w-10 h-10 rounded-2xl bg-white/5 hover:bg-white/10 transition-all flex items-center justify-center group"
           >
@@ -53,7 +59,6 @@ export const AskPlutoOverlay = ({
           {/* Input Section */}
           <div className="relative group/input">
             <input
-              autoFocus
               placeholder="Ask Pluto anything..."
               className="w-full bg-white/[0.04] border border-white/10 rounded-2xl p-6 text-xl font-medium tracking-tight text-white focus:bg-white/[0.07] focus:border-indigo-500/40 outline-none transition-all placeholder:text-white/10"
               value={query}
@@ -62,6 +67,7 @@ export const AskPlutoOverlay = ({
             <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
               <div className="w-11 h-11 rounded-xl bg-indigo-500 text-white flex items-center justify-center shadow-lg transform hover:scale-105 transition-all">
                 <svg
+                  aria-hidden="true"
                   className="w-5 h-5"
                   fill="none"
                   viewBox="0 0 24 24"
@@ -86,7 +92,7 @@ export const AskPlutoOverlay = ({
                 'Action items for Sarah',
                 'Neptune status',
               ].map((tag) => (
-                <button
+                <button type="button"
                   key={tag}
                   onClick={() => setQuery(tag)}
                   className="px-4 py-2 bg-white/[0.04] border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 hover:text-white hover:bg-white/10 transition-all uppercase tracking-widest"
@@ -128,10 +134,10 @@ export const AskPlutoOverlay = ({
 
               {/* Primary Action Only */}
               <div className="pt-4 border-t border-white/5 flex items-center justify-between">
-                <button className="h-12 px-8 rounded-xl bg-pro-accent text-[#163758] font-black text-[10px] uppercase tracking-widest hover:bg-pro-accent-alt transition-all shadow-lg active-push">
+                <button type="button" className="h-12 px-8 rounded-xl bg-pro-accent text-[#163758] font-black text-[10px] uppercase tracking-widest hover:bg-pro-accent-alt transition-all shadow-lg active-push">
                   Create Action Item
                 </button>
-                <button className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest">
+                <button type="button" className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest">
                   Share Insight →
                 </button>
               </div>

@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { Plus, Users, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { Logo } from '../Brand/Logo';
 import { ZenVisualizer } from '../ZenVisualizer';
-import { Users, X, Plus } from 'lucide-react';
 
 interface ZenModeProps {
   isProcessing: boolean;
@@ -26,6 +26,11 @@ interface ZenModeProps {
   speakingSource: 'Me' | 'Them' | null;
 }
 
+type EntitySuggestion = {
+  type: string;
+  name: string;
+};
+
 export const ZenMode = ({
   isProcessing,
   onEndMeeting,
@@ -46,7 +51,7 @@ export const ZenMode = ({
   analyser,
   speakingSource,
 }: ZenModeProps) => {
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<EntitySuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const suggestionsRequestId = useRef(0);
 
@@ -61,14 +66,14 @@ export const ZenMode = ({
       try {
         // IPC call to search entities
         const results =
-          (await (window as any).ipcRenderer.invoke(
+          (await window.ipcRenderer.invoke<EntitySuggestion[]>(
             'SEARCH_ENTITIES',
             participantInput,
           )) || [];
 
         // Filter for people only and limit to 5
         const people = results
-          .filter((e: any) => e.type === 'person')
+          .filter((e) => e.type === 'person')
           .slice(0, 5);
 
         if (requestId !== suggestionsRequestId.current) return;
@@ -107,7 +112,7 @@ export const ZenMode = ({
           </div>
         </div>
 
-        <button
+        <button type="button"
           disabled={isProcessing}
           onClick={onEndMeeting}
           className={`no-drag px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 flex items-center gap-2
@@ -148,11 +153,12 @@ export const ZenMode = ({
                 </div>
                 {meetingParticipants.map((p, i) => (
                   <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: Participant names are not guaranteed unique, so index is used for deterministic removal.
                     key={i}
                     className="flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-full bg-stone-100 border border-stone-200 text-sm font-medium text-stone-600 animate-in fade-in zoom-in group"
                   >
                     <span>{p}</span>
-                    <button
+                    <button type="button"
                       onClick={() =>
                         setMeetingParticipants((prev: string[]) =>
                           prev.filter((_, idx) => idx !== i),
@@ -197,7 +203,7 @@ export const ZenMode = ({
                   {showSuggestions && (
                     <div className="absolute top-full left-0 mt-2 w-48 bg-white/90 backdrop-blur-md border border-pro-border rounded-xl shadow-premium z-50 overflow-hidden animate-in slide-in-from-top-1 fade-in duration-200">
                       {suggestions.map((person) => (
-                        <button
+                        <button type="button"
                           key={person.id}
                           onClick={() => {
                             setMeetingParticipants((prev: string[]) => [
@@ -220,7 +226,6 @@ export const ZenMode = ({
             </div>
 
             <textarea
-              autoFocus
               value={currentNotes}
               onChange={(e) => setCurrentNotes(e.target.value)}
               placeholder="Start typing your notes... Pluto is listening in the background and will enhance these notes with context from the conversation."
@@ -237,7 +242,6 @@ export const ZenMode = ({
               <div className="flex items-center gap-3">
                 <span className="text-xl">✨</span>
                 <input
-                  autoFocus
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
@@ -245,7 +249,7 @@ export const ZenMode = ({
                     if (e.key === 'Enter' && query) {
                       setPlutoResponse('Checking past context...');
                       try {
-                        const res = await (window as any).ipcRenderer.invoke(
+                        const res = await window.ipcRenderer.invoke<string>(
                           'ASK_PLUTO',
                           { query },
                         );
@@ -265,7 +269,7 @@ export const ZenMode = ({
                   placeholder="Ask about previous meetings, decisions, or context..."
                   className="flex-1 bg-transparent outline-none text-[15px] font-medium text-pro-text-main placeholder:text-pro-text-muted/30"
                 />
-                <button
+                <button type="button"
                   onClick={() => {
                     setInlineAskPluto(false);
                     setQuery('');
@@ -290,7 +294,7 @@ export const ZenMode = ({
             </div>
           ) : (
             <div className="max-w-3xl mx-auto px-8 py-5 flex items-center justify-between">
-              <button
+              <button type="button"
                 onClick={() => setInlineAskPluto(true)}
                 className="flex items-center gap-3 text-sm text-pro-text-muted/60 hover:text-pro-accent transition-all group"
               >

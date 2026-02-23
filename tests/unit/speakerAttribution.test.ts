@@ -7,10 +7,10 @@ import {
   dropShortCrossSpeakerEchoes,
   reassignShortBoundarySegments,
   resolveCrossChannelDuplicates,
-  shouldHydrateCanonicalTranscript,
-  stripLikelyMeBleedSegments,
   shouldApplyFullSessionMeRecovery,
   shouldDropBySpeakerActivity,
+  shouldHydrateCanonicalTranscript,
+  stripLikelyMeBleedSegments,
 } from '../../src/utils/speakerAttribution';
 
 describe('speakerAttribution utilities', () => {

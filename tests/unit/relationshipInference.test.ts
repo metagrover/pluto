@@ -3,14 +3,18 @@ vi.mock('../../electron/db', () => ({
   findEntity: vi.fn(),
   upsertEntity: vi
     .fn()
-    .mockImplementation((e: any) => ({ ...e, id: 'mock-id-' + Math.random() })),
-  linkEntities: vi.fn().mockImplementation((l: any) => l),
+    .mockImplementation((e: Record<string, unknown>) => ({
+      ...e,
+      id: `mock-id-${Math.random()}`,
+    })),
+  linkEntities: vi.fn().mockImplementation((l: unknown) => l),
   addMeetingEntity: vi.fn(),
 }));
 
 import * as db from '../../electron/db';
 import { processExtractedEntities } from '../../electron/entityPipeline';
-import { ExtractedEntities } from '../../electron/llm/provider';
+import type { ExtractedEntities } from '../../electron/llm/provider';
+import type { Entity } from '../../electron/db';
 
 describe('Relationship Inference', () => {
   beforeEach(() => {
@@ -49,15 +53,20 @@ describe('Relationship Inference', () => {
 
   it('should link created entity to existing entity', async () => {
     // Setup existing person
-    const existingPerson = {
+    const existingPerson: Entity = {
       id: 'p1',
       type: 'person',
       name: 'Bob',
+      normalized_name: 'bob',
+      status: null,
+      due_date: null,
+      assigned_to: null,
+      metadata: null,
       created_at: '',
       updated_at: '',
     };
     vi.mocked(db.getEntitiesByType).mockImplementation((type) =>
-      type === 'person' ? ([existingPerson] as any) : [],
+      type === 'person' ? [existingPerson] : [],
     );
 
     const extracted: ExtractedEntities = {
@@ -147,15 +156,20 @@ describe('Relationship Inference', () => {
   });
 
   it('should not link ungrounded person relationships even if person exists in DB', async () => {
-    const existingPerson = {
+    const existingPerson: Entity = {
       id: 'p-sarah',
       type: 'person',
       name: 'Sarah Chen',
+      normalized_name: 'sarah chen',
+      status: null,
+      due_date: null,
+      assigned_to: null,
+      metadata: null,
       created_at: '',
       updated_at: '',
     };
     vi.mocked(db.getEntitiesByType).mockImplementation((type) => {
-      if (type === 'person') return [existingPerson] as any;
+      if (type === 'person') return [existingPerson];
       return [];
     });
 

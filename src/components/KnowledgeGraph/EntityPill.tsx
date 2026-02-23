@@ -1,9 +1,9 @@
-import React from 'react';
+import type React from 'react';
 import {
-  Entity,
   ENTITY_ICONS,
+  type Entity,
+  type EntityType,
   STATUS_COLORS,
-  EntityType,
 } from '../../api/knowledgeGraph';
 
 interface EntityPillProps {
@@ -33,7 +33,7 @@ export const EntityPill: React.FC<EntityPillProps> = ({
   const statusColor = status ? STATUS_COLORS[status] : null;
 
   return (
-    <button
+    <button type="button"
       onClick={onClick}
       title={entity.name}
       className={`

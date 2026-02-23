@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import plutoLogo from '../../assets/brand/pluto_logo_v4.png';
 
 interface LogoProps {

@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import type React from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Entity,
+  type Entity,
   getEntitiesByType,
   updateEntityStatus,
 } from '../../api/knowledgeGraph';
@@ -81,7 +82,7 @@ export const TasksTab: React.FC = () => {
             commitments
           </p>
         </div>
-        <button className="h-10 px-6 rounded-xl bg-pro-bg border border-pro-border text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all">
+        <button type="button" className="h-10 px-6 rounded-xl bg-pro-bg border border-pro-border text-[10px] font-black uppercase tracking-widest hover:bg-white transition-all">
           Sync Linear
         </button>
       </div>
@@ -99,7 +100,7 @@ export const TasksTab: React.FC = () => {
                 ${isCompleted ? 'bg-pro-bg/30 border-pro-border/40 grayscale-[0.8] opacity-60' : 'bg-white border-pro-border shadow-sm hover:shadow-md hover:border-pro-accent/20'}
               `}
             >
-              <button
+              <button type="button"
                 onClick={() => toggleTask(task)}
                 className={`
                   mt-1 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all shrink-0
@@ -108,6 +109,7 @@ export const TasksTab: React.FC = () => {
               >
                 {isCompleted && (
                   <svg
+                    aria-hidden="true"
                     className="w-4 h-4"
                     fill="none"
                     viewBox="0 0 24 24"
@@ -132,7 +134,9 @@ export const TasksTab: React.FC = () => {
                   </h4>
                   {task.due_date && (
                     <span
-                      className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded bg-stone-100 text-stone-500 shrink-0`}
+                      className={
+                        'text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded bg-stone-100 text-stone-500 shrink-0'
+                      }
                     >
                       Due{' '}
                       {new Date(task.due_date).toLocaleDateString([], {

@@ -1,7 +1,7 @@
 export function createWavBlob(
   samples: Float32Array,
-  sampleRate: number = 48000,
-  numChannels: number = 1,
+  sampleRate = 48000,
+  numChannels = 1,
 ): Blob {
   const buffer = new ArrayBuffer(44 + samples.length * 4);
   const view = new DataView(buffer);

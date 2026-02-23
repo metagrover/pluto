@@ -3,14 +3,17 @@
  * Manages the Python WhisperX server process and provides a TypeScript API.
  */
 
-import { spawn, ChildProcess } from 'child_process';
-import { app } from 'electron';
-import path from 'node:path';
+import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
+import path from 'node:path';
+import { app } from 'electron';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { Agent } = require('undici') as {
-  Agent: new (opts: { headersTimeout: number; bodyTimeout: number }) => any;
+  Agent: new (opts: {
+    headersTimeout: number;
+    bodyTimeout: number;
+  }) => unknown;
 };
 
 // Types
@@ -68,9 +71,9 @@ const WHISPERX_FETCH_AGENT = new Agent({
 
 class WhisperXManager {
   private process: ChildProcess | null = null;
-  private pythonPath: string = '';
+  private pythonPath = '';
   private port: number = WHISPERX_DEFAULT_PORT;
-  private externalServer: boolean = false;
+  private externalServer = false;
 
   constructor() {
     this.detectExecutable();
@@ -174,7 +177,7 @@ class WhisperXManager {
   private detectSystemPython(): string {
     if (this.pythonPath) return this.pythonPath;
 
-    const { execSync } = require('child_process');
+    const { execSync } = require('node:child_process');
     const tryNames = ['python3.12', 'python3.11', 'python3', 'python'];
     for (const name of tryNames) {
       try {
@@ -196,7 +199,7 @@ class WhisperXManager {
 
   private async healthOnPort(
     port: number,
-    timeoutMs: number = 1000,
+    timeoutMs = 1000,
   ): Promise<HealthStatus> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -234,7 +237,7 @@ class WhisperXManager {
 
   private async findAvailablePort(
     preferredPort: number,
-    maxAttempts: number = 20,
+    maxAttempts = 20,
   ): Promise<number> {
     for (let i = 0; i < maxAttempts; i++) {
       const candidate = preferredPort + i;

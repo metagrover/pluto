@@ -1,8 +1,14 @@
 interface DashboardProps {
-  intelligence: any;
+  intelligence: {
+    greeting: string;
+    type: string;
+    detail: string;
+    actionLabel?: string;
+    meetingId?: string | number | null;
+  };
   isRecording: boolean;
-  setSelectedMeetingId: (id: any) => void;
-  setActiveTab: (tab: any) => void;
+  setSelectedMeetingId: (id: string | number | null) => void;
+  setActiveTab: (tab: 'hub' | 'people' | 'projects' | 'wiki' | 'tasks') => void;
   completedTasks: Set<string>;
   handleCompleteTask: (id: string) => void;
 }
@@ -33,7 +39,7 @@ export const Dashboard = ({
           </p>
           {intelligence.actionLabel && (
             <div className="pt-4 flex items-center gap-4">
-              <button
+              <button type="button"
                 onClick={() =>
                   intelligence.meetingId &&
                   setSelectedMeetingId(intelligence.meetingId)
@@ -42,7 +48,7 @@ export const Dashboard = ({
               >
                 {intelligence.actionLabel}
               </button>
-              <button className="px-6 py-4 rounded-2xl bg-white border border-pro-border text-pro-text-muted font-black text-[11px] uppercase tracking-[.15em] hover:bg-pro-bg transition-all active-push">
+              <button type="button" className="px-6 py-4 rounded-2xl bg-white border border-pro-border text-pro-text-muted font-black text-[11px] uppercase tracking-[.15em] hover:bg-pro-bg transition-all active-push">
                 Ignore for now
               </button>
             </div>
@@ -62,9 +68,9 @@ export const Dashboard = ({
           ]
             .filter((cta) => cta.active || intelligence.type === 'default')
             .slice(0, 3)
-            .map((action, i) => (
-              <button
-                key={i}
+            .map((action) => (
+              <button type="button"
+                key={action.label}
                 className="px-5 py-2.5 rounded-full bg-white border border-pro-border shadow-sm hover:border-pro-accent/40 hover:scale-[1.02] transition-all active-push flex items-center gap-2 group"
               >
                 <span className="text-sm group-hover:scale-110 transition-transform">
@@ -116,10 +122,10 @@ export const Dashboard = ({
               </div>
             </div>
             <div className="flex gap-3 relative z-10 pt-8">
-              <button className="flex-1 py-4 rounded-xl bg-[#1E1F24] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl hover:bg-pro-accent transition-all active-push">
+              <button type="button" className="flex-1 py-4 rounded-xl bg-[#1E1F24] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl hover:bg-pro-accent transition-all active-push">
                 Prep Intel Card
               </button>
-              <button className="w-14 h-14 rounded-xl bg-white border border-pro-border flex items-center justify-center hover:bg-pro-bg transition-all active-push shadow-sm">
+              <button type="button" className="w-14 h-14 rounded-xl bg-white border border-pro-border flex items-center justify-center hover:bg-pro-bg transition-all active-push shadow-sm">
                 🔗
               </button>
             </div>
@@ -134,7 +140,7 @@ export const Dashboard = ({
               <h3 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
                 ⚠️ Action Insights
               </h3>
-              <button
+              <button type="button"
                 className="h-8 px-4 rounded-lg bg-pro-bg border border-pro-border text-[9px] font-black text-pro-accent uppercase tracking-widest hover:bg-pro-accent hover:text-white transition-all active-push shadow-sm"
                 onClick={() => setActiveTab('tasks')}
               >
@@ -173,6 +179,13 @@ export const Dashboard = ({
                       e.stopPropagation();
                       handleCompleteTask(t.id);
                     }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleCompleteTask(t.id);
+                      }
+                    }}
                     className={`group/item p-4 rounded-2xl border transition-all cursor-pointer flex items-start gap-4 ${isDone ? 'bg-pro-success/5 border-pro-success/20 opacity-60 scale-[0.98] success-ring' : 'hover:border-pro-border/20 hover:bg-white border-transparent'}`}
                   >
                     <div
@@ -199,7 +212,7 @@ export const Dashboard = ({
                         <span className="text-[9px] font-bold text-pro-text-muted/30 uppercase tracking-widest">
                           Due {t.due}
                         </span>
-                        <button
+                        <button type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             console.log('Snooze');
@@ -279,13 +292,13 @@ export const Dashboard = ({
               </div>
             </div>
             <div className="flex gap-3 pt-4 mt-auto">
-              <button
+              <button type="button"
                 onClick={() => setActiveTab('people')}
                 className="flex-1 py-4 rounded-xl bg-white border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-soft hover:bg-pro-bg transition-all active-push"
               >
                 View Biography
               </button>
-              <button className="flex-1 py-4 rounded-xl bg-[#2A2B32] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">
+              <button type="button" className="flex-1 py-4 rounded-xl bg-[#2A2B32] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">
                 Draft Follow-up
               </button>
             </div>
@@ -301,6 +314,7 @@ export const Dashboard = ({
               <div className="flex items-center gap-6">
                 <div className="w-24 h-24 rounded-[1.5rem] bg-white border border-pro-border/10 flex items-center justify-center text-pro-accent shadow-sm relative overflow-hidden group-hover:scale-105 transition-transform duration-500 shrink-0">
                   <svg
+                    aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
                     viewBox="0 0 24 24"
                     fill="currentColor"
@@ -352,13 +366,13 @@ export const Dashboard = ({
 
             {/* Right: Actions */}
             <div className="flex flex-col gap-4 w-[200px] shrink-0">
-              <button
+              <button type="button"
                 onClick={() => setActiveTab('people')}
                 className="w-full py-4 rounded-xl bg-white border border-pro-border/10 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-sm hover:bg-pro-bg transition-all active-push"
               >
                 View Biography
               </button>
-              <button className="w-full py-4 rounded-xl bg-[#1A1D26] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">
+              <button type="button" className="w-full py-4 rounded-xl bg-[#1A1D26] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push">
                 Draft Follow-up
               </button>
             </div>
@@ -371,7 +385,7 @@ export const Dashboard = ({
           <h2 className="text-xl font-black tracking-tight">
             Live Intelligence Documents
           </h2>
-          <button
+          <button type="button"
             className="text-[10px] font-black text-pro-accent uppercase tracking-[0.15em] hover:underline"
             onClick={() => setActiveTab('wiki')}
           >
@@ -404,9 +418,9 @@ export const Dashboard = ({
               icon: '🚀',
               count: '5 Key Shifts',
             },
-          ].map((item, i) => (
-            <button
-              key={i}
+          ].map((item) => (
+            <button type="button"
+              key={item.title}
               className="text-left glass-card border border-pro-border rounded-[2rem] p-8 space-y-6 hover:border-pro-accent/40 transition-all group card-hover-effect"
             >
               <div className="w-12 h-12 rounded-2xl bg-white border border-pro-border flex items-center justify-center text-2xl group-hover:scale-110 transition-transform shadow-soft">

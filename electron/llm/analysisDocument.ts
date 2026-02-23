@@ -1,4 +1,4 @@
-import { AnalysisDocument, AnalysisQuality } from './provider';
+import type { AnalysisDocument, AnalysisQuality } from './provider';
 
 const SCHEMA_VERSION = 2;
 const SECTION_HEADERS = [

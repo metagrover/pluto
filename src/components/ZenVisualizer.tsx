@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface ZenVisualizerProps {
   analyser: AnalyserNode | null;
@@ -29,6 +29,7 @@ export const ZenVisualizer = ({
   // When isProcessing becomes true, we just stop updating.
 
   // ... rewritten effect:
+  // biome-ignore lint/correctness/useExhaustiveDependencies: This timer intentionally rebinds only on processing state transitions.
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (!isProcessing) {

@@ -1,20 +1,20 @@
+import { type ChildProcess, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
-  app,
   BrowserWindow,
-  ipcMain,
-  systemPreferences,
-  Tray,
   Menu,
+  Tray,
+  app,
+  ipcMain,
   nativeImage,
   shell,
+  systemPreferences,
 } from 'electron';
-import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import fs from 'node:fs';
-import { spawn, ChildProcess } from 'node:child_process';
-import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
+import ffmpeg from 'fluent-ffmpeg';
 import { createActiveCallDetector } from './activeCall/detector';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
@@ -31,7 +31,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname, '..');
 
 // 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
-export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL'];
+export const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron');
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist');
 
@@ -90,18 +90,18 @@ app.on('activate', () => {
 
 // Module imports
 import * as db from './db';
-import { whisperX } from './whisperx';
-import { getProvider, getAllSettings } from './llm/factory';
 import {
   extractAndProcessEntities,
   processExtractedEntities,
 } from './entityPipeline';
+import { getAllSettings, getProvider } from './llm/factory';
 import type { AnalysisArtifacts, InternalSignalDocument } from './llm/provider';
-import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
 import {
+  type TranscriptCleanupStats,
   cleanTranscriptSegments,
-  TranscriptCleanupStats,
 } from './transcriptCleanup';
+import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
+import { whisperX } from './whisperx';
 
 // Cleanup on quit
 app.on('before-quit', async () => {
@@ -211,11 +211,11 @@ app.whenReady().then(async () => {
       }
     });
 
-    recorderProcess.stderr?.on('data', (data: any) => {
+    recorderProcess.stderr?.on('data', (data: Buffer | string) => {
       console.error(`[Pluto] Recorder stderr: ${data}`);
     });
 
-    recorderProcess.on('close', (code: any) => {
+    recorderProcess.on('close', (code: number | null) => {
       console.log(`[Pluto] Recorder exited with code ${code}`);
       recorderProcess = null;
     });
@@ -568,7 +568,7 @@ app.whenReady().then(async () => {
         typeof meeting === 'object' &&
         'run_transcript_cleanup' in meeting
       ) {
-        delete meeting.run_transcript_cleanup;
+        meeting.run_transcript_cleanup = undefined;
       }
 
       console.log(`[Pluto] Saving meeting: ${meeting.id} - ${meeting.title}`);

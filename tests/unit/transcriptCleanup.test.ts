@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type TranscriptSegmentLike,
   cleanTranscriptSegments,
-  TranscriptSegmentLike,
 } from '../../electron/transcriptCleanup';
 
 describe('cleanTranscriptSegments', () => {

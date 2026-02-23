@@ -1,7 +1,7 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
-import { app } from 'electron';
 import fs from 'node:fs';
+import path from 'node:path';
+import Database from 'better-sqlite3';
+import { app } from 'electron';
 
 const dbPath = path.join(app.getPath('userData'), 'pluto.db');
 
@@ -11,12 +11,40 @@ if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
 const db = new Database(dbPath);
 
+type TableInfoColumn = {
+  name: string;
+};
+
+export interface PersistedMeeting {
+  id: string | number;
+  title: string;
+  meeting_type?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds?: number | null;
+  audio_path?: string | null;
+  transcript_json?: string | null;
+  user_notes?: string | null;
+  enhanced_notes?: string | null;
+  analysis_json?: string | null;
+  analysis_schema_version?: number | null;
+  analysis_format_pass?: boolean | number | null;
+  analysis_retry_count?: number | null;
+  analysis_fallback_used?: boolean | number | null;
+  value_signals_json?: string | null;
+  folder_id?: string | null;
+  is_favorite?: boolean | number | null;
+  created_at?: string | null;
+}
+
 /**
  * DATABASE MIGRATION / INITIALIZATION
  */
 const initDb = () => {
   // Check if we need to migrate from old schema
-  const tableInfo = db.prepare('PRAGMA table_info(meetings)').all() as any[];
+  const tableInfo = db
+    .prepare('PRAGMA table_info(meetings)')
+    .all() as TableInfoColumn[];
   const hasCreatedAt = tableInfo.some((col) => col.name === 'created_at');
 
   if (tableInfo.length > 0 && !hasCreatedAt) {
@@ -30,7 +58,7 @@ const initDb = () => {
   try {
     const ftsInfo = db
       .prepare('PRAGMA table_info(meetings_fts)')
-      .all() as any[];
+      .all() as TableInfoColumn[];
     // If table exists but doesn't have meeting_id (old schema linked to rowid)
     if (
       ftsInfo.length > 0 &&
@@ -44,7 +72,7 @@ const initDb = () => {
     // FTS5 Migration for Entities UUID support
     const entitiesFtsInfo = db
       .prepare('PRAGMA table_info(entities_fts)')
-      .all() as any[];
+      .all() as TableInfoColumn[];
     if (
       entitiesFtsInfo.length > 0 &&
       !entitiesFtsInfo.some((col) => col.name === 'entity_id')
@@ -232,7 +260,7 @@ export const setSetting = (key: string, value: string) => {
 /**
  * Meeting Management
  */
-export const saveMeeting = (meeting: any) => {
+export const saveMeeting = (meeting: PersistedMeeting) => {
   // Ensure ID is a string
   const id = String(meeting.id);
 
@@ -287,7 +315,7 @@ export const saveMeeting = (meeting: any) => {
           ? transcript.segments
           : [];
       transcriptText = segments
-        .map((segment: any) =>
+        .map((segment: { text?: string }) =>
           typeof segment?.text === 'string' ? segment.text.trim() : '',
         )
         .filter((text: string) => text.length > 0)
@@ -364,7 +392,7 @@ export const searchMeetings = (query: string) => {
 
 export const deleteMeeting = (id: string | number) => {
   const safeId = String(id);
-  const meeting = getMeeting(safeId) as any;
+  const meeting = getMeeting(safeId) as PersistedMeeting | undefined;
 
   if (!meeting) {
     console.warn(`[DB] deleteMeeting: Meeting not found for id: ${safeId}`);
@@ -441,7 +469,8 @@ export type RelationshipType =
   | 'attended'
   | 'produced'
   | 'impacts'
-  | 'works_on';
+  | 'works_on'
+  | 'involved_in';
 
 export interface Entity {
   id: string;
@@ -499,7 +528,7 @@ export const upsertEntity = (entity: {
   status?: EntityStatus;
   due_date?: string | null;
   assigned_to?: string | null;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }): Entity => {
   const normalizedName = normalizeEntityName(entity.name);
   let existing: Entity | undefined;
@@ -857,7 +886,12 @@ export const getMeetingEntities = (
 /**
  * Get all meetings where an entity was mentioned
  */
-export const getEntityMeetings = (entityId: string): any[] => {
+export const getEntityMeetings = (
+  entityId: string,
+): (PersistedMeeting & {
+  mention_count: number;
+  context: string | null;
+})[] => {
   return db
     .prepare(`
     SELECT m.*, me.mention_count, me.context
@@ -901,7 +935,7 @@ export const getOverdueActionItems = (): Entity[] => {
 /**
  * Get stale action items (not mentioned in last N days)
  */
-export const getStaleActionItems = (staleDays: number = 7): Entity[] => {
+export const getStaleActionItems = (staleDays = 7): Entity[] => {
   return db
     .prepare(`
     SELECT e.* FROM entities e
@@ -923,13 +957,15 @@ export const getKnowledgeGraphStats = (): {
   total_meeting_connections: number;
 } => {
   const totalEntities = (
-    db.prepare('SELECT COUNT(*) as count FROM entities').get() as any
+    db.prepare('SELECT COUNT(*) as count FROM entities').get() as { count: number }
   ).count;
   const totalLinks = (
-    db.prepare('SELECT COUNT(*) as count FROM entity_links').get() as any
+    db.prepare('SELECT COUNT(*) as count FROM entity_links').get() as { count: number }
   ).count;
   const totalMeetingConnections = (
-    db.prepare('SELECT COUNT(*) as count FROM meeting_entities').get() as any
+    db
+      .prepare('SELECT COUNT(*) as count FROM meeting_entities')
+      .get() as { count: number }
   ).count;
 
   const typeCounts = db

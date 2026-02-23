@@ -1,7 +1,7 @@
 const ffmpegPath = require('ffmpeg-static');
-const { spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
+const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const videoPath = path.resolve('./reference.mp4');
 
@@ -71,10 +71,9 @@ function processBuffer(buf) {
     .slice(0, 20); // Top 20
 
   console.log('Top colors found (RGB):');
-  sorted.forEach(([key, count]) => {
+  for (const [key, count] of sorted) {
     const [r, g, b] = key.split(',').map(Number);
-    const hex =
-      '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('');
+    const hex = `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
     console.log(`${hex} (Count: ${count})`);
-  });
+  }
 }

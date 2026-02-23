@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
-import { Mic, Loader2 } from 'lucide-react';
+import { Loader2, Mic } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  createWavBlob,
   computeRms,
+  createWavBlob,
   decodeFloat32PcmChunk,
 } from '../utils/audio';
 import {
@@ -12,9 +12,9 @@ import {
   dropShortCrossSpeakerEchoes,
   reassignShortBoundarySegments,
   resolveCrossChannelDuplicates,
-  stripLikelyMeBleedSegments,
   shouldApplyFullSessionMeRecovery,
   shouldDropBySpeakerActivity,
+  stripLikelyMeBleedSegments,
 } from '../utils/speakerAttribution';
 
 interface AudioManagerProps {
@@ -275,7 +275,7 @@ export const AudioManager = ({
   const micPcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const micPcmSinkRef = useRef<GainNode | null>(null);
   const nativeAudioListenerRef = useRef<
-    ((event: any, chunk: any) => void) | null
+    ((event: unknown, chunk: Uint8Array | ArrayBuffer | null | undefined) => void) | null
   >(null);
   const systemAudioChunkSeenRef = useRef(false);
 
@@ -448,7 +448,10 @@ export const AudioManager = ({
         systemAudioChunkSeenRef.current = false;
 
         // Setup Listener
-        const handler = (_: any, chunk: any) => {
+        const handler = (
+          _: unknown,
+          chunk: Uint8Array | ArrayBuffer | null | undefined,
+        ) => {
           if (chunk) {
             systemAudioChunkSeenRef.current = true;
             let chunkBytes: Uint8Array | null = null;
@@ -616,10 +619,10 @@ export const AudioManager = ({
               );
               const merged = new Float32Array(totalLen);
               let offset = 0;
-              floatChunks.forEach((c) => {
+              for (const c of floatChunks) {
                 merged.set(c, offset);
                 offset += c.length;
-              });
+              }
               const chunkDurationSec = Math.max(
                 0.2,
                 chunkEndSec - chunkStartSec,
@@ -825,7 +828,9 @@ export const AudioManager = ({
     }
     micPcmChunksRef.current = [];
     if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop());
+      for (const track of micStreamRef.current.getTracks()) {
+        track.stop();
+      }
       micStreamRef.current = null;
     }
   };
@@ -934,9 +939,11 @@ export const AudioManager = ({
   };
 
   const computeRmsData = async (audioBuffer: ArrayBuffer): Promise<RmsData> => {
-    const audioCtx = new (
-      window.AudioContext || (window as any).webkitAudioContext
-    )();
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+      throw new Error('Web Audio API unavailable');
+    }
+    const audioCtx = new AudioContextCtor();
     try {
       const decoded = await audioCtx.decodeAudioData(audioBuffer.slice(0));
       const numChannels = decoded.numberOfChannels;
@@ -1072,7 +1079,7 @@ export const AudioManager = ({
   const tokenPrefixSimilarity = (
     left: string,
     right: string,
-    maxPrefixTokens: number = 8,
+    maxPrefixTokens = 8,
   ): number => {
     const leftTokens = normalizeTranscriptText(left).split(' ').filter(Boolean);
     const rightTokens = normalizeTranscriptText(right)
@@ -2860,7 +2867,9 @@ export const AudioManager = ({
         audioContextRef.current = null;
       }
       if (visStreamRef.current) {
-        visStreamRef.current.getTracks().forEach((t) => t.stop());
+        for (const track of visStreamRef.current.getTracks()) {
+          track.stop();
+        }
         visStreamRef.current = null;
       }
       setAnalyser(null);
@@ -2928,8 +2937,7 @@ export const AudioManager = ({
       );
       if (baselinePassThroughCheck.probable) {
         console.warn(
-          `[Pluto] Early pass-through risk detected before full-session recovery ` +
-            `(overlapPairs=${baselinePassThroughCheck.overlapPairs}, similarPairs=${baselinePassThroughCheck.similarPairs}).`,
+          `[Pluto] Early pass-through risk detected before full-session recovery (overlapPairs=${baselinePassThroughCheck.overlapPairs}, similarPairs=${baselinePassThroughCheck.similarPairs}).`,
         );
       }
       let timelineSegments = collectedSegments;
@@ -3167,10 +3175,11 @@ export const AudioManager = ({
         }
       } else if (fullSessionCanonicalSegments.length > 0) {
         console.log(
-          '[Pluto] Skipping session-canonical hydration: ' +
-            (finalizedSegments.length === 0
+          `[Pluto] Skipping session-canonical hydration: ${
+            finalizedSegments.length === 0
               ? 'missing channel attribution context'
-              : 'session lexical confidence lower than channel transcript'),
+              : 'session lexical confidence lower than channel transcript'
+          }`,
         );
       }
 
@@ -3669,18 +3678,20 @@ const WaveformVisualizer = ({
             ) : (
               <div className="flex items-center gap-1.5 h-full opacity-20 group-hover:opacity-40 transition-opacity duration-500">
                 {/* Static Equalizer (reacts to hover only) */}
-                {[...Array(5)].map((_, i) => (
+                {Array.from({ length: 5 }, (_, barIndex) => barIndex).map(
+                  (barIndex) => (
                   <div
-                    key={i}
+                    key={barIndex}
                     className="w-1 rounded-full bg-pro-text-main transition-all duration-500 ease-out h-1 group-hover:h-2"
                   />
-                ))}
+                  ),
+                )}
               </div>
             )}
           </div>
 
           {/* Primary Action Button */}
-          <button
+          <button type="button"
             onClick={onToggle}
             disabled={isProcessing}
             className={`

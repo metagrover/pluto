@@ -1,4 +1,4 @@
-import { LLMProvider, ProviderType, LLMSettings } from './provider';
+import type { LLMProvider, LLMSettings, ProviderType } from './provider';
 import { UnifiedLLMProvider } from './unifiedProvider';
 
 export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {

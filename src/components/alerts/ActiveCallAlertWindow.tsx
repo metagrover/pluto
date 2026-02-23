@@ -63,6 +63,7 @@ export const ActiveCallAlertWindow = () => {
     window.close();
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: The animation loop callback intentionally uses current refs across a single mount.
   useEffect(() => {
     rafRef.current = window.requestAnimationFrame(updateProgress);
     const handleKeyDown = (event: KeyboardEvent) => {

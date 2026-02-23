@@ -1,15 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
-  AnalysisArtifacts,
-  EntityExtractionContext,
-  ExtractedEntities,
-  InternalSignalDocument,
-  InternalSignalTag,
-  LLMProvider,
-  LLMSettings,
-  ProviderType,
-} from './provider';
-import {
   analysisDocumentToMarkdown,
   fallbackAnalysisDocument,
   parseAnalysisMarkdown,
@@ -22,6 +12,16 @@ import {
   getTitlePrompt,
   getValueSignalsPrompt,
 } from './prompts';
+import type {
+  AnalysisArtifacts,
+  EntityExtractionContext,
+  ExtractedEntities,
+  InternalSignalDocument,
+  InternalSignalTag,
+  LLMProvider,
+  LLMSettings,
+  ProviderType,
+} from './provider';
 
 const OLLAMA_TIMEOUT_MS = 120_000;
 const OLLAMA_DEFAULT_MODEL = 'llama3.2';

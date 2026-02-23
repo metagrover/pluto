@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Entity, getEntitiesByType } from '../../api/knowledgeGraph';
+import type React from 'react';
+import { useEffect, useState } from 'react';
+import { type Entity, getEntitiesByType } from '../../api/knowledgeGraph';
 
 export const KnowledgeTab: React.FC = () => {
   const [topics, setTopics] = useState<Entity[]>([]);
@@ -95,7 +96,7 @@ export const KnowledgeTab: React.FC = () => {
                         year: 'numeric',
                       })}
                     </span>
-                    <button className="text-xs font-bold text-pro-accent hover:underline">
+                    <button type="button" className="text-xs font-bold text-pro-accent hover:underline">
                       View Source
                     </button>
                   </div>
@@ -143,7 +144,9 @@ export const KnowledgeTab: React.FC = () => {
               return (
                 <div
                   key={topic.id}
-                  className={`px-6 py-4 rounded-[1.5rem] bg-white border border-pro-border shadow-sm hover:shadow-md transition-all cursor-pointer group flex flex-col gap-2`}
+                  className={
+                    'px-6 py-4 rounded-[1.5rem] bg-white border border-pro-border shadow-sm hover:shadow-md transition-all cursor-pointer group flex flex-col gap-2'
+                  }
                 >
                   <div className="flex items-center gap-3">
                     <span className="text-lg">💡</span>

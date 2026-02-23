@@ -50,6 +50,12 @@ export const PermissionsOverlay = ({
       <div
         className="absolute inset-0 bg-slate-950/60 backdrop-blur-md"
         onClick={onClose}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onClose();
+          }
+        }}
       />
       <div className="w-full max-w-lg bg-white rounded-[2rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center">
         <div className="p-8 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg/50">
@@ -90,7 +96,7 @@ export const PermissionsOverlay = ({
             <p className="text-[12px] text-pro-text-muted/70 leading-relaxed mb-5">
               System Settings → Privacy & Security → Microphone.
             </p>
-            <button
+            <button type="button"
               onClick={() => onOpenSystemSettings('microphone')}
               className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-white hover:border-pro-accent/40 transition-all active-push"
             >
@@ -113,7 +119,7 @@ export const PermissionsOverlay = ({
               System Settings → Privacy & Security → Screen &amp; System Audio
               Recording → System Audio Recording Only.
             </p>
-            <button
+            <button type="button"
               onClick={() => onOpenSystemSettings('system-audio')}
               className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-white hover:border-pro-accent/40 transition-all active-push"
             >
@@ -122,13 +128,13 @@ export const PermissionsOverlay = ({
           </div>
 
           <div className="flex items-center gap-3 pt-2">
-            <button
+            <button type="button"
               onClick={onClose}
               className="flex-1 h-12 rounded-2xl border border-pro-border/50 bg-white text-pro-text-muted font-black text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-all active-push"
             >
               Cancel
             </button>
-            <button
+            <button type="button"
               onClick={handleCheckAgain}
               className="flex-[2] h-12 rounded-2xl bg-pro-text-main text-white font-black text-[10px] uppercase tracking-[0.2em] hover:bg-pro-accent transition-all active-push shadow-premium"
             >

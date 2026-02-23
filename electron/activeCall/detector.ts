@@ -1,5 +1,5 @@
-import path from 'node:path';
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 
 export type ActiveCallState = {
   active: boolean;
@@ -374,7 +374,10 @@ export const createActiveCallDetector = ({
       const expanded = new Set<number>(rootPids);
       const queue = [...rootPids];
       while (queue.length > 0) {
-        const current = queue.shift()!;
+        const current = queue.shift();
+        if (current === undefined) {
+          continue;
+        }
         const children = childrenByParent.get(current) ?? [];
         for (const childPid of children) {
           if (expanded.has(childPid)) continue;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AudioManager } from './components/AudioManager';
 import { SetupWizard } from './components/Setup/SetupWizard';
 import './App.css';
@@ -7,25 +7,25 @@ import { useActiveCallMonitor } from './hooks/useActiveCallMonitor';
 // Layout Components
 import { Sidebar } from './components/layout/Sidebar';
 
-// Feature Components
-import { ZenMode } from './components/features/ZenMode';
 import { Dashboard } from './components/features/Dashboard';
 import { MeetingView } from './components/features/MeetingView';
+// Feature Components
+import { ZenMode } from './components/features/ZenMode';
 
+import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
 // Knowledge Graph Components
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsTab } from './components/KnowledgeGraph/ProjectsTab';
 import { TasksTab } from './components/KnowledgeGraph/TasksTab';
-import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
 
-// Overlay Components
-import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { AskPlutoOverlay } from './components/overlays/AskPlutoOverlay';
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
+// Overlay Components
+import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { SettingsOverlay } from './components/overlays/SettingsOverlay';
 
 // Types
-import { Meeting } from './types';
+import type { Meeting } from './types';
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
@@ -125,6 +125,7 @@ function App() {
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: This effect is intentionally scoped to meeting selection changes.
   useEffect(() => {
     setTranscriptVisible(false);
     if (contentScrollRef.current) {
@@ -142,39 +143,48 @@ function App() {
     ];
 
     let parts: (string | JSX.Element)[] = [text];
-    entities.forEach((entity) => {
+    for (const entity of entities) {
       const newParts: (string | JSX.Element)[] = [];
-      parts.forEach((part) => {
+      for (const part of parts) {
         if (typeof part === 'string') {
           const subParts = part.split(entity.pattern);
           const matches = part.match(entity.pattern);
-          subParts.forEach((sp, k) => {
+          for (const [k, sp] of subParts.entries()) {
             newParts.push(sp);
-            if (matches && matches[k]) {
+            const matchText = matches?.[k];
+            if (matchText) {
               newParts.push(
                 <span
                   key={`${entity.type}-${k}`}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSearchQuery(matches[k]!);
+                    setSearchQuery(matchText);
                     setSearchVisible(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setSearchQuery(matchText);
+                      setSearchVisible(true);
+                    }
                   }}
                   className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-pro-accent/5 border border-pro-accent/20 rounded-md text-pro-accent font-bold text-[13px] hover:bg-pro-accent hover:text-white transition-colors cursor-pointer group/pill"
                 >
                   <span className="opacity-60 group-hover/pill:opacity-100">
                     {entity.icon}
                   </span>
-                  {matches[k]}
+                  {matchText}
                 </span>,
               );
             }
-          });
+          }
         } else {
           newParts.push(part);
         }
-      });
+      }
       parts = newParts;
-    });
+    }
     return parts;
   };
 
@@ -294,7 +304,7 @@ function App() {
 
     if (upcomingMeeting && !selectedMeetingId) {
       return {
-        greeting: `Upcoming Meeting Prep`,
+        greeting: 'Upcoming Meeting Prep',
         detail: `${upcomingMeeting.title} · Happening in 45 mins`,
         type: 'meeting',
         actionLabel: 'Review Prep Intel',
@@ -346,6 +356,7 @@ function App() {
     }
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: This boot probe should run once and intentionally captures initial handlers.
   useEffect(() => {
     const probeOnBoot = async () => {
       const alreadyDone = await window.ipcRenderer.invoke('BOOT_PROBE_STATUS');
@@ -439,6 +450,12 @@ function App() {
           <div
             className={`fixed inset-0 bg-black/20 backdrop-blur-sm z-30 lg:hidden transition-opacity duration-300 ${sidebarVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             onClick={() => setSidebarVisible(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setSidebarVisible(false);
+              }
+            }}
           />
           <Sidebar
             sidebarVisible={sidebarVisible}
@@ -487,11 +504,12 @@ function App() {
         <main className="flex-1 flex flex-col bg-pro-bg h-full relative z-10 rounded-l-[2.5rem] overflow-hidden content-shift border-l border-pro-border/10">
           <header className="app-titlebar h-28 flex items-center justify-between px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20">
             <div className="flex items-center gap-8">
-              <button
+              <button type="button"
                 onClick={() => setSidebarVisible((prev) => !prev)}
                 className="w-11 h-11 rounded-xl bg-white border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push group"
               >
                 <svg
+                  aria-hidden="true"
                   className={`w-5 h-5 transition-transform duration-700 ${sidebarVisible ? '' : 'rotate-180'}`}
                   fill="none"
                   viewBox="0 0 24 24"
@@ -529,7 +547,7 @@ function App() {
             </div>
 
             <div className="flex items-center gap-4">
-              <button
+              <button type="button"
                 onClick={() => setAskPlutoVisible(true)}
                 className="h-12 px-6 rounded-2xl bg-white border border-pro-border shadow-soft flex items-center gap-4 hover:border-pro-accent/40 transition-all active-push group"
               >
@@ -547,11 +565,12 @@ function App() {
                 </div>
               </button>
               <div className="w-[1px] h-6 bg-pro-border/20" />
-              <button
+              <button type="button"
                 onClick={() => setSettingsVisible(true)}
                 className="w-11 h-11 rounded-xl bg-white border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push"
               >
                 <svg
+                  aria-hidden="true"
                   className="w-4 h-4"
                   fill="none"
                   viewBox="0 0 24 24"
@@ -651,7 +670,7 @@ function App() {
                   </p>
                 </div>
                 <div className="pt-10 flex flex-col items-center gap-6 relative z-10">
-                  <button
+                  <button type="button"
                     onClick={() => {
                       if (startSessionRef.current) startSessionRef.current();
                     }}

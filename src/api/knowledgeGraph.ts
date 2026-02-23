@@ -21,7 +21,8 @@ export type RelationshipType =
   | 'attended'
   | 'produced'
   | 'impacts'
-  | 'works_on';
+  | 'works_on'
+  | 'involved_in';
 
 export interface Entity {
   id: string;
@@ -131,8 +132,8 @@ export const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 // IPC invoke helper
-const invoke = (channel: string, ...args: any[]): Promise<any> => {
-  return (window as any).ipcRenderer.invoke(channel, ...args);
+const invoke = <T = unknown>(channel: string, ...args: unknown[]): Promise<T> => {
+  return window.ipcRenderer.invoke(channel, ...args) as Promise<T>;
 };
 
 // =============================================
@@ -210,7 +211,7 @@ export const upsertEntity = async (entity: {
   status?: EntityStatus;
   due_date?: string | null;
   assigned_to?: string | null;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }): Promise<Entity> => {
   return invoke('UPSERT_ENTITY', entity);
 };
@@ -338,7 +339,9 @@ export const getMeetingEntities = async (
 /**
  * Get all meetings where an entity was mentioned
  */
-export const getEntityMeetings = async (entityId: string): Promise<any[]> => {
+export const getEntityMeetings = async (
+  entityId: string,
+): Promise<(Entity & { mention_count: number; context: string | null })[]> => {
   return invoke('GET_ENTITY_MEETINGS', entityId);
 };
 
@@ -390,7 +393,7 @@ export const getKnowledgeGraphStats =
 /**
  * Parse entity metadata JSON
  */
-export const parseMetadata = <T extends Record<string, any>>(
+export const parseMetadata = <T extends Record<string, unknown>>(
   entity: Entity,
 ): T | null => {
   if (!entity.metadata) return null;

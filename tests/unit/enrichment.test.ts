@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock Electron and Database to prevent side effects during import
 vi.mock('electron', () => ({
@@ -8,25 +8,21 @@ vi.mock('electron', () => ({
 
 vi.mock('better-sqlite3', () => {
   return {
-    default: function () {
-      return {
-        prepare: vi
-          .fn()
-          .mockReturnValue({
-            run: vi.fn(),
-            get: vi.fn(),
-            all: vi.fn().mockReturnValue([]),
-          }),
-        transaction: vi.fn((fn) => fn),
-        exec: vi.fn(),
-      };
-    },
+    default: () => ({
+      prepare: vi.fn().mockReturnValue({
+        run: vi.fn(),
+        get: vi.fn(),
+        all: vi.fn().mockReturnValue([]),
+      }),
+      transaction: vi.fn((fn) => fn),
+      exec: vi.fn(),
+    }),
   };
 });
 
 import {
-  shouldEnrichEntity,
   parseDueDate,
+  shouldEnrichEntity,
 } from '../../electron/entityPipeline';
 
 describe('Critical Business Logic', () => {

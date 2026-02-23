@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { Logo } from '../Brand/Logo';
 
 interface SetupWizardProps {
@@ -18,6 +18,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [hydrated, setHydrated] = useState(false);
 
   // Restore saved progress so user doesn't redo first screens
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Setup restoration intentionally runs once on mount.
   useEffect(() => {
     const load = async () => {
       const [setupComplete, savedStep, savedHf, savedLlm] = await Promise.all([
@@ -105,7 +106,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               Pluto is your personal second brain for deep focus and effortless
               recall.
             </p>
-            <button
+            <button type="button"
               onClick={async () => {
                 await persistStep(2);
                 setStep(2);
@@ -174,13 +175,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             </div>
 
             <div className="flex gap-6 mt-12">
-              <button
+              <button type="button"
                 onClick={() => setStep(1)}
                 className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
               >
                 Go back
               </button>
-              <button
+              <button type="button"
                 onClick={async () => {
                   await persistStep(3);
                   setStep(3);
@@ -206,10 +207,14 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             </div>
 
             <div className="text-left space-y-4">
-              <label className="block text-[10px] font-bold text-pro-text-muted/40 uppercase tracking-[0.2em] mb-4 pl-4">
+              <label
+                htmlFor="setup-hf-token"
+                className="block text-[10px] font-bold text-pro-text-muted/40 uppercase tracking-[0.2em] mb-4 pl-4"
+              >
                 Hugging Face Token
               </label>
               <input
+                id="setup-hf-token"
                 type="password"
                 placeholder="hf_..."
                 value={hfToken}
@@ -225,13 +230,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             </div>
 
             <div className="flex gap-6 mt-14">
-              <button
+              <button type="button"
                 onClick={() => setStep(2)}
                 className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
               >
                 Back
               </button>
-              <button
+              <button type="button"
                 onClick={async () => {
                   await window.ipcRenderer.invoke('SET_SETTING', {
                     key: 'hf_token',
@@ -280,7 +285,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                   icon: '☁️',
                 },
               ].map((provider) => (
-                <button
+                <button type="button"
                   key={provider.id}
                   onClick={() => {
                     setLlmProvider(provider.id);
@@ -327,13 +332,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             </div>
 
             <div className="flex gap-6 mt-12">
-              <button
+              <button type="button"
                 onClick={() => setStep(3)}
                 className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
               >
                 Go back
               </button>
-              <button
+              <button type="button"
                 onClick={handleFinish}
                 className="flex-[2] h-16 bg-pro-text-main text-white rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
               >

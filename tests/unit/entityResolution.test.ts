@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 // Mock Electron and Database to prevent side effects during import
 vi.mock('electron', () => ({
@@ -12,26 +12,24 @@ vi.mock('electron', () => ({
 
 vi.mock('better-sqlite3', () => {
   return {
-    default: function () {
-      return {
-        prepare: vi.fn().mockReturnValue({
-          run: vi.fn(),
-          get: vi.fn(),
-          all: vi.fn().mockReturnValue([]),
-        }),
-        transaction: vi.fn((fn) => fn),
-        exec: vi.fn(),
-      };
-    },
+    default: () => ({
+      prepare: vi.fn().mockReturnValue({
+        run: vi.fn(),
+        get: vi.fn(),
+        all: vi.fn().mockReturnValue([]),
+      }),
+      transaction: vi.fn((fn) => fn),
+      exec: vi.fn(),
+    }),
   };
 });
 
+import type { Entity } from '../../electron/db';
 import {
   findSimilarEntity,
   normalizeForMatch,
   normalizeTokenSort,
 } from '../../electron/entityPipeline';
-import { Entity } from '../../electron/db';
 
 describe('Entity Resolution Logic', () => {
   describe('normalizeForMatch', () => {
@@ -56,33 +54,49 @@ describe('Entity Resolution Logic', () => {
         type: 'person',
         name: 'Sarah Chen',
         normalized_name: 'sarah chen',
+        status: null,
+        due_date: null,
+        assigned_to: null,
+        metadata: null,
         created_at: '',
         updated_at: '',
-      } as any,
+      },
       {
         id: '2',
         type: 'project',
         name: 'Alpha Project',
         normalized_name: 'alpha project',
+        status: null,
+        due_date: null,
+        assigned_to: null,
+        metadata: null,
         created_at: '',
         updated_at: '',
-      } as any,
+      },
       {
         id: '3',
         type: 'topic',
         name: 'API Migration',
         normalized_name: 'api migration',
+        status: null,
+        due_date: null,
+        assigned_to: null,
+        metadata: null,
         created_at: '',
         updated_at: '',
-      } as any,
+      },
       {
         id: '4',
         type: 'person',
         name: 'Michael Scott',
         normalized_name: 'michael scott',
+        status: null,
+        due_date: null,
+        assigned_to: null,
+        metadata: null,
         created_at: '',
         updated_at: '',
-      } as any,
+      },
     ];
 
     it('should find exact matches', () => {

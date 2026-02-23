@@ -5,9 +5,12 @@
  * Handles entity resolution, relationship creation, and meeting associations.
  */
 
-import { EntityExtractionContext, ExtractedEntities } from './llm/provider';
-import * as db from './db';
 import levenshtein from 'fast-levenshtein';
+import * as db from './db';
+import type {
+  EntityExtractionContext,
+  ExtractedEntities,
+} from './llm/provider';
 
 export interface ProcessedEntities {
   created: number;
@@ -238,7 +241,7 @@ export function parseDueDate(dueDate: string): string | null {
   // Try to parse as a date directly
   try {
     const parsed = new Date(dueDate);
-    if (!isNaN(parsed.getTime())) {
+    if (!Number.isNaN(parsed.getTime())) {
       return parsed.toISOString();
     }
   } catch {
@@ -676,7 +679,7 @@ export async function processExtractedEntities(
 
       if (sourceEntity && targetEntity) {
         // Validate relationship type
-        const validTypes = [
+        const validTypes: db.RelationshipType[] = [
           'works_on',
           'impacts',
           'relates_to',
@@ -684,8 +687,10 @@ export async function processExtractedEntities(
           'produced',
           'assigned_to',
         ];
-        const relationship = validTypes.includes(rel.relationship)
-          ? rel.relationship
+        const relationship: db.RelationshipType = validTypes.includes(
+          rel.relationship as db.RelationshipType,
+        )
+          ? (rel.relationship as db.RelationshipType)
           : 'relates_to';
         const confidence = clamp(
           0.85 + getRelationshipBias(context, relationship),
@@ -696,7 +701,7 @@ export async function processExtractedEntities(
         db.linkEntities({
           source_entity_id: sourceEntity.id,
           target_entity_id: targetEntity.id,
-          relationship: relationship as any,
+          relationship,
           meeting_id: meetingId,
           confidence,
         });

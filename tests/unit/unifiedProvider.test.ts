@@ -21,7 +21,7 @@ vi.mock('@google/generative-ai', () => {
 });
 
 import { getAllSettings, getProvider } from '../../electron/llm/factory';
-import { LLMSettings } from '../../electron/llm/provider';
+import type { LLMSettings } from '../../electron/llm/provider';
 import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
 
 const validAnalysisMarkdown = `## Summary

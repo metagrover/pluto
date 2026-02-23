@@ -1,4 +1,4 @@
-import { Meeting } from '../../types';
+import type { Meeting } from '../../types';
 
 interface SearchOverlayProps {
   searchVisible: boolean;
@@ -24,11 +24,18 @@ export const SearchOverlay = ({
       <div
         className="absolute inset-0 bg-slate-950/60 backdrop-blur-md"
         onClick={() => setSearchVisible(false)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setSearchVisible(false);
+          }
+        }}
       />
       <div className="w-full max-w-3xl bg-white rounded-[2.5rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center">
         <div className="p-10 border-b border-pro-border/40 flex items-center gap-8">
           <div className="w-12 h-12 rounded-2xl bg-pro-bg flex items-center justify-center border border-pro-border/40 text-pro-text-muted shadow-sm">
             <svg
+              aria-hidden="true"
               className="w-6 h-6"
               fill="none"
               viewBox="0 0 24 24"
@@ -43,7 +50,6 @@ export const SearchOverlay = ({
             </svg>
           </div>
           <input
-            autoFocus
             type="text"
             placeholder="Search your second brain..."
             value={searchQuery}
@@ -72,7 +78,7 @@ export const SearchOverlay = ({
                   </h3>
                   <div className="grid grid-cols-2 gap-6">
                     {filteredMeetings.map((m) => (
-                      <button
+                      <button type="button"
                         key={m.id}
                         onClick={() => {
                           setSelectedMeetingId(m.id);

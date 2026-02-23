@@ -5,6 +5,7 @@ import {
   parseAnalysisMarkdown,
   resolveMeetingAnalysisDocument,
 } from '../../src/utils/analysisDocument';
+import type { Meeting } from '../../src/types';
 
 describe('renderer analysis document utilities', () => {
   it('parses canonical markdown with multiline bullets without line fragmentation', () => {
@@ -47,7 +48,7 @@ continues on next line.
       enhanced_notes: '## Summary\nFallback summary',
     };
 
-    const doc = resolveMeetingAnalysisDocument(meeting as any);
+    const doc = resolveMeetingAnalysisDocument(meeting as Meeting);
 
     expect(doc?.summary).toEqual(['Structured summary']);
     expect(doc?.key_points).toEqual(['Structured point']);

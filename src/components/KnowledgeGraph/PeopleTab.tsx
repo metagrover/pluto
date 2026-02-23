@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Entity, getEntitiesByType } from '../../api/knowledgeGraph';
+import type React from 'react';
+import { useEffect, useState } from 'react';
+import { type Entity, getEntitiesByType } from '../../api/knowledgeGraph';
 
 export const PeopleTab: React.FC = () => {
   const [people, setPeople] = useState<Entity[]>([]);
@@ -69,10 +70,10 @@ export const PeopleTab: React.FC = () => {
             {JSON.parse(person.metadata || '{}').role || 'Contact'}
           </p>
           <div className="flex items-center gap-2">
-            <button className="px-4 py-1.5 rounded-xl bg-pro-bg text-[10px] font-bold uppercase tracking-widest hover:bg-pro-accent hover:text-white transition-all">
+            <button type="button" className="px-4 py-1.5 rounded-xl bg-pro-bg text-[10px] font-bold uppercase tracking-widest hover:bg-pro-accent hover:text-white transition-all">
               View Profile
             </button>
-            <button className="w-8 h-8 rounded-xl bg-pro-bg flex items-center justify-center hover:bg-white border border-transparent hover:border-pro-border transition-all">
+            <button type="button" className="w-8 h-8 rounded-xl bg-pro-bg flex items-center justify-center hover:bg-white border border-transparent hover:border-pro-border transition-all">
               📞
             </button>
           </div>
