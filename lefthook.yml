@@ -1,5 +1,6 @@
-pre-push:
+pre-commit:
   commands:
     audit:
       run: pnpm run audit:high
-      files: git diff --name-only HEAD @{push}
+    biome:
+      run: pnpm run check

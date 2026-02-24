@@ -42,6 +42,11 @@ rm -rf "$PYTHON_DIR/dist"
 # Build with PyInstaller
 # We run from python/ dir so relative paths in spec work
 cd "$PYTHON_DIR"
+# Mitigate OpenMP shared-memory failures during PyInstaller hook analysis (torch import)
+export KMP_SHM_ENABLE=0
+export KMP_INIT_AT_FORK=FALSE
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
 pyinstaller whisperx_server.spec
 
 # Move output to resources/bin

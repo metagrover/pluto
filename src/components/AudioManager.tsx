@@ -44,6 +44,21 @@ interface TranscriptionSegment {
 }
 
 type MicChunkFormat = 'webm' | 'ogg' | 'wav';
+type NativeAudioChunk =
+  | Uint8Array
+  | ArrayBuffer
+  | ArrayBufferView
+  | { type: 'Buffer'; data: number[] }
+  | null
+  | undefined;
+
+const isBufferJson = (
+  chunk: unknown,
+): chunk is { type: 'Buffer'; data: number[] } => {
+  if (!chunk || typeof chunk !== 'object') return false;
+  const record = chunk as { type?: unknown; data?: unknown };
+  return record.type === 'Buffer' && Array.isArray(record.data);
+};
 
 interface PendingMicChunk {
   blob: Blob;
@@ -91,21 +106,6 @@ interface AnalysisArtifacts {
   markdown: string;
   analysis: AnalysisDocument;
   signals: InternalSignalDocument;
-}
-
-interface WhisperRawSegment {
-  start: number;
-  end: number;
-  text: string;
-}
-
-interface WhisperTranscriptionResult {
-  segments?: WhisperRawSegment[];
-}
-
-interface EntityExtractionResult {
-  created: number;
-  linked: number;
 }
 
 const emptyValueSignals = (): InternalSignalDocument => ({
@@ -289,9 +289,13 @@ export const AudioManager = ({
   const micPcmSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micPcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const micPcmSinkRef = useRef<GainNode | null>(null);
-  const nativeAudioListenerRef = useRef<((...args: unknown[]) => void) | null>(
-    null,
-  );
+  const nativeAudioListenerRef = useRef<
+    | ((
+        event: unknown,
+        chunk: Uint8Array | ArrayBuffer | null | undefined,
+      ) => void)
+    | null
+  >(null);
   const systemAudioChunkSeenRef = useRef(false);
 
   const speakingLoopRef = useRef<number | null>(null);
@@ -346,7 +350,7 @@ export const AudioManager = ({
       console.log('[Pluto] Starting session (Robust Mic First)...');
 
       // 0. Preflight Permissions (Mic only)
-      const micStatus = await window.ipcRenderer.invoke<string>(
+      const micStatus = await window.ipcRenderer.invoke(
         'CHECK_MICROPHONE_PERMISSION',
       );
       if (micStatus !== 'granted') {
@@ -463,8 +467,7 @@ export const AudioManager = ({
         systemAudioChunkSeenRef.current = false;
 
         // Setup Listener
-        const handler = (...args: unknown[]) => {
-          const chunk = args[1];
+        const handler = (_: unknown, chunk: NativeAudioChunk) => {
           if (chunk) {
             systemAudioChunkSeenRef.current = true;
             let chunkBytes: Uint8Array | null = null;
@@ -477,37 +480,13 @@ export const AudioManager = ({
             } else if (chunk instanceof ArrayBuffer) {
               chunkBytes = new Uint8Array(chunk);
             } else if (ArrayBuffer.isView(chunk)) {
-              const view = chunk as ArrayBufferView;
               chunkBytes = new Uint8Array(
-                view.buffer,
-                view.byteOffset,
-                view.byteLength,
+                chunk.buffer,
+                chunk.byteOffset,
+                chunk.byteLength,
               );
-            } else if (typeof chunk === 'object' && chunk !== null) {
-              const chunkRecord = chunk as {
-                buffer?: unknown;
-                byteOffset?: unknown;
-                byteLength?: unknown;
-                type?: unknown;
-                data?: unknown;
-              };
-              if (
-                chunkRecord.buffer instanceof ArrayBuffer &&
-                typeof chunkRecord.byteLength === 'number'
-              ) {
-                chunkBytes = new Uint8Array(
-                  chunkRecord.buffer,
-                  typeof chunkRecord.byteOffset === 'number'
-                    ? chunkRecord.byteOffset
-                    : 0,
-                  chunkRecord.byteLength,
-                );
-              } else if (
-                chunkRecord.type === 'Buffer' &&
-                Array.isArray(chunkRecord.data)
-              ) {
-                chunkBytes = Uint8Array.from(chunkRecord.data);
-              }
+            } else if (isBufferJson(chunk)) {
+              chunkBytes = Uint8Array.from(chunk.data);
             }
             if (!chunkBytes || chunkBytes.length === 0) {
               systemChunkDecodeDropCountRef.current += 1;
@@ -2306,7 +2285,7 @@ export const AudioManager = ({
       let wavPath: string | null = null;
       let conversionError: unknown = null;
       try {
-        wavPath = await window.ipcRenderer.invoke<string | null>(
+        wavPath = await window.ipcRenderer.invoke(
           'AUDIO_SAVE_AND_CONVERT',
           buffer,
           format,
@@ -2327,7 +2306,7 @@ export const AudioManager = ({
             micWebmInitSegmentRef.current,
             buffer,
           );
-          wavPath = await window.ipcRenderer.invoke<string | null>(
+          wavPath = await window.ipcRenderer.invoke(
             'AUDIO_SAVE_AND_CONVERT',
             repairedWebm,
             format,
@@ -2355,24 +2334,21 @@ export const AudioManager = ({
             { type: micMimeTypeRef.current || 'audio/webm;codecs=opus' },
           );
           const cumulativeBuffer = await cumulativeBlob.arrayBuffer();
-          const cumulativeWavPath = await window.ipcRenderer.invoke<
-            string | null
-          >(
+          const cumulativeWavPath = await window.ipcRenderer.invoke(
             'AUDIO_SAVE_AND_CONVERT',
             cumulativeBuffer,
             getMicFormat(),
             'me-cumulative',
           );
           if (cumulativeWavPath) {
-            const cumulativeResult =
-              await window.ipcRenderer.invoke<WhisperTranscriptionResult>(
-                'WHISPER_TRANSCRIBE',
-                cumulativeWavPath,
-                {
-                  diarize: false,
-                  language: 'en',
-                },
-              );
+            const cumulativeResult = await window.ipcRenderer.invoke(
+              'WHISPER_TRANSCRIBE',
+              cumulativeWavPath,
+              {
+                diarize: false,
+                language: 'en',
+              },
+            );
             const cumulativeSegments = cumulativeResult?.segments
               ? cumulativeResult.segments
                   .filter((s: { text: string }) => isValidSegment(s.text))
@@ -2431,15 +2407,14 @@ export const AudioManager = ({
         return { segments: [], rms, conversionFailed: true };
       }
 
-      const result =
-        await window.ipcRenderer.invoke<WhisperTranscriptionResult>(
-          'WHISPER_TRANSCRIBE',
-          wavPath,
-          {
-            diarize: false,
-            language: 'en',
-          },
-        );
+      const result = await window.ipcRenderer.invoke(
+        'WHISPER_TRANSCRIBE',
+        wavPath,
+        {
+          diarize: false,
+          language: 'en',
+        },
+      );
       // ... (rest of mapping logic same as before)
       const segments = result?.segments
         ? result.segments
@@ -2937,7 +2912,7 @@ export const AudioManager = ({
       if (primaryBlob && primaryBlob.size > 0) {
         try {
           const buffer = await primaryBlob.arrayBuffer();
-          const maybePath = await window.ipcRenderer.invoke<string | null>(
+          const maybePath = await window.ipcRenderer.invoke(
             'AUDIO_SAVE_AND_CONVERT',
             buffer,
             getMicFormat(),
@@ -2986,15 +2961,14 @@ export const AudioManager = ({
 
       if (primaryAudioPath) {
         try {
-          const fullMicResult =
-            await window.ipcRenderer.invoke<WhisperTranscriptionResult>(
-              'WHISPER_TRANSCRIBE',
-              primaryAudioPath,
-              {
-                diarize: false,
-                language: 'en',
-              },
-            );
+          const fullMicResult = await window.ipcRenderer.invoke(
+            'WHISPER_TRANSCRIBE',
+            primaryAudioPath,
+            {
+              diarize: false,
+              language: 'en',
+            },
+          );
           const recoveredMeSegments: TranscriptionSegment[] =
             fullMicResult?.segments
               ? fullMicResult.segments
@@ -3454,16 +3428,15 @@ export const AudioManager = ({
             const fullTranscriptText = labeledTranscription
               .map((s) => `${s.speaker}: ${s.text}`)
               .join('\n');
-            const entityResult =
-              await window.ipcRenderer.invoke<EntityExtractionResult>(
-                'EXTRACT_AND_PROCESS_ENTITIES',
-                {
-                  transcript: fullTranscriptText,
-                  meetingId: String(meetingData.id),
-                  summary: enhancedNotes,
-                  valueSignals,
-                },
-              );
+            const entityResult = await window.ipcRenderer.invoke(
+              'EXTRACT_AND_PROCESS_ENTITIES',
+              {
+                transcript: fullTranscriptText,
+                meetingId: String(meetingData.id),
+                summary: enhancedNotes,
+                valueSignals,
+              },
+            );
             console.log(
               `[Pluto] Entity extraction complete: ${entityResult.created} created, ${entityResult.linked} linked`,
             );

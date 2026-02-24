@@ -27,6 +27,7 @@ interface ZenModeProps {
 }
 
 type EntitySuggestion = {
+  id?: string;
   type: string;
   name: string;
 };
@@ -202,10 +203,10 @@ export const ZenMode = ({
                   {/* Autocomplete Dropdown */}
                   {showSuggestions && (
                     <div className="absolute top-full left-0 mt-2 w-48 bg-white/90 backdrop-blur-md border border-pro-border rounded-xl shadow-premium z-50 overflow-hidden animate-in slide-in-from-top-1 fade-in duration-200">
-                      {suggestions.map((person, index) => (
+                      {suggestions.map((person) => (
                         <button
                           type="button"
-                          key={`${person.name}-${index}`}
+                          key={person.id ?? person.name}
                           onClick={() => {
                             setMeetingParticipants((prev: string[]) => [
                               ...prev,
