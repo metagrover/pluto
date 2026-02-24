@@ -900,7 +900,10 @@ export const getEntityMeetings = (
     WHERE me.entity_id = ?
     ORDER BY m.started_at DESC
   `)
-    .all(entityId);
+    .all(entityId) as (PersistedMeeting & {
+    mention_count: number;
+    context: string | null;
+  })[];
 };
 
 /**

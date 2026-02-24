@@ -22,10 +22,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   useEffect(() => {
     const load = async () => {
       const [setupComplete, savedStep, savedHf, savedLlm] = await Promise.all([
-        window.ipcRenderer.invoke('GET_SETTING', 'setup_complete'),
-        window.ipcRenderer.invoke('GET_SETTING', 'setup_step'),
-        window.ipcRenderer.invoke('GET_SETTING', 'hf_token'),
-        window.ipcRenderer.invoke('GET_SETTING', 'llm_provider'),
+        window.ipcRenderer.invoke<string | null>(
+          'GET_SETTING',
+          'setup_complete',
+        ),
+        window.ipcRenderer.invoke<string | null>('GET_SETTING', 'setup_step'),
+        window.ipcRenderer.invoke<string | null>('GET_SETTING', 'hf_token'),
+        window.ipcRenderer.invoke<string | null>('GET_SETTING', 'llm_provider'),
       ]);
       if (setupComplete === 'true') {
         onComplete();
@@ -35,8 +38,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         ? Math.min(4, Math.max(1, Number(savedStep)))
         : 1;
       setStep(stepNum);
-      setHfToken(savedHf ?? '');
-      setLlmProvider(savedLlm ?? 'ollama');
+      setHfToken(typeof savedHf === 'string' ? savedHf : '');
+      setLlmProvider(typeof savedLlm === 'string' ? savedLlm : 'ollama');
       setHydrated(true);
     };
     load();
@@ -50,7 +53,11 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   }, [step]);
 
   const checkPython = async () => {
-    const status = await window.ipcRenderer.invoke('WHISPERX_CHECK_PYTHON');
+    const status = await window.ipcRenderer.invoke<{
+      available: boolean;
+      version?: string;
+      error?: string;
+    }>('WHISPERX_CHECK_PYTHON');
     setPythonStatus(status);
   };
 

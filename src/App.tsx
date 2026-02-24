@@ -189,35 +189,58 @@ function App() {
   };
 
   useEffect(() => {
-    window.ipcRenderer.invoke('GET_SETTING', 'setup_complete').then((val) => {
-      setSetupNeeded(val !== 'true');
-    });
+    window.ipcRenderer
+      .invoke<string | null>('GET_SETTING', 'setup_complete')
+      .then((val) => {
+        setSetupNeeded(val !== 'true');
+      });
 
     fetchMeetings();
 
-    window.ipcRenderer.invoke('GET_SETTING', 'llm_provider').then((val) => {
-      if (val) setLlmProvider(val as 'ollama' | 'gemini' | 'openai' | 'claude');
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'hf_token').then((val) => {
-      if (val) setHfToken(val);
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'gemini_api_key').then((val) => {
-      if (val) setGeminiApiKey(val);
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'openai_api_key').then((val) => {
-      if (val) setOpenaiApiKey(val);
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'claude_api_key').then((val) => {
-      if (val) setClaudeApiKey(val);
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'ollama_model').then((val) => {
-      if (val) setOllamaModel(val);
-    });
+    window.ipcRenderer
+      .invoke<string | null>('GET_SETTING', 'llm_provider')
+      .then((val) => {
+        if (
+          val === 'ollama' ||
+          val === 'gemini' ||
+          val === 'openai' ||
+          val === 'claude'
+        ) {
+          setLlmProvider(val);
+        }
+      });
+    window.ipcRenderer
+      .invoke<string | null>('GET_SETTING', 'hf_token')
+      .then((val) => {
+        if (typeof val === 'string' && val.length > 0) setHfToken(val);
+      });
+    window.ipcRenderer
+      .invoke<string | null>('GET_SETTING', 'gemini_api_key')
+      .then((val) => {
+        if (typeof val === 'string' && val.length > 0) setGeminiApiKey(val);
+      });
+    window.ipcRenderer
+      .invoke<string | null>('GET_SETTING', 'openai_api_key')
+      .then((val) => {
+        if (typeof val === 'string' && val.length > 0) setOpenaiApiKey(val);
+      });
+    window.ipcRenderer
+      .invoke<string | null>('GET_SETTING', 'claude_api_key')
+      .then((val) => {
+        if (typeof val === 'string' && val.length > 0) setClaudeApiKey(val);
+      });
+    window.ipcRenderer
+      .invoke<string | null>('GET_SETTING', 'ollama_model')
+      .then((val) => {
+        if (typeof val === 'string' && val.length > 0) setOllamaModel(val);
+      });
 
     const checkServer = async () => {
       try {
-        const health = await window.ipcRenderer.invoke('WHISPERX_HEALTH');
-        if (health.status === 'ok') {
+        const health = await window.ipcRenderer.invoke<{ status?: string }>(
+          'WHISPERX_HEALTH',
+        );
+        if (health?.status === 'ok') {
           setIsServerReady(true);
         } else {
           setTimeout(checkServer, 1000);
@@ -335,10 +358,13 @@ function App() {
     allowSilent = true,
   ) => {
     try {
-      const ok = await window.ipcRenderer.invoke('SYSTEM_AUDIO_PROBE', {
-        durationMs: 1500,
-        allowSilent,
-      });
+      const ok = await window.ipcRenderer.invoke<boolean>(
+        'SYSTEM_AUDIO_PROBE',
+        {
+          durationMs: 1500,
+          allowSilent,
+        },
+      );
       const systemAudioStatus = ok ? 'granted' : 'needs-audio';
       setPermissionStatus((prev) => ({
         ...prev,
@@ -359,12 +385,15 @@ function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: This boot probe should run once and intentionally captures initial handlers.
   useEffect(() => {
     const probeOnBoot = async () => {
-      const alreadyDone = await window.ipcRenderer.invoke('BOOT_PROBE_STATUS');
+      const alreadyDone =
+        await window.ipcRenderer.invoke<boolean>('BOOT_PROBE_STATUS');
       if (alreadyDone) return;
       await window.ipcRenderer.invoke('BOOT_PROBE_MARK');
-      const micStatus = await window.ipcRenderer.invoke(
+      const micStatusRaw = await window.ipcRenderer.invoke<string>(
         'CHECK_MICROPHONE_PERMISSION',
       );
+      const micStatus =
+        typeof micStatusRaw === 'string' ? micStatusRaw : 'unknown';
       const { systemAudioStatus } = await checkSystemAudioPermission(micStatus);
       if (micStatus !== 'granted' || systemAudioStatus !== 'granted') {
         window.dispatchEvent(

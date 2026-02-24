@@ -44,9 +44,12 @@ export const useActiveCallMonitor = ({
     }
 
     if (visible) {
-      const shown = await window.ipcRenderer.invoke('SHOW_ACTIVE_CALL_ALERT', {
-        appName: appName || 'Call',
-      });
+      const shown = await window.ipcRenderer.invoke<boolean>(
+        'SHOW_ACTIVE_CALL_ALERT',
+        {
+          appName: appName || 'Call',
+        },
+      );
       if (!shown) {
         return false;
       }
@@ -80,21 +83,26 @@ export const useActiveCallMonitor = ({
       }
 
       try {
-        const result = await window.ipcRenderer.invoke('DETECT_ACTIVE_CALL');
+        const resultRaw =
+          await window.ipcRenderer.invoke<unknown>('DETECT_ACTIVE_CALL');
+        const result =
+          resultRaw && typeof resultRaw === 'object'
+            ? (resultRaw as Record<string, unknown>)
+            : {};
         if (cancelled) return;
 
         const appName =
-          typeof result?.appName === 'string' ? result.appName : null;
-        const pidCount = Number.isInteger(result?.pidCount)
+          typeof result.appName === 'string' ? result.appName : null;
+        const pidCount = Number.isInteger(result.pidCount)
           ? Number(result.pidCount)
           : null;
         const confidence =
-          result?.confidence === 'high' || result?.confidence === 'medium'
+          result.confidence === 'high' || result.confidence === 'medium'
             ? result.confidence
             : 'low';
         // DETECT_ACTIVE_CALL already applies app-specific fallback rules.
         // Treat active=true as eligible here and handle transition gating below.
-        const isActive = Boolean(result?.active) && Boolean(appName);
+        const isActive = Boolean(result.active) && Boolean(appName);
 
         // Establish startup baseline: do not alert for calls that were already active
         // before monitoring began.

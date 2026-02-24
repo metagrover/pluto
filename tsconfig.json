@@ -21,5 +21,13 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src", "electron"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-electron",
+    "python",
+    "release",
+    "resources/bin"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

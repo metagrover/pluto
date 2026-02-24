@@ -492,26 +492,28 @@ export const MeetingView = ({
                         }
                       }
 
-                      return mergedSegments.map((s: TranscriptSegment) => {
-                        const segmentKey = `${String(s.speaker ?? 'unknown')}-${s.start}-${s.end}-${s.text}`;
-                        return (
-                          <div
-                            key={segmentKey}
-                            className="group flex gap-12 transition-all"
-                          >
-                            <div className="w-20 shrink-0 pt-1 text-right">
-                              <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
-                                {s.speaker || 'Unknown'}
-                              </span>
+                      return mergedSegments.map(
+                        (s: TranscriptSegment, index: number) => {
+                          const segmentKey = `${String(s.speaker ?? 'unknown')}-${index}-${s.text}`;
+                          return (
+                            <div
+                              key={segmentKey}
+                              className="group flex gap-12 transition-all"
+                            >
+                              <div className="w-20 shrink-0 pt-1 text-right">
+                                <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
+                                  {s.speaker || 'Unknown'}
+                                </span>
+                              </div>
+                              <div className="flex-1">
+                                <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
+                                  {highlightEntities(s.text)}
+                                </p>
+                              </div>
                             </div>
-                            <div className="flex-1">
-                              <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
-                                {highlightEntities(s.text)}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      });
+                          );
+                        },
+                      );
                     })()}
                   </div>
                 </div>

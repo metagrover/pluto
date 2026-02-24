@@ -20,6 +20,7 @@
     "enabled": true
   },
   "files": {
+    "include": ["src/**", "electron/**"],
     "ignore": [
       "**/node_modules/**",
       "**/dist/**",
