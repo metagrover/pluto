@@ -1,6 +1,8 @@
 export interface TranscriptSegment {
   text: string;
   speaker?: string | number;
+  start?: number;
+  end?: number;
 }
 
 export interface InternalSignalTag {
