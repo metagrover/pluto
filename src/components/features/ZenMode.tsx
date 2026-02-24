@@ -1,7 +1,7 @@
-import { Plus, Users, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { Logo } from '../Brand/Logo';
-import { ZenVisualizer } from '../ZenVisualizer';
+import { Plus, Users, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Logo } from "../Brand/Logo";
+import { ZenVisualizer } from "../ZenVisualizer";
 
 interface ZenModeProps {
   isProcessing: boolean;
@@ -23,7 +23,7 @@ interface ZenModeProps {
   plutoResponse: string;
   setPlutoResponse: (val: string) => void;
   analyser: AnalyserNode | null;
-  speakingSource: 'Me' | 'Them' | null;
+  speakingSource: "Me" | "Them" | null;
 }
 
 type EntitySuggestion = {
@@ -68,19 +68,19 @@ export const ZenMode = ({
         // IPC call to search entities
         const results =
           (await window.ipcRenderer.invoke<EntitySuggestion[]>(
-            'SEARCH_ENTITIES',
+            "SEARCH_ENTITIES",
             participantInput,
           )) || [];
 
         // Filter for people only and limit to 5
-        const people = results.filter((e) => e.type === 'person').slice(0, 5);
+        const people = results.filter((e) => e.type === "person").slice(0, 5);
 
         if (requestId !== suggestionsRequestId.current) return;
 
         setSuggestions(people);
         setShowSuggestions(people.length > 0);
       } catch (e) {
-        console.error('Failed to fetch suggestions', e);
+        console.error("Failed to fetch suggestions", e);
       }
     };
 
@@ -102,12 +102,12 @@ export const ZenMode = ({
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-pro-border/40 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
             <span
-              className={`w-1.5 h-1.5 rounded-full ${speakingSource === 'Me' ? 'bg-pro-accent' : 'bg-stone-300'}`}
+              className={`w-1.5 h-1.5 rounded-full ${speakingSource === "Me" ? "bg-pro-accent" : "bg-stone-300"}`}
             />
             <span
-              className={`w-1.5 h-1.5 rounded-full ${speakingSource === 'Them' ? 'bg-pro-accent' : 'bg-stone-300'}`}
+              className={`w-1.5 h-1.5 rounded-full ${speakingSource === "Them" ? "bg-pro-accent" : "bg-stone-300"}`}
             />
-            <span>Speaking: {speakingSource ?? '—'}</span>
+            <span>Speaking: {speakingSource ?? "—"}</span>
           </div>
         </div>
 
@@ -118,14 +118,14 @@ export const ZenMode = ({
           className={`no-drag px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 flex items-center gap-2
                         ${
                           isProcessing
-                            ? 'bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200'
-                            : 'bg-stone-900 text-white hover:bg-stone-800'
+                            ? "bg-stone-100 text-stone-400 cursor-not-allowed border border-stone-200"
+                            : "bg-stone-900 text-white hover:bg-stone-800"
                         }`}
         >
           {isProcessing && (
             <div className="w-3 h-3 rounded-full border-2 border-stone-400 border-t-transparent animate-spin" />
           )}
-          {isProcessing ? 'Processing...' : 'End Meeting'}
+          {isProcessing ? "Processing..." : "End Meeting"}
         </button>
       </header>
 
@@ -177,12 +177,12 @@ export const ZenMode = ({
                     value={participantInput}
                     onChange={(e) => setParticipantInput(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && participantInput.trim()) {
+                      if (e.key === "Enter" && participantInput.trim()) {
                         setMeetingParticipants((prev: string[]) => [
                           ...prev,
                           participantInput.trim(),
                         ]);
-                        setParticipantInput('');
+                        setParticipantInput("");
                         setShowSuggestions(false);
                       }
                     }}
@@ -203,7 +203,7 @@ export const ZenMode = ({
                   {/* Autocomplete Dropdown */}
                   {showSuggestions && (
                     <div className="absolute top-full left-0 mt-2 w-48 bg-white/90 backdrop-blur-md border border-pro-border rounded-xl shadow-premium z-50 overflow-hidden animate-in slide-in-from-top-1 fade-in duration-200">
-                      {suggestions.map((person) => (
+                      {suggestions.map((person, index) => (
                         <button
                           type="button"
                           key={person.id ?? person.name}
@@ -212,7 +212,7 @@ export const ZenMode = ({
                               ...prev,
                               person.name,
                             ]);
-                            setParticipantInput('');
+                            setParticipantInput("");
                             setShowSuggestions(false);
                           }}
                           className="w-full text-left px-4 py-2 text-sm text-pro-text-main hover:bg-pro-accent/5 hover:text-pro-accent transition-colors flex items-center gap-2"
@@ -248,24 +248,24 @@ export const ZenMode = ({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={async (e) => {
-                    if (e.key === 'Enter' && query) {
-                      setPlutoResponse('Checking past context...');
+                    if (e.key === "Enter" && query) {
+                      setPlutoResponse("Checking past context...");
                       try {
                         const res = await window.ipcRenderer.invoke<string>(
-                          'ASK_PLUTO',
+                          "ASK_PLUTO",
                           { query },
                         );
                         setPlutoResponse(res);
                       } catch (err) {
                         setPlutoResponse(
-                          'Unable to reach your second brain right now.',
+                          "Unable to reach your second brain right now.",
                         );
                       }
                     }
-                    if (e.key === 'Escape') {
+                    if (e.key === "Escape") {
                       setInlineAskPluto(false);
-                      setQuery('');
-                      setPlutoResponse('');
+                      setQuery("");
+                      setPlutoResponse("");
                     }
                   }}
                   placeholder="Ask about previous meetings, decisions, or context..."
@@ -275,8 +275,8 @@ export const ZenMode = ({
                   type="button"
                   onClick={() => {
                     setInlineAskPluto(false);
-                    setQuery('');
-                    setPlutoResponse('');
+                    setQuery("");
+                    setPlutoResponse("");
                   }}
                   className="text-[10px] font-bold text-pro-text-muted/40 uppercase tracking-widest px-2 py-1 rounded bg-white border border-pro-border hover:text-pro-text-main transition-colors"
                 >

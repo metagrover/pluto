@@ -1,10 +1,10 @@
-import { Loader2, Mic } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Loader2, Mic } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import {
   computeRms,
   createWavBlob,
   decodeFloat32PcmChunk,
-} from '../utils/audio';
+} from "../utils/audio";
 import {
   applyTurnTakingHeuristics,
   assignSpeakersToCanonicalSegments,
@@ -15,14 +15,14 @@ import {
   shouldApplyFullSessionMeRecovery,
   shouldDropBySpeakerActivity,
   stripLikelyMeBleedSegments,
-} from '../utils/speakerAttribution';
+} from "../utils/speakerAttribution";
 
 interface AudioManagerProps {
   onTranscript: (text: string) => void;
   onSessionComplete: (meetingId?: string | number) => void;
   onRecordingChange?: (isRecording: boolean) => void;
   onProcessingChange?: (isProcessing: boolean) => void;
-  onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
+  onSpeakingChange?: (speaker: "Me" | "Them" | null) => void;
   userNotes?: string;
   userTitle?: string;
   participants?: string[];
@@ -43,21 +43,21 @@ interface TranscriptionSegment {
   speaker: string;
 }
 
-type MicChunkFormat = 'webm' | 'ogg' | 'wav';
+type MicChunkFormat = "webm" | "ogg" | "wav";
 type NativeAudioChunk =
   | Uint8Array
   | ArrayBuffer
   | ArrayBufferView
-  | { type: 'Buffer'; data: number[] }
+  | { type: "Buffer"; data: number[] }
   | null
   | undefined;
 
 const isBufferJson = (
   chunk: unknown,
-): chunk is { type: 'Buffer'; data: number[] } => {
-  if (!chunk || typeof chunk !== 'object') return false;
+): chunk is { type: "Buffer"; data: number[] } => {
+  if (!chunk || typeof chunk !== "object") return false;
   const record = chunk as { type?: unknown; data?: unknown };
-  return record.type === 'Buffer' && Array.isArray(record.data);
+  return record.type === "Buffer" && Array.isArray(record.data);
 };
 
 interface PendingMicChunk {
@@ -70,7 +70,7 @@ interface PendingMicChunk {
 interface SpeakerActivityWindow {
   startTime: number;
   endTime: number;
-  speaker: 'Me' | 'Them';
+  speaker: "Me" | "Them";
 }
 
 interface InternalSignalTag {
@@ -108,6 +108,21 @@ interface AnalysisArtifacts {
   signals: InternalSignalDocument;
 }
 
+interface WhisperRawSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+interface WhisperTranscriptionResult {
+  segments?: WhisperRawSegment[];
+}
+
+interface EntityExtractionResult {
+  created: number;
+  linked: number;
+}
+
 const emptyValueSignals = (): InternalSignalDocument => ({
   analysis_schema_version: 2,
   continuity: [],
@@ -126,18 +141,18 @@ const emptyAnalysisDocument = (): AnalysisDocument => ({
     format_pass: false,
     retry_count: 1,
     fallback_used: true,
-    issues: ['Missing analysis document'],
+    issues: ["Missing analysis document"],
   },
 });
 
 const normalizeSignalTag = (value: unknown): InternalSignalTag | null => {
-  if (!value || typeof value !== 'object') return null;
+  if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   const tag =
-    typeof record.tag === 'string' ? record.tag.trim().toLowerCase() : '';
+    typeof record.tag === "string" ? record.tag.trim().toLowerCase() : "";
   if (!tag) return null;
   const confidence =
-    typeof record.confidence === 'number' ? record.confidence : 0.5;
+    typeof record.confidence === "number" ? record.confidence : 0.5;
   return {
     tag,
     confidence: Math.max(0, Math.min(1, confidence)),
@@ -147,14 +162,14 @@ const normalizeSignalTag = (value: unknown): InternalSignalTag | null => {
 const normalizeSignalList = (value: unknown): string[] => {
   if (!Array.isArray(value)) return [];
   return value
-    .filter((item): item is string => typeof item === 'string')
+    .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
     .slice(0, 3);
 };
 
 const normalizeValueSignals = (value: unknown): InternalSignalDocument => {
-  if (!value || typeof value !== 'object') {
+  if (!value || typeof value !== "object") {
     return emptyValueSignals();
   }
   const record = value as Record<string, unknown>;
@@ -180,19 +195,19 @@ const normalizeValueSignals = (value: unknown): InternalSignalDocument => {
 };
 
 const normalizeAnalysisDocument = (value: unknown): AnalysisDocument => {
-  if (!value || typeof value !== 'object') {
+  if (!value || typeof value !== "object") {
     return emptyAnalysisDocument();
   }
   const record = value as Record<string, unknown>;
   const normalizeList = (raw: unknown): string[] => {
     if (!Array.isArray(raw)) return [];
     return raw
-      .filter((item): item is string => typeof item === 'string')
+      .filter((item): item is string => typeof item === "string")
       .map((item) => item.trim())
       .filter(Boolean);
   };
   const quality =
-    record.quality && typeof record.quality === 'object'
+    record.quality && typeof record.quality === "object"
       ? (record.quality as Record<string, unknown>)
       : {};
   return {
@@ -204,11 +219,11 @@ const normalizeAnalysisDocument = (value: unknown): AnalysisDocument => {
     quality: {
       format_pass: Boolean(quality.format_pass),
       retry_count:
-        typeof quality.retry_count === 'number' ? quality.retry_count : 0,
+        typeof quality.retry_count === "number" ? quality.retry_count : 0,
       fallback_used: Boolean(quality.fallback_used),
       issues: Array.isArray(quality.issues)
         ? quality.issues.filter(
-            (item): item is string => typeof item === 'string',
+            (item): item is string => typeof item === "string",
           )
         : [],
     },
@@ -218,34 +233,34 @@ const normalizeAnalysisDocument = (value: unknown): AnalysisDocument => {
 const analysisDocumentToMarkdown = (doc: AnalysisDocument): string => {
   const summaryBody =
     doc.summary.length > 0
-      ? doc.summary.join('\n\n')
-      : 'No summary was generated for this meeting.';
+      ? doc.summary.join("\n\n")
+      : "No summary was generated for this meeting.";
   const keyPointsBody =
     doc.key_points.length > 0
-      ? doc.key_points.map((item) => `- ${item}`).join('\n')
-      : '- No key points were captured.';
+      ? doc.key_points.map((item) => `- ${item}`).join("\n")
+      : "- No key points were captured.";
   const actionItemsBody =
     doc.action_items.length > 0
-      ? doc.action_items.map((item) => `- [ ] ${item}`).join('\n')
-      : '- [ ] No concrete action items were explicitly committed.';
+      ? doc.action_items.map((item) => `- [ ] ${item}`).join("\n")
+      : "- [ ] No concrete action items were explicitly committed.";
   const decisionsBody =
     doc.decisions.length > 0
-      ? doc.decisions.map((item) => `- ${item}`).join('\n')
-      : '- No explicit decisions were made.';
+      ? doc.decisions.map((item) => `- ${item}`).join("\n")
+      : "- No explicit decisions were made.";
 
   return [
-    '## Summary',
+    "## Summary",
     summaryBody,
-    '',
-    '## Key Points',
+    "",
+    "## Key Points",
     keyPointsBody,
-    '',
-    '## Action Items',
+    "",
+    "## Action Items",
     actionItemsBody,
-    '',
-    '## Decisions',
+    "",
+    "## Decisions",
     decisionsBody,
-  ].join('\n');
+  ].join("\n");
 };
 
 export const AudioManager = ({
@@ -253,14 +268,14 @@ export const AudioManager = ({
   onSessionComplete,
   onRecordingChange,
   onProcessingChange,
-  userNotes = '',
-  userTitle = '',
+  userNotes = "",
+  userTitle = "",
   participants = [],
   onStopSessionRef,
   onStartSessionRef,
   onAnalyserReadyRef,
   onSpeakingChange,
-  systemAudioStatus = 'unknown',
+  systemAudioStatus = "unknown",
 }: AudioManagerProps) => {
   const [isRecording, setIsRecording] = useState(false);
 
@@ -289,21 +304,17 @@ export const AudioManager = ({
   const micPcmSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micPcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const micPcmSinkRef = useRef<GainNode | null>(null);
-  const nativeAudioListenerRef = useRef<
-    | ((
-        event: unknown,
-        chunk: Uint8Array | ArrayBuffer | null | undefined,
-      ) => void)
-    | null
-  >(null);
+  const nativeAudioListenerRef = useRef<((...args: unknown[]) => void) | null>(
+    null,
+  );
   const systemAudioChunkSeenRef = useRef(false);
 
   const speakingLoopRef = useRef<number | null>(null);
-  const lastSpeakerRef = useRef<'Me' | 'Them' | null>(null);
+  const lastSpeakerRef = useRef<"Me" | "Them" | null>(null);
   const lastSpeakerTsRef = useRef<number>(0);
   const speakerTimelineRef = useRef<SpeakerActivityWindow[]>([]);
   const activeSpeakerWindowRef = useRef<{
-    speaker: 'Me' | 'Them';
+    speaker: "Me" | "Them";
     startTime: number;
   } | null>(null);
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -347,15 +358,15 @@ export const AudioManager = ({
       startTimeRef.current = Date.now();
       setIsRecording(true);
 
-      console.log('[Pluto] Starting session (Robust Mic First)...');
+      console.log("[Pluto] Starting session (Robust Mic First)...");
 
       // 0. Preflight Permissions (Mic only)
-      const micStatus = await window.ipcRenderer.invoke(
-        'CHECK_MICROPHONE_PERMISSION',
+      const micStatus = await window.ipcRenderer.invoke<string>(
+        "CHECK_MICROPHONE_PERMISSION",
       );
-      if (micStatus !== 'granted') {
+      if (micStatus !== "granted") {
         window.dispatchEvent(
-          new CustomEvent('SHOW_PERMISSION_OVERLAY', {
+          new CustomEvent("SHOW_PERMISSION_OVERLAY", {
             detail: { micStatus },
           }),
         );
@@ -364,10 +375,10 @@ export const AudioManager = ({
       }
 
       // 1. System Audio Verification (Block start if unavailable)
-      if (systemAudioStatus !== 'granted') {
+      if (systemAudioStatus !== "granted") {
         window.dispatchEvent(
-          new CustomEvent('SHOW_PERMISSION_OVERLAY', {
-            detail: { micStatus: 'granted', systemAudioStatus: 'needs-audio' },
+          new CustomEvent("SHOW_PERMISSION_OVERLAY", {
+            detail: { micStatus: "granted", systemAudioStatus: "needs-audio" },
           }),
         );
         setIsRecording(false);
@@ -394,8 +405,8 @@ export const AudioManager = ({
           });
         }
       } catch (micErr) {
-        console.warn('[Pluto] Failed to capture microphone:', micErr);
-        alert('Failed to access microphone. Please check permissions.');
+        console.warn("[Pluto] Failed to capture microphone:", micErr);
+        alert("Failed to access microphone. Please check permissions.");
         setIsRecording(false);
         return;
       }
@@ -405,7 +416,7 @@ export const AudioManager = ({
         const micTrack = micStream.getAudioTracks()[0];
         if (micTrack) {
           console.log(
-            '[Pluto] Mic track:',
+            "[Pluto] Mic track:",
             `label="${micTrack.label}", enabled=${micTrack.enabled}, muted=${micTrack.muted}`,
             micTrack.getSettings(),
           );
@@ -419,7 +430,7 @@ export const AudioManager = ({
           .webkitAudioContext
       )();
       audioContextRef.current = audioContext;
-      if (audioContext.state === 'suspended') await audioContext.resume();
+      if (audioContext.state === "suspended") await audioContext.resume();
 
       const visAnalyser = audioContext.createAnalyser();
       visAnalyser.fftSize = 256;
@@ -450,7 +461,7 @@ export const AudioManager = ({
           );
         } catch (pcmErr) {
           console.warn(
-            '[Pluto] Failed to initialize mic PCM chunk capture, falling back to MediaRecorder chunks:',
+            "[Pluto] Failed to initialize mic PCM chunk capture, falling back to MediaRecorder chunks:",
             pcmErr,
           );
         }
@@ -460,9 +471,9 @@ export const AudioManager = ({
       startSpeakingMonitor(audioContext, micStream);
 
       // 4. System Audio: Native AudioCap
-      console.log('[Pluto] Starting Native AudioCap...');
+      console.log("[Pluto] Starting Native AudioCap...");
       try {
-        await window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+        await window.ipcRenderer.invoke("NATIVE_AUDIO_START");
         hasSystemRecorderRef.current = true;
         systemAudioChunkSeenRef.current = false;
 
@@ -480,10 +491,11 @@ export const AudioManager = ({
             } else if (chunk instanceof ArrayBuffer) {
               chunkBytes = new Uint8Array(chunk);
             } else if (ArrayBuffer.isView(chunk)) {
+              const view = chunk as ArrayBufferView;
               chunkBytes = new Uint8Array(
-                chunk.buffer,
-                chunk.byteOffset,
-                chunk.byteLength,
+                view.buffer,
+                view.byteOffset,
+                view.byteLength,
               );
             } else if (isBufferJson(chunk)) {
               chunkBytes = Uint8Array.from(chunk.data);
@@ -513,10 +525,10 @@ export const AudioManager = ({
           }
         };
         nativeAudioListenerRef.current = handler;
-        window.ipcRenderer.on('NATIVE_AUDIO_CHUNK', handler);
-        console.log('[Pluto] Native AudioCap started & listening.');
+        window.ipcRenderer.on("NATIVE_AUDIO_CHUNK", handler);
+        console.log("[Pluto] Native AudioCap started & listening.");
       } catch (sysErr) {
-        console.warn('[Pluto] System audio failed:', sysErr);
+        console.warn("[Pluto] System audio failed:", sysErr);
       }
 
       // 5. Start Recorders Synced
@@ -546,7 +558,7 @@ export const AudioManager = ({
         micRecorderRef.current = micRecorder;
         micMimeTypeRef.current = micRecorder.mimeType || null;
         console.log(
-          `[Pluto] Mic recorder MIME: ${micRecorder.mimeType || 'unknown'}, format: ${getMicFormat()}`,
+          `[Pluto] Mic recorder MIME: ${micRecorder.mimeType || "unknown"}, format: ${getMicFormat()}`,
         );
 
         micRecorder.ondataavailable = (event) => {
@@ -584,7 +596,7 @@ export const AudioManager = ({
                 1,
               );
               micPcmChunksRef.current = [];
-              micChunkFormat = 'wav';
+              micChunkFormat = "wav";
             }
 
             const fallbackMicBlob = event.data;
@@ -595,7 +607,7 @@ export const AudioManager = ({
               );
             }
 
-            if (getMicFormat() === 'webm' && !micWebmInitSegmentRef.current) {
+            if (getMicFormat() === "webm" && !micWebmInitSegmentRef.current) {
               void event.data
                 .arrayBuffer()
                 .then((chunkBuffer) => {
@@ -609,7 +621,7 @@ export const AudioManager = ({
                 })
                 .catch((err) => {
                   console.warn(
-                    '[Pluto] Failed to inspect mic chunk for WebM init segment:',
+                    "[Pluto] Failed to inspect mic chunk for WebM init segment:",
                     err,
                   );
                 });
@@ -660,7 +672,7 @@ export const AudioManager = ({
 
             // Manually handle chunks
             handleChunkBlob(
-              'mic',
+              "mic",
               index,
               finalMicBlob,
               micChunkFormat,
@@ -669,10 +681,10 @@ export const AudioManager = ({
             );
             if (systemBlob) {
               handleChunkBlob(
-                'system',
+                "system",
                 index,
                 systemBlob,
-                'wav',
+                "wav",
                 chunkStartSec,
                 chunkEndSec,
               );
@@ -695,10 +707,10 @@ export const AudioManager = ({
                 1,
               );
               handleChunkBlob(
-                'system',
+                "system",
                 index,
                 systemBlob,
-                'wav',
+                "wav",
                 chunkStartSec,
                 chunkEndSec,
               );
@@ -707,12 +719,12 @@ export const AudioManager = ({
         };
 
         micRecorder.start(CHUNK_SECONDS * 1000);
-        console.log('[Pluto] Microphone recording started.');
+        console.log("[Pluto] Microphone recording started.");
       }
 
       // 6. No restart loop needed
     } catch (e) {
-      console.error('[Pluto] Failed to start session', e);
+      console.error("[Pluto] Failed to start session", e);
       setIsRecording(false);
     }
   };
@@ -743,7 +755,7 @@ export const AudioManager = ({
   };
 
   const recordSpeakerActivity = (
-    nextSpeaker: 'Me' | 'Them' | null,
+    nextSpeaker: "Me" | "Them" | null,
     nowTime: number,
   ) => {
     const active = activeSpeakerWindowRef.current;
@@ -845,11 +857,11 @@ export const AudioManager = ({
   // --- Helpers ---
 
   const extractTitle = (segments: TranscriptionSegment[]): string => {
-    if (segments.length === 0) return 'New Meeting';
-    const firstText = segments[0]?.text || '';
+    if (segments.length === 0) return "New Meeting";
+    const firstText = segments[0]?.text || "";
     return firstText
-      ? firstText.substring(0, 30) + (firstText.length > 30 ? '...' : '')
-      : 'New Meeting';
+      ? firstText.substring(0, 30) + (firstText.length > 30 ? "..." : "")
+      : "New Meeting";
   };
 
   type RmsData = { windowSec: number; rms: number[] };
@@ -868,9 +880,9 @@ export const AudioManager = ({
 
   const getRecorderOptions = (): MediaRecorderOptions | undefined => {
     const candidates = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
     ];
     for (const mimeType of candidates) {
       if (MediaRecorder.isTypeSupported(mimeType)) {
@@ -880,11 +892,11 @@ export const AudioManager = ({
     return undefined;
   };
 
-  const getMicFormat = (): 'webm' | 'ogg' => {
+  const getMicFormat = (): "webm" | "ogg" => {
     const mimeType =
-      micMimeTypeRef.current || micRecorderRef.current?.mimeType || '';
-    if (mimeType.includes('ogg')) return 'ogg';
-    return 'webm';
+      micMimeTypeRef.current || micRecorderRef.current?.mimeType || "";
+    if (mimeType.includes("ogg")) return "ogg";
+    return "webm";
   };
 
   const snapSampleRate = (estimate: number): number => {
@@ -948,7 +960,7 @@ export const AudioManager = ({
   const computeRmsData = async (audioBuffer: ArrayBuffer): Promise<RmsData> => {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextCtor) {
-      throw new Error('Web Audio API unavailable');
+      throw new Error("Web Audio API unavailable");
     }
     const audioCtx = new AudioContextCtor();
     try {
@@ -1009,7 +1021,7 @@ export const AudioManager = ({
   const getSpeakerActivityCoverage = (
     startTime: number,
     endTime: number,
-    speaker: 'Me' | 'Them',
+    speaker: "Me" | "Them",
   ): number => {
     if (endTime <= startTime) return 0;
     let total = 0;
@@ -1061,17 +1073,17 @@ export const AudioManager = ({
   const normalizeTranscriptText = (text: string): string => {
     return text
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
   };
 
   const tokenSimilarity = (left: string, right: string): number => {
     const leftTokens = new Set(
-      normalizeTranscriptText(left).split(' ').filter(Boolean),
+      normalizeTranscriptText(left).split(" ").filter(Boolean),
     );
     const rightTokens = new Set(
-      normalizeTranscriptText(right).split(' ').filter(Boolean),
+      normalizeTranscriptText(right).split(" ").filter(Boolean),
     );
     if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
 
@@ -1088,9 +1100,9 @@ export const AudioManager = ({
     right: string,
     maxPrefixTokens = 8,
   ): number => {
-    const leftTokens = normalizeTranscriptText(left).split(' ').filter(Boolean);
+    const leftTokens = normalizeTranscriptText(left).split(" ").filter(Boolean);
     const rightTokens = normalizeTranscriptText(right)
-      .split(' ')
+      .split(" ")
       .filter(Boolean);
     const sharedLength = Math.min(
       leftTokens.length,
@@ -1117,7 +1129,7 @@ export const AudioManager = ({
   };
 
   const transcriptQualityScore = (text: string): number => {
-    const tokens = normalizeTranscriptText(text).split(' ').filter(Boolean);
+    const tokens = normalizeTranscriptText(text).split(" ").filter(Boolean);
     if (tokens.length === 0) return 0;
     const freq = new Map<string, number>();
     let maxTokenFreq = 0;
@@ -1141,7 +1153,7 @@ export const AudioManager = ({
     for (const segment of segments) {
       const words = Math.max(
         1,
-        normalizeTranscriptText(segment.text).split(' ').filter(Boolean).length,
+        normalizeTranscriptText(segment.text).split(" ").filter(Boolean).length,
       );
       const score = transcriptQualityScore(segment.text);
       weightedScore += score * words;
@@ -1162,7 +1174,7 @@ export const AudioManager = ({
     const sessionWords = sessionSegments.reduce(
       (sum, segment) =>
         sum +
-        normalizeTranscriptText(segment.text).split(' ').filter(Boolean).length,
+        normalizeTranscriptText(segment.text).split(" ").filter(Boolean).length,
       0,
     );
 
@@ -1198,7 +1210,7 @@ export const AudioManager = ({
       if (removeMic.has(micIndex)) continue;
       const mic = micSegments[micIndex];
       const micWords = normalizeTranscriptText(mic.text)
-        .split(' ')
+        .split(" ")
         .filter(Boolean).length;
       if (micWords < 5) continue;
 
@@ -1228,7 +1240,7 @@ export const AudioManager = ({
       if (bestSystemIndex < 0 || bestOverlapRatio < 0.45) continue;
       const system = systemSegments[bestSystemIndex];
       const systemWords = normalizeTranscriptText(system.text)
-        .split(' ')
+        .split(" ")
         .filter(Boolean).length;
       if (systemWords < 5) continue;
 
@@ -1289,8 +1301,8 @@ export const AudioManager = ({
     micRmsData: RmsData | null,
     systemRmsData: RmsData | null,
     chunkStartSec: number,
-    preferredSpeaker: 'Me' | 'Them' | null,
-  ): 'Me' | 'Them' => {
+    preferredSpeaker: "Me" | "Them" | null,
+  ): "Me" | "Them" => {
     let meScore = 0;
     let themScore = 0;
 
@@ -1300,25 +1312,25 @@ export const AudioManager = ({
     const meCoverage = getSpeakerActivityCoverage(
       overlapStart,
       overlapEnd,
-      'Me',
+      "Me",
     );
     const themCoverage = getSpeakerActivityCoverage(
       overlapStart,
       overlapEnd,
-      'Them',
+      "Them",
     );
     const micWords = normalizeTranscriptText(mic.text)
-      .split(' ')
+      .split(" ")
       .filter(Boolean).length;
     const sysWords = normalizeTranscriptText(system.text)
-      .split(' ')
+      .split(" ")
       .filter(Boolean).length;
 
     if (isBleedDuplicate(mic, system)) {
       const strongMeDominance =
         meCoverage >= Math.max(0.8, themCoverage * 2.8) &&
         micWords >= sysWords + 4;
-      return strongMeDominance ? 'Me' : 'Them';
+      return strongMeDominance ? "Me" : "Them";
     }
 
     if (meCoverage >= 0.2 && meCoverage >= themCoverage * 1.25) meScore += 2;
@@ -1341,19 +1353,19 @@ export const AudioManager = ({
     if (micWords <= 2 && sysWords >= 5) themScore += 1;
     if (sysWords <= 2 && micWords >= 5) meScore += 1;
 
-    if (preferredSpeaker === 'Me') meScore += 0.2;
-    else if (preferredSpeaker === 'Them') themScore += 0.2;
+    if (preferredSpeaker === "Me") meScore += 0.2;
+    else if (preferredSpeaker === "Them") themScore += 0.2;
 
     if (meScore === themScore) {
-      if (micWords !== sysWords) return micWords > sysWords ? 'Me' : 'Them';
+      if (micWords !== sysWords) return micWords > sysWords ? "Me" : "Them";
       const micDur = Math.max(0.01, mic.endTime - mic.startTime);
       const sysDur = Math.max(0.01, system.endTime - system.startTime);
       if (Math.abs(micDur - sysDur) >= 0.3)
-        return micDur > sysDur ? 'Me' : 'Them';
-      return preferredSpeaker || 'Them';
+        return micDur > sysDur ? "Me" : "Them";
+      return preferredSpeaker || "Them";
     }
 
-    return meScore > themScore ? 'Me' : 'Them';
+    return meScore > themScore ? "Me" : "Them";
   };
 
   const maxOverlapRatioWithSegments = (
@@ -1397,14 +1409,14 @@ export const AudioManager = ({
     for (const segment of micSegments) {
       const absStart = chunkStartSec + segment.startTime;
       const absEnd = chunkStartSec + segment.endTime;
-      const meCoverage = getSpeakerActivityCoverage(absStart, absEnd, 'Me');
-      const themCoverage = getSpeakerActivityCoverage(absStart, absEnd, 'Them');
+      const meCoverage = getSpeakerActivityCoverage(absStart, absEnd, "Me");
+      const themCoverage = getSpeakerActivityCoverage(absStart, absEnd, "Them");
       const overlapWithSystem = maxOverlapRatioWithSegments(
         segment,
         systemSegments,
       );
       const shouldDrop = shouldDropBySpeakerActivity({
-        targetSpeaker: 'Me',
+        targetSpeaker: "Me",
         overlapRatio: overlapWithSystem,
         meCoverage,
         themCoverage,
@@ -1419,11 +1431,11 @@ export const AudioManager = ({
     for (const segment of systemSegments) {
       const absStart = chunkStartSec + segment.startTime;
       const absEnd = chunkStartSec + segment.endTime;
-      const meCoverage = getSpeakerActivityCoverage(absStart, absEnd, 'Me');
-      const themCoverage = getSpeakerActivityCoverage(absStart, absEnd, 'Them');
+      const meCoverage = getSpeakerActivityCoverage(absStart, absEnd, "Me");
+      const themCoverage = getSpeakerActivityCoverage(absStart, absEnd, "Them");
       const overlapWithMic = maxOverlapRatioWithSegments(segment, keepMic);
       const shouldDrop = shouldDropBySpeakerActivity({
-        targetSpeaker: 'Them',
+        targetSpeaker: "Them",
         overlapRatio: overlapWithMic,
         meCoverage,
         themCoverage,
@@ -1535,26 +1547,26 @@ export const AudioManager = ({
     chunkEndSec: number,
     micMeanRms: number | null,
     systemMeanRms: number | null,
-  ): 'Me' | 'Them' | null => {
+  ): "Me" | "Them" | null => {
     const meCoverage = getSpeakerActivityCoverage(
       chunkStartSec,
       chunkEndSec,
-      'Me',
+      "Me",
     );
     const themCoverage = getSpeakerActivityCoverage(
       chunkStartSec,
       chunkEndSec,
-      'Them',
+      "Them",
     );
     const minCoverageSeconds = 0.35;
 
     if (meCoverage >= minCoverageSeconds && meCoverage >= themCoverage * 1.2)
-      return 'Me';
+      return "Me";
     if (themCoverage >= minCoverageSeconds && themCoverage >= meCoverage * 1.2)
-      return 'Them';
+      return "Them";
 
     if (micMeanRms !== null && systemMeanRms !== null) {
-      return micMeanRms >= systemMeanRms ? 'Me' : 'Them';
+      return micMeanRms >= systemMeanRms ? "Me" : "Them";
     }
 
     return null;
@@ -1574,7 +1586,7 @@ export const AudioManager = ({
     const incomingNorm = normalizeTranscriptText(incoming);
 
     // Recall-first: only collapse exact duplicates.
-    if (speaker === 'Them' || speaker === 'Me') {
+    if (speaker === "Them" || speaker === "Me") {
       if (incomingNorm === baseNorm) return base;
     }
 
@@ -1587,10 +1599,10 @@ export const AudioManager = ({
       const trailingSimilarity = tokenSimilarity(trailingSentence, incoming);
       if (trailingSimilarity >= 0.32) {
         const trailingWords = normalizeTranscriptText(trailingSentence)
-          .split(' ')
+          .split(" ")
           .filter(Boolean).length;
         const incomingWords = normalizeTranscriptText(incoming)
-          .split(' ')
+          .split(" ")
           .filter(Boolean).length;
         const trailingQuality = transcriptQualityScore(trailingSentence);
         const incomingQuality = transcriptQualityScore(incoming);
@@ -1599,7 +1611,7 @@ export const AudioManager = ({
           incomingQuality >= trailingQuality + 0.08
         ) {
           sentenceChunks[sentenceChunks.length - 1] = incoming;
-          return sentenceChunks.join(' ').trim();
+          return sentenceChunks.join(" ").trim();
         }
       }
     }
@@ -1612,7 +1624,7 @@ export const AudioManager = ({
   ): TranscriptionSegment[] => {
     const expanded: TranscriptionSegment[] = [];
     for (const segment of segments) {
-      const text = (segment.text || '').trim();
+      const text = (segment.text || "").trim();
       if (!text) continue;
       const pieces = text
         .split(/(?<=[.!?])\s+/)
@@ -1655,17 +1667,17 @@ export const AudioManager = ({
   const normalizeEnglishArtifacts = (text: string): string => {
     let next = text.trim();
     // Collapse duplicated leading token: "Let's let's" -> "Let's"
-    next = next.replace(/^(\b[^\s]+\b)\s+\1\b/i, '$1');
+    next = next.replace(/^(\b[^\s]+\b)\s+\1\b/i, "$1");
     next = next.replace(/\blet['’]?s\s+let['’]?s\b/gi, "Let's");
     next = next.replace(/\bthat it\b/gi, "That's it");
     next = next.replace(
       /\bi['’]?m not again speaking\b/gi,
       "I'm now again speaking",
     );
-    next = next.replace(/\ba more like\b/gi, 'more like');
+    next = next.replace(/\ba more like\b/gi, "more like");
     next = next.replace(
       /\bmore like ([A-Za-z0-9]+) and ([A-Za-z0-9]+)\b/g,
-      'more like $1, $2',
+      "more like $1, $2",
     );
     return next;
   };
@@ -1685,7 +1697,7 @@ export const AudioManager = ({
       const oppositeSpeakerEvidence = channelEvidenceSegments.filter(
         (candidate) =>
           candidate.speaker !== segment.speaker &&
-          candidate.speaker !== 'Unknown' &&
+          candidate.speaker !== "Unknown" &&
           candidate.endTime <= segment.startTime + 0.4 &&
           candidate.endTime >= segment.startTime - 2.2,
       );
@@ -1698,7 +1710,7 @@ export const AudioManager = ({
       ) {
         text = text.replace(
           /my audio is getting appropriately captured/i,
-          'my audio or your audio is getting appropriately captured',
+          "my audio or your audio is getting appropriately captured",
         );
       }
 
@@ -1708,7 +1720,7 @@ export const AudioManager = ({
           /\bmore like\b/i.test(candidate.text),
         )
       ) {
-        text = text.replace(/\bmodel like\b/i, 'more like');
+        text = text.replace(/\bmodel like\b/i, "more like");
       }
 
       if (
@@ -1728,7 +1740,7 @@ export const AudioManager = ({
       ) {
         text = text.replace(
           /\b(i['’]?\s?m\s+)?not sure[^.?!]*there\b[.?!]?/i,
-          'Not sure how much I should share there.',
+          "Not sure how much I should share there.",
         );
       }
 
@@ -1741,7 +1753,7 @@ export const AudioManager = ({
 
   const filterDuplicateSpeakerSegments = (
     segments: TranscriptionSegment[],
-    speaker: 'Me' | 'Them',
+    speaker: "Me" | "Them",
   ): TranscriptionSegment[] => {
     const filtered: TranscriptionSegment[] = [];
     const recentForSpeaker: TranscriptionSegment[] = [];
@@ -1792,7 +1804,7 @@ export const AudioManager = ({
       .split(/\s+/)
       .map((raw) => ({
         raw,
-        norm: raw.toLowerCase().replace(/[^a-z0-9]/g, ''),
+        norm: raw.toLowerCase().replace(/[^a-z0-9]/g, ""),
       }))
       .filter((token) => token.norm.length > 0);
   };
@@ -1853,7 +1865,7 @@ export const AudioManager = ({
 
       // Prefer preserving "Them" on cross-speaker overlap by trimming duplicated
       // text from the "Me" side when possible.
-      const trimCurrentSegment = current.speaker === 'Me';
+      const trimCurrentSegment = current.speaker === "Me";
 
       if (!trimCurrentSegment) {
         const prevRawWords = prev.text.trim().split(/\s+/);
@@ -1864,7 +1876,7 @@ export const AudioManager = ({
         } else {
           const trimmedPrevText = prevRawWords
             .slice(0, remainingPrevWords)
-            .join(' ')
+            .join(" ")
             .trim();
           if (!trimmedPrevText) {
             trimmed.pop();
@@ -1884,7 +1896,7 @@ export const AudioManager = ({
       }
 
       const rawWords = current.text.trim().split(/\s+/);
-      const trimmedText = rawWords.slice(matchedPrefixWords).join(' ').trim();
+      const trimmedText = rawWords.slice(matchedPrefixWords).join(" ").trim();
       if (!trimmedText) {
         droppedCount++;
         continue;
@@ -1915,9 +1927,9 @@ export const AudioManager = ({
     meCount: number;
     themCount: number;
   } => {
-    const meSegments = segments.filter((segment) => segment.speaker === 'Me');
+    const meSegments = segments.filter((segment) => segment.speaker === "Me");
     const themSegments = segments.filter(
-      (segment) => segment.speaker === 'Them',
+      (segment) => segment.speaker === "Them",
     );
     if (meSegments.length === 0 || themSegments.length === 0) {
       return {
@@ -2021,7 +2033,7 @@ export const AudioManager = ({
     systemSegments: TranscriptionSegment[];
     micRmsData: RmsData | null;
     systemRmsData: RmsData | null;
-    preferredSpeaker: 'Me' | 'Them' | null;
+    preferredSpeaker: "Me" | "Them" | null;
   }): {
     micSegments: TranscriptionSegment[];
     systemSegments: TranscriptionSegment[];
@@ -2101,7 +2113,7 @@ export const AudioManager = ({
 
       const micNorm = normalizeTranscriptText(mic.text);
       const systemNorm = normalizeTranscriptText(system.text);
-      let canonicalText = winner === 'Me' ? mic.text : system.text;
+      let canonicalText = winner === "Me" ? mic.text : system.text;
       if (micNorm.length > 0 && systemNorm.length > 0) {
         if (micNorm.includes(systemNorm) && micNorm.length >= systemNorm.length)
           canonicalText = mic.text;
@@ -2114,7 +2126,7 @@ export const AudioManager = ({
       const canonicalStart = Math.min(mic.startTime, system.startTime);
       const canonicalEnd = Math.max(mic.endTime, system.endTime);
 
-      if (winner === 'Me') {
+      if (winner === "Me") {
         removeSystem.add(bestSystemIndex);
         micSegments[micIndex] = {
           ...mic,
@@ -2137,7 +2149,7 @@ export const AudioManager = ({
 
     if (candidatePairs > 0 || relabeledToMe > 0 || relabeledToThem > 0) {
       console.log(
-        `[Pluto] Chunk #${chunkIndex} timestamp attribution: candidates=${candidatePairs}, toMe=${relabeledToMe}, toThem=${relabeledToThem}, preferred=${preferredSpeaker ?? 'none'}`,
+        `[Pluto] Chunk #${chunkIndex} timestamp attribution: candidates=${candidatePairs}, toMe=${relabeledToMe}, toThem=${relabeledToThem}, preferred=${preferredSpeaker ?? "none"}`,
       );
     }
 
@@ -2165,19 +2177,19 @@ export const AudioManager = ({
     processingQueueRef.current = processingQueueRef.current
       .then(job)
       .catch((e) => {
-        console.error('[Pluto] Background transcription job failed:', e);
+        console.error("[Pluto] Background transcription job failed:", e);
       });
   };
 
   const handleChunkBlob = (
-    type: 'mic' | 'system',
+    type: "mic" | "system",
     chunkIndex: number,
     chunkBlob: Blob,
-    micFormat: MicChunkFormat = 'webm',
+    micFormat: MicChunkFormat = "webm",
     chunkStartSec?: number,
     chunkEndSec?: number,
   ) => {
-    if (type === 'mic') {
+    if (type === "mic") {
       const fallbackStartSec = chunkIndex * CHUNK_SECONDS;
       pendingMicChunksRef.current.set(chunkIndex, {
         blob: chunkBlob,
@@ -2193,7 +2205,7 @@ export const AudioManager = ({
 
     const micPending = pendingMicChunksRef.current.get(chunkIndex);
     const micBlob = micPending?.blob;
-    const micFormatForChunk = micPending?.format ?? 'webm';
+    const micFormatForChunk = micPending?.format ?? "webm";
     const systemBlob = pendingSystemChunksRef.current.get(chunkIndex);
 
     if (micBlob && (systemBlob || !hasSystemRecorderRef.current)) {
@@ -2222,21 +2234,21 @@ export const AudioManager = ({
     chunkEndSec?: number;
   }) => {
     const chunkStartSec =
-      typeof opts.chunkStartSec === 'number'
+      typeof opts.chunkStartSec === "number"
         ? opts.chunkStartSec
         : opts.chunkIndex * CHUNK_SECONDS;
     const chunkEndSec =
-      typeof opts.chunkEndSec === 'number'
+      typeof opts.chunkEndSec === "number"
         ? Math.max(chunkStartSec + 0.01, opts.chunkEndSec)
         : chunkStartSec + CHUNK_SECONDS;
     const chunkWindowPadSec = 0.75;
 
     const processStream = async (
-      label: 'Me' | 'Them',
+      label: "Me" | "Them",
       blob?: Blob,
-      format: 'webm' | 'ogg' | 'wav' = 'webm',
+      format: "webm" | "ogg" | "wav" = "webm",
     ) => {
-      if (label === 'Me' && disableMicChunkTranscriptionRef.current) {
+      if (label === "Me" && disableMicChunkTranscriptionRef.current) {
         return {
           segments: [],
           rms: null as RmsData | null,
@@ -2267,7 +2279,7 @@ export const AudioManager = ({
           e instanceof Error ? e.message : e,
         );
       }
-      if (label === 'Them') {
+      if (label === "Them") {
         const streamMeanRms = meanRms(rms);
         if (
           streamMeanRms !== null &&
@@ -2285,8 +2297,8 @@ export const AudioManager = ({
       let wavPath: string | null = null;
       let conversionError: unknown = null;
       try {
-        wavPath = await window.ipcRenderer.invoke(
-          'AUDIO_SAVE_AND_CONVERT',
+        wavPath = await window.ipcRenderer.invoke<string | null>(
+          "AUDIO_SAVE_AND_CONVERT",
           buffer,
           format,
           label.toLowerCase(),
@@ -2297,8 +2309,8 @@ export const AudioManager = ({
 
       if (
         !wavPath &&
-        label === 'Me' &&
-        format === 'webm' &&
+        label === "Me" &&
+        format === "webm" &&
         micWebmInitSegmentRef.current
       ) {
         try {
@@ -2306,8 +2318,8 @@ export const AudioManager = ({
             micWebmInitSegmentRef.current,
             buffer,
           );
-          wavPath = await window.ipcRenderer.invoke(
-            'AUDIO_SAVE_AND_CONVERT',
+          wavPath = await window.ipcRenderer.invoke<string | null>(
+            "AUDIO_SAVE_AND_CONVERT",
             repairedWebm,
             format,
             label.toLowerCase(),
@@ -2325,30 +2337,33 @@ export const AudioManager = ({
         }
       }
 
-      if (!wavPath && label === 'Me') {
+      if (!wavPath && label === "Me") {
         // Fallback: build a cumulative WebM (chunks 0..N) so ffmpeg sees a full container.
         // Then keep only segments that overlap the current chunk window.
         try {
           const cumulativeBlob = new Blob(
             micChunksRef.current.slice(0, opts.chunkIndex + 1),
-            { type: micMimeTypeRef.current || 'audio/webm;codecs=opus' },
+            { type: micMimeTypeRef.current || "audio/webm;codecs=opus" },
           );
           const cumulativeBuffer = await cumulativeBlob.arrayBuffer();
-          const cumulativeWavPath = await window.ipcRenderer.invoke(
-            'AUDIO_SAVE_AND_CONVERT',
+          const cumulativeWavPath = await window.ipcRenderer.invoke<
+            string | null
+          >(
+            "AUDIO_SAVE_AND_CONVERT",
             cumulativeBuffer,
             getMicFormat(),
-            'me-cumulative',
+            "me-cumulative",
           );
           if (cumulativeWavPath) {
-            const cumulativeResult = await window.ipcRenderer.invoke(
-              'WHISPER_TRANSCRIBE',
-              cumulativeWavPath,
-              {
-                diarize: false,
-                language: 'en',
-              },
-            );
+            const cumulativeResult =
+              await window.ipcRenderer.invoke<WhisperTranscriptionResult>(
+                "WHISPER_TRANSCRIBE",
+                cumulativeWavPath,
+                {
+                  diarize: false,
+                  language: "en",
+                },
+              );
             const cumulativeSegments = cumulativeResult?.segments
               ? cumulativeResult.segments
                   .filter((s: { text: string }) => isValidSegment(s.text))
@@ -2387,7 +2402,7 @@ export const AudioManager = ({
       }
 
       if (!wavPath) {
-        if (label !== 'Me') {
+        if (label !== "Me") {
           if (conversionError) {
             console.warn(
               `[Pluto] Skip ${label} chunk (convert failed):`,
@@ -2407,14 +2422,15 @@ export const AudioManager = ({
         return { segments: [], rms, conversionFailed: true };
       }
 
-      const result = await window.ipcRenderer.invoke(
-        'WHISPER_TRANSCRIBE',
-        wavPath,
-        {
-          diarize: false,
-          language: 'en',
-        },
-      );
+      const result =
+        await window.ipcRenderer.invoke<WhisperTranscriptionResult>(
+          "WHISPER_TRANSCRIBE",
+          wavPath,
+          {
+            diarize: false,
+            language: "en",
+          },
+        );
       // ... (rest of mapping logic same as before)
       const segments = result?.segments
         ? result.segments
@@ -2431,8 +2447,8 @@ export const AudioManager = ({
     };
 
     const [micResult, systemResult] = await Promise.all([
-      processStream('Me', opts.micBlob, opts.micFormat),
-      processStream('Them', opts.systemBlob, 'wav'),
+      processStream("Me", opts.micBlob, opts.micFormat),
+      processStream("Them", opts.systemBlob, "wav"),
     ]);
     if (micResult.conversionFailed) {
       micChunkConversionFailuresRef.current += 1;
@@ -2445,7 +2461,7 @@ export const AudioManager = ({
       ) {
         disableMicChunkTranscriptionRef.current = true;
         console.warn(
-          '[Pluto] Disabling per-chunk Me transcription for this meeting; using full-session recovery path',
+          "[Pluto] Disabling per-chunk Me transcription for this meeting; using full-session recovery path",
         );
       }
     }
@@ -2498,7 +2514,7 @@ export const AudioManager = ({
       micSegments.length > 0 &&
       systemSegments.length > 0
     ) {
-      const chunkPreferredSpeaker: 'Me' | 'Them' | null =
+      const chunkPreferredSpeaker: "Me" | "Them" | null =
         pickPreferredSpeakerForChunk(
           chunkStartSec,
           chunkEndSec,
@@ -2518,7 +2534,7 @@ export const AudioManager = ({
       filteredMicSegments = reconciled.micSegments;
       filteredSystemSegments = reconciled.systemSegments;
       logChunkAttributionStage(
-        'reconcile',
+        "reconcile",
         micSegments.length,
         systemSegments.length,
         filteredMicSegments.length,
@@ -2527,7 +2543,7 @@ export const AudioManager = ({
 
       // Fallback pruning for unresolved bleed when one channel is clearly dominant in this chunk.
       if (
-        chunkPreferredSpeaker === 'Them' &&
+        chunkPreferredSpeaker === "Them" &&
         filteredMicSegments.length > 0 &&
         filteredSystemSegments.length > 0
       ) {
@@ -2537,14 +2553,14 @@ export const AudioManager = ({
             !filteredSystemSegments.some((sys) => isBleedDuplicate(mic, sys)),
         );
         logChunkAttributionStage(
-          'preferred-them-duplicate-prune',
+          "preferred-them-duplicate-prune",
           beforeMe,
           filteredSystemSegments.length,
           filteredMicSegments.length,
           filteredSystemSegments.length,
         );
       } else if (
-        chunkPreferredSpeaker === 'Me' &&
+        chunkPreferredSpeaker === "Me" &&
         filteredMicSegments.length > 0 &&
         filteredSystemSegments.length > 0
       ) {
@@ -2554,7 +2570,7 @@ export const AudioManager = ({
             !filteredMicSegments.some((mic) => isBleedDuplicate(sys, mic)),
         );
         logChunkAttributionStage(
-          'preferred-me-duplicate-prune',
+          "preferred-me-duplicate-prune",
           filteredMicSegments.length,
           beforeThem,
           filteredMicSegments.length,
@@ -2574,7 +2590,7 @@ export const AudioManager = ({
         filteredMicSegments = activityPruned.micSegments;
         filteredSystemSegments = activityPruned.systemSegments;
         logChunkAttributionStage(
-          'activity-prune',
+          "activity-prune",
           beforeMe,
           beforeThem,
           filteredMicSegments.length,
@@ -2587,7 +2603,7 @@ export const AudioManager = ({
         filteredSystemSegments.length !== systemSegments.length
       ) {
         console.log(
-          `[Pluto] Chunk #${opts.chunkIndex} arbitration: preferred=${chunkPreferredSpeaker ?? 'none'}, Me ${micSegments.length}->${filteredMicSegments.length}, Them ${systemSegments.length}->${filteredSystemSegments.length}, micRms=${micMean ?? 0}, sysRms=${systemMean ?? 0}`,
+          `[Pluto] Chunk #${opts.chunkIndex} arbitration: preferred=${chunkPreferredSpeaker ?? "none"}, Me ${micSegments.length}->${filteredMicSegments.length}, Them ${systemSegments.length}->${filteredSystemSegments.length}, micRms=${micMean ?? 0}, sysRms=${systemMean ?? 0}`,
         );
       }
     }
@@ -2605,7 +2621,7 @@ export const AudioManager = ({
       filteredMicSegments = energyPruned.micSegments;
       filteredSystemSegments = energyPruned.systemSegments;
       logChunkAttributionStage(
-        'energy-prune',
+        "energy-prune",
         beforeMe,
         beforeThem,
         filteredMicSegments.length,
@@ -2625,7 +2641,7 @@ export const AudioManager = ({
       filteredMicSegments = activityPruned.micSegments;
       filteredSystemSegments = activityPruned.systemSegments;
       logChunkAttributionStage(
-        'post-energy-activity-prune',
+        "post-energy-activity-prune",
         beforeMe,
         beforeThem,
         filteredMicSegments.length,
@@ -2644,7 +2660,7 @@ export const AudioManager = ({
       filteredMicSegments = qualityPruned.micSegments;
       filteredSystemSegments = qualityPruned.systemSegments;
       logChunkAttributionStage(
-        'quality-prune',
+        "quality-prune",
         beforeMe,
         beforeThem,
         filteredMicSegments.length,
@@ -2685,14 +2701,14 @@ export const AudioManager = ({
 
   // Common Whisper Hallucinations to filter out
   const INVALID_PHRASES = [
-    'you',
-    'mbc',
-    'subtitles by',
-    'captioned by',
-    'watching',
-    'subscribe',
-    'copyright',
-    'all rights reserved',
+    "you",
+    "mbc",
+    "subtitles by",
+    "captioned by",
+    "watching",
+    "subscribe",
+    "copyright",
+    "all rights reserved",
   ];
 
   const hasRepeatedPhraseLoop = (tokens: string[]): boolean => {
@@ -2702,7 +2718,7 @@ export const AudioManager = ({
       const phraseCounts = new Map<string, number>();
       let maxCount = 0;
       for (let i = 0; i <= tokens.length - width; i++) {
-        const phrase = tokens.slice(i, i + width).join(' ');
+        const phrase = tokens.slice(i, i + width).join(" ");
         const next = (phraseCounts.get(phrase) || 0) + 1;
         phraseCounts.set(phrase, next);
         if (next > maxCount) maxCount = next;
@@ -2732,11 +2748,11 @@ export const AudioManager = ({
     const clean = text
       .toLowerCase()
       .trim()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ');
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ");
     if (clean.length < 2) return false; // Too short
     if (INVALID_PHRASES.includes(clean)) return false;
-    const tokens = clean.split(' ').filter(Boolean);
+    const tokens = clean.split(" ").filter(Boolean);
     if (hasLongTokenRun(tokens)) return false;
     if (hasRepeatedPhraseLoop(tokens)) return false;
     if (tokens.length >= 14) {
@@ -2749,19 +2765,19 @@ export const AudioManager = ({
   const normalizeValidationText = (text: string): string =>
     text
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
 
   const shouldDropUnvalidatedShortThemSegment = (
     segment: TranscriptionSegment,
     fullSessionTexts: string[],
   ): boolean => {
-    if (segment.speaker !== 'Them') return false;
+    if (segment.speaker !== "Them") return false;
     if (fullSessionTexts.length === 0) return false;
     const normalizedSegment = normalizeValidationText(segment.text);
     if (!normalizedSegment) return true;
-    const words = normalizedSegment.split(' ').filter(Boolean);
+    const words = normalizedSegment.split(" ").filter(Boolean);
     const durationSec = Math.max(0, segment.endTime - segment.startTime);
     if (words.length >= 3) return false;
     if (durationSec >= 0.85 && words.length >= 2) return false;
@@ -2790,7 +2806,7 @@ export const AudioManager = ({
   };
 
   const stopSession = async () => {
-    console.log('[Pluto] Stopping session...');
+    console.log("[Pluto] Stopping session...");
     setIsProcessing(true);
 
     try {
@@ -2800,12 +2816,12 @@ export const AudioManager = ({
         chunks: Blob[],
         mimeTypeOverride?: string | null,
       ): Promise<Blob | null> => {
-        if (!recorder || recorder.state === 'inactive') {
+        if (!recorder || recorder.state === "inactive") {
           if (chunks.length > 0) {
             const type =
               mimeTypeOverride ||
               recorder?.mimeType ||
-              'audio/webm;codecs=opus';
+              "audio/webm;codecs=opus";
             return new Blob(chunks, { type });
           }
           return null;
@@ -2819,7 +2835,7 @@ export const AudioManager = ({
 
         if (chunks.length === 0) return null;
         const type =
-          mimeTypeOverride || recorder?.mimeType || 'audio/webm;codecs=opus';
+          mimeTypeOverride || recorder?.mimeType || "audio/webm;codecs=opus";
         return new Blob(chunks, { type });
       };
 
@@ -2831,10 +2847,10 @@ export const AudioManager = ({
       );
 
       // Stop Native Capture
-      await window.ipcRenderer.invoke('NATIVE_AUDIO_STOP');
+      await window.ipcRenderer.invoke("NATIVE_AUDIO_STOP");
       if (nativeAudioListenerRef.current) {
         window.ipcRenderer.off(
-          'NATIVE_AUDIO_CHUNK',
+          "NATIVE_AUDIO_CHUNK",
           nativeAudioListenerRef.current,
         );
         nativeAudioListenerRef.current = null;
@@ -2907,20 +2923,20 @@ export const AudioManager = ({
       await processingQueueRef.current;
 
       // Store a single full audio file for playback
-      let primaryAudioPath = '';
+      let primaryAudioPath = "";
       const primaryBlob = micBlob; // Default to mic
       if (primaryBlob && primaryBlob.size > 0) {
         try {
           const buffer = await primaryBlob.arrayBuffer();
-          const maybePath = await window.ipcRenderer.invoke(
-            'AUDIO_SAVE_AND_CONVERT',
+          const maybePath = await window.ipcRenderer.invoke<string | null>(
+            "AUDIO_SAVE_AND_CONVERT",
             buffer,
             getMicFormat(),
-            'session-mic',
+            "session-mic",
           );
           if (maybePath) primaryAudioPath = maybePath;
         } catch (e) {
-          console.warn('[Pluto] Save failed:', e);
+          console.warn("[Pluto] Save failed:", e);
         }
       }
       // Notify completion
@@ -2952,23 +2968,24 @@ export const AudioManager = ({
       let fullSessionCanonicalSegments: TranscriptionSegment[] = [];
       let fullSessionValidationTexts: string[] = [];
       const chunkMeSegments = collectedSegments.filter(
-        (segment) => segment.speaker === 'Me',
+        (segment) => segment.speaker === "Me",
       );
       const chunkThemSegments = collectedSegments.filter(
-        (segment) => segment.speaker === 'Them',
+        (segment) => segment.speaker === "Them",
       );
       const hasChunkMeSegments = chunkMeSegments.length > 0;
 
       if (primaryAudioPath) {
         try {
-          const fullMicResult = await window.ipcRenderer.invoke(
-            'WHISPER_TRANSCRIBE',
-            primaryAudioPath,
-            {
-              diarize: false,
-              language: 'en',
-            },
-          );
+          const fullMicResult =
+            await window.ipcRenderer.invoke<WhisperTranscriptionResult>(
+              "WHISPER_TRANSCRIBE",
+              primaryAudioPath,
+              {
+                diarize: false,
+                language: "en",
+              },
+            );
           const recoveredMeSegments: TranscriptionSegment[] =
             fullMicResult?.segments
               ? fullMicResult.segments
@@ -2978,7 +2995,7 @@ export const AudioManager = ({
                     startTime: s.start,
                     endTime: s.end,
                     text: s.text.trim(),
-                    speaker: 'Me',
+                    speaker: "Me",
                   }))
               : [];
           fullSessionCanonicalSegments = fullMicResult?.segments
@@ -2989,12 +3006,12 @@ export const AudioManager = ({
                   startTime: s.start,
                   endTime: s.end,
                   text: s.text.trim(),
-                  speaker: 'Me',
+                  speaker: "Me",
                 }))
             : [];
           fullSessionValidationTexts = fullMicResult?.segments
             ? fullMicResult.segments
-                .map((s: { text: string }) => (s.text || '').trim())
+                .map((s: { text: string }) => (s.text || "").trim())
                 .filter((text: string) => text.length > 0)
             : [];
           fullSessionRecoveredMeSegments = recoveredMeSegments;
@@ -3008,7 +3025,7 @@ export const AudioManager = ({
               })
             ) {
               const nonMeSegments = collectedSegments.filter(
-                (segment) => segment.speaker !== 'Me',
+                (segment) => segment.speaker !== "Me",
               );
               const replacedCount =
                 collectedSegments.length - nonMeSegments.length;
@@ -3030,12 +3047,12 @@ export const AudioManager = ({
             }
           } else {
             console.warn(
-              '[Pluto] Full session mic transcription returned no recoverable Me segments',
+              "[Pluto] Full session mic transcription returned no recoverable Me segments",
             );
           }
         } catch (recoveryErr) {
           console.error(
-            '[Pluto] Failed to recover Me transcript from full session audio:',
+            "[Pluto] Failed to recover Me transcript from full session audio:",
             recoveryErr,
           );
         }
@@ -3061,11 +3078,11 @@ export const AudioManager = ({
       }
       const dedupedThemSegments = filterDuplicateSpeakerSegments(
         crossChannelSegments,
-        'Them',
+        "Them",
       );
       const dedupedSegments = filterDuplicateSpeakerSegments(
         dedupedThemSegments,
-        'Me',
+        "Me",
       );
       const echoTrimmedSegments = trimAdjacentCrossSpeakerEcho(dedupedSegments);
       const shortEchoPruned = dropShortCrossSpeakerEchoes({
@@ -3080,8 +3097,8 @@ export const AudioManager = ({
         shortEchoPruned.segments as TranscriptionSegment[];
       const rawSpeakerCounts = crossChannelSegments.reduce(
         (acc, segment) => {
-          if (segment.speaker === 'Me') acc.me++;
-          if (segment.speaker === 'Them') acc.them++;
+          if (segment.speaker === "Me") acc.me++;
+          if (segment.speaker === "Them") acc.them++;
           return acc;
         },
         { me: 0, them: 0 },
@@ -3096,7 +3113,7 @@ export const AudioManager = ({
           `[Pluto] Probable audio pass-through detected (overlapPairs=${passThroughCheck.overlapPairs}, similarPairs=${passThroughCheck.similarPairs}, meSegments=${passThroughCheck.meCount}, themSegments=${passThroughCheck.themCount}).`,
         );
         console.warn(
-          '[Pluto] Routing guidance: disable pass-through/mixers, ensure call app + OS default devices match, and prefer a headset.',
+          "[Pluto] Routing guidance: disable pass-through/mixers, ensure call app + OS default devices match, and prefer a headset.",
         );
       }
       const shouldRunMeBleedCleanup =
@@ -3110,7 +3127,7 @@ export const AudioManager = ({
             meBleedStripped.segments as TranscriptionSegment[];
           console.warn(
             `[Pluto] Me-bleed cleanup removed segments: droppedMe=${meBleedStripped.droppedMe}, ` +
-              `reason=${passThroughCheck.probable ? 'pass-through' : 'duplicate-pressure'}`,
+              `reason=${passThroughCheck.probable ? "pass-through" : "duplicate-pressure"}`,
           );
         }
       }
@@ -3132,7 +3149,7 @@ export const AudioManager = ({
       }
       if (rawSpeakerCounts.me === 0 && rawSpeakerCounts.them > 0) {
         console.warn(
-          '[Pluto] No transcribed mic segments detected. Check selected microphone/input routing.',
+          "[Pluto] No transcribed mic segments detected. Check selected microphone/input routing.",
         );
       }
       const noisyAttributionEvidence =
@@ -3184,8 +3201,8 @@ export const AudioManager = ({
         console.log(
           `[Pluto] Skipping session-canonical hydration: ${
             finalizedSegments.length === 0
-              ? 'missing channel attribution context'
-              : 'session lexical confidence lower than channel transcript'
+              ? "missing channel attribution context"
+              : "session lexical confidence lower than channel transcript"
           }`,
         );
       }
@@ -3216,8 +3233,8 @@ export const AudioManager = ({
       }
       const mergedSpeakerCounts = newTranscription.reduce(
         (acc, segment) => {
-          if (segment.speaker === 'Me') acc.me++;
-          if (segment.speaker === 'Them') acc.them++;
+          if (segment.speaker === "Me") acc.me++;
+          if (segment.speaker === "Them") acc.them++;
           return acc;
         },
         { me: 0, them: 0 },
@@ -3235,18 +3252,18 @@ export const AudioManager = ({
         );
 
         const rescueSorted = [
-          ...sortedSegments.filter((segment) => segment.speaker !== 'Me'),
+          ...sortedSegments.filter((segment) => segment.speaker !== "Me"),
           ...fullSessionRecoveredMeSegments,
         ].sort((a, b) => a.startTime - b.startTime);
         const rescueCrossChannelResolved =
           resolveCrossChannelDuplicates(rescueSorted);
         const rescueDedupedThem = filterDuplicateSpeakerSegments(
           rescueCrossChannelResolved.segments as TranscriptionSegment[],
-          'Them',
+          "Them",
         );
         const rescueDedupedSegments = filterDuplicateSpeakerSegments(
           rescueDedupedThem,
-          'Me',
+          "Me",
         );
         const rescueEchoTrimmedSegments = trimAdjacentCrossSpeakerEcho(
           rescueDedupedSegments,
@@ -3282,8 +3299,8 @@ export const AudioManager = ({
         mergedSpeakerCounts.me = 0;
         mergedSpeakerCounts.them = 0;
         for (const segment of newTranscription) {
-          if (segment.speaker === 'Me') mergedSpeakerCounts.me++;
-          if (segment.speaker === 'Them') mergedSpeakerCounts.them++;
+          if (segment.speaker === "Me") mergedSpeakerCounts.me++;
+          if (segment.speaker === "Them") mergedSpeakerCounts.them++;
         }
       } else if (
         mergedSpeakerCounts.me === 0 &&
@@ -3304,24 +3321,24 @@ export const AudioManager = ({
       );
 
       if (onTranscript && newTranscription.length > 0) {
-        const fullText = newTranscription.map((s) => s.text).join(' ');
+        const fullText = newTranscription.map((s) => s.text).join(" ");
         onTranscript(fullText);
       }
       if (newTranscription.length === 0) {
-        console.warn('[Pluto] No transcription segments from either source');
+        console.warn("[Pluto] No transcription segments from either source");
       }
 
       // 3. Generate Analysis V2 (canonical markdown + hidden signals)
       const fullTranscript = newTranscription
         .map((s) => `${s.speaker}: ${s.text}`)
-        .join('\n');
-      let enhancedNotes = '';
+        .join("\n");
+      let enhancedNotes = "";
       let valueSignals = emptyValueSignals();
       let analysisDocument = emptyAnalysisDocument();
 
       try {
         const rawArtifacts = (await window.ipcRenderer.invoke(
-          'GENERATE_ANALYSIS_V2',
+          "GENERATE_ANALYSIS_V2",
           {
             transcript: fullTranscript,
             userNotes: userNotes,
@@ -3331,7 +3348,7 @@ export const AudioManager = ({
         analysisDocument = normalizeAnalysisDocument(rawArtifacts?.analysis);
         valueSignals = normalizeValueSignals(rawArtifacts?.signals);
         enhancedNotes =
-          typeof rawArtifacts?.markdown === 'string'
+          typeof rawArtifacts?.markdown === "string"
             ? rawArtifacts.markdown
             : analysisDocumentToMarkdown(analysisDocument);
 
@@ -3340,7 +3357,7 @@ export const AudioManager = ({
         }
 
         console.log(
-          '[Pluto] V2 analysis generated:',
+          "[Pluto] V2 analysis generated:",
           `formatPass=${analysisDocument.quality.format_pass},`,
           `retryCount=${analysisDocument.quality.retry_count},`,
           `fallback=${analysisDocument.quality.fallback_used},`,
@@ -3349,7 +3366,7 @@ export const AudioManager = ({
           `decisionImpact=${valueSignals.decision_impacts.length}`,
         );
       } catch (analysisErr) {
-        console.error('[Pluto] V2 analysis generation failed:', analysisErr);
+        console.error("[Pluto] V2 analysis generation failed:", analysisErr);
         analysisDocument = emptyAnalysisDocument();
         enhancedNotes = analysisDocumentToMarkdown(analysisDocument);
         valueSignals = emptyValueSignals();
@@ -3366,19 +3383,19 @@ export const AudioManager = ({
       const endTime = new Date().toISOString();
 
       // Generate intelligent title
-      let title = userTitle || 'Meeting';
+      let title = userTitle || "Meeting";
       if (!userTitle) {
         try {
           const fullTranscript = labeledTranscription
             .map((s) => `${s.speaker}: ${s.text}`)
-            .join('\n');
-          title = await window.ipcRenderer.invoke('GENERATE_TITLE', {
+            .join("\n");
+          title = await window.ipcRenderer.invoke("GENERATE_TITLE", {
             transcript: fullTranscript,
           });
           console.log(`[Pluto] Generated title: ${title}`);
         } catch (titleErr) {
           console.error(
-            '[Pluto] Title generation failed, using fallback:',
+            "[Pluto] Title generation failed, using fallback:",
             titleErr,
           );
           title = extractTitle(labeledTranscription);
@@ -3388,7 +3405,7 @@ export const AudioManager = ({
       const meetingData = {
         id: crypto.randomUUID(),
         title: title,
-        meeting_type: 'Recording',
+        meeting_type: "Recording",
         started_at: startTime,
         ended_at: endTime,
         duration_seconds: Math.floor(duration),
@@ -3407,11 +3424,11 @@ export const AudioManager = ({
         is_favorite: false,
       };
 
-      await window.ipcRenderer.invoke('SAVE_MEETING', meetingData);
+      await window.ipcRenderer.invoke("SAVE_MEETING", meetingData);
       console.log(
-        '[Pluto] Session saved to DB with transcript segments:',
+        "[Pluto] Session saved to DB with transcript segments:",
         labeledTranscription.length,
-        'summary length:',
+        "summary length:",
         enhancedNotes.length,
       );
 
@@ -3419,48 +3436,49 @@ export const AudioManager = ({
       void (async () => {
         const runExtraction = async () => {
           try {
-            console.log('[Pluto] Extracting entities for Knowledge Graph...');
+            console.log("[Pluto] Extracting entities for Knowledge Graph...");
             window.dispatchEvent(
-              new CustomEvent('MEETING_ENTITIES_PROCESSING', {
+              new CustomEvent("MEETING_ENTITIES_PROCESSING", {
                 detail: { meetingId: meetingData.id, processing: true },
               }),
             );
             const fullTranscriptText = labeledTranscription
               .map((s) => `${s.speaker}: ${s.text}`)
-              .join('\n');
-            const entityResult = await window.ipcRenderer.invoke(
-              'EXTRACT_AND_PROCESS_ENTITIES',
-              {
-                transcript: fullTranscriptText,
-                meetingId: String(meetingData.id),
-                summary: enhancedNotes,
-                valueSignals,
-              },
-            );
+              .join("\n");
+            const entityResult =
+              await window.ipcRenderer.invoke<EntityExtractionResult>(
+                "EXTRACT_AND_PROCESS_ENTITIES",
+                {
+                  transcript: fullTranscriptText,
+                  meetingId: String(meetingData.id),
+                  summary: enhancedNotes,
+                  valueSignals,
+                },
+              );
             console.log(
               `[Pluto] Entity extraction complete: ${entityResult.created} created, ${entityResult.linked} linked`,
             );
             window.dispatchEvent(
-              new CustomEvent('MEETING_ENTITIES_UPDATED', {
+              new CustomEvent("MEETING_ENTITIES_UPDATED", {
                 detail: { meetingId: meetingData.id },
               }),
             );
           } catch (entityErr) {
             console.error(
-              '[Pluto] Knowledge Graph processing failed:',
+              "[Pluto] Knowledge Graph processing failed:",
               entityErr,
             );
             // Non-blocking error
           } finally {
             window.dispatchEvent(
-              new CustomEvent('MEETING_ENTITIES_PROCESSING', {
+              new CustomEvent("MEETING_ENTITIES_PROCESSING", {
                 detail: { meetingId: meetingData.id, processing: false },
               }),
             );
           }
         };
 
-        if ('requestIdleCallback' in window) {
+        if ("requestIdleCallback" in window) {
           window.requestIdleCallback(
             () => {
               void runExtraction();
@@ -3478,7 +3496,7 @@ export const AudioManager = ({
         onSessionComplete(meetingData.id);
       }
     } catch (e) {
-      console.error('[Pluto] Processing failed:', e);
+      console.error("[Pluto] Processing failed:", e);
       alert(`Failed to process recording: ${(e as Error).message}`);
       setIsRecording(false);
     } finally {
@@ -3490,7 +3508,7 @@ export const AudioManager = ({
   useEffect(() => {
     const handleStopRecording = () => {
       console.log(
-        '[Pluto] STOP_RECORDING event received, isRecording:',
+        "[Pluto] STOP_RECORDING event received, isRecording:",
         isRecordingRef.current,
       );
       if (isRecordingRef.current && !isProcessingRef.current) {
@@ -3498,16 +3516,16 @@ export const AudioManager = ({
       }
     };
     const handleStartRecording = () => {
-      console.log('[Pluto] START_RECORDING event received');
+      console.log("[Pluto] START_RECORDING event received");
       if (!isRecordingRef.current && !isProcessingRef.current) {
         startSession();
       }
     };
-    window.addEventListener('STOP_RECORDING', handleStopRecording);
-    window.addEventListener('START_RECORDING', handleStartRecording);
+    window.addEventListener("STOP_RECORDING", handleStopRecording);
+    window.addEventListener("START_RECORDING", handleStartRecording);
     return () => {
-      window.removeEventListener('STOP_RECORDING', handleStopRecording);
-      window.removeEventListener('START_RECORDING', handleStartRecording);
+      window.removeEventListener("STOP_RECORDING", handleStopRecording);
+      window.removeEventListener("START_RECORDING", handleStartRecording);
     };
   });
 
@@ -3584,7 +3602,7 @@ const WaveformVisualizer = ({
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
   // Visualize waveform
@@ -3592,7 +3610,7 @@ const WaveformVisualizer = ({
     if (!analyser || !canvasRef.current || !isRecording) return;
 
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -3620,7 +3638,7 @@ const WaveformVisualizer = ({
         const x = startX + i * (barWidth + gap);
         const y = (canvas.height - barHeight) / 2;
 
-        ctx.fillStyle = '#C6AA79'; // Pro Accent Gold
+        ctx.fillStyle = "#C6AA79"; // Pro Accent Gold
 
         // Draw rounded rect
         ctx.beginPath();
@@ -3643,7 +3661,7 @@ const WaveformVisualizer = ({
         relative w-full h-[280px] rounded-[2.5rem] overflow-hidden transition-all duration-700 ease-out
         border border-white/50 bg-gradient-to-b from-white/80 via-white/40 to-white/30 backdrop-blur-2xl
         shadow-[0_20px_40px_-12px_rgba(0,0,0,0.05)]
-        ${isRecording ? 'shadow-[0_25px_50px_-12px_rgba(99,102,241,0.15)] ring-1 ring-pro-accent/20' : 'hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.08)] hover:scale-[1.01]'}
+        ${isRecording ? "shadow-[0_25px_50px_-12px_rgba(99,102,241,0.15)] ring-1 ring-pro-accent/20" : "hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.08)] hover:scale-[1.01]"}
       `}
       >
         {/* Subtle internal gradient overlay */}
@@ -3706,10 +3724,10 @@ const WaveformVisualizer = ({
                   relative group/btn flex items-center justify-center gap-3 px-8 py-4 rounded-full font-black text-[11px] uppercase tracking-[0.2em] transition-all duration-300
                   ${
                     isProcessing
-                      ? 'bg-pro-bg text-pro-text-muted cursor-not-allowed border border-pro-border'
+                      ? "bg-pro-bg text-pro-text-muted cursor-not-allowed border border-pro-border"
                       : isRecording
-                        ? 'bg-white text-pro-text-main shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 border border-transparent ring-2 ring-red-50/50'
-                        : 'bg-pro-text-main text-white shadow-[0_10px_20px_-5px_rgba(0,0,0,0.2)] hover:shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm'
+                        ? "bg-white text-pro-text-main shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 border border-transparent ring-2 ring-red-50/50"
+                        : "bg-pro-text-main text-white shadow-[0_10px_20px_-5px_rgba(0,0,0,0.2)] hover:shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm"
                   }
                 `}
           >
