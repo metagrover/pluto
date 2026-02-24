@@ -27,6 +27,7 @@ interface ZenModeProps {
 }
 
 type EntitySuggestion = {
+  id?: string;
   type: string;
   name: string;
 };
@@ -205,7 +206,7 @@ export const ZenMode = ({
                       {suggestions.map((person) => (
                         <button
                           type="button"
-                          key={person.id}
+                          key={person.id ?? person.name}
                           onClick={() => {
                             setMeetingParticipants((prev: string[]) => [
                               ...prev,

@@ -30,7 +30,7 @@ a = Analysis(
         'sklearn.tree',
         'sklearn.tree._utils',
     ],
-    hookspath=[],
+    hookspath=['hooks'],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],

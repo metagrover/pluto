@@ -3,12 +3,16 @@
 interface Window {
   webkitAudioContext?: typeof AudioContext;
   ipcRenderer: {
-    invoke: <T = unknown>(channel: string, ...args: unknown[]) => Promise<T>;
-    send: (channel: string, ...args: unknown[]) => void;
+    // biome-ignore lint/suspicious/noExplicitAny: IPC payloads are dynamic across channels.
+    invoke: <T = any>(channel: string, ...args: any[]) => Promise<T>;
+    // biome-ignore lint/suspicious/noExplicitAny: IPC payloads are dynamic across channels.
+    send: (channel: string, ...args: any[]) => void;
     on: (
       channel: string,
-      listener: (event: unknown, ...args: unknown[]) => void,
+      // biome-ignore lint/suspicious/noExplicitAny: IPC payloads are dynamic across channels.
+      listener: (event: unknown, ...args: any[]) => void,
     ) => void;
-    off: (channel: string, listener: (...args: unknown[]) => void) => void;
+    // biome-ignore lint/suspicious/noExplicitAny: IPC payloads are dynamic across channels.
+    off: (channel: string, listener: (...args: any[]) => void) => void;
   };
 }

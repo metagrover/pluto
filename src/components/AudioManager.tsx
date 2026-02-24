@@ -44,6 +44,21 @@ interface TranscriptionSegment {
 }
 
 type MicChunkFormat = 'webm' | 'ogg' | 'wav';
+type NativeAudioChunk =
+  | Uint8Array
+  | ArrayBuffer
+  | ArrayBufferView
+  | { type: 'Buffer'; data: number[] }
+  | null
+  | undefined;
+
+const isBufferJson = (
+  chunk: unknown,
+): chunk is { type: 'Buffer'; data: number[] } => {
+  if (!chunk || typeof chunk !== 'object') return false;
+  const record = chunk as { type?: unknown; data?: unknown };
+  return record.type === 'Buffer' && Array.isArray(record.data);
+};
 
 interface PendingMicChunk {
   blob: Blob;
@@ -452,10 +467,7 @@ export const AudioManager = ({
         systemAudioChunkSeenRef.current = false;
 
         // Setup Listener
-        const handler = (
-          _: unknown,
-          chunk: Uint8Array | ArrayBuffer | null | undefined,
-        ) => {
+        const handler = (_: unknown, chunk: NativeAudioChunk) => {
           if (chunk) {
             systemAudioChunkSeenRef.current = true;
             let chunkBytes: Uint8Array | null = null;
@@ -473,16 +485,7 @@ export const AudioManager = ({
                 chunk.byteOffset,
                 chunk.byteLength,
               );
-            } else if (
-              chunk?.buffer instanceof ArrayBuffer &&
-              typeof chunk.byteLength === 'number'
-            ) {
-              chunkBytes = new Uint8Array(
-                chunk.buffer,
-                chunk.byteOffset ?? 0,
-                chunk.byteLength,
-              );
-            } else if (chunk?.type === 'Buffer' && Array.isArray(chunk.data)) {
+            } else if (isBufferJson(chunk)) {
               chunkBytes = Uint8Array.from(chunk.data);
             }
             if (!chunkBytes || chunkBytes.length === 0) {

@@ -444,6 +444,7 @@ export const getRelationshipLabel = (
     produced: 'produced',
     impacts: 'impacts',
     works_on: 'works on',
+    involved_in: 'involved in',
   };
   return labels[relationship];
 };
