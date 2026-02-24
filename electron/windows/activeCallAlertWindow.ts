@@ -19,6 +19,18 @@ export const createActiveCallAlertController = ({
 }: ActiveCallAlertControllerOptions) => {
   let activeCallAlertWin: BrowserWindow | null = null;
 
+  const enforceAlertBounds = (win: BrowserWindow, x: number, y: number) => {
+    if (win.isDestroyed()) return;
+    if (win.isFullScreen()) win.setFullScreen(false);
+    if (win.isMaximized()) win.unmaximize();
+    win.setBounds({
+      x,
+      y,
+      width: ALERT_WIDTH,
+      height: ALERT_HEIGHT,
+    });
+  };
+
   const close = () => {
     if (!activeCallAlertWin || activeCallAlertWin.isDestroyed()) {
       activeCallAlertWin = null;
@@ -45,11 +57,14 @@ export const createActiveCallAlertController = ({
       height: ALERT_HEIGHT,
       x,
       y,
+      useContentSize: true,
       minWidth: ALERT_WIDTH,
       maxWidth: ALERT_WIDTH,
       minHeight: ALERT_HEIGHT,
       maxHeight: ALERT_HEIGHT,
       resizable: false,
+      maximizable: false,
+      fullscreenable: false,
       frame: false,
       transparent: true,
       alwaysOnTop: true,
@@ -64,10 +79,18 @@ export const createActiveCallAlertController = ({
     });
 
     activeCallAlertWin = alertWin;
+    enforceAlertBounds(alertWin, x, y);
+    alertWin.on('maximize', () => {
+      enforceAlertBounds(alertWin, x, y);
+    });
+    alertWin.on('enter-full-screen', () => {
+      enforceAlertBounds(alertWin, x, y);
+    });
     alertWin.setAlwaysOnTop(true, 'status');
     alertWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     const reveal = () => {
       if (alertWin.isDestroyed() || alertWin.isVisible()) return;
+      enforceAlertBounds(alertWin, x, y);
       alertWin.showInactive();
     };
     const revealFallbackTimer = setTimeout(reveal, 700);
