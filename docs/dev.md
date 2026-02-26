@@ -103,3 +103,32 @@ xcode-select --install
 2. `pnpm install`
 3. If WhisperX fails: pin `setuptools<82` (see above) and re-run `pnpm run setup-python`
 4. If Electron throws ABI mismatch: run `pnpm exec electron-rebuild -f -w better-sqlite3`
+
+## Code Formatting with Biome
+
+This project uses [Biome](https://biomejs.dev/) for code formatting and linting.
+
+**Configuration**
+
+- Biome config: `biome.json` at project root
+- Biome runs as part of the pre-commit hook via Lefthook
+- Pre-commit hook runs `biome check {staged_files} --write` on staged files only
+
+**Manual Usage**
+
+```bash
+# Check for formatting issues
+pnpm run check
+
+# Auto-fix formatting issues
+pnpm run fix
+```
+
+**Pre-commit Hook**
+
+When you commit, Lefthook automatically:
+1. Runs `biome check` on staged JavaScript, TypeScript, and JSON files
+2. Auto-fixes formatting issues with the `--write` flag
+3. Re-stages the fixed files
+
+If Biome finds issues during commit, they will be automatically fixed. You may need to re-stage and commit again if files were modified.
