@@ -102,6 +102,7 @@ export const MeetingView = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [transcriptVisible]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: This effect intentionally resets local entity detail state when the selected meeting id changes.
   useEffect(() => {
     setSelectedEntity(null);
     setEntityMeetings([]);
