@@ -7,8 +7,8 @@ vi.mock('electron', () => ({
 }));
 
 vi.mock('better-sqlite3', () => {
-  return {
-    default: () => ({
+  function BetterSqlite3Mock() {
+    return {
       prepare: vi.fn().mockReturnValue({
         run: vi.fn(),
         get: vi.fn(),
@@ -16,7 +16,11 @@ vi.mock('better-sqlite3', () => {
       }),
       transaction: vi.fn((fn) => fn),
       exec: vi.fn(),
-    }),
+    };
+  }
+
+  return {
+    default: BetterSqlite3Mock,
   };
 });
 
