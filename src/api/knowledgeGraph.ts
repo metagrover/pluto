@@ -56,6 +56,18 @@ export interface MeetingEntity {
   created_at: string;
 }
 
+export interface EntityMeeting {
+  id: string;
+  title: string;
+  meeting_type: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_seconds: number | null;
+  created_at: string | null;
+  mention_count: number;
+  context: string | null;
+}
+
 export interface KnowledgeGraphStats {
   total_entities: number;
   by_type: Record<EntityType, number>;
@@ -344,7 +356,7 @@ export const getMeetingEntities = async (
  */
 export const getEntityMeetings = async (
   entityId: string,
-): Promise<(Entity & { mention_count: number; context: string | null })[]> => {
+): Promise<EntityMeeting[]> => {
   return invoke('GET_ENTITY_MEETINGS', entityId);
 };
 

@@ -348,7 +348,7 @@ For local embeddings (privacy-preserving):
 * [x] Entity resolution (fuzzy matching for deduplication)
 * [x] Relationship inference from transcript context
 * [x] Entity sidebar panel
-* [ ] Entity detail view (all mentions across meetings)
+* [x] Entity detail view (all mentions across meetings)
 
 
 ### Sprint 3: Live Documents (Mind Map)
