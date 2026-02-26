@@ -19,6 +19,14 @@ import {
   analysisDocumentToMarkdown,
   resolveMeetingAnalysisDocument,
 } from '../../utils/analysisDocument';
+import {
+  ENTITY_ICONS,
+  type Entity,
+  type EntityMeeting,
+  getEntityMeetings,
+  getEntityTypeLabel,
+  getRelatedEntities,
+} from '../../api/knowledgeGraph';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 
 interface MeetingViewProps {
@@ -54,6 +62,15 @@ export const MeetingView = ({
 
   const transcriptBodyRef = useRef<HTMLDivElement>(null);
   const [transcriptBodyHeight, setTranscriptBodyHeight] = useState(0);
+  const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
+  const [entityMeetings, setEntityMeetings] = useState<EntityMeeting[]>([]);
+  const [relatedEntities, setRelatedEntities] = useState<
+    (Entity & { relationship: string; direction: 'outgoing' | 'incoming' })[]
+  >([]);
+  const [entityDetailsLoading, setEntityDetailsLoading] = useState(false);
+  const [entityDetailsError, setEntityDetailsError] = useState<string | null>(
+    null,
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: The selected meeting fields are intentionally included to recalculate measured height when content changes.
   useLayoutEffect(() => {
@@ -85,6 +102,51 @@ export const MeetingView = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [transcriptVisible]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: This effect intentionally resets local entity detail state when the selected meeting id changes.
+  useEffect(() => {
+    setSelectedEntity(null);
+    setEntityMeetings([]);
+    setRelatedEntities([]);
+    setEntityDetailsError(null);
+  }, [selectedMeeting.id]);
+
+  useEffect(() => {
+    if (!selectedEntity) {
+      setEntityMeetings([]);
+      setRelatedEntities([]);
+      setEntityDetailsLoading(false);
+      setEntityDetailsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setEntityDetailsLoading(true);
+    setEntityDetailsError(null);
+
+    Promise.all([
+      getEntityMeetings(selectedEntity.id),
+      getRelatedEntities(selectedEntity.id),
+    ])
+      .then(([meetings, related]) => {
+        if (cancelled) return;
+        setEntityMeetings(meetings);
+        setRelatedEntities(related);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('Failed to fetch entity details:', error);
+        setEntityDetailsError('Could not load entity details.');
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setEntityDetailsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEntity]);
+
   const analysisDoc = resolveMeetingAnalysisDocument(selectedMeeting);
   const canonicalAnalysisMarkdown = analysisDoc
     ? analysisDocumentToMarkdown(analysisDoc)
@@ -95,6 +157,22 @@ export const MeetingView = ({
   const keyPoints = analysisDoc?.key_points || [];
   const actionItems = analysisDoc?.action_items || [];
   const decisions = analysisDoc?.decisions || [];
+  const totalEntityMentions = entityMeetings.reduce(
+    (sum, meeting) => sum + meeting.mention_count,
+    0,
+  );
+
+  const formatEntityMeetingDate = (meeting: EntityMeeting): string => {
+    const value = meeting.started_at || meeting.created_at;
+    if (!value) return 'Unknown date';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return 'Unknown date';
+    return parsed.toLocaleDateString([], {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
 
   return (
     <div
@@ -267,14 +345,147 @@ export const MeetingView = ({
       </div>
 
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
-      <div className="mb-12">
+      <div className="mb-12 space-y-6">
         <EntitySidebar
           meetingId={String(selectedMeeting.id)}
           onEntityClick={(entity) => {
-            // Handle entity jump - for now just high level
-            console.log('Entity clicked:', entity);
+            setSelectedEntity(entity);
           }}
         />
+        {selectedEntity && (
+          <div className="bg-white/70 border border-pro-border/50 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-2">
+                <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
+                  Entity Detail
+                </p>
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">
+                    {ENTITY_ICONS[selectedEntity.type]}
+                  </span>
+                  <div>
+                    <h3 className="text-xl font-black text-pro-text-main">
+                      {selectedEntity.name}
+                    </h3>
+                    <p className="text-[11px] font-bold uppercase tracking-widest text-pro-text-muted/60">
+                      {getEntityTypeLabel(selectedEntity.type)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedEntity(null)}
+                className="h-8 px-3 rounded-full border border-pro-border text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60 hover:text-pro-text-main hover:border-pro-accent/30 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+
+            {entityDetailsLoading ? (
+              <div className="p-5 rounded-2xl border border-pro-border/50 bg-pro-bg/50 text-[12px] font-semibold text-pro-text-muted/60">
+                Loading mentions and related entities...
+              </div>
+            ) : entityDetailsError ? (
+              <div className="p-5 rounded-2xl border border-red-200 bg-red-50/50 text-[12px] font-semibold text-red-600">
+                {entityDetailsError}
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-2.5 py-1 rounded-full bg-pro-accent/10 text-[10px] font-black uppercase tracking-widest text-pro-accent">
+                    {entityMeetings.length} meetings
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full bg-stone-100 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
+                    {totalEntityMentions} mentions
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full bg-stone-100 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
+                    {relatedEntities.length} connections
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/40">
+                      All Mentions Across Meetings
+                    </h4>
+                    <div className="space-y-3">
+                      {entityMeetings.length === 0 ? (
+                        <p className="p-4 rounded-2xl border border-dashed border-pro-border text-[12px] text-pro-text-muted/60">
+                          No prior meeting mentions found.
+                        </p>
+                      ) : (
+                        entityMeetings.map((meeting) => (
+                          <div
+                            key={meeting.id}
+                            className="p-4 rounded-2xl border border-pro-border/50 bg-white/70 space-y-2"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-[13px] font-bold text-pro-text-main truncate">
+                                {meeting.title || 'Untitled Session'}
+                              </p>
+                              <span className="text-[10px] font-bold uppercase tracking-widest text-pro-text-muted/50">
+                                {formatEntityMeetingDate(meeting)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60">
+                                {meeting.mention_count} mention
+                                {meeting.mention_count === 1 ? '' : 's'}
+                              </span>
+                              {String(meeting.id) ===
+                                String(selectedMeeting.id) && (
+                                <span className="text-[9px] font-black uppercase tracking-widest text-pro-accent">
+                                  Current Meeting
+                                </span>
+                              )}
+                            </div>
+                            {meeting.context ? (
+                              <p className="text-[12px] text-pro-text-muted/80 line-clamp-3">
+                                {meeting.context}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/40">
+                      Connected Entities
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {relatedEntities.length === 0 ? (
+                        <p className="w-full p-4 rounded-2xl border border-dashed border-pro-border text-[12px] text-pro-text-muted/60">
+                          No relationships inferred yet.
+                        </p>
+                      ) : (
+                        relatedEntities.map((related) => (
+                          <button
+                            key={`${related.id}-${related.relationship}-${related.direction}`}
+                            type="button"
+                            onClick={() => setSelectedEntity(related)}
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-pro-border bg-white text-[11px] font-bold text-pro-text-main hover:border-pro-accent/30 hover:text-pro-accent transition-colors"
+                            title={`${related.direction === 'outgoing' ? 'Links to' : 'Linked from'} ${related.name}`}
+                          >
+                            <span>{ENTITY_ICONS[related.type]}</span>
+                            <span className="truncate max-w-[120px]">
+                              {related.name}
+                            </span>
+                            <span className="text-[9px] font-black uppercase tracking-widest text-pro-text-muted/50">
+                              {related.relationship.replace(/_/g, ' ')}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Summary & Analysis Section */}
