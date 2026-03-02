@@ -4,6 +4,7 @@ import {
   ChevronDown,
   Copy,
   FileText,
+  Loader2,
   MessageSquare,
   Sparkles,
 } from 'lucide-react';
@@ -14,11 +15,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { Meeting, TranscriptSegment } from '../../types';
-import {
-  analysisDocumentToMarkdown,
-  resolveMeetingAnalysisDocument,
-} from '../../utils/analysisDocument';
 import {
   ENTITY_ICONS,
   type Entity,
@@ -27,6 +23,13 @@ import {
   getEntityTypeLabel,
   getRelatedEntities,
 } from '../../api/knowledgeGraph';
+import type { Meeting, TranscriptSegment } from '../../types';
+import {
+  analysisDocumentToMarkdown,
+  parseAnalysisDocumentJson,
+  resolveMeetingAnalysisDocument,
+} from '../../utils/analysisDocument';
+import { buildAnalysisTranscriptFromJson } from '../../utils/transcript';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 
 interface MeetingViewProps {
@@ -71,6 +74,10 @@ export const MeetingView = ({
   const [entityDetailsError, setEntityDetailsError] = useState<string | null>(
     null,
   );
+  const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
+  const [regenerateNotesError, setRegenerateNotesError] = useState<
+    string | null
+  >(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: The selected meeting fields are intentionally included to recalculate measured height when content changes.
   useLayoutEffect(() => {
@@ -108,6 +115,8 @@ export const MeetingView = ({
     setEntityMeetings([]);
     setRelatedEntities([]);
     setEntityDetailsError(null);
+    setIsRegeneratingNotes(false);
+    setRegenerateNotesError(null);
   }, [selectedMeeting.id]);
 
   useEffect(() => {
@@ -172,6 +181,78 @@ export const MeetingView = ({
       day: 'numeric',
       year: 'numeric',
     });
+  };
+
+  const regenerateEnhancedNotes = async () => {
+    if (isRegeneratingNotes) return;
+
+    setRegenerateNotesError(null);
+    const transcript = buildAnalysisTranscriptFromJson(
+      selectedMeeting.transcript_json,
+    );
+    if (!transcript.trim()) {
+      setRegenerateNotesError(
+        'No transcript is available for enhanced note generation.',
+      );
+      return;
+    }
+
+    setIsRegeneratingNotes(true);
+    try {
+      const artifacts = (await window.ipcRenderer.invoke(
+        'GENERATE_ANALYSIS_V2',
+        {
+          transcript,
+          userNotes: selectedMeeting.user_notes || '',
+        },
+      )) as { markdown?: unknown; analysis?: unknown; signals?: unknown };
+
+      const normalizedAnalysis =
+        artifacts?.analysis != null
+          ? parseAnalysisDocumentJson(JSON.stringify(artifacts.analysis))
+          : null;
+      if (!normalizedAnalysis) {
+        setRegenerateNotesError(
+          'Enhanced note generation returned an invalid response. Check LLM settings and try again.',
+        );
+        return;
+      }
+      if (normalizedAnalysis.quality.fallback_used) {
+        setRegenerateNotesError(
+          'Enhanced note generation failed. Verify LLM provider/API settings, then retry.',
+        );
+        return;
+      }
+      const enhancedNotes =
+        typeof artifacts?.markdown === 'string' && artifacts.markdown.trim()
+          ? artifacts.markdown
+          : analysisDocumentToMarkdown(normalizedAnalysis);
+
+      await window.ipcRenderer.invoke('SAVE_MEETING', {
+        ...selectedMeeting,
+        enhanced_notes: enhancedNotes,
+        analysis_json: JSON.stringify(normalizedAnalysis),
+        analysis_schema_version:
+          normalizedAnalysis.analysis_schema_version ??
+          selectedMeeting.analysis_schema_version ??
+          null,
+        analysis_format_pass: normalizedAnalysis.quality.format_pass,
+        analysis_retry_count: normalizedAnalysis.quality.retry_count,
+        analysis_fallback_used: normalizedAnalysis.quality.fallback_used,
+        value_signals_json:
+          artifacts?.signals != null
+            ? JSON.stringify(artifacts.signals)
+            : selectedMeeting.value_signals_json || null,
+      });
+      await fetchMeetings();
+    } catch (error) {
+      console.error('Failed to regenerate enhanced notes:', error);
+      setRegenerateNotesError(
+        'Could not regenerate enhanced notes. Please try again.',
+      );
+    } finally {
+      setIsRegeneratingNotes(false);
+    }
   };
 
   return (
@@ -278,6 +359,27 @@ export const MeetingView = ({
         <div className="flex gap-2">
           <button
             type="button"
+            onClick={regenerateEnhancedNotes}
+            disabled={isRegeneratingNotes}
+            className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${
+              isRegeneratingNotes
+                ? 'bg-pro-bg border-pro-border/40 text-pro-text-muted cursor-not-allowed'
+                : 'bg-pro-bg border-pro-border/40 hover:bg-white text-pro-text-main hover:scale-105'
+            }`}
+            title={
+              isRegeneratingNotes
+                ? 'Generating Enhanced Notes...'
+                : 'Regenerate Enhanced Notes'
+            }
+          >
+            {isRegeneratingNotes ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4 opacity-70" />
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
             className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-white text-pro-text-main hover:scale-105'}`}
             title="Copy Summary"
@@ -343,6 +445,11 @@ export const MeetingView = ({
           </button>
         </div>
       </div>
+      {regenerateNotesError ? (
+        <p className="-mt-4 text-xs font-semibold text-red-600">
+          {regenerateNotesError}
+        </p>
+      ) : null}
 
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
       <div className="mb-12 space-y-6">

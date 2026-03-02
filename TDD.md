@@ -333,7 +333,7 @@ For local embeddings (privacy-preserving):
 * [x] Reliable batch recording flow
 * [x] Speaker diarization (via WhisperX + pyannote)
 * [x] Configurable LLM provider layer (Ollama, Gemini, OpenAI, Claude)
-* [ ] **Enhanced notes generation (LLM)** — deferred to Sprint 2
+* [x] **Enhanced notes generation (LLM)** — completed in Sprint 2
 * [ ] **Folder organization + tags** — deferred to Sprint 3
 
 ### Sprint 2: Knowledge Graph Foundation (Current)
