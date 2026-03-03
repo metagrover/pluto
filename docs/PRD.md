@@ -2,8 +2,8 @@
 
 ## Pluto: Your Second Brain for Work
 
-**Version:** 3.1  
-**Last Updated:** February 22, 2026  
+**Version:** 3.2  
+**Last Updated:** March 3, 2026  
 **Status:** Active Development
 
 ---
@@ -171,6 +171,13 @@ After each transcription, Pluto:
 | Action Item | *"I'll send the doc by Friday"* → `Action: Send doc, Due: Friday, Owner: You` |
 | Decision | *"We decided to use PostgreSQL"* → `Decision: Use PostgreSQL` |
 | Topic | *"...the API migration..."* → `Topic: API Migration` |
+
+### 6.2.1 Organization Strategy (Decision)
+
+Pluto uses a **project-first organization model**:
+- `Project` entities in the knowledge graph are the canonical way to organize meeting context.
+- Pluto does **not** introduce a second taxonomy (separate folder/tag system) for meeting organization.
+- Future organization UX should build on project links, saved project views, and project-centric synthesis.
 
 ### 6.3 Live Documents
 

@@ -148,7 +148,7 @@ CREATE TABLE meetings (
   transcript_json TEXT,
   user_notes TEXT,
   enhanced_notes TEXT,
-  folder_id TEXT,
+  folder_id TEXT, -- legacy/unused: project entities are the canonical organization model
   is_favorite BOOLEAN DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -159,20 +159,16 @@ CREATE VIRTUAL TABLE meetings_fts USING fts5(
   content='meetings', content_rowid='rowid'
 );
 
--- Organization
-CREATE TABLE folders (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  parent_id TEXT,
-  icon TEXT
-);
-
-CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT, color TEXT);
-CREATE TABLE meeting_tags (meeting_id TEXT, tag_id TEXT);
-
 -- Settings
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 ```
+
+### 4.1.1 Organization Decision
+
+Pluto standardizes on a **project-first** model:
+- `project` entities in the knowledge graph are the single source of truth for organization.
+- We intentionally avoid a parallel folder/tag taxonomy to prevent duplicate categorization and UI overhead.
+- `meetings.folder_id` may remain in legacy schemas but is not part of the active product model.
 
 ### 4.2 Knowledge Graph Tables
 
@@ -334,7 +330,7 @@ For local embeddings (privacy-preserving):
 * [x] Speaker diarization (via WhisperX + pyannote)
 * [x] Configurable LLM provider layer (Ollama, Gemini, OpenAI, Claude)
 * [x] **Enhanced notes generation (LLM)** — completed in Sprint 2
-* [ ] **Folder organization + tags** — deferred to Sprint 3
+* [x] **Project-first organization strategy** — documented decision to avoid separate folder/tag taxonomy
 
 ### Sprint 2: Knowledge Graph Foundation (Current)
 * [x] Database schema: `entities`, `entity_links`, `meeting_entities` tables
