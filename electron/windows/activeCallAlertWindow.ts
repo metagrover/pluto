@@ -87,7 +87,7 @@ export const createActiveCallAlertController = ({
       enforceAlertBounds(alertWin, x, y);
     });
     alertWin.setAlwaysOnTop(true, 'status');
-    alertWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // Avoid setVisibleOnAllWorkspaces: on macOS it implicitly hides the dock and resets the app icon to Electron default (electron/electron#37487)
     const reveal = () => {
       if (alertWin.isDestroyed() || alertWin.isVisible()) return;
       enforceAlertBounds(alertWin, x, y);
