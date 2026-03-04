@@ -3,6 +3,8 @@ import { AudioManager } from './components/AudioManager';
 import { SetupWizard } from './components/Setup/SetupWizard';
 import './App.css';
 import { useActiveCallMonitor } from './hooks/useActiveCallMonitor';
+import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
+import { AutoEndToast } from './components/ui/AutoEndToast';
 
 // Layout Components
 import { Sidebar } from './components/layout/Sidebar';
@@ -70,9 +72,10 @@ function App() {
   const [plutoResponse, setPlutoResponse] = useState('');
   const [transcriptVisible, setTranscriptVisible] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [autoEndEnabled, setAutoEndEnabled] = useState(true);
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
-  const stopSessionRef = useRef<(() => void) | null>(null);
+  const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
   const startSessionRef = useRef<(() => void) | null>(null);
   const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(
     null,
@@ -92,6 +95,17 @@ function App() {
     isRecording,
     isProcessing,
     startSessionRef,
+  });
+
+  const {
+    autoEndTriggered,
+    autoEndReason,
+    autoEndAppName,
+    dismissAutoEndToast,
+  } = useAutoEndMonitor({
+    isRecording,
+    autoEndEnabled,
+    stopSessionRef,
   });
 
   const handleCopySummary = (text: string) => {
@@ -213,6 +227,11 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'ollama_model').then((val) => {
       if (val) setOllamaModel(val);
     });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'auto_end_enabled')
+      .then((val) => {
+        if (val !== null) setAutoEndEnabled(val !== 'false');
+      });
 
     const checkServer = async () => {
       try {
@@ -726,6 +745,8 @@ function App() {
         setClaudeApiKey={setClaudeApiKey}
         ollamaModel={ollamaModel}
         setOllamaModel={setOllamaModel}
+        autoEndEnabled={autoEndEnabled}
+        setAutoEndEnabled={setAutoEndEnabled}
         fetchMeetings={fetchMeetings}
         setSelectedMeetingId={setSelectedMeetingId}
       />
@@ -740,6 +761,20 @@ function App() {
           window.ipcRenderer.invoke('OPEN_SYSTEM_SETTINGS_PRIVACY', pane);
         }}
       />
+
+      {autoEndTriggered && (
+        <AutoEndToast
+          reason={autoEndReason}
+          appName={autoEndAppName}
+          onReopen={() => {
+            dismissAutoEndToast();
+            if (startSessionRef.current) {
+              startSessionRef.current();
+            }
+          }}
+          onDismiss={dismissAutoEndToast}
+        />
+      )}
     </div>
   );
 }

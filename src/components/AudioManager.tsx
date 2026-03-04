@@ -28,7 +28,9 @@ interface AudioManagerProps {
   participants?: string[];
   systemAudioStatus?: string;
 
-  onStopSessionRef?: React.MutableRefObject<(() => void) | null>;
+  onStopSessionRef?: React.MutableRefObject<
+    ((endReason?: string) => void) | null
+  >;
   onStartSessionRef?: React.MutableRefObject<(() => void) | null>;
   onAnalyserReadyRef?: React.MutableRefObject<
     ((analyser: AnalyserNode) => void) | null
@@ -2789,8 +2791,8 @@ export const AudioManager = ({
     return true;
   };
 
-  const stopSession = async () => {
-    console.log('[Pluto] Stopping session...');
+  const stopSession = async (endReason?: string) => {
+    console.log('[Pluto] Stopping session...', endReason ? `(reason: ${endReason})` : '');
     setIsProcessing(true);
 
     try {
@@ -3405,6 +3407,7 @@ export const AudioManager = ({
         participants: participants,
         folder_id: null,
         is_favorite: false,
+        end_reason: endReason || 'manual',
       };
 
       await window.ipcRenderer.invoke('SAVE_MEETING', meetingData);

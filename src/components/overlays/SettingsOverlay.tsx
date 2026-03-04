@@ -13,6 +13,8 @@ interface SettingsOverlayProps {
   setClaudeApiKey: (val: string) => void;
   ollamaModel: string;
   setOllamaModel: (val: string) => void;
+  autoEndEnabled: boolean;
+  setAutoEndEnabled: (val: boolean) => void;
   fetchMeetings: () => void;
   setSelectedMeetingId: (id: string | number | null) => void;
 }
@@ -32,6 +34,8 @@ export const SettingsOverlay = ({
   setClaudeApiKey,
   ollamaModel,
   setOllamaModel,
+  autoEndEnabled,
+  setAutoEndEnabled,
   fetchMeetings,
   setSelectedMeetingId,
 }: SettingsOverlayProps) => {
@@ -221,6 +225,40 @@ export const SettingsOverlay = ({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Meeting Section */}
+          <div className="space-y-4 pt-2">
+            <p className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
+              Meeting
+            </p>
+            <div className="flex items-center justify-between p-5 rounded-2xl border border-pro-border bg-white">
+              <div className="flex flex-col gap-1">
+                <span className="text-[13px] font-bold tracking-tight text-pro-text-main">
+                  Auto-end when call ends
+                </span>
+                <span className="text-[11px] text-pro-text-muted/60 font-medium">
+                  Automatically stop recording when your call app closes or
+                  audio goes silent
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !autoEndEnabled;
+                  setAutoEndEnabled(next);
+                  window.ipcRenderer.invoke('SET_SETTING', {
+                    key: 'auto_end_enabled',
+                    value: next ? 'true' : 'false',
+                  });
+                }}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${autoEndEnabled ? 'bg-pro-accent' : 'bg-pro-border/60'}`}
+              >
+                <div
+                  className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow-sm transition-transform ${autoEndEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-4 pt-2">

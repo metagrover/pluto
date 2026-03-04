@@ -477,7 +477,17 @@ app.whenReady().then(async () => {
       );
       fs.writeFileSync(rawPath, buffer);
 
+      const meetingsDir = path.join(app.getPath('userData'), 'meetings');
+      fs.mkdirSync(meetingsDir, { recursive: true });
+
       return new Promise<string | null>((resolve) => {
+        if (!fs.existsSync(rawPath) || fs.statSync(rawPath).size === 0) {
+          console.warn('[Pluto] Conversion skipped: temp file missing or empty');
+          try {
+            if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
+          } catch (_) {}
+          return resolve(null);
+        }
         console.log(`[Pluto] Converting ${sourceTag} to WAV: ${wavPath}`);
         let command = ffmpeg(rawPath);
 
@@ -713,6 +723,16 @@ app.whenReady().then(async () => {
       return db.resetKnowledge();
     } catch (e) {
       console.error('[Pluto] RESET_KNOWLEDGE failed:', e);
+      throw e;
+    }
+  });
+
+  // Auto-end logging
+  ipcMain.handle('LOG_AUTO_END_EVENT', (_event, event) => {
+    try {
+      return db.logAutoEndEvent(event);
+    } catch (e) {
+      console.error('[AutoEnd] LOG_AUTO_END_EVENT failed:', e);
       throw e;
     }
   });
