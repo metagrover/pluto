@@ -226,3 +226,116 @@ Respond with valid JSON in this exact format:
 ${contextBlock ? `${contextBlock}\n\n` : ''}Transcript:
 ${transcript}`;
 };
+
+type KnowledgePromptSourceMeeting = {
+  id: string;
+  title: string;
+  occurred_at: string | null;
+  evidence: string;
+};
+
+export const getKnowledgeDocumentPrompt = (params: {
+  scopeType: string;
+  scopeTitle: string;
+  sourceMeetings: KnowledgePromptSourceMeeting[];
+  previousStructuredJson?: string | null;
+}): string => {
+  const { scopeType, scopeTitle, sourceMeetings, previousStructuredJson } =
+    params;
+
+  const sourcesBlock = sourceMeetings
+    .map((meeting) => {
+      const occurred = meeting.occurred_at ? ` (${meeting.occurred_at})` : '';
+      return `- id: ${meeting.id}${occurred}\n  title: ${meeting.title}\n  evidence: ${meeting.evidence}`;
+    })
+    .join('\n');
+
+  return `You are an expert at producing strict, citation-grounded knowledge documents for Pluto.
+
+Non-negotiable requirements:
+- Use ONLY the provided meeting evidence. Never invent facts.
+- Every statement MUST include citations with meeting_id + quote.
+- quote MUST be a verbatim substring of the cited meeting's evidence.
+- Output MUST be valid JSON only (no markdown fences, no commentary).
+
+You are generating a structured knowledge document for this scope:
+- scope.type: ${scopeType}
+- scope.title: ${scopeTitle}
+
+Available meeting evidence (newest first):
+${sourcesBlock || '(none)'}
+
+${
+  previousStructuredJson?.trim()
+    ? `Previous structured document JSON (may be empty/invalid; use as a hint for stability when updating):\n${previousStructuredJson}`
+    : 'No previous structured document is provided.'
+}
+
+Return JSON in this exact shape:
+{
+  "schema_version": 1,
+  "scope": { "type": "meeting|entity|workspace|topic|person|project|decision|action_item|other", "title": "string" },
+  "chapters": [
+    {
+      "chapter_id": "string",
+      "title": "string",
+      "decisions": [{"id":"string","text":"string","why_it_matters":"string","citations":[{"meeting_id":"string","quote":"string"}]}],
+      "topic_evolution": [{"id":"string","text":"string","why_it_matters":"string","citations":[{"meeting_id":"string","quote":"string"}]}],
+      "open_risks": [{"id":"string","text":"string","why_it_matters":"string","citations":[{"meeting_id":"string","quote":"string"}]}],
+      "signals": [{"id":"string","text":"string","why_it_matters":"string","citations":[{"meeting_id":"string","quote":"string"}]}]
+    }
+  ],
+  "dependency_suggestions": [
+    {
+      "source_name": "string",
+      "target_name": "string",
+      "relationship": "depends_on|blocked_by|owns|impacts",
+      "why": "string",
+      "citations": [{"meeting_id":"string","quote":"string"}]
+    }
+  ]
+}
+
+Quality bar:
+- Prefer fewer, higher-signal items over volume.
+- Avoid generic phrasing ("It is important..."). Be concrete.
+- Keep citations tight (short quotes that clearly support the statement).
+`;
+};
+
+export const getEntitySummaryPrompt = (params: {
+  entityName: string;
+  entityType: string;
+  sources: Array<{ id: string; title: string; evidence: string }>;
+}): string => {
+  const { entityName, entityType, sources } = params;
+
+  const sourcesBlock = sources
+    .map(
+      (source) =>
+        `- id: ${source.id}\n  title: ${source.title}\n  evidence: ${source.evidence}`,
+    )
+    .join('\n');
+
+  return `You are generating a concise, citation-grounded summary for a single entity in Pluto's knowledge graph.
+
+Entity:
+- name: ${entityName}
+- type: ${entityType}
+
+Rules:
+- Use ONLY the provided evidence snippets. Never invent facts.
+- Output MUST be valid JSON only.
+- Write 3-8 short sentences. Each sentence should be directly supported by cited sources.
+
+Available evidence snippets:
+${sourcesBlock || '(none)'}
+
+Return JSON in this exact shape:
+{
+  "sentences": [
+    { "text": "string", "source_meeting_ids": ["string"] }
+  ]
+}
+`;
+};
