@@ -364,7 +364,7 @@ export const MeetingView = ({
             className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${
               isRegeneratingNotes
                 ? 'bg-pro-bg border-pro-border/40 text-pro-text-muted cursor-not-allowed'
-                : 'bg-pro-bg border-pro-border/40 hover:bg-white text-pro-text-main hover:scale-105'
+                : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'
             }`}
             title={
               isRegeneratingNotes
@@ -381,7 +381,7 @@ export const MeetingView = ({
           <button
             type="button"
             onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
-            className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-white text-pro-text-main hover:scale-105'}`}
+            className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'}`}
             title="Copy Summary"
           >
             {copySuccess ? (
@@ -404,7 +404,7 @@ export const MeetingView = ({
                 a.click();
               }
             }}
-            className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/40 flex items-center justify-center text-pro-text-main/60 hover:text-pro-text-main hover:bg-white transition-all"
+            className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/40 flex items-center justify-center text-pro-text-main/60 hover:text-pro-text-main hover:bg-pro-surface transition-all"
             title="Export Session"
           >
             <svg
@@ -460,7 +460,7 @@ export const MeetingView = ({
           }}
         />
         {selectedEntity && (
-          <div className="bg-white/70 border border-pro-border/50 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
+          <div className="bg-pro-surface/70 border border-pro-border/50 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
             <div className="flex items-start justify-between gap-4">
               <div className="space-y-2">
                 <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
@@ -525,7 +525,7 @@ export const MeetingView = ({
                         entityMeetings.map((meeting) => (
                           <div
                             key={meeting.id}
-                            className="p-4 rounded-2xl border border-pro-border/50 bg-white/70 space-y-2"
+                            className="p-4 rounded-2xl border border-pro-border/50 bg-pro-surface/70 space-y-2"
                           >
                             <div className="flex items-center justify-between gap-3">
                               <p className="text-[13px] font-bold text-pro-text-main truncate">
@@ -573,7 +573,7 @@ export const MeetingView = ({
                             key={`${related.id}-${related.relationship}-${related.direction}`}
                             type="button"
                             onClick={() => setSelectedEntity(related)}
-                            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-pro-border bg-white text-[11px] font-bold text-pro-text-main hover:border-pro-accent/30 hover:text-pro-accent transition-colors"
+                            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-pro-border bg-pro-surface text-[11px] font-bold text-pro-text-main hover:border-pro-accent/30 hover:text-pro-accent transition-colors"
                             title={`${related.direction === 'outgoing' ? 'Links to' : 'Linked from'} ${related.name}`}
                           >
                             <span>{ENTITY_ICONS[related.type]}</span>
@@ -606,7 +606,7 @@ export const MeetingView = ({
                 <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
                   Executive Summary
                 </h2>
-                <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-white/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
+                <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-pro-surface/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
                   {summaryParagraphs.map((line, i) => (
                     <p
                       key={`${line}-${line.length}`}
@@ -630,7 +630,7 @@ export const MeetingView = ({
                   ).map((item) => (
                     <div
                       key={`${item}-${item.length}`}
-                      className="p-6 rounded-2xl bg-white border border-pro-border shadow-sm flex gap-4 group hover:border-pro-accent/30 transition-all"
+                      className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-sm flex gap-4 group hover:border-pro-accent/30 transition-all"
                     >
                       <span className="text-pro-accent group-hover:scale-125 transition-transform shrink-0 pt-0.5">
                         ◆
@@ -648,7 +648,7 @@ export const MeetingView = ({
                 <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
                   Decisions
                 </h2>
-                <div className="p-8 rounded-[2rem] bg-indigo-50/30 border border-indigo-100/50 space-y-4">
+                <div className="p-8 rounded-[2rem] bg-indigo-50/30 dark:bg-pro-surface/50 border border-indigo-100/50 dark:border-pro-border/30 space-y-4">
                   {(decisions.length > 0
                     ? decisions
                     : ['No explicit decisions were made.']
@@ -660,7 +660,7 @@ export const MeetingView = ({
                       <span className="text-indigo-500 font-bold leading-none -translate-y-[3px]">
                         ↳
                       </span>
-                      <p className="text-[14px] font-semibold text-indigo-900/80 leading-relaxed">
+                      <p className="text-[14px] font-semibold text-indigo-900/80 dark:text-indigo-200/90 leading-relaxed">
                         {highlightEntities(item)}
                       </p>
                     </div>
@@ -682,7 +682,7 @@ export const MeetingView = ({
                   ).map((item) => (
                     <div
                       key={`${item}-${item.length}`}
-                      className="p-6 rounded-2xl bg-white border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect"
+                      className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect"
                     >
                       <div className="w-6 h-6 rounded-lg border border-pro-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-pro-accent group-hover:bg-pro-accent/5 transition-all">
                         <Check className="w-3.5 h-3.5 text-pro-accent opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -724,15 +724,15 @@ export const MeetingView = ({
           {/* Right: Transcript (Collapsible) - Visual polish */}
           <div className="relative bg-pro-bg lg:bg-transparent z-20 flex-1 border-l border-pro-border/40 lg:border-l-0">
             {transcriptVisible && (
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg z-20" />
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg dark:bg-pro-bg z-20" />
             )}
             <div className="flex flex-col">
               {transcriptVisible && (
                 <div
-                  className="sticky z-30 bg-pro-bg pt-6"
+                  className="sticky z-30 bg-pro-bg dark:bg-pro-bg pt-6"
                   style={{ top: '-65px' }}
                 >
-                  <div className="bg-white shadow-md overflow-hidden">
+                  <div className="bg-pro-surface dark:bg-pro-bg shadow-md dark:shadow-none border-b border-transparent dark:border-transparent overflow-hidden">
                     <div className="p-6 flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-pro-accent/10 flex items-center justify-center text-pro-accent">
@@ -771,7 +771,7 @@ export const MeetingView = ({
               >
                 <div
                   ref={transcriptBodyRef}
-                  className="px-8 pb-10 pt-6 bg-stone-50/30"
+                  className="px-8 pb-10 pt-6 bg-stone-50/30 dark:bg-transparent"
                 >
                   <div className="space-y-8 max-w-xl mx-auto pt-4">
                     {(() => {
@@ -841,7 +841,7 @@ export const MeetingView = ({
                   <button
                     type="button"
                     onClick={() => setTranscriptVisible(!transcriptVisible)}
-                    className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
+                    className="group relative px-8 py-3 bg-pro-surface border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
                   >
                     <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
                       Collapse Transcript
@@ -860,7 +860,7 @@ export const MeetingView = ({
               <button
                 type="button"
                 onClick={() => setTranscriptVisible(true)}
-                className="group relative px-8 py-3 bg-white border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
+                className="group relative px-8 py-3 bg-pro-surface border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
               >
                 <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
                   Explore Full Transcript

@@ -48,7 +48,7 @@ export const AskPlutoOverlay = ({
           <button
             type="button"
             onClick={() => setAskPlutoVisible(false)}
-            className="w-10 h-10 rounded-2xl bg-white/5 hover:bg-white/10 transition-all flex items-center justify-center group"
+            className="w-10 h-10 rounded-2xl bg-pro-surface/5 hover:bg-pro-surface/10 transition-all flex items-center justify-center group"
           >
             <span className="text-[10px] font-black text-slate-500 group-hover:text-white transition-colors uppercase tracking-widest">
               Esc
@@ -61,7 +61,7 @@ export const AskPlutoOverlay = ({
           <div className="relative group/input">
             <input
               placeholder="Ask Pluto anything..."
-              className="w-full bg-white/[0.04] border border-white/10 rounded-2xl p-6 text-xl font-medium tracking-tight text-white focus:bg-white/[0.07] focus:border-indigo-500/40 outline-none transition-all placeholder:text-white/10"
+              className="w-full bg-pro-surface/[0.04] border border-white/10 rounded-2xl p-6 text-xl font-medium tracking-tight text-white focus:bg-pro-surface/[0.07] focus:border-indigo-500/40 outline-none transition-all placeholder:text-white/10"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -97,7 +97,7 @@ export const AskPlutoOverlay = ({
                   type="button"
                   key={tag}
                   onClick={() => setQuery(tag)}
-                  className="px-4 py-2 bg-white/[0.04] border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 hover:text-white hover:bg-white/10 transition-all uppercase tracking-widest"
+                  className="px-4 py-2 bg-pro-surface/[0.04] border border-white/5 rounded-xl text-[10px] font-bold text-slate-400 hover:text-white hover:bg-pro-surface/10 transition-all uppercase tracking-widest"
                 >
                   {tag}
                 </button>
@@ -126,7 +126,7 @@ export const AskPlutoOverlay = ({
                   {['Mon Standup', 'Tech Sync'].map((source) => (
                     <span
                       key={source}
-                      className="px-3 py-1.5 bg-white/[0.05] border border-white/10 rounded-lg text-[9px] font-bold text-slate-400 uppercase tracking-wider"
+                      className="px-3 py-1.5 bg-pro-surface/[0.05] border border-white/10 rounded-lg text-[9px] font-bold text-slate-400 uppercase tracking-wider"
                     >
                       {source}
                     </span>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface ZenVisualizerProps {
   analyser: AnalyserNode | null;
@@ -11,24 +11,8 @@ export const ZenVisualizer = ({
 }: ZenVisualizerProps) => {
   const [elapsed, setElapsed] = useState(0);
   const [level, setLevel] = useState(0);
-  const startTimeRef = useRef(Date.now());
 
-  useEffect(() => {
-    // Only run timer if NOT processing
-    if (isProcessing) return;
-
-    const timer = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isProcessing]); // Reset if processing changes? No, we want to freeze.
-
-  // Better Timer Logic:
-  // We want to count UP while !isProcessing.
-  // When isProcessing becomes true, we just stop updating.
-
-  // ... rewritten effect:
+  // Count up while recording; freeze when processing starts
   // biome-ignore lint/correctness/useExhaustiveDependencies: This timer intentionally rebinds only on processing state transitions.
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -39,15 +23,9 @@ export const ZenVisualizer = ({
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isProcessing]); // Note: this resets to 0 if we don't handle resume, but here we just mount once.
-  // Actually simplicity: usage in App.tsx mounts it only during Zen Mode.
-  // So just freezing the state update is enough.
+  }, [isProcessing]);
 
-  // Use a ref to track start time to avoid effect re-run issues
-
-  // ... Simplified implementation for tool call:
-
-  // Optional: Subtle breathing effect based on audio level (Freeze if processing)
+  // Subtle breathing effect based on audio level (frozen during processing)
   useEffect(() => {
     if (!analyser || isProcessing) return;
 
@@ -79,7 +57,7 @@ export const ZenVisualizer = ({
       className={`flex items-center gap-4 px-6 py-3 rounded-full border shadow-sm animate-in fade-in slide-in-from-top-4 duration-700 transition-colors cursor-default ${
         isProcessing
           ? 'bg-pro-bg/80 border-pro-border/60'
-          : 'bg-white/40 backdrop-blur-xl border-white/60 hover:bg-white/60'
+          : 'bg-pro-surface/40 backdrop-blur-xl border-white/60 hover:bg-pro-surface/60'
       }`}
     >
       <div className="flex items-center gap-3">

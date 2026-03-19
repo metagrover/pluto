@@ -32,7 +32,8 @@ type LLMTask =
   | 'speaker'
   | 'title'
   | 'entities'
-  | 'valueSignals';
+  | 'valueSignals'
+  | 'knowledgeDoc';
 
 type PersonEntity = ExtractedEntities['people'][number];
 type TopicEntity = ExtractedEntities['topics'][number];
@@ -229,6 +230,14 @@ export class UnifiedLLMProvider implements LLMProvider {
       console.error(`[${this.name}] Failed to generate title:`, e);
       return 'Meeting';
     }
+  }
+
+  async synthesizeKnowledgeDocument(prompt: string): Promise<string> {
+    return this.generateText({
+      prompt,
+      task: 'knowledgeDoc',
+      jsonMode: true,
+    });
   }
 
   async extractEntities(
@@ -504,6 +513,9 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'valueSignals') {
       return 'You are an expert at classifying conversation value signals. Always respond with valid JSON only.';
     }
+    if (task === 'knowledgeDoc') {
+      return 'You are an expert at generating strict citation-grounded knowledge documents. Always respond with valid JSON only.';
+    }
     if (task === 'summaryRepair') {
       return 'You are a strict formatting assistant. Return only corrected markdown.';
     }
@@ -520,6 +532,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'summary') return 0.7;
     if (task === 'summaryRepair') return 0.2;
     if (task === 'valueSignals') return 0.2;
+    if (task === 'knowledgeDoc') return 0.2;
     if (task === 'title') return 0.5;
     return 0.3;
   }
@@ -529,6 +542,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'summaryRepair') return 1024;
     if (task === 'entities') return 2048;
     if (task === 'valueSignals') return 512;
+    if (task === 'knowledgeDoc') return 4096;
     return 50;
   }
 

@@ -686,6 +686,9 @@ export async function processExtractedEntities(
           'involved_in',
           'produced',
           'assigned_to',
+          'depends_on',
+          'blocked_by',
+          'owns',
         ];
         const relationship: db.RelationshipType = validTypes.includes(
           rel.relationship as db.RelationshipType,

@@ -1,17 +1,18 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        'pro-bg': '#F8F5F0', // Warm Cream
-        'pro-surface': '#FFFFFF',
-        'pro-border': '#E8E2D9', // Muted cream/gold for borders
-        'pro-text-main': '#1A2340', // Midnight Blue
-        'pro-text-muted': '#5C637A', // Muted Midnight Blue
-        'pro-primary': '#1A2340', // Midnight Blue
-        'pro-accent': '#D4B483', // Champagne Gold
-        'pro-hover': '#F1ECE4', // Slightly darker cream for hover
+        'pro-bg': 'hsl(var(--pro-bg) / <alpha-value>)',
+        'pro-surface': 'hsl(var(--pro-surface) / <alpha-value>)',
+        'pro-border': 'hsl(var(--pro-border) / <alpha-value>)',
+        'pro-text-main': 'hsl(var(--pro-text-main) / <alpha-value>)',
+        'pro-text-muted': 'hsl(var(--pro-text-muted) / <alpha-value>)',
+        'pro-primary': 'hsl(var(--pro-text-main) / <alpha-value>)',
+        'pro-accent': 'hsl(var(--pro-accent) / <alpha-value>)',
+        'pro-hover': 'hsl(var(--pro-hover) / <alpha-value>)',
       },
       boxShadow: {
         premium:

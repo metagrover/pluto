@@ -35,14 +35,16 @@ model_lock = threading.Lock()
 model_config = {
     "device": "cpu",
     "compute_type": "int8",  # Use int8 for faster CPU inference
-    "model_name": "base",
+    "model_name": "small",
     "language": "en"
 }
 
 class TranscribeRequest(BaseModel):
     audio_path: str
+    # Deprecated runtime override. We keep it for backward compatibility
+    # but model changes should happen via /config.
     model: Optional[str] = None
-    language: Optional[str] = "en"
+    language: Optional[str] = None
     diarize: Optional[bool] = False
     hf_token: Optional[str] = None
 
@@ -126,7 +128,7 @@ def transcribe(request: TranscribeRequest):
     global model, diarize_model
     
     # Ensure model is loaded
-    load_model_if_needed({"model": request.model} if request.model else {})
+    load_model_if_needed({})
     
     if not os.path.exists(request.audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
@@ -136,7 +138,7 @@ def transcribe(request: TranscribeRequest):
         
         # 1. Transcribe
         try:
-            language = "en"
+            language = request.language or "en"
             logger.info(f"Transcribing {request.audio_path} (language={language})...")
             result = model.transcribe(
                 request.audio_path,

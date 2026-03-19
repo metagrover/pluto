@@ -51,7 +51,7 @@ const getPreloadPath = () => {
 function createWindow() {
   win = new BrowserWindow({
     title: 'Pluto',
-    icon: path.join(process.env.VITE_PUBLIC, 'logo.png'),
+    icon: path.join(process.env.VITE_PUBLIC, 'dock-icon.png'),
     width: 1200,
     height: 800,
     minWidth: 900,
@@ -94,6 +94,13 @@ import {
   extractAndProcessEntities,
   processExtractedEntities,
 } from './entityPipeline';
+import {
+  initializeKnowledgeDocs,
+  queueAllKnowledgeDocsRefresh,
+  queueKnowledgeDocsRefreshForMeeting,
+  refreshKnowledgeDocNow,
+  synthesizeEntitySummary,
+} from './knowledgeSynthesis';
 import { getAllSettings, getProvider } from './llm/factory';
 import type { AnalysisArtifacts, InternalSignalDocument } from './llm/provider';
 import {
@@ -514,6 +521,133 @@ app.whenReady().then(async () => {
     },
   );
 
+  ipcMain.handle(
+    'AUDIO_SLICE_WAV',
+    async (_event, { inputPath, segments, outputTag } = {}) => {
+      if (
+        typeof inputPath !== 'string' ||
+        inputPath.length === 0 ||
+        !fs.existsSync(inputPath)
+      ) {
+        return null;
+      }
+      if (!Array.isArray(segments) || segments.length === 0) return [];
+
+      const tag =
+        (typeof outputTag === 'string' ? outputTag : 'slice')
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, '')
+          .slice(0, 24) || 'slice';
+      const outputDir = app.getPath('temp');
+      const outputPaths: Array<string | null> = [];
+
+      for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i] as
+          | { startSec?: number; endSec?: number }
+          | undefined;
+        const rawStart =
+          typeof segment?.startSec === 'number' ? segment.startSec : 0;
+        const rawEnd =
+          typeof segment?.endSec === 'number' ? segment.endSec : rawStart;
+        const startSec = Math.max(0, rawStart);
+        const endSec = Math.max(startSec, rawEnd);
+        const durationSec = Math.max(0, endSec - startSec);
+
+        if (!Number.isFinite(durationSec) || durationSec < 0.05) {
+          outputPaths.push(null);
+          continue;
+        }
+
+        const outputPath = path.join(
+          outputDir,
+          `slice_${tag}_${i}_${Date.now()}_${randomUUID()}.wav`,
+        );
+
+        const ok = await new Promise<boolean>((resolve) => {
+          ffmpeg(inputPath)
+            .setStartTime(startSec)
+            .setDuration(durationSec)
+            .audioChannels(1)
+            .audioFrequency(16000)
+            .toFormat('wav')
+            .on('end', () => {
+              resolve(true);
+            })
+            .on('error', (err) => {
+              console.warn(
+                '[Pluto] Slice failed:',
+                err instanceof Error ? err.message : err,
+              );
+              resolve(false);
+            })
+            .save(outputPath);
+        });
+
+        if (!ok) {
+          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          outputPaths.push(null);
+        } else {
+          outputPaths.push(outputPath);
+        }
+      }
+
+      return outputPaths;
+    },
+  );
+
+  ipcMain.handle(
+    'AUDIO_MIX_WAV',
+    async (_event, { inputPaths, outputTag } = {}) => {
+      if (!Array.isArray(inputPaths) || inputPaths.length < 2) return null;
+      const validPaths = inputPaths.filter(
+        (value): value is string =>
+          typeof value === 'string' && value.length > 0 && fs.existsSync(value),
+      );
+      if (validPaths.length < 2) return null;
+
+      const tag =
+        (typeof outputTag === 'string' ? outputTag : 'mix')
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, '')
+          .slice(0, 24) || 'mix';
+      const outputDir = path.join(app.getPath('userData'), 'meetings');
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      const outputPath = path.join(
+        outputDir,
+        `mix_${tag}_${Date.now()}_${randomUUID()}.wav`,
+      );
+
+      return await new Promise<string | null>((resolve) => {
+        const command = ffmpeg();
+        for (const inputPath of validPaths) {
+          command.input(inputPath);
+        }
+        command
+          .complexFilter(
+            `amix=inputs=${validPaths.length}:duration=longest:normalize=0`,
+          )
+          .audioChannels(1)
+          .audioFrequency(16000)
+          .toFormat('wav')
+          .on('end', () => {
+            console.log(`[Pluto] Mixed audio created: ${outputPath}`);
+            resolve(outputPath);
+          })
+          .on('error', (err) => {
+            console.warn(
+              '[Pluto] Mixed audio failed:',
+              err instanceof Error ? err.message : err,
+            );
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+            resolve(null);
+          })
+          .save(outputPath);
+      });
+    },
+  );
+
   // Database handlers
   const cleanupTranscriptJson = (
     transcriptJson: unknown,
@@ -623,7 +757,9 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle('DELETE_MEETING', (_event, id) => {
     try {
-      return db.deleteMeeting(id);
+      const result = db.deleteMeeting(id);
+      queueAllKnowledgeDocsRefresh();
+      return result;
     } catch (e) {
       console.error('[Pluto] DELETE_MEETING failed:', e);
       throw e;
@@ -637,7 +773,9 @@ app.whenReady().then(async () => {
   // Entity operations
   ipcMain.handle('UPSERT_ENTITY', (_event, entity) => {
     try {
-      return db.upsertEntity(entity);
+      const saved = db.upsertEntity(entity);
+      queueAllKnowledgeDocsRefresh();
+      return saved;
     } catch (e) {
       console.error('[Pluto] UPSERT_ENTITY failed:', e);
       throw e;
@@ -658,24 +796,43 @@ app.whenReady().then(async () => {
   ipcMain.handle('UPDATE_ENTITY_STATUS', (_event, { id, status }) =>
     db.updateEntityStatus(id, status),
   );
-  ipcMain.handle('DELETE_ENTITY', (_event, id) => db.deleteEntity(id));
+  ipcMain.handle('DELETE_ENTITY', (_event, id) => {
+    db.deleteEntity(id);
+    queueAllKnowledgeDocsRefresh();
+  });
 
   // Entity relationship operations
   ipcMain.handle('LINK_ENTITIES', (_event, link) => {
     try {
-      return db.linkEntities(link);
+      const saved = db.linkEntities({
+        ...link,
+        source: link?.source || 'user',
+        state: link?.state || 'confirmed',
+      });
+      queueAllKnowledgeDocsRefresh();
+      return saved;
     } catch (e) {
       console.error('[Pluto] LINK_ENTITIES failed:', e);
       throw e;
     }
   });
 
-  ipcMain.handle('GET_ENTITY_LINKS', (_event, entityId) =>
-    db.getEntityLinks(entityId),
-  );
-  ipcMain.handle('GET_RELATED_ENTITIES', (_event, entityId) =>
-    db.getRelatedEntities(entityId),
-  );
+  ipcMain.handle('GET_ENTITY_LINKS', (_event, payload) => {
+    const { entityId, includeRejected } = (payload || {}) as {
+      entityId?: string;
+      includeRejected?: boolean;
+    };
+    if (!entityId) return [];
+    return db.getEntityLinks(entityId, { includeRejected });
+  });
+  ipcMain.handle('GET_RELATED_ENTITIES', (_event, payload) => {
+    const { entityId, includeRejected } = (payload || {}) as {
+      entityId?: string;
+      includeRejected?: boolean;
+    };
+    if (!entityId) return [];
+    return db.getRelatedEntities(entityId, { includeRejected });
+  });
 
   // Meeting-entity associations
   ipcMain.handle('ADD_MEETING_ENTITY', (_event, meetingEntity) => {
@@ -693,6 +850,56 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_ENTITY_MEETINGS', (_event, entityId) =>
     db.getEntityMeetings(entityId),
   );
+  ipcMain.handle('GET_KNOWLEDGE_FEED_SUMMARY', (_event, params) =>
+    db.getKnowledgeFeedSummary(params),
+  );
+  ipcMain.handle('GET_KNOWLEDGE_DOCS', (_event, filters) =>
+    db.getKnowledgeDocs(filters),
+  );
+  ipcMain.handle('GET_KNOWLEDGE_DOC', (_event, id) => db.getKnowledgeDoc(id));
+  ipcMain.handle('GET_KNOWLEDGE_DOC_VERSIONS', (_event, { docId, limit }) =>
+    db.getKnowledgeDocVersions(docId, limit),
+  );
+  ipcMain.handle('GET_KNOWLEDGE_DOC_SOURCES', (_event, docId) =>
+    db.getKnowledgeDocSourceDetails(docId),
+  );
+  ipcMain.handle('SAVE_KNOWLEDGE_DOC_EDIT', (_event, { docId, content }) =>
+    db.saveKnowledgeDocUserEdit(docId, content),
+  );
+  ipcMain.handle('REFRESH_KNOWLEDGE_DOC', async (_event, docId) => {
+    return refreshKnowledgeDocNow(docId);
+  });
+  ipcMain.handle('GET_ENTITY_SUMMARY', async (_event, entityId) => {
+    return synthesizeEntitySummary(entityId);
+  });
+  ipcMain.handle('GET_KNOWLEDGE_DOC_NOTES', (_event, docId) =>
+    db.getKnowledgeDocNotes(docId),
+  );
+  ipcMain.handle('SAVE_KNOWLEDGE_DOC_NOTES', (_event, { docId, markdown }) =>
+    db.saveKnowledgeDocNotes(docId, markdown),
+  );
+  ipcMain.handle('GET_KNOWLEDGE_BACKLINKS', (_event, { docId, options }) =>
+    db.getKnowledgeBacklinks(docId, options),
+  );
+  ipcMain.handle('GET_KNOWLEDGE_GRAPH', (_event, { docId, options }) =>
+    db.getKnowledgeGraph(docId, options),
+  );
+  ipcMain.handle('GET_KNOWLEDGE_TIMELINE', (_event, { docId, limit }) =>
+    db.getKnowledgeTimeline(docId, limit),
+  );
+  ipcMain.handle('GET_KNOWLEDGE_WORKSPACE', (_event, params) =>
+    db.getKnowledgeWorkspace(params),
+  );
+  ipcMain.handle('SET_ENTITY_LINK_STATE', (_event, { id, state }) => {
+    const updated = db.setEntityLinkState(id, state);
+    queueAllKnowledgeDocsRefresh();
+    return updated;
+  });
+  ipcMain.handle('RESOLVE_CONFLICT', (_event, { winnerId, loserId }) => {
+    const result = db.resolveConflictLinks(winnerId, loserId);
+    queueAllKnowledgeDocsRefresh();
+    return result;
+  });
 
   // Action item queries
   ipcMain.handle('GET_ACTION_ITEMS_BY_STATUS', (_event, status) =>
@@ -1022,7 +1229,7 @@ app.whenReady().then(async () => {
         console.log(
           `[LLM] Extracting and processing entities for meeting ${meetingId}`,
         );
-        return await extractAndProcessEntities(
+        const result = await extractAndProcessEntities(
           provider,
           transcript,
           meetingId,
@@ -1032,6 +1239,8 @@ app.whenReady().then(async () => {
             priorityHints: mergedPriorityHints,
           },
         );
+        queueKnowledgeDocsRefreshForMeeting(String(meetingId));
+        return result;
       } catch (error) {
         console.error('[LLM] Entity extraction and processing failed:', error);
         throw error;
@@ -1047,7 +1256,9 @@ app.whenReady().then(async () => {
         console.log(
           `[EntityPipeline] Processing pre-extracted entities for meeting ${meetingId}`,
         );
-        return await processExtractedEntities(entities, meetingId);
+        const result = await processExtractedEntities(entities, meetingId);
+        queueKnowledgeDocsRefreshForMeeting(String(meetingId));
+        return result;
       } catch (error) {
         console.error('[EntityPipeline] Processing failed:', error);
         throw error;
@@ -1089,6 +1300,13 @@ app.whenReady().then(async () => {
     console.log('[Pluto] WhisperX will start on first transcription request');
   });
 
+  initializeKnowledgeDocs().catch((error) => {
+    console.error(
+      '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
+      error,
+    );
+  });
+
   // macOS: Proactively request microphone access
   if (process.platform === 'darwin') {
     console.log('[Pluto] Requesting microphone access from OS...');
@@ -1103,8 +1321,8 @@ app.whenReady().then(async () => {
   }
 
   // Create Tray Icon
-  const iconPath = path.join(process.env.VITE_PUBLIC, 'logo.png');
   const dockIconPath = path.join(process.env.VITE_PUBLIC, 'dock-icon.png');
+  const iconPath = dockIconPath;
 
   const icon = nativeImage.createFromPath(iconPath);
 

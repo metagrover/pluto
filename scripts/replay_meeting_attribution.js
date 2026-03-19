@@ -71,6 +71,7 @@ const parseArgs = () => {
     allSets: false,
     fixtureFile: DEFAULT_LOCAL_FIXTURE_FILE,
     expectedFile: '',
+    echoStats: false,
   };
 
   const takeValue = (flag, index) => {
@@ -136,6 +137,10 @@ const parseArgs = () => {
     }
     if (arg === '--require-expected') {
       options.requireExpected = true;
+      continue;
+    }
+    if (arg === '--echo-stats') {
+      options.echoStats = true;
       continue;
     }
     if (arg === '--all-sets') {
@@ -257,24 +262,28 @@ const transcribeFile = async (serverUrl, audioPath, model) => {
 };
 
 const bestOfAttempts = async (serverUrl, audioPath, attempts, model) => {
-  const variants = [];
+  const attemptsPayload = [];
   for (let i = 0; i < attempts; i++) {
     const result = await transcribeFile(serverUrl, audioPath, model);
-    const text = (result.segments || [])
+    const segments = Array.isArray(result.segments) ? result.segments : [];
+    const text = segments
       .map((segment) => String(segment.text || '').trim())
       .filter(Boolean)
       .join(' ')
       .trim();
-    variants.push(text);
+    attemptsPayload.push({ text, segments });
   }
   const counts = new Map();
-  for (const value of variants) {
+  for (const value of attemptsPayload.map((item) => item.text)) {
     counts.set(value, (counts.get(value) || 0) + 1);
   }
   const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  const bestText = sorted[0] ? sorted[0][0] : '';
+  const bestMatch = attemptsPayload.find((item) => item.text === bestText);
   return {
-    best: sorted[0] ? sorted[0][0] : '',
-    variants,
+    best: bestText,
+    variants: attemptsPayload.map((item) => item.text),
+    bestSegments: Array.isArray(bestMatch?.segments) ? bestMatch.segments : [],
     uniqueCount: counts.size,
   };
 };
@@ -290,6 +299,52 @@ const mergeTurns = (segments) => {
     merged.push({ ...segment });
   }
   return merged;
+};
+
+const computeEchoStats = (turns) => {
+  const total = turns.length;
+  if (total === 0) {
+    return {
+      total,
+      unique: 0,
+      duplicates: 0,
+      duplicateRatio: 0,
+      crossSpeakerDuplicateTurns: 0,
+      crossSpeakerRatio: 0,
+      crossSpeakerGroups: 0,
+    };
+  }
+  const normalized = turns.map((turn) => ({
+    speaker: turn.speaker,
+    text: normalizeText(turn.text),
+  }));
+  const byText = new Map();
+  for (const item of normalized) {
+    if (!item.text) continue;
+    const entry = byText.get(item.text) || { count: 0, speakers: new Set() };
+    entry.count += 1;
+    entry.speakers.add(item.speaker);
+    byText.set(item.text, entry);
+  }
+  const unique = byText.size;
+  const duplicates = Math.max(0, total - unique);
+  let crossSpeakerDuplicateTurns = 0;
+  let crossSpeakerGroups = 0;
+  for (const [text, info] of byText.entries()) {
+    if (info.speakers.size > 1) {
+      crossSpeakerGroups += 1;
+      crossSpeakerDuplicateTurns += info.count;
+    }
+  }
+  return {
+    total,
+    unique,
+    duplicates,
+    duplicateRatio: total === 0 ? 0 : duplicates / total,
+    crossSpeakerDuplicateTurns,
+    crossSpeakerRatio: total === 0 ? 0 : crossSpeakerDuplicateTurns / total,
+    crossSpeakerGroups,
+  };
 };
 
 const qualityScore = (text) => {
@@ -422,6 +477,292 @@ const dropShortCrossSpeakerEchoes = (
   return { segments: kept, dropped };
 };
 
+const pruneSourceEchoBleed = (
+  segments,
+  maxGapMs = 2600,
+  similarityThreshold = 0.34,
+) => {
+  if (!Array.isArray(segments) || segments.length < 2) {
+    return {
+      segments: Array.isArray(segments) ? [...segments] : [],
+      dropped: 0,
+    };
+  }
+
+  const sorted = [...segments].sort((a, b) => a.ts - b.ts);
+  const kept = [];
+  let dropped = 0;
+
+  for (const segment of sorted) {
+    if (segment.speaker !== 'Me') {
+      kept.push(segment);
+      continue;
+    }
+
+    const meTokens = tokenize(segment.text);
+    let shouldDropAsEcho = false;
+    for (const other of sorted) {
+      if (other === segment || other.speaker !== 'Them') continue;
+      const gapMs = Math.abs((other.ts || 0) - (segment.ts || 0));
+      if (gapMs > maxGapMs) continue;
+
+      const sim = jaccardSimilarity(segment.text, other.text);
+      if (sim < similarityThreshold) continue;
+
+      const themTokens = tokenize(other.text);
+      const meIsShorter = meTokens.length <= themTokens.length + 2;
+      const meContained =
+        meTokens.length > 0 && containsTokenSequence(themTokens, meTokens);
+      if (meIsShorter || meContained || meTokens.length <= 6) {
+        shouldDropAsEcho = true;
+        break;
+      }
+    }
+
+    if (shouldDropAsEcho) {
+      dropped++;
+      continue;
+    }
+    kept.push(segment);
+  }
+
+  return { segments: kept, dropped };
+};
+
+const clampUnit = (value) => Math.max(0, Math.min(1, value));
+
+const mapAttemptSegmentsToAbsolute = (speaker, baseTs, segments) => {
+  if (!Array.isArray(segments) || segments.length === 0) return [];
+  return segments
+    .map((segment) => {
+      const text = String(segment.text || '').trim();
+      if (!text) return null;
+      const startSec = Number.isFinite(segment.start)
+        ? Number(segment.start)
+        : 0;
+      const endSec = Number.isFinite(segment.end)
+        ? Number(segment.end)
+        : startSec + 0.8;
+      const safeStart = Math.max(0, startSec);
+      const safeEnd = Math.max(safeStart + 0.05, endSec);
+      return {
+        speaker,
+        text,
+        startMs: baseTs + safeStart * 1000,
+        endMs: baseTs + safeEnd * 1000,
+      };
+    })
+    .filter(Boolean);
+};
+
+const splitCanonicalSegmentsIntoSentences = (segments) => {
+  if (!Array.isArray(segments) || segments.length === 0) return [];
+  const expanded = [];
+  for (const segment of segments) {
+    const text = String(segment.text || '').trim();
+    if (!text) continue;
+    const pieces = text
+      .split(/(?<=[.!?])\s+/)
+      .map((piece) => piece.trim())
+      .filter(Boolean);
+    if (pieces.length <= 1) {
+      expanded.push({ ...segment, text });
+      continue;
+    }
+    const totalWeight = pieces.reduce(
+      (sum, piece) => sum + Math.max(1, piece.length),
+      0,
+    );
+    const totalDurationMs = Math.max(80, segment.endMs - segment.startMs);
+    let cursor = segment.startMs;
+    for (let i = 0; i < pieces.length; i++) {
+      const weight = Math.max(1, pieces[i].length);
+      const remaining = Math.max(50, segment.endMs - cursor);
+      const allocated =
+        i === pieces.length - 1
+          ? remaining
+          : Math.max(50, totalDurationMs * (weight / totalWeight));
+      const endMs =
+        i === pieces.length - 1
+          ? segment.endMs
+          : Math.min(segment.endMs, cursor + allocated);
+      expanded.push({
+        ...segment,
+        text: pieces[i],
+        startMs: cursor,
+        endMs: Math.max(cursor + 50, endMs),
+      });
+      cursor = Math.max(cursor + 50, endMs);
+    }
+  }
+  return expanded;
+};
+
+const assignSessionSegmentsFromSource = (sessionSegments, sourceSegments) => {
+  if (!Array.isArray(sessionSegments) || sessionSegments.length === 0)
+    return [];
+  if (!Array.isArray(sourceSegments) || sourceSegments.length === 0) {
+    return [];
+  }
+
+  const sortedSession = [...sessionSegments].sort(
+    (a, b) => a.startMs - b.startMs,
+  );
+  const sortedSource = [...sourceSegments].sort(
+    (a, b) => a.startMs - b.startMs,
+  );
+  const sentenceAssignments = [];
+  let lastSpeaker = 'Them';
+  const timelineStart = sortedSession[0].startMs;
+  const timelineEnd = sortedSession[sortedSession.length - 1].endMs;
+  const timelineSpan = Math.max(1, timelineEnd - timelineStart);
+
+  for (const session of sortedSession) {
+    const durationMs = Math.max(50, session.endMs - session.startMs);
+    const sessionMid = (session.startMs + session.endMs) / 2;
+    const sessionWords = tokenize(session.text).length;
+
+    let meScore = 0;
+    let themScore = 0;
+    let meLex = 0;
+    let themLex = 0;
+    for (const source of sortedSource) {
+      const overlapMs = Math.max(
+        0,
+        Math.min(session.endMs, source.endMs) -
+          Math.max(session.startMs, source.startMs),
+      );
+      const overlapRatio = overlapMs > 0 ? overlapMs / durationMs : 0;
+      const lexical = jaccardSimilarity(session.text, source.text);
+      const sourceMid = (source.startMs + source.endMs) / 2;
+      const proximity = clampUnit(1 - Math.abs(sessionMid - sourceMid) / 4500);
+      const score =
+        overlapRatio * (0.2 + lexical * 0.8) +
+        lexical * 0.75 +
+        proximity * 0.25;
+      if (source.speaker === 'Me') {
+        meScore = Math.max(meScore, score);
+        meLex = Math.max(meLex, lexical);
+      } else if (source.speaker === 'Them') {
+        themScore = Math.max(themScore, score);
+        themLex = Math.max(themLex, lexical);
+      }
+    }
+
+    let speaker = 'Them';
+    const bestScore = Math.max(meScore, themScore);
+    const uncoveredFromThem =
+      sessionWords >= 4 && themLex < 0.24 && meScore <= themScore + 0.05;
+    if (Math.abs(meScore - themScore) >= 0.12 && bestScore >= 0.18) {
+      speaker = meScore >= themScore ? 'Me' : 'Them';
+    } else if (uncoveredFromThem) {
+      speaker = 'Me';
+    } else if (bestScore >= 0.14) {
+      speaker = meScore >= themScore ? 'Me' : 'Them';
+    } else {
+      speaker = lastSpeaker;
+    }
+
+    lastSpeaker = speaker;
+    sentenceAssignments.push({
+      speaker,
+      text: session.text,
+      startMs: session.startMs,
+      endMs: session.endMs,
+      meScore,
+      themScore,
+      meLex,
+      themLex,
+      relativePos: (sessionMid - timelineStart) / timelineSpan,
+    });
+  }
+
+  // Smooth unstable Me runs that are likely unmatched system fragments.
+  for (let i = 0; i < sentenceAssignments.length; ) {
+    if (sentenceAssignments[i].speaker !== 'Me') {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (
+      j + 1 < sentenceAssignments.length &&
+      sentenceAssignments[j + 1].speaker === 'Me'
+    ) {
+      j++;
+    }
+    const run = sentenceAssignments.slice(i, j + 1);
+    const prevSpeaker = i > 0 ? sentenceAssignments[i - 1].speaker : null;
+    const nextSpeaker =
+      j + 1 < sentenceAssignments.length
+        ? sentenceAssignments[j + 1].speaker
+        : null;
+    const lowConfidenceRun = run.every(
+      (item) => item.meScore < 0.2 && item.themScore < 0.2 && item.meLex < 0.25,
+    );
+    const runMidPos =
+      run.reduce((sum, item) => sum + item.relativePos, 0) /
+      Math.max(1, run.length);
+    const earlyOrMidRun = runMidPos <= 0.55;
+    const earlyRun = run.every((item) => item.relativePos <= 0.4);
+    const runStartsAsContinuation = /^(or|and|but|so)\b/.test(
+      normalizeText(run[0]?.text || ''),
+    );
+
+    if (
+      lowConfidenceRun &&
+      prevSpeaker === 'Them' &&
+      runMidPos > 0.65 &&
+      run.length >= 2 &&
+      runStartsAsContinuation
+    ) {
+      const tailToKeepAsMe = run.length >= 3 ? 2 : 1;
+      const convertThrough = Math.max(i - 1, j - tailToKeepAsMe);
+      for (let k = i; k <= convertThrough; k++) {
+        sentenceAssignments[k].speaker = 'Them';
+      }
+      i = j + 1;
+      continue;
+    }
+
+    if (
+      lowConfidenceRun &&
+      earlyOrMidRun &&
+      ((run.length >= 2 && prevSpeaker === 'Them') ||
+        (run.length === 1 &&
+          prevSpeaker === 'Them' &&
+          nextSpeaker === 'Them' &&
+          earlyRun))
+    ) {
+      for (let k = i; k <= j; k++) {
+        sentenceAssignments[k].speaker = 'Them';
+      }
+    }
+    i = j + 1;
+  }
+
+  const assigned = [];
+  for (const sentence of sentenceAssignments) {
+    const last = assigned[assigned.length - 1];
+    if (last && last.speaker === sentence.speaker) {
+      last.text = `${last.text} ${sentence.text}`.trim();
+      last.endMs = sentence.endMs;
+      continue;
+    }
+    assigned.push({
+      speaker: sentence.speaker,
+      text: sentence.text,
+      startMs: sentence.startMs,
+      endMs: sentence.endMs,
+    });
+  }
+
+  return assigned.map((segment) => ({
+    speaker: segment.speaker,
+    text: segment.text,
+    ts: segment.startMs,
+  }));
+};
+
 const compareAgainstExpectedTurns = (actualTurns, expectedTurns) => {
   if (!Array.isArray(expectedTurns) || expectedTurns.length === 0) return null;
   const comparisons = [];
@@ -456,229 +797,6 @@ const compareAgainstExpectedTurns = (actualTurns, expectedTurns) => {
     total: expectedTurns.length,
     comparisons,
   };
-};
-
-const splitIntoSentences = (text) => {
-  return String(text || '')
-    .split(/(?<=[.!?])\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-};
-
-const isBackchannelOrUncertainty = (text) => {
-  const normalized = normalizeText(text);
-  if (!normalized) return false;
-  return /^(yeah|yes|yup|yep|ok|okay|right|sure|not sure|i m not sure|i dont know|i do not know)\b/.test(
-    normalized,
-  );
-};
-
-const isQuestionLikeSentence = (text) => {
-  const raw = String(text || '').trim();
-  if (!raw) return false;
-  const normalized = normalizeText(raw);
-  if (!normalized) return false;
-  if (raw.includes('?')) return true;
-  return /^(do you|did you|are you|can you|could you|would you|will you|what|why|how|when|where|who)\b/.test(
-    normalized,
-  );
-};
-
-const isAckOnly = (text) => {
-  const normalized = normalizeText(text);
-  if (!normalized) return false;
-  const tokens = normalized.split(' ').filter(Boolean);
-  if (tokens.length === 0 || tokens.length > 3) return false;
-  const first = tokens[0];
-  return (
-    first === 'yeah' ||
-    first === 'yes' ||
-    first === 'yup' ||
-    first === 'yep' ||
-    first === 'ok' ||
-    first === 'okay' ||
-    first === 'right' ||
-    first === 'sure'
-  );
-};
-
-const hydrateSessionTextWithEvidence = (sessionText, evidenceTurns) => {
-  const sentences = splitIntoSentences(sessionText);
-  if (
-    sentences.length === 0 ||
-    !Array.isArray(evidenceTurns) ||
-    evidenceTurns.length === 0
-  )
-    return [];
-
-  let turnIndex = 0;
-  const assigned = [];
-  for (
-    let sentenceIndex = 0;
-    sentenceIndex < sentences.length;
-    sentenceIndex++
-  ) {
-    const sentence = sentences[sentenceIndex];
-    const current =
-      evidenceTurns[Math.min(turnIndex, evidenceTurns.length - 1)];
-    const simCurrent = current ? jaccardSimilarity(sentence, current.text) : 0;
-
-    let bestIndex = turnIndex;
-    let bestSim = simCurrent;
-    const lookaheadLimit = Math.min(evidenceTurns.length - 1, turnIndex + 2);
-    for (let idx = turnIndex + 1; idx <= lookaheadLimit; idx++) {
-      const sim = jaccardSimilarity(sentence, evidenceTurns[idx].text);
-      if (sim > bestSim) {
-        bestSim = sim;
-        bestIndex = idx;
-      }
-    }
-
-    if (
-      isBackchannelOrUncertainty(sentence) &&
-      turnIndex + 1 < evidenceTurns.length
-    ) {
-      const nextSim = jaccardSimilarity(
-        sentence,
-        evidenceTurns[turnIndex + 1].text,
-      );
-      if (nextSim >= Math.max(0.1, simCurrent + 0.01)) {
-        bestIndex = turnIndex + 1;
-        bestSim = nextSim;
-      }
-    }
-    if (
-      isAckOnly(sentence) &&
-      sentenceIndex > 0 &&
-      isQuestionLikeSentence(sentences[sentenceIndex - 1]) &&
-      turnIndex + 1 < evidenceTurns.length &&
-      evidenceTurns[turnIndex + 1].speaker !== evidenceTurns[turnIndex].speaker
-    ) {
-      bestIndex = turnIndex + 1;
-      bestSim = Math.max(bestSim, 0.2);
-    }
-
-    if (turnIndex > 0) {
-      const prevIndex = turnIndex - 1;
-      const prevSim = jaccardSimilarity(
-        sentence,
-        evidenceTurns[prevIndex].text,
-      );
-      if (prevSim >= Math.max(0.18, bestSim + 0.06)) {
-        bestIndex = prevIndex;
-        bestSim = prevSim;
-      }
-    }
-
-    if (bestIndex > turnIndex && bestSim >= Math.max(0.12, simCurrent + 0.03)) {
-      turnIndex = bestIndex;
-    } else if (
-      bestIndex < turnIndex &&
-      bestSim >= Math.max(0.18, simCurrent + 0.06)
-    ) {
-      turnIndex = bestIndex;
-    }
-
-    const speaker =
-      evidenceTurns[Math.min(turnIndex, evidenceTurns.length - 1)].speaker;
-    const last = assigned[assigned.length - 1];
-    if (last && last.speaker === speaker) {
-      last.text = `${last.text} ${sentence}`.trim();
-    } else {
-      assigned.push({ speaker, text: sentence });
-    }
-  }
-
-  return assigned;
-};
-
-const normalizeEnglishArtifacts = (text) => {
-  let next = String(text || '').trim();
-  next = next.replace(/^(\b[^\s]+\b)\s+\1\b/i, '$1');
-  next = next.replace(/\blet['’]?s\s+let['’]?s\b/gi, "Let's");
-  next = next.replace(/\bthat it\b/gi, "That's it");
-  next = next.replace(
-    /\bi['’]?m not again speaking\b/gi,
-    "I'm now again speaking",
-  );
-  next = next.replace(/\ba more like\b/gi, 'more like');
-  next = next.replace(
-    /\bmore like ([A-Za-z0-9]+) and ([A-Za-z0-9]+)\b/g,
-    'more like $1, $2',
-  );
-  return next;
-};
-
-const applyTurnLexicalHints = (turns, rawSegments) => {
-  if (!Array.isArray(turns) || turns.length === 0) return [];
-  return turns.map((turn) => {
-    const sameSpeakerEvidence = rawSegments
-      .filter((segment) => segment.speaker === turn.speaker)
-      .map((segment) => String(segment.text || '').toLowerCase());
-    const oppositeEvidence = rawSegments
-      .filter((segment) => segment.speaker !== turn.speaker)
-      .map((segment) => String(segment.text || '').toLowerCase());
-
-    let text = normalizeEnglishArtifacts(turn.text);
-    if (
-      /my audio is getting appropriately captured/i.test(text) &&
-      sameSpeakerEvidence.some((e) =>
-        e.includes('or you are getting appropriately captured'),
-      )
-    ) {
-      text = text.replace(
-        /my audio is getting appropriately captured/i,
-        'my audio or your audio is getting appropriately captured',
-      );
-    }
-    if (
-      /\bmodel like\b/i.test(text) &&
-      sameSpeakerEvidence.some((e) => e.includes('more like'))
-    ) {
-      text = text.replace(/\bmodel like\b/i, 'more like');
-    }
-    if (
-      /^maybe\b/i.test(text) &&
-      oppositeEvidence.some(
-        (e) => e.includes('that it') || e.includes("that's it"),
-      )
-    ) {
-      text = `That's it. ${text}`;
-    }
-    if (
-      /\bnot sure\b/i.test(text) &&
-      sameSpeakerEvidence.some((e) =>
-        /not sure how much i should share there/.test(e),
-      )
-    ) {
-      text = text.replace(
-        /\b(i['’]?\s?m\s+)?not sure[^.?!]*there\b[.?!]?/i,
-        'Not sure how much I should share there.',
-      );
-    }
-
-    return {
-      ...turn,
-      text: normalizeEnglishArtifacts(text),
-    };
-  });
-};
-
-const shouldPreferSessionLexicalSource = (sessionText, evidenceTurns) => {
-  const sessionSentences = splitIntoSentences(sessionText);
-  if (sessionSentences.length === 0) return false;
-  if (!Array.isArray(evidenceTurns) || evidenceTurns.length === 0) return true;
-
-  const sessionWords = tokenize(sessionText).length;
-  if (sessionWords < 6) return false;
-
-  const sessionQuality = qualityScore(sessionText);
-  const evidenceQuality =
-    evidenceTurns.reduce((sum, turn) => sum + qualityScore(turn.text), 0) /
-    Math.max(1, evidenceTurns.length);
-  // Prefer session text by default; use channel wording only if session text
-  // quality is markedly worse.
-  return sessionQuality + 0.45 >= evidenceQuality;
 };
 
 const loadMeetingFromDb = (dbPath, meetingId) => {
@@ -819,6 +937,7 @@ const main = async () => {
 
   let meeting = null;
   let sessionAudioPath = '';
+  let sessionBaseTs = 0;
   let selectedEntries = [];
   let expectedTurns = [];
 
@@ -869,6 +988,7 @@ const main = async () => {
         sessionInfo.ts,
         opts,
       );
+      sessionBaseTs = sessionInfo.ts;
       sessionAudioPath = meeting.audio_path;
       meeting = {
         ...meeting,
@@ -881,6 +1001,10 @@ const main = async () => {
         throw new Error(
           `Fixed-set session file not found: ${sessionAudioPath}`,
         );
+      }
+      const fixedSessionInfo = extractTimestampFromName(fixed.sessionFile);
+      if (fixedSessionInfo && fixedSessionInfo.speaker === 'session-mic') {
+        sessionBaseTs = fixedSessionInfo.ts;
       }
       selectedEntries = (fixed.channelFiles || []).map((name) => {
         const info = extractTimestampFromName(name);
@@ -944,6 +1068,7 @@ const main = async () => {
       sessionInfo.ts,
       opts,
     );
+    sessionBaseTs = sessionInfo.ts;
     sessionAudioPath = meeting.audio_path;
   }
 
@@ -990,8 +1115,15 @@ const main = async () => {
       normalized && (sessionContains || similarity >= minSimilarity),
     );
     const repetitive = hasHeavyRepetition(text);
-    const reliable = supportedBySession && !repetitive;
+    const minWordsForUnsup = entry.speaker === 'Them' ? 3 : 4;
+    const substantialText = tokens.length >= minWordsForUnsup;
+    const reliable = !repetitive && (supportedBySession || substantialText);
     const uncertain = !reliable;
+    const absoluteAttemptSegments = mapAttemptSegmentsToAbsolute(
+      entry.speaker,
+      entry.ts,
+      replay.bestSegments,
+    );
 
     rawSegments.push({
       speaker: entry.speaker,
@@ -1004,6 +1136,7 @@ const main = async () => {
       reliable,
       uncertain,
       similarity,
+      absoluteAttemptSegments,
     });
   }
 
@@ -1029,6 +1162,33 @@ const main = async () => {
       text: segment.text,
       ts: segment.ts,
     }));
+  const sourceEvidenceSegments = rawSegments
+    .filter((segment) => segment.reliable)
+    .flatMap((segment) => {
+      if (
+        Array.isArray(segment.absoluteAttemptSegments) &&
+        segment.absoluteAttemptSegments.length > 0
+      ) {
+        return segment.absoluteAttemptSegments;
+      }
+      if (!segment.text) return [];
+      return [
+        {
+          speaker: segment.speaker,
+          text: segment.text,
+          startMs: segment.ts,
+          endMs: segment.ts + 8000,
+        },
+      ];
+    });
+  const sessionCanonicalSegments = mapAttemptSegmentsToAbsolute(
+    'Unknown',
+    sessionBaseTs,
+    sessionResult.bestSegments,
+  );
+  const sessionSentenceSegments = splitCanonicalSegmentsIntoSentences(
+    sessionCanonicalSegments,
+  );
   const collapsed = collapseCrossSpeakerNearDuplicates(kept);
   const shortEchoPruned = dropShortCrossSpeakerEchoes(collapsed);
   if (shortEchoPruned.dropped > 0) {
@@ -1036,24 +1196,19 @@ const main = async () => {
       `\nDropped short cross-speaker echoes: ${shortEchoPruned.dropped}`,
     );
   }
-  const merged = mergeTurns(shortEchoPruned.segments);
-  const sessionHydrated = hydrateSessionTextWithEvidence(sessionText, merged);
-  const noisyAttributionEvidence =
-    rawSegments.some((segment) => !segment.reliable) ||
-    shortEchoPruned.dropped > 0;
-  const preferSessionLexical =
-    noisyAttributionEvidence ||
-    shouldPreferSessionLexicalSource(sessionText, merged);
-  const fusedTurns =
-    preferSessionLexical && sessionHydrated.length > 0
-      ? sessionHydrated
-      : merged;
-  const finalTurns = applyTurnLexicalHints(fusedTurns, rawSegments);
-  if (!preferSessionLexical) {
+  const sourceEchoPruned = pruneSourceEchoBleed(shortEchoPruned.segments);
+  if (sourceEchoPruned.dropped > 0) {
     console.log(
-      '\nSession lexical source skipped: channel transcript quality was stronger.',
+      `Dropped source-echo segments from Me channel: ${sourceEchoPruned.dropped}`,
     );
   }
+  const merged = mergeTurns(sourceEchoPruned.segments);
+  const canonicalAssigned = assignSessionSegmentsFromSource(
+    sessionSentenceSegments,
+    sourceEvidenceSegments,
+  );
+  const finalTurns =
+    canonicalAssigned.length > 0 ? mergeTurns(canonicalAssigned) : merged;
 
   console.log('\nSuggested transcript:');
   if (finalTurns.length === 0) {
@@ -1062,6 +1217,16 @@ const main = async () => {
     for (const turn of finalTurns) {
       console.log(`${turn.speaker}: ${turn.text}`);
     }
+  }
+  if (opts.echoStats) {
+    const stats = computeEchoStats(finalTurns);
+    console.log('\nEcho duplication stats (final transcript):');
+    console.log(
+      `turns=${stats.total}, uniqueTexts=${stats.unique}, duplicates=${stats.duplicates} (${(stats.duplicateRatio * 100).toFixed(1)}%)`,
+    );
+    console.log(
+      `crossSpeakerDuplicateTurns=${stats.crossSpeakerDuplicateTurns} (${(stats.crossSpeakerRatio * 100).toFixed(1)}%), crossSpeakerGroups=${stats.crossSpeakerGroups}`,
+    );
   }
 
   const comparison = compareAgainstExpectedTurns(finalTurns, expectedTurns);

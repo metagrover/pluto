@@ -1,3 +1,5 @@
+import { TRANSCRIPTION_TUNING } from './transcriptionConfig';
+
 export interface AttributionSegment {
   startTime: number;
   endTime: number;
@@ -411,7 +413,12 @@ export const assignSpeakersToCanonicalSegments = <
 }): CanonicalSpeakerAttributionResult<T> => {
   const { canonicalSegments, attributedSegments } = params;
   const activityWindows = params.activityWindows || [];
-  const tieMargin = params.tieMargin ?? 0.18;
+  const tieMargin =
+    params.tieMargin ?? TRANSCRIPTION_TUNING.attribution.tieMargin;
+  const activityGap = TRANSCRIPTION_TUNING.attribution.activityCoverageGap;
+  const proximityDeltaThreshold =
+    TRANSCRIPTION_TUNING.attribution.proximityDelta;
+  const overlapScoreDelta = TRANSCRIPTION_TUNING.attribution.overlapScoreDelta;
   if (canonicalSegments.length === 0) {
     return {
       segments: [],
@@ -443,7 +450,11 @@ export const assignSpeakersToCanonicalSegments = <
       const tokenSim = tokenSetSimilarity(segment.text, candidate.text);
       const prefixSim = tokenPrefixSimilarity(segment.text, candidate.text);
       if (overlap > 0) {
-        const overlapScore = overlapRatio + tokenSim * 0.9 + prefixSim * 0.5;
+        const lexicalSupport = Math.max(tokenSim, prefixSim);
+        const overlapScore =
+          overlapRatio * (0.25 + lexicalSupport * 0.75) +
+          tokenSim * 0.6 +
+          prefixSim * 0.35;
         if (candidate.speaker === 'Me')
           meScore = Math.max(meScore, overlapScore);
         else themScore = Math.max(themScore, overlapScore);
@@ -482,16 +493,16 @@ export const assignSpeakersToCanonicalSegments = <
       );
       if (
         (meCoverage > 0 || themCoverage > 0) &&
-        Math.abs(meCoverage - themCoverage) >= 0.16
+        Math.abs(meCoverage - themCoverage) >= activityGap
       ) {
         speaker = meCoverage >= themCoverage ? 'Me' : 'Them';
         byActivity++;
       } else if (hasOverlapEvidence) {
         const scoreDelta = Math.abs(meScore - themScore);
         const proximityDelta = Math.abs(meProximity - themProximity);
-        if (proximityDelta >= 0.12) {
+        if (proximityDelta >= proximityDeltaThreshold) {
           speaker = meProximity >= themProximity ? 'Me' : 'Them';
-        } else if (scoreDelta <= 0.06) {
+        } else if (scoreDelta <= overlapScoreDelta) {
           speaker = oppositeSpeaker(lastSpeaker);
         } else {
           speaker = meScore > themScore ? 'Me' : 'Them';
@@ -499,7 +510,7 @@ export const assignSpeakersToCanonicalSegments = <
         byFallback++;
       } else if (
         hasProximityEvidence &&
-        Math.abs(meProximity - themProximity) >= 0.12
+        Math.abs(meProximity - themProximity) >= proximityDeltaThreshold
       ) {
         speaker = meProximity >= themProximity ? 'Me' : 'Them';
         byFallback++;
@@ -649,17 +660,25 @@ export const shouldDropBySpeakerActivity = (params: {
   const { targetSpeaker, overlapRatio, meCoverage, themCoverage } = params;
   if (targetSpeaker === 'Me') {
     return (
-      overlapRatio >= 0.45 &&
-      themCoverage >= 0.35 &&
-      themCoverage >= Math.max(0.25, meCoverage * 1.5)
+      overlapRatio >= TRANSCRIPTION_TUNING.activityPrune.meOverlapRatio &&
+      themCoverage >= TRANSCRIPTION_TUNING.activityPrune.meMinCoverage &&
+      themCoverage >=
+        Math.max(
+          TRANSCRIPTION_TUNING.activityPrune.meMinCoverageFloor,
+          meCoverage * TRANSCRIPTION_TUNING.activityPrune.meCoverageRatio,
+        )
     );
   }
 
   // Keep "Them" unless "Me" clearly dominates both overlap and activity.
   return (
-    overlapRatio >= 0.8 &&
-    meCoverage >= 0.75 &&
-    meCoverage >= Math.max(0.55, themCoverage * 3.0)
+    overlapRatio >= TRANSCRIPTION_TUNING.activityPrune.themOverlapRatio &&
+    meCoverage >= TRANSCRIPTION_TUNING.activityPrune.themMinCoverage &&
+    meCoverage >=
+      Math.max(
+        TRANSCRIPTION_TUNING.activityPrune.themMinCoverageFloor,
+        themCoverage * TRANSCRIPTION_TUNING.activityPrune.themCoverageRatio,
+      )
   );
 };
 
@@ -739,6 +758,7 @@ export const shouldHydrateCanonicalTranscript = (params: {
 
 export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
   segments: T[],
+  activityWindows: SpeakerActivityWindow[] = [],
 ): MeBleedStripResult<T> => {
   const meSegments: Array<{ index: number; segment: T }> = [];
   const themSegments: T[] = [];
@@ -754,6 +774,14 @@ export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
 
   const dropIndices = new Set<number>();
 
+  const maxGapSeconds = TRANSCRIPTION_TUNING.sourceEchoPrune.maxGapSeconds;
+  const minSimilarity = TRANSCRIPTION_TUNING.sourceEchoPrune.minSimilarity;
+  const minThemCoverage = TRANSCRIPTION_TUNING.sourceEchoPrune.minThemCoverage;
+  const maxMeCoverageForEcho =
+    TRANSCRIPTION_TUNING.sourceEchoPrune.maxMeCoverageForEcho;
+  const themCoverageRatio =
+    TRANSCRIPTION_TUNING.sourceEchoPrune.themCoverageRatio;
+
   for (const { index, segment: me } of meSegments) {
     const meNorm = normalizeText(me.text);
     if (!meNorm) continue;
@@ -764,10 +792,14 @@ export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
     let dropForMe = false;
     for (const them of themSegments) {
       const overlap = overlapSeconds(me, them);
-      if (overlap <= 0) continue;
+      const meThemGap = Math.max(
+        0,
+        Math.max(me.startTime, them.startTime) -
+          Math.min(me.endTime, them.endTime),
+      );
+      if (overlap <= 0 && meThemGap > maxGapSeconds) continue;
 
-      const overlapRatio = overlap / meDur;
-      if (overlapRatio < 0.35) continue;
+      const overlapRatio = overlap > 0 ? overlap / meDur : 0;
 
       const themNorm = normalizeText(them.text);
       if (!themNorm) continue;
@@ -783,7 +815,10 @@ export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
         shorter / Math.max(1, longer) >= 0.72 &&
         (meNorm.includes(themNorm) || themNorm.includes(meNorm));
 
-      const highSimilarity = contains || tokenSim >= 0.55 || prefixSim >= 0.58;
+      const highSimilarity =
+        contains ||
+        tokenSim >= minSimilarity ||
+        prefixSim >= minSimilarity + 0.08;
       const themStronglyDominant =
         themDur >= meDur * 1.2 || themWords >= meWords + 5;
       const shortEcho = meWords <= 4 && (tokenSim >= 0.36 || prefixSim >= 0.45);
@@ -792,11 +827,43 @@ export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
         highSimilarity &&
         overlapRatio >= 0.5 &&
         (themDur >= meDur * 0.95 || themWords >= meWords + 1);
+      const evidenceStart =
+        overlap > 0
+          ? Math.max(me.startTime, them.startTime)
+          : Math.min(me.startTime, them.startTime);
+      const evidenceEnd =
+        overlap > 0
+          ? Math.min(me.endTime, them.endTime)
+          : Math.max(me.endTime, them.endTime);
+      const meCoverage = activityCoverage(
+        evidenceStart,
+        evidenceEnd,
+        'Me',
+        activityWindows,
+      );
+      const themCoverage = activityCoverage(
+        evidenceStart,
+        evidenceEnd,
+        'Them',
+        activityWindows,
+      );
+      const activityIndicatesEcho =
+        highSimilarity &&
+        themCoverage >= minThemCoverage &&
+        themCoverage >=
+          Math.max(meCoverage * themCoverageRatio, meCoverage + 0.08) &&
+        meCoverage <= maxMeCoverageForEcho;
+      const meClearlyDominant =
+        meCoverage >= minThemCoverage &&
+        meCoverage >=
+          Math.max(themCoverage * themCoverageRatio, themCoverage + 0.08);
 
       if (
-        (highSimilarity && themStronglyDominant && overlapRatio >= 0.45) ||
-        shortEcho ||
-        mediumEcho
+        !meClearlyDominant &&
+        ((highSimilarity && themStronglyDominant && overlapRatio >= 0.45) ||
+          activityIndicatesEcho ||
+          shortEcho ||
+          mediumEcho)
       ) {
         dropForMe = true;
         break;
@@ -886,4 +953,240 @@ export const dropShortCrossSpeakerEchoes = <
     segments: kept,
     dropped,
   };
+};
+
+export interface DiarizationMappingResult {
+  mapping: Record<string, 'Me' | 'Them'>;
+  confidence: number;
+  reason?: string;
+}
+
+export const mapDiarizationSpeakers = (params: {
+  diarizationSegments: AttributionSegment[];
+  referenceSegments: AttributionSegment[];
+  activityWindows?: SpeakerActivityWindow[];
+}): DiarizationMappingResult => {
+  const diarizationSegments = params.diarizationSegments || [];
+  const referenceSegments = params.referenceSegments || [];
+  const activityWindows = params.activityWindows || [];
+
+  if (diarizationSegments.length === 0) {
+    return { mapping: {}, confidence: 0, reason: 'no diarization segments' };
+  }
+
+  const grouped = new Map<string, AttributionSegment[]>();
+  for (const segment of diarizationSegments) {
+    const speakerId = String(segment.speaker || '').trim();
+    if (!speakerId) continue;
+    const existing = grouped.get(speakerId) ?? [];
+    existing.push(segment);
+    grouped.set(speakerId, existing);
+  }
+
+  if (grouped.size < 2) {
+    return { mapping: {}, confidence: 0, reason: 'not enough speakers' };
+  }
+
+  const referenceMe = referenceSegments.filter(
+    (segment) => segment.speaker === 'Me',
+  );
+  const referenceThem = referenceSegments.filter(
+    (segment) => segment.speaker === 'Them',
+  );
+  const activityMe: AttributionSegment[] = activityWindows
+    .filter((window) => window.speaker === 'Me')
+    .map((window) => ({
+      startTime: window.startTime,
+      endTime: window.endTime,
+      text: '',
+      speaker: 'Me',
+    }));
+  const activityThem: AttributionSegment[] = activityWindows
+    .filter((window) => window.speaker === 'Them')
+    .map((window) => ({
+      startTime: window.startTime,
+      endTime: window.endTime,
+      text: '',
+      speaker: 'Them',
+    }));
+
+  const sumOverlap = (
+    left: AttributionSegment[],
+    right: AttributionSegment[],
+  ): number => {
+    let total = 0;
+    for (const a of left) {
+      for (const b of right) {
+        const overlap = overlapSeconds(a, b);
+        if (overlap > 0) total += overlap;
+      }
+    }
+    return total;
+  };
+
+  const activityWeight = TRANSCRIPTION_TUNING.diarization.activityWeight;
+  const minOverlapSeconds =
+    TRANSCRIPTION_TUNING.diarization.minSpeakerOverlapSeconds;
+  const minScoreRatio = TRANSCRIPTION_TUNING.diarization.minSpeakerScoreRatio;
+
+  type Candidate = {
+    speakerId: string;
+    meScore: number;
+    themScore: number;
+    confidence: number;
+  };
+
+  const candidates: Candidate[] = [];
+  for (const [speakerId, segments] of grouped.entries()) {
+    const meOverlap = sumOverlap(segments, referenceMe);
+    const themOverlap = sumOverlap(segments, referenceThem);
+    const meActivity = sumOverlap(segments, activityMe);
+    const themActivity = sumOverlap(segments, activityThem);
+    const meScore = meOverlap + meActivity * activityWeight;
+    const themScore = themOverlap + themActivity * activityWeight;
+    const total = meScore + themScore;
+    const confidence = total > 0 ? Math.abs(meScore - themScore) / total : 0;
+    candidates.push({ speakerId, meScore, themScore, confidence });
+  }
+
+  const preferMe = candidates.filter((candidate) => {
+    return candidate.meScore >= candidate.themScore;
+  });
+  const preferThem = candidates.filter((candidate) => {
+    return candidate.themScore >= candidate.meScore;
+  });
+
+  const byMeScore = [...(preferMe.length > 0 ? preferMe : candidates)].sort(
+    (a, b) => b.meScore - a.meScore,
+  );
+  const byThemScore = [
+    ...(preferThem.length > 0 ? preferThem : candidates),
+  ].sort((a, b) => b.themScore - a.themScore);
+
+  const topMe = byMeScore[0];
+  const topThem = byThemScore[0];
+  if (!topMe || !topThem) {
+    return { mapping: {}, confidence: 0, reason: 'no candidates' };
+  }
+
+  let meCandidate = topMe;
+  let themCandidate = topThem;
+
+  if (meCandidate.meScore < minOverlapSeconds) {
+    return { mapping: {}, confidence: 0, reason: 'low Me overlap' };
+  }
+  if (themCandidate.themScore < minOverlapSeconds) {
+    return { mapping: {}, confidence: 0, reason: 'low Them overlap' };
+  }
+
+  if (meCandidate.speakerId === themCandidate.speakerId) {
+    const alternateThem = byThemScore.find(
+      (candidate) =>
+        candidate.speakerId !== meCandidate.speakerId &&
+        candidate.themScore >= minOverlapSeconds,
+    );
+    const alternateMe = byMeScore.find(
+      (candidate) =>
+        candidate.speakerId !== themCandidate.speakerId &&
+        candidate.meScore >= minOverlapSeconds,
+    );
+    if (alternateThem && alternateMe) {
+      themCandidate =
+        alternateThem.themScore >= alternateMe.meScore
+          ? alternateThem
+          : themCandidate;
+      if (themCandidate.speakerId === meCandidate.speakerId) {
+        meCandidate = alternateMe;
+      }
+    } else if (alternateThem) {
+      themCandidate = alternateThem;
+    } else if (alternateMe) {
+      meCandidate = alternateMe;
+    } else {
+      return { mapping: {}, confidence: 0, reason: 'ambiguous speaker' };
+    }
+  }
+
+  if (meCandidate.speakerId === themCandidate.speakerId) {
+    return { mapping: {}, confidence: 0, reason: 'ambiguous speaker' };
+  }
+
+  if (
+    meCandidate.confidence < minScoreRatio ||
+    themCandidate.confidence < minScoreRatio
+  ) {
+    return { mapping: {}, confidence: 0, reason: 'low confidence' };
+  }
+
+  const confidence = Math.min(meCandidate.confidence, themCandidate.confidence);
+
+  return {
+    mapping: {
+      [meCandidate.speakerId]: 'Me',
+      [themCandidate.speakerId]: 'Them',
+    },
+    confidence,
+  };
+};
+
+export const applyDiarizationRefinement = <
+  T extends AttributionSegment,
+>(params: {
+  segments: T[];
+  diarizationSegments: AttributionSegment[];
+  mapping: Record<string, 'Me' | 'Them'>;
+  minSegmentOverlapSeconds?: number;
+  minSegmentCoverageRatio?: number;
+}): { segments: T[]; relabeled: number } => {
+  const inputSegments = params.segments || [];
+  const mapping = params.mapping || {};
+  const diarizationSegments = params.diarizationSegments || [];
+  const minOverlapSeconds =
+    params.minSegmentOverlapSeconds ??
+    TRANSCRIPTION_TUNING.diarization.minSegmentOverlapSeconds;
+  const minCoverageRatio =
+    params.minSegmentCoverageRatio ??
+    TRANSCRIPTION_TUNING.diarization.minSegmentCoverageRatio;
+
+  if (inputSegments.length === 0 || diarizationSegments.length === 0) {
+    return { segments: [...inputSegments], relabeled: 0 };
+  }
+
+  const usableDiarization = diarizationSegments.filter((segment) => {
+    const key = String(segment.speaker || '');
+    return Boolean(mapping[key]);
+  });
+
+  if (usableDiarization.length === 0) {
+    return { segments: [...inputSegments], relabeled: 0 };
+  }
+
+  const updated: T[] = inputSegments.map((segment) => ({ ...segment }));
+  let relabeled = 0;
+
+  for (const segment of updated) {
+    const duration = Math.max(0.01, segment.endTime - segment.startTime);
+    let bestSpeaker = '';
+    let bestOverlap = 0;
+
+    for (const diarSegment of usableDiarization) {
+      const overlap = overlapSeconds(segment, diarSegment);
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestSpeaker = String(diarSegment.speaker || '');
+      }
+    }
+
+    if (!bestSpeaker || bestOverlap < minOverlapSeconds) continue;
+    const coverage = bestOverlap / duration;
+    if (coverage < minCoverageRatio) continue;
+
+    const mapped = mapping[bestSpeaker];
+    if (mapped && segment.speaker !== mapped) {
+      segment.speaker = mapped;
+      relabeled++;
+    }
+  }
+
+  return { segments: updated, relabeled };
 };

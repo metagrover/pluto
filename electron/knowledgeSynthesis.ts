@@ -1,0 +1,1318 @@
+import * as db from './db';
+import { parseAnalysisMarkdown } from './llm/analysisDocument';
+import { getAllSettings, getProvider } from './llm/factory';
+import {
+  getEntitySummaryPrompt,
+  getKnowledgeDocumentPrompt,
+} from './llm/prompts';
+
+const SYNTHESIS_DEBOUNCE_MS = 2500;
+const MAX_SOURCE_MEETINGS = 80;
+const MAX_EVIDENCE_CHARS = 2500;
+const MIN_EVIDENCE_CHARS = 140;
+const MIN_SOURCE_MEETINGS = 6;
+const MAX_TRANSCRIPT_HIGHLIGHTS = 10;
+const MAX_ENTITY_CONTEXTS = 6;
+const MAX_CONTEXT_CHARS = 220;
+const ENTITY_SUMMARY_MAX_MEETINGS = 12;
+
+export interface EntitySummarySentence {
+  text: string;
+  source_meeting_ids: string[];
+}
+
+export interface EntitySummary {
+  sentences: EntitySummarySentence[];
+  isInitialExtraction: boolean;
+}
+
+type KnowledgeSectionKey =
+  | 'decisions'
+  | 'topic_evolution'
+  | 'open_risks'
+  | 'signals';
+
+interface KnowledgeCitation {
+  meeting_id: string;
+  quote: string;
+}
+
+interface KnowledgeStatement {
+  id: string;
+  text: string;
+  why_it_matters: string;
+  citations: KnowledgeCitation[];
+}
+
+type KnowledgeDependencyRelationship =
+  | 'depends_on'
+  | 'blocked_by'
+  | 'owns'
+  | 'impacts';
+
+interface KnowledgeDependencySuggestion {
+  source_name: string;
+  target_name: string;
+  relationship: KnowledgeDependencyRelationship;
+  why: string;
+  citations: KnowledgeCitation[];
+}
+
+interface KnowledgeChapter {
+  chapter_id: string;
+  title: string;
+  decisions: KnowledgeStatement[];
+  topic_evolution: KnowledgeStatement[];
+  open_risks: KnowledgeStatement[];
+  signals: KnowledgeStatement[];
+}
+
+interface KnowledgeStructuredDocument {
+  schema_version: number;
+  scope: {
+    type: db.KnowledgeDocScopeType;
+    title: string;
+  };
+  chapters: KnowledgeChapter[];
+  dependency_suggestions: KnowledgeDependencySuggestion[];
+}
+
+interface KnowledgeSectionChange {
+  section: string;
+  added_count: number;
+  removed_count: number;
+  updated_count: number;
+  sample_items: string[];
+}
+
+interface KnowledgeChangelog {
+  generated_at: string;
+  sections: KnowledgeSectionChange[];
+}
+
+interface SynthSourceMeeting {
+  id: string;
+  title: string;
+  occurred_at: string | null;
+  evidence: string;
+}
+
+type QueueState = {
+  timer: ReturnType<typeof setTimeout> | null;
+  inFlight: boolean;
+  pending: boolean;
+};
+
+const queueByDocId = new Map<string, QueueState>();
+
+const normalizeText = (value: string): string =>
+  value.toLowerCase().replace(/\s+/g, ' ').trim();
+
+const normalizeForMatch = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const clipText = (value: string, maxChars: number): string => {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars).trim()}...`;
+};
+
+const countWords = (value: string): number => {
+  return value.trim().split(/\s+/).filter(Boolean).length;
+};
+
+const MIN_STATEMENT_LENGTH = 24;
+const MIN_WHY_LENGTH = 18;
+const MAX_SECTION_ITEMS = 5;
+
+const isWeakStatement = (text: string): boolean => {
+  const normalized = normalizeText(text);
+  if (normalized.length < MIN_STATEMENT_LENGTH) return true;
+  if (
+    /^(there (is|was)|it was|discussion about|talked about|the participants|the documents mention|based on the|in this meeting|i have summarized)/i.test(
+      text,
+    )
+  ) {
+    return true;
+  }
+  return false;
+};
+
+const isWeakWhy = (text: string): boolean => {
+  const normalized = normalizeText(text);
+  if (normalized.length < MIN_WHY_LENGTH) return true;
+  if (
+    /^(important|matters|useful|relevant|it's worth noting|note that)\b/i.test(
+      text,
+    )
+  )
+    return true;
+  return false;
+};
+
+const getState = (docId: string): QueueState => {
+  const existing = queueByDocId.get(docId);
+  if (existing) return existing;
+  const created: QueueState = { timer: null, inFlight: false, pending: false };
+  queueByDocId.set(docId, created);
+  return created;
+};
+
+const extractTranscriptSegments = (
+  raw: string | null | undefined,
+): string[] => {
+  if (!raw || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const segments = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray((parsed as { segments?: unknown[] })?.segments)
+        ? ((parsed as { segments?: unknown[] }).segments as unknown[])
+        : [];
+    return segments
+      .map((segment) => {
+        if (!segment || typeof segment !== 'object') return '';
+        const text = (segment as { text?: unknown }).text;
+        return typeof text === 'string' ? text.trim() : '';
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+};
+
+const extractTranscriptText = (raw: string | null | undefined): string => {
+  return extractTranscriptSegments(raw).join(' ');
+};
+
+type AnalysisEvidence = {
+  summary: string[];
+  key_points: string[];
+  action_items: string[];
+  decisions: string[];
+};
+
+const emptyAnalysisEvidence = (): AnalysisEvidence => ({
+  summary: [],
+  key_points: [],
+  action_items: [],
+  decisions: [],
+});
+
+const hasAnalysisEvidence = (doc: AnalysisEvidence): boolean => {
+  return (
+    doc.summary.length > 0 ||
+    doc.key_points.length > 0 ||
+    doc.action_items.length > 0 ||
+    doc.decisions.length > 0
+  );
+};
+
+const normalizeList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const parseAnalysisJson = (
+  raw: string | null | undefined,
+): AnalysisEvidence => {
+  if (!raw || !raw.trim()) return emptyAnalysisEvidence();
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      summary: normalizeList(parsed.summary).slice(0, 6),
+      key_points: normalizeList(parsed.key_points).slice(0, 8),
+      action_items: normalizeList(parsed.action_items).slice(0, 6),
+      decisions: normalizeList(parsed.decisions).slice(0, 6),
+    };
+  } catch {
+    return emptyAnalysisEvidence();
+  }
+};
+
+const parseAnalysisNotes = (
+  raw: string | null | undefined,
+): AnalysisEvidence => {
+  if (!raw || !raw.trim()) return emptyAnalysisEvidence();
+  const parsed = parseAnalysisMarkdown(raw);
+  return {
+    summary: parsed.document.summary.slice(0, 6),
+    key_points: parsed.document.key_points.slice(0, 8),
+    action_items: parsed.document.action_items.slice(0, 6),
+    decisions: parsed.document.decisions.slice(0, 6),
+  };
+};
+
+const formatEvidenceList = (label: string, items: string[]): string => {
+  if (items.length === 0) return '';
+  const clipped = items.map((item) => clipText(item, 180));
+  return `${label}: ${clipped.join(' | ')}`;
+};
+
+const extractAnalysisEvidence = (
+  analysisRaw: string | null | undefined,
+  notesRaw: string | null | undefined,
+): { text: string; usedNotes: boolean } => {
+  const fromJson = parseAnalysisJson(analysisRaw);
+  const hasJson = hasAnalysisEvidence(fromJson);
+  const fromNotes = hasJson
+    ? emptyAnalysisEvidence()
+    : parseAnalysisNotes(notesRaw);
+  const hasNotes = hasAnalysisEvidence(fromNotes);
+  const source = hasJson ? fromJson : fromNotes;
+  if (!hasAnalysisEvidence(source)) {
+    return { text: '', usedNotes: false };
+  }
+
+  const lines = [
+    formatEvidenceList('Summary', source.summary),
+    formatEvidenceList('Key points', source.key_points),
+    formatEvidenceList('Action items', source.action_items),
+    formatEvidenceList('Decisions', source.decisions),
+  ].filter(Boolean);
+
+  return { text: lines.join('\n'), usedNotes: !hasJson && hasNotes };
+};
+
+const extractNotesEvidence = (raw: string | null | undefined): string => {
+  if (!raw || !raw.trim()) return '';
+  const parsed = parseAnalysisNotes(raw);
+  if (hasAnalysisEvidence(parsed)) {
+    const lines = [
+      formatEvidenceList('Notes summary', parsed.summary),
+      formatEvidenceList('Notes highlights', parsed.key_points),
+      formatEvidenceList('Notes action items', parsed.action_items),
+      formatEvidenceList('Notes decisions', parsed.decisions),
+    ].filter(Boolean);
+    if (lines.length > 0) return lines.join('\n');
+  }
+  return `Notes excerpt: ${clipText(raw.trim(), 700)}`;
+};
+
+const extractUserNotesEvidence = (raw: string | null | undefined): string => {
+  if (!raw || !raw.trim()) return '';
+  return `User notes: ${clipText(raw.trim(), 400)}`;
+};
+
+const extractValueSignalsEvidence = (
+  raw: string | null | undefined,
+): string => {
+  if (!raw || !raw.trim()) return '';
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const lines: string[] = [];
+    const append = (label: string, value: unknown) => {
+      if (!Array.isArray(value) || value.length === 0) return;
+      const texts = value.filter(
+        (item): item is string => typeof item === 'string',
+      );
+      if (texts.length === 0) return;
+      lines.push(`${label}: ${texts.join(' | ')}`);
+    };
+    append('Continuity signals', parsed.continuity);
+    append('Accountability risks', parsed.accountability_risks);
+    append('Decision impacts', parsed.decision_impacts);
+    if (Array.isArray(parsed.extra_tags) && parsed.extra_tags.length > 0) {
+      const tags = parsed.extra_tags
+        .map((tag) => {
+          if (!tag || typeof tag !== 'object') return '';
+          const record = tag as Record<string, unknown>;
+          const label = typeof record.tag === 'string' ? record.tag.trim() : '';
+          if (!label) return '';
+          const confidence =
+            typeof record.confidence === 'number'
+              ? record.confidence.toFixed(2)
+              : null;
+          return confidence ? `${label} (${confidence})` : label;
+        })
+        .filter(Boolean)
+        .slice(0, 8);
+      if (tags.length > 0) {
+        lines.push(`Signal tags: ${tags.join(' | ')}`);
+      }
+    }
+    return lines.join('\n');
+  } catch {
+    return '';
+  }
+};
+
+const buildEntityHints = (
+  entities: Array<{ type: string; name: string; mention_count: number }>,
+): string => {
+  if (!entities.length) return '';
+  const topByType = new Map<string, string[]>();
+  for (const entity of entities.slice(0, 12)) {
+    if (!topByType.has(entity.type)) {
+      topByType.set(entity.type, []);
+    }
+    const label =
+      entity.mention_count > 1
+        ? `${entity.name} (${entity.mention_count})`
+        : entity.name;
+    topByType.get(entity.type)?.push(label);
+  }
+  const lines = Array.from(topByType.entries()).map(
+    ([type, names]) => `${type}: ${names.slice(0, 5).join(', ')}`,
+  );
+  return lines.length ? `Entity hints:\n${lines.join('\n')}` : '';
+};
+
+const buildEntityContextEvidence = (
+  entities: Array<{ name: string; context: string | null }>,
+): string => {
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const entity of entities) {
+    if (!entity.context || !entity.context.trim()) continue;
+    const normalized = normalizeText(entity.context);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    lines.push(
+      `- ${entity.name}: ${clipText(entity.context.trim(), MAX_CONTEXT_CHARS)}`,
+    );
+    if (lines.length >= MAX_ENTITY_CONTEXTS) break;
+  }
+  return lines.length > 0
+    ? `Entity mention contexts:\n${lines.join('\n')}`
+    : '';
+};
+
+const extractTranscriptHighlights = (
+  raw: string | null | undefined,
+  entityNames: string[],
+): string => {
+  const segments = extractTranscriptSegments(raw);
+  if (segments.length === 0) return '';
+  const normalizedEntities = entityNames
+    .map((name) => normalizeForMatch(name))
+    .filter((name) => name.length >= 3)
+    .slice(0, 10);
+  const actionCues = [
+    /\bdecid(ed|es|ing)?\b/i,
+    /\bblock(ed|er|ing)?\b/i,
+    /\brisk(s|y)?\b/i,
+    /\bneed(s|ed)?\b/i,
+    /\bplan(s|ned)?\b/i,
+    /\bwill\b/i,
+    /\bship(ped|ping)?\b/i,
+    /\bdeadline\b/i,
+  ];
+
+  const scored = segments.map((text, index) => {
+    const normalized = normalizeForMatch(text);
+    if (!normalized) {
+      return { index, text, score: -3, normalized };
+    }
+    let score = 0;
+    if (normalizedEntities.some((entity) => normalized.includes(entity))) {
+      score += 3;
+    }
+    if (actionCues.some((cue) => cue.test(text))) {
+      score += 1;
+    }
+    if (/\b\d{1,4}\b/.test(text)) {
+      score += 1;
+    }
+    const wordCount = countWords(text);
+    if (wordCount < 4) score -= 2;
+    else if (wordCount < 7) score -= 1;
+    return { index, text, score, normalized };
+  });
+
+  let candidates = scored.filter((item) => item.score > 0);
+  if (candidates.length === 0) {
+    candidates = scored.slice(0, 4);
+  }
+
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return countWords(b.text) - countWords(a.text);
+  });
+
+  const picked = candidates.slice(0, MAX_TRANSCRIPT_HIGHLIGHTS);
+  picked.sort((a, b) => a.index - b.index);
+
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const item of picked) {
+    if (!item.normalized || seen.has(item.normalized)) continue;
+    seen.add(item.normalized);
+    lines.push(`- ${clipText(item.text, 200)}`);
+  }
+
+  return lines.length > 0 ? `Transcript highlights:\n${lines.join('\n')}` : '';
+};
+
+type MeetingEvidenceBundle = {
+  evidence: string;
+  score: number;
+};
+
+const scoreMeetingEvidence = (params: {
+  meeting: db.KnowledgeDocSourceMeeting;
+  analysisText: string;
+  notesText: string;
+  userNotesText: string;
+  valueSignalsText: string;
+  entityContextText: string;
+  transcriptHighlights: string;
+}): number => {
+  let score = 0;
+  if (params.meeting.analysis_format_pass) score += 2;
+  if (params.analysisText) score += 4;
+  if (params.notesText) score += 2;
+  if (params.userNotesText) score += 1;
+  if (params.valueSignalsText) score += 1;
+  if (params.entityContextText) score += 1;
+  if (params.transcriptHighlights) score += 1;
+  const mentions = Math.max(0, params.meeting.mention_count || 0);
+  if (mentions > 0) score += Math.min(3, Math.log2(mentions + 1));
+  return score;
+};
+
+const buildMeetingEvidence = (
+  meeting: db.KnowledgeDocSourceMeeting,
+): MeetingEvidenceBundle => {
+  let entities: Array<{
+    type: string;
+    name: string;
+    mention_count: number;
+    context: string | null;
+  }> = [];
+  try {
+    entities = db.getMeetingEntities(String(meeting.id));
+  } catch {
+    entities = [];
+  }
+
+  const entityHints = buildEntityHints(entities);
+  const entityContextText = buildEntityContextEvidence(entities);
+  const analysisEvidence = extractAnalysisEvidence(
+    meeting.analysis_json,
+    meeting.enhanced_notes,
+  );
+  const analysisText = analysisEvidence.text;
+  const notesText = analysisEvidence.usedNotes
+    ? ''
+    : extractNotesEvidence(meeting.enhanced_notes);
+  const userNotesText = extractUserNotesEvidence(meeting.user_notes);
+  const valueSignalsText = extractValueSignalsEvidence(
+    meeting.value_signals_json,
+  );
+  const transcriptHighlights = extractTranscriptHighlights(
+    meeting.transcript_json,
+    entities.map((entity) => entity.name),
+  );
+  const context =
+    typeof meeting.context === 'string' ? meeting.context.trim() : '';
+  const transcriptText = extractTranscriptText(meeting.transcript_json);
+  const transcriptExcerpt =
+    !transcriptHighlights && transcriptText
+      ? `Transcript excerpt: ${clipText(transcriptText, 600)}`
+      : '';
+
+  const combined = [
+    entityHints,
+    analysisText,
+    notesText,
+    userNotesText,
+    valueSignalsText,
+    entityContextText,
+    context ? `Context snippet: ${clipText(context, MAX_CONTEXT_CHARS)}` : '',
+    transcriptHighlights,
+    transcriptExcerpt,
+  ]
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean)
+    .join('\n\n');
+
+  if (!combined) {
+    return { evidence: '', score: 0 };
+  }
+
+  const score = scoreMeetingEvidence({
+    meeting,
+    analysisText,
+    notesText,
+    userNotesText,
+    valueSignalsText,
+    entityContextText,
+    transcriptHighlights,
+  });
+
+  const evidence =
+    combined.length > MAX_EVIDENCE_CHARS
+      ? `${combined.slice(0, MAX_EVIDENCE_CHARS)}...`
+      : combined;
+
+  return { evidence, score };
+};
+
+const parseJsonResponse = (raw: string): unknown => {
+  const trimmed = raw.trim();
+  const cleaned = trimmed.startsWith('```')
+    ? trimmed.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+    : trimmed;
+  return JSON.parse(cleaned);
+};
+
+const sanitizeCitations = (
+  list: unknown,
+  sourceEvidenceByMeeting: Map<string, string>,
+): { citations: KnowledgeCitation[]; citedMeetingIds: Set<string> } => {
+  const output: KnowledgeCitation[] = [];
+  const citedMeetingIds = new Set<string>();
+  const rawCitations = Array.isArray(list) ? list : [];
+
+  for (const entry of rawCitations) {
+    if (!entry || typeof entry !== 'object') continue;
+    const citation = entry as Record<string, unknown>;
+    const meetingId =
+      typeof citation.meeting_id === 'string' ? citation.meeting_id.trim() : '';
+    const quote =
+      typeof citation.quote === 'string' ? citation.quote.trim() : '';
+    if (!meetingId || !quote || quote.length < 6) continue;
+
+    const evidenceText = sourceEvidenceByMeeting.get(meetingId);
+    if (!evidenceText) continue;
+    if (!evidenceText.includes(normalizeText(quote))) continue;
+
+    output.push({ meeting_id: meetingId, quote });
+    citedMeetingIds.add(meetingId);
+  }
+
+  return { citations: output, citedMeetingIds };
+};
+
+const sanitizeStatementList = (params: {
+  list: unknown;
+  section: KnowledgeSectionKey;
+  sourceEvidenceByMeeting: Map<string, string>;
+  seenTexts: Set<string>;
+}): KnowledgeStatement[] => {
+  if (!Array.isArray(params.list)) return [];
+  const output: KnowledgeStatement[] = [];
+
+  for (const item of params.list) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const text = typeof record.text === 'string' ? record.text.trim() : '';
+    if (!text || isWeakStatement(text)) continue;
+    const why =
+      typeof record.why_it_matters === 'string'
+        ? record.why_it_matters.trim()
+        : '';
+    if (!why || isWeakWhy(why)) continue;
+
+    const normalizedText = normalizeText(text);
+    const dedupeKey = `${normalizedText}|${normalizeText(why)}`;
+    if (params.seenTexts.has(dedupeKey)) continue;
+
+    const { citations, citedMeetingIds } = sanitizeCitations(
+      record.citations,
+      params.sourceEvidenceByMeeting,
+    );
+
+    if (citations.length === 0) continue;
+    if (params.section === 'topic_evolution' && citedMeetingIds.size < 2) {
+      continue;
+    }
+
+    const id =
+      typeof record.id === 'string' && record.id.trim().length > 0
+        ? record.id.trim()
+        : `item-${output.length + 1}`;
+
+    output.push({ id, text, why_it_matters: why, citations });
+    params.seenTexts.add(dedupeKey);
+
+    if (output.length >= MAX_SECTION_ITEMS) {
+      break;
+    }
+  }
+
+  return output;
+};
+
+const sanitizeDependencySuggestions = (params: {
+  value: unknown;
+  sourceEvidenceByMeeting: Map<string, string>;
+}): KnowledgeDependencySuggestion[] => {
+  if (!Array.isArray(params.value)) return [];
+  const out: KnowledgeDependencySuggestion[] = [];
+
+  for (const item of params.value) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const sourceName =
+      typeof record.source_name === 'string' ? record.source_name.trim() : '';
+    const targetName =
+      typeof record.target_name === 'string' ? record.target_name.trim() : '';
+    const relationship =
+      typeof record.relationship === 'string' ? record.relationship.trim() : '';
+    const why = typeof record.why === 'string' ? record.why.trim() : '';
+    if (!sourceName || !targetName || sourceName === targetName) continue;
+    if (!why || isWeakWhy(why)) continue;
+
+    if (
+      relationship !== 'depends_on' &&
+      relationship !== 'blocked_by' &&
+      relationship !== 'owns' &&
+      relationship !== 'impacts'
+    ) {
+      continue;
+    }
+
+    const { citations } = sanitizeCitations(
+      record.citations,
+      params.sourceEvidenceByMeeting,
+    );
+    if (!citations.length) continue;
+
+    out.push({
+      source_name: sourceName,
+      target_name: targetName,
+      relationship,
+      why,
+      citations,
+    });
+    if (out.length >= 30) break;
+  }
+
+  return out;
+};
+
+const inferEntityTypeForDependency = (label: string): db.EntityType => {
+  const normalized = normalizeText(label);
+  if (
+    /\b(project|initiative|platform|workspace|migration|launch|roadmap)\b/i.test(
+      normalized,
+    )
+  ) {
+    return 'project';
+  }
+  if (/^(build|ship|fix|review|deploy|create|update|prepare)\b/i.test(label)) {
+    return 'action_item';
+  }
+  return 'topic';
+};
+
+const resolveDependencyEntity = (name: string): db.Entity | undefined => {
+  const entity = db.findEntity('project', name) || db.findEntity('topic', name);
+  if (entity) return entity;
+
+  const normalized = normalizeText(name);
+  if (normalized.length < 3) return undefined;
+
+  return db.upsertEntity({
+    type: inferEntityTypeForDependency(name),
+    name: name.trim(),
+    status: 'active',
+    metadata: { generated_by: 'knowledge_synthesis' },
+  });
+};
+
+const persistDependencySuggestions = (
+  suggestions: KnowledgeDependencySuggestion[],
+): void => {
+  for (const suggestion of suggestions) {
+    const sourceEntity = resolveDependencyEntity(suggestion.source_name);
+    const targetEntity = resolveDependencyEntity(suggestion.target_name);
+    if (!sourceEntity || !targetEntity) continue;
+    if (sourceEntity.id === targetEntity.id) continue;
+
+    const primaryCitation = suggestion.citations[0];
+    db.linkEntities({
+      source_entity_id: sourceEntity.id,
+      target_entity_id: targetEntity.id,
+      relationship: suggestion.relationship,
+      meeting_id: primaryCitation?.meeting_id || undefined,
+      state: 'suggested',
+      source: 'synthesis',
+      evidence_meeting_id: primaryCitation?.meeting_id || null,
+      evidence_quote:
+        `${suggestion.why} — ${primaryCitation?.quote || ''}`.trim(),
+      confidence: 0.72,
+    });
+  }
+};
+
+const sanitizeStructuredDocument = (params: {
+  parsed: unknown;
+  scopeType: db.KnowledgeDocScopeType;
+  scopeTitle: string;
+  sourceEvidenceByMeeting: Map<string, string>;
+}): KnowledgeStructuredDocument => {
+  const result: KnowledgeStructuredDocument = {
+    schema_version: 1,
+    scope: {
+      type: params.scopeType,
+      title: params.scopeTitle,
+    },
+    chapters: [],
+    dependency_suggestions: [],
+  };
+
+  if (!params.parsed || typeof params.parsed !== 'object') {
+    return result;
+  }
+
+  const top = params.parsed as Record<string, unknown>;
+  const rawChapters = Array.isArray(top.chapters) ? top.chapters : [];
+  const seenTexts = new Set<string>();
+  result.dependency_suggestions = sanitizeDependencySuggestions({
+    value: top.dependency_suggestions,
+    sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+  });
+
+  for (const chapter of rawChapters) {
+    if (!chapter || typeof chapter !== 'object') continue;
+    const record = chapter as Record<string, unknown>;
+    const title = typeof record.title === 'string' ? record.title.trim() : '';
+    if (!title) continue;
+
+    const decisions = sanitizeStatementList({
+      list: record.decisions,
+      section: 'decisions',
+      sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+      seenTexts,
+    });
+    const topicEvolution = sanitizeStatementList({
+      list: record.topic_evolution,
+      section: 'topic_evolution',
+      sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+      seenTexts,
+    });
+    const openRisks = sanitizeStatementList({
+      list: record.open_risks,
+      section: 'open_risks',
+      sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+      seenTexts,
+    });
+    const signals = sanitizeStatementList({
+      list: record.signals,
+      section: 'signals',
+      sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+      seenTexts,
+    });
+
+    if (
+      decisions.length === 0 &&
+      topicEvolution.length === 0 &&
+      openRisks.length === 0 &&
+      signals.length === 0
+    ) {
+      continue;
+    }
+
+    const chapterId =
+      typeof record.chapter_id === 'string' &&
+      record.chapter_id.trim().length > 0
+        ? record.chapter_id.trim()
+        : `chapter-${result.chapters.length + 1}`;
+
+    result.chapters.push({
+      chapter_id: chapterId,
+      title,
+      decisions,
+      topic_evolution: topicEvolution,
+      open_risks: openRisks,
+      signals,
+    });
+  }
+
+  return result;
+};
+
+type SectionItemSnapshot = {
+  raw: string;
+  normalized: string;
+};
+
+const toSectionItems = (
+  doc: KnowledgeStructuredDocument,
+): Map<string, Map<string, SectionItemSnapshot>> => {
+  const sectionMap = new Map<string, Map<string, SectionItemSnapshot>>();
+  const sections: KnowledgeSectionKey[] = [
+    'decisions',
+    'topic_evolution',
+    'open_risks',
+    'signals',
+  ];
+
+  for (const section of sections) {
+    sectionMap.set(section, new Map<string, SectionItemSnapshot>());
+  }
+
+  for (const chapter of doc.chapters) {
+    for (const section of sections) {
+      for (const item of chapter[section]) {
+        const itemText = typeof item.text === 'string' ? item.text : '';
+        const itemWhy =
+          typeof item.why_it_matters === 'string' ? item.why_it_matters : '';
+        const identity = `${chapter.chapter_id}|${item.id || normalizeText(itemText)}`;
+        sectionMap.get(section)?.set(identity, {
+          raw: `${itemText.trim()} - ${itemWhy.trim()}`,
+          normalized: `${normalizeText(itemText)}|${normalizeText(itemWhy)}`,
+        });
+      }
+    }
+  }
+
+  return sectionMap;
+};
+
+const parseStoredStructuredDoc = (
+  raw: string | null,
+): KnowledgeStructuredDocument | null => {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as KnowledgeStructuredDocument;
+    if (!Array.isArray(parsed.chapters)) return null;
+    if (!Array.isArray(parsed.dependency_suggestions)) {
+      parsed.dependency_suggestions = [];
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const computeChangelog = (
+  previousDoc: KnowledgeStructuredDocument | null,
+  nextDoc: KnowledgeStructuredDocument,
+): KnowledgeChangelog => {
+  const previousSections = previousDoc
+    ? toSectionItems(previousDoc)
+    : new Map<string, Map<string, SectionItemSnapshot>>();
+  const nextSections = toSectionItems(nextDoc);
+  const sectionLabels: Array<{ key: KnowledgeSectionKey; label: string }> = [
+    { key: 'decisions', label: 'Decisions' },
+    { key: 'topic_evolution', label: 'Topic Evolution' },
+    { key: 'open_risks', label: 'Open Risks' },
+    { key: 'signals', label: 'Signals' },
+  ];
+
+  const sections: KnowledgeSectionChange[] = sectionLabels.map(
+    ({ key, label }) => {
+      const prev =
+        previousSections.get(key) || new Map<string, SectionItemSnapshot>();
+      const next =
+        nextSections.get(key) || new Map<string, SectionItemSnapshot>();
+
+      const added: string[] = [];
+      const removed: string[] = [];
+      const updated: string[] = [];
+
+      for (const [identity, nextItem] of next.entries()) {
+        const prevItem = prev.get(identity);
+        if (!prevItem) {
+          added.push(nextItem.raw);
+          continue;
+        }
+        if (prevItem.normalized !== nextItem.normalized) {
+          updated.push(nextItem.raw);
+        }
+      }
+
+      for (const [identity, prevItem] of prev.entries()) {
+        if (!next.has(identity)) {
+          removed.push(prevItem.raw);
+        }
+      }
+
+      return {
+        section: label,
+        added_count: added.length,
+        removed_count: removed.length,
+        updated_count: updated.length,
+        sample_items: [...added, ...updated].slice(0, 3),
+      };
+    },
+  );
+
+  return {
+    generated_at: new Date().toISOString(),
+    sections,
+  };
+};
+
+const renderStructuredDocument = (doc: KnowledgeStructuredDocument): string => {
+  const lines: string[] = [
+    `# ${doc.scope.title}`,
+    '',
+    `Auto-synthesized on ${new Date().toLocaleString()}.`,
+    '',
+  ];
+
+  if (doc.chapters.length === 0) {
+    lines.push('No citation-backed context is available yet.');
+    return lines.join('\n');
+  }
+
+  const sections: Array<{ key: KnowledgeSectionKey; title: string }> = [
+    { key: 'decisions', title: 'Decisions' },
+    { key: 'topic_evolution', title: 'Topic Evolution' },
+    { key: 'open_risks', title: 'Open Risks' },
+    { key: 'signals', title: 'Signals' },
+  ];
+
+  for (const chapter of doc.chapters) {
+    lines.push(`## ${chapter.title}`);
+    lines.push('');
+
+    for (const section of sections) {
+      const items = chapter[section.key];
+      if (items.length === 0) continue;
+      lines.push(`### ${section.title}`);
+      for (const item of items) {
+        const refs = item.citations
+          .map((citation) => `[${citation.meeting_id}]`)
+          .join(' ');
+        lines.push(`- ${item.text} (${item.why_it_matters}) ${refs}`.trim());
+      }
+      lines.push('');
+    }
+  }
+
+  if (doc.dependency_suggestions.length > 0) {
+    lines.push('## Dependency Suggestions');
+    lines.push('');
+    for (const suggestion of doc.dependency_suggestions) {
+      const refs = suggestion.citations
+        .map((citation) => `[${citation.meeting_id}]`)
+        .join(' ');
+      lines.push(
+        `- ${suggestion.source_name} ${suggestion.relationship.replace(/_/g, ' ')} ${suggestion.target_name} (${suggestion.why}) ${refs}`.trim(),
+      );
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
+};
+
+const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
+  const sourceMeetings = db.getKnowledgeDocSourceMeetings(
+    doc.id,
+    MAX_SOURCE_MEETINGS,
+  );
+
+  const scored = sourceMeetings.map((meeting) => {
+    const bundle = buildMeetingEvidence(meeting);
+    return {
+      meeting,
+      evidence: bundle.evidence,
+      score: bundle.score,
+      occurred_at: meeting.started_at || meeting.created_at || null,
+    };
+  });
+
+  const nonEmpty = scored.filter((item) => item.evidence.length > 0);
+  if (nonEmpty.length === 0) return [];
+
+  const viable = nonEmpty.filter(
+    (item) => item.evidence.length >= MIN_EVIDENCE_CHARS,
+  );
+  const candidates = viable.length >= MIN_SOURCE_MEETINGS ? viable : nonEmpty;
+
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const aTime = a.occurred_at ? new Date(a.occurred_at).getTime() : 0;
+    const bTime = b.occurred_at ? new Date(b.occurred_at).getTime() : 0;
+    return bTime - aTime;
+  });
+
+  return candidates.slice(0, MAX_SOURCE_MEETINGS).map((item) => ({
+    id: String(item.meeting.id),
+    title: item.meeting.title || 'Untitled Session',
+    occurred_at: item.occurred_at,
+    evidence: item.evidence,
+  }));
+};
+
+const synthesizeKnowledgeDocNowInternal = async (
+  docId: string,
+): Promise<db.KnowledgeDoc | undefined> => {
+  const doc = db.getKnowledgeDoc(docId);
+  if (!doc) return undefined;
+
+  db.upsertKnowledgeDoc({
+    id: doc.id,
+    scope_type: doc.scope_type,
+    scope_key: doc.scope_key,
+    title: doc.title,
+    status: 'synthesizing',
+  });
+
+  const sourceMeetings = buildSourceMeetings(doc);
+  const sourceMeetingIds = sourceMeetings.map((meeting) => meeting.id);
+
+  if (sourceMeetings.length === 0) {
+    const emptyDoc: KnowledgeStructuredDocument = {
+      schema_version: 1,
+      scope: { type: doc.scope_type, title: doc.title },
+      chapters: [],
+      dependency_suggestions: [],
+    };
+    const rendered = renderStructuredDocument(emptyDoc);
+    const previous = parseStoredStructuredDoc(doc.structured_json);
+    const changelog = computeChangelog(previous, emptyDoc);
+
+    db.replaceKnowledgeDocSources(doc.id, []);
+    db.saveKnowledgeDocVersion({
+      doc_id: doc.id,
+      structured_json: JSON.stringify(emptyDoc),
+      rendered_content: rendered,
+      changelog_json: JSON.stringify(changelog),
+      source_count: 0,
+    });
+    db.rebuildKnowledgeBacklinks(doc.id);
+
+    return db.upsertKnowledgeDoc({
+      id: doc.id,
+      scope_type: doc.scope_type,
+      scope_key: doc.scope_key,
+      title: doc.title,
+      structured_json: JSON.stringify(emptyDoc),
+      rendered_content: rendered,
+      status: 'up_to_date',
+      last_synthesized_at: new Date().toISOString(),
+      last_source_cursor: null,
+    });
+  }
+
+  const sourceEvidenceByMeeting = new Map<string, string>(
+    sourceMeetings.map((meeting) => [
+      meeting.id,
+      normalizeText(meeting.evidence),
+    ]),
+  );
+
+  try {
+    const settings = await getAllSettings(db);
+    const provider = await getProvider(settings);
+    const prompt = getKnowledgeDocumentPrompt({
+      scopeType: doc.scope_type,
+      scopeTitle: doc.title,
+      sourceMeetings,
+      previousStructuredJson: doc.structured_json,
+    });
+
+    const raw = await provider.synthesizeKnowledgeDocument(prompt);
+    const parsed = parseJsonResponse(raw);
+    const structured = sanitizeStructuredDocument({
+      parsed,
+      scopeType: doc.scope_type,
+      scopeTitle: doc.title,
+      sourceEvidenceByMeeting,
+    });
+
+    const rendered = renderStructuredDocument(structured);
+    const previous = parseStoredStructuredDoc(doc.structured_json);
+    const changelog = computeChangelog(previous, structured);
+
+    db.replaceKnowledgeDocSources(doc.id, sourceMeetingIds);
+    db.saveKnowledgeDocVersion({
+      doc_id: doc.id,
+      structured_json: JSON.stringify(structured),
+      rendered_content: rendered,
+      changelog_json: JSON.stringify(changelog),
+      source_count: sourceMeetings.length,
+    });
+    persistDependencySuggestions(structured.dependency_suggestions);
+    db.rebuildKnowledgeBacklinks(doc.id);
+
+    const latestSource = sourceMeetings[0];
+
+    return db.upsertKnowledgeDoc({
+      id: doc.id,
+      scope_type: doc.scope_type,
+      scope_key: doc.scope_key,
+      title: doc.title,
+      structured_json: JSON.stringify(structured),
+      rendered_content: rendered,
+      status: 'up_to_date',
+      last_synthesized_at: new Date().toISOString(),
+      last_source_cursor: latestSource
+        ? `${latestSource.occurred_at || ''}:${latestSource.id}`
+        : null,
+    });
+  } catch (error) {
+    console.error(`[KnowledgeDoc] Synthesis failed for doc ${doc.id}:`, error);
+    return db.upsertKnowledgeDoc({
+      id: doc.id,
+      scope_type: doc.scope_type,
+      scope_key: doc.scope_key,
+      title: doc.title,
+      status: 'failed',
+    });
+  }
+};
+
+const runQueuedSynthesis = async (docId: string): Promise<void> => {
+  const state = getState(docId);
+  if (state.inFlight) {
+    state.pending = true;
+    return;
+  }
+
+  state.inFlight = true;
+  state.pending = false;
+  try {
+    await synthesizeKnowledgeDocNowInternal(docId);
+  } finally {
+    state.inFlight = false;
+    if (state.pending) {
+      queueKnowledgeDocRefresh(docId, 750);
+    }
+  }
+};
+
+export const queueKnowledgeDocRefresh = (
+  docId: string,
+  delayMs = SYNTHESIS_DEBOUNCE_MS,
+): void => {
+  const state = getState(docId);
+  state.pending = true;
+
+  if (state.timer) {
+    clearTimeout(state.timer);
+  }
+
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    void runQueuedSynthesis(docId);
+  }, delayMs);
+};
+
+export const refreshKnowledgeDocNow = async (
+  docId: string,
+): Promise<db.KnowledgeDoc | undefined> => {
+  return synthesizeKnowledgeDocNowInternal(docId);
+};
+
+export const synthesizeEntitySummary = async (
+  entityId: string,
+): Promise<EntitySummary> => {
+  const entity = db.getEntity(entityId);
+  if (!entity) {
+    throw new Error(`Entity not found: ${entityId}`);
+  }
+
+  const meetings = db.getEntityMeetings(entityId);
+
+  // Handle "Dummy" State (Fallback for 1 mention)
+  if (meetings.length <= 1) {
+    return {
+      sentences: [
+        {
+          text: `Initial extraction for **${entity.name}**.`,
+          source_meeting_ids: meetings.map((m) => String(m.id)),
+        },
+      ],
+      isInitialExtraction: true,
+    };
+  }
+
+  const sourceMeetings = meetings
+    .slice(0, ENTITY_SUMMARY_MAX_MEETINGS)
+    .map((m) => ({
+      id: String(m.id),
+      title: m.title,
+      evidence: m.context || '',
+    }));
+
+  const settings = await getAllSettings(db);
+  const provider = await getProvider(settings);
+
+  const prompt = getEntitySummaryPrompt({
+    entityName: entity.name,
+    entityType: entity.type,
+    sources: sourceMeetings,
+  });
+
+  const raw = await provider.synthesizeKnowledgeDocument(prompt); // Reusing the same provider method
+  try {
+    const parsed = parseJsonResponse(raw) as {
+      sentences: EntitySummarySentence[];
+    };
+    return {
+      sentences: parsed.sentences || [],
+      isInitialExtraction: false,
+    };
+  } catch (err) {
+    console.error('[KnowledgeDoc] Entity summary parse failed:', err);
+    return {
+      sentences: [
+        {
+          text: `Synthesis failed for **${entity.name}**. Please try again.`,
+          source_meeting_ids: [],
+        },
+      ],
+      isInitialExtraction: false,
+    };
+  }
+};
+
+const ensureDocsAndCollectActive = (): db.KnowledgeDoc[] => {
+  const globalDoc = db.ensureGlobalKnowledgeDoc();
+  db.syncKnowledgeProjectLifecycle({
+    activeDays: 30,
+    minMeetings: 2,
+    minMentions: 3,
+    inactiveDays: 45,
+  });
+  const docs = db.getKnowledgeDocs({ includeInactive: false });
+  if (!docs.some((doc) => doc.id === globalDoc.id)) {
+    return [globalDoc, ...docs];
+  }
+  return docs;
+};
+
+export const initializeKnowledgeDocs = async (): Promise<void> => {
+  const docs = ensureDocsAndCollectActive();
+  for (const doc of docs) {
+    queueKnowledgeDocRefresh(doc.id, 1000);
+  }
+};
+
+export const queueKnowledgeDocsRefreshForMeeting = (
+  meetingId: string,
+): void => {
+  const docs = ensureDocsAndCollectActive();
+  const docIds = new Set<string>();
+
+  const globalDoc = db.getKnowledgeDocByScope('global', 'global');
+  if (globalDoc) docIds.add(globalDoc.id);
+
+  const projectIds = db.getProjectEntityIdsForMeeting(meetingId);
+  for (const projectId of projectIds) {
+    const projectDoc = db.getKnowledgeDocByScope('project', projectId);
+    if (projectDoc && projectDoc.status !== 'inactive') {
+      docIds.add(projectDoc.id);
+    }
+  }
+
+  for (const doc of docs) {
+    if (doc.scope_type === 'global') docIds.add(doc.id);
+  }
+
+  for (const docId of docIds) {
+    queueKnowledgeDocRefresh(docId);
+  }
+};
+
+export const queueAllKnowledgeDocsRefresh = (): void => {
+  const docs = ensureDocsAndCollectActive();
+  for (const doc of docs) {
+    queueKnowledgeDocRefresh(doc.id);
+  }
+};

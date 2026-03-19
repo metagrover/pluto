@@ -106,6 +106,7 @@ export interface LLMProvider {
   ): Promise<InternalSignalDocument>;
   extractSpeakerIdentity(transcript: string): Promise<string | null>;
   generateTitle(transcript: string): Promise<string>;
+  synthesizeKnowledgeDocument(prompt: string): Promise<string>;
   extractEntities(
     transcript: string,
     context?: EntityExtractionContext,

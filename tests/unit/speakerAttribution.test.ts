@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyDiarizationRefinement,
   applyTurnTakingHeuristics,
   assignSpeakersToCanonicalSegments,
   decideNextSpeaker,
   dropShortCrossSpeakerEchoes,
+  mapDiarizationSpeakers,
   reassignShortBoundarySegments,
   resolveCrossChannelDuplicates,
   shouldApplyFullSessionMeRecovery,
@@ -174,6 +176,59 @@ describe('speakerAttribution utilities', () => {
     expect(stripped.droppedMe).toBeGreaterThanOrEqual(1);
     expect(combined).toContain('no interest in monetizing');
     expect(combined).toContain('look out for himself');
+  });
+
+  it('uses source activity windows to drop Me echo bleed', () => {
+    const stripped = stripLikelyMeBleedSegments(
+      [
+        {
+          startTime: 10.0,
+          endTime: 13.2,
+          speaker: 'Them',
+          text: 'you can learn faster if you have your own teacher',
+        },
+        {
+          startTime: 10.1,
+          endTime: 13.0,
+          speaker: 'Me',
+          text: 'you can learn faster if you have your own teacher',
+        },
+      ],
+      [
+        { startTime: 10.0, endTime: 13.3, speaker: 'Them' },
+        { startTime: 10.0, endTime: 10.08, speaker: 'Me' },
+      ],
+    );
+
+    expect(stripped.droppedMe).toBe(1);
+    expect(stripped.segments).toHaveLength(1);
+    expect(stripped.segments[0].speaker).toBe('Them');
+  });
+
+  it('keeps Me segment when source activity confirms local speech', () => {
+    const stripped = stripLikelyMeBleedSegments(
+      [
+        {
+          startTime: 20.0,
+          endTime: 23.0,
+          speaker: 'Them',
+          text: 'okay i can share access if needed',
+        },
+        {
+          startTime: 20.1,
+          endTime: 23.1,
+          speaker: 'Me',
+          text: 'okay i can share access if needed',
+        },
+      ],
+      [
+        { startTime: 20.0, endTime: 20.2, speaker: 'Them' },
+        { startTime: 20.0, endTime: 23.2, speaker: 'Me' },
+      ],
+    );
+
+    expect(stripped.droppedMe).toBe(0);
+    expect(stripped.segments).toHaveLength(2);
   });
 
   it('hydrates canonical session text while keeping speaker assignment from overlap evidence', () => {
@@ -445,5 +500,59 @@ describe('speakerAttribution utilities', () => {
       'Them',
       'Them',
     ]);
+  });
+
+  it('maps diarization speakers to Me/Them using overlap evidence', () => {
+    const mapping = mapDiarizationSpeakers({
+      diarizationSegments: [
+        { startTime: 0, endTime: 4.8, text: '', speaker: 'SPEAKER_00' },
+        { startTime: 5.1, endTime: 9.5, text: '', speaker: 'SPEAKER_01' },
+      ],
+      referenceSegments: [
+        { startTime: 0, endTime: 4.5, text: 'hello', speaker: 'Me' },
+        { startTime: 5.2, endTime: 9.2, text: 'hi there', speaker: 'Them' },
+      ],
+      activityWindows: [],
+    });
+
+    expect(mapping.mapping).toEqual({
+      SPEAKER_00: 'Me',
+      SPEAKER_01: 'Them',
+    });
+    expect(mapping.confidence).toBeGreaterThan(0);
+  });
+
+  it('skips diarization mapping when overlap evidence is insufficient', () => {
+    const mapping = mapDiarizationSpeakers({
+      diarizationSegments: [
+        { startTime: 0, endTime: 2, text: '', speaker: 'SPEAKER_00' },
+        { startTime: 2, endTime: 4, text: '', speaker: 'SPEAKER_01' },
+      ],
+      referenceSegments: [
+        { startTime: 0, endTime: 4, text: 'solo monologue', speaker: 'Me' },
+      ],
+      activityWindows: [],
+    });
+
+    expect(Object.keys(mapping.mapping)).toHaveLength(0);
+  });
+
+  it('relabels segments when diarization coverage is strong', () => {
+    const diarizationSegments = [
+      { startTime: 0, endTime: 4, text: '', speaker: 'SPEAKER_00' },
+      { startTime: 4, endTime: 8, text: '', speaker: 'SPEAKER_01' },
+    ];
+    const applied = applyDiarizationRefinement({
+      segments: [
+        { startTime: 0, endTime: 4, text: 'intro', speaker: 'Them' },
+        { startTime: 4, endTime: 8, text: 'reply', speaker: 'Me' },
+      ],
+      diarizationSegments,
+      mapping: { SPEAKER_00: 'Me', SPEAKER_01: 'Them' },
+    });
+
+    expect(applied.relabeled).toBe(2);
+    expect(applied.segments[0].speaker).toBe('Me');
+    expect(applied.segments[1].speaker).toBe('Them');
   });
 });

@@ -12,7 +12,13 @@ export type EntityType =
   | 'action_item'
   | 'decision'
   | 'project';
-export type EntityStatus = 'active' | 'completed' | 'stale' | 'overdue' | null;
+export type EntityStatus =
+  | 'active'
+  | 'completed'
+  | 'stale'
+  | 'overdue'
+  | 'merge_pending'
+  | null;
 export type RelationshipType =
   | 'discussed'
   | 'assigned_to'
@@ -22,7 +28,12 @@ export type RelationshipType =
   | 'produced'
   | 'impacts'
   | 'works_on'
-  | 'involved_in';
+  | 'involved_in'
+  | 'depends_on'
+  | 'blocked_by'
+  | 'owns';
+export type RelationshipState = 'suggested' | 'confirmed' | 'rejected';
+export type LinkSource = 'pipeline' | 'synthesis' | 'user';
 
 export interface Entity {
   id: string;
@@ -33,6 +44,8 @@ export interface Entity {
   due_date: string | null;
   assigned_to: string | null;
   metadata: string | null; // JSON string
+  saliency_score: number;
+  domain_tag: string;
   created_at: string;
   updated_at: string;
 }
@@ -43,8 +56,13 @@ export interface EntityLink {
   target_entity_id: string;
   relationship: RelationshipType;
   meeting_id: string | null;
+  state: RelationshipState;
+  evidence_meeting_id: string | null;
+  evidence_quote: string | null;
+  source: LinkSource;
   confidence: number;
   created_at: string;
+  updated_at: string;
 }
 
 export interface MeetingEntity {
@@ -73,6 +91,26 @@ export interface KnowledgeGraphStats {
   by_type: Record<EntityType, number>;
   total_links: number;
   total_meeting_connections: number;
+}
+
+export type KnowledgeFeedTypeFilter = 'all' | 'topic' | 'decision';
+export type KnowledgeFeedSort = 'recent' | 'most_mentioned';
+
+export interface KnowledgeFeedQueryParams {
+  type?: KnowledgeFeedTypeFilter;
+  search?: string;
+  sort?: KnowledgeFeedSort;
+}
+
+export interface KnowledgeFeedItemSummary {
+  entity_id: string;
+  type: Extract<EntityType, 'topic' | 'decision'>;
+  name: string;
+  updated_at: string;
+  meeting_count: number;
+  mention_count: number;
+  last_mentioned_at: string | null;
+  latest_context: string | null;
 }
 
 // =============================================
@@ -301,6 +339,10 @@ export const linkEntities = async (link: {
   relationship: RelationshipType;
   meeting_id?: string;
   confidence?: number;
+  state?: RelationshipState;
+  source?: LinkSource;
+  evidence_meeting_id?: string;
+  evidence_quote?: string;
 }): Promise<EntityLink> => {
   return invoke('LINK_ENTITIES', link);
 };
@@ -310,8 +352,9 @@ export const linkEntities = async (link: {
  */
 export const getEntityLinks = async (
   entityId: string,
+  includeRejected = false,
 ): Promise<EntityLink[]> => {
-  return invoke('GET_ENTITY_LINKS', entityId);
+  return invoke('GET_ENTITY_LINKS', { entityId, includeRejected });
 };
 
 /**
@@ -319,10 +362,18 @@ export const getEntityLinks = async (
  */
 export const getRelatedEntities = async (
   entityId: string,
+  includeRejected = false,
 ): Promise<
-  (Entity & { relationship: string; direction: 'outgoing' | 'incoming' })[]
+  (Entity & {
+    link_id: string;
+    relationship: string;
+    direction: 'outgoing' | 'incoming';
+    state: RelationshipState;
+    confidence: number;
+    evidence_quote: string | null;
+  })[]
 > => {
-  return invoke('GET_RELATED_ENTITIES', entityId);
+  return invoke('GET_RELATED_ENTITIES', { entityId, includeRejected });
 };
 
 // =============================================
@@ -401,6 +452,15 @@ export const getKnowledgeGraphStats =
     return invoke('GET_KNOWLEDGE_GRAPH_STATS');
   };
 
+/**
+ * Get knowledge feed summary rows for topic/decision entities.
+ */
+export const getKnowledgeFeedSummary = async (
+  params: KnowledgeFeedQueryParams = {},
+): Promise<KnowledgeFeedItemSummary[]> => {
+  return invoke('GET_KNOWLEDGE_FEED_SUMMARY', params);
+};
+
 // =============================================
 // HELPER FUNCTIONS
 // =============================================
@@ -457,6 +517,9 @@ export const getRelationshipLabel = (
     impacts: 'impacts',
     works_on: 'works on',
     involved_in: 'involved in',
+    depends_on: 'depends on',
+    blocked_by: 'blocked by',
+    owns: 'owns',
   };
   return labels[relationship];
 };
