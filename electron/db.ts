@@ -34,6 +34,7 @@ export interface PersistedMeeting {
   value_signals_json?: string | null;
   folder_id?: string | null;
   is_favorite?: boolean | number | null;
+  end_reason?: string | null;
   created_at?: string | null;
 }
 
@@ -278,6 +279,19 @@ const initDb = () => {
         entity_id UNINDEXED
       );
 
+      -- Auto-end event log
+      CREATE TABLE IF NOT EXISTS auto_end_log (
+        id TEXT PRIMARY KEY,
+        meeting_id TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reason_code TEXT NOT NULL,
+        app_name TEXT,
+        grace_seconds INTEGER,
+        FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_auto_end_log_meeting ON auto_end_log(meeting_id);
+
       -- Backfill FTS if needed (Self-healing)
       INSERT INTO entities_fts (name, entity_id)
       SELECT name, id FROM entities 
@@ -318,6 +332,10 @@ const initDb = () => {
     if (!meetingColumns.some((col) => col.name === 'value_signals_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN value_signals_json TEXT');
       console.log('[DB] Added meetings.value_signals_json column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'end_reason')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN end_reason TEXT');
+      console.log('[DB] Added meetings.end_reason column');
     }
   } catch (e) {
     console.warn('[DB] Optional column migration failed:', e);
@@ -552,8 +570,8 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
     INSERT OR REPLACE INTO meetings (
       id, title, meeting_type, started_at, ended_at, duration_seconds, 
       audio_path, transcript_json, user_notes, enhanced_notes, analysis_json, analysis_schema_version,
-      analysis_format_pass, analysis_retry_count, analysis_fallback_used, value_signals_json, folder_id, is_favorite, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+      analysis_format_pass, analysis_retry_count, analysis_fallback_used, value_signals_json, folder_id, is_favorite, end_reason, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
   `);
 
   const result = stmt.run(
@@ -585,6 +603,7 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
     meeting.value_signals_json || null,
     meeting.folder_id,
     meeting.is_favorite ? 1 : 0,
+    meeting.end_reason || 'manual',
     meeting.created_at,
   );
 
@@ -2949,6 +2968,33 @@ export const getKnowledgeGraphStats = (): {
   };
 };
 
+// =============================================
+// AUTO-END LOG OPERATIONS
+// =============================================
+
+export const logAutoEndEvent = (event: {
+  meeting_id?: string;
+  reason_code: string;
+  app_name?: string;
+  grace_seconds?: number;
+}) => {
+  const id = generateId();
+  db.prepare(`
+    INSERT INTO auto_end_log (id, meeting_id, reason_code, app_name, grace_seconds)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(
+    id,
+    event.meeting_id || null,
+    event.reason_code,
+    event.app_name || null,
+    event.grace_seconds ?? null,
+  );
+  console.log(
+    `[AutoEnd] Logged event: ${event.reason_code} (app=${event.app_name || 'n/a'}, grace=${event.grace_seconds ?? 'n/a'}s)`,
+  );
+  return id;
+};
+
 /**
  * Reset all knowledge (meetings, entities, etc) but KEEP settings
  */
@@ -2972,6 +3018,7 @@ export const resetKnowledge = () => {
 
   // 2. Clear tables within a transaction
   const tables = [
+    'auto_end_log',
     'knowledge_backlinks',
     'knowledge_doc_notes',
     'knowledge_doc_user_edits',
