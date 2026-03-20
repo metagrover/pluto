@@ -1,5 +1,12 @@
 {
   "defaultSet": "private_meeting",
+  "transcriptRegressions": [
+    {
+      "id": "optional_custom_check",
+      "meetingId": "PUT_MEETING_ID_HERE",
+      "expectedPath": "baselines/your-meeting.expected-human.json"
+    }
+  ],
   "sets": {
     "private_meeting": {
       "label": "Private local meeting regression",

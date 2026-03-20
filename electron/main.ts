@@ -662,12 +662,33 @@ app.whenReady().then(async () => {
 
     try {
       const parsed = JSON.parse(transcriptJson) as unknown;
-      if (!Array.isArray(parsed)) {
+      const segmentArray = Array.isArray(parsed)
+        ? parsed
+        : parsed &&
+            typeof parsed === 'object' &&
+            Array.isArray((parsed as { segments?: unknown }).segments)
+          ? ((parsed as { segments: unknown[] }).segments as Array<{
+              text: string;
+            }>)
+          : null;
+      if (!segmentArray) {
         return null;
       }
 
-      const result = cleanTranscriptSegments(parsed as Array<{ text: string }>);
-      const cleanedTranscriptJson = JSON.stringify(result.segments);
+      const result = cleanTranscriptSegments(segmentArray);
+      const meta =
+        parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        (parsed as { schemaVersion?: number }).schemaVersion === 2
+          ? (parsed as Record<string, unknown>)
+          : null;
+      const cleanedTranscriptJson = meta
+        ? JSON.stringify({
+            ...meta,
+            segments: result.segments,
+          })
+        : JSON.stringify(result.segments);
       return {
         cleanedTranscriptJson,
         changed: cleanedTranscriptJson !== transcriptJson,

@@ -1,10 +1,26 @@
 import { TRANSCRIPTION_TUNING } from './transcriptionConfig';
 
+const TRANSCRIPT_DEBUG_ENABLED: boolean =
+  (typeof process !== 'undefined' &&
+    typeof process.env !== 'undefined' &&
+    process.env.PLUTO_TRANSCRIPT_DEBUG === '1') ||
+  Boolean(
+    (globalThis as unknown as { __PLUTO_TRANSCRIPT_DEBUG__?: unknown })
+      .__PLUTO_TRANSCRIPT_DEBUG__ === true,
+  );
+
+export interface WordTimestamp {
+  word: string;
+  start: number;
+  end: number;
+}
+
 export interface AttributionSegment {
   startTime: number;
   endTime: number;
   text: string;
   speaker: string;
+  words?: WordTimestamp[];
 }
 
 export interface ResolveDuplicateStats {
@@ -39,6 +55,8 @@ export interface CanonicalSpeakerAttributionStats {
   byOverlap: number;
   byActivity: number;
   byFallback: number;
+  /** RMS windows contradicted overlap/proximity winner */
+  byRmsActivityOverride: number;
 }
 
 export interface CanonicalSpeakerAttributionResult<
@@ -54,6 +72,15 @@ const normalizeText = (text: string): string => {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+};
+
+const textCoverage = (query: string, reference: string): number => {
+  const qTokens = new Set(normalizeText(query).split(' ').filter(Boolean));
+  const rTokens = new Set(normalizeText(reference).split(' ').filter(Boolean));
+  if (qTokens.size === 0) return 0;
+  let covered = 0;
+  for (const w of qTokens) if (rTokens.has(w)) covered++;
+  return covered / qTokens.size;
 };
 
 const tokenSetSimilarity = (left: string, right: string): number => {
@@ -203,9 +230,6 @@ const hasHeavyRepetition = (text: string): boolean => {
   return uniqueRatio <= 0.58 || maxTokenFreq >= 4;
 };
 
-const oppositeSpeaker = (speaker: 'Me' | 'Them'): 'Me' | 'Them' =>
-  speaker === 'Me' ? 'Them' : 'Me';
-
 const isQuestionLike = (text: string): boolean => {
   const raw = String(text || '').trim();
   if (!raw) return false;
@@ -214,36 +238,6 @@ const isQuestionLike = (text: string): boolean => {
   if (raw.includes('?')) return true;
   return /^(do you|did you|are you|can you|could you|would you|will you|what|why|how|when|where|who)\b/.test(
     normalized,
-  );
-};
-
-const isAckLike = (text: string): boolean => {
-  const normalized = normalizeText(text);
-  if (!normalized) return false;
-  const tokens = normalized.split(' ').filter(Boolean);
-  if (tokens.length === 0 || tokens.length > 4) return false;
-  const first = tokens[0];
-  return (
-    first === 'yeah' ||
-    first === 'yes' ||
-    first === 'yup' ||
-    first === 'no' ||
-    first === 'nope' ||
-    first === 'ok' ||
-    first === 'okay' ||
-    first === 'right' ||
-    first === 'sure'
-  );
-};
-
-const isUncertaintyLike = (text: string): boolean => {
-  const normalized = normalizeText(text);
-  if (!normalized) return false;
-  return (
-    normalized.startsWith('not sure') ||
-    normalized.startsWith('i m not sure') ||
-    normalized.startsWith('i dont know') ||
-    normalized.startsWith('i do not know')
   );
 };
 
@@ -403,234 +397,474 @@ export const resolveCrossChannelDuplicates = <T extends AttributionSegment>(
   };
 };
 
+const isNearDuplicatePair = (
+  left: AttributionSegment,
+  right: AttributionSegment,
+): {
+  nearDuplicate: boolean;
+  overlapRatio: number;
+  tokenSim: number;
+  prefixSim: number;
+} => {
+  const nd = TRANSCRIPTION_TUNING.overlapNearDuplicate;
+  const overlap = overlapSeconds(left, right);
+  if (overlap <= 0) {
+    return { nearDuplicate: false, overlapRatio: 0, tokenSim: 0, prefixSim: 0 };
+  }
+
+  const leftDur = Math.max(0.01, left.endTime - left.startTime);
+  const rightDur = Math.max(0.01, right.endTime - right.startTime);
+  const overlapRatio = overlap / Math.min(leftDur, rightDur);
+  if (overlapRatio < nd.minOverlapRatio || overlap < nd.minOverlapSeconds) {
+    return { nearDuplicate: false, overlapRatio, tokenSim: 0, prefixSim: 0 };
+  }
+
+  const dup = isDuplicatePair(left, right);
+  if (dup.duplicate) {
+    return {
+      nearDuplicate: false,
+      overlapRatio,
+      tokenSim: dup.tokenSim,
+      prefixSim: dup.prefixSim,
+    };
+  }
+
+  const leftNorm = normalizeText(left.text);
+  const rightNorm = normalizeText(right.text);
+  if (!leftNorm || !rightNorm) {
+    return { nearDuplicate: false, overlapRatio, tokenSim: 0, prefixSim: 0 };
+  }
+
+  const tokenSim = tokenSetSimilarity(left.text, right.text);
+  const prefixSim = tokenPrefixSimilarity(left.text, right.text);
+  const nearDuplicate =
+    tokenSim >= nd.minTokenSim ||
+    prefixSim >= nd.minPrefixSim ||
+    (tokenSim >= nd.minTokenSim - 0.05 && overlapRatio >= 0.42);
+  return { nearDuplicate, overlapRatio, tokenSim, prefixSim };
+};
+
+/**
+ * Greedy one-to-one collapse for cross-channel paraphrases / skewed boundaries
+ * that miss strict {@link isDuplicatePair}. Run after {@link resolveCrossChannelDuplicates}.
+ */
+export const resolveCrossChannelNearDuplicates = <T extends AttributionSegment>(
+  segments: T[],
+): ResolveDuplicateResult<T> => {
+  if (segments.length < 2) {
+    return {
+      segments: [...segments],
+      stats: {
+        candidatePairs: 0,
+        resolvedPairs: 0,
+        droppedMe: 0,
+        droppedThem: 0,
+      },
+    };
+  }
+
+  type Candidate = {
+    meIndex: number;
+    themIndex: number;
+    score: number;
+    overlapRatio: number;
+    tokenSim: number;
+    prefixSim: number;
+  };
+
+  const candidates: Candidate[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    for (let j = i + 1; j < segments.length; j++) {
+      const left = segments[i];
+      const right = segments[j];
+      const speakers = new Set([left.speaker, right.speaker]);
+      if (!speakers.has('Me') || !speakers.has('Them')) continue;
+
+      const meIndex = left.speaker === 'Me' ? i : j;
+      const themIndex = left.speaker === 'Them' ? i : j;
+      const me = segments[meIndex];
+      const them = segments[themIndex];
+
+      const decision = isNearDuplicatePair(me, them);
+      if (!decision.nearDuplicate) continue;
+
+      const score =
+        decision.overlapRatio + decision.tokenSim + decision.prefixSim;
+      candidates.push({
+        meIndex,
+        themIndex,
+        score,
+        overlapRatio: decision.overlapRatio,
+        tokenSim: decision.tokenSim,
+        prefixSim: decision.prefixSim,
+      });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return {
+      segments: [...segments],
+      stats: {
+        candidatePairs: 0,
+        resolvedPairs: 0,
+        droppedMe: 0,
+        droppedThem: 0,
+      },
+    };
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const matchedMe = new Set<number>();
+  const matchedThem = new Set<number>();
+  const dropped = new Set<number>();
+  let droppedMe = 0;
+  let droppedThem = 0;
+  let resolvedPairs = 0;
+
+  for (const candidate of candidates) {
+    if (
+      matchedMe.has(candidate.meIndex) ||
+      matchedThem.has(candidate.themIndex)
+    )
+      continue;
+    if (dropped.has(candidate.meIndex) || dropped.has(candidate.themIndex))
+      continue;
+
+    const me = segments[candidate.meIndex];
+    const them = segments[candidate.themIndex];
+    const winner = pickDuplicateWinner(
+      me,
+      them,
+      candidate.overlapRatio,
+      candidate.tokenSim,
+      candidate.prefixSim,
+    );
+    const dropIndex = winner === 'Me' ? candidate.themIndex : candidate.meIndex;
+    dropped.add(dropIndex);
+    if (dropIndex === candidate.meIndex) droppedMe++;
+    else droppedThem++;
+    matchedMe.add(candidate.meIndex);
+    matchedThem.add(candidate.themIndex);
+    resolvedPairs++;
+  }
+
+  return {
+    segments: segments.filter((_, index) => !dropped.has(index)),
+    stats: {
+      candidatePairs: candidates.length,
+      resolvedPairs,
+      droppedMe,
+      droppedThem,
+    },
+  };
+};
+
+/**
+ * When both Me and Them channels overlap a segment (bleed), use word-level
+ * timestamps to determine which words belong to which speaker, then split
+ * the segment at speaker boundaries.
+ * Returns null if words aren't available or all words map to a single speaker.
+ */
+const splitSegmentByWordSpeakers = <T extends AttributionSegment>(
+  segment: T,
+  meSegs: AttributionSegment[],
+  themSegs: AttributionSegment[],
+): T[] | null => {
+  if (!segment.words || segment.words.length === 0) return null;
+
+  const MIN_WORD_OVERLAP_SEC = 0.05;
+  const wordSpeakers: (('Me' | 'Them') | null)[] = segment.words.map((w) => {
+    const meHit = meSegs.some(
+      (m) =>
+        Math.min(w.end, m.endTime) - Math.max(w.start, m.startTime) >
+        MIN_WORD_OVERLAP_SEC,
+    );
+    const themHit = themSegs.some(
+      (t) =>
+        Math.min(w.end, t.endTime) - Math.max(w.start, t.startTime) >
+        MIN_WORD_OVERLAP_SEC,
+    );
+    if (meHit && themHit) return 'Them';
+    if (meHit) return 'Me';
+    if (themHit) return 'Them';
+    return null;
+  });
+
+  for (let i = 0; i < wordSpeakers.length; i++) {
+    if (!wordSpeakers[i] && i > 0) wordSpeakers[i] = wordSpeakers[i - 1];
+  }
+  for (let i = wordSpeakers.length - 2; i >= 0; i--) {
+    if (!wordSpeakers[i]) wordSpeakers[i] = wordSpeakers[i + 1];
+  }
+  if (wordSpeakers.every((s) => !s)) return null;
+
+  const groups: T[] = [];
+  let groupStart = 0;
+  for (let i = 1; i <= wordSpeakers.length; i++) {
+    if (
+      i === wordSpeakers.length ||
+      wordSpeakers[i] !== wordSpeakers[groupStart]
+    ) {
+      const words = segment.words?.slice(groupStart, i) ?? [];
+      groups.push({
+        ...segment,
+        speaker: wordSpeakers[groupStart] ?? 'Me',
+        text: words
+          .map((w) => w.word)
+          .join(' ')
+          .trim(),
+        startTime: words[0].start,
+        endTime: words[words.length - 1].end,
+        words,
+      });
+      groupStart = i;
+    }
+  }
+
+  if (groups.length <= 1) return null;
+  return groups;
+};
+
+/**
+ * Assign speakers to canonical segments using channel overlap.
+ * Both channels present → word-level split if available, else Them (bleed).
+ * Only Me channel → Me. Only Them channel → Them if text matches, else Me
+ * (canonical captured something the Them channel didn't say). Neither → last.
+ */
 export const assignSpeakersToCanonicalSegments = <
   T extends AttributionSegment,
 >(params: {
   canonicalSegments: T[];
   attributedSegments: AttributionSegment[];
-  activityWindows?: SpeakerActivityWindow[];
-  tieMargin?: number;
 }): CanonicalSpeakerAttributionResult<T> => {
   const { canonicalSegments, attributedSegments } = params;
-  const activityWindows = params.activityWindows || [];
-  const tieMargin =
-    params.tieMargin ?? TRANSCRIPTION_TUNING.attribution.tieMargin;
-  const activityGap = TRANSCRIPTION_TUNING.attribution.activityCoverageGap;
-  const proximityDeltaThreshold =
-    TRANSCRIPTION_TUNING.attribution.proximityDelta;
-  const overlapScoreDelta = TRANSCRIPTION_TUNING.attribution.overlapScoreDelta;
   if (canonicalSegments.length === 0) {
     return {
       segments: [],
-      stats: { byOverlap: 0, byActivity: 0, byFallback: 0 },
+      stats: {
+        byOverlap: 0,
+        byActivity: 0,
+        byFallback: 0,
+        byRmsActivityOverride: 0,
+      },
     };
   }
 
-  const sortedCanonical = [...canonicalSegments].sort(
+  const MIN_OVERLAP_SEC = 0.2;
+  const COVERAGE_THRESHOLD = 0.5;
+  const meSegs = attributedSegments.filter(
+    (s) => s.speaker === 'Me' && (s.text || '').trim(),
+  );
+  const themSegs = attributedSegments.filter(
+    (s) => s.speaker === 'Them' && (s.text || '').trim(),
+  );
+
+  const sorted = [...canonicalSegments].sort(
     (a, b) => a.startTime - b.startTime,
   );
+
   const assigned: T[] = [];
-  let byOverlap = 0;
-  let byActivity = 0;
-  let byFallback = 0;
   let lastSpeaker: 'Me' | 'Them' = 'Me';
+  let byOverlap = 0;
+  let byFallback = 0;
 
-  for (const segment of sortedCanonical) {
-    const duration = Math.max(0.01, segment.endTime - segment.startTime);
-    let meScore = 0;
-    let themScore = 0;
-    let meProximity = 0;
-    let themProximity = 0;
-    const segmentMid = (segment.startTime + segment.endTime) / 2;
+  for (const segment of sorted) {
+    const meOverlapping = meSegs.filter(
+      (m) => overlapSeconds(segment, m) > MIN_OVERLAP_SEC,
+    );
+    const themOverlapping = themSegs.filter(
+      (t) => overlapSeconds(segment, t) > MIN_OVERLAP_SEC,
+    );
 
-    for (const candidate of attributedSegments) {
-      if (candidate.speaker !== 'Me' && candidate.speaker !== 'Them') continue;
-      const overlap = overlapSeconds(segment, candidate);
-      const overlapRatio = overlap > 0 ? overlap / duration : 0;
-      const tokenSim = tokenSetSimilarity(segment.text, candidate.text);
-      const prefixSim = tokenPrefixSimilarity(segment.text, candidate.text);
-      if (overlap > 0) {
-        const lexicalSupport = Math.max(tokenSim, prefixSim);
-        const overlapScore =
-          overlapRatio * (0.25 + lexicalSupport * 0.75) +
-          tokenSim * 0.6 +
-          prefixSim * 0.35;
-        if (candidate.speaker === 'Me')
-          meScore = Math.max(meScore, overlapScore);
-        else themScore = Math.max(themScore, overlapScore);
+    if (meOverlapping.length > 0 && themOverlapping.length > 0) {
+      const wordSplit = splitSegmentByWordSpeakers(
+        segment,
+        meOverlapping,
+        themOverlapping,
+      );
+      if (wordSplit) {
+        for (const sub of wordSplit) {
+          lastSpeaker = sub.speaker as 'Me' | 'Them';
+          assigned.push(sub);
+        }
+      } else {
+        lastSpeaker = 'Them';
+        assigned.push({ ...segment, speaker: 'Them' });
       }
-
-      const candidateMid = (candidate.startTime + candidate.endTime) / 2;
-      const deltaSeconds = Math.abs(segmentMid - candidateMid);
-      if (deltaSeconds <= 3.5) {
-        const proximityWeight = Math.max(0, 1 - deltaSeconds / 3.5);
-        const proximityScore =
-          proximityWeight * 0.8 + tokenSim * 0.7 + prefixSim * 0.4;
-        if (candidate.speaker === 'Me')
-          meProximity = Math.max(meProximity, proximityScore);
-        else themProximity = Math.max(themProximity, proximityScore);
-      }
-    }
-
-    let speaker: 'Me' | 'Them';
-    const hasOverlapEvidence = meScore > 0 || themScore > 0;
-    const hasProximityEvidence = meProximity > 0 || themProximity > 0;
-    if (hasOverlapEvidence && Math.abs(meScore - themScore) >= tieMargin) {
-      speaker = meScore > themScore ? 'Me' : 'Them';
+      byOverlap++;
+    } else if (meOverlapping.length > 0 && themOverlapping.length === 0) {
+      lastSpeaker = 'Me';
+      assigned.push({ ...segment, speaker: 'Me' });
       byOverlap++;
     } else {
-      const meCoverage = activityCoverage(
-        segment.startTime,
-        segment.endTime,
-        'Me',
-        activityWindows,
-      );
-      const themCoverage = activityCoverage(
-        segment.startTime,
-        segment.endTime,
-        'Them',
-        activityWindows,
-      );
-      if (
-        (meCoverage > 0 || themCoverage > 0) &&
-        Math.abs(meCoverage - themCoverage) >= activityGap
-      ) {
-        speaker = meCoverage >= themCoverage ? 'Me' : 'Them';
-        byActivity++;
-      } else if (hasOverlapEvidence) {
-        const scoreDelta = Math.abs(meScore - themScore);
-        const proximityDelta = Math.abs(meProximity - themProximity);
-        if (proximityDelta >= proximityDeltaThreshold) {
-          speaker = meProximity >= themProximity ? 'Me' : 'Them';
-        } else if (scoreDelta <= overlapScoreDelta) {
-          speaker = oppositeSpeaker(lastSpeaker);
+      const bestOvCov =
+        themOverlapping.length > 0
+          ? Math.max(
+              ...themOverlapping.map((t) => textCoverage(segment.text, t.text)),
+            )
+          : 0;
+      let speaker: 'Me' | 'Them';
+      if (bestOvCov >= COVERAGE_THRESHOLD) {
+        speaker = 'Them';
+        byOverlap++;
+      } else {
+        const bestMeCov =
+          meSegs.length > 0
+            ? Math.max(...meSegs.map((m) => textCoverage(segment.text, m.text)))
+            : 0;
+        const bestThemCov =
+          themSegs.length > 0
+            ? Math.max(
+                ...themSegs.map((t) => textCoverage(segment.text, t.text)),
+              )
+            : 0;
+        if (
+          bestMeCov >= COVERAGE_THRESHOLD ||
+          bestThemCov >= COVERAGE_THRESHOLD
+        ) {
+          speaker = bestThemCov > bestMeCov ? 'Them' : 'Me';
         } else {
-          speaker = meScore > themScore ? 'Me' : 'Them';
+          const wordCount = normalizeText(segment.text)
+            .split(' ')
+            .filter(Boolean).length;
+          speaker = wordCount < 3 ? lastSpeaker : 'Me';
         }
         byFallback++;
-      } else if (
-        hasProximityEvidence &&
-        Math.abs(meProximity - themProximity) >= proximityDeltaThreshold
-      ) {
-        speaker = meProximity >= themProximity ? 'Me' : 'Them';
-        byFallback++;
-      } else {
-        speaker = lastSpeaker;
-        byFallback++;
       }
+      lastSpeaker = speaker;
+      assigned.push({ ...segment, speaker });
     }
-
-    lastSpeaker = speaker;
-    assigned.push({
-      ...segment,
-      speaker,
-    });
   }
 
   return {
     segments: assigned,
-    stats: { byOverlap, byActivity, byFallback },
+    stats: { byOverlap, byActivity: 0, byFallback, byRmsActivityOverride: 0 },
   };
 };
 
-export const applyTurnTakingHeuristics = <T extends AttributionSegment>(
-  segments: T[],
-): T[] => {
-  if (segments.length < 2) return [...segments];
-  const adjusted = segments.map((segment) => ({ ...segment }));
-
-  for (let i = 0; i < adjusted.length; i++) {
-    const current = adjusted[i];
-    if (current.speaker !== 'Me' && current.speaker !== 'Them') continue;
-
-    const prev = i > 0 ? adjusted[i - 1] : null;
-    const next = i + 1 < adjusted.length ? adjusted[i + 1] : null;
-    const currentQuestion = isQuestionLike(current.text);
-    const nextAck = next ? isAckLike(next.text) : false;
-
-    if (
-      currentQuestion &&
-      prev &&
-      (prev.speaker === 'Me' || prev.speaker === 'Them') &&
-      prev.speaker !== current.speaker &&
-      next &&
-      nextAck &&
-      next.speaker === current.speaker
-    ) {
-      current.speaker = prev.speaker;
-    }
-
-    if (
-      next &&
-      nextAck &&
-      (next.speaker === 'Me' || next.speaker === 'Them') &&
-      next.speaker === current.speaker &&
-      isQuestionLike(current.text)
-    ) {
-      next.speaker = oppositeSpeaker(current.speaker);
-    }
-
-    if (
-      prev &&
-      (prev.speaker === 'Me' || prev.speaker === 'Them') &&
-      (current.speaker === 'Me' || current.speaker === 'Them') &&
-      prev.speaker !== current.speaker &&
-      isAckLike(prev.text) &&
-      isUncertaintyLike(current.text)
-    ) {
-      current.speaker = prev.speaker;
-    }
-  }
-
-  return adjusted;
+/** Remote participant hedging / planning — often mis-tagged as Me after a question. */
+const isRemoteStyleUncertaintyAnswer = (text: string): boolean => {
+  const n = normalizeText(text);
+  if (!n) return false;
+  return (
+    n.startsWith('i don t know') ||
+    n.startsWith('i dont know') ||
+    n.startsWith('not sure') ||
+    n.startsWith('i m not sure') ||
+    n.startsWith('i am not sure') ||
+    n.startsWith('hmm') ||
+    n.startsWith('uh ') ||
+    (n.startsWith('well') &&
+      (n.includes('don t know') || n.includes('dont know')))
+  );
 };
 
-export const reassignShortBoundarySegments = <
+const isLocalAffirmOrCorrection = (text: string): boolean => {
+  const n = normalizeText(text);
+  if (!n) return false;
+  if (n.includes('correction')) return true;
+  return (
+    n.startsWith('oh yeah') ||
+    n.startsWith('oh ok') ||
+    n.startsWith('oh okay') ||
+    n.startsWith('yeah yeah') ||
+    (n.startsWith('yeah') && n.includes('correction'))
+  );
+};
+
+const isVeryShortConfirmation = (text: string): boolean => {
+  const n = normalizeText(text);
+  return (
+    n === 'yes' ||
+    n === 'no' ||
+    n === 'yeah' ||
+    n === 'yep' ||
+    n === 'nope' ||
+    n === 'sure' ||
+    n === 'right'
+  );
+};
+
+/**
+ * Repairs systematic mis-attributions when ASR / overlap favors the wrong side:
+ * - Me question → mis-tagged Them answer opening with uncertainty
+ * - Them turn → short local back-channel ("oh yeah", "correction …") still on Them
+ * - Me question → one-word reply that belongs to remote ("yes"/"sure")
+ */
+export const reassignThemLikelyAnswersAfterMeQuestion = <
   T extends AttributionSegment,
->(params: {
-  segments: T[];
-  maxWords?: number;
-  maxGapSeconds?: number;
-}): T[] => {
-  const segments = params.segments || [];
-  const maxWords = params.maxWords ?? 4;
-  const maxGapSeconds = params.maxGapSeconds ?? 1.2;
-  if (segments.length < 2) return [...segments];
-
-  const adjusted = segments.map((segment) => ({ ...segment }));
-  for (let i = 0; i < adjusted.length; i++) {
-    const current = adjusted[i];
-    if (current.speaker !== 'Me' && current.speaker !== 'Them') continue;
-    const next = i + 1 < adjusted.length ? adjusted[i + 1] : null;
-    if (!next || (next.speaker !== 'Me' && next.speaker !== 'Them')) continue;
-    if (next.speaker === current.speaker) continue;
-
-    const words = wordCount(current.text);
-    if (words === 0 || words > maxWords) continue;
-
-    const gapSeconds = Math.max(0, next.startTime - current.endTime);
-    if (gapSeconds > maxGapSeconds) continue;
-
-    const prev = i > 0 ? adjusted[i - 1] : null;
-    const prevSameSpeaker = Boolean(prev && prev.speaker === current.speaker);
-    const cue = normalizeText(current.text);
-    const isBridgeCue =
-      cue === 'that s it' ||
-      cue === 'thats it' ||
-      cue === 'okay' ||
-      cue === 'ok' ||
-      cue === 'yeah' ||
-      cue === 'right' ||
-      cue === 'anyway' ||
-      cue === 'well' ||
-      cue === 'so';
-
-    if (prevSameSpeaker || isBridgeCue) {
-      current.speaker = next.speaker;
-    }
+>(
+  segments: T[],
+  params?: { maxGapSec?: number },
+): T[] => {
+  const maxGap = params?.maxGapSec ?? 1.25;
+  const out = segments.map((s) => ({ ...s }));
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (prev.speaker !== 'Me' || cur.speaker !== 'Me') continue;
+    if (!isQuestionLike(prev.text)) continue;
+    if (!isRemoteStyleUncertaintyAnswer(cur.text)) continue;
+    const gap = Math.max(0, cur.startTime - prev.endTime);
+    if (gap > maxGap) continue;
+    cur.speaker = 'Them';
   }
+  return out;
+};
 
-  return adjusted;
+export const reassignMeLocalBackchannelAfterRemoteThem = <
+  T extends AttributionSegment,
+>(
+  segments: T[],
+  params?: { maxWords?: number; maxGapSec?: number },
+): T[] => {
+  const maxWords = params?.maxWords ?? 14;
+  const maxGap = params?.maxGapSec ?? 1.5;
+  const out = segments.map((s) => ({ ...s }));
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (prev.speaker !== 'Them' || cur.speaker !== 'Them') continue;
+    if (wordCount(cur.text) > maxWords) continue;
+    if (!isLocalAffirmOrCorrection(cur.text)) continue;
+    const gap = Math.max(0, cur.startTime - prev.endTime);
+    if (gap > maxGap) continue;
+    cur.speaker = 'Me';
+  }
+  return out;
+};
+
+export const reassignThemShortConfirmationAfterMeQuestion = <
+  T extends AttributionSegment,
+>(
+  segments: T[],
+  params?: { maxGapSec?: number; maxWords?: number },
+): T[] => {
+  const maxGap = params?.maxGapSec ?? 1.5;
+  const maxWords = params?.maxWords ?? 3;
+  const out = segments.map((s) => ({ ...s }));
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (prev.speaker !== 'Me' || cur.speaker !== 'Me') continue;
+    if (!isQuestionLike(prev.text)) continue;
+    if (wordCount(cur.text) > maxWords) continue;
+    if (!isVeryShortConfirmation(cur.text)) continue;
+    const gap = Math.max(0, cur.startTime - prev.endTime);
+    if (gap > maxGap) continue;
+    cur.speaker = 'Them';
+  }
+  return out;
+};
+
+export const applyCrossTurnAttributionRepairs = <T extends AttributionSegment>(
+  segments: T[],
+): T[] => {
+  let s = segments.map((seg) => ({ ...seg }));
+  s = reassignThemShortConfirmationAfterMeQuestion(s);
+  s = reassignThemLikelyAnswersAfterMeQuestion(s);
+  s = reassignMeLocalBackchannelAfterRemoteThem(s);
+  return s;
 };
 
 export const decideNextSpeaker = (params: {
@@ -691,75 +925,263 @@ export const shouldApplyFullSessionMeRecovery = (params: {
   return !hasChunkMeSegments && recoveredMeCount > 0 && !bleedLikely;
 };
 
-const sumSegmentDurations = (segments: AttributionSegment[]): number => {
-  return segments.reduce(
-    (total, segment) =>
-      total + Math.max(0.01, segment.endTime - segment.startTime),
-    0,
-  );
-};
-
-const getTimelineSpanDuration = (segments: AttributionSegment[]): number => {
-  if (segments.length === 0) return 0;
-  let minStart = Number.POSITIVE_INFINITY;
-  let maxEnd = Number.NEGATIVE_INFINITY;
-  for (const segment of segments) {
-    if (
-      !Number.isFinite(segment.startTime) ||
-      !Number.isFinite(segment.endTime)
-    )
-      continue;
-    if (segment.startTime < minStart) minStart = segment.startTime;
-    if (segment.endTime > maxEnd) maxEnd = segment.endTime;
-  }
+/** Approximate character cut in original text at normalized word boundary. */
+const splitOriginalTextAtWordIndex = (
+  original: string,
+  wordIndex: number,
+  totalNormWords: number,
+): { left: string; right: string } | null => {
+  const t = original.trim();
   if (
-    !Number.isFinite(minStart) ||
-    !Number.isFinite(maxEnd) ||
-    maxEnd <= minStart
-  )
-    return 0;
-  return maxEnd - minStart;
-};
-
-export const shouldHydrateCanonicalTranscript = (params: {
-  channelSegments: AttributionSegment[];
-  canonicalSegments: AttributionSegment[];
-  minCoverageRatio?: number;
-}): boolean => {
-  const channelSegments = params.channelSegments || [];
-  const canonicalSegments = params.canonicalSegments || [];
-  const minCoverageRatio = params.minCoverageRatio ?? 0.5;
-
-  if (canonicalSegments.length === 0) return false;
-  if (channelSegments.length === 0) return true;
-
-  const speakerSet = new Set(
-    channelSegments
-      .map((segment) => segment.speaker)
-      .filter((speaker) => speaker === 'Me' || speaker === 'Them'),
-  );
-  const hasBothSpeakers = speakerSet.has('Me') && speakerSet.has('Them');
-
-  const channelDuration = sumSegmentDurations(channelSegments);
-  const canonicalSpanDuration = getTimelineSpanDuration(canonicalSegments);
-  const coverageRatio =
-    canonicalSpanDuration > 0 ? channelDuration / canonicalSpanDuration : 0;
-
-  if (
-    hasBothSpeakers &&
-    channelSegments.length >= 4 &&
-    coverageRatio >= minCoverageRatio
+    !t ||
+    wordIndex <= 0 ||
+    totalNormWords <= 0 ||
+    wordIndex >= totalNormWords
   ) {
-    return false;
+    return null;
+  }
+  const ratio = wordIndex / totalNormWords;
+  let cut = Math.min(t.length - 1, Math.max(1, Math.floor(t.length * ratio)));
+  while (cut > 0 && !/\s/.test(t[cut] ?? '')) cut--;
+  if (cut <= 0) return null;
+  const left = t.slice(0, cut).trim();
+  const right = t.slice(cut).trim();
+  if (!left || !right) return null;
+  return { left, right };
+};
+
+/**
+ * Find where a Them channel token sequence starts inside the canonical.
+ * Tries exact match first (fast), then allows up to `maxMismatches` skips
+ * to handle minor Whisper transcription differences.
+ */
+const findFuzzyAnchor = (
+  canonicalWords: string[],
+  themWords: string[],
+  startFrom: number,
+  minAnchor: number,
+  maxMismatches = 1,
+): number => {
+  for (let i = startFrom; i <= canonicalWords.length - minAnchor; i++) {
+    let k = 0;
+    let mismatches = 0;
+    while (k < themWords.length && i + k + mismatches < canonicalWords.length) {
+      if (canonicalWords[i + k + mismatches] === themWords[k]) {
+        k++;
+      } else {
+        mismatches++;
+        if (mismatches > maxMismatches) break;
+      }
+    }
+    if (k >= minAnchor) return i;
+  }
+  return -1;
+};
+
+const trySplitCanonicalSegmentAtThemAnchor = <T extends AttributionSegment>(
+  segment: T,
+  themChannel: AttributionSegment[],
+): T[] => {
+  const cfg = TRANSCRIPTION_TUNING.canonicalChannelSplit;
+  const text = (segment.text || '').trim();
+  if (!text || themChannel.length === 0) return [segment];
+
+  const canonicalWords = normalizeText(text).split(' ').filter(Boolean);
+  if (canonicalWords.length < cfg.minMePrefixWords + cfg.minThemAnchorWords) {
+    return [segment];
   }
 
-  return true;
+  const overlapping = themChannel
+    .map((th) => ({ th, ov: overlapSeconds(segment, th) }))
+    .filter((x) => x.ov >= cfg.minThemOverlapSeconds)
+    .sort((a, b) => b.ov - a.ov);
+
+  for (const { th: themSeg } of overlapping) {
+    const themWords = normalizeText(themSeg.text).split(' ').filter(Boolean);
+    if (themWords.length < cfg.minThemChannelWords) continue;
+
+    const minAnchor = Math.min(cfg.minThemAnchorWords, themWords.length);
+    const anchorStart = findFuzzyAnchor(
+      canonicalWords,
+      themWords,
+      cfg.minMePrefixWords,
+      minAnchor,
+    );
+    if (anchorStart < 0) continue;
+
+    const split = splitOriginalTextAtWordIndex(
+      text,
+      anchorStart,
+      canonicalWords.length,
+    );
+    if (!split) continue;
+
+    const dur = Math.max(0.01, segment.endTime - segment.startTime);
+    const wL = Math.max(1, split.left.length);
+    const wR = Math.max(1, split.right.length);
+    const totalW = wL + wR;
+    const tCut = segment.startTime + dur * (wL / totalW);
+
+    const left = {
+      ...segment,
+      endTime: Math.min(segment.endTime, tCut),
+      text: split.left,
+    } as T;
+    const right = {
+      ...segment,
+      startTime: Math.max(segment.startTime, tCut),
+      endTime: segment.endTime,
+      text: split.right,
+    } as T;
+    return [left, right];
+  }
+
+  return [segment];
+};
+
+/**
+ * Split mix/session canonical segments when overlapping Them-channel ASR appears inside text.
+ * Runs before punctuation splitting and speaker assignment.
+ */
+export const splitCanonicalSegmentsAtChannelBoundaries = <
+  T extends AttributionSegment,
+>(
+  canonicalSegments: T[],
+  channelSegments: AttributionSegment[],
+): { segments: T[]; splitsApplied: number } => {
+  const themChannel = channelSegments.filter((s) => s.speaker === 'Them');
+  if (themChannel.length === 0 || canonicalSegments.length === 0) {
+    return { segments: [...canonicalSegments], splitsApplied: 0 };
+  }
+
+  let splitsApplied = 0;
+  const out: T[] = [];
+  for (const segment of canonicalSegments) {
+    const pieces = trySplitCanonicalSegmentAtThemAnchor(segment, themChannel);
+    if (pieces.length > 1) splitsApplied++;
+    out.push(...pieces);
+  }
+  return { segments: out, splitsApplied };
+};
+
+export const splitSegmentsAtDiarizationBoundaries = <
+  T extends AttributionSegment,
+>(
+  segments: T[],
+  diarizationSegments: AttributionSegment[],
+  mapping: Record<string, 'Me' | 'Them'>,
+): { segments: T[]; splitsApplied: number } => {
+  const cfg = TRANSCRIPTION_TUNING.diarizationBoundarySplit;
+  if (segments.length === 0 || diarizationSegments.length === 0) {
+    return { segments: [...segments], splitsApplied: 0 };
+  }
+
+  const mappedDiar = diarizationSegments.filter((d) => {
+    const k = String(d.speaker || '');
+    return Boolean(k && mapping[k]);
+  });
+  if (mappedDiar.length === 0) {
+    return { segments: [...segments], splitsApplied: 0 };
+  }
+
+  let splitsApplied = 0;
+  const sortedInput = [...segments].sort((a, b) => a.startTime - b.startTime);
+  const out: T[] = [];
+
+  for (const seg of sortedInput) {
+    const dur = Math.max(0.01, seg.endTime - seg.startTime);
+    const words = (seg.text || '').trim().split(/\s+/).filter(Boolean);
+    if (words.length < cfg.minSegmentWords) {
+      out.push(seg);
+      continue;
+    }
+
+    type Clip = { start: number; end: number; speaker: 'Me' | 'Them' };
+    const clips: Clip[] = [];
+    for (const d of mappedDiar) {
+      const k = String(d.speaker || '');
+      const sp = mapping[k];
+      if (!sp) continue;
+      const s = Math.max(seg.startTime, d.startTime);
+      const e = Math.min(seg.endTime, d.endTime);
+      if (e - s < cfg.minClipDurationSec) continue;
+      clips.push({ start: s, end: e, speaker: sp });
+    }
+    clips.sort((a, b) => a.start - b.start);
+
+    const merged: Clip[] = [];
+    for (const c of clips) {
+      const last = merged[merged.length - 1];
+      if (last && last.speaker === c.speaker && c.start <= last.end + 0.05) {
+        last.end = Math.max(last.end, c.end);
+      } else {
+        merged.push({ ...c });
+      }
+    }
+
+    const speakers = new Set(merged.map((m) => m.speaker));
+    if (speakers.size < 2) {
+      out.push(seg);
+      continue;
+    }
+
+    const secondClips = merged.filter((m) => {
+      const cd = m.end - m.start;
+      return cd >= cfg.minSecondSpeakerClipSec;
+    });
+    const secondSpeakers = new Set(secondClips.map((m) => m.speaker));
+    if (secondSpeakers.size < 2) {
+      out.push(seg);
+      continue;
+    }
+
+    const useClips = merged.filter((m) => m.end > m.start);
+    const totalClipDur = useClips.reduce((a, c) => a + (c.end - c.start), 0);
+    if (totalClipDur < dur * 0.35) {
+      out.push(seg);
+      continue;
+    }
+
+    splitsApplied++;
+    let wordOffset = 0;
+    for (let i = 0; i < useClips.length; i++) {
+      const c = useClips[i];
+      if (!c) continue;
+      const cd = c.end - c.start;
+      const frac = cd / totalClipDur;
+      let nWords = Math.max(1, Math.round(words.length * frac));
+      if (i === useClips.length - 1) {
+        nWords = Math.max(1, words.length - wordOffset);
+      } else {
+        nWords = Math.min(nWords, words.length - wordOffset);
+      }
+      const chunk = words
+        .slice(wordOffset, wordOffset + nWords)
+        .join(' ')
+        .trim();
+      wordOffset += nWords;
+      if (!chunk) continue;
+      out.push({
+        ...seg,
+        startTime: c.start,
+        endTime: c.end,
+        text: chunk,
+        speaker: c.speaker,
+      } as T);
+    }
+  }
+
+  return {
+    segments: out.sort((a, b) => a.startTime - b.startTime),
+    splitsApplied,
+  };
 };
 
 export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
   segments: T[],
   activityWindows: SpeakerActivityWindow[] = [],
 ): MeBleedStripResult<T> => {
+  let debugDropCount = 0;
   const meSegments: Array<{ index: number; segment: T }> = [];
   const themSegments: T[] = [];
   for (let i = 0; i < segments.length; i++) {
@@ -805,6 +1227,8 @@ export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
       if (!themNorm) continue;
       const themWords = wordCount(them.text);
       const themDur = Math.max(0.01, them.endTime - them.startTime);
+      const overlapRatioToMin =
+        overlap > 0 ? overlap / Math.min(meDur, themDur) : 0;
 
       const tokenSim = tokenSetSimilarity(meNorm, themNorm);
       const prefixSim = tokenPrefixSimilarity(meNorm, themNorm);
@@ -827,6 +1251,39 @@ export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
         highSimilarity &&
         overlapRatio >= 0.5 &&
         (themDur >= meDur * 0.95 || themWords >= meWords + 1);
+
+      // Loudspeaker bleed case: the participant utterance can be fully embedded
+      // inside a longer "Me" commentary span. Coverage-based gating can fail
+      // when RMS activity windows are polluted, so we prioritize overlap+lexical
+      // evidence without relying on activity windows.
+      const overlapLexicalBleed =
+        overlap > 0 && overlapRatioToMin >= 0.75 && highSimilarity;
+
+      // Additional guard: only treat it as "Me bleed" when Them is short enough
+      // to plausibly be embedded inside a longer Me utterance.
+      // This avoids dropping Me in cases where both sides are similarly long
+      // and activity windows (even if skewed) indicate local speech.
+      const overlapLexicalEmbeddedThem =
+        overlapLexicalBleed && themDur <= meDur * 0.9;
+
+      if (overlapLexicalEmbeddedThem) {
+        if (TRANSCRIPT_DEBUG_ENABLED && debugDropCount < 5) {
+          debugDropCount++;
+          console.log(
+            '[Pluto][TranscriptDebug] stripLikelyMeBleedSegments DROP',
+            {
+              reason: 'lexicalEmbeddedThem',
+              me: `${me.startTime.toFixed(1)}-${me.endTime.toFixed(1)}`,
+              them: `${them.startTime.toFixed(1)}-${them.endTime.toFixed(1)}`,
+              overlapRatioToMin: Number(overlapRatioToMin.toFixed(2)),
+              tokenSim: Number(tokenSetSimilarity(meNorm, themNorm).toFixed(2)),
+            },
+          );
+        }
+        dropForMe = true;
+        break;
+      }
+
       const evidenceStart =
         overlap > 0
           ? Math.max(me.startTime, them.startTime)
@@ -862,9 +1319,35 @@ export const stripLikelyMeBleedSegments = <T extends AttributionSegment>(
         !meClearlyDominant &&
         ((highSimilarity && themStronglyDominant && overlapRatio >= 0.45) ||
           activityIndicatesEcho ||
+          overlapLexicalBleed ||
           shortEcho ||
           mediumEcho)
       ) {
+        if (TRANSCRIPT_DEBUG_ENABLED && debugDropCount < 5) {
+          const reasons: string[] = [];
+          if (highSimilarity && themStronglyDominant && overlapRatio >= 0.45) {
+            reasons.push('themStronglyDominant');
+          }
+          if (activityIndicatesEcho) reasons.push('activityIndicatesEcho');
+          if (overlapLexicalBleed) reasons.push('lexicalBleed');
+          if (shortEcho) reasons.push('shortEcho');
+          if (mediumEcho) reasons.push('mediumEcho');
+          debugDropCount++;
+          console.log(
+            '[Pluto][TranscriptDebug] stripLikelyMeBleedSegments DROP',
+            {
+              reason: reasons.join(',') || 'combinedCondition',
+              me: `${me.startTime.toFixed(1)}-${me.endTime.toFixed(1)}`,
+              them: `${them.startTime.toFixed(1)}-${them.endTime.toFixed(1)}`,
+              overlapRatioToMin: Number(overlapRatioToMin.toFixed(2)),
+              overlapRatio: Number(overlapRatio.toFixed(2)),
+              tokenSim: Number(tokenSetSimilarity(meNorm, themNorm).toFixed(2)),
+              meClearlyDominant,
+              meCoverage: Number(meCoverage.toFixed(2)),
+              themCoverage: Number(themCoverage.toFixed(2)),
+            },
+          );
+        }
         dropForMe = true;
         break;
       }

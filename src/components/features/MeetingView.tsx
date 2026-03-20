@@ -29,7 +29,11 @@ import {
   parseAnalysisDocumentJson,
   resolveMeetingAnalysisDocument,
 } from '../../utils/analysisDocument';
-import { buildAnalysisTranscriptFromJson } from '../../utils/transcript';
+import {
+  buildAnalysisTranscriptFromJson,
+  isTranscriptJsonEffectivelyEmpty,
+  parseTranscriptSegments,
+} from '../../utils/transcript';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 
 interface MeetingViewProps {
@@ -704,7 +708,7 @@ export const MeetingView = ({
       !selectedMeeting?.enhanced_notes &&
       !selectedMeeting?.user_notes &&
       (!selectedMeeting?.transcript_json ||
-        selectedMeeting.transcript_json === '[]') ? (
+        isTranscriptJsonEffectivelyEmpty(selectedMeeting.transcript_json)) ? (
         <div className="flex-1 flex flex-col items-center justify-center p-20 text-center space-y-6 opacity-60">
           <div className="w-16 h-16 rounded-2xl bg-stone-100 flex items-center justify-center mb-4">
             <FileText className="w-8 h-8 text-stone-300" />
@@ -776,9 +780,11 @@ export const MeetingView = ({
                   <div className="space-y-8 max-w-xl mx-auto pt-4">
                     {(() => {
                       if (!selectedMeeting?.transcript_json) return null;
-                      let segments = [];
+                      let segments: TranscriptSegment[] = [];
                       try {
-                        segments = JSON.parse(selectedMeeting.transcript_json);
+                        segments = parseTranscriptSegments(
+                          selectedMeeting.transcript_json,
+                        ) as TranscriptSegment[];
                       } catch (e) {
                         console.error('Failed to parse transcript', e);
                         return null;

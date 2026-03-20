@@ -20,12 +20,6 @@ export const TRANSCRIPTION_TUNING = {
     maxSegments: 4,
     maxFullCoverageRatio: 0.75,
   },
-  attribution: {
-    tieMargin: 0.18,
-    activityCoverageGap: 0.16,
-    proximityDelta: 0.12,
-    overlapScoreDelta: 0.06,
-  },
   activityPrune: {
     meOverlapRatio: 0.45,
     meMinCoverage: 0.35,
@@ -38,9 +32,14 @@ export const TRANSCRIPTION_TUNING = {
   },
   sourceEchoPrune: {
     maxGapSeconds: 0.35,
-    minSimilarity: 0.42,
+    // Berlin loudspeaker-bleed pattern contains partial paraphrases.
+    // Lowering similarity slightly helps the lexical evidence gate
+    // trigger more reliably without relying on RMS activity windows.
+    minSimilarity: 0.38,
     minThemCoverage: 0.25,
-    maxMeCoverageForEcho: 0.12,
+    // Allow a bit more Me activity before assuming it's local speech,
+    // since RMS windows can be polluted by echo.
+    maxMeCoverageForEcho: 0.16,
     themCoverageRatio: 1.2,
   },
   transcriptQuality: {
@@ -83,5 +82,40 @@ export const TRANSCRIPTION_TUNING = {
     minSpeakerScoreRatio: 0.18,
     minSegmentOverlapSeconds: 0.2,
     minSegmentCoverageRatio: 0.5,
+  },
+  /**
+   * When mix canonical ASR glues Me + Them, split using overlapping Them-channel text.
+   */
+  canonicalChannelSplit: {
+    minThemOverlapSeconds: 0.08,
+    minThemAnchorWords: 5,
+    minMePrefixWords: 3,
+    minThemChannelWords: 5,
+  },
+  /**
+   * Split transcript segments when diarization shows two mapped speakers inside one span.
+   */
+  diarizationBoundarySplit: {
+    minClipDurationSec: 0.25,
+    minSegmentWords: 10,
+    minSecondSpeakerClipSec: 0.35,
+  },
+  /**
+   * Full-session Whisper text for canonical hydration: mix-down hears both sides
+   * on one timeline (stable wording/boundaries). Me recovery still uses mic-only
+   * when this is enabled and a mix file exists.
+   */
+  canonicalTranscript: {
+    preferMixSource: true,
+  },
+  /**
+   * Second-pass cross-channel collapse: high time overlap + moderate lexical
+   * match, below strict isDuplicatePair thresholds (paraphrase / timing skew).
+   */
+  overlapNearDuplicate: {
+    minOverlapRatio: 0.34,
+    minOverlapSeconds: 0.3,
+    minTokenSim: 0.42,
+    minPrefixSim: 0.48,
   },
 } as const;

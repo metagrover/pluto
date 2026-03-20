@@ -28,6 +28,45 @@ const normalizeTranscriptText = (text: string): string => {
     .trim();
 };
 
+const tokenSimilarity = (left: string, right: string): number => {
+  const leftTokens = new Set(
+    normalizeTranscriptText(left).split(' ').filter(Boolean),
+  );
+  const rightTokens = new Set(
+    normalizeTranscriptText(right).split(' ').filter(Boolean),
+  );
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
+
+  let intersection = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) intersection++;
+  }
+
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  return union > 0 ? intersection / union : 0;
+};
+
+const tokenPrefixSimilarity = (
+  left: string,
+  right: string,
+  maxPrefixTokens = 8,
+): number => {
+  const leftTokens = normalizeTranscriptText(left).split(' ').filter(Boolean);
+  const rightTokens = normalizeTranscriptText(right).split(' ').filter(Boolean);
+  const sharedLength = Math.min(
+    leftTokens.length,
+    rightTokens.length,
+    maxPrefixTokens,
+  );
+  if (sharedLength === 0) return 0;
+  let matched = 0;
+  for (let i = 0; i < sharedLength; i++) {
+    if (leftTokens[i] !== rightTokens[i]) break;
+    matched++;
+  }
+  return matched / sharedLength;
+};
+
 const normalizeSpeaker = (speaker: unknown): string => {
   if (typeof speaker === 'string') return speaker.trim().toLowerCase();
   if (typeof speaker === 'number') return String(speaker).toLowerCase();
@@ -82,6 +121,28 @@ const filterDuplicateSpeakerSegments = (
       const prevNorm = normalizeTranscriptText(prev.text || '');
       if (!segNorm || !prevNorm) return false;
       if (segNorm === prevNorm) return true;
+
+      const shorter = Math.min(segNorm.length, prevNorm.length);
+      const longer = Math.max(segNorm.length, prevNorm.length);
+
+      // If the new segment is a strict extension of the previous one,
+      // keep it so we don't lose continuation detail.
+      const lengthRatio = longer / Math.max(1, shorter);
+      if (lengthRatio >= 1.25) return false;
+
+      if (tokenSimilarity(segment.text || '', prev.text || '') >= 0.64)
+        return true;
+      if (tokenPrefixSimilarity(segment.text || '', prev.text || '') >= 0.84)
+        return true;
+
+      if (
+        shorter >= 30 &&
+        shorter / longer >= 0.9 &&
+        (segNorm.includes(prevNorm) || prevNorm.includes(segNorm))
+      ) {
+        return true;
+      }
+
       return false;
     });
 

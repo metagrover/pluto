@@ -3,7 +3,8 @@ interface TranscriptSegmentLike {
   speaker?: unknown;
 }
 
-const parseTranscriptSegments = (
+/** Parse legacy array or v2 `{ segments }` wrapper. */
+export const parseTranscriptSegments = (
   transcriptJson?: string | null,
 ): TranscriptSegmentLike[] => {
   if (!transcriptJson || !transcriptJson.trim()) {
@@ -25,6 +26,12 @@ const parseTranscriptSegments = (
   } catch {
     return [];
   }
+};
+
+export const isTranscriptJsonEffectivelyEmpty = (
+  transcriptJson?: string | null,
+): boolean => {
+  return parseTranscriptSegments(transcriptJson).length === 0;
 };
 
 export const buildAnalysisTranscriptFromJson = (

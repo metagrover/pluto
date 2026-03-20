@@ -1,21 +1,42 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyCrossTurnAttributionRepairs,
   applyDiarizationRefinement,
-  applyTurnTakingHeuristics,
   assignSpeakersToCanonicalSegments,
   decideNextSpeaker,
   dropShortCrossSpeakerEchoes,
   mapDiarizationSpeakers,
-  reassignShortBoundarySegments,
   resolveCrossChannelDuplicates,
+  resolveCrossChannelNearDuplicates,
   shouldApplyFullSessionMeRecovery,
   shouldDropBySpeakerActivity,
-  shouldHydrateCanonicalTranscript,
+  splitCanonicalSegmentsAtChannelBoundaries,
+  splitSegmentsAtDiarizationBoundaries,
   stripLikelyMeBleedSegments,
 } from '../../src/utils/speakerAttribution';
 
 describe('speakerAttribution utilities', () => {
+  it('resolveCrossChannelNearDuplicates merges paraphrase pair below strict duplicate overlap', () => {
+    // Overlap 2s / minDur 5s = 0.4 → below strict isDuplicatePair (0.45), still near-dup lexically.
+    const near = resolveCrossChannelNearDuplicates([
+      {
+        startTime: 10,
+        endTime: 16,
+        speaker: 'Me',
+        text: 'the quarterly revenue target is seven million for the east region',
+      },
+      {
+        startTime: 14,
+        endTime: 19,
+        speaker: 'Them',
+        text: 'quarterly revenue target seven million east region plan',
+      },
+    ]);
+    expect(near.segments.length).toBe(1);
+    expect(near.stats.resolvedPairs).toBe(1);
+  });
+
   it('keeps Them when overlap is high and Them carries additional continuation detail', () => {
     const result = resolveCrossChannelDuplicates([
       {
@@ -178,6 +199,84 @@ describe('speakerAttribution utilities', () => {
     expect(combined).toContain('look out for himself');
   });
 
+  it('drops Me bleed even when Me activity coverage is polluted', () => {
+    const stripped = stripLikelyMeBleedSegments(
+      [
+        {
+          startTime: 0.0,
+          endTime: 10.0,
+          speaker: 'Me',
+          text: 'You have to think about it. So we can figure it out while we plan the trip to Berlin.',
+        },
+        {
+          startTime: 3.0,
+          endTime: 9.0,
+          speaker: 'Them',
+          text: 'You have to think about it. So we can figure it out while we plan the trip to Berlin.',
+        },
+      ],
+      // Simulate bad RMS windows where "Me" coverage dominates.
+      [{ startTime: 0.0, endTime: 10.0, speaker: 'Me' }],
+    );
+
+    expect(stripped.droppedMe).toBe(1);
+    expect(stripped.segments).toHaveLength(1);
+    expect(stripped.segments[0].speaker).toBe('Them');
+  });
+
+  it('does not drop Me when lexical similarity is weak', () => {
+    const stripped = stripLikelyMeBleedSegments(
+      [
+        {
+          startTime: 0.0,
+          endTime: 10.0,
+          speaker: 'Me',
+          text: 'I think we should pause rollout because churn is up this week.',
+        },
+        {
+          startTime: 3.0,
+          endTime: 9.0,
+          speaker: 'Them',
+          text: 'Wait, churn is concentrated in one region, not global.',
+        },
+      ],
+      // Even if Me coverage is high, overlap+lexical evidence should be too weak.
+      [
+        { startTime: 0.0, endTime: 10.0, speaker: 'Me' },
+        { startTime: 3.0, endTime: 9.0, speaker: 'Them' },
+      ],
+    );
+
+    expect(stripped.droppedMe).toBe(0);
+    expect(stripped.segments).toHaveLength(2);
+  });
+
+  it('drops Berlin loudspeaker-bleed candidate (Me contains Them phrase)', () => {
+    // Extracted directly from the Berlin meeting DB transcript_json.
+    const stripped = stripLikelyMeBleedSegments(
+      [
+        {
+          startTime: 215.572,
+          endTime: 230.49800000000002,
+          speaker: 'Me',
+          text: 'You have to think about it. So we can figure it out while we',
+        },
+        {
+          startTime: 221.702,
+          endTime: 225.465,
+          speaker: 'Them',
+          text: 'You have to think about it.',
+        },
+      ],
+      // Simulate polluted RMS windows where "Me" looks dominant.
+      [{ startTime: 215.572, endTime: 230.49800000000002, speaker: 'Me' }],
+    );
+
+    expect(stripped.droppedMe).toBe(1);
+    expect(stripped.segments).toHaveLength(1);
+    expect(stripped.segments[0].speaker).toBe('Them');
+  });
+
   it('uses source activity windows to drop Me echo bleed', () => {
     const stripped = stripLikelyMeBleedSegments(
       [
@@ -299,7 +398,7 @@ describe('speakerAttribution utilities', () => {
     expect(assigned.segments[0].speaker).toBe('Them');
   });
 
-  it('uses activity timeline as tie-breaker when overlap evidence is ambiguous', () => {
+  it('assigns Them when both channels overlap (bleed detection)', () => {
     const assigned = assignSpeakersToCanonicalSegments({
       canonicalSegments: [
         {
@@ -323,99 +422,89 @@ describe('speakerAttribution utilities', () => {
           text: 'Do you lean one way or the other?',
         },
       ],
-      activityWindows: [{ startTime: 10.1, endTime: 12.9, speaker: 'Them' }],
     });
 
     expect(assigned.segments).toHaveLength(1);
     expect(assigned.segments[0].speaker).toBe('Them');
-    expect(assigned.stats.byActivity).toBe(1);
+    expect(assigned.stats.byOverlap).toBe(1);
   });
 
-  it('relabels question and acknowledgment into alternating speakers', () => {
-    const adjusted = applyTurnTakingHeuristics([
+  it('assigns Me when only Them channel overlaps but text is unrelated', () => {
+    const assigned = assignSpeakersToCanonicalSegments({
+      canonicalSegments: [
+        {
+          startTime: 10,
+          endTime: 14,
+          speaker: 'Me',
+          text: 'They are talking about open source and I want to listen more.',
+        },
+      ],
+      attributedSegments: [
+        {
+          startTime: 10,
+          endTime: 14,
+          speaker: 'Them',
+          text: 'my backlog is very large but I learned so much from open source',
+        },
+      ],
+    });
+
+    expect(assigned.segments).toHaveLength(1);
+    expect(assigned.segments[0].speaker).toBe('Me');
+  });
+
+  it('applyCrossTurnAttributionRepairs flips uncertainty answer after Me question', () => {
+    const out = applyCrossTurnAttributionRepairs([
       {
-        startTime: 0,
+        startTime: 1,
         endTime: 3,
         speaker: 'Me',
-        text: 'Very interesting that this guy is discussing options.',
+        text: 'So how do you propose I spend my time there?',
       },
       {
-        startTime: 3,
-        endTime: 6,
-        speaker: 'Them',
-        text: 'Do you lean one way or the other?',
-      },
-      {
-        startTime: 6,
-        endTime: 7,
-        speaker: 'Them',
-        text: 'Yeah.',
-      },
-      {
-        startTime: 7,
-        endTime: 10,
-        speaker: 'Them',
-        text: 'Not sure how much I should share there.',
+        startTime: 3.05,
+        endTime: 8,
+        speaker: 'Me',
+        text: "I don't know, eating, travelling, we also need to shop.",
       },
     ]);
-
-    expect(adjusted[1].speaker).toBe('Me');
-    expect(adjusted[2].speaker).toBe('Them');
+    expect(out[1].speaker).toBe('Them');
   });
 
-  it('keeps uncertainty follow-up with prior acknowledgment speaker', () => {
-    const adjusted = applyTurnTakingHeuristics([
+  it('applyCrossTurnAttributionRepairs flips local correction after remote Them', () => {
+    const out = applyCrossTurnAttributionRepairs([
       {
-        startTime: 0,
+        startTime: 1,
+        endTime: 2,
+        speaker: 'Them',
+        text: 'July 3rd.',
+      },
+      {
+        startTime: 2.1,
         endTime: 4,
-        speaker: 'Me',
-        text: 'Do you lean one way or the other?',
-      },
-      {
-        startTime: 4.1,
-        endTime: 4.8,
         speaker: 'Them',
-        text: 'Yeah.',
-      },
-      {
-        startTime: 4.9,
-        endTime: 8.1,
-        speaker: 'Me',
-        text: "Not sure how much I should share there, it's not quite finalized yet.",
+        text: 'Oh yeah, July 3rd correction July 3rd.',
       },
     ]);
-
-    expect(adjusted[2].speaker).toBe('Them');
+    expect(out[1].speaker).toBe('Me');
   });
 
-  it('skips canonical hydration when channel transcript already has both speakers with enough coverage', () => {
-    const shouldHydrate = shouldHydrateCanonicalTranscript({
-      canonicalSegments: [
-        { startTime: 0, endTime: 16, speaker: 'Me', text: 'session text' },
-      ],
-      channelSegments: [
-        { startTime: 0, endTime: 4, speaker: 'Me', text: 'opening' },
-        { startTime: 4, endTime: 8, speaker: 'Them', text: 'reply' },
-        { startTime: 8, endTime: 12, speaker: 'Me', text: 'follow-up' },
-        { startTime: 12, endTime: 16, speaker: 'Them', text: 'answer' },
-      ],
-    });
-
-    expect(shouldHydrate).toBe(false);
-  });
-
-  it('runs canonical hydration when channel transcript misses one speaker', () => {
-    const shouldHydrate = shouldHydrateCanonicalTranscript({
-      canonicalSegments: [
-        { startTime: 0, endTime: 16, speaker: 'Me', text: 'session text' },
-      ],
-      channelSegments: [
-        { startTime: 0, endTime: 6, speaker: 'Me', text: 'opening' },
-        { startTime: 7, endTime: 11, speaker: 'Me', text: 'question' },
-      ],
-    });
-
-    expect(shouldHydrate).toBe(true);
+  it('applyCrossTurnAttributionRepairs flips short yes after Me question', () => {
+    const out = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 1,
+        endTime: 5,
+        speaker: 'Me',
+        text: 'Is Berlin mostly flat for biking?',
+      },
+      {
+        startTime: 5.2,
+        endTime: 5.8,
+        speaker: 'Me',
+        text: 'Yes.',
+      },
+    ]);
+    expect(out[1].speaker).toBe('Them');
   });
 
   it('drops short opposite-speaker echoes contained in neighboring long utterances', () => {
@@ -471,37 +560,6 @@ describe('speakerAttribution utilities', () => {
     expect(pruned.segments).toHaveLength(2);
   });
 
-  it('reassigns short bridge boundary segment to the following speaker', () => {
-    const adjusted = reassignShortBoundarySegments({
-      segments: [
-        {
-          startTime: 0,
-          endTime: 4,
-          speaker: 'Me',
-          text: 'I am going to interrupt and test attribution.',
-        },
-        {
-          startTime: 4.05,
-          endTime: 4.5,
-          speaker: 'Me',
-          text: "That's it.",
-        },
-        {
-          startTime: 4.55,
-          endTime: 8,
-          speaker: 'Them',
-          text: 'Maybe it is going to be more like Chrome.',
-        },
-      ],
-    });
-
-    expect(adjusted.map((segment) => segment.speaker)).toEqual([
-      'Me',
-      'Them',
-      'Them',
-    ]);
-  });
-
   it('maps diarization speakers to Me/Them using overlap evidence', () => {
     const mapping = mapDiarizationSpeakers({
       diarizationSegments: [
@@ -554,5 +612,78 @@ describe('speakerAttribution utilities', () => {
     expect(applied.relabeled).toBe(2);
     expect(applied.segments[0].speaker).toBe('Me');
     expect(applied.segments[1].speaker).toBe('Them');
+  });
+
+  it('splitCanonicalSegmentsAtChannelBoundaries peels Them tail glued on mix canonical', () => {
+    const canonical = [
+      {
+        startTime: 0,
+        endTime: 12,
+        speaker: 'Me',
+        text: 'So how do you propose I spend my time there? I do not know eating travelling I do not have anything else right now in mind we also need to shop',
+      },
+    ];
+    const channel = [
+      {
+        startTime: 1,
+        endTime: 11,
+        speaker: 'Them',
+        text: 'I do not know eating travelling I do not have anything else right now in mind we also need to shop',
+      },
+    ];
+    const { segments, splitsApplied } =
+      splitCanonicalSegmentsAtChannelBoundaries(canonical, channel);
+    expect(splitsApplied).toBe(1);
+    expect(segments.length).toBe(2);
+    expect(segments[0].text).toContain('propose');
+    expect(segments[0].text).not.toContain('eating');
+    expect(segments[1].text).toContain('eating');
+  });
+
+  it('splitCanonicalSegmentsAtChannelBoundaries handles fuzzy Whisper variations (1 word mismatch)', () => {
+    const canonical = [
+      {
+        startTime: 0,
+        endTime: 15,
+        speaker: 'Me',
+        text: 'So how do you propose I spend my time there? I do not know eating travelling I do not have anything else right now in mind we also need to shop',
+      },
+    ];
+    const channel = [
+      {
+        startTime: 1,
+        endTime: 14,
+        speaker: 'Them',
+        text: 'I do not know eating traveling I do not have anything else right now in mind we also need to shop',
+      },
+    ];
+    const { segments, splitsApplied } =
+      splitCanonicalSegmentsAtChannelBoundaries(canonical, channel);
+    expect(splitsApplied).toBe(1);
+    expect(segments.length).toBe(2);
+    expect(segments[0].text).toContain('propose');
+    expect(segments[1].text.toLowerCase()).toContain('know');
+  });
+
+  it('splitSegmentsAtDiarizationBoundaries splits one long segment when two speakers inside', () => {
+    const segments = [
+      {
+        startTime: 0,
+        endTime: 10,
+        speaker: 'Me',
+        text: 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen',
+      },
+    ];
+    const diar = [
+      { startTime: 0, endTime: 4.5, text: '', speaker: 'SPEAKER_00' },
+      { startTime: 4.5, endTime: 10, text: '', speaker: 'SPEAKER_01' },
+    ];
+    const mapping = { SPEAKER_00: 'Me' as const, SPEAKER_01: 'Them' as const };
+    const { segments: out, splitsApplied } =
+      splitSegmentsAtDiarizationBoundaries(segments, diar, mapping);
+    expect(splitsApplied).toBe(1);
+    expect(out.length).toBeGreaterThanOrEqual(2);
+    expect(out.some((s) => s.speaker === 'Me')).toBe(true);
+    expect(out.some((s) => s.speaker === 'Them')).toBe(true);
   });
 });

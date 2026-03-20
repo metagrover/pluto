@@ -1,5 +1,14 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+  /** mic | mix | auto — overrides canonical full-session Whisper source */
+  readonly VITE_PLUTO_CANONICAL_SOURCE?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 interface Window {
   webkitAudioContext?: typeof AudioContext;
   ipcRenderer: {

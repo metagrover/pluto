@@ -21,7 +21,8 @@
     "audit:high": "pnpm audit --audit-level high",
     "test": "vitest",
     "replay:meeting": "node scripts/replay_meeting_attribution.js",
-    "test:meeting-regression": "node scripts/replay_meeting_attribution.js --fixture-file scripts/replay.local-fixtures.json --attempts 1 --require-expected --all-sets"
+    "regenerate:meeting-transcript": "node scripts/replay_meeting_attribution.js",
+    "test:meeting-regression": "node scripts/replay_meeting_attribution.js --fixture-file scripts/replay.local-fixtures.json --attempts 1 --require-expected --all-sets --transcript-regressions"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

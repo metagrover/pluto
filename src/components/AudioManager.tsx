@@ -5,19 +5,28 @@ import {
   createWavBlob,
   decodeFloat32PcmChunk,
 } from '../utils/audio';
+import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import {
   type SpeakerActivityWindow,
+  type WordTimestamp,
+  applyCrossTurnAttributionRepairs,
   applyDiarizationRefinement,
   assignSpeakersToCanonicalSegments,
   decideNextSpeaker,
   dropShortCrossSpeakerEchoes,
   mapDiarizationSpeakers,
   resolveCrossChannelDuplicates,
+  resolveCrossChannelNearDuplicates,
   shouldApplyFullSessionMeRecovery,
   shouldDropBySpeakerActivity,
-  shouldHydrateCanonicalTranscript,
+  splitCanonicalSegmentsAtChannelBoundaries,
+  splitSegmentsAtDiarizationBoundaries,
   stripLikelyMeBleedSegments,
 } from '../utils/speakerAttribution';
+import {
+  type CanonicalTranscriptSource,
+  buildTranscriptJsonPayload,
+} from '../utils/transcriptSchema';
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
   type TranscriptionSettings,
@@ -51,6 +60,7 @@ interface TranscriptionSegment {
   endTime: number;
   text: string;
   speaker: string;
+  words?: WordTimestamp[];
 }
 
 type MicChunkFormat = 'webm' | 'ogg' | 'wav';
@@ -133,6 +143,22 @@ const emptyAnalysisDocument = (): AnalysisDocument => ({
     issues: ['Missing analysis document'],
   },
 });
+
+const TRANSCRIPT_DEBUG_ENABLED: boolean =
+  (typeof process !== 'undefined' &&
+    typeof process.env !== 'undefined' &&
+    process.env.PLUTO_TRANSCRIPT_DEBUG === '1') ||
+  Boolean(
+    (globalThis as unknown as { __PLUTO_TRANSCRIPT_DEBUG__?: unknown })
+      .__PLUTO_TRANSCRIPT_DEBUG__ === true,
+  );
+
+/** One-line pipeline summary (canonical splits, hydration mode, diarization). */
+const TRANSCRIPT_PIPELINE_LOG: boolean =
+  TRANSCRIPT_DEBUG_ENABLED ||
+  (typeof process !== 'undefined' &&
+    typeof process.env !== 'undefined' &&
+    process.env.PLUTO_TRANSCRIPT_PIPELINE_LOG === '1');
 
 const normalizeSignalTag = (value: unknown): InternalSignalTag | null => {
   if (!value || typeof value !== 'object') return null;
@@ -897,8 +923,7 @@ export const AudioManager = ({
   const CHUNK_FLUSH_MAX_SEGMENTS = TRANSCRIPTION_TUNING.chunkFlush.maxSegments;
   const CHUNK_FLUSH_MAX_FULL_COVERAGE_RATIO =
     TRANSCRIPTION_TUNING.chunkFlush.maxFullCoverageRatio;
-  // Shorter chunks improve turn-level recovery when one participant dominates long spans.
-  const CHUNK_SECONDS = 8;
+  const CHUNK_SECONDS = 30;
   const ENABLE_CHUNK_ARBITRATION = true;
   const ENABLE_CHUNK_FLUSH = true;
   const COMMON_SAMPLE_RATES = [
@@ -1781,17 +1806,68 @@ export const AudioManager = ({
       }
 
       const segNorm = normalizeTranscriptText(segment.text);
-      const isDuplicate = recentForSpeaker.some((prev) => {
-        const gap = segment.startTime - prev.endTime;
-        if (gap > 2.5) return false;
-        const prevNorm = normalizeTranscriptText(prev.text);
-        if (!segNorm || !prevNorm) return false;
-        if (segNorm === prevNorm) return true;
+      let duplicatePrev: TranscriptionSegment | null = null;
+      const isDuplicate = (() => {
+        for (const prev of recentForSpeaker) {
+          const gap = segment.startTime - prev.endTime;
+          if (gap > 2.5) continue;
+
+          const prevNorm = normalizeTranscriptText(prev.text);
+          if (!segNorm || !prevNorm) continue;
+
+          // Exact match (fast path).
+          if (segNorm === prevNorm) {
+            duplicatePrev = prev;
+            return true;
+          }
+
+          // Near-duplicate: lexical similarity + light containment.
+          const shorter = Math.min(segNorm.length, prevNorm.length);
+          const longer = Math.max(segNorm.length, prevNorm.length);
+          const lengthRatio = longer / Math.max(1, shorter);
+
+          // If the new segment is a strict extension of the previous one,
+          // keep it so we don't lose continuation detail.
+          if (lengthRatio >= 1.25) continue;
+
+          const tokenSim = tokenSimilarity(segment.text, prev.text);
+          if (tokenSim >= 0.64) {
+            duplicatePrev = prev;
+            return true;
+          }
+
+          const prefixSim = tokenPrefixSimilarity(segment.text, prev.text);
+          if (prefixSim >= 0.84) {
+            duplicatePrev = prev;
+            return true;
+          }
+          const containsMatch =
+            shorter >= 30 &&
+            shorter / longer >= 0.9 &&
+            (segNorm.includes(prevNorm) || prevNorm.includes(segNorm));
+          if (containsMatch) {
+            duplicatePrev = prev;
+            return true;
+          }
+        }
         return false;
-      });
+      })();
 
       if (isDuplicate) {
         dropped++;
+        if (TRANSCRIPT_DEBUG_ENABLED && dropped <= 6 && duplicatePrev) {
+          console.log(
+            `[Pluto][TranscriptDebug] duplicate(${speaker}) gap~${(
+              segment.startTime - duplicatePrev.endTime
+            ).toFixed(2)}s tokenSim=${tokenSimilarity(
+              segment.text,
+              duplicatePrev.text,
+            ).toFixed(2)} prefixSim=${tokenPrefixSimilarity(
+              segment.text,
+              duplicatePrev.text,
+            ).toFixed(2)}`,
+          );
+        }
         continue;
       }
 
@@ -2469,7 +2545,12 @@ export const AudioManager = ({
 
       const chunkDurationSec = Math.max(0.01, chunkEndSec - chunkStartSec);
       const mapSegments = (
-        rawSegments: Array<{ start: number; end: number; text: string }>,
+        rawSegments: Array<{
+          start: number;
+          end: number;
+          text: string;
+          words?: Array<{ word: string; start: number; end: number }>;
+        }>,
         timeOffsetSec: number,
       ): TranscriptionSegment[] =>
         rawSegments
@@ -2480,6 +2561,11 @@ export const AudioManager = ({
             endTime: s.end + timeOffsetSec,
             text: s.text.trim(),
             speaker: label,
+            words: s.words?.map((w) => ({
+              word: w.word,
+              start: w.start + timeOffsetSec,
+              end: w.end + timeOffsetSec,
+            })),
           }));
 
       if (ENABLE_CHUNK_FLUSH && rms) {
@@ -3086,6 +3172,10 @@ export const AudioManager = ({
       let fullSessionRecoveredMeSegments: TranscriptionSegment[] = [];
       let fullSessionCanonicalSegments: TranscriptionSegment[] = [];
       let fullSessionValidationTexts: string[] = [];
+      let sessionCanonicalSource: CanonicalTranscriptSource = 'mic';
+      let postHydrationBleedPass = false;
+      let postHydrationBleedDroppedMe = 0;
+      const transcriptPipeline: Record<string, string | number> = {};
       const chunkMeSegments = collectedSegments.filter(
         (segment) => segment.speaker === 'Me',
       );
@@ -3094,42 +3184,87 @@ export const AudioManager = ({
       );
       const hasChunkMeSegments = chunkMeSegments.length > 0;
 
-      if (primaryAudioPath) {
+      const useMixForCanonical = shouldUseMixForCanonicalTranscript({
+        preferMixDefault:
+          TRANSCRIPTION_TUNING.canonicalTranscript.preferMixSource === true,
+        hasMixedAudioPath: Boolean(mixedAudioPath),
+      });
+      const canonicalAudioPath =
+        useMixForCanonical && mixedAudioPath
+          ? mixedAudioPath
+          : primaryAudioPath;
+
+      const whisperToMicLabeledSegments = (
+        whisperResult: unknown,
+      ): TranscriptionSegment[] => {
+        const raw = whisperResult as {
+          segments?: Array<{
+            start: number;
+            end: number;
+            text: string;
+            words?: Array<{ word: string; start: number; end: number }>;
+          }>;
+        };
+        return raw?.segments
+          ? raw.segments
+              .filter((s) => isValidSegment(s.text))
+              .map((s) => ({
+                id: crypto.randomUUID(),
+                startTime: s.start,
+                endTime: s.end,
+                text: s.text.trim(),
+                speaker: 'Me' as const,
+                words: s.words?.map((w) => ({
+                  word: w.word,
+                  start: w.start,
+                  end: w.end,
+                })),
+              }))
+          : [];
+      };
+
+      const whisperToValidationTexts = (whisperResult: unknown): string[] => {
+        const raw = whisperResult as { segments?: Array<{ text: string }> };
+        return raw?.segments
+          ? raw.segments
+              .map((s: { text: string }) => (s.text || '').trim())
+              .filter((text: string) => text.length > 0)
+          : [];
+      };
+
+      if (canonicalAudioPath) {
         try {
-          const fullMicResult = await window.ipcRenderer.invoke(
+          const canonicalWhisper = await window.ipcRenderer.invoke(
             'WHISPER_TRANSCRIBE',
-            primaryAudioPath,
+            canonicalAudioPath,
             buildTranscriptionOptions({ diarize: false }),
           );
-          const recoveredMeSegments: TranscriptionSegment[] =
-            fullMicResult?.segments
-              ? fullMicResult.segments
-                  .filter((s: { text: string }) => isValidSegment(s.text))
-                  .map((s: { start: number; end: number; text: string }) => ({
-                    id: crypto.randomUUID(),
-                    startTime: s.start,
-                    endTime: s.end,
-                    text: s.text.trim(),
-                    speaker: 'Me',
-                  }))
-              : [];
-          fullSessionCanonicalSegments = fullMicResult?.segments
-            ? fullMicResult.segments
-                .filter((s: { text: string }) => isValidSegment(s.text))
-                .map((s: { start: number; end: number; text: string }) => ({
-                  id: crypto.randomUUID(),
-                  startTime: s.start,
-                  endTime: s.end,
-                  text: s.text.trim(),
-                  speaker: 'Me',
-                }))
-            : [];
-          fullSessionValidationTexts = fullMicResult?.segments
-            ? fullMicResult.segments
-                .map((s: { text: string }) => (s.text || '').trim())
-                .filter((text: string) => text.length > 0)
-            : [];
-          fullSessionRecoveredMeSegments = recoveredMeSegments;
+          fullSessionCanonicalSegments =
+            whisperToMicLabeledSegments(canonicalWhisper);
+          fullSessionValidationTexts =
+            whisperToValidationTexts(canonicalWhisper);
+          sessionCanonicalSource =
+            canonicalAudioPath === mixedAudioPath ? 'mix' : 'mic';
+
+          if (primaryAudioPath && primaryAudioPath !== canonicalAudioPath) {
+            const micOnlyWhisper = await window.ipcRenderer.invoke(
+              'WHISPER_TRANSCRIBE',
+              primaryAudioPath,
+              buildTranscriptionOptions({ diarize: false }),
+            );
+            fullSessionRecoveredMeSegments =
+              whisperToMicLabeledSegments(micOnlyWhisper);
+            console.log(
+              `[Pluto] Full-session canonical source=${sessionCanonicalSource} (${fullSessionCanonicalSegments.length} segs); mic recovery=${fullSessionRecoveredMeSegments.length} segs`,
+            );
+          } else {
+            fullSessionRecoveredMeSegments = fullSessionCanonicalSegments;
+            console.log(
+              `[Pluto] Full-session transcript source=${sessionCanonicalSource}, segments=${fullSessionCanonicalSegments.length}`,
+            );
+          }
+
+          const recoveredMeSegments = fullSessionRecoveredMeSegments;
 
           if (recoveredMeSegments.length > 0) {
             if (
@@ -3162,16 +3297,17 @@ export const AudioManager = ({
             }
           } else {
             console.warn(
-              '[Pluto] Full session mic transcription returned no recoverable Me segments',
+              '[Pluto] Full session transcription returned no recoverable Me segments',
             );
           }
         } catch (recoveryErr) {
           console.error(
-            '[Pluto] Failed to recover Me transcript from full session audio:',
+            '[Pluto] Failed full-session transcript / Me recovery:',
             recoveryErr,
           );
         }
       }
+
       micChunkConversionFailuresRef.current = 0;
       disableMicChunkTranscriptionRef.current = false;
       micWebmInitSegmentRef.current = null;
@@ -3182,8 +3318,14 @@ export const AudioManager = ({
       );
       const crossChannelResolved =
         resolveCrossChannelDuplicates(sortedSegments);
-      const crossChannelSegments =
+      let crossChannelSegments =
         crossChannelResolved.segments as TranscriptionSegment[];
+      if (TRANSCRIPT_DEBUG_ENABLED) {
+        console.log(
+          '[Pluto][TranscriptDebug] resolveCrossChannelDuplicates',
+          crossChannelResolved.stats,
+        );
+      }
       if (crossChannelResolved.stats.resolvedPairs > 0) {
         console.log(
           `[Pluto] Cross-channel duplicate resolver: candidates=${crossChannelResolved.stats.candidatePairs}, ` +
@@ -3191,18 +3333,130 @@ export const AudioManager = ({
             `droppedMe=${crossChannelResolved.stats.droppedMe}, droppedThem=${crossChannelResolved.stats.droppedThem}`,
         );
       }
+
+      const nearDupResolved =
+        resolveCrossChannelNearDuplicates(crossChannelSegments);
+      crossChannelSegments = nearDupResolved.segments as TranscriptionSegment[];
+      if (TRANSCRIPT_DEBUG_ENABLED) {
+        console.log(
+          '[Pluto][TranscriptDebug] resolveCrossChannelNearDuplicates',
+          nearDupResolved.stats,
+        );
+      }
+      if (nearDupResolved.stats.resolvedPairs > 0) {
+        console.log(
+          `[Pluto] Cross-channel near-duplicate merge: candidates=${nearDupResolved.stats.candidatePairs}, ` +
+            `resolved=${nearDupResolved.stats.resolvedPairs}, ` +
+            `droppedMe=${nearDupResolved.stats.droppedMe}, droppedThem=${nearDupResolved.stats.droppedThem}`,
+        );
+      }
+
+      if (TRANSCRIPT_DEBUG_ENABLED) {
+        const meSegs = crossChannelSegments.filter((s) => s.speaker === 'Me');
+        const themSegs = crossChannelSegments.filter(
+          (s) => s.speaker === 'Them',
+        );
+        const candidates: Array<{
+          score: number;
+          overlap: number;
+          overlapRatioMin: number;
+          tokenSim: number;
+          me: TranscriptionSegment;
+          them: TranscriptionSegment;
+        }> = [];
+
+        for (const me of meSegs) {
+          for (const them of themSegs) {
+            const ov = overlapSeconds(me, them);
+            if (ov <= 0) continue;
+            const minDur = Math.max(
+              0.01,
+              Math.min(
+                me.endTime - me.startTime,
+                them.endTime - them.startTime,
+              ),
+            );
+            const overlapRatioMin = ov / minDur;
+            if (overlapRatioMin < 0.2) continue;
+            const tokenSim = tokenSimilarity(me.text, them.text);
+            const score = overlapRatioMin + tokenSim * 0.8;
+            candidates.push({
+              score,
+              overlap: ov,
+              overlapRatioMin,
+              tokenSim,
+              me,
+              them,
+            });
+          }
+        }
+
+        candidates.sort((a, b) => b.score - a.score);
+        const top = candidates.slice(0, 5);
+        console.log(
+          '[Pluto][TranscriptDebug] topLikelyMeBleed BEFORE dedupe/trim',
+          top.map((c) => ({
+            me: `${c.me.startTime.toFixed(1)}-${c.me.endTime.toFixed(1)}`,
+            them: `${c.them.startTime.toFixed(1)}-${c.them.endTime.toFixed(1)}`,
+            overlap: Number(c.overlap.toFixed(2)),
+            overlapRatioMin: Number(c.overlapRatioMin.toFixed(2)),
+            tokenSim: Number(c.tokenSim.toFixed(2)),
+            mePrefix: c.me.text.slice(0, 40),
+          })),
+        );
+      }
+
       const dedupedThemSegments = filterDuplicateSpeakerSegments(
         crossChannelSegments,
         'Them',
       );
+      if (TRANSCRIPT_DEBUG_ENABLED) {
+        const themBefore = crossChannelSegments.filter(
+          (s) => s.speaker === 'Them',
+        ).length;
+        const themAfter = dedupedThemSegments.filter(
+          (s) => s.speaker === 'Them',
+        ).length;
+        console.log('[Pluto][TranscriptDebug] dedupe Them', {
+          themBefore,
+          themAfter,
+          dropped: themBefore - themAfter,
+        });
+      }
       const dedupedSegments = filterDuplicateSpeakerSegments(
         dedupedThemSegments,
         'Me',
       );
+      if (TRANSCRIPT_DEBUG_ENABLED) {
+        const meBefore = dedupedThemSegments.filter(
+          (s) => s.speaker === 'Me',
+        ).length;
+        const meAfter = dedupedSegments.filter(
+          (s) => s.speaker === 'Me',
+        ).length;
+        console.log('[Pluto][TranscriptDebug] dedupe Me', {
+          meBefore,
+          meAfter,
+          dropped: meBefore - meAfter,
+        });
+      }
       const echoTrimmedSegments = trimAdjacentCrossSpeakerEcho(dedupedSegments);
       const shortEchoPruned = dropShortCrossSpeakerEchoes({
         segments: echoTrimmedSegments as TranscriptionSegment[],
       });
+      if (TRANSCRIPT_DEBUG_ENABLED) {
+        const beforeTrim = dedupedSegments.length;
+        const afterTrim = echoTrimmedSegments.length;
+        console.log('[Pluto][TranscriptDebug] trimAdjacentCrossSpeakerEcho', {
+          before: beforeTrim,
+          after: afterTrim,
+          dropped: beforeTrim - afterTrim,
+        });
+        console.log('[Pluto][TranscriptDebug] dropShortCrossSpeakerEchoes', {
+          dropped: shortEchoPruned.dropped,
+          after: shortEchoPruned.segments.length,
+        });
+      }
       if (shortEchoPruned.dropped > 0) {
         console.log(
           `[Pluto] Dropped ${shortEchoPruned.dropped} short cross-speaker echo segments`,
@@ -3210,6 +3464,9 @@ export const AudioManager = ({
       }
       let finalizedSegments =
         shortEchoPruned.segments as TranscriptionSegment[];
+      const preCleanupChannelSegments = [
+        ...crossChannelSegments,
+      ] as TranscriptionSegment[];
       const rawSpeakerCounts = crossChannelSegments.reduce(
         (acc, segment) => {
           if (segment.speaker === 'Me') acc.me++;
@@ -3249,6 +3506,30 @@ export const AudioManager = ({
           finalizedSegments,
           activityWindowsForCleanup,
         );
+
+        if (TRANSCRIPT_DEBUG_ENABLED) {
+          const meSegs = meBleedStripped.segments.filter(
+            (s) => s.speaker === 'Me',
+          );
+          const themSegs = meBleedStripped.segments.filter(
+            (s) => s.speaker === 'Them',
+          );
+          let bleedPairs = 0;
+          for (const me of meSegs) {
+            for (const them of themSegs) {
+              if (overlapSeconds(me, them) > 0.5) bleedPairs++;
+            }
+          }
+          console.log(
+            '[Pluto][TranscriptDebug] after stripLikelyMeBleedSegments',
+            {
+              droppedMe: meBleedStripped.droppedMe,
+              meSegs: meSegs.length,
+              themSegs: themSegs.length,
+              bleedPairsHalfSec: bleedPairs,
+            },
+          );
+        }
         if (meBleedStripped.droppedMe > 0) {
           finalizedSegments =
             meBleedStripped.segments as TranscriptionSegment[];
@@ -3279,40 +3560,44 @@ export const AudioManager = ({
           '[Pluto] No transcribed mic segments detected. Check selected microphone/input routing.',
         );
       }
-      const shouldHydrateFromSession = shouldHydrateCanonicalTranscript({
-        canonicalSegments: fullSessionCanonicalSegments,
-        channelSegments: finalizedSegments,
-      });
-      if (
+
+      const shouldHydrateFromSession =
         fullSessionCanonicalSegments.length > 0 &&
-        finalizedSegments.length > 0 &&
-        shouldHydrateFromSession
-      ) {
-        const canonicalForAttribution = splitCanonicalSegmentsForAttribution(
+        preCleanupChannelSegments.length > 0;
+
+      if (shouldHydrateFromSession) {
+        const channelSplit = splitCanonicalSegmentsAtChannelBoundaries(
           fullSessionCanonicalSegments,
+          preCleanupChannelSegments,
         );
+        if (channelSplit.splitsApplied > 0) {
+          console.log(
+            `[Pluto] Channel-boundary canonical splits: ${channelSplit.splitsApplied}`,
+          );
+        }
+        transcriptPipeline.channelBoundarySplits = channelSplit.splitsApplied;
+
+        const canonicalForAttribution = splitCanonicalSegmentsForAttribution(
+          channelSplit.segments,
+        );
+
         const canonicalAttribution = assignSpeakersToCanonicalSegments({
           canonicalSegments: canonicalForAttribution,
-          attributedSegments: finalizedSegments,
-          activityWindows: speakerTimelineRef.current,
+          attributedSegments: preCleanupChannelSegments,
         });
         if (canonicalAttribution.segments.length > 0) {
           finalizedSegments =
             canonicalAttribution.segments as TranscriptionSegment[];
           console.log(
-            `[Pluto] Session-canonical hydration (source-driven): segments=${canonicalAttribution.segments.length}, ` +
+            `[Pluto] Session-canonical hydration: segments=${canonicalAttribution.segments.length}, ` +
+              `channelSplits=${channelSplit.splitsApplied}, ` +
               `byOverlap=${canonicalAttribution.stats.byOverlap}, ` +
-              `byActivity=${canonicalAttribution.stats.byActivity}, ` +
               `fallback=${canonicalAttribution.stats.byFallback}`,
           );
         }
       } else if (fullSessionCanonicalSegments.length > 0) {
         console.log(
-          `[Pluto] Skipping session-canonical hydration: ${
-            finalizedSegments.length === 0
-              ? 'missing channel attribution context'
-              : 'channel attribution already has enough speaker coverage'
-          }`,
+          '[Pluto] Skipping session-canonical hydration: no channel segments',
         );
       }
 
@@ -3357,6 +3642,21 @@ export const AudioManager = ({
               activityWindows: speakerTimelineRef.current,
             });
             if (Object.keys(mapping.mapping).length > 0) {
+              const diarBoundary = splitSegmentsAtDiarizationBoundaries(
+                finalizedSegments,
+                diarizationSegments,
+                mapping.mapping,
+              );
+              if (diarBoundary.splitsApplied > 0) {
+                finalizedSegments =
+                  diarBoundary.segments as TranscriptionSegment[];
+                console.log(
+                  `[Pluto] Diarization boundary split: applied=${diarBoundary.splitsApplied}, segments=${finalizedSegments.length}`,
+                );
+              }
+              transcriptPipeline.diarizationBoundarySplits =
+                diarBoundary.splitsApplied;
+
               const applied = applyDiarizationRefinement({
                 segments: finalizedSegments,
                 diarizationSegments,
@@ -3384,6 +3684,37 @@ export const AudioManager = ({
           }
         } catch (e) {
           console.warn('[Pluto] Diarization refinement failed:', e);
+        }
+      }
+
+      finalizedSegments = applyCrossTurnAttributionRepairs(
+        finalizedSegments,
+      ) as TranscriptionSegment[];
+
+      const hasBothSpeakersForPostBleed =
+        finalizedSegments.some((s) => s.speaker === 'Me') &&
+        finalizedSegments.some((s) => s.speaker === 'Them');
+      if (hasBothSpeakersForPostBleed) {
+        postHydrationBleedPass = true;
+        const activityWindowsPost = [...speakerTimelineRef.current];
+        const activeWindowPost = activeSpeakerWindowRef.current;
+        if (activeWindowPost) {
+          activityWindowsPost.push({
+            startTime: activeWindowPost.startTime,
+            endTime: getMeetingElapsedSeconds(),
+            speaker: activeWindowPost.speaker,
+          });
+        }
+        const postBleed = stripLikelyMeBleedSegments(
+          finalizedSegments,
+          activityWindowsPost,
+        );
+        postHydrationBleedDroppedMe = postBleed.droppedMe;
+        if (postBleed.droppedMe > 0) {
+          finalizedSegments = postBleed.segments as TranscriptionSegment[];
+          console.warn(
+            `[Pluto] Post-hydration Me-bleed cleanup: droppedMe=${postBleed.droppedMe}`,
+          );
         }
       }
 
@@ -3500,6 +3831,15 @@ export const AudioManager = ({
         `[Pluto] Merged: ${finalizedSegments.length} channel-first segments → ${newTranscription.length} merged segments`,
       );
 
+      if (TRANSCRIPT_PIPELINE_LOG) {
+        console.log('[Pluto][TranscriptPipeline]', {
+          ...transcriptPipeline,
+          mergedSegments: newTranscription.length,
+          mergedMe: mergedSpeakerCounts.me,
+          mergedThem: mergedSpeakerCounts.them,
+        });
+      }
+
       if (onTranscript && newTranscription.length > 0) {
         const fullText = newTranscription.map((s) => s.text).join(' ');
         onTranscript(fullText);
@@ -3590,7 +3930,13 @@ export const AudioManager = ({
         ended_at: endTime,
         duration_seconds: Math.floor(duration),
         audio_path: primaryAudioPath,
-        transcript_json: JSON.stringify(labeledTranscription),
+        transcript_json: JSON.stringify(
+          buildTranscriptJsonPayload(labeledTranscription, {
+            canonicalSource: sessionCanonicalSource,
+            postHydrationBleedPass,
+            postHydrationBleedDroppedMe,
+          }),
+        ),
         user_notes: userNotes,
         enhanced_notes: enhancedNotes,
         analysis_json: JSON.stringify(analysisDocument),
