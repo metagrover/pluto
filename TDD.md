@@ -347,11 +347,9 @@ For local embeddings (privacy-preserving):
 * [x] Entity detail view (all mentions across meetings)
 
 
-### Sprint 3: Live Documents (Mind Map)
+### Sprint 3: Live Documents
 * [ ] Document types (Team Tracker, Project Space, Person Context)
 * [ ] Auto-synthesis when new meetings added
-* [ ] Mind map visualization (react-flow or similar)
-* [ ] Canvas-based entity exploration
 * [ ] Export (Markdown, PDF)
 
 ### Sprint 4: Accountability Engine

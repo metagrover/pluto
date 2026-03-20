@@ -127,7 +127,7 @@ graph TB
 
 ### 🧠 Second Brain
 - *"I want a system that accumulates context from every meeting so I can focus on the conversation."*
-- *"I want a live 'standup tracker' that auto-updates with themes from each standup, like a mind map."*
+- *"I want a live 'standup tracker' that auto-updates with themes from each standup."*
 - *"I want to see all my 1-on-1s with Sarah as a connected timeline."*
 
 ### ⏰ Accountability
@@ -326,7 +326,7 @@ gantt
 |--------|-------|------------------|
 | **1** | Foundation | WhisperX, reliable recording, basic UI |
 | **2** | Knowledge Graph | Entity extraction, resolution, graph storage, active-call detection + quick note alert |
-| **3** | Live Documents | Team Tracker, mind map visualization |
+| **3** | Live Documents | Team Tracker, auto-synthesis, export |
 | **4** | Accountability | Action item lifecycle, notifications |
 | **5** | Synthesis | Quarterly summaries, self-review, "Ask Pluto" |
 | **6** | Pre-Meeting Intel | Calendar integration, context cards |
@@ -346,9 +346,8 @@ gantt
 
 ## 11. Open Questions
 
-1. **Mind Map UX:** Full canvas editor (Miro-style) or simpler graph view?
-2. **Action Item Completion:** Explicit "complete" button or infer from meetings?
-3. **Calendar Priority:** Integrate early (Sprint 2) or wait for Sprint 6?
+1. **Action Item Completion:** Explicit "complete" button or infer from meetings?
+2. **Calendar Priority:** Integrate early (Sprint 2) or wait for Sprint 6?
 
 ---
 
