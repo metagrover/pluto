@@ -25,6 +25,8 @@
   /* Subtle Cream Border */
   --pro-surface: 0 0% 100%;
   /* Pure White */
+  --pro-hover: 42 35% 93%;
+  /* Slightly darker cream for hover */
 
   /* Semantic Status Colors */
   --pro-urgent: 0 84% 60%;
@@ -53,9 +55,29 @@
   -webkit-font-smoothing: antialiased;
 }
 
+.dark {
+  /* Dark Mode Palette based on design */
+  --pro-bg: 231 22% 11%;
+  /* Very Dark Navy #161A23 */
+  --pro-surface: 231 28% 14%;
+  /* Slightly lighter card #1A1F2D */
+  --pro-text-main: 0 0% 100%;
+  /* Pure White */
+  --pro-text-muted: 227 15% 60%;
+  /* Muted Steel */
+  --pro-border: 231 20% 20%;
+  /* Soft Navy Border */
+  --pro-hover: 231 25% 18%;
+  /* Darker background for hover */
+  --pro-accent: 37 49% 67%;
+  /* Champagne Gold (Maintained for branding) */
+  --pro-accent-alt: 37 30% 50%;
+  /* Muted Gold for Dark */
+}
+
 @layer base {
   body {
-    @apply antialiased selection:bg-pro-accent/10 selection:text-pro-accent;
+    @apply antialiased selection:bg-pro-accent/10 selection:text-pro-accent transition-colors duration-300;
   }
 }
 

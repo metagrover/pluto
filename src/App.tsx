@@ -1,33 +1,39 @@
 import { useEffect, useRef, useState } from 'react';
+import './App.css';
+
+// Core
 import { AudioManager } from './components/AudioManager';
 import { SetupWizard } from './components/Setup/SetupWizard';
-import './App.css';
 import { useActiveCallMonitor } from './hooks/useActiveCallMonitor';
 import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
 import { AutoEndToast } from './components/ui/AutoEndToast';
 
-// Layout Components
+// Layout
 import { Sidebar } from './components/layout/Sidebar';
 
+// Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { MeetingView } from './components/features/MeetingView';
-// Feature Components
 import { ZenMode } from './components/features/ZenMode';
 
+// Knowledge Graph
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
-// Knowledge Graph Components
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
-import { ProjectsTab } from './components/KnowledgeGraph/ProjectsTab';
-import { TasksTab } from './components/KnowledgeGraph/TasksTab';
+import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
 
+// Overlays
 import { AskPlutoOverlay } from './components/overlays/AskPlutoOverlay';
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
-// Overlay Components
 import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { SettingsOverlay } from './components/overlays/SettingsOverlay';
 
 // Types
 import type { Meeting } from './types';
+import type {
+  WhisperComputeType,
+  WhisperDevice,
+  WhisperModel,
+} from './utils/transcriptionSettings';
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
@@ -43,7 +49,7 @@ function App() {
     string | number | null
   >(null);
   const [activeTab, setActiveTab] = useState<
-    'hub' | 'people' | 'projects' | 'wiki' | 'tasks'
+    'hub' | 'people' | 'projects' | 'wiki'
   >('hub');
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [searchVisible, setSearchVisible] = useState(false);
@@ -62,6 +68,12 @@ function App() {
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [claudeApiKey, setClaudeApiKey] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const [whisperModel, setWhisperModel] = useState<WhisperModel>('small');
+  const [whisperDevice, setWhisperDevice] = useState<WhisperDevice>('cpu');
+  const [whisperComputeType, setWhisperComputeType] =
+    useState<WhisperComputeType>('int8');
+  const [whisperLanguage, setWhisperLanguage] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
   const [askPlutoVisible, setAskPlutoVisible] = useState(false);
@@ -146,6 +158,31 @@ function App() {
       contentScrollRef.current.scrollTo({ top: 0, behavior: 'auto' });
     }
   }, [selectedMeetingId]);
+
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.remove('light', 'dark');
+
+    if (theme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
+        .matches
+        ? 'dark'
+        : 'light';
+      root.classList.add(systemTheme);
+    } else {
+      root.classList.add(theme);
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => {
+      if (theme === 'system') {
+        root.classList.remove('light', 'dark');
+        root.classList.add(e.matches ? 'dark' : 'light');
+      }
+    };
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [theme]);
 
   const highlightEntities = (text: string) => {
     const entities = [
@@ -232,6 +269,23 @@ function App() {
       .then((val) => {
         if (val !== null) setAutoEndEnabled(val !== 'false');
       });
+    window.ipcRenderer.invoke('GET_SETTING', 'theme').then((val) => {
+      if (val) setTheme(val as 'light' | 'dark' | 'system');
+    });
+    window.ipcRenderer.invoke('GET_SETTING', 'whisper_model').then((val) => {
+      if (val) setWhisperModel(val as WhisperModel);
+    });
+    window.ipcRenderer.invoke('GET_SETTING', 'whisper_device').then((val) => {
+      if (val) setWhisperDevice(val as WhisperDevice);
+    });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'whisper_compute_type')
+      .then((val) => {
+        if (val) setWhisperComputeType(val as WhisperComputeType);
+      });
+    window.ipcRenderer.invoke('GET_SETTING', 'whisper_language').then((val) => {
+      if (val !== null && val !== undefined) setWhisperLanguage(String(val));
+    });
 
     const checkServer = async () => {
       try {
@@ -455,6 +509,13 @@ function App() {
           onProcessingChange={setIsProcessing}
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
+          transcriptionSettings={{
+            model: whisperModel,
+            device: whisperDevice,
+            computeType: whisperComputeType,
+            language: whisperLanguage,
+          }}
+          hfToken={hfToken}
           onStopSessionRef={stopSessionRef}
           onStartSessionRef={startSessionRef}
           onAnalyserReadyRef={onAnalyserReadyRef}
@@ -490,6 +551,14 @@ function App() {
             }}
             handleDeleteMeeting={handleDeleteMeeting}
             setSettingsVisible={setSettingsVisible}
+            theme={theme}
+            setTheme={(newTheme) => {
+              setTheme(newTheme);
+              window.ipcRenderer.invoke('SET_SETTING', {
+                key: 'theme',
+                value: newTheme,
+              });
+            }}
           />
         </>
       )}
@@ -526,7 +595,7 @@ function App() {
               <button
                 type="button"
                 onClick={() => setSidebarVisible((prev) => !prev)}
-                className="w-11 h-11 rounded-xl bg-white border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push group"
+                className="w-11 h-11 rounded-xl bg-pro-surface border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push group"
               >
                 <svg
                   aria-hidden="true"
@@ -570,17 +639,17 @@ function App() {
               <button
                 type="button"
                 onClick={() => setAskPlutoVisible(true)}
-                className="h-12 px-6 rounded-2xl bg-white border border-pro-border shadow-soft flex items-center gap-4 hover:border-pro-accent/40 transition-all active-push group"
+                className="h-10 px-5 rounded-full bg-white dark:bg-pro-surface border border-pro-border/40 dark:border-pro-border/50 shadow-sm flex items-center gap-3 hover:border-pro-accent/40 transition-all active-push group"
               >
-                <span className="text-lg">🧠</span>
-                <span className="text-[10px] font-black text-pro-text-muted/60 uppercase tracking-[0.2em]">
+                <span className="text-sm">🧠</span>
+                <span className="text-[9px] font-black text-pro-text-muted/60 dark:text-pro-text-main/70 uppercase tracking-[0.2em] pt-[1px]">
                   Ask Pluto Intelligence
                 </span>
-                <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
-                  <span className="w-5 h-5 rounded-md border border-pro-border flex items-center justify-center text-[10px] font-bold">
+                <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity ml-2">
+                  <span className="w-4 h-4 rounded border border-pro-border flex items-center justify-center text-[8px] font-bold">
                     ⌘
                   </span>
-                  <span className="w-5 h-5 rounded-md border border-pro-border flex items-center justify-center text-[10px] font-bold">
+                  <span className="w-4 h-4 rounded border border-pro-border flex items-center justify-center text-[8px] font-bold">
                     K
                   </span>
                 </div>
@@ -589,7 +658,7 @@ function App() {
               <button
                 type="button"
                 onClick={() => setSettingsVisible(true)}
-                className="w-11 h-11 rounded-xl bg-white border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push"
+                className="w-11 h-11 rounded-xl bg-pro-surface border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push"
               >
                 <svg
                   aria-hidden="true"
@@ -652,21 +721,23 @@ function App() {
                 <PeopleTab />
               </div>
             ) : activeTab === 'projects' ? (
-              <div className="max-w-4xl mx-auto w-full space-y-12 animate-in pb-20">
-                <ProjectsTab />
+              <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
+                <ProjectsExecutionTab />
               </div>
             ) : activeTab === 'wiki' ? (
               <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
-                <KnowledgeTab />
-              </div>
-            ) : activeTab === 'tasks' ? (
-              <div className="max-w-4xl mx-auto w-full space-y-12 animate-in pb-20">
-                <TasksTab />
+                <KnowledgeTab
+                  onOpenMeeting={(meetingId) => {
+                    setSelectedMeetingId(meetingId);
+                    setActiveTab('hub');
+                  }}
+                  onOpenProjectsTab={() => setActiveTab('projects')}
+                />
               </div>
             ) : (
               <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pro-accent/5 rounded-full blur-[120px] pointer-events-none" />
-                <div className="w-32 h-32 rounded-[3.5rem] bg-white border border-pro-border flex items-center justify-center text-5xl mx-auto mb-10 shadow-premium active-push group">
+                <div className="w-32 h-32 rounded-[3.5rem] bg-pro-surface border border-pro-border flex items-center justify-center text-5xl mx-auto mb-10 shadow-premium active-push group">
                   <span className="group-hover:rotate-12 transition-transform duration-500">
                     {activeTab === 'people'
                       ? '👤'
@@ -697,7 +768,7 @@ function App() {
                     onClick={() => {
                       if (startSessionRef.current) startSessionRef.current();
                     }}
-                    className="h-16 px-12 rounded-3xl bg-pro-text-main text-white font-black text-xs uppercase tracking-[0.2em] shadow-2xl hover:bg-pro-accent hover:scale-[1.02] transition-all active-push"
+                    className="h-16 px-12 rounded-3xl bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] font-black text-xs uppercase tracking-[0.2em] shadow-2xl hover:bg-pro-accent hover:scale-[1.02] transition-all active-push"
                   >
                     Initialize Capture
                   </button>
@@ -747,8 +818,24 @@ function App() {
         setOllamaModel={setOllamaModel}
         autoEndEnabled={autoEndEnabled}
         setAutoEndEnabled={setAutoEndEnabled}
+        whisperModel={whisperModel}
+        setWhisperModel={setWhisperModel}
+        whisperDevice={whisperDevice}
+        setWhisperDevice={setWhisperDevice}
+        whisperComputeType={whisperComputeType}
+        setWhisperComputeType={setWhisperComputeType}
+        whisperLanguage={whisperLanguage}
+        setWhisperLanguage={setWhisperLanguage}
         fetchMeetings={fetchMeetings}
         setSelectedMeetingId={setSelectedMeetingId}
+        theme={theme}
+        setTheme={(newTheme) => {
+          setTheme(newTheme);
+          window.ipcRenderer.invoke('SET_SETTING', {
+            key: 'theme',
+            value: newTheme,
+          });
+        }}
       />
 
       <PermissionsOverlay

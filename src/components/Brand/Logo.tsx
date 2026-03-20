@@ -1,5 +1,6 @@
 import type React from 'react';
-import plutoLogo from '../../assets/brand/pluto_logo_v4.png';
+import logoSvg from '../../assets/brand/pluto_logo.svg';
+import logoDarkSvg from '../../assets/brand/pluto_logo_dark_mode.svg';
 
 interface LogoProps {
   className?: string;
@@ -20,9 +21,15 @@ export const Logo: React.FC<LogoProps> = ({
     darkBlue: '#1A2340',
     gold: '#D4B483',
     white: '#FFFFFF',
+    offWhite: '#FAFAFA',
   };
 
-  const mainColor = variant === 'light' ? colors.white : colors.darkBlue;
+  const mainColor =
+    variant === 'light'
+      ? colors.white
+      : variant === 'gold'
+        ? colors.gold
+        : colors.darkBlue;
 
   return (
     <div className={`flex items-center gap-3 ${className}`}>
@@ -31,9 +38,14 @@ export const Logo: React.FC<LogoProps> = ({
         className="relative flex-shrink-0"
       >
         <img
-          src={plutoLogo}
+          src={logoSvg}
           alt="Pluto Logo"
-          className="w-full h-full object-contain"
+          className="w-full h-full object-contain block dark:hidden transition-all duration-300 hover:scale-110 active:scale-95"
+        />
+        <img
+          src={logoDarkSvg}
+          alt="Pluto Logo"
+          className="w-full h-full object-contain hidden dark:block transition-all duration-300 hover:scale-110 active:scale-95"
         />
       </div>
 
@@ -41,7 +53,7 @@ export const Logo: React.FC<LogoProps> = ({
         <div className="flex flex-col">
           {showText && (
             <span
-              className="font-bold tracking-tight leading-none"
+              className="font-bold tracking-tight leading-none dark:!text-[#FAFAFA]"
               style={{ color: mainColor, fontSize: size * 0.7 }}
             >
               Pluto
@@ -49,7 +61,7 @@ export const Logo: React.FC<LogoProps> = ({
           )}
           {showTagline && (
             <span
-              className="font-normal tracking-tight opacity-70 mt-1"
+              className="font-normal tracking-tight opacity-70 mt-1 dark:!text-[#FAFAFA]/70"
               style={{ color: mainColor, fontSize: size * 0.22 }}
             >
               Your Second Brain for Work

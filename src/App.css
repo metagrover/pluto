@@ -34,6 +34,11 @@
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.dark .glass-card {
+  background: hsl(var(--pro-surface) / 0.5);
+  border: 1px solid hsl(var(--pro-border) / 0.4);
+}
+
 .shadow-premium {
   box-shadow: var(--pro-shadow-premium);
 }
@@ -136,6 +141,15 @@
   box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.08);
   position: relative;
   overflow: hidden;
+}
+
+.dark .hero-card {
+  background: linear-gradient(
+    135deg,
+    hsl(var(--pro-surface)) 0%,
+    hsl(var(--pro-bg)) 100%
+  );
+  border: 1px solid hsl(var(--pro-border) / 0.2);
 }
 
 .hero-card::after {

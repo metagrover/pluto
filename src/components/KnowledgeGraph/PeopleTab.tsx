@@ -53,7 +53,7 @@ export const PeopleTab: React.FC = () => {
       {people.map((person) => (
         <div
           key={person.id}
-          className="p-6 bg-white border border-pro-border rounded-[2rem] shadow-sm hover:shadow-md transition-all group"
+          className="p-6 bg-pro-surface border border-pro-border rounded-[2rem] shadow-sm hover:shadow-md transition-all group"
         >
           <div className="flex items-start justify-between mb-4">
             <div className="w-12 h-12 rounded-2xl bg-pro-bg flex items-center justify-center text-xl group-hover:scale-110 transition-transform">
@@ -78,7 +78,7 @@ export const PeopleTab: React.FC = () => {
             </button>
             <button
               type="button"
-              className="w-8 h-8 rounded-xl bg-pro-bg flex items-center justify-center hover:bg-white border border-transparent hover:border-pro-border transition-all"
+              className="w-8 h-8 rounded-xl bg-pro-bg flex items-center justify-center hover:bg-pro-surface border border-transparent hover:border-pro-border transition-all"
             >
               📞
             </button>

@@ -91,7 +91,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         {step === 1 && (
           <div className="animate-in fade-in slide-in-from-bottom-8 duration-1000">
             <div className="relative inline-block mb-10">
-              <div className="w-48 h-48 rounded-[2.5rem] bg-white shadow-2xl flex items-center justify-center p-8 border border-pro-border relative group">
+              <div className="w-48 h-48 rounded-[2.5rem] bg-pro-surface shadow-2xl flex items-center justify-center p-8 border border-pro-border relative group">
                 <Logo size={120} />
                 <div className="absolute inset-0 bg-pro-accent/5 rounded-[2.5rem] blur-2xl -z-10 group-hover:bg-pro-accent/10 transition-all" />
               </div>
@@ -112,7 +112,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 await persistStep(2);
                 setStep(2);
               }}
-              className="mt-14 w-full h-16 bg-pro-text-main text-white rounded-2xl font-bold text-xs uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all active:scale-[0.98]"
+              className="mt-14 w-full h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-xs uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all active:scale-[0.98]"
             >
               Get Started
             </button>
@@ -130,7 +130,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               </p>
             </div>
 
-            <div className="p-10 bg-white border border-pro-border rounded-[2rem] shadow-premium text-left space-y-8">
+            <div className="p-10 bg-pro-surface border border-pro-border rounded-[2rem] shadow-premium text-left space-y-8">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div
@@ -190,7 +190,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                   setStep(3);
                 }}
                 disabled={!pythonStatus?.available}
-                className="flex-[2] h-16 bg-pro-text-main text-white rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl transition-all disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed hover:scale-[1.02]"
+                className="flex-[2] h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl transition-all disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed hover:scale-[1.02]"
               >
                 Continue Setup
               </button>
@@ -222,7 +222,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 placeholder="hf_..."
                 value={hfToken}
                 onChange={(e) => setHfToken(e.target.value)}
-                className="w-full h-16 p-6 bg-white border border-pro-border rounded-2xl text-sm focus:outline-none focus:ring-4 focus:ring-pro-accent/10 transition-all font-mono shadow-sm placeholder:text-pro-text-muted/20"
+                className="w-full h-16 p-6 bg-pro-surface border border-pro-border rounded-2xl text-sm focus:outline-none focus:ring-4 focus:ring-pro-accent/10 transition-all font-mono shadow-sm placeholder:text-pro-text-muted/20"
               />
               <div className="p-6 bg-pro-bg/50 rounded-2xl border border-pro-border">
                 <p className="text-[10px] text-pro-text-muted/50 font-medium leading-loose italic">
@@ -250,7 +250,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                   await persistStep(4);
                   setStep(4);
                 }}
-                className="flex-[2] h-16 bg-pro-text-main text-white rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
+                className="flex-[2] h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
               >
                 {hfToken ? 'Continue' : 'Skip Step'}
               </button>
@@ -302,8 +302,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                   }}
                   className={`w-full p-6 text-left border rounded-3xl transition-all duration-500 group relative overflow-hidden ${
                     llmProvider === provider.id
-                      ? 'border-pro-accent bg-white shadow-xl ring-2 ring-pro-accent/10'
-                      : 'border-pro-border bg-white/60 hover:bg-white hover:border-pro-accent/20'
+                      ? 'border-pro-accent bg-pro-surface shadow-xl ring-2 ring-pro-accent/10'
+                      : 'border-pro-border bg-pro-surface/60 hover:bg-pro-surface hover:border-pro-accent/20'
                   }`}
                 >
                   <div className="flex items-center justify-between relative z-10">
@@ -348,7 +348,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               <button
                 type="button"
                 onClick={handleFinish}
-                className="flex-[2] h-16 bg-pro-text-main text-white rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
+                className="flex-[2] h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
               >
                 Finish Setup
               </button>

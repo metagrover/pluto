@@ -3,5 +3,5 @@ pre-commit:
     audit:
       run: pnpm run audit:high
     biome:
-      run: biome check {staged_files} --write
+      run: pnpm exec biome check {staged_files} --write
       glob: "*.{js,jsx,ts,tsx,json}"

@@ -1,7 +1,7 @@
 import { Plus, Users, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Logo } from '../Brand/Logo';
-import { ZenVisualizer } from '../ZenVisualizer';
+import { ZenVisualizer } from './ZenVisualizer';
 
 interface ZenModeProps {
   isProcessing: boolean;
@@ -91,7 +91,7 @@ export const ZenMode = ({
   return (
     <main className="flex-1 flex flex-col h-full relative z-10 bg-pro-bg overflow-hidden">
       {/* Minimal Top Bar - Added padding for Traffic Lights */}
-      <header className="h-20 flex items-center justify-between px-6 pl-24 bg-white/60 backdrop-blur-xl border-b border-stone-200/60 shrink-0 select-none drag-region">
+      <header className="h-20 flex items-center justify-between px-6 pl-24 bg-pro-surface/60 backdrop-blur-xl border-b border-stone-200/60 shrink-0 select-none drag-region">
         <div className="flex items-center gap-6 no-drag">
           <Logo size={28} showText={false} variant="default" />
 
@@ -100,7 +100,7 @@ export const ZenMode = ({
           {/* Audio Visualizer */}
           <ZenVisualizer analyser={analyser} isProcessing={isProcessing} />
 
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-pro-border/40 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-pro-surface border border-pro-border/40 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
             <span
               className={`w-1.5 h-1.5 rounded-full ${speakingSource === 'Me' ? 'bg-pro-accent' : 'bg-stone-300'}`}
             />
@@ -202,7 +202,7 @@ export const ZenMode = ({
 
                   {/* Autocomplete Dropdown */}
                   {showSuggestions && (
-                    <div className="absolute top-full left-0 mt-2 w-48 bg-white/90 backdrop-blur-md border border-pro-border rounded-xl shadow-premium z-50 overflow-hidden animate-in slide-in-from-top-1 fade-in duration-200">
+                    <div className="absolute top-full left-0 mt-2 w-48 bg-pro-surface/90 backdrop-blur-md border border-pro-border rounded-xl shadow-premium z-50 overflow-hidden animate-in slide-in-from-top-1 fade-in duration-200">
                       {suggestions.map((person) => (
                         <button
                           type="button"
@@ -278,13 +278,13 @@ export const ZenMode = ({
                     setQuery('');
                     setPlutoResponse('');
                   }}
-                  className="text-[10px] font-bold text-pro-text-muted/40 uppercase tracking-widest px-2 py-1 rounded bg-white border border-pro-border hover:text-pro-text-main transition-colors"
+                  className="text-[10px] font-bold text-pro-text-muted/40 uppercase tracking-widest px-2 py-1 rounded bg-pro-surface border border-pro-border hover:text-pro-text-main transition-colors"
                 >
                   ESC
                 </button>
               </div>
               {plutoResponse && (
-                <div className="p-6 bg-white rounded-2xl border border-pro-border shadow-premium text-sm text-pro-text-main/80 leading-relaxed animate-in slide-in-from-bottom-2 duration-500 selection:bg-pro-accent/20">
+                <div className="p-6 bg-pro-surface rounded-2xl border border-pro-border shadow-premium text-sm text-pro-text-main/80 leading-relaxed animate-in slide-in-from-bottom-2 duration-500 selection:bg-pro-accent/20">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-1 h-3 bg-pro-accent rounded-full" />
                     <span className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]">
@@ -310,10 +310,10 @@ export const ZenMode = ({
                 </span>
               </button>
               <div className="flex items-center gap-1.5 opacity-20 group-hover:opacity-40 transition-opacity">
-                <span className="px-1.5 py-0.5 rounded bg-white border border-pro-border text-[9px] font-bold text-pro-text-muted/60 uppercase">
+                <span className="px-1.5 py-0.5 rounded bg-pro-surface border border-pro-border text-[9px] font-bold text-pro-text-muted/60 uppercase">
                   ⌘
                 </span>
-                <span className="px-1.5 py-0.5 rounded bg-white border border-pro-border text-[9px] font-bold text-pro-text-muted/60 uppercase">
+                <span className="px-1.5 py-0.5 rounded bg-pro-surface border border-pro-border text-[9px] font-bold text-pro-text-muted/60 uppercase">
                   K
                 </span>
               </div>

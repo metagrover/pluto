@@ -26,6 +26,8 @@ export interface WhisperXConfig {
 
 export interface TranscribeOptions {
   model?: WhisperXConfig['model'];
+  device?: WhisperXConfig['device'];
+  computeType?: WhisperXConfig['computeType'];
   language?: string;
   diarize?: boolean;
   hfToken?: string;
@@ -74,6 +76,7 @@ class WhisperXManager {
   private pythonPath = '';
   private port: number = WHISPERX_DEFAULT_PORT;
   private externalServer = false;
+  private appliedConfig: Partial<WhisperXConfig> = {};
 
   constructor() {
     this.detectExecutable();
@@ -353,6 +356,7 @@ class WhisperXManager {
           this.process = null;
           this.startPromise = null; // Reset promise so it can be restarted
           this.externalServer = false;
+          this.appliedConfig = {};
         });
 
         this.process.on('error', (err) => {
@@ -360,6 +364,7 @@ class WhisperXManager {
           this.process = null;
           this.startPromise = null;
           this.externalServer = false;
+          this.appliedConfig = {};
         });
 
         // Wait for server to be ready
@@ -416,6 +421,7 @@ class WhisperXManager {
       }
 
       this.process = null;
+      this.appliedConfig = {};
     }
   }
 
@@ -435,6 +441,25 @@ class WhisperXManager {
     return await this.healthOnPort(this.port, 2000);
   }
 
+  private async applyConfigFromOptions(
+    options: TranscribeOptions,
+  ): Promise<void> {
+    const next: Partial<WhisperXConfig> = {};
+    if (options.model) next.model = options.model;
+    if (options.device) next.device = options.device;
+    if (options.computeType) next.computeType = options.computeType;
+    if (options.language) next.language = options.language;
+
+    const keys = Object.keys(next) as Array<keyof WhisperXConfig>;
+    const needsUpdate = keys.some(
+      (key) => this.appliedConfig[key] !== next[key],
+    );
+    if (!needsUpdate) return;
+
+    await this.setConfig(next);
+    this.appliedConfig = { ...this.appliedConfig, ...next };
+  }
+
   /**
    * Transcribe an audio file
    */
@@ -444,6 +469,7 @@ class WhisperXManager {
   ): Promise<Transcript> {
     // Ensure server is running and ready
     await this.start();
+    await this.applyConfigFromOptions(options);
 
     const response = await fetch(`${this.getBaseUrl()}/transcribe`, {
       method: 'POST',
@@ -451,7 +477,6 @@ class WhisperXManager {
       dispatcher: WHISPERX_FETCH_AGENT,
       body: JSON.stringify({
         audio_path: audioPath,
-        model: options.model,
         language: options.language,
         diarize: options.diarize,
         hf_token: options.hfToken,

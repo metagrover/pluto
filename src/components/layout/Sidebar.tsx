@@ -1,7 +1,7 @@
 import type { Meeting } from '../../types'; // I'll create this type file if it doesn't exist, or just define it here for now
 import { Logo } from '../Brand/Logo';
 
-type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki' | 'tasks';
+type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki';
 
 interface SidebarProps {
   sidebarVisible: boolean;
@@ -13,6 +13,8 @@ interface SidebarProps {
   onStartRecording: () => void;
   handleDeleteMeeting: (id: string | number) => void;
   setSettingsVisible: (visible: boolean) => void;
+  theme: 'light' | 'dark' | 'system';
+  setTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
 
 export const Sidebar = ({
@@ -25,6 +27,8 @@ export const Sidebar = ({
   onStartRecording,
   handleDeleteMeeting,
   setSettingsVisible,
+  theme,
+  setTheme,
 }: SidebarProps) => {
   return (
     <aside
@@ -41,7 +45,7 @@ export const Sidebar = ({
       {/* Simplified Meeting Widget */}
       <div className="px-6 pb-6 pt-2">
         <div className="relative group">
-          <div className="relative overflow-hidden rounded-2xl bg-white border border-pro-border shadow-sm p-5 flex flex-col items-center text-center gap-4 transition-all duration-300 hover:shadow-md hover:border-pro-accent/20">
+          <div className="relative overflow-hidden rounded-2xl bg-pro-surface border border-pro-border shadow-sm p-5 flex flex-col items-center text-center gap-4 transition-all duration-300 hover:shadow-md hover:border-pro-accent/20">
             <div className="space-y-1">
               <h3 className="text-[15px] font-bold text-pro-text-main tracking-tight">
                 New Meeting
@@ -54,7 +58,7 @@ export const Sidebar = ({
             <button
               type="button"
               onClick={onStartRecording}
-              className="w-full h-10 rounded-xl bg-pro-text-main text-white text-[12px] font-bold hover:bg-pro-accent transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+              className="w-full h-10 rounded-xl bg-pro-accent dark:bg-white text-[#1A2340] dark:text-[#161A23] text-[12px] font-bold hover:bg-pro-accent/90 dark:hover:bg-white/90 transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-premium"
             >
               <span>Start Recording</span>
             </button>
@@ -84,7 +88,7 @@ export const Sidebar = ({
               setActiveTab('hub');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === 'hub' && !selectedMeetingId ? 'bg-pro-text-main text-white shadow-premium' : 'text-pro-text-muted hover:bg-pro-text-main/5 hover:text-pro-text-main'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === 'hub' && !selectedMeetingId ? 'bg-pro-surface text-pro-text-main shadow-premium border border-pro-border/50' : 'text-pro-text-muted hover:bg-pro-surface/50 hover:text-pro-text-main border border-transparent'}`}
           >
             <span
               className={`text-base transition-transform group-hover:scale-110 ${activeTab === 'hub' && !selectedMeetingId ? 'opacity-100' : 'opacity-60'}`}
@@ -98,38 +102,44 @@ export const Sidebar = ({
               <div className="absolute left-[-12px] w-1 h-5 bg-pro-accent rounded-full" />
             )}
           </button>
+        </div>
+
+        {/* Execution Section */}
+        <div className="space-y-1 pt-4">
+          <h3 className="px-4 text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-[0.2em] mb-3">
+            Execution
+          </h3>
           <button
             type="button"
             onClick={() => {
-              setActiveTab('tasks');
+              setActiveTab('projects');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === 'tasks' ? 'bg-pro-text-main text-white shadow-premium' : 'text-pro-text-muted hover:bg-pro-text-main/5 hover:text-pro-text-main'}`}
+            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === 'projects' && !selectedMeetingId ? 'bg-pro-surface text-pro-text-main shadow-premium border border-pro-border/50' : 'text-pro-text-muted hover:bg-pro-surface/50 hover:text-pro-text-main border border-transparent'}`}
           >
             <span
-              className={`text-base transition-transform group-hover:scale-110 ${activeTab === 'tasks' ? 'opacity-100' : 'opacity-60'}`}
+              className={`text-base transition-transform group-hover:scale-110 ${activeTab === 'projects' && !selectedMeetingId ? 'opacity-100' : 'opacity-60'}`}
             >
-              ✅
+              📁
             </span>
             <span className="text-[13px] font-bold tracking-tight">
-              Action Items
+              Projects
             </span>
-            {activeTab === 'tasks' && (
+            {activeTab === 'projects' && !selectedMeetingId && (
               <div className="absolute left-[-12px] w-1 h-5 bg-pro-accent rounded-full" />
             )}
           </button>
         </div>
 
-        {/* Second Brain Section */}
+        {/* Intelligence Section */}
         <div className="space-y-1 pt-4">
           <h3 className="px-4 text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-[0.2em] mb-3">
-            Library
+            Intelligence
           </h3>
           {(
             [
-              { id: 'projects', name: 'Projects', icon: '📁' },
-              { id: 'people', name: 'People', icon: '👤' },
               { id: 'wiki', name: 'Knowledge', icon: '🧠' },
+              { id: 'people', name: 'People', icon: '👤' },
             ] as const
           ).map((item) => (
             <button
@@ -139,7 +149,7 @@ export const Sidebar = ({
                 setActiveTab(item.id);
                 setSelectedMeetingId(null);
               }}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === item.id && !selectedMeetingId ? 'bg-pro-text-main text-white shadow-premium' : 'text-pro-text-muted hover:bg-pro-text-main/5 hover:text-pro-text-main'}`}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === item.id && !selectedMeetingId ? 'bg-pro-surface text-pro-text-main shadow-premium border border-pro-border/50' : 'text-pro-text-muted hover:bg-pro-surface/50 hover:text-pro-text-main border border-transparent'}`}
             >
               <span
                 className={`text-base transition-transform group-hover:scale-110 ${activeTab === item.id && !selectedMeetingId ? 'opacity-100' : 'opacity-60'}`}
@@ -177,8 +187,8 @@ export const Sidebar = ({
                                         w-full text-left px-4 py-3 rounded-xl transition-all border duration-300 relative
                                         ${
                                           selectedMeetingId === m.id
-                                            ? 'bg-white border-pro-border shadow-premium'
-                                            : 'border-transparent hover:bg-white/40 hover-lift'
+                                            ? 'bg-pro-surface border-pro-border shadow-premium'
+                                            : 'border-transparent hover:bg-pro-surface/40 hover-lift'
                                         }
                                     `}
                 >
@@ -235,16 +245,35 @@ export const Sidebar = ({
       </div>
 
       <div className="p-8 border-t border-pro-border/20 flex flex-col gap-4">
-        <button
-          type="button"
-          onClick={() => setSettingsVisible(true)}
-          className="flex items-center gap-3 text-[11px] font-semibold text-pro-text-muted hover:text-pro-accent transition-all active-push group"
-        >
-          <div className="w-8 h-8 rounded-lg bg-white border border-pro-border/40 flex items-center justify-center text-sm group-hover:bg-pro-bg transition-colors shadow-sm">
-            ⚙️
-          </div>
-          <span className="uppercase tracking-widest">Settings</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSettingsVisible(true)}
+            className="flex-1 flex items-center gap-3 text-[11px] font-semibold text-pro-text-muted hover:text-pro-accent transition-all active-push group"
+          >
+            <div className="w-8 h-8 rounded-lg bg-pro-surface border border-pro-border/40 flex items-center justify-center text-sm group-hover:bg-pro-bg transition-colors shadow-sm bg-transparent dark:bg-pro-surface/5">
+              ⚙️
+            </div>
+            <span className="uppercase tracking-widest">Settings</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setTheme(
+                theme === 'dark'
+                  ? 'light'
+                  : theme === 'light'
+                    ? 'system'
+                    : 'dark',
+              )
+            }
+            className="w-8 h-8 rounded-lg bg-pro-surface border border-pro-border/40 flex items-center justify-center text-sm hover:bg-pro-bg transition-colors shadow-sm text-pro-text-muted hover:text-pro-accent active-push bg-transparent dark:bg-pro-surface/5"
+            title={`Theme: ${theme}`}
+          >
+            {theme === 'dark' ? '🌙' : theme === 'light' ? '☀️' : '💻'}
+          </button>
+        </div>
         <div className="flex items-center gap-2 px-1">
           <div className="w-1.5 h-1.5 rounded-full bg-[#10B981] shadow-[0_0_12px_rgba(16,185,129,0.3)]" />
           <span className="text-[9px] font-bold text-pro-text-muted/40 uppercase tracking-widest leading-none">

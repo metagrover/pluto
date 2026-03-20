@@ -41,7 +41,7 @@ export const EntityPill: React.FC<EntityPillProps> = ({
         inline-flex items-center font-bold rounded-lg border transition-all
         ${onClick ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default'}
         ${sizeClasses[size]}
-        bg-white border-pro-border shadow-sm
+        bg-pro-surface border-pro-border shadow-sm
         hover:border-pro-accent/40 hover:shadow-md
         ${className}
       `}

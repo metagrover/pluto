@@ -8,7 +8,7 @@ interface DashboardProps {
   };
   isRecording: boolean;
   setSelectedMeetingId: (id: string | number | null) => void;
-  setActiveTab: (tab: 'hub' | 'people' | 'projects' | 'wiki' | 'tasks') => void;
+  setActiveTab: (tab: 'hub' | 'people' | 'projects' | 'wiki') => void;
   completedTasks: Set<string>;
   handleCompleteTask: (id: string) => void;
 }
@@ -45,13 +45,13 @@ export const Dashboard = ({
                   intelligence.meetingId &&
                   setSelectedMeetingId(intelligence.meetingId)
                 }
-                className="px-8 py-4 rounded-2xl bg-pro-text-main text-white font-black text-[11px] uppercase tracking-[.15em] shadow-premium hover:bg-pro-accent hover:scale-[1.02] transition-all active-push"
+                className="px-8 py-3.5 rounded-full bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[11px] uppercase tracking-[.15em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 hover:scale-[1.02] transition-all active-push border border-pro-border/40 dark:border-pro-border/50"
               >
                 {intelligence.actionLabel}
               </button>
               <button
                 type="button"
-                className="px-6 py-4 rounded-2xl bg-white border border-pro-border text-pro-text-muted font-black text-[11px] uppercase tracking-[.15em] hover:bg-pro-bg transition-all active-push"
+                className="px-8 py-3.5 rounded-full bg-transparent border border-pro-border/60 text-pro-text-muted font-black text-[11px] uppercase tracking-[.15em] hover:bg-pro-surface/50 dark:hover:bg-pro-surface transition-all active-push shadow-sm"
               >
                 Ignore for now
               </button>
@@ -76,7 +76,7 @@ export const Dashboard = ({
               <button
                 type="button"
                 key={action.label}
-                className="px-5 py-2.5 rounded-full bg-white border border-pro-border shadow-sm hover:border-pro-accent/40 hover:scale-[1.02] transition-all active-push flex items-center gap-2 group"
+                className="px-5 py-2.5 rounded-full bg-pro-surface border border-pro-border shadow-sm hover:border-pro-accent/40 hover:scale-[1.02] transition-all active-push flex items-center gap-2 group"
               >
                 <span className="text-sm group-hover:scale-110 transition-transform">
                   {action.icon}
@@ -95,7 +95,7 @@ export const Dashboard = ({
         <div className="grid grid-cols-12 gap-6 col-span-12">
           {/* Next Meeting Intelligence - SECONDARY (or HERO if no recording) */}
           <div
-            className={`${!isRecording ? 'col-span-12 xl:col-span-8' : 'col-span-6'} bg-white border border-pro-border rounded-[2.5rem] p-10 flex flex-col justify-between min-h-[420px] shadow-sm relative overflow-hidden group hover:border-pro-accent/40 card-hover-effect`}
+            className={`${!isRecording ? 'col-span-12 xl:col-span-8' : 'col-span-6'} bg-pro-surface border border-pro-border rounded-[2.5rem] p-10 flex flex-col justify-between min-h-[420px] shadow-sm relative overflow-hidden group hover:border-pro-accent/40 card-hover-effect`}
           >
             <div className="z-10 space-y-8">
               <div className="flex items-center justify-between">
@@ -135,7 +135,7 @@ export const Dashboard = ({
               </button>
               <button
                 type="button"
-                className="w-14 h-14 rounded-xl bg-white border border-pro-border flex items-center justify-center hover:bg-pro-bg transition-all active-push shadow-sm"
+                className="w-14 h-14 rounded-xl bg-pro-surface border border-pro-border flex items-center justify-center hover:bg-pro-bg transition-all active-push shadow-sm"
               >
                 🔗
               </button>
@@ -154,7 +154,7 @@ export const Dashboard = ({
               <button
                 type="button"
                 className="h-8 px-4 rounded-lg bg-pro-bg border border-pro-border text-[9px] font-black text-pro-accent uppercase tracking-widest hover:bg-pro-accent hover:text-white transition-all active-push shadow-sm"
-                onClick={() => setActiveTab('tasks')}
+                onClick={() => setActiveTab('projects')}
               >
                 View all
               </button>
@@ -198,7 +198,7 @@ export const Dashboard = ({
                         handleCompleteTask(t.id);
                       }
                     }}
-                    className={`group/item p-4 rounded-2xl border transition-all cursor-pointer flex items-start gap-4 ${isDone ? 'bg-pro-success/5 border-pro-success/20 opacity-60 scale-[0.98] success-ring' : 'hover:border-pro-border/20 hover:bg-white border-transparent'}`}
+                    className={`group/item p-4 rounded-2xl border transition-all cursor-pointer flex items-start gap-4 ${isDone ? 'bg-pro-success/5 border-pro-success/20 opacity-60 scale-[0.98] success-ring' : 'hover:border-pro-border/20 hover:bg-pro-surface border-transparent'}`}
                   >
                     <div
                       className={`w-6 h-6 rounded-lg border-2 mt-0.5 flex items-center justify-center transition-all ${isDone ? 'bg-pro-success border-pro-success' : 'border-pro-border group-hover/item:border-pro-accent'}`}
@@ -259,7 +259,7 @@ export const Dashboard = ({
           <div className="flex xl:hidden flex-col justify-between h-full relative z-10 gap-8">
             <div className="space-y-8">
               <div className="flex items-center justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-white border border-pro-border flex items-center justify-center text-3xl shadow-soft">
+                <div className="w-12 h-12 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-3xl shadow-soft">
                   👤
                 </div>
                 <div className="flex items-center gap-4">
@@ -295,7 +295,7 @@ export const Dashboard = ({
                     {['API Migration', 'Schema Design'].map((tag) => (
                       <span
                         key={tag}
-                        className="px-3 py-1.5 bg-white border border-pro-border rounded-lg text-[9px] font-black text-pro-text-main/60 uppercase tracking-tight"
+                        className="px-3 py-1.5 bg-pro-surface border border-pro-border rounded-lg text-[9px] font-black text-pro-text-main/60 uppercase tracking-tight"
                       >
                         {tag}
                       </span>
@@ -308,13 +308,13 @@ export const Dashboard = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('people')}
-                className="flex-1 py-4 rounded-xl bg-white border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-soft hover:bg-pro-bg transition-all active-push"
+                className="flex-1 py-4 rounded-xl bg-pro-surface border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-soft hover:bg-pro-bg transition-all active-push"
               >
                 View Biography
               </button>
               <button
                 type="button"
-                className="flex-1 py-4 rounded-xl bg-[#2A2B32] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push"
+                className="flex-1 py-4 rounded-xl bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 transition-all active-push border border-pro-border/40 dark:border-pro-border/50"
               >
                 Draft Follow-up
               </button>
@@ -329,7 +329,7 @@ export const Dashboard = ({
                 Contextual Spotlight
               </span>
               <div className="flex items-center gap-6">
-                <div className="w-24 h-24 rounded-[1.5rem] bg-white border border-pro-border/10 flex items-center justify-center text-pro-accent shadow-sm relative overflow-hidden group-hover:scale-105 transition-transform duration-500 shrink-0">
+                <div className="w-24 h-24 rounded-[1.5rem] bg-pro-surface border border-pro-border/10 flex items-center justify-center text-pro-accent shadow-sm relative overflow-hidden group-hover:scale-105 transition-transform duration-500 shrink-0">
                   <svg
                     aria-hidden="true"
                     xmlns="http://www.w3.org/2000/svg"
@@ -373,7 +373,7 @@ export const Dashboard = ({
                 {['API Migration', 'Schema Design'].map((tag) => (
                   <span
                     key={tag}
-                    className="px-3 py-1.5 bg-white border border-pro-border/10 rounded-lg text-[9px] font-bold text-pro-text-muted uppercase tracking-wider shadow-sm"
+                    className="px-3 py-1.5 bg-pro-surface border border-pro-border/10 rounded-lg text-[9px] font-bold text-pro-text-muted uppercase tracking-wider shadow-sm"
                   >
                     {tag}
                   </span>
@@ -386,13 +386,13 @@ export const Dashboard = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('people')}
-                className="w-full py-4 rounded-xl bg-white border border-pro-border/10 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-sm hover:bg-pro-bg transition-all active-push"
+                className="w-full py-4 rounded-xl bg-pro-surface border border-pro-border/10 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-sm hover:bg-pro-bg transition-all active-push"
               >
                 View Biography
               </button>
               <button
                 type="button"
-                className="w-full py-4 rounded-xl bg-[#1A1D26] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-pro-accent transition-all active-push"
+                className="w-full py-4 rounded-xl bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 transition-all active-push border border-pro-border/40 dark:border-pro-border/50"
               >
                 Draft Follow-up
               </button>
@@ -446,7 +446,7 @@ export const Dashboard = ({
               key={item.title}
               className="text-left glass-card border border-pro-border rounded-[2rem] p-8 space-y-6 hover:border-pro-accent/40 transition-all group card-hover-effect"
             >
-              <div className="w-12 h-12 rounded-2xl bg-white border border-pro-border flex items-center justify-center text-2xl group-hover:scale-110 transition-transform shadow-soft">
+              <div className="w-12 h-12 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-2xl group-hover:scale-110 transition-transform shadow-soft">
                 {item.icon}
               </div>
               <div className="space-y-2">

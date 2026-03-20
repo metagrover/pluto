@@ -31,7 +31,7 @@ export const SearchOverlay = ({
           }
         }}
       />
-      <div className="w-full max-w-3xl bg-white rounded-[2.5rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center">
+      <div className="w-full max-w-3xl bg-pro-surface rounded-[2.5rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center">
         <div className="p-10 border-b border-pro-border/40 flex items-center gap-8">
           <div className="w-12 h-12 rounded-2xl bg-pro-bg flex items-center justify-center border border-pro-border/40 text-pro-text-muted shadow-sm">
             <svg
@@ -86,7 +86,7 @@ export const SearchOverlay = ({
                           setSearchVisible(false);
                           setSearchQuery('');
                         }}
-                        className="w-full text-left p-8 rounded-[2rem] bg-white border border-pro-border/40 hover:border-pro-accent/40 hover:shadow-xl transition-all flex flex-col gap-4 group shadow-sm active-push"
+                        className="w-full text-left p-8 rounded-[2rem] bg-pro-surface border border-pro-border/40 hover:border-pro-accent/40 hover:shadow-xl transition-all flex flex-col gap-4 group shadow-sm active-push"
                       >
                         <div className="flex justify-between items-center">
                           <div className="w-10 h-10 rounded-xl bg-pro-bg flex items-center justify-center text-xl group-hover:scale-110 transition-transform">

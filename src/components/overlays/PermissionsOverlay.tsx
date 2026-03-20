@@ -57,10 +57,10 @@ export const PermissionsOverlay = ({
           }
         }}
       />
-      <div className="w-full max-w-lg bg-white rounded-[2rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center">
+      <div className="w-full max-w-lg bg-pro-surface rounded-[2rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center">
         <div className="p-8 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg/50">
           <div className="flex items-center gap-5">
-            <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-xl border border-pro-border/40 shadow-sm">
+            <div className="w-12 h-12 rounded-2xl bg-pro-surface flex items-center justify-center text-xl border border-pro-border/40 shadow-sm">
               🔒
             </div>
             <div>
@@ -82,7 +82,7 @@ export const PermissionsOverlay = ({
             </p>
           </div>
 
-          <div className="p-6 rounded-[1.5rem] border border-pro-border/40 bg-white shadow-sm ring-4 ring-pro-bg/30">
+          <div className="p-6 rounded-[1.5rem] border border-pro-border/40 bg-pro-surface shadow-sm ring-4 ring-pro-bg/30">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
                 Microphone
@@ -99,13 +99,13 @@ export const PermissionsOverlay = ({
             <button
               type="button"
               onClick={() => onOpenSystemSettings('microphone')}
-              className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-white hover:border-pro-accent/40 transition-all active-push"
+              className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-pro-surface hover:border-pro-accent/40 transition-all active-push"
             >
               Open System Settings
             </button>
           </div>
 
-          <div className="p-6 rounded-[1.5rem] border border-pro-border/40 bg-white shadow-sm ring-4 ring-pro-bg/30">
+          <div className="p-6 rounded-[1.5rem] border border-pro-border/40 bg-pro-surface shadow-sm ring-4 ring-pro-bg/30">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
                 System Audio
@@ -123,7 +123,7 @@ export const PermissionsOverlay = ({
             <button
               type="button"
               onClick={() => onOpenSystemSettings('system-audio')}
-              className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-white hover:border-pro-accent/40 transition-all active-push"
+              className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-pro-surface hover:border-pro-accent/40 transition-all active-push"
             >
               Open System Settings
             </button>
@@ -133,14 +133,14 @@ export const PermissionsOverlay = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 h-12 rounded-2xl border border-pro-border/50 bg-white text-pro-text-muted font-black text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-all active-push"
+              className="flex-1 h-12 rounded-2xl border border-pro-border/50 bg-pro-surface text-pro-text-muted font-black text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-all active-push"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleCheckAgain}
-              className="flex-[2] h-12 rounded-2xl bg-pro-text-main text-white font-black text-[10px] uppercase tracking-[0.2em] hover:bg-pro-accent transition-all active-push shadow-premium"
+              className="flex-[2] h-12 rounded-2xl bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] font-black text-[10px] uppercase tracking-[0.2em] hover:bg-pro-accent transition-all active-push shadow-premium"
             >
               Restart App
             </button>

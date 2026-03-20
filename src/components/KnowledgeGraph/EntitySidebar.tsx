@@ -90,10 +90,10 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
               {label}
             </div>
             <div className="flex flex-wrap gap-3">
-              <div className="h-8 w-40 rounded-full bg-white/70 border border-pro-border/50 shadow-sm" />
-              <div className="h-8 w-32 rounded-full bg-white/70 border border-pro-border/50 shadow-sm" />
+              <div className="h-8 w-40 rounded-full bg-pro-surface/70 border border-pro-border/50 shadow-sm" />
+              <div className="h-8 w-32 rounded-full bg-pro-surface/70 border border-pro-border/50 shadow-sm" />
               {i === 2 && (
-                <div className="h-8 w-52 rounded-full bg-white/70 border border-pro-border/50 shadow-sm" />
+                <div className="h-8 w-52 rounded-full bg-pro-surface/70 border border-pro-border/50 shadow-sm" />
               )}
             </div>
           </div>
@@ -204,7 +204,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                       }
                     }}
                     placeholder={`Add ${labels[type].toLowerCase()}...`}
-                    className="h-8 w-40 px-2.5 rounded-full border border-pro-border bg-white text-[12px] font-bold text-pro-text-main placeholder:text-pro-text-muted/40"
+                    className="h-8 w-40 px-2.5 rounded-full border border-pro-border bg-pro-surface text-[12px] font-bold text-pro-text-main placeholder:text-pro-text-muted/40"
                   />
                 ) : (
                   <button
@@ -213,7 +213,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                       setActiveAddType(type);
                       setAddName('');
                     }}
-                    className="h-7 w-7 rounded-full border border-pro-border/40 bg-white/70 text-pro-text-muted/50 hover:text-pro-text-main hover:border-pro-accent/30 transition-colors flex items-center justify-center"
+                    className="h-7 w-7 rounded-full border border-pro-border/40 bg-pro-surface/70 text-pro-text-muted/50 hover:text-pro-text-main hover:border-pro-accent/30 transition-colors flex items-center justify-center"
                     aria-label={`Add ${labels[type]}`}
                   >
                     <Plus size={12} />
@@ -253,7 +253,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                           }
                         }}
                         disabled={saving}
-                        className="h-7 w-7 rounded-full border border-pro-border bg-white text-pro-accent hover:border-pro-accent/40 transition-colors flex items-center justify-center"
+                        className="h-7 w-7 rounded-full border border-pro-border bg-pro-surface text-pro-accent hover:border-pro-accent/40 transition-colors flex items-center justify-center"
                         aria-label="Save edit"
                       >
                         <Check size={12} />
@@ -264,7 +264,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                           setEditId(null);
                           setEditName('');
                         }}
-                        className="h-7 w-7 rounded-full border border-pro-border bg-white text-pro-text-muted/60 hover:text-pro-text-main transition-colors flex items-center justify-center"
+                        className="h-7 w-7 rounded-full border border-pro-border bg-pro-surface text-pro-text-muted/60 hover:text-pro-text-main transition-colors flex items-center justify-center"
                         aria-label="Cancel edit"
                       >
                         <X size={12} />
@@ -282,7 +282,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                         }}
                         className={`
                           inline-flex items-center font-bold rounded-lg border transition-all cursor-pointer
-                          px-2.5 py-1 text-[12px] gap-1.5 bg-white border-pro-border shadow-sm
+                          px-2.5 py-1 text-[12px] gap-1.5 bg-pro-surface border-pro-border shadow-sm
                           hover:border-pro-accent/40 hover:shadow-md group
                         `}
                         title={entity.name}

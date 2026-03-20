@@ -35,14 +35,16 @@ model_lock = threading.Lock()
 model_config = {
     "device": "cpu",
     "compute_type": "int8",  # Use int8 for faster CPU inference
-    "model_name": "base",
+    "model_name": "small",
     "language": "en"
 }
 
 class TranscribeRequest(BaseModel):
     audio_path: str
+    # Deprecated runtime override. We keep it for backward compatibility
+    # but model changes should happen via /config.
     model: Optional[str] = None
-    language: Optional[str] = "en"
+    language: Optional[str] = None
     diarize: Optional[bool] = False
     hf_token: Optional[str] = None
 
@@ -126,7 +128,7 @@ def transcribe(request: TranscribeRequest):
     global model, diarize_model
     
     # Ensure model is loaded
-    load_model_if_needed({"model": request.model} if request.model else {})
+    load_model_if_needed({})
     
     if not os.path.exists(request.audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
@@ -136,7 +138,7 @@ def transcribe(request: TranscribeRequest):
         
         # 1. Transcribe
         try:
-            language = "en"
+            language = request.language or "en"
             logger.info(f"Transcribing {request.audio_path} (language={language})...")
             result = model.transcribe(
                 request.audio_path,
@@ -161,17 +163,43 @@ def transcribe(request: TranscribeRequest):
                 "duration": 0
             }
         
-        # 2. Diarize (optional)
-        if request.diarize and request.hf_token:
-            if diarize_model is None:
-                logger.info("Loading diarization model...")
-                diarize_model = whisperx.DiarizationPipeline(
-                    use_auth_token=request.hf_token, 
-                    device=model_config["device"]
+        # 2. Align for word-level timestamps
+        try:
+            align_model, align_metadata = whisperx.load_align_model(
+                language_code=detected_language,
+                device=model_config["device"],
+            )
+            result = whisperx.align(
+                result["segments"],
+                align_model,
+                align_metadata,
+                request.audio_path,
+                model_config["device"],
+                return_char_alignments=False,
+            )
+            logger.info("Word-level alignment complete")
+        except Exception as e:
+            logger.warning("Alignment skipped (unsupported language or error): %s", e)
+        
+        # 3. Diarize (optional, power-user)
+        # Pyannote diarization is gated on HuggingFace; most users won't set hf_token.
+        # Never fail the whole transcribe: fall back to non-diarized segments.
+        if request.diarize:
+            try:
+                if diarize_model is None:
+                    logger.info("Loading diarization model...")
+                    diarize_model = whisperx.DiarizationPipeline(
+                        use_auth_token=request.hf_token,
+                        device=model_config["device"],
+                    )
+                diarize_segments = diarize_model(request.audio_path)
+                result = whisperx.assign_word_speakers(diarize_segments, result)
+            except Exception as e:
+                logger.warning(
+                    "Diarization skipped (no usable model/token or runtime error): %s",
+                    e,
                 )
-            
-            diarize_segments = diarize_model(request.audio_path)
-            result = whisperx.assign_word_speakers(diarize_segments, result)
+                diarize_model = None
             
         logger.info("Transcription complete")
         return {
