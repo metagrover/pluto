@@ -58,3 +58,7 @@ resources/bin
 dist-electron/
 scripts/replay.local-fixtures.json
 scripts/replay.local-expected.json
+
+# Worktrees
+.worktrees/
+worktrees/
