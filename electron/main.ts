@@ -916,6 +916,24 @@ app.whenReady().then(async () => {
   ipcMain.handle('SAVE_KNOWLEDGE_DOC_NOTES', (_event, { docId, markdown }) =>
     db.saveKnowledgeDocNotes(docId, markdown),
   );
+
+  // --- Dummy Handlers for Phase 3 UI Testing ---
+  ipcMain.handle('intelligence:query', async (_event, _query) => {
+    return {
+      answer:
+        'Phase 2 (Query Engine) is currently being built by another agent. This is a dummy response for the UI.',
+      citations: [
+        {
+          claim: 'Phase 2 is in progress',
+          meeting_id: 'dummy-1',
+          meeting_title: 'System Status',
+          evidence_valid: true,
+          evidence_span:
+            'Parallel agent is working on vectorless RAG query engine.',
+        },
+      ],
+    };
+  });
   ipcMain.handle('GET_KNOWLEDGE_BACKLINKS', (_event, { docId, options }) =>
     db.getKnowledgeBacklinks(docId, options),
   );

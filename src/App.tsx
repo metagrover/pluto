@@ -4,13 +4,14 @@ import './App.css';
 // Core
 import { AudioManager } from './components/AudioManager';
 import { SetupWizard } from './components/Setup/SetupWizard';
+import { AutoEndToast } from './components/ui/AutoEndToast';
 import { useActiveCallMonitor } from './hooks/useActiveCallMonitor';
 import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
-import { AutoEndToast } from './components/ui/AutoEndToast';
 
 // Layout
 import { Sidebar } from './components/layout/Sidebar';
 
+import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { MeetingView } from './components/features/MeetingView';
@@ -49,7 +50,7 @@ function App() {
     string | number | null
   >(null);
   const [activeTab, setActiveTab] = useState<
-    'hub' | 'people' | 'projects' | 'wiki'
+    'hub' | 'people' | 'projects' | 'wiki' | 'ask'
   >('hub');
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [searchVisible, setSearchVisible] = useState(false);
@@ -264,11 +265,9 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'ollama_model').then((val) => {
       if (val) setOllamaModel(val);
     });
-    window.ipcRenderer
-      .invoke('GET_SETTING', 'auto_end_enabled')
-      .then((val) => {
-        if (val !== null) setAutoEndEnabled(val !== 'false');
-      });
+    window.ipcRenderer.invoke('GET_SETTING', 'auto_end_enabled').then((val) => {
+      if (val !== null) setAutoEndEnabled(val !== 'false');
+    });
     window.ipcRenderer.invoke('GET_SETTING', 'theme').then((val) => {
       if (val) setTheme(val as 'light' | 'dark' | 'system');
     });
@@ -314,7 +313,8 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setAskPlutoVisible((prev) => !prev);
+        setActiveTab('ask');
+        setSelectedMeetingId(null);
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
@@ -638,7 +638,10 @@ function App() {
             <div className="flex items-center gap-4">
               <button
                 type="button"
-                onClick={() => setAskPlutoVisible(true)}
+                onClick={() => {
+                  setActiveTab('ask');
+                  setSelectedMeetingId(null);
+                }}
                 className="h-10 px-5 rounded-full bg-white dark:bg-pro-surface border border-pro-border/40 dark:border-pro-border/50 shadow-sm flex items-center gap-3 hover:border-pro-accent/40 transition-all active-push group"
               >
                 <span className="text-sm">🧠</span>
@@ -732,6 +735,15 @@ function App() {
                     setActiveTab('hub');
                   }}
                   onOpenProjectsTab={() => setActiveTab('projects')}
+                />
+              </div>
+            ) : activeTab === 'ask' ? (
+              <div className="max-w-5xl mx-auto w-full h-full animate-in pb-12 pt-4">
+                <AskPluto
+                  onOpenMeeting={(meetingId) => {
+                    setSelectedMeetingId(meetingId);
+                    setActiveTab('hub');
+                  }}
                 />
               </div>
             ) : (
