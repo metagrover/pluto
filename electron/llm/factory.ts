@@ -1,7 +1,7 @@
 import type { LLMProvider, LLMSettings, ProviderType } from './provider';
 import { UnifiedLLMProvider } from './unifiedProvider';
 
-let cachedProvider: LLMProvider | null = null;
+let pendingProviderPromise: Promise<LLMProvider> | null = null;
 let lastSettingsHash: string | null = null;
 
 function getSettingsHash(settings: LLMSettings): string {
@@ -21,79 +21,96 @@ function getSettingsHash(settings: LLMSettings): string {
 export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
   const currentHash = getSettingsHash(settings);
 
-  if (cachedProvider && lastSettingsHash === currentHash) {
-    if (await cachedProvider.isAvailable()) {
-      return cachedProvider;
+  // 1. If we have a pending/completed promise for this exact hash, wait and reuse.
+  if (pendingProviderPromise && lastSettingsHash === currentHash) {
+    const provider = await pendingProviderPromise;
+    // Basic health check to handle service restarts
+    if (await provider.isAvailable()) {
+      return provider;
     }
+    // If unhealthy, clear and initialize fresh
+    pendingProviderPromise = null;
   }
 
-  const providerType: ProviderType = settings.llm_provider || 'ollama';
-  let providerInstance: LLMProvider;
+  // 2. Clear old state if settings changed
+  if (lastSettingsHash !== currentHash) {
+    pendingProviderPromise = null;
+    lastSettingsHash = currentHash;
+  }
 
-  console.log(`[LLM Factory] Loading fresh provider instance: ${providerType}`);
+  // 3. Start initialization if no pending promise exists
+  if (!pendingProviderPromise) {
+    pendingProviderPromise = (async (): Promise<LLMProvider> => {
+      const providerType: ProviderType = settings.llm_provider || 'ollama';
+      let providerInstance: LLMProvider;
 
-  switch (providerType) {
-    case 'ollama': {
-      const ollama = new UnifiedLLMProvider('ollama', settings);
-      if (await ollama.isAvailable()) {
-        console.log('[LLM Factory] Ollama is available');
-        providerInstance = ollama;
-        break;
-      }
-      console.warn(
-        '[LLM Factory] Ollama not available, falling back to cloud provider',
+      console.log(
+        `[LLM Factory] Loading fresh provider instance: ${providerType} (hash: ${currentHash.substring(0, 8)}...)`,
       );
 
-      if (settings.gemini_api_key) {
-        console.log('[LLM Factory] Falling back to Gemini');
-        providerInstance = new UnifiedLLMProvider('gemini', settings);
-      } else if (settings.openai_api_key) {
-        console.log('[LLM Factory] Falling back to OpenAI');
-        providerInstance = new UnifiedLLMProvider('openai', settings);
-      } else if (settings.claude_api_key) {
-        console.log('[LLM Factory] Falling back to Claude');
-        providerInstance = new UnifiedLLMProvider('claude', settings);
-      } else {
-        throw new Error(
-          'Ollama is not running and no cloud API keys configured. Please install Ollama or add an API key in settings.',
-        );
-      }
-      break;
-    }
+      switch (providerType) {
+        case 'ollama': {
+          const ollama = new UnifiedLLMProvider('ollama', settings);
+          if (await ollama.isAvailable()) {
+            console.log('[LLM Factory] Ollama is available');
+            providerInstance = ollama;
+          } else {
+            console.warn(
+              '[LLM Factory] Ollama not available, falling back to cloud provider',
+            );
 
-    case 'gemini': {
-      if (!settings.gemini_api_key) {
-        throw new Error('Gemini API key not configured');
-      }
-      providerInstance = new UnifiedLLMProvider('gemini', settings);
-      break;
-    }
+            if (settings.gemini_api_key) {
+              console.log('[LLM Factory] Falling back to Gemini');
+              providerInstance = new UnifiedLLMProvider('gemini', settings);
+            } else if (settings.openai_api_key) {
+              console.log('[LLM Factory] Falling back to OpenAI');
+              providerInstance = new UnifiedLLMProvider('openai', settings);
+            } else if (settings.claude_api_key) {
+              console.log('[LLM Factory] Falling back to Claude');
+              providerInstance = new UnifiedLLMProvider('claude', settings);
+            } else {
+              throw new Error(
+                'Ollama is not running and no cloud API keys configured. Please install Ollama or add an API key in settings.',
+              );
+            }
+          }
+          break;
+        }
 
-    case 'openai': {
-      if (!settings.openai_api_key) {
-        throw new Error('OpenAI API key not configured');
-      }
-      providerInstance = new UnifiedLLMProvider('openai', settings);
-      break;
-    }
+        case 'gemini': {
+          if (!settings.gemini_api_key) {
+            throw new Error('Gemini API key not configured');
+          }
+          providerInstance = new UnifiedLLMProvider('gemini', settings);
+          break;
+        }
 
-    case 'claude': {
-      if (!settings.claude_api_key) {
-        throw new Error('Claude API key not configured');
-      }
-      providerInstance = new UnifiedLLMProvider('claude', settings);
-      break;
-    }
+        case 'openai': {
+          if (!settings.openai_api_key) {
+            throw new Error('OpenAI API key not configured');
+          }
+          providerInstance = new UnifiedLLMProvider('openai', settings);
+          break;
+        }
 
-    default:
-      throw new Error(`Unknown provider type: ${providerType}`);
+        case 'claude': {
+          if (!settings.claude_api_key) {
+            throw new Error('Claude API key not configured');
+          }
+          providerInstance = new UnifiedLLMProvider('claude', settings);
+          break;
+        }
+
+        default:
+          throw new Error(`Unknown provider type: ${providerType}`);
+      }
+
+      return providerInstance;
+    })();
   }
 
-  cachedProvider = providerInstance;
-  lastSettingsHash = currentHash;
-  return providerInstance;
+  return pendingProviderPromise;
 }
-
 
 export async function getAllSettings(db: {
   getSetting: (key: string) => unknown;
