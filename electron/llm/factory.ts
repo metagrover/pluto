@@ -1,66 +1,99 @@
 import type { LLMProvider, LLMSettings, ProviderType } from './provider';
 import { UnifiedLLMProvider } from './unifiedProvider';
 
-export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
-  const providerType: ProviderType = settings.llm_provider || 'ollama';
+let cachedProvider: LLMProvider | null = null;
+let lastSettingsHash: string | null = null;
 
-  console.log(`[LLM Factory] Attempting to load provider: ${providerType}`);
+function getSettingsHash(settings: LLMSettings): string {
+  return JSON.stringify({
+    type: settings.llm_provider || 'ollama',
+    ollama: settings.ollama_model,
+    llm: settings.llm_model,
+    gemini: settings.gemini_model,
+    openai: settings.openai_model,
+    claude: settings.claude_model,
+    hasGemini: !!settings.gemini_api_key,
+    hasOpenAI: !!settings.openai_api_key,
+    hasClaude: !!settings.claude_api_key,
+  });
+}
+
+export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
+  const currentHash = getSettingsHash(settings);
+
+  if (cachedProvider && lastSettingsHash === currentHash) {
+    if (await cachedProvider.isAvailable()) {
+      return cachedProvider;
+    }
+  }
+
+  const providerType: ProviderType = settings.llm_provider || 'ollama';
+  let providerInstance: LLMProvider;
+
+  console.log(`[LLM Factory] Loading fresh provider instance: ${providerType}`);
 
   switch (providerType) {
     case 'ollama': {
       const ollama = new UnifiedLLMProvider('ollama', settings);
       if (await ollama.isAvailable()) {
         console.log('[LLM Factory] Ollama is available');
-        return ollama;
+        providerInstance = ollama;
+        break;
       }
       console.warn(
         '[LLM Factory] Ollama not available, falling back to cloud provider',
       );
 
-      // Fallback to cloud provider if available
       if (settings.gemini_api_key) {
         console.log('[LLM Factory] Falling back to Gemini');
-        return new UnifiedLLMProvider('gemini', settings);
-      }
-      if (settings.openai_api_key) {
+        providerInstance = new UnifiedLLMProvider('gemini', settings);
+      } else if (settings.openai_api_key) {
         console.log('[LLM Factory] Falling back to OpenAI');
-        return new UnifiedLLMProvider('openai', settings);
-      }
-      if (settings.claude_api_key) {
+        providerInstance = new UnifiedLLMProvider('openai', settings);
+      } else if (settings.claude_api_key) {
         console.log('[LLM Factory] Falling back to Claude');
-        return new UnifiedLLMProvider('claude', settings);
+        providerInstance = new UnifiedLLMProvider('claude', settings);
+      } else {
+        throw new Error(
+          'Ollama is not running and no cloud API keys configured. Please install Ollama or add an API key in settings.',
+        );
       }
-
-      throw new Error(
-        'Ollama is not running and no cloud API keys configured. Please install Ollama or add an API key in settings.',
-      );
+      break;
     }
 
     case 'gemini': {
       if (!settings.gemini_api_key) {
         throw new Error('Gemini API key not configured');
       }
-      return new UnifiedLLMProvider('gemini', settings);
+      providerInstance = new UnifiedLLMProvider('gemini', settings);
+      break;
     }
 
     case 'openai': {
       if (!settings.openai_api_key) {
         throw new Error('OpenAI API key not configured');
       }
-      return new UnifiedLLMProvider('openai', settings);
+      providerInstance = new UnifiedLLMProvider('openai', settings);
+      break;
     }
 
     case 'claude': {
       if (!settings.claude_api_key) {
         throw new Error('Claude API key not configured');
       }
-      return new UnifiedLLMProvider('claude', settings);
+      providerInstance = new UnifiedLLMProvider('claude', settings);
+      break;
     }
 
     default:
       throw new Error(`Unknown provider type: ${providerType}`);
   }
+
+  cachedProvider = providerInstance;
+  lastSettingsHash = currentHash;
+  return providerInstance;
 }
+
 
 export async function getAllSettings(db: {
   getSetting: (key: string) => unknown;

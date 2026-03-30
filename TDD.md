@@ -95,7 +95,7 @@ interface LLMProvider {
 
 | Provider | Connection | Default Model |
 |----------|------------|---------------|
-| Ollama (default) | localhost:11434 | llama3.2 |
+| Ollama (default) | localhost:11434 | phi4-mini:3.8b |
 | Gemini | API SDK | gemini-1.5-flash |
 | OpenAI | API SDK | gpt-4o-mini |
 | Anthropic | API SDK | claude-3.5-sonnet |

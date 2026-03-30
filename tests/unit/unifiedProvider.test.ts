@@ -101,12 +101,12 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('prefers llama3.2 variant when auto-detecting ollama model', async () => {
+  it('prefers phi4-mini variant when auto-detecting ollama model', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
         return jsonResponse({
-          models: [{ name: 'kimike:latest' }, { name: 'llama3.2:latest' }],
+          models: [{ name: 'kimike:latest' }, { name: 'phi4-mini:3.8b:latest' }],
         });
       }
       if (url.endsWith('/api/generate')) {
@@ -120,7 +120,7 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
-    expect(selectedModel).toBe('llama3.2:latest');
+    expect(selectedModel).toBe('phi4-mini:3.8b:latest');
   });
 
   it('avoids embedding-only ollama models during auto-detection', async () => {
@@ -165,7 +165,7 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
-    expect(selectedModel).toBe('llama3.2');
+    expect(selectedModel).toBe('phi4-mini:3.8b');
   });
 
   it('routes openai user-analysis generation through chat completions', async () => {

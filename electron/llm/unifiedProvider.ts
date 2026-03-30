@@ -24,7 +24,7 @@ import type {
 } from './provider';
 
 const OLLAMA_TIMEOUT_MS = 120_000;
-const OLLAMA_DEFAULT_MODEL = 'llama3.2';
+const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 
 type LLMTask =
   | 'summary'
@@ -33,7 +33,9 @@ type LLMTask =
   | 'title'
   | 'entities'
   | 'valueSignals'
-  | 'knowledgeDoc';
+  | 'knowledgeDoc'
+  | 'askPluto'
+  | 'queryClassification';
 
 type PersonEntity = ExtractedEntities['people'][number];
 type TopicEntity = ExtractedEntities['topics'][number];
@@ -236,6 +238,21 @@ export class UnifiedLLMProvider implements LLMProvider {
     return this.generateText({
       prompt,
       task: 'knowledgeDoc',
+      jsonMode: true,
+    });
+  }
+
+  async answerAskPluto(prompt: string): Promise<string> {
+    return this.generateText({
+      prompt,
+      task: 'askPluto',
+    });
+  }
+
+  async classifyQueryIntent(prompt: string): Promise<string> {
+    return this.generateText({
+      prompt,
+      task: 'queryClassification',
       jsonMode: true,
     });
   }
@@ -525,6 +542,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'speaker') {
       return 'You are a helpful assistant that extracts speaker information.';
     }
+    if (task === 'askPluto') {
+      return 'You are an intelligent meeting assistant.';
+    }
+    if (task === 'queryClassification') {
+      return 'You are an exact expert intent classifier. Reply with valid JSON only.';
+    }
     return 'You are an intelligent meeting assistant.';
   }
 
@@ -534,6 +557,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'valueSignals') return 0.2;
     if (task === 'knowledgeDoc') return 0.2;
     if (task === 'title') return 0.5;
+    if (task === 'askPluto') return 0.4;
+    if (task === 'queryClassification') return 0.1;
     return 0.3;
   }
 
@@ -543,6 +568,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'entities') return 2048;
     if (task === 'valueSignals') return 512;
     if (task === 'knowledgeDoc') return 4096;
+    if (task === 'askPluto') return 2048;
+    if (task === 'queryClassification') return 128;
     return 50;
   }
 
