@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { app } from 'electron';
+import type { MidFrontmatter } from './intelligence/intelligenceTypes';
 
 const dbPath = path.join(app.getPath('userData'), 'pluto.db');
 
@@ -203,11 +204,12 @@ const initDb = () => {
 
       CREATE TABLE IF NOT EXISTS knowledge_docs (
         id TEXT PRIMARY KEY,
-        scope_type TEXT NOT NULL CHECK(scope_type IN ('global', 'project')),
+        scope_type TEXT NOT NULL CHECK(scope_type IN ('global', 'project', 'team_tracker', 'person_context')),
         scope_key TEXT NOT NULL,
         title TEXT NOT NULL,
         rendered_content TEXT,
         structured_json TEXT,
+        config TEXT,
         status TEXT NOT NULL DEFAULT 'stale' CHECK(status IN ('synthesizing', 'up_to_date', 'stale', 'failed', 'inactive')),
         last_synthesized_at DATETIME,
         last_source_cursor TEXT,
@@ -337,8 +339,71 @@ const initDb = () => {
       db.exec('ALTER TABLE meetings ADD COLUMN end_reason TEXT');
       console.log('[DB] Added meetings.end_reason column');
     }
+    if (!meetingColumns.some((col) => col.name === 'mid_json')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN mid_json TEXT');
+      console.log('[DB] Added meetings.mid_json column');
+    }
   } catch (e) {
     console.warn('[DB] Optional column migration failed:', e);
+  }
+
+  // FTS5 Migration: rebuild with MID-derived columns for unified search
+  try {
+    const ftsColumns = db
+      .prepare('PRAGMA table_info(meetings_fts)')
+      .all() as Array<{ name: string }>;
+    const hasMidParticipants = ftsColumns.some(
+      (col) => col.name === 'mid_participants',
+    );
+    if (ftsColumns.length > 0 && !hasMidParticipants) {
+      console.log('[DB] Rebuilding meetings_fts with MID columns...');
+
+      // Preserve existing FTS data
+      const existing = db
+        .prepare('SELECT meeting_id, title, transcript_text, enhanced_notes, user_notes FROM meetings_fts')
+        .all() as Array<{
+          meeting_id: string;
+          title: string;
+          transcript_text: string;
+          enhanced_notes: string;
+          user_notes: string;
+        }>;
+
+      db.exec('DROP TABLE IF EXISTS meetings_fts');
+      db.exec(`
+        CREATE VIRTUAL TABLE meetings_fts USING fts5(
+          title,
+          transcript_text,
+          enhanced_notes,
+          user_notes,
+          mid_participants,
+          mid_topics,
+          mid_decisions,
+          mid_action_items,
+          meeting_id UNINDEXED
+        );
+      `);
+
+      // Reinsert existing data (MID columns empty until MID is generated)
+      const insertFts = db.prepare(`
+        INSERT INTO meetings_fts (title, transcript_text, enhanced_notes, user_notes,
+          mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id)
+        VALUES (?, ?, ?, ?, '', '', '', '', ?)
+      `);
+      for (const row of existing) {
+        insertFts.run(
+          row.title,
+          row.transcript_text,
+          row.enhanced_notes,
+          row.user_notes,
+          row.meeting_id,
+        );
+      }
+
+      console.log('[DB] meetings_fts rebuilt with MID columns');
+    }
+  } catch (e) {
+    console.warn('[DB] FTS5 MID migration failed:', e);
   }
 
   // Additive migration for entity columns (Sprint 3 / V1.2)
@@ -383,6 +448,57 @@ const initDb = () => {
     }
   } catch (e) {
     console.warn('[DB] Knowledge-doc migration checks failed:', e);
+  }
+
+  // Migration: expand knowledge_docs scope_type CHECK and add config column.
+  try {
+    const kdCols = db
+      .prepare('PRAGMA table_info(knowledge_docs)')
+      .all() as Array<{ name: string }>;
+    const hasConfig = kdCols.some((col) => col.name === 'config');
+    if (kdCols.length > 0 && !hasConfig) {
+      const migrateKnowledgeDocs = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE knowledge_docs_new (
+            id TEXT PRIMARY KEY,
+            scope_type TEXT NOT NULL CHECK(scope_type IN ('global', 'project', 'team_tracker', 'person_context')),
+            scope_key TEXT NOT NULL,
+            title TEXT NOT NULL,
+            rendered_content TEXT,
+            structured_json TEXT,
+            config TEXT,
+            status TEXT NOT NULL DEFAULT 'stale' CHECK(status IN ('synthesizing', 'up_to_date', 'stale', 'failed', 'inactive')),
+            last_synthesized_at DATETIME,
+            last_source_cursor TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        db.exec(`
+          INSERT INTO knowledge_docs_new (
+            id, scope_type, scope_key, title, rendered_content,
+            structured_json, config, status, last_synthesized_at,
+            last_source_cursor, updated_at
+          )
+          SELECT
+            id, scope_type, scope_key, title, rendered_content,
+            structured_json, NULL, status, last_synthesized_at,
+            last_source_cursor, updated_at
+          FROM knowledge_docs;
+        `);
+        db.exec('DROP TABLE knowledge_docs');
+        db.exec('ALTER TABLE knowledge_docs_new RENAME TO knowledge_docs');
+        db.exec(`
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_docs_scope ON knowledge_docs(scope_type, scope_key);
+          CREATE INDEX IF NOT EXISTS idx_knowledge_docs_updated_at ON knowledge_docs(updated_at DESC);
+        `);
+      });
+      migrateKnowledgeDocs();
+      console.log(
+        '[DB] Migrated knowledge_docs to v2 (config column + expanded scope types)',
+      );
+    }
+  } catch (e) {
+    console.warn('[DB] knowledge_docs v2 migration failed:', e);
   }
 
   // Migration: rebuild entity_links with typed dependency semantics and state/evidence columns.
@@ -489,6 +605,10 @@ const initDb = () => {
       db.exec(`
         CREATE INDEX IF NOT EXISTS idx_entity_links_state_relationship
         ON entity_links(state, relationship);
+        CREATE INDEX IF NOT EXISTS idx_entity_links_confirmed_source
+        ON entity_links(source_entity_id) WHERE state = 'confirmed';
+        CREATE INDEX IF NOT EXISTS idx_entity_links_confirmed_target
+        ON entity_links(target_entity_id) WHERE state = 'confirmed';
       `);
     }
 
@@ -628,15 +748,38 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
     console.warn('Failed to parse transcript_json for FTS', e);
   }
 
+  // Extract MID fields for FTS if mid_json is present
+  let midParticipants = '';
+  let midTopics = '';
+  let midDecisions = '';
+  let midActionItems = '';
+  const midJsonRaw = (meeting as unknown as Record<string, unknown>).mid_json;
+  if (typeof midJsonRaw === 'string' && midJsonRaw.trim()) {
+    try {
+      const mid = JSON.parse(midJsonRaw) as MidFrontmatter;
+      midParticipants = (mid.participants || []).map((p) => p.name).join(', ');
+      midTopics = (mid.topics || []).map((t) => t.name).join(', ');
+      midDecisions = (mid.decisions || []).map((d) => d.description).join(', ');
+      midActionItems = (mid.action_items || []).map((a) => a.description).join(', ');
+    } catch {
+      // Ignore MID parse errors during FTS update
+    }
+  }
+
   console.log(`[DB] Updating FTS index for meeting: ${id}`);
   db.prepare(`
-    INSERT OR REPLACE INTO meetings_fts (title, transcript_text, enhanced_notes, user_notes, meeting_id)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO meetings_fts (title, transcript_text, enhanced_notes, user_notes,
+      mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     meeting.title,
     transcriptText,
     meeting.enhanced_notes || '',
     meeting.user_notes || '',
+    midParticipants,
+    midTopics,
+    midDecisions,
+    midActionItems,
     id,
   );
 
@@ -845,13 +988,21 @@ export interface KnowledgeFeedItemSummary {
   latest_context: string | null;
 }
 
-export type KnowledgeDocScopeType = 'global' | 'project';
+export type KnowledgeDocScopeType =
+  | 'global'
+  | 'project'
+  | 'team_tracker'
+  | 'person_context';
 export type KnowledgeDocStatus =
   | 'synthesizing'
   | 'up_to_date'
   | 'stale'
   | 'failed'
   | 'inactive';
+
+export interface KnowledgeDocConfig {
+  member_entity_ids?: string[];
+}
 
 export interface KnowledgeDoc {
   id: string;
@@ -860,6 +1011,7 @@ export interface KnowledgeDoc {
   title: string;
   rendered_content: string | null;
   structured_json: string | null;
+  config: string | null; // JSON KnowledgeDocConfig
   status: KnowledgeDocStatus;
   last_synthesized_at: string | null;
   last_source_cursor: string | null;
@@ -1076,6 +1228,7 @@ export const upsertKnowledgeDoc = (doc: {
   title: string;
   rendered_content?: string | null;
   structured_json?: string | null;
+  config?: KnowledgeDocConfig | null;
   status?: KnowledgeDocStatus;
   last_synthesized_at?: string | null;
   last_source_cursor?: string | null;
@@ -1093,6 +1246,7 @@ export const upsertKnowledgeDoc = (doc: {
         title = ?,
         rendered_content = ?,
         structured_json = ?,
+        config = ?,
         status = ?,
         last_synthesized_at = ?,
         last_source_cursor = ?,
@@ -1108,6 +1262,11 @@ export const upsertKnowledgeDoc = (doc: {
       doc.structured_json === undefined
         ? existing.structured_json
         : doc.structured_json,
+      doc.config === undefined
+        ? existing.config
+        : doc.config
+          ? JSON.stringify(doc.config)
+          : existing.config,
       doc.status || existing.status,
       doc.last_synthesized_at === undefined
         ? existing.last_synthesized_at
@@ -1129,10 +1288,11 @@ export const upsertKnowledgeDoc = (doc: {
       title,
       rendered_content,
       structured_json,
+      config,
       status,
       last_synthesized_at,
       last_source_cursor
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     doc.scope_type,
@@ -1140,6 +1300,7 @@ export const upsertKnowledgeDoc = (doc: {
     doc.title,
     doc.rendered_content ?? null,
     doc.structured_json ?? null,
+    doc.config ? JSON.stringify(doc.config) : null,
     doc.status || 'stale',
     doc.last_synthesized_at ?? null,
     doc.last_source_cursor ?? null,
@@ -1175,7 +1336,15 @@ export const getKnowledgeDocs = (filters?: {
     .prepare(`
       SELECT * FROM knowledge_docs
       ${whereClause}
-      ORDER BY CASE WHEN scope_type = 'global' THEN 0 ELSE 1 END, updated_at DESC
+      ORDER BY
+        CASE scope_type
+          WHEN 'global' THEN 0
+          WHEN 'team_tracker' THEN 1
+          WHEN 'project' THEN 2
+          WHEN 'person_context' THEN 3
+          ELSE 4
+        END,
+        updated_at DESC
     `)
     .all(...values) as KnowledgeDoc[];
 };
@@ -1320,8 +1489,209 @@ export const getProjectEntityIdsForMeeting = (meetingId: string): string[] => {
 };
 
 /**
+ * Get person entity ids mentioned in a specific meeting.
+ */
+export const getPersonEntityIdsForMeeting = (meetingId: string): string[] => {
+  const rows = db
+    .prepare(`
+      SELECT DISTINCT e.id
+      FROM entities e
+      JOIN meeting_entities me ON me.entity_id = e.id
+      WHERE me.meeting_id = ? AND e.type = 'person'
+    `)
+    .all(meetingId) as Array<{ id: string }>;
+  return rows.map((row) => row.id);
+};
+
+export interface KnowledgeDocPersonCandidate {
+  person_id: string;
+  person_name: string;
+  meeting_count: number;
+  mention_count: number;
+  last_mentioned_at: string | null;
+}
+
+/**
+ * Get person entities eligible for person_context knowledge docs.
+ */
+export const getKnowledgeDocPersonCandidates = (options?: {
+  activeDays?: number;
+  minMeetings?: number;
+  minMentions?: number;
+}): KnowledgeDocPersonCandidate[] => {
+  const activeDays = options?.activeDays ?? 60;
+  const minMeetings = options?.minMeetings ?? 2;
+  const minMentions = options?.minMentions ?? 3;
+
+  return db
+    .prepare(`
+      SELECT
+        e.id AS person_id,
+        e.name AS person_name,
+        COUNT(DISTINCT me.meeting_id) AS meeting_count,
+        COALESCE(SUM(me.mention_count), 0) AS mention_count,
+        MAX(COALESCE(m.started_at, m.created_at, me.created_at)) AS last_mentioned_at
+      FROM entities e
+      JOIN meeting_entities me ON me.entity_id = e.id
+      LEFT JOIN meetings m ON m.id = me.meeting_id
+      WHERE e.type = 'person'
+        AND COALESCE(m.started_at, m.created_at, me.created_at) >= datetime('now', '-' || ? || ' days')
+      GROUP BY e.id, e.name
+      HAVING COUNT(DISTINCT me.meeting_id) >= ?
+        AND COALESCE(SUM(me.mention_count), 0) >= ?
+      ORDER BY meeting_count DESC, mention_count DESC
+    `)
+    .all(activeDays, minMeetings, minMentions) as KnowledgeDocPersonCandidate[];
+};
+
+/**
+ * Sync person_context docs: auto-create for active people, deactivate stale ones.
+ */
+export const syncKnowledgePersonLifecycle = (options?: {
+  activeDays?: number;
+  minMeetings?: number;
+  minMentions?: number;
+  inactiveDays?: number;
+}): {
+  activeDocIds: string[];
+  createdDocIds: string[];
+  inactivatedDocIds: string[];
+} => {
+  const candidates = getKnowledgeDocPersonCandidates(options);
+  const activePersonIds = new Set(candidates.map((c) => c.person_id));
+  const activeDocIds: string[] = [];
+  const createdDocIds: string[] = [];
+
+  for (const candidate of candidates) {
+    const existing = getKnowledgeDocByScope(
+      'person_context',
+      candidate.person_id,
+    );
+    const saved = upsertKnowledgeDoc({
+      id: existing?.id,
+      scope_type: 'person_context',
+      scope_key: candidate.person_id,
+      title: `Conversations with ${candidate.person_name}`,
+      status: 'stale',
+    });
+    activeDocIds.push(saved.id);
+    if (!existing) createdDocIds.push(saved.id);
+  }
+
+  const personDocs = db
+    .prepare(
+      "SELECT * FROM knowledge_docs WHERE scope_type = 'person_context' ORDER BY updated_at DESC",
+    )
+    .all() as KnowledgeDoc[];
+  const inactiveDocIds: string[] = [];
+  const inactiveDays = options?.inactiveDays ?? 90;
+
+  for (const doc of personDocs) {
+    if (activePersonIds.has(doc.scope_key)) continue;
+    const hasRecentMention = (
+      db
+        .prepare(`
+          SELECT COUNT(*) AS count
+          FROM meeting_entities me
+          LEFT JOIN meetings m ON m.id = me.meeting_id
+          WHERE me.entity_id = ?
+            AND COALESCE(m.started_at, m.created_at, me.created_at) >= datetime('now', '-' || ? || ' days')
+        `)
+        .get(doc.scope_key, inactiveDays) as { count: number }
+    ).count;
+    if (hasRecentMention > 0) continue;
+
+    upsertKnowledgeDoc({
+      id: doc.id,
+      scope_type: 'person_context',
+      scope_key: doc.scope_key,
+      title: doc.title,
+      status: 'inactive',
+    });
+    inactiveDocIds.push(doc.id);
+  }
+
+  return { activeDocIds, createdDocIds, inactivatedDocIds: inactiveDocIds };
+};
+
+/**
+ * Create a team tracker doc with a set of member person entity IDs.
+ */
+export const createTeamTrackerDoc = (params: {
+  title: string;
+  memberEntityIds: string[];
+}): KnowledgeDoc => {
+  const scopeKey = `team-${generateId()}`;
+  return upsertKnowledgeDoc({
+    scope_type: 'team_tracker',
+    scope_key: scopeKey,
+    title: params.title,
+    config: { member_entity_ids: params.memberEntityIds },
+    status: 'stale',
+  });
+};
+
+/**
+ * Update an existing team tracker's members.
+ */
+export const updateTeamTrackerMembers = (
+  docId: string,
+  memberEntityIds: string[],
+): KnowledgeDoc | undefined => {
+  const doc = getKnowledgeDoc(docId);
+  if (!doc || doc.scope_type !== 'team_tracker') return undefined;
+  return upsertKnowledgeDoc({
+    id: doc.id,
+    scope_type: 'team_tracker',
+    scope_key: doc.scope_key,
+    title: doc.title,
+    config: { member_entity_ids: memberEntityIds },
+    status: 'stale',
+  });
+};
+
+/**
+ * Get team tracker docs that include a specific person entity.
+ */
+export const getTeamTrackerDocsForPerson = (
+  personEntityId: string,
+): KnowledgeDoc[] => {
+  const docs = getKnowledgeDocs({
+    includeInactive: false,
+    scopeType: 'team_tracker',
+  });
+  return docs.filter((doc) => {
+    const config = parseDocConfig(doc.config);
+    return config.member_entity_ids?.includes(personEntityId);
+  });
+};
+
+/**
  * Get source meetings used for synthesizing a given knowledge doc.
  */
+const MEETING_QUALITY_FILTER = `(
+  m.analysis_format_pass = 1
+  OR length(COALESCE(m.enhanced_notes, '')) >= 200
+  OR length(COALESCE(m.transcript_json, '')) >= 800
+  OR length(COALESCE(m.user_notes, '')) >= 80
+)`;
+
+const MEETING_SOURCE_ORDER = `
+  m.analysis_format_pass DESC,
+  length(COALESCE(m.enhanced_notes, '')) DESC,
+  COALESCE(SUM(me.mention_count), 0) DESC,
+  COALESCE(m.started_at, m.created_at) DESC
+`;
+
+const parseDocConfig = (raw: string | null): KnowledgeDocConfig => {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as KnowledgeDocConfig;
+  } catch {
+    return {};
+  }
+};
+
 export const getKnowledgeDocSourceMeetings = (
   docId: string,
   limit = 80,
@@ -1338,23 +1708,39 @@ export const getKnowledgeDocSourceMeetings = (
           MAX(me.context) AS context
         FROM meetings m
         LEFT JOIN meeting_entities me ON me.meeting_id = m.id
-        WHERE (
-          m.analysis_format_pass = 1
-          OR length(COALESCE(m.enhanced_notes, '')) >= 200
-          OR length(COALESCE(m.transcript_json, '')) >= 800
-          OR length(COALESCE(m.user_notes, '')) >= 80
-        )
+        WHERE ${MEETING_QUALITY_FILTER}
         GROUP BY m.id
-        ORDER BY
-          m.analysis_format_pass DESC,
-          length(COALESCE(m.enhanced_notes, '')) DESC,
-          COALESCE(SUM(me.mention_count), 0) DESC,
-          COALESCE(m.started_at, m.created_at) DESC
+        ORDER BY ${MEETING_SOURCE_ORDER}
         LIMIT ?
       `)
       .all(limit) as KnowledgeDocSourceMeeting[];
   }
 
+  if (doc.scope_type === 'team_tracker') {
+    const config = parseDocConfig(doc.config);
+    const memberIds = config.member_entity_ids || [];
+    if (memberIds.length === 0) return [];
+
+    const placeholders = memberIds.map(() => '?').join(', ');
+    return db
+      .prepare(`
+        SELECT
+          m.*,
+          COALESCE(SUM(me.mention_count), 0) AS mention_count,
+          MAX(me.context) AS context
+        FROM meetings m
+        JOIN meeting_entities me ON me.meeting_id = m.id
+        WHERE me.entity_id IN (${placeholders})
+          AND ${MEETING_QUALITY_FILTER}
+        GROUP BY m.id
+        HAVING COUNT(DISTINCT me.entity_id) >= 1
+        ORDER BY ${MEETING_SOURCE_ORDER}
+        LIMIT ?
+      `)
+      .all(...memberIds, limit) as KnowledgeDocSourceMeeting[];
+  }
+
+  // person_context and project share the same pattern: scope_key = entity id
   return db
     .prepare(`
       SELECT
@@ -1364,18 +1750,9 @@ export const getKnowledgeDocSourceMeetings = (
       FROM meetings m
       JOIN meeting_entities me ON me.meeting_id = m.id
       WHERE me.entity_id = ?
-        AND (
-          m.analysis_format_pass = 1
-          OR length(COALESCE(m.enhanced_notes, '')) >= 200
-          OR length(COALESCE(m.transcript_json, '')) >= 800
-          OR length(COALESCE(m.user_notes, '')) >= 80
-        )
+        AND ${MEETING_QUALITY_FILTER}
       GROUP BY m.id
-      ORDER BY
-        m.analysis_format_pass DESC,
-        length(COALESCE(m.enhanced_notes, '')) DESC,
-        COALESCE(SUM(me.mention_count), 0) DESC,
-        COALESCE(m.started_at, m.created_at) DESC
+      ORDER BY ${MEETING_SOURCE_ORDER}
       LIMIT ?
     `)
     .all(doc.scope_key, limit) as KnowledgeDocSourceMeeting[];
@@ -1434,7 +1811,7 @@ export const getKnowledgeDocSourceDetails = (
         m.started_at,
         m.created_at,
         CASE
-          WHEN kd.scope_type = 'project'
+          WHEN kd.scope_type IN ('project', 'person_context')
             THEN COALESCE((
               SELECT SUM(me.mention_count)
               FROM meeting_entities me
@@ -1447,7 +1824,7 @@ export const getKnowledgeDocSourceDetails = (
           ), 0)
         END AS mention_count,
         CASE
-          WHEN kd.scope_type = 'project'
+          WHEN kd.scope_type IN ('project', 'person_context')
             THEN (
               SELECT MAX(me.context)
               FROM meeting_entities me
@@ -1714,8 +2091,10 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
           }>;
         };
 
+        const isBroadScope =
+          doc.scope_type === 'global' || doc.scope_type === 'team_tracker';
         const candidateEntities = (
-          doc.scope_type === 'global'
+          isBroadScope
             ? db
                 .prepare(
                   `
@@ -1782,6 +2161,8 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
       }
     }
 
+    const isBroadScopeLinks =
+      doc.scope_type === 'global' || doc.scope_type === 'team_tracker';
     const entityLinks = db
       .prepare(
         `
@@ -1790,7 +2171,7 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
           WHERE source IN ('pipeline', 'synthesis', 'user')
             AND state != 'rejected'
             AND (
-              ? = 'global'
+              ? = 1
               OR source_entity_id = ?
               OR target_entity_id = ?
             )
@@ -1798,7 +2179,11 @@ export const rebuildKnowledgeBacklinks = (docId: string): void => {
           LIMIT 120
         `,
       )
-      .all(doc.scope_type, doc.scope_key, doc.scope_key) as EntityLink[];
+      .all(
+        isBroadScopeLinks ? 1 : 0,
+        doc.scope_key,
+        doc.scope_key,
+      ) as EntityLink[];
 
     const insertBacklink = db.prepare(`
       INSERT INTO knowledge_backlinks (id, source_doc_id, target_kind, target_id, label, snippet)
@@ -1954,41 +2339,60 @@ export const getKnowledgeGraph = (
   const includeRejected = options?.includeRejected ?? false;
   const stateFilter = includeRejected ? '' : "AND l.state != 'rejected'";
 
-  const edges = db
-    .prepare(
-      `
-        SELECT
-          l.*,
-          src.name AS source_label,
-          tgt.name AS target_label
-        FROM entity_links l
-        JOIN entities src ON src.id = l.source_entity_id
-        JOIN entities tgt ON tgt.id = l.target_entity_id
-        WHERE l.confidence >= ?
-          ${stateFilter}
-          AND (
-            ? = 'global'
-            OR l.source_entity_id = ?
-            OR l.target_entity_id = ?
-          )
-        ORDER BY
-          CASE l.state
-            WHEN 'confirmed' THEN 0
-            WHEN 'suggested' THEN 1
-            ELSE 2
-          END,
-          l.updated_at DESC,
-          l.confidence DESC
-        LIMIT ?
-      `,
-    )
-    .all(
-      minConfidence,
-      doc.scope_type,
-      doc.scope_key,
-      doc.scope_key,
-      maxEdges,
-    ) as KnowledgeGraphEdge[];
+  // Resolve scope entity IDs for edge filtering
+  const isGlobalLike =
+    doc.scope_type === 'global' || doc.scope_type === 'team_tracker';
+  const scopeEntityIds: string[] = [];
+  if (doc.scope_type === 'team_tracker') {
+    const config = parseDocConfig(doc.config);
+    scopeEntityIds.push(...(config.member_entity_ids || []));
+  } else if (!isGlobalLike) {
+    scopeEntityIds.push(doc.scope_key);
+  }
+
+  let edges: KnowledgeGraphEdge[];
+  if (isGlobalLike && scopeEntityIds.length === 0) {
+    edges = db
+      .prepare(
+        `
+          SELECT l.*, src.name AS source_label, tgt.name AS target_label
+          FROM entity_links l
+          JOIN entities src ON src.id = l.source_entity_id
+          JOIN entities tgt ON tgt.id = l.target_entity_id
+          WHERE l.confidence >= ? ${stateFilter}
+          ORDER BY
+            CASE l.state WHEN 'confirmed' THEN 0 WHEN 'suggested' THEN 1 ELSE 2 END,
+            l.updated_at DESC, l.confidence DESC
+          LIMIT ?
+        `,
+      )
+      .all(minConfidence, maxEdges) as KnowledgeGraphEdge[];
+  } else if (scopeEntityIds.length > 0) {
+    const ph = scopeEntityIds.map(() => '?').join(', ');
+    edges = db
+      .prepare(
+        `
+          SELECT l.*, src.name AS source_label, tgt.name AS target_label
+          FROM entity_links l
+          JOIN entities src ON src.id = l.source_entity_id
+          JOIN entities tgt ON tgt.id = l.target_entity_id
+          WHERE l.confidence >= ? ${stateFilter}
+            AND (l.source_entity_id IN (${ph}) OR l.target_entity_id IN (${ph}))
+          ORDER BY
+            CASE l.state WHEN 'confirmed' THEN 0 WHEN 'suggested' THEN 1 ELSE 2 END,
+            l.updated_at DESC, l.confidence DESC
+          LIMIT ?
+        `,
+      )
+      .all(
+        minConfidence,
+        ...scopeEntityIds,
+        ...scopeEntityIds,
+        maxEdges,
+      ) as KnowledgeGraphEdge[];
+  } else {
+    edges = [];
+  }
 
   const nodeIds = new Set<string>();
   for (const edge of edges) {
@@ -1996,12 +2400,15 @@ export const getKnowledgeGraph = (
     nodeIds.add(edge.target_entity_id);
   }
 
-  if (doc.scope_type === 'project') {
+  if (doc.scope_type === 'project' || doc.scope_type === 'person_context') {
     nodeIds.add(doc.scope_key);
+  }
+  if (doc.scope_type === 'team_tracker') {
+    for (const id of scopeEntityIds) nodeIds.add(id);
   }
 
   let preferredNodeIds: Array<{ id: string }> = [];
-  if (doc.scope_type === 'global') {
+  if (isGlobalLike) {
     preferredNodeIds = db
       .prepare(
         `
@@ -2029,7 +2436,7 @@ export const getKnowledgeGraph = (
     for (const row of preferredNodeIds) nodeIds.add(row.id);
   }
 
-  if (nodeIds.size === 0 && doc.scope_type === 'global') {
+  if (nodeIds.size === 0 && isGlobalLike) {
     const fallbackNodeIds = db
       .prepare(
         `
@@ -2045,7 +2452,7 @@ export const getKnowledgeGraph = (
   }
 
   let nodeIdList: string[] = [];
-  if (doc.scope_type === 'global' && preferredNodeIds.length > 0) {
+  if (isGlobalLike && preferredNodeIds.length > 0) {
     const ordered = new Set<string>();
     for (const row of preferredNodeIds) ordered.add(row.id);
     for (const id of nodeIds) ordered.add(id);
@@ -2142,6 +2549,8 @@ export const getKnowledgeTimeline = (
     }
   }
 
+  const isBroadTimeline =
+    doc.scope_type === 'global' || doc.scope_type === 'team_tracker';
   const dependencyRows = db
     .prepare(
       `
@@ -2152,7 +2561,7 @@ export const getKnowledgeTimeline = (
         WHERE l.relationship IN ('depends_on', 'blocked_by', 'owns', 'impacts')
           AND l.state != 'rejected'
           AND (
-            ? = 'global'
+            ? = 1
             OR l.source_entity_id = ?
             OR l.target_entity_id = ?
           )
@@ -2160,7 +2569,7 @@ export const getKnowledgeTimeline = (
         LIMIT 30
       `,
     )
-    .all(doc.scope_type, doc.scope_key, doc.scope_key) as Array<
+    .all(isBroadTimeline ? 1 : 0, doc.scope_key, doc.scope_key) as Array<
     EntityLink & { source_label: string; target_label: string }
   >;
 
@@ -2311,7 +2720,10 @@ export const getKnowledgeWorkspace = (params?: {
   rebuildKnowledgeBacklinks(selectedDoc.id);
   const backlinks = getKnowledgeBacklinks(selectedDoc.id);
   const projectCards =
-    selectedDoc.scope_type === 'global' ? getProjectHealthCards(24) : [];
+    selectedDoc.scope_type === 'global' ||
+    selectedDoc.scope_type === 'team_tracker'
+      ? getProjectHealthCards(24)
+      : [];
 
   return {
     docs,
@@ -3048,3 +3460,175 @@ export const resetKnowledge = () => {
   // Re-init FTS table if needed implies ensuring it's empty, which DELETE FROM does.
   return true;
 };
+
+// =============================================
+// MID (Meeting Intelligence Document) Operations
+// =============================================
+
+/**
+ * Save MID JSON for a meeting and update FTS with flattened fields.
+ */
+export const saveMeetingMid = (
+  meetingId: string,
+  mid: MidFrontmatter,
+): void => {
+  const midJson = JSON.stringify(mid);
+
+  db.prepare('UPDATE meetings SET mid_json = ? WHERE id = ?').run(
+    midJson,
+    meetingId,
+  );
+
+  // Update FTS with flattened MID fields
+  const participants = mid.participants.map((p) => p.name).join(', ');
+  const topics = mid.topics.map((t) => t.name).join(', ');
+  const decisions = mid.decisions.map((d) => d.description).join(', ');
+  const actionItems = mid.action_items.map((a) => a.description).join(', ');
+
+  // Check if FTS has MID columns (migration may not have run yet)
+  try {
+    const ftsColumns = db
+      .prepare('PRAGMA table_info(meetings_fts)')
+      .all() as Array<{ name: string }>;
+    if (ftsColumns.some((col) => col.name === 'mid_participants')) {
+      // Get existing FTS row to preserve non-MID fields
+      const existing = db
+        .prepare('SELECT title, transcript_text, enhanced_notes, user_notes FROM meetings_fts WHERE meeting_id = ?')
+        .get(meetingId) as {
+          title: string;
+          transcript_text: string;
+          enhanced_notes: string;
+          user_notes: string;
+        } | undefined;
+
+      if (existing) {
+        db.prepare(`
+          INSERT OR REPLACE INTO meetings_fts (
+            title, transcript_text, enhanced_notes, user_notes,
+            mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          existing.title,
+          existing.transcript_text,
+          existing.enhanced_notes,
+          existing.user_notes,
+          participants,
+          topics,
+          decisions,
+          actionItems,
+          meetingId,
+        );
+      }
+    }
+  } catch (e) {
+    console.warn('[DB] Failed to update MID FTS fields:', e);
+  }
+
+  console.log(`[DB] Saved MID for meeting: ${meetingId}`);
+};
+
+/**
+ * Retrieve and parse MID for a meeting. Returns null if not present.
+ */
+export const getMeetingMid = (meetingId: string): MidFrontmatter | null => {
+  const row = db
+    .prepare('SELECT mid_json FROM meetings WHERE id = ?')
+    .get(meetingId) as { mid_json: string | null } | undefined;
+
+  if (!row?.mid_json) return null;
+
+  try {
+    return JSON.parse(row.mid_json) as MidFrontmatter;
+  } catch {
+    console.warn(`[DB] Failed to parse mid_json for meeting: ${meetingId}`);
+    return null;
+  }
+};
+
+/**
+ * ==========================================
+ * PHASE 2: INTELLIGENCE ENGINE QUERIES
+ * ==========================================
+ */
+
+export interface SearchFtsOptions {
+  limit?: number;
+}
+
+export const searchMeetingsFts = (query: string, options: SearchFtsOptions = {}) => {
+  const limit = options.limit || 50;
+  return db.prepare(`
+    SELECT 
+      m.*,
+      snippet(meetings_fts, -1, '<mark>', '</mark>', '...', 32) as snippet
+    FROM meetings_fts f
+    JOIN meetings m ON f.meeting_id = m.id
+    WHERE meetings_fts MATCH ?
+    ORDER BY rank
+    LIMIT ?
+  `).all(query, limit) as (PersistedMeeting & { snippet: string })[];
+};
+
+export const searchEntitiesWithMeetingContext = (query: string) => {
+  return db.prepare(`
+    SELECT e.*, c.mention_count, c.context, c.meeting_id
+    FROM entities_fts f
+    JOIN entities e ON f.entity_id = e.id
+    LEFT JOIN meeting_entities c ON c.entity_id = e.id
+    WHERE entities_fts MATCH ?
+    ORDER BY rank
+    LIMIT 20
+  `).all(query) as (Entity & {
+    mention_count: number;
+    context: string | null;
+    meeting_id: string;
+  })[];
+};
+
+export const walkEntityGraph = (entityId: string, depth: number, filters?: { state?: string }) => {
+  // BFS graph walk with visited set, confirmed-only default limit, 50-node cap
+  const cap = 50;
+  const results: Entity[] = [];
+  const queue: { id: string; level: number }[] = [{ id: entityId, level: 0 }];
+  const localVisited = new Set<string>();
+  localVisited.add(entityId);
+  const stateFilter = filters?.state || 'confirmed';
+  
+  while (queue.length > 0 && results.length < cap) {
+    const { id, level } = queue.shift()!;
+    if (level > depth) continue;
+    
+    if (level > 0) {
+      const e = getEntity(id);
+      if (e) results.push(e);
+    }
+    if (level === depth) continue;
+    
+    const links = db.prepare(`
+      SELECT source_entity_id, target_entity_id 
+      FROM entity_links 
+      WHERE state = ? AND (source_entity_id = ? OR target_entity_id = ?)
+    `).all(stateFilter, id, id) as Array<{source_entity_id: string; target_entity_id: string}>;
+    
+    for (const link of links) {
+      const neighborId = link.source_entity_id === id ? link.target_entity_id : link.source_entity_id;
+      if (!localVisited.has(neighborId)) {
+        localVisited.add(neighborId);
+        queue.push({ id: neighborId, level: level + 1 });
+      }
+    }
+  }
+  return results;
+};
+
+export const getTemporalMeetings = (range: { from?: string; to?: string }) => {
+  if (range.from && range.to) {
+    return db.prepare('SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ? AND started_at <= ?').all(range.from, range.to) as PersistedMeeting[];
+  } else if (range.from) {
+    return db.prepare('SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ?').all(range.from) as PersistedMeeting[];
+  } else if (range.to) {
+    return db.prepare('SELECT id, started_at, mid_json FROM meetings WHERE started_at <= ?').all(range.to) as PersistedMeeting[];
+  }
+  return getMeetings();
+};
+

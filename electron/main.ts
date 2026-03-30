@@ -109,6 +109,11 @@ import {
 } from './transcriptCleanup';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
 import { whisperX } from './whisperx';
+import { generateMid } from './intelligence/midGenerator';
+import { renderMidToMarkdown } from './intelligence/midRenderer';
+import { parseQuery, retrieveContext } from './intelligence/queryEngine';
+import { getAskPlutoPrompt } from './intelligence/queryPrompts';
+import { buildCitationChain, auditCitations } from './intelligence/citationEngine';
 
 // Cleanup on quit
 app.on('before-quit', async () => {
@@ -489,7 +494,9 @@ app.whenReady().then(async () => {
 
       return new Promise<string | null>((resolve) => {
         if (!fs.existsSync(rawPath) || fs.statSync(rawPath).size === 0) {
-          console.warn('[Pluto] Conversion skipped: temp file missing or empty');
+          console.warn(
+            '[Pluto] Conversion skipped: temp file missing or empty',
+          );
           try {
             if (fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
           } catch (_) {}
@@ -932,6 +939,27 @@ app.whenReady().then(async () => {
     return result;
   });
 
+  // Team tracker & person context
+  ipcMain.handle(
+    'CREATE_TEAM_TRACKER',
+    (_event, params: { title: string; memberEntityIds: string[] }) => {
+      const doc = db.createTeamTrackerDoc(params);
+      queueKnowledgeDocsRefreshForMeeting('');
+      return doc;
+    },
+  );
+  ipcMain.handle(
+    'UPDATE_TEAM_TRACKER_MEMBERS',
+    (_event, { docId, memberEntityIds }) => {
+      const doc = db.updateTeamTrackerMembers(docId, memberEntityIds);
+      if (doc) queueAllKnowledgeDocsRefresh();
+      return doc;
+    },
+  );
+  ipcMain.handle('GET_PERSON_CONTEXT_CANDIDATES', () =>
+    db.getKnowledgeDocPersonCandidates(),
+  );
+
   // Action item queries
   ipcMain.handle('GET_ACTION_ITEMS_BY_STATUS', (_event, status) =>
     db.getActionItemsByStatus(status),
@@ -1280,6 +1308,62 @@ app.whenReady().then(async () => {
             priorityHints: mergedPriorityHints,
           },
         );
+
+        // Generate MID after entity extraction
+        try {
+          const meeting = db.getMeeting(String(meetingId)) as db.PersistedMeeting | undefined;
+          if (meeting) {
+            const meetingEntities = db.getMeetingEntities(String(meetingId));
+            // Parse analysis from the meeting's stored data
+            let analysisDoc = fallbackAnalysisArtifacts().analysis;
+            if (meeting.analysis_json) {
+              try {
+                analysisDoc = JSON.parse(meeting.analysis_json);
+              } catch {
+                // Use fallback
+              }
+            }
+            let signals = emptyValueSignals();
+            if (meeting.value_signals_json) {
+              try {
+                signals = normalizeValueSignals(JSON.parse(meeting.value_signals_json));
+              } catch {
+                // Use empty signals
+              }
+            }
+            // Parse transcript segments for evidence spans
+            let transcriptSegments: Array<{ text: string }> = [];
+            if (meeting.transcript_json) {
+              try {
+                const parsed = JSON.parse(meeting.transcript_json);
+                transcriptSegments = Array.isArray(parsed)
+                  ? parsed
+                  : Array.isArray(parsed?.segments)
+                    ? parsed.segments
+                    : [];
+              } catch {
+                // No transcript segments available
+              }
+            }
+
+            const mid = generateMid({
+              meeting_id: String(meetingId),
+              title: meeting.title,
+              occurred_at: meeting.started_at || meeting.created_at || null,
+              duration_seconds: meeting.duration_seconds || 0,
+              analysis: analysisDoc,
+              signals,
+              meeting_entities: meetingEntities,
+              transcript_segments: transcriptSegments,
+            });
+
+            db.saveMeetingMid(String(meetingId), mid);
+            console.log(`[Intelligence] MID generated for meeting ${meetingId}`);
+          }
+        } catch (midError) {
+          console.warn('[Intelligence] MID generation failed (non-blocking):', midError);
+        }
+
         queueKnowledgeDocsRefreshForMeeting(String(meetingId));
         return result;
       } catch (error) {
@@ -1306,6 +1390,67 @@ app.whenReady().then(async () => {
       }
     },
   );
+
+  // =============================================
+  // MID (Meeting Intelligence Document) HANDLERS
+  // =============================================
+
+  ipcMain.handle('GET_MEETING_MID', (_event, meetingId: string) => {
+    return db.getMeetingMid(meetingId);
+  });
+
+  ipcMain.handle('GET_MEETING_MID_MARKDOWN', (_event, meetingId: string) => {
+    const mid = db.getMeetingMid(meetingId);
+    if (!mid) return null;
+    return renderMidToMarkdown(mid);
+  });
+
+  // =============================================
+  // INTELLIGENCE QUERY HANDLERS (Phase 2)
+  // =============================================
+  ipcMain.handle('intelligence:query', async (_event, queryText: string) => {
+    try {
+      if (!queryText || !queryText.trim()) return { answer: '', citations: [] };
+      
+      const parsed = await parseQuery(queryText);
+      const context = await retrieveContext(parsed);
+      
+      if (context.length === 0) {
+        return { answer: "I couldn't find any relevant information in your meeting history.", citations: [] };
+      }
+      
+      const settings = await getAllSettings(db);
+      const provider = await getProvider(settings);
+      
+      const prompt = getAskPlutoPrompt(queryText, context, "Use exact quotes wherever possible.");
+      const answerHtml = await provider.synthesizeKnowledgeDocument(prompt);
+      
+      const rawCitations = buildCitationChain(answerHtml, context);
+      const auditedCitations = auditCitations(rawCitations);
+      
+      return {
+        answer: answerHtml,
+        citations: auditedCitations,
+      };
+    } catch (e) {
+      console.error('[Pluto] intelligence:query failed:', e);
+      throw e;
+    }
+  });
+
+  ipcMain.handle('intelligence:query:debug', async (_event, queryText: string) => {
+    try {
+      const parsed = await parseQuery(queryText);
+      const context = await retrieveContext(parsed);
+      return {
+        parsed,
+        context,
+      };
+    } catch (e) {
+      console.error('[Pluto] intelligence:query:debug failed:', e);
+      throw e;
+    }
+  });
 
   // Permissions handlers
   ipcMain.handle('CHECK_MICROPHONE_PERMISSION', () => {
