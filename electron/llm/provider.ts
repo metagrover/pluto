@@ -140,6 +140,13 @@ export interface LLMProvider {
     transcript: string,
     context?: EntityExtractionContext,
   ): Promise<ExtractedEntities>;
+  generateFollowUpDrafts(params: {
+    meetingTitle: string;
+    participants: string[];
+    actionItems: string[];
+    decisions: string[];
+    customPrompt?: string;
+  }): Promise<{ drafts: Array<{ title: string; content: string }> }>;
 }
 
 export type ProviderType = 'ollama' | 'gemini' | 'openai' | 'claude';

@@ -1743,6 +1743,32 @@ app.whenReady().then(async () => {
 
   // Process pre-extracted entities (save to knowledge graph)
   ipcMain.handle(
+    'GENERATE_FOLLOW_UPS',
+    async (
+      _event,
+      { meetingTitle, participants, actionItems, decisions, customPrompt },
+    ) => {
+      try {
+        const settings = await getAllSettings(db);
+        const provider = await getProvider(settings);
+        console.log(
+          `[LLM] Generating follow-up drafts with provider: ${provider.name}`,
+        );
+        return await provider.generateFollowUpDrafts({
+          meetingTitle,
+          participants,
+          actionItems,
+          decisions,
+          customPrompt,
+        });
+      } catch (error) {
+        console.error('[LLM] Follow-up generation failed:', error);
+        return { drafts: [] };
+      }
+    },
+  );
+
+  ipcMain.handle(
     'PROCESS_EXTRACTED_ENTITIES',
     async (_event, { entities, meetingId }) => {
       try {

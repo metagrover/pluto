@@ -40,6 +40,7 @@ import {
   parseTranscriptSegments,
 } from '../../utils/transcript';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
+import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
 
 interface MeetingViewProps {
@@ -179,8 +180,20 @@ export const MeetingView = ({
     ? v2.summary
     : ['No summary was generated for this meeting.'];
   const keyPoints = v2?.key_points || [];
-  const actionItems = v2?.action_items || [];
-  const decisions = v2?.decisions || [];
+  const actionItems =
+    v3?.all_action_items.map((item) => {
+      const details = [
+        item.assignee ? `Owner: ${item.assignee}` : '',
+        item.due ? `Due: ${item.due}` : '',
+      ]
+        .filter(Boolean)
+        .join(' | ');
+      return details ? `${item.text} (${details})` : item.text;
+    }) ||
+    v2?.action_items ||
+    [];
+  const decisions =
+    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
     0,
@@ -554,6 +567,13 @@ export const MeetingView = ({
 
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
       <div className="mb-12 space-y-6">
+        <FollowUpDrafts
+          meetingId={selectedMeeting.id}
+          meetingTitle={selectedMeeting.title}
+          actionItems={actionItems}
+          decisions={decisions}
+        />
+
         <EntitySidebar
           meetingId={String(selectedMeeting.id)}
           onEntityClick={(entity) => {
