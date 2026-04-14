@@ -1,5 +1,5 @@
-import * as electron from 'electron';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import * as electron from 'electron';
 import {
   analysisDocumentToMarkdown,
   fallbackAnalysisDocument,
@@ -1039,7 +1039,10 @@ export class UnifiedLLMProvider implements LLMProvider {
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel();
     const estimatedTokens = Math.ceil(prompt.length / 3) + 1000; // rough char-to-token heuristic + buffer
-    const num_ctx = Math.min(8192, Math.max(2048, Math.ceil(estimatedTokens / 1024) * 1024));
+    const num_ctx = Math.min(
+      8192,
+      Math.max(2048, Math.ceil(estimatedTokens / 1024) * 1024),
+    );
 
     const requestBody: Record<string, unknown> = {
       model,

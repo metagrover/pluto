@@ -6,38 +6,44 @@ import {
   Loader2,
   Mail,
   MessageSquare,
+  Save,
   Send,
   Sparkles,
 } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { getMeetingEntities } from '../../api/knowledgeGraph';
+import type { Meeting } from '../../types';
 
 interface FollowUpDraftsProps {
-  meetingId: string | number;
-  meetingTitle: string;
+  meeting: Meeting;
   actionItems: string[];
   decisions: string[];
+  fetchMeetings: () => void;
 }
 
 const DRAFT_TYPES = [
   { id: 'client', title: 'Client Recap Email', icon: Mail },
   { id: 'internal', title: 'Internal Summary', icon: Send },
   { id: 'slack', title: 'Slack Update', icon: MessageSquare },
-];
+] as const;
 
 export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
-  meetingId,
-  meetingTitle,
+  meeting,
   actionItems,
   decisions,
+  fetchMeetings,
 }) => {
   const [participants, setParticipants] = useState<string[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [copyId, setCopyId] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState('');
   const [isExpanded, setIsExpanded] = useState(true);
+
+  const meetingId = meeting.id;
+  const meetingTitle = meeting.title;
 
   useEffect(() => {
     getMeetingEntities(String(meetingId)).then((entities) =>
@@ -45,8 +51,20 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         entities.filter((e) => e.type === 'person').map((e) => e.name),
       ),
     );
-    setDrafts({}); // Clear drafts when meeting changes to trigger regeneration
-  }, [meetingId]);
+
+    // Load drafts from database if they exist
+    if (meeting.follow_up_drafts_json) {
+      try {
+        const savedDrafts = JSON.parse(meeting.follow_up_drafts_json);
+        setDrafts(savedDrafts);
+      } catch (e) {
+        console.error('Failed to parse saved drafts:', e);
+        setDrafts({});
+      }
+    } else {
+      setDrafts({});
+    }
+  }, [meetingId, meeting.follow_up_drafts_json]);
 
   const generateDefaults = useCallback(() => {
     const people = participants.join(', ') || 'Team';
@@ -60,17 +78,32 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     });
   }, [participants, meetingTitle, actionItems, decisions]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Only generate defaults when there are no drafts or meeting changes, to avoid overwriting manual edits.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Only generate defaults when there are no drafts and meeting changes
   useEffect(() => {
-    if (Object.keys(drafts).length === 0) {
+    if (Object.keys(drafts).length === 0 && !meeting.follow_up_drafts_json) {
       generateDefaults();
     }
-  }, [generateDefaults, meetingId]);
+  }, [generateDefaults, meetingId, meeting.follow_up_drafts_json]);
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopyId(id);
     setTimeout(() => setCopyId(null), 2000);
+  };
+
+  const handleSave = async (updatedDrafts = drafts) => {
+    setSaving(true);
+    try {
+      await window.ipcRenderer.invoke('SAVE_MEETING', {
+        ...meeting,
+        follow_up_drafts_json: JSON.stringify(updatedDrafts),
+      });
+      fetchMeetings();
+    } catch (e) {
+      console.error('Failed to save drafts:', e);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleRegenerate = async () => {
@@ -89,6 +122,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           nextDrafts[DRAFT_TYPES[i]?.id || `draft-${i}`] = d.content;
         });
         setDrafts(nextDrafts);
+        await handleSave(nextDrafts);
       }
     } catch (e) {
       console.error(e);
@@ -119,9 +153,26 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between px-1">
-        <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-          Follow-up Drafts
-        </h2>
+        <div className="flex items-center gap-4">
+          <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
+            Follow-up Drafts
+          </h2>
+          {Object.keys(drafts).length > 0 && (
+            <button
+              type="button"
+              onClick={() => handleSave()}
+              disabled={saving}
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-pro-accent/5 border border-pro-accent/10 text-[9px] font-black text-pro-accent uppercase tracking-widest hover:bg-pro-accent/10 transition-all disabled:opacity-50"
+            >
+              {saving ? (
+                <Loader2 size={10} className="animate-spin" />
+              ) : (
+                <Save size={10} />
+              )}
+              {saving ? 'Saving...' : 'Save Drafts'}
+            </button>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}

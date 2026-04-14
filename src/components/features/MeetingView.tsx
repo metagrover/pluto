@@ -25,7 +25,12 @@ import {
   getEntityTypeLabel,
   getRelatedEntities,
 } from '../../api/knowledgeGraph';
-import type { Meeting, TranscriptSegment } from '../../types';
+import type {
+  AnalysisDocument,
+  AnalysisDocumentV3,
+  Meeting,
+  TranscriptSegment,
+} from '../../types';
 import {
   analysisDocumentToMarkdown,
   analysisDocumentV3ToMarkdown,
@@ -235,7 +240,8 @@ export const MeetingView = ({
         },
       )) as { markdown?: unknown; analysis?: unknown; signals?: unknown };
 
-      let normalizedAnalysis: any = null;
+      let normalizedAnalysis: AnalysisDocument | AnalysisDocumentV3 | null =
+        null;
       if (artifacts?.analysis != null) {
         const strAnalysis = JSON.stringify(artifacts.analysis);
         normalizedAnalysis =
@@ -259,8 +265,12 @@ export const MeetingView = ({
         typeof artifacts?.markdown === 'string' && artifacts.markdown.trim()
           ? artifacts.markdown
           : normalizedAnalysis.analysis_schema_version === 3
-            ? analysisDocumentV3ToMarkdown(normalizedAnalysis)
-            : analysisDocumentToMarkdown(normalizedAnalysis);
+            ? analysisDocumentV3ToMarkdown(
+                normalizedAnalysis as AnalysisDocumentV3,
+              )
+            : analysisDocumentToMarkdown(
+                normalizedAnalysis as AnalysisDocument,
+              );
       const normalizedSignals: ValueGainSignals | undefined =
         artifacts?.signals != null &&
         typeof artifacts.signals === 'object' &&
@@ -568,10 +578,10 @@ export const MeetingView = ({
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
       <div className="mb-12 space-y-6">
         <FollowUpDrafts
-          meetingId={selectedMeeting.id}
-          meetingTitle={selectedMeeting.title}
+          meeting={selectedMeeting}
           actionItems={actionItems}
           decisions={decisions}
+          fetchMeetings={fetchMeetings}
         />
 
         <EntitySidebar
