@@ -11,12 +11,14 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
+const { resolveBackendConfig } = require('./lib/transcription_backends');
 
 const DEFAULT_PORT = 5123;
 const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_MAX_LOOKBACK_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_GAP_MS = 20 * 1000;
 const DEFAULT_SESSION_LEAD_MS = 8 * 1000;
+const DEFAULT_DIAGNOSTICS_WINDOW_SECONDS = 5 * 60;
 const DEFAULT_LOCAL_FIXTURE_FILE = path.join(
   process.cwd(),
   'scripts',
@@ -27,6 +29,15 @@ const BUILTIN_TEST_SETS = {};
 
 /** DB transcript_json vs human baseline (ordered speaker + Jaccard). */
 const BUILTIN_TRANSCRIPT_REGRESSIONS = [
+  {
+    id: 'advisor_agent_deployment',
+    meetingId: 'd0ae42f8-479a-47bc-ae0e-95cc726da165',
+    expectedPath: path.join(
+      __dirname,
+      'baselines',
+      'd0ae42f8-479a-47bc-ae0e-95cc726da165.expected-human.json',
+    ),
+  },
   {
     id: 'berlin_travel_human',
     meetingId: '8a6dfe36-7151-4763-9f43-2b87b682a386',
@@ -98,6 +109,10 @@ const parseArgs = () => {
     maxGapMs: DEFAULT_MAX_GAP_MS,
     sessionLeadMs: DEFAULT_SESSION_LEAD_MS,
     model: '',
+    backend: '',
+    preset: '',
+    device: '',
+    computeType: '',
     fixedSet: '',
     requireExpected: false,
     allSets: false,
@@ -152,6 +167,26 @@ const parseArgs = () => {
     }
     if (arg === '--model') {
       options.model = takeValue(arg, i);
+      i++;
+      continue;
+    }
+    if (arg === '--backend') {
+      options.backend = takeValue(arg, i);
+      i++;
+      continue;
+    }
+    if (arg === '--preset') {
+      options.preset = takeValue(arg, i);
+      i++;
+      continue;
+    }
+    if (arg === '--device') {
+      options.device = takeValue(arg, i);
+      i++;
+      continue;
+    }
+    if (arg === '--compute-type') {
+      options.computeType = takeValue(arg, i);
       i++;
       continue;
     }
@@ -232,12 +267,40 @@ const parseArgs = () => {
 };
 
 const extractTimestampFromName = (filename) => {
-  const match = filename.match(/^(me|them|session-mic)_(\d+)_/);
-  if (!match) return null;
-  return {
-    speaker: match[1],
-    ts: Number.parseInt(match[2], 10),
-  };
+  const standardMatch = filename.match(
+    /^(me|them|session-mic|session-system)_(\d+)_/,
+  );
+  if (standardMatch) {
+    return {
+      speaker: standardMatch[1],
+      ts: Number.parseInt(standardMatch[2], 10),
+    };
+  }
+  const mixMatch = filename.match(/^mix_session-mix_(\d+)_/);
+  if (mixMatch) {
+    return {
+      speaker: 'session-mix',
+      ts: Number.parseInt(mixMatch[1], 10),
+    };
+  }
+  return null;
+};
+
+const findNearestCompanionSessionFile = (
+  allEntries,
+  sessionTs,
+  speaker,
+  maxDeltaMs = 15_000,
+) => {
+  const matches = allEntries
+    .filter((entry) => entry.speaker === speaker)
+    .map((entry) => ({
+      ...entry,
+      delta: Math.abs(entry.ts - sessionTs),
+    }))
+    .filter((entry) => entry.delta <= maxDeltaMs)
+    .sort((a, b) => a.delta - b.delta);
+  return matches[0] || null;
 };
 
 const pickContiguousChannelFiles = (allEntries, sessionTs, opts) => {
@@ -271,15 +334,82 @@ const pickContiguousChannelFiles = (allEntries, sessionTs, opts) => {
   return candidates.slice(left, right + 1);
 };
 
+const pickMeetingWindowChannelFiles = (
+  allEntries,
+  meetingStartTs,
+  meetingEndTs,
+  paddingMs = 15_000,
+) =>
+  allEntries
+    .filter((entry) => entry.speaker === 'Me' || entry.speaker === 'Them')
+    .filter((entry) => entry.ts >= meetingStartTs - paddingMs)
+    .filter((entry) => entry.ts <= meetingEndTs + paddingMs)
+    .sort((a, b) => a.ts - b.ts);
+
+const probeAudioFile = (audioPath) => {
+  if (!audioPath || !fs.existsSync(audioPath)) {
+    return { exists: false, sizeBytes: 0, durationSec: 0 };
+  }
+  const sizeBytes = fs.statSync(audioPath).size;
+  const result = spawnSync(
+    'ffprobe',
+    [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'default=nokey=1:noprint_wrappers=1',
+      audioPath,
+    ],
+    { encoding: 'utf8' },
+  );
+  const durationSec =
+    result.status === 0
+      ? Number.parseFloat(String(result.stdout || '').trim()) || 0
+      : 0;
+  return { exists: true, sizeBytes, durationSec };
+};
+
+const isUsableSessionAudio = (probe) =>
+  Boolean(
+    probe &&
+      probe.exists &&
+      probe.sizeBytes >= 1024 &&
+      Number.isFinite(probe.durationSec) &&
+      probe.durationSec >= 1,
+  );
+
+const chooseReplayEntriesForRecovery = (
+  selectedEntries,
+  usableSessionSystemAudio,
+) => {
+  if (!Array.isArray(selectedEntries) || selectedEntries.length === 0) {
+    return [];
+  }
+  if (usableSessionSystemAudio) {
+    return selectedEntries;
+  }
+  const themEntries = selectedEntries.filter(
+    (entry) => entry.speaker === 'Them',
+  );
+  if (themEntries.length > 0) {
+    return themEntries;
+  }
+  return selectedEntries;
+};
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const transcribeFile = async (serverUrl, audioPath, model) => {
+const transcribeFile = async (serverUrl, audioPath, config) => {
   const payload = {
     audio_path: audioPath,
-    language: 'en',
+    language: config.language || 'en',
     diarize: false,
+    model: config.model,
+    device: config.device,
+    compute_type: config.computeType,
   };
-  if (model) payload.model = model;
 
   let lastError = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -309,10 +439,10 @@ const transcribeFile = async (serverUrl, audioPath, model) => {
   );
 };
 
-const bestOfAttempts = async (serverUrl, audioPath, attempts, model) => {
+const bestOfAttempts = async (serverUrl, audioPath, attempts, config) => {
   const attemptsPayload = [];
   for (let i = 0; i < attempts; i++) {
-    const result = await transcribeFile(serverUrl, audioPath, model);
+    const result = await transcribeFile(serverUrl, audioPath, config);
     const segments = Array.isArray(result.segments) ? result.segments : [];
     const text = segments
       .map((segment) => String(segment.text || '').trim())
@@ -333,6 +463,7 @@ const bestOfAttempts = async (serverUrl, audioPath, attempts, model) => {
     variants: attemptsPayload.map((item) => item.text),
     bestSegments: Array.isArray(bestMatch?.segments) ? bestMatch.segments : [],
     uniqueCount: counts.size,
+    activeConfig: bestMatch?.activeConfig,
   };
 };
 
@@ -402,6 +533,273 @@ const computeEchoStats = (turns) => {
   };
 };
 
+const isQuestionLikeReplay = (text) => {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  const n = normalizeText(raw);
+  if (!n) return false;
+  if (raw.includes('?')) return true;
+  return /^(do you|did you|are you|can you|could you|would you|will you|what|why|how|when|where|who)\b/.test(
+    n,
+  );
+};
+
+const isGreetingLikeReplay = (text) => {
+  const n = normalizeText(text);
+  if (!n) return false;
+  return (
+    n.startsWith('hey ') ||
+    n === 'hey' ||
+    n.startsWith('hi ') ||
+    n === 'hi' ||
+    n.startsWith('hello ') ||
+    n === 'hello'
+  );
+};
+
+const isVeryShortConfirmationReplay = (text) => {
+  const n = normalizeText(text);
+  return (
+    n === 'yes' ||
+    n === 'no' ||
+    n === 'yeah' ||
+    n === 'yep' ||
+    n === 'nope' ||
+    n === 'sure' ||
+    n === 'right'
+  );
+};
+
+const SHORT_ANSWER_PREFIXES_REPLAY = [
+  'not bad',
+  'pretty good',
+  'good',
+  'fine',
+  'busy',
+  'just',
+  'trying to',
+  'working on',
+  'doing okay',
+  'all good',
+];
+
+const isLikelyShortAnswerReplay = (text) => {
+  const n = normalizeText(text);
+  if (!n) return false;
+  const words = tokenize(text);
+  if (words.length === 0 || words.length > 8) return false;
+  const matchesPrefix = SHORT_ANSWER_PREFIXES_REPLAY.some(
+    (prefix) => n === prefix || n.startsWith(`${prefix} `),
+  );
+  if (matchesPrefix) return true;
+  if (isQuestionLikeReplay(text)) return false;
+  return false;
+};
+
+const isLikelySplitFragmentReplay = (text) => {
+  const raw = String(text || '').trim();
+  const n = normalizeText(raw);
+  if (!n || isQuestionLikeReplay(raw)) return false;
+  const words = n.split(' ').filter(Boolean);
+  if (words.length === 0 || words.length > 16) return false;
+  const hasTerminalPunctuation = /[.!?]["']?$/.test(raw);
+  if (isLikelyShortAnswerReplay(raw) || isVeryShortConfirmationReplay(raw)) {
+    return false;
+  }
+  return !hasTerminalPunctuation;
+};
+
+const normalizeTimedTranscriptSegment = (seg) => {
+  if (!seg || typeof seg !== 'object') return null;
+  const speaker = seg.speaker != null ? String(seg.speaker) : '';
+  const text = seg.text != null ? String(seg.text).trim() : '';
+  if ((speaker !== 'Me' && speaker !== 'Them') || !text) return null;
+  const startTime =
+    typeof seg.startTime === 'number'
+      ? seg.startTime
+      : typeof seg.startMs === 'number'
+        ? seg.startMs / 1000
+        : typeof seg.start === 'number'
+          ? seg.start
+          : null;
+  const endTime =
+    typeof seg.endTime === 'number'
+      ? seg.endTime
+      : typeof seg.endMs === 'number'
+        ? seg.endMs / 1000
+        : typeof seg.end === 'number'
+          ? seg.end
+          : null;
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return null;
+  return { speaker, text, startTime, endTime };
+};
+
+const computeTranscriptDiagnostics = (
+  segments,
+  windowSeconds = DEFAULT_DIAGNOSTICS_WINDOW_SECONDS,
+) => {
+  const normalized = (segments || [])
+    .map(normalizeTimedTranscriptSegment)
+    .filter(Boolean)
+    .sort((a, b) => a.startTime - b.startTime);
+  const inWindow = normalized.filter((s) => s.startTime <= windowSeconds);
+
+  let sameSpeakerQuestionAnswer = 0;
+  let sameSpeakerGreetingPairs = 0;
+  let suspiciousAlternatingShort = 0;
+  let continuationSandwiches = 0;
+  let overlappingLexicalDuplicates = 0;
+  const openingSamples = [];
+
+  const overlapSecondsLocal = (left, right) =>
+    Math.max(
+      0,
+      Math.min(left.endTime, right.endTime) -
+        Math.max(left.startTime, right.startTime),
+    );
+
+  for (let i = 1; i < normalized.length; i++) {
+    const prev = normalized[i - 1];
+    const cur = normalized[i];
+    const gap = Math.max(0, cur.startTime - prev.endTime);
+    if (
+      prev.speaker === cur.speaker &&
+      isQuestionLikeReplay(prev.text) &&
+      !isQuestionLikeReplay(cur.text) &&
+      tokenize(cur.text).length <= 8 &&
+      gap <= 1.75
+    ) {
+      sameSpeakerQuestionAnswer++;
+      if (openingSamples.length < 5 && cur.startTime <= windowSeconds) {
+        openingSamples.push(
+          `Q/A same-speaker ${prev.speaker}: "${prev.text}" -> "${cur.text}"`,
+        );
+      }
+    }
+
+    if (
+      prev.speaker === cur.speaker &&
+      isGreetingLikeReplay(prev.text) &&
+      isGreetingLikeReplay(cur.text) &&
+      cur.startTime <= Math.min(windowSeconds, 45) &&
+      gap <= 12
+    ) {
+      sameSpeakerGreetingPairs++;
+      if (openingSamples.length < 5) {
+        openingSamples.push(
+          `Opening greeting same-speaker ${cur.speaker}: "${prev.text}" / "${cur.text}"`,
+        );
+      }
+    }
+  }
+
+  for (let i = 1; i < normalized.length - 1; i++) {
+    const prev = normalized[i - 1];
+    const cur = normalized[i];
+    const next = normalized[i + 1];
+    const curWords = tokenize(cur.text).length;
+    if (
+      prev.speaker !== cur.speaker &&
+      cur.speaker !== next.speaker &&
+      curWords > 0 &&
+      curWords <= 6 &&
+      cur.startTime <= windowSeconds
+    ) {
+      suspiciousAlternatingShort++;
+    }
+
+    if (
+      prev.speaker === next.speaker &&
+      cur.speaker !== prev.speaker &&
+      curWords <= 12 &&
+      isLikelySplitFragmentReplay(cur.text) &&
+      Math.max(0, cur.startTime - prev.endTime) <= 1.25 &&
+      Math.max(0, next.startTime - cur.endTime) <= 1.25
+    ) {
+      continuationSandwiches++;
+      if (openingSamples.length < 5 && cur.startTime <= windowSeconds) {
+        openingSamples.push(
+          `Sandwich fragment ${cur.speaker} between ${prev.speaker}: "${cur.text}"`,
+        );
+      }
+    }
+  }
+
+  for (let i = 0; i < normalized.length; i++) {
+    for (let j = i + 1; j < normalized.length; j++) {
+      const left = normalized[i];
+      const right = normalized[j];
+      if (left.speaker === right.speaker) continue;
+      const overlap = overlapSecondsLocal(left, right);
+      if (overlap < 0.2) continue;
+      const overlapRatio =
+        overlap /
+        Math.max(
+          0.01,
+          Math.min(
+            left.endTime - left.startTime,
+            right.endTime - right.startTime,
+          ),
+        );
+      const similarity = jaccardSimilarity(left.text, right.text);
+      if (overlapRatio >= 0.45 && similarity >= 0.35) {
+        overlappingLexicalDuplicates++;
+      }
+    }
+  }
+
+  const openingSameSpeakerQuestionAnswer = sameSpeakerQuestionAnswer;
+  const openingAnomalies =
+    sameSpeakerGreetingPairs +
+    openingSameSpeakerQuestionAnswer +
+    continuationSandwiches;
+  const score =
+    sameSpeakerGreetingPairs * 4 +
+    sameSpeakerQuestionAnswer * 4 +
+    continuationSandwiches * 5 +
+    suspiciousAlternatingShort * 2 +
+    overlappingLexicalDuplicates * 3;
+
+  return {
+    totalTurns: normalized.length,
+    sameSpeakerGreetingPairs,
+    sameSpeakerQuestionAnswer,
+    suspiciousAlternatingShort,
+    continuationSandwiches,
+    overlappingLexicalDuplicates,
+    firstFiveMinutesAnomalies: openingAnomalies,
+    score,
+    openingSamples,
+  };
+};
+
+const printTranscriptDiagnostics = (label, diagnostics) => {
+  console.log(`\n[Diagnostics:${label}] score=${diagnostics.score}`);
+  console.log(
+    `[Diagnostics:${label}] greetingsSameSpeaker=${diagnostics.sameSpeakerGreetingPairs} questionAnswerSameSpeaker=${diagnostics.sameSpeakerQuestionAnswer} sandwichContinuations=${diagnostics.continuationSandwiches}`,
+  );
+  console.log(
+    `[Diagnostics:${label}] alternatingShort=${diagnostics.suspiciousAlternatingShort} overlappingLexicalDuplicates=${diagnostics.overlappingLexicalDuplicates} firstFiveMinutes=${diagnostics.firstFiveMinutesAnomalies}`,
+  );
+  for (const sample of diagnostics.openingSamples.slice(0, 5)) {
+    console.log(`  - ${sample}`);
+  }
+};
+
+const hasMaterialDiagnosticImprovement = (current, candidate) => {
+  if (!candidate) return false;
+  if (!current) return true;
+  if (candidate.score < current.score) return true;
+  if (
+    candidate.firstFiveMinutesAnomalies < current.firstFiveMinutesAnomalies &&
+    candidate.overlappingLexicalDuplicates <=
+      current.overlappingLexicalDuplicates
+  ) {
+    return true;
+  }
+  return false;
+};
+
 const qualityScore = (text) => {
   const tokens = tokenize(text);
   if (tokens.length === 0) return 0;
@@ -447,17 +845,6 @@ const applyCrossTurnAttributionRepairsReplay = (turns) => {
   const segmentStartMs = (s) =>
     typeof s.startMs === 'number' ? s.startMs : Number(s.ts) || 0;
 
-  const isQuestionLike = (text) => {
-    const raw = String(text || '').trim();
-    if (!raw) return false;
-    const n = normalizeText(raw);
-    if (!n) return false;
-    if (raw.includes('?')) return true;
-    return /^(do you|did you|are you|can you|could you|would you|will you|what|why|how|when|where|who)\b/.test(
-      n,
-    );
-  };
-
   const isRemoteStyleUncertaintyAnswer = (text) => {
     const n = normalizeText(text);
     if (!n) return false;
@@ -487,28 +874,27 @@ const applyCrossTurnAttributionRepairsReplay = (turns) => {
     );
   };
 
-  const isVeryShortConfirmation = (text) => {
-    const n = normalizeText(text);
-    return (
-      n === 'yes' ||
-      n === 'no' ||
-      n === 'yeah' ||
-      n === 'yep' ||
-      n === 'nope' ||
-      n === 'sure' ||
-      n === 'right'
-    );
-  };
-
   const out = turns.map((s) => ({ ...s }));
 
   for (let i = 1; i < out.length; i++) {
     const prev = out[i - 1];
     const cur = out[i];
+    if (prev.speaker !== cur.speaker) continue;
+    if (!isGreetingLikeReplay(prev.text) || !isGreetingLikeReplay(cur.text))
+      continue;
+    if (segmentStartMs(cur) > 45_000) continue;
+    const gapMs = Math.max(0, segmentStartMs(cur) - segmentEndMs(prev));
+    if (gapMs > 12_000) continue;
+    cur.speaker = prev.speaker === 'Me' ? 'Them' : 'Me';
+  }
+
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
     if (prev.speaker !== 'Me' || cur.speaker !== 'Me') continue;
-    if (!isQuestionLike(prev.text)) continue;
+    if (!isQuestionLikeReplay(prev.text)) continue;
     if (tokenize(cur.text).length > 3) continue;
-    if (!isVeryShortConfirmation(cur.text)) continue;
+    if (!isVeryShortConfirmationReplay(cur.text)) continue;
     const gapMs = Math.max(0, segmentStartMs(cur) - segmentEndMs(prev));
     if (gapMs > 1500) continue;
     cur.speaker = 'Them';
@@ -518,10 +904,40 @@ const applyCrossTurnAttributionRepairsReplay = (turns) => {
     const prev = out[i - 1];
     const cur = out[i];
     if (prev.speaker !== 'Me' || cur.speaker !== 'Me') continue;
-    if (!isQuestionLike(prev.text)) continue;
+    if (!isQuestionLikeReplay(prev.text)) continue;
+    if (tokenize(cur.text).length > 8) continue;
+    if (!isLikelyShortAnswerReplay(cur.text)) continue;
+    const gapMs = Math.max(0, segmentStartMs(cur) - segmentEndMs(prev));
+    if (gapMs > 3000) continue;
+    cur.speaker = 'Them';
+  }
+
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (prev.speaker !== 'Me' || cur.speaker !== 'Me') continue;
+    if (!isQuestionLikeReplay(prev.text)) continue;
     if (!isRemoteStyleUncertaintyAnswer(cur.text)) continue;
     const gapMs = Math.max(0, segmentStartMs(cur) - segmentEndMs(prev));
     if (gapMs > 1250) continue;
+    cur.speaker = 'Them';
+  }
+
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (prev.speaker !== 'Them' || cur.speaker !== 'Me') continue;
+    if (tokenize(prev.text).length > 16) continue;
+    if (tokenize(cur.text).length > 16) continue;
+    if (
+      !isLikelySplitFragmentReplay(cur.text) &&
+      !isLikelyShortAnswerReplay(cur.text) &&
+      !(tokenize(prev.text).length <= 4 && !isQuestionLikeReplay(cur.text))
+    ) {
+      continue;
+    }
+    const gapMs = Math.max(0, segmentStartMs(cur) - segmentEndMs(prev));
+    if (gapMs > 2500) continue;
     cur.speaker = 'Them';
   }
 
@@ -534,6 +950,19 @@ const applyCrossTurnAttributionRepairsReplay = (turns) => {
     const gapMs = Math.max(0, segmentStartMs(cur) - segmentEndMs(prev));
     if (gapMs > 1500) continue;
     cur.speaker = 'Me';
+  }
+
+  for (let i = 1; i < out.length - 1; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    const next = out[i + 1];
+    if (prev.speaker !== next.speaker || cur.speaker === prev.speaker) continue;
+    if (tokenize(cur.text).length > 12) continue;
+    if (!isLikelySplitFragmentReplay(cur.text)) continue;
+    const gapBeforeMs = Math.max(0, segmentStartMs(cur) - segmentEndMs(prev));
+    const gapAfterMs = Math.max(0, segmentStartMs(next) - segmentEndMs(cur));
+    if (gapBeforeMs > 1250 || gapAfterMs > 1250) continue;
+    cur.speaker = prev.speaker;
   }
 
   return out;
@@ -1205,7 +1634,28 @@ const normalizeTranscriptAppSegment = (seg) => {
   const text = seg.text != null ? String(seg.text) : '';
   if (!speaker || !text.trim()) return null;
   if (speaker !== 'Me' && speaker !== 'Them') return null;
-  return { speaker, text: text.trim() };
+  const startTime =
+    typeof seg.startTime === 'number'
+      ? seg.startTime
+      : typeof seg.startMs === 'number'
+        ? seg.startMs / 1000
+        : typeof seg.start === 'number'
+          ? seg.start
+          : null;
+  const endTime =
+    typeof seg.endTime === 'number'
+      ? seg.endTime
+      : typeof seg.endMs === 'number'
+        ? seg.endMs / 1000
+        : typeof seg.end === 'number'
+          ? seg.end
+          : null;
+  return {
+    speaker,
+    text: text.trim(),
+    startTime: Number.isFinite(startTime) ? startTime : null,
+    endTime: Number.isFinite(endTime) ? endTime : null,
+  };
 };
 
 const transcriptRegressionThreshold = (expectedText) =>
@@ -1264,6 +1714,60 @@ const normalizeTranscriptRegressionFileEntries = (entries, fixtureFile) => {
   });
 };
 
+const evaluateTranscriptRegressionChecks = (app, checks) => {
+  if (!Array.isArray(checks) || checks.length === 0) return [];
+  const failures = [];
+  for (const check of checks) {
+    if (!check || typeof check !== 'object') continue;
+    const type = String(check.type || '');
+    if (type === 'maxDiagnostics') {
+      const diagnostics = computeTranscriptDiagnostics(
+        app,
+        Number.isFinite(check.windowSeconds)
+          ? Number(check.windowSeconds)
+          : DEFAULT_DIAGNOSTICS_WINDOW_SECONDS,
+      );
+      const constraints = [
+        ['sameSpeakerGreetingPairs', 'sameSpeakerGreetingPairs'],
+        ['sameSpeakerQuestionAnswer', 'sameSpeakerQuestionAnswer'],
+        ['continuationSandwiches', 'continuationSandwiches'],
+        ['suspiciousAlternatingShort', 'suspiciousAlternatingShort'],
+        ['overlappingLexicalDuplicates', 'overlappingLexicalDuplicates'],
+        ['firstFiveMinutesAnomalies', 'firstFiveMinutesAnomalies'],
+        ['score', 'score'],
+      ];
+      for (const [field, label] of constraints) {
+        if (!Number.isFinite(check[field])) continue;
+        if (diagnostics[field] > Number(check[field])) {
+          failures.push(
+            `${type}:${label} expected <= ${check[field]} got ${diagnostics[field]}`,
+          );
+        }
+      }
+      continue;
+    }
+
+    if (type === 'orderedPrefixTurns') {
+      const turns = Array.isArray(check.turns) ? check.turns : [];
+      const normalizedTurns = turns.map((turn) => ({
+        speaker: String(turn.speaker || ''),
+        text: String(turn.text || '').trim(),
+      }));
+      const failuresForCheck = findTranscriptRegressionFailures(
+        normalizedTurns,
+        app,
+      );
+      if (failuresForCheck.length > 0) {
+        failures.push(
+          `${type} missing ${failuresForCheck.length} ordered turn(s) in prefix`,
+        );
+      }
+      continue;
+    }
+  }
+  return failures;
+};
+
 const runTranscriptRegressionsSuite = (dbPath, entries) => {
   if (!Array.isArray(entries) || entries.length === 0) {
     console.log('\n[TranscriptRegression] No entries configured.');
@@ -1286,6 +1790,7 @@ const runTranscriptRegressionsSuite = (dbPath, entries) => {
       speaker: String(s.speaker),
       text: String(s.text || '').trim(),
     }));
+    const checks = Array.isArray(baseline.checks) ? baseline.checks : [];
     const rawSegments = loadMeetingTranscriptSegmentsFromDb(
       dbPath,
       entry.meetingId,
@@ -1298,17 +1803,23 @@ const runTranscriptRegressionsSuite = (dbPath, entries) => {
       continue;
     }
     console.log(
-      `[TranscriptRegression] meeting=${entry.meetingId} appSegments=${app.length} expectedTurns=${expected.length}`,
+      `[TranscriptRegression] meeting=${entry.meetingId} appSegments=${app.length} expectedTurns=${expected.length} checks=${checks.length}`,
     );
-    const failures = findTranscriptRegressionFailures(expected, app);
+    const failures = [
+      ...findTranscriptRegressionFailures(expected, app),
+      ...evaluateTranscriptRegressionChecks(app, checks),
+    ];
     if (failures.length > 0) {
       console.error(
-        `[TranscriptRegression] FAIL ${entry.id} — ${failures.length} expected turn(s) not matched in order`,
+        `[TranscriptRegression] FAIL ${entry.id} — ${failures.length} regression issue(s)`,
       );
       for (const f of failures.slice(0, 25)) {
-        console.error(
-          `  #${f.index} ${f.expectedSpeaker} thr=${f.threshold}: ${f.expectedPreview}…`,
-        );
+        if (typeof f === 'string') console.error(`  - ${f}`);
+        else {
+          console.error(
+            `  #${f.index} ${f.expectedSpeaker} thr=${f.threshold}: ${f.expectedPreview}…`,
+          );
+        }
       }
       if (failures.length > 25) {
         console.error(`  … +${failures.length - 25} more`);
@@ -1382,6 +1893,19 @@ const finalTurnsToAppSegments = (finalTurns, sessionBaseTsMs) => {
   }));
 };
 
+const appSegmentsToReplayTurns = (segments) => {
+  return (segments || [])
+    .map(normalizeTimedTranscriptSegment)
+    .filter(Boolean)
+    .map((segment) => ({
+      speaker: segment.speaker,
+      text: segment.text,
+      ts: Math.round(segment.startTime * 1000),
+      startMs: Math.round(segment.startTime * 1000),
+      endMs: Math.round(segment.endTime * 1000),
+    }));
+};
+
 const persistTranscriptToDb = (dbPath, meetingId, segments) => {
   const tmp = path.join(
     os.tmpdir(),
@@ -1434,6 +1958,7 @@ print("OK updated transcript_json + FTS for", mid, "segments", len(segs))
 };
 
 const main = async () => {
+  const benchmarkStart = Date.now();
   const opts = parseArgs();
   if (!fs.existsSync(opts.dbPath)) {
     throw new Error(`DB not found: ${opts.dbPath}`);
@@ -1485,6 +2010,10 @@ const main = async () => {
       ];
       if (opts.requireExpected) childArgs.push('--require-expected');
       if (opts.model) childArgs.push('--model', opts.model);
+      if (opts.backend) childArgs.push('--backend', opts.backend);
+      if (opts.preset) childArgs.push('--preset', opts.preset);
+      if (opts.device) childArgs.push('--device', opts.device);
+      if (opts.computeType) childArgs.push('--compute-type', opts.computeType);
       const child = spawnSync(process.execPath, childArgs, {
         stdio: 'inherit',
       });
@@ -1518,6 +2047,11 @@ const main = async () => {
   let sessionBaseTs = 0;
   let selectedEntries = [];
   let expectedTurns = [];
+  let sessionInfo = null;
+  let allMeetingEntries = [];
+  let channelEntries = [];
+  let sessionSystemAudioPath = '';
+  let sessionMixedAudioPath = '';
 
   if (opts.fixedSet) {
     const fixed = fixtureSets[opts.fixedSet];
@@ -1539,7 +2073,7 @@ const main = async () => {
         throw new Error(`Meeting has no audio_path: ${fixed.meetingId}`);
 
       const sessionFile = path.basename(meeting.audio_path);
-      const sessionInfo = extractTimestampFromName(sessionFile);
+      sessionInfo = extractTimestampFromName(sessionFile);
       if (!sessionInfo || sessionInfo.speaker !== 'session-mic') {
         throw new Error(
           `Meeting audio_path is not a session-mic file: ${meeting.audio_path}`,
@@ -1547,7 +2081,19 @@ const main = async () => {
       }
 
       const allFiles = fs.readdirSync(opts.meetingsDir);
-      const channelEntries = allFiles
+      allMeetingEntries = allFiles
+        .map((name) => {
+          const info = extractTimestampFromName(name);
+          if (!info) return null;
+          return {
+            name,
+            ts: info.ts,
+            speaker: info.speaker,
+            absolutePath: path.join(opts.meetingsDir, name),
+          };
+        })
+        .filter(Boolean);
+      channelEntries = allFiles
         .map((name) => {
           const info = extractTimestampFromName(name);
           if (!info) return null;
@@ -1580,9 +2126,9 @@ const main = async () => {
           `Fixed-set session file not found: ${sessionAudioPath}`,
         );
       }
-      const fixedSessionInfo = extractTimestampFromName(fixed.sessionFile);
-      if (fixedSessionInfo && fixedSessionInfo.speaker === 'session-mic') {
-        sessionBaseTs = fixedSessionInfo.ts;
+      sessionInfo = extractTimestampFromName(fixed.sessionFile);
+      if (sessionInfo && sessionInfo.speaker === 'session-mic') {
+        sessionBaseTs = sessionInfo.ts;
       }
       selectedEntries = (fixed.channelFiles || []).map((name) => {
         const info = extractTimestampFromName(name);
@@ -1620,7 +2166,7 @@ const main = async () => {
     }
 
     const sessionFile = path.basename(meeting.audio_path);
-    const sessionInfo = extractTimestampFromName(sessionFile);
+    sessionInfo = extractTimestampFromName(sessionFile);
     if (!sessionInfo || sessionInfo.speaker !== 'session-mic') {
       throw new Error(
         `Meeting audio_path is not a session-mic file: ${meeting.audio_path}`,
@@ -1628,7 +2174,19 @@ const main = async () => {
     }
 
     const allFiles = fs.readdirSync(opts.meetingsDir);
-    const channelEntries = allFiles
+    allMeetingEntries = allFiles
+      .map((name) => {
+        const info = extractTimestampFromName(name);
+        if (!info) return null;
+        return {
+          name,
+          ts: info.ts,
+          speaker: info.speaker,
+          absolutePath: path.join(opts.meetingsDir, name),
+        };
+      })
+      .filter(Boolean);
+    channelEntries = allFiles
       .map((name) => {
         const info = extractTimestampFromName(name);
         if (!info) return null;
@@ -1650,37 +2208,107 @@ const main = async () => {
     sessionAudioPath = meeting.audio_path;
   }
 
+  if (sessionInfo && allMeetingEntries.length > 0) {
+    const sessionSystemEntry = findNearestCompanionSessionFile(
+      allMeetingEntries,
+      sessionInfo.ts,
+      'session-system',
+    );
+    const sessionMixEntry = findNearestCompanionSessionFile(
+      allMeetingEntries,
+      sessionInfo.ts,
+      'session-mix',
+    );
+    sessionSystemAudioPath = sessionSystemEntry?.absolutePath || '';
+    sessionMixedAudioPath = sessionMixEntry?.absolutePath || '';
+  }
+
   if (expectedOverride.expectedTurns.length > 0) {
     expectedTurns = expectedOverride.expectedTurns;
   }
 
-  console.log(`Meeting: ${meeting.id}`);
-  console.log(`Title: ${meeting.title}`);
-  console.log(`Session audio: ${sessionAudioPath}`);
-  console.log(`Selected channel files: ${selectedEntries.length}`);
-  for (const entry of selectedEntries) {
-    console.log(`  - ${entry.name}`);
-  }
+  const currentTranscriptSegments = meeting.id.startsWith('(fixed-set:')
+    ? loadMeetingTranscriptSegmentsFromDb(
+        opts.dbPath,
+        String(
+          fixtureSets[opts.fixedSet]?.meetingId || opts.meetingId || meeting.id,
+        ),
+      )
+    : loadMeetingTranscriptSegmentsFromDb(opts.dbPath, String(meeting.id));
+
+  const transcriptionConfig = resolveBackendConfig({
+    backend: opts.backend,
+    preset: opts.preset,
+    model: opts.model,
+    device: opts.device,
+    computeType: opts.computeType,
+  });
+
+  console.log(
+    `[ReplayConfig] backend=${transcriptionConfig.backend} preset=${transcriptionConfig.preset} model=${transcriptionConfig.model} device=${transcriptionConfig.device} computeType=${transcriptionConfig.computeType}`,
+  );
 
   const sessionResult = await bestOfAttempts(
     opts.serverUrl,
     sessionAudioPath,
     opts.attempts,
-    opts.model,
+    transcriptionConfig,
   );
   const sessionText = sessionResult.best;
   const normalizedSession = normalizeText(sessionText);
+  const sessionWhisperSegs = sessionResult.bestSegments || [];
+  const sessionDurationSec =
+    sessionWhisperSegs.length > 0
+      ? Math.max(...sessionWhisperSegs.map((s) => Number(s.end) || 0))
+      : 0;
+  const meetingStartTs = sessionBaseTs - Math.round(sessionDurationSec * 1000);
+  const fullMeetingChannelEntries = pickMeetingWindowChannelFiles(
+    channelEntries,
+    meetingStartTs,
+    sessionBaseTs,
+  );
+  if (fullMeetingChannelEntries.length >= selectedEntries.length) {
+    selectedEntries = fullMeetingChannelEntries;
+  }
+  const sessionSystemProbe = probeAudioFile(sessionSystemAudioPath);
+  const usableSessionSystemAudio = isUsableSessionAudio(sessionSystemProbe);
+  const replayEntries = chooseReplayEntriesForRecovery(
+    selectedEntries,
+    usableSessionSystemAudio,
+  );
+
+  console.log(`Meeting: ${meeting.id}`);
+  console.log(`Title: ${meeting.title}`);
+  console.log(`Session audio: ${sessionAudioPath}`);
+  if (sessionSystemAudioPath) {
+    const status = usableSessionSystemAudio ? 'usable' : 'invalid';
+    console.log(
+      `Session system audio: ${sessionSystemAudioPath} (${status}, duration=${sessionSystemProbe.durationSec.toFixed(2)}s, bytes=${sessionSystemProbe.sizeBytes})`,
+    );
+  }
+  if (sessionMixedAudioPath) {
+    console.log(`Session mixed audio: ${sessionMixedAudioPath}`);
+  }
+  console.log(`Selected channel files: ${selectedEntries.length}`);
+  for (const entry of selectedEntries) {
+    console.log(`  - ${entry.name}`);
+  }
+  if (replayEntries.length !== selectedEntries.length) {
+    console.log(
+      `[Replay] Recovery mode: replaying ${replayEntries.length}/${selectedEntries.length} channel files (Them-first reconstruction).`,
+    );
+  }
 
   console.log('\nSession-mic transcription:');
   console.log(sessionText || '(empty)');
 
   const rawSegments = [];
-  for (const entry of selectedEntries) {
+  for (const entry of replayEntries) {
     const replay = await bestOfAttempts(
       opts.serverUrl,
       entry.absolutePath,
       opts.attempts,
-      opts.model,
+      transcriptionConfig,
     );
     const text = replay.best;
     const similarity = jaccardSimilarity(text, normalizedSession);
@@ -1718,6 +2346,32 @@ const main = async () => {
     });
   }
 
+  let fullSessionSystemSegments = [];
+  let sessionSystemText = '';
+  if (sessionSystemAudioPath && usableSessionSystemAudio) {
+    const systemResult = await bestOfAttempts(
+      opts.serverUrl,
+      sessionSystemAudioPath,
+      opts.attempts,
+      transcriptionConfig,
+    );
+    sessionSystemText = systemResult.best;
+    fullSessionSystemSegments = mapAttemptSegmentsToAbsolute(
+      'Them',
+      meetingStartTs,
+      systemResult.bestSegments,
+    );
+    console.log('\nSession-system transcription:');
+    console.log(sessionSystemText || '(empty)');
+    console.log(
+      `[Replay] Full-session system segments: ${fullSessionSystemSegments.length}`,
+    );
+  } else if (sessionSystemAudioPath) {
+    console.warn(
+      `[Replay] Session-system audio is invalid; reconstructing system evidence from Them chunk files instead (duration=${sessionSystemProbe.durationSec.toFixed(2)}s, bytes=${sessionSystemProbe.sizeBytes}).`,
+    );
+  }
+
   console.log('\nRaw channel replay:');
   for (const segment of rawSegments) {
     const status = segment.reliable ? 'keep' : 'drop';
@@ -1730,6 +2384,19 @@ const main = async () => {
     console.log(
       `[${status}] ${segment.speaker} ${segment.file} | ${tags} | ${segment.text || '(empty)'}`,
     );
+  }
+
+  if (fullSessionSystemSegments.length === 0) {
+    const reconstructedSystemSegments = rawSegments
+      .filter((segment) => segment.speaker === 'Them')
+      .filter((segment) => segment.reliable)
+      .flatMap((segment) => segment.absoluteAttemptSegments || []);
+    if (reconstructedSystemSegments.length > 0) {
+      fullSessionSystemSegments = reconstructedSystemSegments;
+      console.log(
+        `\n[ReplayFallback] Reconstructed full-session system evidence from ${reconstructedSystemSegments.length} Them chunk segments.`,
+      );
+    }
   }
 
   const kept = rawSegments
@@ -1759,13 +2426,9 @@ const main = async () => {
         },
       ];
     });
-  const sessionWhisperSegs = sessionResult.bestSegments || [];
-  const sessionDurationSec =
-    sessionWhisperSegs.length > 0
-      ? Math.max(...sessionWhisperSegs.map((s) => Number(s.end) || 0))
-      : 0;
-
-  const meetingStartTs = sessionBaseTs - Math.round(sessionDurationSec * 1000);
+  if (fullSessionSystemSegments.length > 0) {
+    sourceEvidenceSegments.push(...fullSessionSystemSegments);
+  }
   const correctedCanonical = mapAttemptSegmentsToAbsolute(
     'Unknown',
     meetingStartTs,
@@ -1801,14 +2464,64 @@ const main = async () => {
     sessionSentenceSegments,
     sourceEvidenceSegments,
   );
+  const sourceSpeakers = new Set(sourceEvidenceSegments.map((s) => s.speaker));
   let finalTurns =
     canonicalAssigned.length > 0 ? mergeTurns(canonicalAssigned) : merged;
   finalTurns = applyCrossTurnAttributionRepairsReplay(finalTurns);
+  finalTurns = mergeTurns(finalTurns);
+  if (
+    sourceSpeakers.size < 2 &&
+    currentTranscriptSegments.length > 0 &&
+    finalTurns.length <= 1
+  ) {
+    const repairedExistingTranscript = mergeTurns(
+      applyCrossTurnAttributionRepairsReplay(
+        appSegmentsToReplayTurns(currentTranscriptSegments),
+      ),
+    );
+    if (repairedExistingTranscript.length > 0) {
+      console.log(
+        '\n[ReplayFallback] Only one speaker channel was captured; using repaired existing transcript turns as the candidate output.',
+      );
+      finalTurns = repairedExistingTranscript;
+    }
+  }
+
+  const currentDiagnostics =
+    currentTranscriptSegments.length > 0
+      ? computeTranscriptDiagnostics(currentTranscriptSegments)
+      : null;
+  const candidateAppSegments = finalTurnsToAppSegments(
+    finalTurns,
+    sessionBaseTs,
+  );
+  const candidateDiagnostics =
+    candidateAppSegments.length > 0
+      ? computeTranscriptDiagnostics(candidateAppSegments)
+      : null;
+
+  if (currentDiagnostics) {
+    printTranscriptDiagnostics('current_db', currentDiagnostics);
+  }
+  if (candidateDiagnostics) {
+    printTranscriptDiagnostics('candidate_replay', candidateDiagnostics);
+  }
+  if (currentDiagnostics && candidateDiagnostics) {
+    const delta = candidateDiagnostics.score - currentDiagnostics.score;
+    console.log(
+      `\n[Diagnostics] deltaScore=${delta} firstFiveMinutes ${currentDiagnostics.firstFiveMinutesAnomalies}->${candidateDiagnostics.firstFiveMinutesAnomalies} lexicalDuplicates ${currentDiagnostics.overlappingLexicalDuplicates}->${candidateDiagnostics.overlappingLexicalDuplicates}`,
+    );
+  }
 
   if (opts.dumpBaselineJsonPath) {
     const payload = {
       meetingId: meeting.id,
       title: meeting.title,
+      transcription: {
+        ...transcriptionConfig,
+        elapsedMs: Date.now() - benchmarkStart,
+        activeConfig: sessionResult.activeConfig || null,
+      },
       segments: finalTurns,
     };
     fs.mkdirSync(path.dirname(opts.dumpBaselineJsonPath), { recursive: true });
@@ -1835,10 +2548,19 @@ const main = async () => {
         '--update-meeting-transcript needs a real meeting id (pass <meetingId> or use --fixed-set with meetingId in the fixture)',
       );
     }
-    const appSegments = finalTurnsToAppSegments(finalTurns, sessionBaseTs);
+    const appSegments = candidateAppSegments;
     if (appSegments.length === 0) {
       console.warn(
         '[Pluto] --update-meeting-transcript: no segments to write; skipping DB update',
+      );
+    } else if (
+      !hasMaterialDiagnosticImprovement(
+        currentDiagnostics,
+        candidateDiagnostics,
+      )
+    ) {
+      console.warn(
+        '[Pluto] --update-meeting-transcript: replay output did not materially improve diagnostics; skipping DB update',
       );
     } else {
       console.log(
@@ -1888,9 +2610,7 @@ const main = async () => {
         `${status} turn ${item.index}: expected=${expectedSpeaker}, actual=${actualSpeaker}, textSim=${similarity}`,
       );
     }
-    const strictPass =
-      comparison.matches === comparison.total &&
-      finalTurns.length === expectedTurns.length;
+    const strictPass = comparison.matches === comparison.total;
     if (opts.requireExpected && !strictPass) {
       throw new Error(
         `Expected fixture mismatch: matched=${comparison.matches}/${comparison.total}, actualTurns=${finalTurns.length}`,

@@ -10,7 +10,16 @@ export type WhisperDevice = 'cpu' | 'cuda' | 'mps';
 
 export type WhisperComputeType = 'float16' | 'float32' | 'int8';
 
+export type TranscriptionBackend =
+  | 'whisperx_current'
+  | 'whisperx_tuned'
+  | 'local_alt_apple_silicon';
+
+export type TranscriptionPreset = 'balanced' | 'accuracy_first';
+
 export interface TranscriptionSettings {
+  backend?: TranscriptionBackend | null;
+  preset?: TranscriptionPreset | null;
   model?: WhisperModel | null;
   device?: WhisperDevice | null;
   computeType?: WhisperComputeType | null;
@@ -20,11 +29,28 @@ export interface TranscriptionSettings {
 export const DEFAULT_TRANSCRIPTION_SETTINGS: Required<
   Omit<TranscriptionSettings, 'language'>
 > & { language: string } = {
+  backend: 'whisperx_current',
+  preset: 'balanced',
   model: 'small',
   device: 'cpu',
   computeType: 'int8',
   language: 'en',
 };
+
+export const TRANSCRIPTION_BACKEND_LABELS: Record<
+  TranscriptionBackend,
+  string
+> = {
+  whisperx_current: 'WhisperX Current',
+  whisperx_tuned: 'WhisperX Tuned',
+  local_alt_apple_silicon: 'Local Alt (Apple Silicon)',
+};
+
+export const TRANSCRIPTION_PRESET_LABELS: Record<TranscriptionPreset, string> =
+  {
+    balanced: 'Balanced',
+    accuracy_first: 'Accuracy First',
+  };
 
 export const resolveTranscriptionLanguage = (
   language?: string | null,
@@ -33,10 +59,30 @@ export const resolveTranscriptionLanguage = (
   return trimmed.length > 0 ? trimmed : DEFAULT_TRANSCRIPTION_SETTINGS.language;
 };
 
+export const resolveTranscriptionBackend = (
+  backend?: string | null,
+): TranscriptionBackend => {
+  return backend === 'whisperx_tuned' ||
+    backend === 'local_alt_apple_silicon' ||
+    backend === 'whisperx_current'
+    ? backend
+    : 'whisperx_current';
+};
+
+export const resolveTranscriptionPreset = (
+  preset?: string | null,
+): TranscriptionPreset => {
+  return preset === 'accuracy_first' || preset === 'balanced'
+    ? preset
+    : 'balanced';
+};
+
 export const resolveTranscriptionSettings = (
   settings?: TranscriptionSettings | null,
 ): Required<TranscriptionSettings> => {
   return {
+    backend: resolveTranscriptionBackend(settings?.backend),
+    preset: resolveTranscriptionPreset(settings?.preset),
     model: settings?.model ?? DEFAULT_TRANSCRIPTION_SETTINGS.model,
     device: settings?.device ?? DEFAULT_TRANSCRIPTION_SETTINGS.device,
     computeType:

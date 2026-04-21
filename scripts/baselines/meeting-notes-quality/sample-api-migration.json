@@ -1,0 +1,95 @@
+{
+  "meeting_id": "sample-api-migration",
+  "label": "API migration accuracy sample",
+  "reviewed_at": "2026-04-21",
+  "reviewer_notes": "Human-reviewed sample fixture used for regression scoring of decisions, action items, and unsupported inferences.",
+  "transcript": [
+    "Sarah: We discussed GraphQL as one option, but we did not choose it.",
+    "Deepak: Agreed, we will use REST for the rollout.",
+    "Sarah: I'll send the rollout email.",
+    "Deepak: We still need to figure out the mobile SDK impact."
+  ],
+  "generated_analysis": {
+    "analysis_schema_version": 3,
+    "overview": "The team aligned on REST for the rollout, captured one concrete follow-up, and left the mobile SDK impact unresolved.",
+    "topics": [
+      {
+        "title": "API migration",
+        "summary": "GraphQL was discussed but not selected. The team agreed to use REST for the rollout.",
+        "key_points": [
+          {
+            "speaker": "Sarah",
+            "text": "GraphQL remained only an option under discussion."
+          }
+        ],
+        "decisions": [
+          {
+            "text": "Use REST for the rollout"
+          }
+        ],
+        "action_items": [
+          {
+            "text": "Send rollout email",
+            "assignee": "Sarah"
+          }
+        ],
+        "open_questions": ["How the mobile SDK is affected by the rollout."],
+        "transcript_range": [0, 3]
+      }
+    ],
+    "all_action_items": [
+      {
+        "text": "Send rollout email",
+        "assignee": "Sarah",
+        "topic": "API migration"
+      }
+    ],
+    "all_decisions": [
+      {
+        "text": "Use REST for the rollout"
+      }
+    ],
+    "meeting_type": "team_sync",
+    "quality": {
+      "format_pass": true,
+      "retry_count": 0,
+      "fallback_used": false,
+      "issues": []
+    },
+    "generation_metadata": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "generation_path": "single_pass",
+      "prompt_version": "notes-v4",
+      "generated_at": "2026-04-21T12:00:00.000Z",
+      "error_categories": []
+    }
+  },
+  "expected": {
+    "summary_must_include": ["aligned on REST", "mobile SDK impact unresolved"],
+    "summary_must_exclude": ["GraphQL was selected"],
+    "decisions": {
+      "must_include": ["Use REST for the rollout"],
+      "must_exclude": ["Use GraphQL for the rollout"]
+    },
+    "action_items": {
+      "must_include": [
+        {
+          "text": "Send rollout email"
+        }
+      ],
+      "must_exclude": ["Bob owns the rollout email"]
+    },
+    "attributions": [
+      {
+        "speaker": "Sarah",
+        "text": "GraphQL remained only an option"
+      }
+    ],
+    "must_include_topics": ["API migration"],
+    "unsupported_inference_must_exclude": [
+      "next Tuesday",
+      "Bob owns the rollout email"
+    ]
+  }
+}

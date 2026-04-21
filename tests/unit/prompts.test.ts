@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getEntitiesPrompt,
+  getStructuredAnalysisPrompt,
   getSummaryPrompt,
   getSummaryRepairPrompt,
+  getTopicAnalysisPrompt,
   getValueSignalsPrompt,
 } from '../../electron/llm/prompts';
 
@@ -21,11 +23,15 @@ describe('getSummaryPrompt', () => {
     expect(prompt).toContain(
       'forbidden: "Observation:", "Why it matters:", "Supporting detail:", "Evidence:", "Pluto use:"',
     );
+    expect(prompt).toContain('Treat the transcript as the source of truth.');
+    expect(prompt).toContain(
+      'Do not convert brainstorming, questions, or suggestions into decisions.',
+    );
     expect(prompt).toContain('Action Items');
     expect(prompt).toContain('Include only explicit committed next steps.');
     expect(prompt).toContain('Decisions');
     expect(prompt).toContain(
-      'List explicit decisions and implemented choices.',
+      'List explicit decisions and implemented choices only.',
     );
   });
 
@@ -56,6 +62,12 @@ describe('getSummaryRepairPrompt', () => {
     expect(prompt).toContain(
       'Return only the corrected markdown with the required sections.',
     );
+    expect(prompt).toContain(
+      'preserve the difference between decisions, proposals, and unresolved questions',
+    );
+    expect(prompt).toContain(
+      'Keep only explicit committed next steps in Action Items.',
+    );
     expect(prompt).toContain('## Summary');
     expect(prompt).toContain('## Key Points');
     expect(prompt).toContain('## Action Items');
@@ -79,6 +91,33 @@ describe('getValueSignalsPrompt', () => {
     );
     expect(prompt).toContain('normalize to lowercase kebab-case');
     expect(prompt).toContain('max 8');
+  });
+});
+
+describe('v3 accuracy prompts', () => {
+  it('requires explicit resolution language before classifying decisions', () => {
+    const prompt = getStructuredAnalysisPrompt(
+      'Speaker A: We might use GraphQL. Speaker B: Let us do REST for now.',
+    );
+
+    expect(prompt).toContain('Only mark something as a decision');
+    expect(prompt).toContain('explicit resolution language');
+    expect(prompt).toContain('agreed');
+    expect(prompt).toContain('approved');
+    expect(prompt).toContain('decided');
+  });
+
+  it('requires explicit commitment language before classifying action items', () => {
+    const prompt = getTopicAnalysisPrompt(
+      'API migration',
+      'Speaker A: I can take that. Speaker B: Maybe we should also test mobile.',
+    );
+
+    expect(prompt).toContain('Only include an action item');
+    expect(prompt).toContain('explicit commitment');
+    expect(prompt).toContain("I'll");
+    expect(prompt).toContain("we'll");
+    expect(prompt).toContain('do not turn suggestions');
   });
 });
 

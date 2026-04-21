@@ -1,93 +1,218 @@
-import {
-  searchMeetingsFts,
-  searchEntitiesWithMeetingContext,
-  walkEntityGraph,
-} from '../db';
+import { searchMeetingsFts, walkEntityGraph } from '../db';
 
-import type { ParsedQuery, RetrievalResult, MidFrontmatter } from './intelligenceTypes';
+import type {
+  MidFrontmatter,
+  ParsedQuery,
+  RetrievalResult,
+} from './intelligenceTypes';
 
-// We import the llm provider factory
-import { getProvider, getAllSettings } from '../llm/factory';
 import * as dbModule from '../db';
-import { getSynonymExpansionPrompt } from './queryPrompts';
+// We import the llm provider factory
+import { getAllSettings, getProvider } from '../llm/factory';
+import { getIntentClassificationPrompt } from './queryPrompts';
 
 /**
  * Parses a query string to extract intent, entities and semantic bounds.
  */
 export const parseQuery = async (text: string): Promise<ParsedQuery> => {
   const lowerText = text.toLowerCase();
-  
+
   // Basic tokenization
   const tokens = text.split(/[\s,.;:!?]+/).filter((w) => w.length > 2);
-  // Basic keyword extraction (exclude stopwords like "what", "is", "the", etc.)
-  const stopwords = new Set(['what', 'is', 'the', 'of', 'in', 'on', 'where', 'when', 'how', 'why', 'did', 'does', 'do', 'a', 'an']);
+  // Basic keyword extraction (exclude stopwords)
+  const stopwords = new Set([
+    'what',
+    'is',
+    'the',
+    'of',
+    'in',
+    'on',
+    'where',
+    'when',
+    'how',
+    'why',
+    'did',
+    'does',
+    'do',
+    'a',
+    'an',
+    'can',
+    'you',
+    'tell',
+    'me',
+    'more',
+    'details',
+    'about',
+    'please',
+    'share',
+    'give',
+    'some',
+    'information',
+    'know',
+    'find',
+    'search',
+    'show',
+    'meeting',
+    'meetings',
+    'call',
+    'calls',
+    'recorded',
+    'recording',
+  ]);
   const keywords = tokens.filter((w) => !stopwords.has(w.toLowerCase()));
 
-  // Entity extraction and temporal is simplified here,
-  // could use LLM for accurate 0-shot parsing
-  const entityMentions = searchEntitiesWithMeetingContext(text)
-    .map((e) => e.id)
-    .slice(0, 3); // top 3 entities
+  // Sanitize text for SQLite FTS5 MATCH queries
+  const sanitizeForFts = (str: string) =>
+    str.replace(/["*()\[\]{}^:~?!,.\-]/g, ' ').trim();
+  const cleanJsonText = (value: string): string => {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('```')) {
+      return trimmed
+        .replace(/^```(?:json)?\n?/, '')
+        .replace(/\n?```$/, '')
+        .trim();
+    }
+    return trimmed;
+  };
 
+  // 1. Fast-path heuristic for conversational greetings
+  const trimmed = lowerText.trim();
+  if (
+    /^hi|hello|hey|thanks|thank you|who are you|what can you do|what is this/i.test(
+      trimmed,
+    )
+  ) {
+    console.log('[QueryEngine] Greeting detected, providing canned response');
+
+    let cannedResponse =
+      "Hi! I'm Pluto, your AI meeting assistant. Ask me anything about your meeting history.";
+    if (/^who are you|what is this/i.test(trimmed)) {
+      cannedResponse =
+        "I'm Pluto, an AI meeting intelligence assistant. I can help you search through your meeting history, summarize discussions, and track action items.";
+    } else if (/^what can you do/i.test(trimmed)) {
+      cannedResponse =
+        'I can extract entities, search through meeting transcripts using semantic retrieval, and answer factual questions using your recording history as context.';
+    } else if (/^thanks|thank you/i.test(trimmed)) {
+      cannedResponse = "You're welcome! Let me know if you need anything else.";
+    }
+
+    return {
+      keywords: [],
+      expanded_keywords: [],
+      entity_mentions: [],
+      temporal_range: null,
+      intent: 'conversational',
+      cannedResponse,
+    };
+  }
+
+  // 2. Intent Classification & Synonym Expansion via LLM
   let intent: ParsedQuery['intent'] = 'factual';
-  if (lowerText.includes('when') || lowerText.includes('date') || lowerText.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})\b/)) {
-    intent = 'temporal';
+  let expanded_keywords: string[] = [];
+
+  try {
+    const settings = await getAllSettings(dbModule);
+    const provider = await getProvider(settings);
+    const prompt = getIntentClassificationPrompt(text);
+
+    console.log('[QueryEngine] Classifying intent via LLM...');
+    const response = await provider.classifyQueryIntent(prompt);
+
+    // Parse JSON with cleaning to handle markdown wrappers (common in phi4-mini)
+    const cleanedResponse =
+      typeof response === 'string' ? cleanJsonText(response) : response;
+    const parsed =
+      typeof cleanedResponse === 'string'
+        ? JSON.parse(cleanedResponse)
+        : cleanedResponse;
+    if (parsed.intent) {
+      intent = parsed.intent as ParsedQuery['intent'];
+    }
+    if (Array.isArray(parsed.expanded_keywords)) {
+      expanded_keywords = parsed.expanded_keywords;
+    }
+    console.log(
+      `[QueryEngine] LLM Classification: ${intent}, Keywords: ${expanded_keywords.join(', ')}`,
+    );
+  } catch (err) {
+    console.warn(
+      '[QueryEngine] Failed to classify intent via LLM, falling back to heuristics:',
+      err,
+    );
+    if (
+      lowerText.includes('when') ||
+      lowerText.includes('date') ||
+      lowerText.match(
+        /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})\b/,
+      )
+    ) {
+      intent = 'temporal';
+    } else if (lowerText.includes('compare') || lowerText.includes('vs')) {
+      intent = 'comparative';
+    } else {
+      intent = 'factual';
+    }
   }
-  if (lowerText.includes('compare') || lowerText.includes('vs')) {
-    intent = 'comparative';
-  }
+
+  // Entity extraction via FTS against keywords (more reliable than full query)
+  const entitySearchStr = keywords
+    .map((k) => `"${sanitizeForFts(k)}"`)
+    .join(' OR ');
+  const entityMentions =
+    intent !== 'conversational' && entitySearchStr.length > 0
+      ? dbModule
+          .searchEntitiesWithMeetingContext(entitySearchStr)
+          .map((e) => e.id)
+          .slice(0, 3) // top 3 entities
+      : [];
 
   return {
     keywords,
-    expanded_keywords: [],
+    expanded_keywords,
     entity_mentions: entityMentions,
     temporal_range: null,
     intent,
   };
 };
 
-/**
- * Uses LLM to expand synonyms within a token limit (~100 tokens).
- */
-export const expandSynonyms = async (keywords: string[]): Promise<string[]> => {
-  if (keywords.length === 0) return [];
-  try {
-    const prompt = getSynonymExpansionPrompt(keywords);
-    const settings = await getAllSettings(dbModule);
-    const provider = await getProvider(settings);
-    
-    // Provider signature: synthesizeKnowledgeDocument(prompt)
-    const response = await provider.synthesizeKnowledgeDocument(prompt);
-    
-    return response
-      .split(',')
-      .map((k: string) => k.trim())
-      .filter((k) => k.length > 0 && k.toLowerCase() !== 'and');
-  } catch (error) {
-    console.warn('[QueryEngine] Failed to expand synonyms:', error);
-    return []; // Return empty on fallback to ensure robustness
-  }
-};
-
 const calculateRecencyDecay = (dateStr: string | null | undefined): number => {
   if (!dateStr) return 0.5;
-  const daysAgo = (Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24);
+  const daysAgo =
+    (Date.now() - new Date(dateStr).getTime()) / (1000 * 60 * 60 * 24);
   return 1 / (1 + Math.max(0, daysAgo) * 0.1);
 };
 
 /**
  * Core Retrieval logic: Vectorless RAG
  */
-export const retrieveContext = async (parsed: ParsedQuery): Promise<RetrievalResult[]> => {
+export const retrieveContext = async (
+  parsed: ParsedQuery,
+): Promise<RetrievalResult[]> => {
+  if (parsed.intent === 'conversational') {
+    return [];
+  }
+
   const startTime = Date.now();
   const TIME_BUDGET = 1000; // 1 second
 
   const resultsMap: Record<string, RetrievalResult> = {};
-  
-  // 1. Synonym Expansion
-  parsed.expanded_keywords = await expandSynonyms(parsed.keywords);
-  const allKeywords = [...parsed.keywords, ...parsed.expanded_keywords];
-  const ftsQueryStr = allKeywords.map((k) => `"${k}"`).join(' OR ');
+
+  // Sanitize keywords for SQLite FTS MATCH syntax to prevent SQL crashes
+  const sanitizeForFts = (str: string) =>
+    str.replace(/["*()\[\]{}^:~?!,.\-]/g, ' ').trim();
+  const allKeywords = [...parsed.keywords, ...(parsed.expanded_keywords || [])]
+    .map(sanitizeForFts)
+    .filter((k) => k.length > 0);
+
+  const ftsQueryStr = allKeywords
+    .map((k) => {
+      const parts = k.split(/\s+/).filter((p) => p.length > 0);
+      if (parts.length > 1) {
+        return '(' + parts.map((p) => `"${p}"`).join(' AND ') + ')';
+      }
+      return `"${parts[0]}"`;
+    })
+    .join(' OR ');
 
   // 2. FTS Search
   if (ftsQueryStr) {
@@ -95,7 +220,7 @@ export const retrieveContext = async (parsed: ParsedQuery): Promise<RetrievalRes
     meetings.forEach((m, idx) => {
       // rank is an implicit SQLite FTS score, we mock it via idx if it's not exposed
       // Assuming return order is rank order
-      const fts_rank = 1.0 / (idx + 1); 
+      const fts_rank = 1.0 / (idx + 1);
       let mid: MidFrontmatter | null = null;
       try {
         const midJsonStr = (m as any).mid_json;
@@ -106,10 +231,29 @@ export const retrieveContext = async (parsed: ParsedQuery): Promise<RetrievalRes
         // ignore JSON errors
       }
 
+      let evidence_text = `[FTS Match]: ${m.snippet || 'No direct match snippet'}\n`;
+      if (
+        typeof m.enhanced_notes === 'string' &&
+        m.enhanced_notes.length > 50
+      ) {
+        evidence_text +=
+          `[Notes]: ` + m.enhanced_notes.substring(0, 800) + '...';
+      } else if (typeof (m as any).analysis_json === 'string') {
+        try {
+          const analysis = JSON.parse((m as any).analysis_json);
+          if (analysis.summary) {
+            evidence_text +=
+              `[Summary]: ` +
+              String(analysis.summary).substring(0, 800) +
+              '...';
+          }
+        } catch (e) {}
+      }
+
       resultsMap[m.id as string] = {
         meeting_id: m.id as string,
         mid,
-        evidence_text: m.snippet || m.title,
+        evidence_text,
         score: fts_rank * 0.4,
         score_breakdown: {
           fts_rank,
@@ -121,49 +265,108 @@ export const retrieveContext = async (parsed: ParsedQuery): Promise<RetrievalRes
     });
   }
 
-  // 3. Graph Walk (BFS 2-hop)
-  let walkedEntityCount = 0;
+  const walkedMeetingCount = new Map<
+    string,
+    { proximity: number; count: number }
+  >();
+
+  // 3. Structural Search via Entity Graph (BFS 1-2 hops)
   for (const entityId of parsed.entity_mentions) {
     if (Date.now() - startTime > TIME_BUDGET) break;
-    
-    const walkResults = walkEntityGraph(entityId, 2, { state: 'confirmed' });
-    
-    // Integrate walkResults scores into resultsMap (can be implemented later)
-    walkedEntityCount += walkResults.length;
+
+    // Find meetings directly linked to this entity first
+    const directMeetings = dbModule.getMeetingsForEntity(entityId);
+    directMeetings.forEach((dm) => {
+      const existing = walkedMeetingCount.get(dm.meeting_id) || {
+        proximity: 0,
+        count: 0,
+      };
+      walkedMeetingCount.set(dm.meeting_id, {
+        proximity: Math.max(existing.proximity, 1.0), // direct hit
+        count: existing.count + 1,
+      });
+    });
+
+    // Walk the graph for related entities
+    const relatedEntities = walkEntityGraph(entityId, 2, {
+      state: 'confirmed',
+    });
+    for (const rel of relatedEntities) {
+      if (Date.now() - startTime > TIME_BUDGET) break;
+
+      const relatedMeetings = dbModule.getMeetingsForEntity(rel.id);
+      relatedMeetings.forEach((rm) => {
+        const existing = walkedMeetingCount.get(rm.meeting_id) || {
+          proximity: 0,
+          count: 0,
+        };
+        walkedMeetingCount.set(rm.meeting_id, {
+          proximity: Math.max(existing.proximity, 0.5), // indirect (graph-walked) hit
+          count: existing.count + 1,
+        });
+      });
+    }
   }
 
-  // Debug logging
-  if (process.env.PLUTO_DEBUG_SCORING === '1') {
-    console.log('[QueryEngine] Graph walk examined entities: ', walkedEntityCount);
+  // 4. Merge Graph results into resultsMap
+  for (const [mId, stats] of walkedMeetingCount.entries()) {
+    if (resultsMap[mId]) {
+      // Boost existing FTS result
+      resultsMap[mId].score_breakdown.graph_proximity = stats.proximity;
+      resultsMap[mId].score_breakdown.mention_weight = Math.min(
+        1,
+        stats.count * 0.2,
+      );
+    } else {
+      // Add new structural hit
+      const m = dbModule.getMeeting(mId) as
+        | dbModule.PersistedMeeting
+        | undefined;
+      if (!m) continue;
+
+      let mid: MidFrontmatter | null = null;
+      try {
+        if (typeof m.mid_json === 'string') mid = JSON.parse(m.mid_json);
+      } catch {
+        // failed mid parse
+      }
+
+      resultsMap[mId] = {
+        meeting_id: mId,
+        mid,
+        evidence_text:
+          m.title +
+          (m.user_notes ? ` - ${m.user_notes.substring(0, 200)}` : ''),
+        score: 0,
+        score_breakdown: {
+          fts_rank: 0,
+          graph_proximity: stats.proximity,
+          recency_decay: calculateRecencyDecay(m.started_at),
+          mention_weight: Math.min(1, stats.count * 0.2),
+        },
+      };
+    }
   }
 
-  // 4. Time filter processing
-  // (Left out for MVP, as getTemporalMeetings takes range but isn't strictly required for MVP)
+  // 5. Time filter processing
+  // (Range logic can be added here if temporal_range is set)
 
-  // 5. Result Fusion
+  // 6. Result Fusion & Final Scoring
   const finalResults = Object.values(resultsMap).map((res) => {
-    // Incorporate mention counts from entities if we cross-referenced
-    // Final composite score calculation:
-    res.score = 
-      res.score_breakdown.fts_rank * 0.4 + 
-      res.score_breakdown.graph_proximity * 0.3 + 
-      res.score_breakdown.recency_decay * 0.2 + 
+    // Composite weights from design spec:
+    // fts: 0.4, graph: 0.3, recency: 0.2, mentions: 0.1
+    res.score =
+      res.score_breakdown.fts_rank * 0.4 +
+      res.score_breakdown.graph_proximity * 0.3 +
+      res.score_breakdown.recency_decay * 0.2 +
       res.score_breakdown.mention_weight * 0.1;
-      
+
     return res;
   });
 
-  // Sort descending by score and pick top K=10
-  finalResults.sort((a, b) => b.score - a.score);
-  
-  if (process.env.PLUTO_DEBUG_SCORING === '1') {
-    console.table(finalResults.map(r => ({
-      MeetingID: r.meeting_id,
-      Score: r.score.toFixed(3),
-      FTS: r.score_breakdown.fts_rank.toFixed(3),
-      Recency: r.score_breakdown.recency_decay.toFixed(3)
-    })));
-  }
+  // Filter out low-relevance noise and return top K=6 to keep the prompt size manageable
+  const filteredResults = finalResults.filter((res) => res.score > 0.05);
+  filteredResults.sort((a, b) => b.score - a.score);
 
-  return finalResults.slice(0, 10);
+  return filteredResults.slice(0, 6);
 };

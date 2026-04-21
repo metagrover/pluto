@@ -23,7 +23,6 @@ import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
 
 // Overlays
-import { AskPlutoOverlay } from './components/overlays/AskPlutoOverlay';
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { SettingsOverlay } from './components/overlays/SettingsOverlay';
@@ -31,6 +30,8 @@ import { SettingsOverlay } from './components/overlays/SettingsOverlay';
 // Types
 import type { Meeting } from './types';
 import type {
+  TranscriptionBackend,
+  TranscriptionPreset,
   WhisperComputeType,
   WhisperDevice,
   WhisperModel,
@@ -50,7 +51,7 @@ function App() {
     string | number | null
   >(null);
   const [activeTab, setActiveTab] = useState<
-    'hub' | 'people' | 'projects' | 'wiki' | 'ask'
+    'hub' | 'people' | 'projects' | 'wiki'
   >('hub');
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [searchVisible, setSearchVisible] = useState(false);
@@ -70,6 +71,10 @@ function App() {
   const [claudeApiKey, setClaudeApiKey] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const [transcriptionBackend, setTranscriptionBackend] =
+    useState<TranscriptionBackend>('whisperx_current');
+  const [transcriptionPreset, setTranscriptionPreset] =
+    useState<TranscriptionPreset>('balanced');
   const [whisperModel, setWhisperModel] = useState<WhisperModel>('small');
   const [whisperDevice, setWhisperDevice] = useState<WhisperDevice>('cpu');
   const [whisperComputeType, setWhisperComputeType] =
@@ -271,6 +276,16 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'theme').then((val) => {
       if (val) setTheme(val as 'light' | 'dark' | 'system');
     });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'transcription_backend')
+      .then((val) => {
+        if (val) setTranscriptionBackend(val as TranscriptionBackend);
+      });
+    window.ipcRenderer
+      .invoke('GET_SETTING', 'transcription_preset')
+      .then((val) => {
+        if (val) setTranscriptionPreset(val as TranscriptionPreset);
+      });
     window.ipcRenderer.invoke('GET_SETTING', 'whisper_model').then((val) => {
       if (val) setWhisperModel(val as WhisperModel);
     });
@@ -313,8 +328,7 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setActiveTab('ask');
-        setSelectedMeetingId(null);
+        setAskPlutoVisible(true);
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
@@ -510,6 +524,8 @@ function App() {
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
           transcriptionSettings={{
+            backend: transcriptionBackend,
+            preset: transcriptionPreset,
             model: whisperModel,
             device: whisperDevice,
             computeType: whisperComputeType,
@@ -638,10 +654,7 @@ function App() {
             <div className="flex items-center gap-4">
               <button
                 type="button"
-                onClick={() => {
-                  setActiveTab('ask');
-                  setSelectedMeetingId(null);
-                }}
+                onClick={() => setAskPlutoVisible(true)}
                 className="h-10 px-5 rounded-full bg-white dark:bg-pro-surface border border-pro-border/40 dark:border-pro-border/50 shadow-sm flex items-center gap-3 hover:border-pro-accent/40 transition-all active-push group"
               >
                 <span className="text-sm">🧠</span>
@@ -737,15 +750,6 @@ function App() {
                   onOpenProjectsTab={() => setActiveTab('projects')}
                 />
               </div>
-            ) : activeTab === 'ask' ? (
-              <div className="max-w-5xl mx-auto w-full h-full animate-in pb-12 pt-4">
-                <AskPluto
-                  onOpenMeeting={(meetingId) => {
-                    setSelectedMeetingId(meetingId);
-                    setActiveTab('hub');
-                  }}
-                />
-              </div>
             ) : (
               <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pro-accent/5 rounded-full blur-[120px] pointer-events-none" />
@@ -795,13 +799,13 @@ function App() {
       )}
 
       {/* Global Overlays */}
-      <AskPlutoOverlay
-        askPlutoVisible={askPlutoVisible}
-        setAskPlutoVisible={setAskPlutoVisible}
-        query={query}
-        setQuery={setQuery}
-        plutoResponse={plutoResponse}
-        setPlutoResponse={setPlutoResponse}
+      <AskPluto
+        visible={askPlutoVisible}
+        onClose={() => setAskPlutoVisible(false)}
+        onOpenMeeting={(meetingId) => {
+          setSelectedMeetingId(meetingId);
+          setAskPlutoVisible(false);
+        }}
       />
 
       <SearchOverlay
@@ -828,6 +832,10 @@ function App() {
         setClaudeApiKey={setClaudeApiKey}
         ollamaModel={ollamaModel}
         setOllamaModel={setOllamaModel}
+        transcriptionBackend={transcriptionBackend}
+        setTranscriptionBackend={setTranscriptionBackend}
+        transcriptionPreset={transcriptionPreset}
+        setTranscriptionPreset={setTranscriptionPreset}
         autoEndEnabled={autoEndEnabled}
         setAutoEndEnabled={setAutoEndEnabled}
         whisperModel={whisperModel}

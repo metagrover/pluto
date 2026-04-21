@@ -155,6 +155,93 @@ describe('speakerAttribution utilities', () => {
     expect(themSegments[0].text).toContain('create a company');
   });
 
+  it('relabels sandwiched lowercase continuation fragments to the surrounding speaker', () => {
+    const repaired = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 273.59,
+        endTime: 276.26,
+        speaker: 'Them',
+        text: 'Just Dev. UAT, you',
+      },
+      {
+        startTime: 276.28,
+        endTime: 290.51,
+        speaker: 'Me',
+        text: "would have to update. There's a release branch for this sprint. I think that's Q2. Or maybe there's a",
+      },
+      {
+        startTime: 290.53,
+        endTime: 291.71,
+        speaker: 'Them',
+        text: 'conference. Is this Q2.2 or Q2.1?',
+      },
+    ]);
+
+    expect(repaired.map((segment) => segment.speaker)).toEqual([
+      'Them',
+      'Them',
+      'Them',
+    ]);
+  });
+
+  it('does not relabel sandwiched clarification questions that belong to Me', () => {
+    const repaired = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 461.27,
+        endTime: 461.53,
+        speaker: 'Them',
+        text: 'What',
+      },
+      {
+        startTime: 462.09,
+        endTime: 466.67,
+        speaker: 'Me',
+        text: 'issues are you seeing? Oh, was Adam mentioning?',
+      },
+      {
+        startTime: 468.28,
+        endTime: 487.93,
+        speaker: 'Them',
+        text: "Honestly, I'm not sure. Regarding memories, maybe that's it.",
+      },
+    ]);
+
+    expect(repaired.map((segment) => segment.speaker)).toEqual([
+      'Them',
+      'Me',
+      'Them',
+    ]);
+  });
+
+  it('does not relabel a complete standalone statement without continuation cues', () => {
+    const repaired = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 0,
+        endTime: 1.2,
+        speaker: 'Them',
+        text: 'We can ship that Friday.',
+      },
+      {
+        startTime: 1.3,
+        endTime: 4.5,
+        speaker: 'Me',
+        text: 'I reviewed the dashboard this morning.',
+      },
+      {
+        startTime: 4.6,
+        endTime: 6.8,
+        speaker: 'Them',
+        text: 'Then I will send the rollout note.',
+      },
+    ]);
+
+    expect(repaired.map((segment) => segment.speaker)).toEqual([
+      'Them',
+      'Me',
+      'Them',
+    ]);
+  });
+
   it('strips likely Me bleed fragments when overlapping Them dominates', () => {
     const stripped = stripLikelyMeBleedSegments([
       {
@@ -504,6 +591,133 @@ describe('speakerAttribution utilities', () => {
         text: 'Yes.',
       },
     ]);
+    expect(out[1].speaker).toBe('Them');
+  });
+
+  it('applyCrossTurnAttributionRepairs alternates opening greeting exchange', () => {
+    const out = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 1.5,
+        endTime: 2.0,
+        speaker: 'Me',
+        text: 'Hey Arnold.',
+      },
+      {
+        startTime: 10.0,
+        endTime: 10.6,
+        speaker: 'Me',
+        text: 'Hey Deepak.',
+      },
+      {
+        startTime: 12.3,
+        endTime: 13.0,
+        speaker: 'Me',
+        text: "How's it going?",
+      },
+      {
+        startTime: 15.4,
+        endTime: 17.2,
+        speaker: 'Me',
+        text: 'Not bad. Just?',
+      },
+    ]);
+
+    expect(out[1].speaker).toBe('Them');
+    expect(out[3].speaker).toBe('Them');
+  });
+
+  it('applyCrossTurnAttributionRepairs flips short answer after Me question', () => {
+    const out = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 0,
+        endTime: 2.1,
+        speaker: 'Me',
+        text: 'How is the rollout going?',
+      },
+      {
+        startTime: 2.3,
+        endTime: 3.8,
+        speaker: 'Me',
+        text: 'Pretty good so far.',
+      },
+    ]);
+
+    expect(out[1].speaker).toBe('Them');
+  });
+
+  it('applyCrossTurnAttributionRepairs repairs sandwiched continuation fragment', () => {
+    const out = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 60.7,
+        endTime: 69.2,
+        speaker: 'Them',
+        text: 'I am trying to fix our API',
+      },
+      {
+        startTime: 69.3,
+        endTime: 74.7,
+        speaker: 'Me',
+        text: 'instrumentation on the issues. So just trying to',
+      },
+      {
+        startTime: 75.0,
+        endTime: 78.2,
+        speaker: 'Them',
+        text: 'go through the motions of engaging SRE.',
+      },
+    ]);
+
+    expect(out[1].speaker).toBe('Them');
+  });
+
+  it('applyCrossTurnAttributionRepairs keeps follow-up continuation with remote answer', () => {
+    const out = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 12.3,
+        endTime: 13.0,
+        speaker: 'Me',
+        text: "How's it going?",
+      },
+      {
+        startTime: 15.4,
+        endTime: 17.2,
+        speaker: 'Me',
+        text: 'Not bad.',
+      },
+      {
+        startTime: 19.0,
+        endTime: 22.2,
+        speaker: 'Me',
+        text: 'Just stretched too thin but trying to keep up.',
+      },
+    ]);
+
+    expect(out[1].speaker).toBe('Them');
+    expect(out[2].speaker).toBe('Them');
+  });
+
+  it('applyCrossTurnAttributionRepairs keeps split RSAMS answer with Them', () => {
+    const out = applyCrossTurnAttributionRepairs([
+      {
+        startTime: 175.0,
+        endTime: 180.0,
+        speaker: 'Them',
+        text: 'Or UAT, we should have been good last week.',
+      },
+      {
+        startTime: 181.5,
+        endTime: 184.9,
+        speaker: 'Me',
+        text: "I made some RSAMS on Friday. I'm not sure if",
+      },
+      {
+        startTime: 185.2,
+        endTime: 189.2,
+        speaker: 'Them',
+        text: "they've gone through yet. But I can check on that as well.",
+      },
+    ]);
+
     expect(out[1].speaker).toBe('Them');
   });
 

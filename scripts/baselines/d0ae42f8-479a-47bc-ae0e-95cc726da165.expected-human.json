@@ -1,0 +1,53 @@
+{
+  "meetingId": "d0ae42f8-479a-47bc-ae0e-95cc726da165",
+  "title": "Advisor Agent Deployment — attribution target",
+  "segments": [
+    {
+      "speaker": "Me",
+      "text": "Hey Arnold."
+    },
+    {
+      "speaker": "Them",
+      "text": "Hey Deepak."
+    },
+    {
+      "speaker": "Me",
+      "text": "How's it going?"
+    },
+    {
+      "speaker": "Them",
+      "text": "Not bad. Just? Just stretched too thin but trying to keep up."
+    }
+  ],
+  "checks": [
+    {
+      "type": "orderedPrefixTurns",
+      "turns": [
+        {
+          "speaker": "Me",
+          "text": "Hey Arnold."
+        },
+        {
+          "speaker": "Them",
+          "text": "Hey Deepak."
+        },
+        {
+          "speaker": "Me",
+          "text": "How's it going?"
+        },
+        {
+          "speaker": "Them",
+          "text": "Not bad. Just? Just stretched too thin but trying to keep up."
+        }
+      ]
+    },
+    {
+      "type": "maxDiagnostics",
+      "windowSeconds": 120,
+      "sameSpeakerGreetingPairs": 0,
+      "sameSpeakerQuestionAnswer": 0,
+      "continuationSandwiches": 1,
+      "firstFiveMinutesAnomalies": 1
+    }
+  ]
+}

@@ -3,39 +3,63 @@ import type {
   InternalSignalDocument,
 } from './provider';
 
+/** @deprecated Use getStructuredAnalysisPrompt for v3 pipeline */
 export const getSummaryPrompt = (
   transcript: string,
   userNotes?: string,
 ): string => {
-  return `You are a rigorous conversation analyst producing user-facing meeting analysis for Pluto.
+  return `You are a rigorous meeting analyst producing high-fidelity user-facing notes for Pluto.
+
+Your job is to help someone who missed the meeting understand:
+- what this conversation was really about,
+- what changed,
+- what still needs follow-through,
+- and what remains uncertain.
 
 Analyze this transcript${userNotes ? ' and user notes' : ''} and produce polished, natural-language output.
 
 Non-negotiable requirements:
-- Use only transcript${userNotes ? ' and user-note' : ''} details. Never invent facts.
-- Keep technical meaning exact (do not flip problem/solution, attack/defense, or cause/effect).
+- Use only transcript${userNotes ? ' and user-note' : ''} details. Never invent facts, owners, decisions, or deadlines.
+- Keep technical meaning exact. Do not flip problem/solution, attack/defense, cause/effect, shipped/planned, or agreed/questioned.
+- Treat the transcript as the source of truth. User notes may sharpen emphasis but must not override clear transcript evidence.
+- If the discussion is exploratory, say that. Do not convert brainstorming, questions, or suggestions into decisions.
+- If content is mostly monologue, interview, demo, or media consumption, reflect that instead of fabricating team consensus.
+- Distinguish clearly between:
+  - explicit decisions already made,
+  - proposals or recommendations,
+  - and unresolved questions or dependencies.
+- Prefer concrete language over generic business-summary wording.
 - Do not include internal taxonomies or field labels in user text (forbidden: "Observation:", "Why it matters:", "Supporting detail:", "Evidence:", "Pluto use:").
-- If content is mostly monologue/interview/video, reflect that instead of fabricating team consensus.
-- Distinguish implemented choices already made from future commitments.
 - Output only these four sections, in order, with markdown headings.
+
+Quality bar:
+- The Summary should explain the real purpose and outcome of the meeting, not just restate the topic.
+- Key Points should capture the most important developments, disagreements, constraints, risks, and follow-ups.
+- Action Items should include only explicit committed next steps with named owners when clearly stated.
+- Decisions should include only explicit decisions or already-implemented choices. Questions, preferences, and tentative ideas do not count.
+- If an important issue was raised but not resolved, include it in Key Points rather than Decisions.
 
 Write exactly:
 
 ## Summary
-- 2-3 concise sentences, direct and specific.
+- 2-3 concise sentences.
+- Explain the core discussion, the practical outcome, and any major unresolved thread if one exists.
 
 ## Key Points
 - 4-6 bullets.
-- Each bullet should be natural prose in one coherent statement.
+- Each bullet should be one coherent, specific statement in natural prose.
+- Prefer bullets that answer: what mattered, why it mattered, and what constraint or implication emerged.
 - No inline meta labels.
 
 ## Action Items
 - Use checkbox bullets only: - [ ] ...
 - Include only explicit committed next steps.
+- Include owner and timing only if clearly stated in the transcript.
 - If none, write: - [ ] No concrete action items were explicitly committed.
 
 ## Decisions
-- List explicit decisions and implemented choices.
+- List explicit decisions and implemented choices only.
+- If a decision was deferred or still under debate, do not include it here.
 - If none, write: - No explicit decisions were made.
 
 ${userNotes ? `\nUser Notes (high-priority context):\n${userNotes}\n` : ''}
@@ -44,6 +68,7 @@ Transcript:
 ${transcript}`;
 };
 
+/** @deprecated Use getStructuredAnalysisPrompt for v3 pipeline */
 export const getSummaryRepairPrompt = (
   transcript: string,
   invalidOutput: string,
@@ -53,8 +78,11 @@ export const getSummaryRepairPrompt = (
 
 Rules:
 - Preserve factual meaning from draft/transcript${userNotes ? '/notes' : ''}; do not invent.
+- Keep technical meaning exact and preserve the difference between decisions, proposals, and unresolved questions.
 - Remove internal field labels and formatting noise.
-- Keep natural prose bullets (no "Observation:" style prefixes).
+- Keep natural prose bullets with specific content, not vague summary filler.
+- Keep only explicit committed next steps in Action Items.
+- Keep only explicit decisions or already-implemented choices in Decisions.
 - Return only the corrected markdown with the required sections.
 
 Required sections in order:
@@ -234,6 +262,30 @@ type KnowledgePromptSourceMeeting = {
   evidence: string;
 };
 
+const getScopeGuidance = (scopeType: string): string => {
+  switch (scopeType) {
+    case 'team_tracker':
+      return `Focus on TEAM dynamics:
+- Track recurring themes, blockers, and wins across standups/syncs.
+- Highlight who is working on what and ownership patterns.
+- Surface cross-cutting risks that affect multiple team members.
+- Capture evolving team priorities and shifts in direction.`;
+    case 'person_context':
+      return `Focus on RELATIONSHIP context:
+- Capture all meaningful topics discussed with this person across meetings.
+- Track commitments, action items, and follow-ups involving them.
+- Note their perspectives, concerns, and recurring themes.
+- Surface useful context for preparing future 1-on-1s or check-ins.`;
+    case 'project':
+      return `Focus on PROJECT trajectory:
+- Track decisions, milestones, and evolving requirements.
+- Surface open risks, blockers, and dependency patterns.
+- Capture topic evolution and how the project scope has shifted.`;
+    default:
+      return '';
+  }
+};
+
 export const getKnowledgeDocumentPrompt = (params: {
   scopeType: string;
   scopeTitle: string;
@@ -250,6 +302,8 @@ export const getKnowledgeDocumentPrompt = (params: {
     })
     .join('\n');
 
+  const scopeGuidance = getScopeGuidance(scopeType);
+
   return `You are an expert at producing strict, citation-grounded knowledge documents for Pluto.
 
 Non-negotiable requirements:
@@ -261,7 +315,7 @@ Non-negotiable requirements:
 You are generating a structured knowledge document for this scope:
 - scope.type: ${scopeType}
 - scope.title: ${scopeTitle}
-
+${scopeGuidance ? `\n${scopeGuidance}\n` : ''}
 Available meeting evidence (newest first):
 ${sourcesBlock || '(none)'}
 
@@ -338,4 +392,171 @@ Return JSON in this exact shape:
   ]
 }
 `;
+};
+
+// =============================================
+// v3 Structured Analysis Prompts
+// =============================================
+
+/**
+ * Single-pass structured analysis prompt for cloud providers.
+ * Returns a complete AnalysisDocumentV3 as JSON.
+ */
+export const getStructuredAnalysisPrompt = (
+  transcript: string,
+  userNotes?: string,
+): string => {
+  const userNotesBlock = userNotes
+    ? `\nUser Notes (the user took these during the meeting — incorporate relevant notes as emphasis within the matching topic's key points, setting from_user_notes to true):\n${userNotes}\n`
+    : '';
+
+  return `You are a rigorous meeting analyst for Pluto. Produce a structured JSON document that reads like well-organized meeting notes.
+
+Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON object with this exact schema:
+
+{
+  "overview": "2-3 sentence summary — if you read nothing else, what was this meeting about and what happened?",
+  "topics": [
+    {
+      "title": "Short descriptive title for this discussion topic",
+      "summary": "2-4 sentence digest of what was discussed under this topic",
+      "key_points": [
+        { "text": "specific insight or statement", "speaker": "Name or null", "from_user_notes": false }
+      ],
+      "decisions": [
+        { "text": "what was decided", "decided_by": "Name or null", "rationale": "why, if stated" }
+      ],
+      "action_items": [
+        { "text": "task description", "assignee": "Name or null", "due": "natural language deadline or null" }
+      ],
+      "open_questions": ["unresolved thread or question"],
+      "transcript_range": [startSegmentIndex, endSegmentIndex]
+    }
+  ],
+  "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title"}],
+  "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null"}],
+  "meeting_type": "one_on_one | team_sync | brainstorm | presentation | general"
+}
+
+Rules:
+- Identify distinct discussion topics chronologically from the transcript.
+- For each topic, extract speaker-attributed key points, decisions (with who decided), action items (with assignee and due date), and open questions.
+- Map each topic to approximate transcript segment index ranges.
+- Use only transcript${userNotes ? ' and user-note' : ''} details. Never invent facts, owners, decisions, or deadlines.
+- Keep technical meaning exact. Do not flip problem/solution, cause/effect, shipped/planned, or agreed/questioned.
+- Treat the transcript as source of truth. User notes sharpen emphasis but do not override.
+- If discussion is exploratory, say that. Do not convert brainstorming into decisions.
+- Distinguish between explicit decisions, proposals/recommendations, and unresolved questions.
+- Only mark something as a decision when the transcript shows explicit resolution language such as "decided", "agreed", "approved", "we will", "let's do that", or another clear commitment to a chosen path.
+- Do not treat brainstorming, options, preferences, concerns, or tentative recommendations as decisions.
+- Only include an action item when the transcript shows an explicit commitment or assignment such as "I'll", "we'll", "I will", "can you", "please", or another direct ownership signal.
+- If the task is mentioned without a clear owner or timing, keep the task text but leave owner and due fields null.
+- Roll up all action items and decisions into the top-level arrays.
+- Classify the meeting type.
+
+Return valid JSON only. No markdown fences, no commentary.
+${userNotesBlock}
+Transcript:
+${transcript}`;
+};
+
+export const getStructuredAnalysisRepairPrompt = (
+  transcript: string,
+  invalidOutput: string,
+  userNotes?: string,
+): string => {
+  const userNotesBlock = userNotes
+    ? `\nUser Notes (context only; do not override transcript evidence):\n${userNotes}\n`
+    : '';
+
+  return `Repair this meeting analysis JSON for Pluto.
+
+Return valid JSON only in the same schema as the original structured analysis task.
+
+Rules:
+- Preserve only facts supported by the transcript${userNotes ? ' and user notes' : ''}.
+- Keep technical meaning exact.
+- Only mark something as a decision when the transcript shows explicit resolution language.
+- Only include an action item when the transcript shows an explicit commitment or assignment.
+- Keep unresolved questions out of decisions.
+- Do not add commentary, markdown fences, or explanation.
+
+Broken JSON to repair:
+${invalidOutput}
+${userNotesBlock}
+Transcript:
+${transcript}`;
+};
+
+/**
+ * Topic segmentation prompt for multi-pass (Ollama) pipeline.
+ * Pass 1: identify distinct discussion topics with segment ranges.
+ */
+export const getTopicSegmentationPrompt = (transcript: string): string => {
+  return `You are a meeting topic segmenter. Read the transcript and identify distinct discussion topics in chronological order.
+
+Return valid JSON only in this exact shape:
+{
+  "topics": [
+    { "title": "Short descriptive title", "start_segment": 0, "end_segment": 15 }
+  ]
+}
+
+Rules:
+- Each topic should represent a coherent discussion thread.
+- Use segment indices (0-based, line numbers in the transcript) to mark the approximate start and end.
+- If the meeting has a single topic throughout, return one topic covering all segments.
+- Keep titles concise and descriptive (3-8 words).
+- Do not invent topics. Only identify what's clearly discussed.
+
+Return valid JSON only. No markdown fences, no commentary.
+
+Transcript:
+${transcript}`;
+};
+
+/**
+ * Per-topic analysis prompt for multi-pass (Ollama) pipeline.
+ * Pass 2: analyze a single topic slice of the transcript.
+ */
+export const getTopicAnalysisPrompt = (
+  topicTitle: string,
+  transcriptSlice: string,
+  userNotes?: string,
+): string => {
+  const userNotesBlock = userNotes
+    ? `\nUser Notes (incorporate relevant notes as emphasis, setting from_user_notes to true):\n${userNotes}\n`
+    : '';
+
+  return `You are a meeting analyst. Analyze this transcript slice for the topic "${topicTitle}".
+
+Return valid JSON only in this exact shape:
+{
+  "summary": "2-4 sentence digest of this topic's discussion",
+  "key_points": [
+    { "text": "specific insight", "speaker": "Name or null", "from_user_notes": false }
+  ],
+  "decisions": [
+    { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null" }
+  ],
+  "action_items": [
+    { "text": "task description", "assignee": "Name or null", "due": "deadline or null" }
+  ],
+  "open_questions": ["unresolved question"]
+}
+
+Rules:
+- Use only the transcript text provided. Never invent facts.
+- Speaker attribution: use name when clearly identifiable, null otherwise.
+- Only include explicit decisions, not proposals or suggestions.
+- Only include an action item when there is an explicit commitment or assignment.
+- Explicit commitment examples: "I'll", "we'll", "I will", "can you", "please do", "let me take".
+- If owner or due date is not directly supported by the transcript, leave that field null.
+- Use explicit commitment language to distinguish real follow-through from brainstorming; do not turn suggestions, ideas, or hypothetical work into action items.
+- If discussion is exploratory, reflect that in the summary.
+
+Return valid JSON only. No markdown fences, no commentary.
+${userNotesBlock}
+Transcript slice:
+${transcriptSlice}`;
 };

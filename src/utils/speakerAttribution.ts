@@ -785,6 +785,171 @@ const isVeryShortConfirmation = (text: string): boolean => {
   );
 };
 
+const SHORT_ANSWER_PREFIXES = [
+  'not bad',
+  'pretty good',
+  'good',
+  'fine',
+  'busy',
+  'just',
+  'trying to',
+  'working on',
+  'doing okay',
+  'all good',
+];
+
+const isGreetingLike = (text: string): boolean => {
+  const n = normalizeText(text);
+  if (!n) return false;
+  return (
+    n.startsWith('hey ') ||
+    n === 'hey' ||
+    n.startsWith('hi ') ||
+    n === 'hi' ||
+    n.startsWith('hello ') ||
+    n === 'hello'
+  );
+};
+
+const isLikelyShortAnswer = (text: string): boolean => {
+  const n = normalizeText(text);
+  if (!n) return false;
+  const words = n.split(' ').filter(Boolean);
+  if (words.length === 0 || words.length > 8) return false;
+  const matchesPrefix = SHORT_ANSWER_PREFIXES.some(
+    (prefix) => n === prefix || n.startsWith(`${prefix} `),
+  );
+  if (matchesPrefix) return true;
+  if (isQuestionLike(text)) return false;
+  return false;
+};
+
+const isLikelySplitFragment = (text: string): boolean => {
+  const raw = String(text || '').trim();
+  const n = normalizeText(raw);
+  if (!n || isQuestionLike(raw)) return false;
+  const words = n.split(' ').filter(Boolean);
+  if (words.length === 0 || words.length > 16) return false;
+  const hasTerminalPunctuation = /[.!?]["']?$/.test(raw);
+  const looksLikeResponse =
+    isLikelyShortAnswer(raw) || isVeryShortConfirmation(raw);
+
+  if (looksLikeResponse) return false;
+  return !hasTerminalPunctuation;
+};
+
+const startsWithLowercaseContinuation = (text: string): boolean => {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  const first = raw[0];
+  return first === first.toLowerCase() && first !== first.toUpperCase();
+};
+
+const isShortFragmentLike = (text: string, maxWords = 6): boolean => {
+  const raw = String(text || '').trim();
+  if (!raw || isQuestionLike(raw)) return false;
+  const words = wordCount(raw);
+  if (words === 0 || words > maxWords) return false;
+  return !/[.!?]["']?$/.test(raw);
+};
+
+const CONTINUATION_START_TOKENS = new Set([
+  'and',
+  'but',
+  'or',
+  'so',
+  'because',
+  'if',
+  'then',
+  'to',
+  'would',
+  'could',
+  'should',
+  'might',
+  'it',
+  'that',
+  'which',
+  'there',
+  'also',
+  'just',
+]);
+
+const CONTINUATION_END_TOKENS = new Set([
+  'and',
+  'but',
+  'or',
+  'so',
+  'because',
+  'if',
+  'then',
+  'to',
+  'for',
+  'of',
+  'with',
+  'on',
+  'in',
+  'at',
+  'from',
+  'that',
+  'which',
+  'who',
+  'what',
+  'when',
+  'where',
+  'why',
+  'how',
+  'it',
+  'this',
+  'these',
+  'those',
+  'you',
+  'we',
+  'they',
+  'he',
+  'she',
+  'there',
+  'here',
+  'my',
+  'our',
+  'your',
+  'the',
+  'a',
+  'an',
+]);
+
+const startsWithContinuationCue = (text: string): boolean => {
+  const raw = String(text || '').trim();
+  if (!raw || isQuestionLike(raw)) return false;
+  if (startsWithLowercaseContinuation(raw)) return true;
+  const firstToken = normalizeText(raw).split(' ').filter(Boolean)[0];
+  if (!firstToken) return false;
+  return CONTINUATION_START_TOKENS.has(firstToken);
+};
+
+const endsWithContinuationCue = (text: string): boolean => {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (!/[.!?]["']?$/.test(raw)) return true;
+  const tokens = normalizeText(raw).split(' ').filter(Boolean);
+  const lastToken = tokens[tokens.length - 1];
+  if (!lastToken) return false;
+  return CONTINUATION_END_TOKENS.has(lastToken);
+};
+
+const continuationSignalScore = (
+  prevText: string,
+  curText: string,
+  nextText: string,
+): number => {
+  let score = 0;
+  if (isLikelySplitFragment(curText)) score += 2;
+  if (startsWithContinuationCue(curText)) score += 2;
+  if (endsWithContinuationCue(prevText)) score += 1;
+  if (isShortFragmentLike(prevText)) score += 1;
+  if (isShortFragmentLike(nextText)) score += 1;
+  return score;
+};
+
 /**
  * Repairs systematic mis-attributions when ASR / overlap favors the wrong side:
  * - Me question → mis-tagged Them answer opening with uncertainty
@@ -857,13 +1022,123 @@ export const reassignThemShortConfirmationAfterMeQuestion = <
   return out;
 };
 
+export const reassignThemShortAnswerAfterMeQuestion = <
+  T extends AttributionSegment,
+>(
+  segments: T[],
+  params?: { maxGapSec?: number; maxWords?: number },
+): T[] => {
+  const maxGap = params?.maxGapSec ?? 3;
+  const maxWords = params?.maxWords ?? 8;
+  const out = segments.map((s) => ({ ...s }));
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (prev.speaker !== 'Me' || cur.speaker !== 'Me') continue;
+    if (!isQuestionLike(prev.text)) continue;
+    if (wordCount(cur.text) > maxWords) continue;
+    if (!isLikelyShortAnswer(cur.text)) continue;
+    const gap = Math.max(0, cur.startTime - prev.endTime);
+    if (gap > maxGap) continue;
+    cur.speaker = 'Them';
+  }
+  return out;
+};
+
+export const reassignOpeningSameSpeakerGreetings = <
+  T extends AttributionSegment,
+>(
+  segments: T[],
+  params?: { openingWindowSec?: number; maxGapSec?: number },
+): T[] => {
+  const openingWindowSec = params?.openingWindowSec ?? 45;
+  const maxGapSec = params?.maxGapSec ?? 12;
+  const out = segments.map((s) => ({ ...s }));
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (prev.speaker !== cur.speaker) continue;
+    if (cur.startTime > openingWindowSec) continue;
+    if (!isGreetingLike(prev.text) || !isGreetingLike(cur.text)) continue;
+    const gap = Math.max(0, cur.startTime - prev.endTime);
+    if (gap > maxGapSec) continue;
+    cur.speaker = prev.speaker === 'Me' ? 'Them' : 'Me';
+  }
+  return out;
+};
+
+export const reassignSandwichedContinuationTurns = <
+  T extends AttributionSegment,
+>(
+  segments: T[],
+  params?: {
+    maxGapSec?: number;
+    maxWords?: number;
+    minSignalScore?: number;
+  },
+): T[] => {
+  const maxGapSec = params?.maxGapSec ?? 1.25;
+  const maxWords = params?.maxWords ?? 24;
+  const minSignalScore = params?.minSignalScore ?? 3;
+  const out = segments.map((s) => ({ ...s }));
+  for (let i = 1; i < out.length - 1; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    const next = out[i + 1];
+    if (prev.speaker !== next.speaker || cur.speaker === prev.speaker) continue;
+    if (wordCount(cur.text) > maxWords) continue;
+    if (isQuestionLike(cur.text)) continue;
+    const gapBefore = Math.max(0, cur.startTime - prev.endTime);
+    const gapAfter = Math.max(0, next.startTime - cur.endTime);
+    if (gapBefore > maxGapSec || gapAfter > maxGapSec) continue;
+    const score = continuationSignalScore(prev.text, cur.text, next.text);
+    if (score < minSignalScore) continue;
+    cur.speaker = prev.speaker;
+  }
+  return out;
+};
+
+export const reassignThemContinuationAfterThemTurn = <
+  T extends AttributionSegment,
+>(
+  segments: T[],
+  params?: { maxGapSec?: number; maxWords?: number; maxPrevWords?: number },
+): T[] => {
+  const maxGapSec = params?.maxGapSec ?? 2.5;
+  const maxWords = params?.maxWords ?? 16;
+  const maxPrevWords = params?.maxPrevWords ?? 16;
+  const out = segments.map((s) => ({ ...s }));
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const cur = out[i];
+    if (prev.speaker !== 'Them' || cur.speaker !== 'Me') continue;
+    if (wordCount(prev.text) > maxPrevWords) continue;
+    if (wordCount(cur.text) > maxWords) continue;
+    if (
+      !isLikelySplitFragment(cur.text) &&
+      !isLikelyShortAnswer(cur.text) &&
+      !(wordCount(prev.text) <= 4 && !isQuestionLike(cur.text))
+    ) {
+      continue;
+    }
+    const gap = Math.max(0, cur.startTime - prev.endTime);
+    if (gap > maxGapSec) continue;
+    cur.speaker = 'Them';
+  }
+  return out;
+};
+
 export const applyCrossTurnAttributionRepairs = <T extends AttributionSegment>(
   segments: T[],
 ): T[] => {
   let s = segments.map((seg) => ({ ...seg }));
+  s = reassignOpeningSameSpeakerGreetings(s);
   s = reassignThemShortConfirmationAfterMeQuestion(s);
+  s = reassignThemShortAnswerAfterMeQuestion(s);
   s = reassignThemLikelyAnswersAfterMeQuestion(s);
+  s = reassignThemContinuationAfterThemTurn(s);
   s = reassignMeLocalBackchannelAfterRemoteThem(s);
+  s = reassignSandwichedContinuationTurns(s);
   return s;
 };
 

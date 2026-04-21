@@ -21,6 +21,8 @@
     "audit:high": "pnpm audit --audit-level high",
     "test": "vitest",
     "replay:meeting": "node scripts/replay_meeting_attribution.js",
+    "benchmark:transcription": "node scripts/benchmark_transcription_backends.js",
+    "benchmark:meeting-notes-quality": "node scripts/evaluate_meeting_notes_quality.js",
     "regenerate:meeting-transcript": "node scripts/replay_meeting_attribution.js",
     "test:meeting-regression": "node scripts/replay_meeting_attribution.js --fixture-file scripts/replay.local-fixtures.json --attempts 1 --require-expected --all-sets --transcript-regressions"
   },

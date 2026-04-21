@@ -1,10 +1,18 @@
-export type KnowledgeDocScopeType = 'global' | 'project';
+export type KnowledgeDocScopeType =
+  | 'global'
+  | 'project'
+  | 'team_tracker'
+  | 'person_context';
 export type KnowledgeDocStatus =
   | 'synthesizing'
   | 'up_to_date'
   | 'stale'
   | 'failed'
   | 'inactive';
+
+export interface KnowledgeDocConfig {
+  member_entity_ids?: string[];
+}
 
 export interface KnowledgeDoc {
   id: string;
@@ -13,6 +21,7 @@ export interface KnowledgeDoc {
   title: string;
   rendered_content: string | null;
   structured_json: string | null;
+  config: string | null;
   status: KnowledgeDocStatus;
   last_synthesized_at: string | null;
   last_source_cursor: string | null;
@@ -114,4 +123,43 @@ export const parseKnowledgeDocChangelog = <T = Record<string, unknown>>(
   } catch {
     return null;
   }
+};
+
+export const parseKnowledgeDocConfig = (
+  doc: KnowledgeDoc,
+): KnowledgeDocConfig => {
+  if (!doc.config) return {};
+  try {
+    return JSON.parse(doc.config) as KnowledgeDocConfig;
+  } catch {
+    return {};
+  }
+};
+
+export interface PersonContextCandidate {
+  person_id: string;
+  person_name: string;
+  meeting_count: number;
+  mention_count: number;
+  last_mentioned_at: string | null;
+}
+
+export const createTeamTracker = async (params: {
+  title: string;
+  memberEntityIds: string[];
+}): Promise<KnowledgeDoc> => {
+  return invoke('CREATE_TEAM_TRACKER', params);
+};
+
+export const updateTeamTrackerMembers = async (
+  docId: string,
+  memberEntityIds: string[],
+): Promise<KnowledgeDoc | undefined> => {
+  return invoke('UPDATE_TEAM_TRACKER_MEMBERS', { docId, memberEntityIds });
+};
+
+export const getPersonContextCandidates = async (): Promise<
+  PersonContextCandidate[]
+> => {
+  return invoke('GET_PERSON_CONTEXT_CANDIDATES');
 };

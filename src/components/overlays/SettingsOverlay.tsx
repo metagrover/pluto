@@ -1,4 +1,6 @@
 import type {
+  TranscriptionBackend,
+  TranscriptionPreset,
   WhisperComputeType,
   WhisperDevice,
   WhisperModel,
@@ -19,6 +21,10 @@ interface SettingsOverlayProps {
   setClaudeApiKey: (val: string) => void;
   ollamaModel: string;
   setOllamaModel: (val: string) => void;
+  transcriptionBackend: TranscriptionBackend;
+  setTranscriptionBackend: (val: TranscriptionBackend) => void;
+  transcriptionPreset: TranscriptionPreset;
+  setTranscriptionPreset: (val: TranscriptionPreset) => void;
   autoEndEnabled: boolean;
   setAutoEndEnabled: (val: boolean) => void;
   whisperModel: WhisperModel;
@@ -34,6 +40,64 @@ interface SettingsOverlayProps {
   theme: 'light' | 'dark' | 'system';
   setTheme: (val: 'light' | 'dark' | 'system') => void;
 }
+
+const cardClass =
+  'rounded-[2rem] border border-pro-border/70 bg-pro-surface/95 shadow-[0_18px_48px_-24px_rgba(0,0,0,0.35)]';
+const sectionTitleClass =
+  'text-[11px] font-black uppercase tracking-[0.2em] text-pro-text-main';
+const labelClass =
+  'text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted';
+const helperClass = 'text-[11px] leading-relaxed text-pro-text-muted/75';
+const controlClass =
+  'w-full rounded-2xl border border-pro-border bg-pro-bg/60 px-4 py-3 text-[14px] font-bold tracking-tight text-pro-text-main outline-none transition-all placeholder:text-pro-text-muted/45 focus:border-pro-accent focus:bg-pro-surface';
+
+const providerOptions = [
+  { id: 'ollama', name: 'Ollama', detail: 'Local' },
+  { id: 'gemini', name: 'Gemini', detail: 'Google' },
+  { id: 'openai', name: 'OpenAI', detail: 'GPT' },
+  { id: 'claude', name: 'Claude', detail: 'Anthropic' },
+] as const;
+
+const themeOptions = [
+  { id: 'light', name: 'Light', icon: '☀️' },
+  { id: 'dark', name: 'Dark', icon: '🌙' },
+  { id: 'system', name: 'System', icon: '💻' },
+] as const;
+
+const Section = ({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) => (
+  <section className={`${cardClass} p-6 sm:p-7`}>
+    <div className="space-y-5">
+      <h3 className={sectionTitleClass}>{title}</h3>
+      {children}
+    </div>
+  </section>
+);
+
+const Field = ({
+  htmlFor,
+  label,
+  helper,
+  children,
+}: {
+  htmlFor?: string;
+  label: string;
+  helper?: string;
+  children: React.ReactNode;
+}) => (
+  <div className="space-y-2.5">
+    <label htmlFor={htmlFor} className={labelClass}>
+      {label}
+    </label>
+    {children}
+    {helper ? <p className={helperClass}>{helper}</p> : null}
+  </div>
+);
 
 export const SettingsOverlay = ({
   settingsVisible,
@@ -52,14 +116,6 @@ export const SettingsOverlay = ({
   setOllamaModel,
   autoEndEnabled,
   setAutoEndEnabled,
-  whisperModel,
-  setWhisperModel,
-  whisperDevice,
-  setWhisperDevice,
-  whisperComputeType,
-  setWhisperComputeType,
-  whisperLanguage,
-  setWhisperLanguage,
   fetchMeetings,
   setSelectedMeetingId,
   theme,
@@ -67,10 +123,21 @@ export const SettingsOverlay = ({
 }: SettingsOverlayProps) => {
   if (!settingsVisible) return null;
 
+  const persistSetting = (key: string, value: string) => {
+    void window.ipcRenderer.invoke('SET_SETTING', { key, value });
+  };
+
+  const providerTokenValue =
+    llmProvider === 'gemini'
+      ? geminiApiKey
+      : llmProvider === 'openai'
+        ? openaiApiKey
+        : claudeApiKey;
+
   return (
-    <div className="fixed inset-0 z-[1000] flex items-start justify-center pt-24 px-6 animate-in">
+    <div className="fixed inset-0 z-[1000] flex items-start justify-center px-4 py-4 sm:px-6 sm:py-8 no-drag">
       <div
-        className="absolute inset-0 bg-slate-950/60 backdrop-blur-md"
+        className="absolute inset-0 bg-slate-950/55 backdrop-blur-md dark:bg-slate-950/72"
         onClick={() => setSettingsVisible(false)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -79,467 +146,263 @@ export const SettingsOverlay = ({
           }
         }}
       />
-      <div className="w-full max-w-2xl bg-pro-surface rounded-[2.5rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center max-h-[85vh]">
-        <div className="p-10 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg/50">
-          <div className="flex items-center gap-6">
-            <div className="w-14 h-14 rounded-2xl bg-pro-surface flex items-center justify-center text-3xl border border-pro-border/40 shadow-sm">
-              ⚙️
-            </div>
-            <div>
-              <h2 className="text-3xl font-black tracking-tighter">
+
+      <div
+        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[2.5rem] border border-pro-border bg-pro-bg shadow-[0_32px_100px_-32px_rgba(0,0,0,0.5)] sm:max-h-[calc(100vh-4rem)] no-drag"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-pro-border/50 bg-gradient-to-br from-pro-surface via-pro-surface to-pro-bg/90 px-5 py-5 sm:px-7 sm:py-6 no-drag">
+          <div className="flex items-start justify-between gap-6">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-[1.2rem] border border-pro-border/60 bg-pro-surface text-xl shadow-sm">
+                ⚙️
+              </div>
+              <h2 className="text-2xl font-black tracking-tight text-pro-text-main sm:text-[2rem]">
                 System Settings
               </h2>
-              <p className="text-[10px] text-pro-text-muted/60 font-black uppercase tracking-[0.2em] mt-2">
-                Local Intelligence Engine v4.2
-              </p>
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setSettingsVisible(false)}
-            className="w-12 h-12 rounded-2xl hover:bg-pro-bg transition-all flex items-center justify-center text-sm border border-pro-border/40 shadow-sm active-push group"
-          >
-            <span className="text-pro-text-muted group-hover:text-pro-text-main transition-colors font-bold">
+            <button
+              type="button"
+              aria-label="Close settings"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSettingsVisible(false);
+              }}
+              className="no-drag flex h-11 w-11 items-center justify-center rounded-2xl border border-pro-border/80 bg-pro-bg/80 text-pro-text-main transition-all hover:border-pro-accent/40 hover:bg-pro-surface active:scale-[0.98]"
+            >
               ✕
-            </span>
-          </button>
+            </button>
+          </div>
         </div>
 
-        <div className="p-10 space-y-12 overflow-y-auto max-h-[calc(85vh-140px)]">
-          {/* Provider Selection */}
-          <div className="space-y-8">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
-                Cognitive Provider
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.08),transparent_32%),radial-gradient(circle_at_top_left,rgba(56,189,248,0.06),transparent_28%)] px-4 py-4 pb-6 sm:px-6 sm:py-6 sm:pb-8">
+          <Section title="Analysis">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {providerOptions.map((provider) => {
+                const active = llmProvider === provider.id;
+                return (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    onClick={() => {
+                      setLlmProvider(provider.id);
+                      persistSetting('llm_provider', provider.id);
+                    }}
+                    className={`rounded-[1.25rem] border px-4 py-3.5 text-left transition-all ${
+                      active
+                        ? 'border-pro-accent bg-pro-accent/8 text-pro-text-main shadow-premium'
+                        : 'border-pro-border/80 bg-pro-bg/55 text-pro-text-main hover:border-pro-accent/30 hover:bg-pro-surface'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="text-[14px] font-black tracking-tight">
+                          {provider.name}
+                        </div>
+                        <div className="mt-0.5 text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted/65">
+                          {provider.detail}
+                        </div>
+                      </div>
+                      <div
+                        className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                          active ? 'bg-pro-accent' : 'bg-pro-border'
+                        }`}
+                      />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="rounded-[1.25rem] border border-pro-border/70 bg-pro-bg/45 px-4 py-3">
+              <p className={helperClass}>
+                Analysis provider affects summaries and extraction only. It does
+                not change the managed transcription pipeline.
               </p>
-              <span className="text-[10px] font-black text-pro-accent uppercase bg-pro-accent/5 px-3 py-1 rounded-full border border-pro-accent/10 tracking-widest">
-                {llmProvider === 'ollama' ? 'Local-First' : 'Cloud Hybrid'}
-              </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { id: 'ollama', name: 'Ollama', label: 'Local', icon: '🦙' },
-                { id: 'gemini', name: 'Gemini', label: 'Google', icon: '✨' },
-                { id: 'openai', name: 'OpenAI', label: 'GPT-4', icon: '🤖' },
-                {
-                  id: 'claude',
-                  name: 'Claude',
-                  label: 'Anthropic',
-                  icon: '🎭',
-                },
-              ].map((p) => (
-                <button
-                  type="button"
-                  key={p.id}
-                  onClick={() => {
-                    setLlmProvider(
-                      p.id as 'ollama' | 'gemini' | 'openai' | 'claude',
-                    );
-                    window.ipcRenderer.invoke('SET_SETTING', {
-                      key: 'llm_provider',
-                      value: p.id,
-                    });
+            {llmProvider === 'ollama' ? (
+              <Field
+                htmlFor="settings-ollama-model"
+                label="Local Model"
+                helper="Leave blank to use the first available Ollama model."
+              >
+                <input
+                  id="settings-ollama-model"
+                  type="text"
+                  placeholder="Auto-detect installed model"
+                  value={ollamaModel}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setOllamaModel(value);
+                    persistSetting('ollama_model', value);
                   }}
-                  className={`p-6 rounded-[1.5rem] border-2 transition-all flex flex-col gap-3 text-left group ${llmProvider === p.id ? 'border-pro-accent bg-pro-accent/5 shadow-premium' : 'border-pro-border hover:border-pro-accent/20 bg-pro-surface'}`}
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="text-2xl group-hover:scale-110 transition-transform">
-                      {p.icon}
-                    </span>
-                    {llmProvider === p.id && (
-                      <div className="w-2 h-2 rounded-full bg-pro-accent shadow-status-ok" />
-                    )}
-                  </div>
-                  <div>
-                    <span className="block text-[14px] font-black tracking-tight">
-                      {p.name}
-                    </span>
-                    <span className="text-[9px] font-black text-pro-text-muted/60 uppercase tracking-widest">
-                      {p.label}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            {llmProvider !== 'ollama' && (
-              <div className="space-y-4 pt-4 animate-in slide-in-from-top-4">
-                <label
-                  htmlFor="settings-api-token"
-                  className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]"
-                >
-                  Encryption Key / API Token
-                </label>
+                  className={controlClass}
+                />
+              </Field>
+            ) : (
+              <Field
+                htmlFor="settings-api-token"
+                label="API Key"
+                helper={`Used for ${llmProvider} analysis requests.`}
+              >
                 <input
                   id="settings-api-token"
                   type="password"
-                  placeholder={`Enter your ${llmProvider} credentials...`}
-                  value={
-                    llmProvider === 'gemini'
-                      ? geminiApiKey
-                      : llmProvider === 'openai'
-                        ? openaiApiKey
-                        : claudeApiKey
-                  }
+                  placeholder={`Enter your ${llmProvider} API key`}
+                  value={providerTokenValue}
                   onChange={(e) => {
                     const value = e.target.value;
                     if (llmProvider === 'gemini') {
                       setGeminiApiKey(value);
-                      window.ipcRenderer.invoke('SET_SETTING', {
-                        key: 'gemini_api_key',
-                        value,
-                      });
+                      persistSetting('gemini_api_key', value);
                     } else if (llmProvider === 'openai') {
                       setOpenaiApiKey(value);
-                      window.ipcRenderer.invoke('SET_SETTING', {
-                        key: 'openai_api_key',
-                        value,
-                      });
+                      persistSetting('openai_api_key', value);
                     } else if (llmProvider === 'claude') {
                       setClaudeApiKey(value);
-                      window.ipcRenderer.invoke('SET_SETTING', {
-                        key: 'claude_api_key',
-                        value,
-                      });
+                      persistSetting('claude_api_key', value);
                     }
                   }}
-                  className="w-full p-5 rounded-2xl border-2 border-pro-border bg-pro-surface text-[15px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
+                  className={controlClass}
                 />
-              </div>
+              </Field>
             )}
+          </Section>
 
-            {llmProvider === 'ollama' && (
-              <div className="space-y-4">
-                <div className="p-6 bg-indigo-500/5 rounded-2xl border border-indigo-500/10 flex gap-4 items-start">
-                  <span className="text-xl">🛡️</span>
-                  <div>
-                    <p className="text-[12px] font-bold text-pro-text-main leading-relaxed">
-                      Privacy-First Local Deployment
-                    </p>
-                    <p className="text-[11px] text-pro-text-muted/70 leading-relaxed mt-1">
-                      Neural weights are processed exclusively on your machine.
-                      Zero data egress.
-                    </p>
-                  </div>
+          <Section title="Recording">
+            <div className="flex items-center justify-between gap-6 rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
+              <div className="space-y-1.5">
+                <div className="text-[14px] font-black tracking-tight text-pro-text-main">
+                  Auto-end when the call ends
                 </div>
-                <div className="space-y-2">
-                  <label
-                    htmlFor="settings-ollama-model"
-                    className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]"
-                  >
-                    Local Model (Optional)
-                  </label>
-                  <input
-                    id="settings-ollama-model"
-                    type="text"
-                    placeholder="Auto-detect installed model (e.g. llama3.2)"
-                    value={ollamaModel}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setOllamaModel(value);
-                      window.ipcRenderer.invoke('SET_SETTING', {
-                        key: 'ollama_model',
-                        value,
-                      });
-                    }}
-                    className="w-full p-5 rounded-2xl border-2 border-pro-border bg-pro-surface text-[15px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
-                  />
-                  <p className="text-[11px] text-pro-text-muted/70 leading-relaxed">
-                    Leave blank to auto-use the first installed Ollama model.
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Meeting Section */}
-          <div className="space-y-4 pt-2">
-            <p className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
-              Meeting
-            </p>
-            <div className="flex items-center justify-between p-5 rounded-2xl border border-pro-border bg-white">
-              <div className="flex flex-col gap-1">
-                <span className="text-[13px] font-bold tracking-tight text-pro-text-main">
-                  Auto-end when call ends
-                </span>
-                <span className="text-[11px] text-pro-text-muted/60 font-medium">
-                  Automatically stop recording when your call app closes or
-                  audio goes silent
-                </span>
+                <p className={helperClass}>
+                  Stop recording when the call app closes or audio goes silent.
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => {
                   const next = !autoEndEnabled;
                   setAutoEndEnabled(next);
-                  window.ipcRenderer.invoke('SET_SETTING', {
-                    key: 'auto_end_enabled',
-                    value: next ? 'true' : 'false',
-                  });
+                  persistSetting('auto_end_enabled', next ? 'true' : 'false');
                 }}
-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${autoEndEnabled ? 'bg-pro-accent' : 'bg-pro-border/60'}`}
+                className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+                  autoEndEnabled ? 'bg-pro-accent' : 'bg-pro-border'
+                }`}
               >
                 <div
-                  className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow-sm transition-transform ${autoEndEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                  className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform dark:bg-pro-surface ${
+                    autoEndEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
                 />
               </button>
             </div>
-          </div>
 
-          <div className="space-y-4 pt-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
-                Transcription Engine
-              </p>
-              <span className="text-[10px] font-black text-pro-text-muted/70 uppercase tracking-widest">
-                Local-Only
-              </span>
+            <Field
+              htmlFor="settings-hf-token"
+              label="Speaker Diarization Token"
+              helper="Optional. Add a Hugging Face token if you want diarization support."
+            >
+              <input
+                id="settings-hf-token"
+                type="password"
+                placeholder="Hugging Face token"
+                value={hfToken}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setHfToken(value);
+                  persistSetting('hf_token', value);
+                }}
+                className={controlClass}
+              />
+            </Field>
+
+            <a
+              className="inline-flex text-[11px] font-bold text-pro-accent hover:underline"
+              href="https://huggingface.co/settings/tokens"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open Hugging Face token settings
+            </a>
+          </Section>
+
+          <Section title="Appearance">
+            <div className="grid gap-3 sm:grid-cols-3">
+              {themeOptions.map((option) => {
+                const active = theme === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setTheme(option.id)}
+                    className={`rounded-[1.4rem] border px-4 py-4 text-left transition-all ${
+                      active
+                        ? 'border-pro-accent bg-pro-accent/8 text-pro-text-main shadow-premium'
+                        : 'border-pro-border/80 bg-pro-bg/55 text-pro-text-main hover:border-pro-accent/35 hover:bg-pro-surface'
+                    }`}
+                  >
+                    <div className="space-y-1.5">
+                      <div className="text-2xl">{option.icon}</div>
+                      <div className="text-[14px] font-black tracking-tight">
+                        {option.name}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label
-                  htmlFor="settings-whisper-model"
-                  className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]"
-                >
-                  Model
-                </label>
-                <select
-                  id="settings-whisper-model"
-                  value={whisperModel}
-                  onChange={(e) => {
-                    const value = e.target.value as WhisperModel;
-                    setWhisperModel(value);
-                    window.ipcRenderer.invoke('SET_SETTING', {
-                      key: 'whisper_model',
-                      value,
-                    });
-                  }}
-                  className="w-full p-4 rounded-2xl border-2 border-pro-border bg-pro-surface text-[14px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
-                >
-                  {[
-                    { id: 'tiny', label: 'Tiny (Fastest)' },
-                    { id: 'base', label: 'Base (Fast)' },
-                    { id: 'small', label: 'Small (Balanced)' },
-                    { id: 'medium', label: 'Medium (Accurate)' },
-                    { id: 'large-v2', label: 'Large v2 (Best)' },
-                    { id: 'large-v3', label: 'Large v3 (Best)' },
-                  ].map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-pro-text-muted/70 leading-relaxed">
-                  Larger models improve accuracy but use more memory and time.
+          </Section>
+
+          <Section title="Danger Zone">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1">
+                <div className="text-[14px] font-black tracking-tight text-pro-text-main">
+                  Reset knowledge base
+                </div>
+                <p className={helperClass}>
+                  Deletes extracted knowledge and clears the selected meeting.
                 </p>
               </div>
-
-              <div className="space-y-2">
-                <label
-                  htmlFor="settings-whisper-compute"
-                  className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]"
-                >
-                  Compute Type
-                </label>
-                <select
-                  id="settings-whisper-compute"
-                  value={whisperComputeType}
-                  onChange={(e) => {
-                    const value = e.target.value as WhisperComputeType;
-                    setWhisperComputeType(value);
-                    window.ipcRenderer.invoke('SET_SETTING', {
-                      key: 'whisper_compute_type',
-                      value,
-                    });
-                  }}
-                  className="w-full p-4 rounded-2xl border-2 border-pro-border bg-pro-surface text-[14px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
-                >
-                  {[
-                    { id: 'int8', label: 'int8 (Fast, Lower RAM)' },
-                    { id: 'float16', label: 'float16 (GPU Optimized)' },
-                    { id: 'float32', label: 'float32 (Highest Precision)' },
-                  ].map((compute) => (
-                    <option key={compute.id} value={compute.id}>
-                      {compute.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label
-                  htmlFor="settings-whisper-device"
-                  className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]"
-                >
-                  Device
-                </label>
-                <select
-                  id="settings-whisper-device"
-                  value={whisperDevice}
-                  onChange={(e) => {
-                    const value = e.target.value as WhisperDevice;
-                    setWhisperDevice(value);
-                    window.ipcRenderer.invoke('SET_SETTING', {
-                      key: 'whisper_device',
-                      value,
-                    });
-                  }}
-                  className="w-full p-4 rounded-2xl border-2 border-pro-border bg-pro-surface text-[14px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
-                >
-                  {[
-                    { id: 'cpu', label: 'CPU (Default)' },
-                    { id: 'cuda', label: 'CUDA (NVIDIA GPU)' },
-                    { id: 'mps', label: 'MPS (Apple Silicon)' },
-                  ].map((device) => (
-                    <option key={device.id} value={device.id}>
-                      {device.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-pro-text-muted/70 leading-relaxed">
-                  GPU modes require compatible hardware and drivers.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <label
-                  htmlFor="settings-whisper-language"
-                  className="text-[10px] font-black text-pro-text-muted uppercase tracking-[0.2em]"
-                >
-                  Language (Optional)
-                </label>
-                <input
-                  id="settings-whisper-language"
-                  type="text"
-                  placeholder="en (default)"
-                  value={whisperLanguage}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setWhisperLanguage(value);
-                    window.ipcRenderer.invoke('SET_SETTING', {
-                      key: 'whisper_language',
-                      value,
-                    });
-                  }}
-                  className="w-full p-4 rounded-2xl border-2 border-pro-border bg-pro-surface text-[14px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
-                />
-                <p className="text-[11px] text-pro-text-muted/70 leading-relaxed">
-                  Leave blank to default to English.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4 pt-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
-                Interface Theme
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              {[
-                { id: 'light', name: 'Light', icon: '☀️' },
-                { id: 'dark', name: 'Dark', icon: '🌙' },
-                { id: 'system', name: 'System', icon: '💻' },
-              ].map((t) => (
-                <button
-                  type="button"
-                  key={t.id}
-                  onClick={() => setTheme(t.id as 'light' | 'dark' | 'system')}
-                  className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 group ${theme === t.id ? 'border-pro-accent bg-pro-accent/5 shadow-premium' : 'border-pro-border hover:border-pro-accent/20 bg-pro-surface dark:bg-pro-surface'}`}
-                >
-                  <span className="text-2xl group-hover:scale-110 transition-transform">
-                    {t.icon}
-                  </span>
-                  <span className="text-[12px] font-bold tracking-tight">
-                    {t.name}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-4 pt-2">
-            <div className="flex items-center justify-between">
-              <label
-                htmlFor="settings-hf-token"
-                className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]"
-              >
-                Speaker Diarization
-              </label>
-              <span
-                className={`text-[10px] font-black uppercase px-3 py-1 rounded-full border tracking-widest ${hfToken ? 'text-green-600 bg-green-500/10 border-green-500/20' : 'text-pro-text-muted/60 bg-pro-bg/60 border-pro-border/60'}`}
-              >
-                {hfToken ? 'Enabled' : 'Disabled'}
-              </span>
-            </div>
-            <input
-              id="settings-hf-token"
-              type="password"
-              placeholder="Hugging Face token (optional)"
-              value={hfToken}
-              onChange={(e) => {
-                const value = e.target.value;
-                setHfToken(value);
-                window.ipcRenderer.invoke('SET_SETTING', {
-                  key: 'hf_token',
-                  value,
-                });
-              }}
-              className="w-full p-5 rounded-2xl border-2 border-pro-border bg-pro-surface text-[15px] font-bold tracking-tight focus:border-pro-accent outline-none transition-all shadow-inner"
-            />
-            <div className="p-6 bg-pro-bg/50 rounded-2xl border border-pro-border">
-              <p className="text-[10px] text-pro-text-muted/60 font-bold uppercase tracking-[0.16em]">
-                Optional
-              </p>
-              <p className="text-[11px] text-pro-text-muted/70 leading-relaxed mt-2">
-                Adds real speaker labels. If you want this, create a token in
-                your HF settings.
-                <a
-                  className="ml-2 text-pro-accent hover:underline font-bold"
-                  href="https://huggingface.co/settings/tokens"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Get token
-                </a>
-              </p>
-            </div>
-          </div>
-
-          <div className="pt-10 border-t border-pro-border/20 flex items-center justify-between">
-            <button
-              type="button"
-              className="text-[10px] font-black text-red-500/40 hover:text-red-500 uppercase tracking-widest transition-colors px-4 py-2 rounded-lg hover:bg-red-50 text-left"
-              onClick={async () => {
-                if (
-                  confirm(
-                    'Are you sure you want to reset all knowledge? This action is irreversible.',
-                  )
-                ) {
-                  try {
-                    await window.ipcRenderer.invoke('RESET_KNOWLEDGE');
-                    fetchMeetings();
-                    setSelectedMeetingId(null);
-                    setSettingsVisible(false);
-                  } catch (e) {
-                    console.error('Failed to reset knowledge', e);
-                    alert('Failed to reset knowledge base');
+              <button
+                type="button"
+                className="rounded-2xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-[11px] font-black uppercase tracking-[0.16em] text-red-500 transition-colors hover:bg-red-500/14"
+                onClick={async () => {
+                  if (
+                    confirm(
+                      'Are you sure you want to reset all knowledge? This action is irreversible.',
+                    )
+                  ) {
+                    try {
+                      await window.ipcRenderer.invoke('RESET_KNOWLEDGE');
+                      fetchMeetings();
+                      setSelectedMeetingId(null);
+                      setSettingsVisible(false);
+                    } catch (e) {
+                      console.error('Failed to reset knowledge', e);
+                      alert('Failed to reset knowledge base');
+                    }
                   }
-                }
-              }}
-            >
-              Reset Neural Fabric
-            </button>
-            <button
-              type="button"
-              onClick={() => setSettingsVisible(false)}
-              className="h-12 px-10 rounded-full bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] font-black text-[12px] uppercase tracking-[0.2em] hover:bg-pro-accent transition-all active-push shadow-premium"
-            >
-              Save & Return
-            </button>
-          </div>
+                }}
+              >
+                Reset Knowledge
+              </button>
+            </div>
+          </Section>
+        </div>
+
+        <div className="flex justify-end border-t border-pro-border/70 bg-pro-surface/85 px-6 py-4 sm:px-8 no-drag">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setSettingsVisible(false);
+            }}
+            className="no-drag rounded-full bg-pro-text-main px-8 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-white transition-all hover:bg-pro-accent dark:bg-pro-accent dark:text-[#1A2340]"
+          >
+            Done
+          </button>
         </div>
       </div>
     </div>

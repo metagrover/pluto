@@ -19,6 +19,8 @@ import {
   ENTITY_ICONS,
   type Entity,
   type EntityMeeting,
+  type ValueGainSignals,
+  extractAndProcessEntities,
   getEntityMeetings,
   getEntityTypeLabel,
   getRelatedEntities,
@@ -26,8 +28,11 @@ import {
 import type { Meeting, TranscriptSegment } from '../../types';
 import {
   analysisDocumentToMarkdown,
+  analysisDocumentV3ToMarkdown,
   parseAnalysisDocumentJson,
-  resolveMeetingAnalysisDocument,
+  parseAnalysisDocumentV3Json,
+  parseUserEditsJson,
+  resolveMeetingAnalysis,
 } from '../../utils/analysisDocument';
 import {
   buildAnalysisTranscriptFromJson,
@@ -35,6 +40,7 @@ import {
   parseTranscriptSegments,
 } from '../../utils/transcript';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
+import { V3AnalysisViewer } from './V3AnalysisViewer';
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
@@ -160,16 +166,21 @@ export const MeetingView = ({
     };
   }, [selectedEntity]);
 
-  const analysisDoc = resolveMeetingAnalysisDocument(selectedMeeting);
-  const canonicalAnalysisMarkdown = analysisDoc
-    ? analysisDocumentToMarkdown(analysisDoc)
-    : selectedMeeting.enhanced_notes || selectedMeeting.user_notes || '';
-  const summaryParagraphs = analysisDoc?.summary.length
-    ? analysisDoc.summary
+  const { version, v2, v3 } = resolveMeetingAnalysis(selectedMeeting);
+  const editsMap = parseUserEditsJson(selectedMeeting.user_edits_json);
+
+  const canonicalAnalysisMarkdown = v3
+    ? analysisDocumentV3ToMarkdown(v3)
+    : v2
+      ? analysisDocumentToMarkdown(v2)
+      : selectedMeeting.enhanced_notes || selectedMeeting.user_notes || '';
+
+  const summaryParagraphs = v2?.summary?.length
+    ? v2.summary
     : ['No summary was generated for this meeting.'];
-  const keyPoints = analysisDoc?.key_points || [];
-  const actionItems = analysisDoc?.action_items || [];
-  const decisions = analysisDoc?.decisions || [];
+  const keyPoints = v2?.key_points || [];
+  const actionItems = v2?.action_items || [];
+  const decisions = v2?.decisions || [];
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
     0,
@@ -211,10 +222,14 @@ export const MeetingView = ({
         },
       )) as { markdown?: unknown; analysis?: unknown; signals?: unknown };
 
-      const normalizedAnalysis =
-        artifacts?.analysis != null
-          ? parseAnalysisDocumentJson(JSON.stringify(artifacts.analysis))
-          : null;
+      let normalizedAnalysis: any = null;
+      if (artifacts?.analysis != null) {
+        const strAnalysis = JSON.stringify(artifacts.analysis);
+        normalizedAnalysis =
+          parseAnalysisDocumentV3Json(strAnalysis) ||
+          parseAnalysisDocumentJson(strAnalysis);
+      }
+
       if (!normalizedAnalysis) {
         setRegenerateNotesError(
           'Enhanced note generation returned an invalid response. Check LLM settings and try again.',
@@ -230,7 +245,55 @@ export const MeetingView = ({
       const enhancedNotes =
         typeof artifacts?.markdown === 'string' && artifacts.markdown.trim()
           ? artifacts.markdown
-          : analysisDocumentToMarkdown(normalizedAnalysis);
+          : normalizedAnalysis.analysis_schema_version === 3
+            ? analysisDocumentV3ToMarkdown(normalizedAnalysis)
+            : analysisDocumentToMarkdown(normalizedAnalysis);
+      const normalizedSignals: ValueGainSignals | undefined =
+        artifacts?.signals != null &&
+        typeof artifacts.signals === 'object' &&
+        !Array.isArray(artifacts.signals)
+          ? {
+              analysis_schema_version:
+                typeof (
+                  artifacts.signals as { analysis_schema_version?: unknown }
+                ).analysis_schema_version === 'number'
+                  ? (artifacts.signals as { analysis_schema_version?: number })
+                      .analysis_schema_version
+                  : undefined,
+              continuity: Array.isArray(
+                (artifacts.signals as { continuity?: unknown }).continuity,
+              )
+                ? (artifacts.signals as { continuity?: string[] }).continuity ||
+                  []
+                : [],
+              accountability_risks: Array.isArray(
+                (artifacts.signals as { accountability_risks?: unknown })
+                  .accountability_risks,
+              )
+                ? (
+                    artifacts.signals as {
+                      accountability_risks?: string[];
+                    }
+                  ).accountability_risks || []
+                : [],
+              decision_impacts: Array.isArray(
+                (artifacts.signals as { decision_impacts?: unknown })
+                  .decision_impacts,
+              )
+                ? (artifacts.signals as { decision_impacts?: string[] })
+                    .decision_impacts || []
+                : [],
+              extra_tags: Array.isArray(
+                (artifacts.signals as { extra_tags?: unknown }).extra_tags,
+              )
+                ? (
+                    artifacts.signals as {
+                      extra_tags?: Array<{ tag: string; confidence: number }>;
+                    }
+                  ).extra_tags
+                : undefined,
+            }
+          : undefined;
 
       await window.ipcRenderer.invoke('SAVE_MEETING', {
         ...selectedMeeting,
@@ -248,6 +311,40 @@ export const MeetingView = ({
             ? JSON.stringify(artifacts.signals)
             : selectedMeeting.value_signals_json || null,
       });
+      try {
+        window.dispatchEvent(
+          new CustomEvent('MEETING_ENTITIES_PROCESSING', {
+            detail: { meetingId: String(selectedMeeting.id), processing: true },
+          }),
+        );
+        await extractAndProcessEntities(
+          transcript,
+          String(selectedMeeting.id),
+          {
+            summary: enhancedNotes,
+            valueSignals: normalizedSignals,
+          },
+        );
+        window.dispatchEvent(
+          new CustomEvent('MEETING_ENTITIES_UPDATED', {
+            detail: { meetingId: String(selectedMeeting.id) },
+          }),
+        );
+      } catch (entityError) {
+        console.error(
+          'Regenerated notes saved, but entity extraction failed:',
+          entityError,
+        );
+      } finally {
+        window.dispatchEvent(
+          new CustomEvent('MEETING_ENTITIES_PROCESSING', {
+            detail: {
+              meetingId: String(selectedMeeting.id),
+              processing: false,
+            },
+          }),
+        );
+      }
       await fetchMeetings();
     } catch (error) {
       console.error('Failed to regenerate enhanced notes:', error);
@@ -600,7 +697,15 @@ export const MeetingView = ({
       </div>
 
       {/* Summary & Analysis Section */}
-      {analysisDoc ? (
+      {version === 3 && v3 ? (
+        <V3AnalysisViewer
+          meetingId={selectedMeeting.id}
+          doc={v3}
+          editsMap={editsMap}
+          highlightEntities={highlightEntities}
+          onEditSaved={fetchMeetings}
+        />
+      ) : v2 ? (
         <div className="space-y-16">
           <div className="grid grid-cols-12 gap-8 items-start overflow-visible">
             {/* Left Column: Executive Summary & Key Points */}
@@ -704,7 +809,8 @@ export const MeetingView = ({
       ) : null}
 
       {/* Empty State vs Content */}
-      {!analysisDoc &&
+      {!v2 &&
+      !v3 &&
       !selectedMeeting?.enhanced_notes &&
       !selectedMeeting?.user_notes &&
       (!selectedMeeting?.transcript_json ||

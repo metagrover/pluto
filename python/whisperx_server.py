@@ -44,6 +44,8 @@ class TranscribeRequest(BaseModel):
     # Deprecated runtime override. We keep it for backward compatibility
     # but model changes should happen via /config.
     model: Optional[str] = None
+    device: Optional[str] = None
+    compute_type: Optional[str] = None
     language: Optional[str] = None
     diarize: Optional[bool] = False
     hf_token: Optional[str] = None
@@ -93,7 +95,10 @@ def health():
         "status": "ok",
         "device": model_config["device"],
         "model": model_config["model_name"],
-        "model_loaded": model is not None
+        "compute_type": model_config["compute_type"],
+        "model_loaded": model is not None,
+        "supported_devices": ["cpu", "cuda"],
+        "supported_compute_types": ["int8", "float32"],
     }
 
 @app.get("/models")
@@ -126,9 +131,17 @@ def update_config(request: ConfigRequest):
 @app.post("/transcribe")
 def transcribe(request: TranscribeRequest):
     global model, diarize_model
-    
+
+    request_conf = {}
+    if request.model:
+        request_conf["model"] = request.model
+    if request.device:
+        request_conf["device"] = request.device
+    if request.compute_type:
+        request_conf["compute_type"] = request.compute_type
+
     # Ensure model is loaded
-    load_model_if_needed({})
+    load_model_if_needed(request_conf)
     
     if not os.path.exists(request.audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
@@ -205,7 +218,12 @@ def transcribe(request: TranscribeRequest):
         return {
             "segments": result["segments"],
             "language": detected_language,
-            "duration": 0 # TODO: Calculate duration
+            "duration": 0, # TODO: Calculate duration
+            "active_config": {
+                "model": model_config["model_name"],
+                "device": model_config["device"],
+                "compute_type": model_config["compute_type"],
+            },
         }
         
     except Exception as e:

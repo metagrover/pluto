@@ -31,6 +31,7 @@ export interface TranscribeOptions {
   language?: string;
   diarize?: boolean;
   hfToken?: string;
+  signal?: AbortSignal;
 }
 
 export interface TranscriptSegment {
@@ -475,6 +476,7 @@ class WhisperXManager {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       dispatcher: WHISPERX_FETCH_AGENT,
+      signal: options.signal,
       body: JSON.stringify({
         audio_path: audioPath,
         language: options.language,

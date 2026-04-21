@@ -32,10 +32,18 @@ export interface PersistedMeeting {
   analysis_format_pass?: boolean | number | null;
   analysis_retry_count?: number | null;
   analysis_fallback_used?: boolean | number | null;
+  analysis_provider?: string | null;
+  analysis_model?: string | null;
+  analysis_generation_path?: string | null;
+  analysis_prompt_version?: string | null;
+  analysis_generated_at?: string | null;
+  analysis_error_categories_json?: string | null;
   value_signals_json?: string | null;
   folder_id?: string | null;
   is_favorite?: boolean | number | null;
   end_reason?: string | null;
+  mid_json?: string | null;
+  user_edits_json?: string | null;
   created_at?: string | null;
 }
 
@@ -105,6 +113,12 @@ const initDb = () => {
         analysis_format_pass BOOLEAN,
         analysis_retry_count INTEGER DEFAULT 0,
         analysis_fallback_used BOOLEAN DEFAULT 0,
+        analysis_provider TEXT,
+        analysis_model TEXT,
+        analysis_generation_path TEXT,
+        analysis_prompt_version TEXT,
+        analysis_generated_at DATETIME,
+        analysis_error_categories_json TEXT,
         value_signals_json TEXT,
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
@@ -331,6 +345,38 @@ const initDb = () => {
       );
       console.log('[DB] Added meetings.analysis_fallback_used column');
     }
+    if (!meetingColumns.some((col) => col.name === 'analysis_provider')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_provider TEXT');
+      console.log('[DB] Added meetings.analysis_provider column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'analysis_model')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_model TEXT');
+      console.log('[DB] Added meetings.analysis_model column');
+    }
+    if (
+      !meetingColumns.some((col) => col.name === 'analysis_generation_path')
+    ) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_generation_path TEXT');
+      console.log('[DB] Added meetings.analysis_generation_path column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'analysis_prompt_version')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_prompt_version TEXT');
+      console.log('[DB] Added meetings.analysis_prompt_version column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'analysis_generated_at')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN analysis_generated_at DATETIME');
+      console.log('[DB] Added meetings.analysis_generated_at column');
+    }
+    if (
+      !meetingColumns.some(
+        (col) => col.name === 'analysis_error_categories_json',
+      )
+    ) {
+      db.exec(
+        'ALTER TABLE meetings ADD COLUMN analysis_error_categories_json TEXT',
+      );
+      console.log('[DB] Added meetings.analysis_error_categories_json column');
+    }
     if (!meetingColumns.some((col) => col.name === 'value_signals_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN value_signals_json TEXT');
       console.log('[DB] Added meetings.value_signals_json column');
@@ -342,6 +388,10 @@ const initDb = () => {
     if (!meetingColumns.some((col) => col.name === 'mid_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN mid_json TEXT');
       console.log('[DB] Added meetings.mid_json column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'user_edits_json')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN user_edits_json TEXT');
+      console.log('[DB] Added meetings.user_edits_json column');
     }
   } catch (e) {
     console.warn('[DB] Optional column migration failed:', e);
@@ -360,14 +410,16 @@ const initDb = () => {
 
       // Preserve existing FTS data
       const existing = db
-        .prepare('SELECT meeting_id, title, transcript_text, enhanced_notes, user_notes FROM meetings_fts')
+        .prepare(
+          'SELECT meeting_id, title, transcript_text, enhanced_notes, user_notes FROM meetings_fts',
+        )
         .all() as Array<{
-          meeting_id: string;
-          title: string;
-          transcript_text: string;
-          enhanced_notes: string;
-          user_notes: string;
-        }>;
+        meeting_id: string;
+        title: string;
+        transcript_text: string;
+        enhanced_notes: string;
+        user_notes: string;
+      }>;
 
       db.exec('DROP TABLE IF EXISTS meetings_fts');
       db.exec(`
@@ -690,9 +742,28 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
     INSERT OR REPLACE INTO meetings (
       id, title, meeting_type, started_at, ended_at, duration_seconds, 
       audio_path, transcript_json, user_notes, enhanced_notes, analysis_json, analysis_schema_version,
-      analysis_format_pass, analysis_retry_count, analysis_fallback_used, value_signals_json, folder_id, is_favorite, end_reason, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+      analysis_format_pass, analysis_retry_count, analysis_fallback_used, analysis_provider, analysis_model,
+      analysis_generation_path, analysis_prompt_version, analysis_generated_at, analysis_error_categories_json,
+      value_signals_json, folder_id, is_favorite, end_reason, user_edits_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
   `);
+
+  let metadataRecord: Record<string, unknown> = {};
+  try {
+    if (meeting.analysis_json) {
+      const parsed = JSON.parse(meeting.analysis_json) as Record<
+        string,
+        unknown
+      >;
+      metadataRecord =
+        parsed.generation_metadata &&
+        typeof parsed.generation_metadata === 'object'
+          ? (parsed.generation_metadata as Record<string, unknown>)
+          : {};
+    }
+  } catch {
+    metadataRecord = {};
+  }
 
   const result = stmt.run(
     id,
@@ -720,10 +791,33 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
         ? 1
         : 0
       : 0,
+    meeting.analysis_provider ||
+      (typeof metadataRecord.provider === 'string'
+        ? metadataRecord.provider
+        : null),
+    meeting.analysis_model ||
+      (typeof metadataRecord.model === 'string' ? metadataRecord.model : null),
+    meeting.analysis_generation_path ||
+      (typeof metadataRecord.generation_path === 'string'
+        ? metadataRecord.generation_path
+        : null),
+    meeting.analysis_prompt_version ||
+      (typeof metadataRecord.prompt_version === 'string'
+        ? metadataRecord.prompt_version
+        : null),
+    meeting.analysis_generated_at ||
+      (typeof metadataRecord.generated_at === 'string'
+        ? metadataRecord.generated_at
+        : null),
+    meeting.analysis_error_categories_json ||
+      (Array.isArray(metadataRecord.error_categories)
+        ? JSON.stringify(metadataRecord.error_categories)
+        : null),
     meeting.value_signals_json || null,
     meeting.folder_id,
     meeting.is_favorite ? 1 : 0,
     meeting.end_reason || 'manual',
+    meeting.user_edits_json || null,
     meeting.created_at,
   );
 
@@ -760,7 +854,9 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
       midParticipants = (mid.participants || []).map((p) => p.name).join(', ');
       midTopics = (mid.topics || []).map((t) => t.name).join(', ');
       midDecisions = (mid.decisions || []).map((d) => d.description).join(', ');
-      midActionItems = (mid.action_items || []).map((a) => a.description).join(', ');
+      midActionItems = (mid.action_items || [])
+        .map((a) => a.description)
+        .join(', ');
     } catch {
       // Ignore MID parse errors during FTS update
     }
@@ -796,32 +892,66 @@ export const getMeeting = (id: string | number) => {
 };
 
 export const getAnalysisQualityStats = () => {
-  const row = db
+  const rows = db
     .prepare(`
     SELECT
-      COUNT(*) AS total_v2_meetings,
+      COALESCE(analysis_provider, 'unknown') AS provider,
+      COALESCE(analysis_generation_path, 'unknown') AS generation_path,
+      COUNT(*) AS total_meetings,
       SUM(CASE WHEN analysis_format_pass = 1 THEN 1 ELSE 0 END) AS format_pass_count,
       SUM(CASE WHEN analysis_retry_count > 0 THEN 1 ELSE 0 END) AS retried_count,
       SUM(CASE WHEN analysis_fallback_used = 1 THEN 1 ELSE 0 END) AS fallback_count
     FROM meetings
-    WHERE analysis_schema_version = 2
+    WHERE analysis_schema_version IS NOT NULL
+    GROUP BY COALESCE(analysis_provider, 'unknown'), COALESCE(analysis_generation_path, 'unknown')
   `)
-    .get() as {
-    total_v2_meetings: number | null;
+    .all() as Array<{
+    provider: string | null;
+    generation_path: string | null;
+    total_meetings: number | null;
     format_pass_count: number | null;
     retried_count: number | null;
     fallback_count: number | null;
-  };
+  }>;
 
-  const total = Number(row.total_v2_meetings || 0);
-  const formatPassCount = Number(row.format_pass_count || 0);
+  const totals = rows.reduce(
+    (acc, row) => {
+      acc.total_meetings += Number(row.total_meetings || 0);
+      acc.format_pass_count += Number(row.format_pass_count || 0);
+      acc.retried_count += Number(row.retried_count || 0);
+      acc.fallback_count += Number(row.fallback_count || 0);
+      return acc;
+    },
+    {
+      total_meetings: 0,
+      format_pass_count: 0,
+      retried_count: 0,
+      fallback_count: 0,
+    },
+  );
 
   return {
-    total_v2_meetings: total,
-    format_pass_count: formatPassCount,
-    format_pass_rate: total > 0 ? formatPassCount / total : 0,
-    retried_count: Number(row.retried_count || 0),
-    fallback_count: Number(row.fallback_count || 0),
+    total_meetings: totals.total_meetings,
+    format_pass_count: totals.format_pass_count,
+    format_pass_rate:
+      totals.total_meetings > 0
+        ? totals.format_pass_count / totals.total_meetings
+        : 0,
+    retried_count: totals.retried_count,
+    fallback_count: totals.fallback_count,
+    by_provider_path: rows.map((row) => {
+      const total = Number(row.total_meetings || 0);
+      const formatPassCount = Number(row.format_pass_count || 0);
+      return {
+        provider: row.provider || 'unknown',
+        generation_path: row.generation_path || 'unknown',
+        total_meetings: total,
+        format_pass_count: formatPassCount,
+        format_pass_rate: total > 0 ? formatPassCount / total : 0,
+        retried_count: Number(row.retried_count || 0),
+        fallback_count: Number(row.fallback_count || 0),
+      };
+    }),
   };
 };
 
@@ -3493,13 +3623,17 @@ export const saveMeetingMid = (
     if (ftsColumns.some((col) => col.name === 'mid_participants')) {
       // Get existing FTS row to preserve non-MID fields
       const existing = db
-        .prepare('SELECT title, transcript_text, enhanced_notes, user_notes FROM meetings_fts WHERE meeting_id = ?')
-        .get(meetingId) as {
-          title: string;
-          transcript_text: string;
-          enhanced_notes: string;
-          user_notes: string;
-        } | undefined;
+        .prepare(
+          'SELECT title, transcript_text, enhanced_notes, user_notes FROM meetings_fts WHERE meeting_id = ?',
+        )
+        .get(meetingId) as
+        | {
+            title: string;
+            transcript_text: string;
+            enhanced_notes: string;
+            user_notes: string;
+          }
+        | undefined;
 
       if (existing) {
         db.prepare(`
@@ -3555,22 +3689,28 @@ export interface SearchFtsOptions {
   limit?: number;
 }
 
-export const searchMeetingsFts = (query: string, options: SearchFtsOptions = {}) => {
+export const searchMeetingsFts = (
+  query: string,
+  options: SearchFtsOptions = {},
+) => {
   const limit = options.limit || 50;
-  return db.prepare(`
+  return db
+    .prepare(`
     SELECT 
       m.*,
-      snippet(meetings_fts, -1, '<mark>', '</mark>', '...', 32) as snippet
+      snippet(meetings_fts, -1, '', '', '...', 64) as snippet
     FROM meetings_fts f
     JOIN meetings m ON f.meeting_id = m.id
     WHERE meetings_fts MATCH ?
     ORDER BY rank
     LIMIT ?
-  `).all(query, limit) as (PersistedMeeting & { snippet: string })[];
+  `)
+    .all(query, limit) as (PersistedMeeting & { snippet: string })[];
 };
 
 export const searchEntitiesWithMeetingContext = (query: string) => {
-  return db.prepare(`
+  return db
+    .prepare(`
     SELECT e.*, c.mention_count, c.context, c.meeting_id
     FROM entities_fts f
     JOIN entities e ON f.entity_id = e.id
@@ -3578,14 +3718,19 @@ export const searchEntitiesWithMeetingContext = (query: string) => {
     WHERE entities_fts MATCH ?
     ORDER BY rank
     LIMIT 20
-  `).all(query) as (Entity & {
+  `)
+    .all(query) as (Entity & {
     mention_count: number;
     context: string | null;
     meeting_id: string;
   })[];
 };
 
-export const walkEntityGraph = (entityId: string, depth: number, filters?: { state?: string }) => {
+export const walkEntityGraph = (
+  entityId: string,
+  depth: number,
+  filters?: { state?: string },
+) => {
   // BFS graph walk with visited set, confirmed-only default limit, 50-node cap
   const cap = 50;
   const results: Entity[] = [];
@@ -3593,25 +3738,33 @@ export const walkEntityGraph = (entityId: string, depth: number, filters?: { sta
   const localVisited = new Set<string>();
   localVisited.add(entityId);
   const stateFilter = filters?.state || 'confirmed';
-  
+
   while (queue.length > 0 && results.length < cap) {
     const { id, level } = queue.shift()!;
     if (level > depth) continue;
-    
+
     if (level > 0) {
       const e = getEntity(id);
       if (e) results.push(e);
     }
     if (level === depth) continue;
-    
-    const links = db.prepare(`
+
+    const links = db
+      .prepare(`
       SELECT source_entity_id, target_entity_id 
       FROM entity_links 
       WHERE state = ? AND (source_entity_id = ? OR target_entity_id = ?)
-    `).all(stateFilter, id, id) as Array<{source_entity_id: string; target_entity_id: string}>;
-    
+    `)
+      .all(stateFilter, id, id) as Array<{
+      source_entity_id: string;
+      target_entity_id: string;
+    }>;
+
     for (const link of links) {
-      const neighborId = link.source_entity_id === id ? link.target_entity_id : link.source_entity_id;
+      const neighborId =
+        link.source_entity_id === id
+          ? link.target_entity_id
+          : link.source_entity_id;
       if (!localVisited.has(neighborId)) {
         localVisited.add(neighborId);
         queue.push({ id: neighborId, level: level + 1 });
@@ -3623,12 +3776,36 @@ export const walkEntityGraph = (entityId: string, depth: number, filters?: { sta
 
 export const getTemporalMeetings = (range: { from?: string; to?: string }) => {
   if (range.from && range.to) {
-    return db.prepare('SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ? AND started_at <= ?').all(range.from, range.to) as PersistedMeeting[];
+    return db
+      .prepare(
+        'SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ? AND started_at <= ?',
+      )
+      .all(range.from, range.to) as PersistedMeeting[];
   } else if (range.from) {
-    return db.prepare('SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ?').all(range.from) as PersistedMeeting[];
+    return db
+      .prepare(
+        'SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ?',
+      )
+      .all(range.from) as PersistedMeeting[];
   } else if (range.to) {
-    return db.prepare('SELECT id, started_at, mid_json FROM meetings WHERE started_at <= ?').all(range.to) as PersistedMeeting[];
+    return db
+      .prepare(
+        'SELECT id, started_at, mid_json FROM meetings WHERE started_at <= ?',
+      )
+      .all(range.to) as PersistedMeeting[];
   }
   return getMeetings();
 };
-
+export const getMeetingsForEntity = (entityId: string) => {
+  return db
+    .prepare(`
+      SELECT me.meeting_id, me.mention_count, me.context
+      FROM meeting_entities me
+      WHERE me.entity_id = ?
+    `)
+    .all(entityId) as Array<{
+    meeting_id: string;
+    mention_count: number;
+    context: string | null;
+  }>;
+};

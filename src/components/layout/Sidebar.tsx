@@ -1,7 +1,7 @@
 import type { Meeting } from '../../types'; // I'll create this type file if it doesn't exist, or just define it here for now
 import { Logo } from '../Brand/Logo';
 
-type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki' | 'ask';
+type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki';
 
 interface SidebarProps {
   sidebarVisible: boolean;
@@ -138,8 +138,7 @@ export const Sidebar = ({
           </h3>
           {(
             [
-              { id: 'ask', name: 'Ask Pluto', icon: '🧠' },
-              { id: 'wiki', name: 'Knowledge', icon: '📚' },
+              { id: 'wiki', name: 'Knowledge', icon: '🧠' },
               { id: 'people', name: 'People', icon: '👤' },
             ] as const
           ).map((item) => (

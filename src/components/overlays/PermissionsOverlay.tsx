@@ -57,7 +57,10 @@ export const PermissionsOverlay = ({
           }
         }}
       />
-      <div className="w-full max-w-lg bg-pro-surface rounded-[2rem] shadow-2xl border border-pro-border overflow-hidden relative scale-in-center">
+      <div
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-[2rem] border border-pro-border bg-pro-surface shadow-2xl scale-in-center"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="p-8 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg/50">
           <div className="flex items-center gap-5">
             <div className="w-12 h-12 rounded-2xl bg-pro-surface flex items-center justify-center text-xl border border-pro-border/40 shadow-sm">
@@ -72,6 +75,17 @@ export const PermissionsOverlay = ({
               </p>
             </div>
           </div>
+          <button
+            type="button"
+            aria-label="Close permissions dialog"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-pro-border/60 bg-pro-surface/80 text-pro-text-muted transition-all hover:bg-pro-bg hover:text-pro-text-main"
+          >
+            ✕
+          </button>
         </div>
 
         <div className="p-8 space-y-8">
@@ -132,7 +146,10 @@ export const PermissionsOverlay = ({
           <div className="flex items-center gap-3 pt-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
               className="flex-1 h-12 rounded-2xl border border-pro-border/50 bg-pro-surface text-pro-text-muted font-black text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-all active-push"
             >
               Cancel

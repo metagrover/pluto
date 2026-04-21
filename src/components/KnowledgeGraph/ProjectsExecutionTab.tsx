@@ -301,6 +301,16 @@ export const ProjectsExecutionTab: React.FC = () => {
   const [taskLinks, setTaskLinks] = useState<EntityLink[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const formatProjectName = (name: string): string => {
+    // LLMs often generate noisy identifiers like "foo-work-project".
+    // Strip a few common suffixes for display only.
+    return name
+      .replace(/-work-project$/i, '')
+      .replace(/-ui-work-project$/i, '')
+      .replace(/[_-]?project$/i, '')
+      .trim();
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -357,10 +367,11 @@ export const ProjectsExecutionTab: React.FC = () => {
       // Find if this task is linked to a project
       const projectLink = taskLinks.find(
         (link) =>
-          (link.source_entity_id === task.id &&
+          link.relationship === 'belongs_to' &&
+          ((link.source_entity_id === task.id &&
             projectIds.has(link.target_entity_id)) ||
-          (link.target_entity_id === task.id &&
-            projectIds.has(link.source_entity_id)),
+            (link.target_entity_id === task.id &&
+              projectIds.has(link.source_entity_id))),
       );
       if (projectLink) {
         const projectId =
@@ -376,6 +387,10 @@ export const ProjectsExecutionTab: React.FC = () => {
 
     return { groupedTasks: grouped, ungroupedTasks: ungrouped };
   }, [allTasks, taskLinks, projects]);
+
+  const visibleProjects = useMemo(() => {
+    return projects.filter((p) => (groupedTasks[p.id]?.length ?? 0) > 0);
+  }, [projects, groupedTasks]);
 
   // Stats
   const activeTasks = allTasks.filter((t) => t.status === 'active');
@@ -415,6 +430,29 @@ export const ProjectsExecutionTab: React.FC = () => {
     );
   }
 
+  if (visibleProjects.length === 0 && ungroupedTasks.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+        <div className="w-20 h-20 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-4xl shadow-premium">
+          ✅
+        </div>
+        <div className="space-y-2">
+          <h3 className="text-xl font-black text-pro-text-main tracking-tight">
+            No tasks are linked to projects yet
+          </h3>
+          <p className="text-sm text-pro-text-muted max-w-md">
+            Your extracted action items aren&apos;t assigned to any project
+            entities. Add tasks from a meeting, or link an action item to a
+            project.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-dashed border-pro-border/40 bg-pro-bg/30 px-6 py-4">
+          <QuickAddTask onTaskAdded={fetchData} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-8">
       {/* Header */}
@@ -428,8 +466,8 @@ export const ProjectsExecutionTab: React.FC = () => {
             <span className="text-pro-text-main font-bold">
               {activeTasks.length} active
             </span>{' '}
-            across {projects.length} project
-            {projects.length !== 1 ? 's' : ''}
+            across {visibleProjects.length} project
+            {visibleProjects.length !== 1 ? 's' : ''}
             {overdueTasks.length > 0 && (
               <span className="text-red-500 font-bold ml-2">
                 · {overdueTasks.length} overdue
@@ -441,10 +479,13 @@ export const ProjectsExecutionTab: React.FC = () => {
 
       {/* Project Groups */}
       <div className="flex flex-col gap-5">
-        {projects.map((project) => (
+        {visibleProjects.map((project) => (
           <ProjectHealthCard
             key={project.id}
-            project={project}
+            project={{
+              ...project,
+              name: formatProjectName(project.name) || project.name,
+            }}
             tasks={groupedTasks[project.id] || []}
             onToggleTask={toggleTask}
             onTaskAdded={fetchData}

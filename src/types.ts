@@ -34,6 +34,90 @@ export interface AnalysisDocument {
   quality: AnalysisQuality;
 }
 
+// === v3 Analysis Schema ===
+
+export type MeetingType =
+  | 'one_on_one'
+  | 'team_sync'
+  | 'brainstorm'
+  | 'presentation'
+  | 'general';
+
+export type AnalysisProvider = 'ollama' | 'gemini' | 'openai' | 'claude';
+
+export type AnalysisGenerationPath = 'single_pass' | 'multi_pass';
+
+export type AnalysisErrorCategory =
+  | 'invalid_json'
+  | 'repair_succeeded'
+  | 'repair_failed'
+  | 'empty_topics'
+  | 'low_topic_coverage'
+  | 'conflicting_rollups'
+  | 'unsupported_decision'
+  | 'unsupported_action_item'
+  | 'unsupported_action_item_owner'
+  | 'unsupported_action_item_due';
+
+export interface TopicPoint {
+  text: string;
+  speaker?: string;
+  from_user_notes?: boolean;
+}
+
+export interface DecisionV3 {
+  text: string;
+  decided_by?: string;
+  rationale?: string;
+}
+
+export interface ActionItemV3 {
+  text: string;
+  assignee?: string;
+  due?: string;
+  topic?: string;
+}
+
+export interface TopicSection {
+  title: string;
+  summary: string;
+  key_points: TopicPoint[];
+  decisions: DecisionV3[];
+  action_items: ActionItemV3[];
+  open_questions: string[];
+  transcript_range?: [number, number];
+}
+
+export interface AnalysisGenerationMetadata {
+  provider: AnalysisProvider;
+  model: string;
+  generation_path: AnalysisGenerationPath;
+  prompt_version: string;
+  generated_at: string;
+  error_categories: AnalysisErrorCategory[];
+}
+
+export interface AnalysisDocumentV3 {
+  analysis_schema_version: 3;
+  overview: string;
+  topics: TopicSection[];
+  all_action_items: ActionItemV3[];
+  all_decisions: DecisionV3[];
+  meeting_type: MeetingType;
+  quality: AnalysisQuality;
+  generation_metadata?: AnalysisGenerationMetadata;
+}
+
+export interface UserEdit {
+  original: string;
+  edited: string;
+  edited_at: string;
+}
+
+export interface UserEditsMap {
+  [path: string]: UserEdit;
+}
+
 export interface Meeting {
   id: string | number;
   title: string;
@@ -50,4 +134,11 @@ export interface Meeting {
   analysis_format_pass?: number | boolean;
   analysis_retry_count?: number;
   analysis_fallback_used?: number | boolean;
+  analysis_provider?: string;
+  analysis_model?: string;
+  analysis_generation_path?: string;
+  analysis_prompt_version?: string;
+  analysis_generated_at?: string;
+  analysis_error_categories_json?: string;
+  user_edits_json?: string;
 }

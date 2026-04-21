@@ -5,8 +5,9 @@
  * entity graph data, and internal signals. Deterministic: same inputs → same output.
  */
 
-import type { AnalysisDocument, InternalSignalDocument } from '../llm/provider';
 import type { Entity } from '../db';
+import type { AnalysisDocumentV3 } from '../llm/analysisTypes';
+import type { AnalysisDocument, InternalSignalDocument } from '../llm/provider';
 import type {
   MidActionItem,
   MidDecision,
@@ -27,7 +28,7 @@ export interface MidGeneratorInput {
   title: string;
   occurred_at: string | null;
   duration_seconds: number;
-  analysis: AnalysisDocument;
+  analysis: AnalysisDocument | AnalysisDocumentV3;
   signals: InternalSignalDocument;
   /** Entities associated with this meeting (from getMeetingEntities) */
   meeting_entities: Array<
@@ -101,6 +102,38 @@ const findEvidenceSpan = (
   const start = clampIndex(bestIndex - 1, segments.length - 1);
   const end = clampIndex(bestIndex + 1, segments.length - 1);
   return [start, end];
+};
+
+// =============================================
+// Analysis normalization for v2/v3 compatibility
+// =============================================
+
+interface NormalizedAnalysis {
+  summary: string[];
+  key_points: string[];
+  action_items: string[];
+  decisions: string[];
+}
+
+const normalizeAnalysisForEvidence = (
+  analysis: AnalysisDocument | AnalysisDocumentV3,
+): NormalizedAnalysis => {
+  if ('overview' in analysis && analysis.analysis_schema_version === 3) {
+    const v3 = analysis as AnalysisDocumentV3;
+    return {
+      summary: [v3.overview],
+      key_points: v3.topics.flatMap((t) => t.key_points.map((p) => p.text)),
+      action_items: v3.all_action_items.map((a) => a.text),
+      decisions: v3.all_decisions.map((d) => d.text),
+    };
+  }
+  const v2 = analysis as AnalysisDocument;
+  return {
+    summary: v2.summary,
+    key_points: v2.key_points,
+    action_items: v2.action_items,
+    decisions: v2.decisions,
+  };
 };
 
 // =============================================
@@ -231,8 +264,11 @@ export function generateMid(input: MidGeneratorInput): MidFrontmatter {
   const evidenceSpans: MidEvidenceSpan[] = [];
   let spanCounter = 0;
 
+  // Normalize analysis for v2/v3 compatibility
+  const normalized = normalizeAnalysisForEvidence(analysis);
+
   // Map summary paragraphs to transcript
-  for (const paragraph of analysis.summary) {
+  for (const paragraph of normalized.summary) {
     const range = findEvidenceSpan(paragraph, segments);
     if (range) {
       spanCounter++;
@@ -250,7 +286,7 @@ export function generateMid(input: MidGeneratorInput): MidFrontmatter {
   }
 
   // Map decisions to transcript
-  for (const decisionText of analysis.decisions) {
+  for (const decisionText of normalized.decisions) {
     const range = findEvidenceSpan(decisionText, segments);
     if (range) {
       spanCounter++;
@@ -268,7 +304,7 @@ export function generateMid(input: MidGeneratorInput): MidFrontmatter {
   }
 
   // Map key points to transcript
-  for (const point of analysis.key_points) {
+  for (const point of normalized.key_points) {
     const range = findEvidenceSpan(point, segments);
     if (range) {
       spanCounter++;

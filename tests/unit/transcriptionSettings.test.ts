@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_TRANSCRIPTION_SETTINGS,
+  resolveTranscriptionBackend,
   resolveTranscriptionLanguage,
+  resolveTranscriptionPreset,
   resolveTranscriptionSettings,
 } from '../../src/utils/transcriptionSettings';
 
@@ -20,11 +22,26 @@ describe('transcription settings', () => {
 
   it('resolves transcription settings with defaults', () => {
     const resolved = resolveTranscriptionSettings({});
+    expect(resolved.backend).toBe(DEFAULT_TRANSCRIPTION_SETTINGS.backend);
+    expect(resolved.preset).toBe(DEFAULT_TRANSCRIPTION_SETTINGS.preset);
     expect(resolved.model).toBe(DEFAULT_TRANSCRIPTION_SETTINGS.model);
     expect(resolved.device).toBe(DEFAULT_TRANSCRIPTION_SETTINGS.device);
     expect(resolved.computeType).toBe(
       DEFAULT_TRANSCRIPTION_SETTINGS.computeType,
     );
     expect(resolved.language).toBe('en');
+  });
+
+  it('normalizes backend and preset values', () => {
+    expect(resolveTranscriptionBackend('whisperx_tuned')).toBe(
+      'whisperx_tuned',
+    );
+    expect(resolveTranscriptionBackend('unknown')).toBe(
+      DEFAULT_TRANSCRIPTION_SETTINGS.backend,
+    );
+    expect(resolveTranscriptionPreset('accuracy_first')).toBe('accuracy_first');
+    expect(resolveTranscriptionPreset('unknown')).toBe(
+      DEFAULT_TRANSCRIPTION_SETTINGS.preset,
+    );
   });
 });

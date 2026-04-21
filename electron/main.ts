@@ -95,29 +95,97 @@ import {
   processExtractedEntities,
 } from './entityPipeline';
 import {
+  auditCitations,
+  buildCitationChain,
+} from './intelligence/citationEngine';
+import { generateMid } from './intelligence/midGenerator';
+import { renderMidToMarkdown } from './intelligence/midRenderer';
+import {
+  clearAlertsForMeeting,
+  getAlerts,
+  runPostMeetingTriggers,
+} from './intelligence/proactiveEngine';
+import { parseQuery, retrieveContext } from './intelligence/queryEngine';
+import { getAskPlutoPrompt } from './intelligence/queryPrompts';
+import {
   initializeKnowledgeDocs,
   queueAllKnowledgeDocsRefresh,
   queueKnowledgeDocsRefreshForMeeting,
   refreshKnowledgeDocNow,
+  setKnowledgeDocSynthesisPaused,
   synthesizeEntitySummary,
 } from './knowledgeSynthesis';
+import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import { getAllSettings, getProvider } from './llm/factory';
-import type { AnalysisArtifacts, InternalSignalDocument } from './llm/provider';
+import type {
+  AnalysisArtifacts,
+  AnalysisDocument,
+  InternalSignalDocument,
+} from './llm/provider';
 import {
   type TranscriptCleanupStats,
   cleanTranscriptSegments,
 } from './transcriptCleanup';
+import {
+  getTranscriptionBackendStatus,
+  listTranscriptionBackends,
+  transcribeWithBackend,
+} from './transcription';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
 import { whisperX } from './whisperx';
-import { generateMid } from './intelligence/midGenerator';
-import { renderMidToMarkdown } from './intelligence/midRenderer';
-import { parseQuery, retrieveContext } from './intelligence/queryEngine';
-import { getAskPlutoPrompt } from './intelligence/queryPrompts';
-import { buildCitationChain, auditCitations } from './intelligence/citationEngine';
+
+// Background task management for cancellation
+const activeMeetingTasks = new Map<string, AbortController>();
+let activeTranscriptionCount = 0;
+
+function beginTranscriptionWork() {
+  activeTranscriptionCount += 1;
+  if (activeTranscriptionCount === 1) {
+    console.log(
+      '[Pluto] Pausing queued knowledge-doc synthesis during transcription',
+    );
+    setKnowledgeDocSynthesisPaused(true);
+  }
+}
+
+function endTranscriptionWork() {
+  activeTranscriptionCount = Math.max(0, activeTranscriptionCount - 1);
+  if (activeTranscriptionCount === 0) {
+    console.log(
+      '[Pluto] Resuming queued knowledge-doc synthesis after transcription',
+    );
+    setKnowledgeDocSynthesisPaused(false);
+  }
+}
+
+function getAbortSignalForMeeting(meetingId: string): AbortSignal {
+  if (!activeMeetingTasks.has(meetingId)) {
+    activeMeetingTasks.set(meetingId, new AbortController());
+  }
+  return activeMeetingTasks.get(meetingId)!.signal;
+}
+
+function clearAbortControllerForMeeting(meetingId: string) {
+  activeMeetingTasks.delete(meetingId);
+}
+
+function abortMeetingTasks(meetingId: string) {
+  const controller = activeMeetingTasks.get(meetingId);
+  if (controller) {
+    console.log(`[Pluto] Aborting background tasks for meeting: ${meetingId}`);
+    controller.abort();
+    activeMeetingTasks.delete(meetingId);
+  }
+}
 
 // Cleanup on quit
 app.on('before-quit', async () => {
   console.log('[Pluto] Shutting down...');
+  // Abort all active tasks
+  for (const controller of activeMeetingTasks.values()) {
+    controller.abort();
+  }
+  activeMeetingTasks.clear();
   await whisperX.stop();
 });
 
@@ -148,7 +216,15 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'WHISPERX_TRANSCRIBE',
     async (_event, { audioPath, options }) => {
-      return await whisperX.transcribe(audioPath, options);
+      beginTranscriptionWork();
+      try {
+        const signal = options?.meetingId
+          ? getAbortSignalForMeeting(options.meetingId)
+          : undefined;
+        return await whisperX.transcribe(audioPath, { ...options, signal });
+      } finally {
+        endTranscriptionWork();
+      }
     },
   );
 
@@ -156,19 +232,64 @@ app.whenReady().then(async () => {
     return await whisperX.listModels();
   });
 
+  ipcMain.handle('WHISPER_LIST_BACKENDS', async () => {
+    return listTranscriptionBackends();
+  });
+
+  ipcMain.handle('WHISPER_BACKEND_HEALTH', async (_event, backend) => {
+    return await getTranscriptionBackendStatus(backend);
+  });
+
   ipcMain.handle(
     'WHISPER_TRANSCRIBE',
     async (_event, audioPath, options = {}) => {
-      console.log(
-        '[Pluto] Transcribing file:',
-        audioPath,
-        options.diarize ? '(with diarization)' : '',
-      );
+      const meetingId = options.meetingId ? String(options.meetingId) : null;
+      if (meetingId) {
+        console.log(
+          `[Pluto] Transcribing file for meeting ${meetingId}:`,
+          audioPath,
+        );
+      } else {
+        console.log('[Pluto] Transcribing file (no meeting ID):', audioPath);
+      }
+
       const start = Date.now();
-      const result = await whisperX.transcribe(audioPath, options);
-      const durationMs = Date.now() - start;
-      console.log(`[Pluto] Transcription completed in ${durationMs}ms`);
-      return result;
+      beginTranscriptionWork();
+      try {
+        const signal = meetingId
+          ? getAbortSignalForMeeting(meetingId)
+          : undefined;
+        const result = await transcribeWithBackend(audioPath, {
+          ...options,
+          signal,
+        });
+        const durationMs = Date.now() - start;
+        console.log(`[Pluto] Transcription completed in ${durationMs}ms`);
+        return result;
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.log(`[Pluto] Transcription aborted for meeting ${meetingId}`);
+          return {
+            segments: [],
+            language: 'en',
+            duration: 0,
+            meta: {
+              backend: options.backend || 'whisperx_current',
+              preset: options.preset || 'balanced',
+              model: options.model || 'small',
+              device: options.device || 'cpu',
+              computeType: options.computeType || 'int8',
+              canonicalSource: options.canonicalSource,
+              diarization: Boolean(options.diarize),
+              elapsedMs: Date.now() - start,
+              providerLabel: 'Aborted',
+            },
+          };
+        }
+        throw err;
+      } finally {
+        endTranscriptionWork();
+      }
     },
   );
 
@@ -665,6 +786,93 @@ app.whenReady().then(async () => {
     },
   );
 
+  ipcMain.handle(
+    'AUDIO_STITCH_WAV_SEGMENTS',
+    async (_event, { segments, outputTag } = {}) => {
+      if (!Array.isArray(segments) || segments.length === 0) return null;
+
+      const validSegments = segments
+        .filter(
+          (
+            value,
+          ): value is {
+            path: string;
+            startSec: number;
+            endSec: number;
+            chunkIndex?: number;
+          } =>
+            value &&
+            typeof value === 'object' &&
+            typeof value.path === 'string' &&
+            value.path.length > 0 &&
+            fs.existsSync(value.path) &&
+            typeof value.startSec === 'number' &&
+            Number.isFinite(value.startSec) &&
+            value.startSec >= 0 &&
+            typeof value.endSec === 'number' &&
+            Number.isFinite(value.endSec) &&
+            value.endSec > value.startSec,
+        )
+        .sort((left, right) => left.startSec - right.startSec);
+
+      if (validSegments.length === 0) return null;
+
+      const tag =
+        (typeof outputTag === 'string' ? outputTag : 'stitched')
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]/g, '')
+          .slice(0, 24) || 'stitched';
+      const outputDir = path.join(app.getPath('userData'), 'meetings');
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+      const outputPath = path.join(
+        outputDir,
+        `${tag}_${Date.now()}_${randomUUID()}.wav`,
+      );
+
+      return await new Promise<string | null>((resolve) => {
+        const command = ffmpeg();
+        const filterParts: string[] = [];
+        const mixInputs: string[] = [];
+
+        for (let i = 0; i < validSegments.length; i++) {
+          const segment = validSegments[i];
+          command.input(segment.path);
+          const delayMs = Math.max(0, Math.round(segment.startSec * 1000));
+          filterParts.push(
+            `[${i}:a]adelay=${delayMs}|${delayMs},volume=1[a${i}]`,
+          );
+          mixInputs.push(`[a${i}]`);
+        }
+
+        command
+          .complexFilter([
+            ...filterParts,
+            `${mixInputs.join('')}amix=inputs=${validSegments.length}:duration=longest:normalize=0`,
+          ])
+          .audioChannels(1)
+          .audioFrequency(16000)
+          .toFormat('wav')
+          .on('end', () => {
+            console.log(
+              `[Pluto] Reconstructed WAV from ${validSegments.length} timed segments: ${outputPath}`,
+            );
+            resolve(outputPath);
+          })
+          .on('error', (err) => {
+            console.warn(
+              '[Pluto] Timed WAV reconstruction failed:',
+              err instanceof Error ? err.message : err,
+            );
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+            resolve(null);
+          })
+          .save(outputPath);
+      });
+    },
+  );
+
   // Database handlers
   const cleanupTranscriptJson = (
     transcriptJson: unknown,
@@ -785,6 +993,72 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle(
+    'SAVE_USER_EDIT',
+    async (_event, { meetingId, path, original, edited }) => {
+      try {
+        const meeting = db.getMeeting(String(meetingId)) as
+          | db.PersistedMeeting
+          | undefined;
+        if (!meeting) {
+          throw new Error(`Meeting ${meetingId} not found`);
+        }
+        let editsMap: Record<
+          string,
+          { original: string; edited: string; edited_at: string }
+        > = {};
+        if (meeting.user_edits_json) {
+          try {
+            editsMap = JSON.parse(meeting.user_edits_json);
+          } catch {
+            editsMap = {};
+          }
+        }
+        editsMap[path] = {
+          original,
+          edited,
+          edited_at: new Date().toISOString(),
+        };
+        db.saveMeeting({
+          ...meeting,
+          user_edits_json: JSON.stringify(editsMap),
+        });
+        return { success: true };
+      } catch (e) {
+        console.error('[Pluto] SAVE_USER_EDIT failed:', e);
+        throw e;
+      }
+    },
+  );
+
+  ipcMain.handle('REVERT_USER_EDIT', async (_event, { meetingId, path }) => {
+    try {
+      const meeting = db.getMeeting(String(meetingId)) as
+        | db.PersistedMeeting
+        | undefined;
+      if (!meeting) {
+        throw new Error(`Meeting ${meetingId} not found`);
+      }
+      let editsMap: Record<string, unknown> = {};
+      if (meeting.user_edits_json) {
+        try {
+          editsMap = JSON.parse(meeting.user_edits_json);
+        } catch {
+          editsMap = {};
+        }
+      }
+      delete editsMap[path];
+      db.saveMeeting({
+        ...meeting,
+        user_edits_json: JSON.stringify(editsMap),
+      });
+      return { success: true };
+    } catch (e) {
+      console.error('[Pluto] REVERT_USER_EDIT failed:', e);
+      throw e;
+    }
+  });
+
   ipcMain.handle('GET_MEETINGS', () => db.getMeetings());
   ipcMain.handle('GET_MEETING', (_event, id) => db.getMeeting(id));
   ipcMain.handle('SEARCH_MEETINGS', (_event, query) =>
@@ -795,7 +1069,18 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle('DELETE_MEETING', (_event, id) => {
     try {
+      const meetingId = String(id);
+
+      // Abort any active background tasks for this meeting
+      abortMeetingTasks(meetingId);
+
       const result = db.deleteMeeting(id);
+
+      // Broadcast to renderer that a meeting has been deleted
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('MEETING_DELETED', meetingId);
+      }
+
       queueAllKnowledgeDocsRefresh();
       return result;
     } catch (e) {
@@ -917,23 +1202,6 @@ app.whenReady().then(async () => {
     db.saveKnowledgeDocNotes(docId, markdown),
   );
 
-  // --- Dummy Handlers for Phase 3 UI Testing ---
-  ipcMain.handle('intelligence:query', async (_event, _query) => {
-    return {
-      answer:
-        'Phase 2 (Query Engine) is currently being built by another agent. This is a dummy response for the UI.',
-      citations: [
-        {
-          claim: 'Phase 2 is in progress',
-          meeting_id: 'dummy-1',
-          meeting_title: 'System Status',
-          evidence_valid: true,
-          evidence_span:
-            'Parallel agent is working on vectorless RAG query engine.',
-        },
-      ],
-    };
-  });
   ipcMain.handle('GET_KNOWLEDGE_BACKLINKS', (_event, { docId, options }) =>
     db.getKnowledgeBacklinks(docId, options),
   );
@@ -1153,48 +1421,55 @@ app.whenReady().then(async () => {
     signals: emptyValueSignals(),
   });
 
+  const fallbackAnalysisV3 = (): AnalysisDocumentV3 => ({
+    analysis_schema_version: 3,
+    overview:
+      'Conversation captured. Key themes and follow-ups are summarized below.',
+    topics: [],
+    all_action_items: [],
+    all_decisions: [],
+    meeting_type: 'general',
+    quality: {
+      format_pass: false,
+      retry_count: 1,
+      fallback_used: true,
+      issues: ['Analysis generation failed in main-process fallback.'],
+    },
+  });
+
   ipcMain.handle(
     'GENERATE_ANALYSIS_V2',
     async (_event, { transcript, userNotes }) => {
       try {
         if (!transcript || !transcript.trim()) {
-          return fallbackAnalysisArtifacts();
+          return {
+            analysis: fallbackAnalysisV3(),
+            signals: emptyValueSignals(),
+          };
         }
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
         console.log(
-          `[LLM] Generating V2 analysis with provider: ${provider.name}`,
+          `[LLM] Generating v3 structured analysis with provider: ${provider.name}`,
         );
-        const artifacts = await provider.generateAnalysisArtifacts(
+        const analysis = await provider.generateStructuredAnalysis(
           transcript,
           userNotes,
         );
+        const signals = await provider.extractValueSignals(
+          transcript,
+          analysis.overview,
+        );
         return {
-          ...artifacts,
-          signals: normalizeValueSignals(artifacts.signals),
+          analysis,
+          signals: normalizeValueSignals(signals),
         };
       } catch (error) {
-        console.error('[LLM] V2 analysis generation failed:', error);
-        return fallbackAnalysisArtifacts();
-      }
-    },
-  );
-
-  ipcMain.handle(
-    'GENERATE_SUMMARY',
-    async (_event, { transcript, userNotes }) => {
-      try {
-        if (!transcript || !transcript.trim()) {
-          console.log('[LLM] Skipping summary generation for empty transcript');
-          return '';
-        }
-        const settings = await getAllSettings(db);
-        const provider = await getProvider(settings);
-        console.log(`[LLM] Using provider: ${provider.name}`);
-        return await provider.generateSummary(transcript, userNotes);
-      } catch (error) {
-        console.error('[LLM] Summary generation failed:', error);
-        throw error;
+        console.error('[LLM] v3 analysis generation failed:', error);
+        return {
+          analysis: fallbackAnalysisV3(),
+          signals: emptyValueSignals(),
+        };
       }
     },
   );
@@ -1313,6 +1588,14 @@ app.whenReady().then(async () => {
           mapValueSignalsToPriorityHints(normalizedSignals),
           priorityHints,
         );
+        const signal = getAbortSignalForMeeting(String(meetingId));
+        if (signal.aborted) {
+          console.log(
+            `[LLM] Skipping entity extraction for meeting ${meetingId} (aborted)`,
+          );
+          return { created: 0, linked: 0 };
+        }
+
         console.log(
           `[LLM] Extracting and processing entities for meeting ${meetingId}`,
         );
@@ -1327,16 +1610,27 @@ app.whenReady().then(async () => {
           },
         );
 
+        if (signal.aborted) {
+          console.log(
+            `[LLM] Aborting MID generation for meeting ${meetingId} (meeting deleted)`,
+          );
+          return result;
+        }
+
         // Generate MID after entity extraction
         try {
-          const meeting = db.getMeeting(String(meetingId)) as db.PersistedMeeting | undefined;
+          const meeting = db.getMeeting(String(meetingId)) as
+            | db.PersistedMeeting
+            | undefined;
           if (meeting) {
             const meetingEntities = db.getMeetingEntities(String(meetingId));
             // Parse analysis from the meeting's stored data
-            let analysisDoc = fallbackAnalysisArtifacts().analysis;
+            let analysisDoc: AnalysisDocument | AnalysisDocumentV3 =
+              fallbackAnalysisArtifacts().analysis;
             if (meeting.analysis_json) {
               try {
-                analysisDoc = JSON.parse(meeting.analysis_json);
+                const parsed = JSON.parse(meeting.analysis_json);
+                analysisDoc = parsed;
               } catch {
                 // Use fallback
               }
@@ -1344,7 +1638,9 @@ app.whenReady().then(async () => {
             let signals = emptyValueSignals();
             if (meeting.value_signals_json) {
               try {
-                signals = normalizeValueSignals(JSON.parse(meeting.value_signals_json));
+                signals = normalizeValueSignals(
+                  JSON.parse(meeting.value_signals_json),
+                );
               } catch {
                 // Use empty signals
               }
@@ -1376,13 +1672,38 @@ app.whenReady().then(async () => {
             });
 
             db.saveMeetingMid(String(meetingId), mid);
-            console.log(`[Intelligence] MID generated for meeting ${meetingId}`);
+            console.log(
+              `[Intelligence] MID generated for meeting ${meetingId}`,
+            );
+
+            // Phase 4: Run proactive triggers (non-blocking, fire-and-forget)
+            runPostMeetingTriggers(String(meetingId), mid)
+              .then((alerts) => {
+                if (
+                  alerts.length > 0 &&
+                  win &&
+                  !win.isDestroyed() &&
+                  !signal.aborted
+                ) {
+                  win.webContents.send('intelligence:alerts:new', alerts);
+                }
+              })
+              .catch((err) => {
+                console.warn(
+                  '[ProactiveEngine] Trigger run failed (non-blocking):',
+                  err,
+                );
+              });
           }
         } catch (midError) {
-          console.warn('[Intelligence] MID generation failed (non-blocking):', midError);
+          console.warn(
+            '[Intelligence] MID generation failed (non-blocking):',
+            midError,
+          );
         }
 
         queueKnowledgeDocsRefreshForMeeting(String(meetingId));
+        clearAbortControllerForMeeting(String(meetingId));
         return result;
       } catch (error) {
         console.error('[LLM] Entity extraction and processing failed:', error);
@@ -1427,47 +1748,93 @@ app.whenReady().then(async () => {
   // INTELLIGENCE QUERY HANDLERS (Phase 2)
   // =============================================
   ipcMain.handle('intelligence:query', async (_event, queryText: string) => {
+    const startTime = Date.now();
     try {
       if (!queryText || !queryText.trim()) return { answer: '', citations: [] };
-      
+
+      console.log(`[Pluto] intelligence:query start: "${queryText}"`);
+
       const parsed = await parseQuery(queryText);
-      const context = await retrieveContext(parsed);
-      
-      if (context.length === 0) {
-        return { answer: "I couldn't find any relevant information in your meeting history.", citations: [] };
+
+      // Fast-path: return canned response for conversational greetings
+      if (parsed.cannedResponse) {
+        console.log(`[Pluto] Returning canned response for "${queryText}"`);
+        return {
+          answer: parsed.cannedResponse,
+          citations: [],
+        };
       }
-      
+
+      const context = await retrieveContext(parsed);
+
+      console.log(
+        `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
+      );
+
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
-      
-      const prompt = getAskPlutoPrompt(queryText, context, "Use exact quotes wherever possible.");
-      const answerHtml = await provider.synthesizeKnowledgeDocument(prompt);
-      
+
+      const prompt = getAskPlutoPrompt(
+        queryText,
+        context,
+        'Use exact quotes wherever possible.',
+      );
+      console.log(
+        `[Pluto] Generating answer via provider: ${provider.name} ...`,
+      );
+      const answerHtml = await provider.answerAskPluto(prompt);
+
       const rawCitations = buildCitationChain(answerHtml, context);
       const auditedCitations = auditCitations(rawCitations);
-      
+
+      console.log(
+        `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
+      );
+
       return {
         answer: answerHtml,
         citations: auditedCitations,
       };
     } catch (e) {
-      console.error('[Pluto] intelligence:query failed:', e);
+      console.error(
+        `[Pluto] intelligence:query failed after ${Date.now() - startTime}ms:`,
+        e,
+      );
       throw e;
     }
   });
 
-  ipcMain.handle('intelligence:query:debug', async (_event, queryText: string) => {
-    try {
-      const parsed = await parseQuery(queryText);
-      const context = await retrieveContext(parsed);
-      return {
-        parsed,
-        context,
-      };
-    } catch (e) {
-      console.error('[Pluto] intelligence:query:debug failed:', e);
-      throw e;
-    }
+  ipcMain.handle(
+    'intelligence:query:debug',
+    async (_event, queryText: string) => {
+      try {
+        const parsed = await parseQuery(queryText);
+        const context = await retrieveContext(parsed);
+        return {
+          parsed,
+          context,
+        };
+      } catch (e) {
+        console.error('[Pluto] intelligence:query:debug failed:', e);
+        throw e;
+      }
+    },
+  );
+
+  // =============================================
+  // PROACTIVE INTELLIGENCE HANDLERS (Phase 4)
+  // =============================================
+
+  ipcMain.handle(
+    'intelligence:alerts',
+    (_event, options?: { meetingId?: string; limit?: number }) => {
+      return getAlerts(options);
+    },
+  );
+
+  ipcMain.handle('intelligence:alerts:clear', (_event, meetingId: string) => {
+    clearAlertsForMeeting(meetingId);
+    return true;
   });
 
   // Permissions handlers

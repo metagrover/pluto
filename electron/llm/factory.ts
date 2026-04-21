@@ -3,6 +3,8 @@ import { UnifiedLLMProvider } from './unifiedProvider';
 
 let pendingProviderPromise: Promise<LLMProvider> | null = null;
 let lastSettingsHash: string | null = null;
+let lastHealthCheck = 0;
+const HEALTH_CHECK_INTERVAL = 60_000; // 1 minute
 
 function getSettingsHash(settings: LLMSettings): string {
   return JSON.stringify({
@@ -23,13 +25,21 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
 
   // 1. If we have a pending/completed promise for this exact hash, wait and reuse.
   if (pendingProviderPromise && lastSettingsHash === currentHash) {
+    const now = Date.now();
+    // Cache the "available" status for HEALTH_CHECK_INTERVAL
+    if (now - lastHealthCheck < HEALTH_CHECK_INTERVAL) {
+      return pendingProviderPromise;
+    }
+
     const provider = await pendingProviderPromise;
-    // Basic health check to handle service restarts
+    // Health check to handle service restarts
     if (await provider.isAvailable()) {
+      lastHealthCheck = now;
       return provider;
     }
     // If unhealthy, clear and initialize fresh
     pendingProviderPromise = null;
+    lastHealthCheck = 0;
   }
 
   // 2. Clear old state if settings changed
@@ -112,9 +122,18 @@ export async function getProvider(settings: LLMSettings): Promise<LLMProvider> {
   return pendingProviderPromise;
 }
 
+let cachedSettings: LLMSettings | null = null;
+let lastSettingsFetch = 0;
+const SETTINGS_CACHE_MS = 10_000;
+
 export async function getAllSettings(db: {
   getSetting: (key: string) => unknown;
 }): Promise<LLMSettings> {
+  const now = Date.now();
+  if (cachedSettings && now - lastSettingsFetch < SETTINGS_CACHE_MS) {
+    return cachedSettings;
+  }
+
   const getStringSetting = (key: string): string | undefined => {
     const value = db.getSetting(key);
     return typeof value === 'string' ? value : undefined;
@@ -132,7 +151,7 @@ export async function getAllSettings(db: {
       ? (providerValue as ProviderType)
       : 'ollama';
 
-  return {
+  const settings: LLMSettings = {
     llm_provider: llmProvider,
     gemini_api_key: getStringSetting('gemini_api_key'),
     openai_api_key: getStringSetting('openai_api_key'),
@@ -143,4 +162,8 @@ export async function getAllSettings(db: {
     openai_model: getStringSetting('openai_model'),
     claude_model: getStringSetting('claude_model'),
   };
+
+  cachedSettings = settings;
+  lastSettingsFetch = now;
+  return settings;
 }

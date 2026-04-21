@@ -1,4 +1,9 @@
-import type { AnalysisDocument, Meeting } from '../types';
+import type {
+  AnalysisDocument,
+  AnalysisDocumentV3,
+  Meeting,
+  UserEditsMap,
+} from '../types';
 
 const FORBIDDEN_PREFIXES = [
   'observation:',
@@ -235,4 +240,131 @@ export const analysisDocumentToMarkdown = (doc: AnalysisDocument): string => {
     '## Decisions',
     decisionsBody,
   ].join('\n');
+};
+
+// =============================================
+// v3 Analysis Utilities
+// =============================================
+
+/**
+ * Parse analysis_json as a v3 document. Returns null if not v3 or invalid.
+ */
+export const parseAnalysisDocumentV3Json = (
+  raw?: string | null,
+): AnalysisDocumentV3 | null => {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (parsed.analysis_schema_version !== 3) return null;
+    if (typeof parsed.overview !== 'string' || !parsed.overview.trim())
+      return null;
+    // Return as-is (backend already validated)
+    return parsed as unknown as AnalysisDocumentV3;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Parse user_edits_json into a UserEditsMap.
+ */
+export const parseUserEditsJson = (raw?: string | null): UserEditsMap => {
+  if (!raw || !raw.trim()) return {};
+  try {
+    return JSON.parse(raw) as UserEditsMap;
+  } catch {
+    return {};
+  }
+};
+
+/**
+ * Apply a user edit overlay to original text.
+ */
+export const applyUserEdit = (
+  original: string,
+  path: string,
+  editsMap: UserEditsMap,
+): string => {
+  const edit = editsMap[path];
+  if (!edit) return original;
+  return edit.edited;
+};
+
+/**
+ * Resolve a meeting's analysis to either v2 or v3, returning which version it is.
+ */
+export const resolveMeetingAnalysis = (
+  meeting?: {
+    analysis_json?: string;
+    analysis_schema_version?: number;
+    enhanced_notes?: string;
+    user_notes?: string;
+  } | null,
+): {
+  version: 2 | 3;
+  v2: AnalysisDocument | null;
+  v3: AnalysisDocumentV3 | null;
+} => {
+  if (!meeting) return { version: 2, v2: null, v3: null };
+
+  const v3 = parseAnalysisDocumentV3Json(meeting.analysis_json);
+  if (v3) return { version: 3, v2: null, v3 };
+
+  const v2 = resolveMeetingAnalysisDocument(meeting as Meeting);
+  return { version: 2, v2, v3: null };
+};
+
+/**
+ * Render a v3 analysis document as readable markdown for copy/export.
+ */
+export const analysisDocumentV3ToMarkdown = (
+  doc: AnalysisDocumentV3,
+): string => {
+  const lines: string[] = [];
+
+  lines.push(doc.overview);
+  lines.push('');
+
+  for (const topic of doc.topics) {
+    lines.push('─────────────────────────────────────────────────');
+    lines.push('');
+    lines.push(`## ${topic.title}`);
+    lines.push('');
+    if (topic.summary) {
+      lines.push(topic.summary);
+      lines.push('');
+    }
+
+    for (const point of topic.key_points) {
+      const prefix = point.from_user_notes ? '• 📝 ' : '• ';
+      const speaker = point.speaker ? `${point.speaker}: ` : '';
+      lines.push(`${prefix}${speaker}${point.text}`);
+    }
+
+    for (const decision of topic.decisions) {
+      const by = decision.decided_by ? ` (${decision.decided_by})` : '';
+      lines.push(`• Decision${by}: ${decision.text}`);
+    }
+
+    for (const question of topic.open_questions) {
+      lines.push(`• ? ${question}`);
+    }
+
+    lines.push('');
+  }
+
+  if (doc.all_action_items.length > 0) {
+    lines.push('─────────────────────────────────────────────────');
+    lines.push('');
+    lines.push('## Action Items');
+    lines.push('');
+    for (const item of doc.all_action_items) {
+      const assignee = item.assignee ? `${item.assignee}: ` : '';
+      const due = item.due ? ` (${item.due})` : '';
+      lines.push(`- [ ] ${assignee}${item.text}${due}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
 };

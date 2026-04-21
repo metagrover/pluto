@@ -1,11 +1,17 @@
 import { Loader2, Mic } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import type { AnalysisDocumentV3 } from '../types';
+import {
+  analysisDocumentV3ToMarkdown,
+  parseAnalysisDocumentV3Json,
+} from '../utils/analysisDocument';
 import {
   computeRms,
   createWavBlob,
   decodeFloat32PcmChunk,
 } from '../utils/audio';
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
+import { getSessionFallbackDecision } from '../utils/sessionTranscriptionFallback';
 import {
   type SpeakerActivityWindow,
   type WordTimestamp,
@@ -24,12 +30,20 @@ import {
   stripLikelyMeBleedSegments,
 } from '../utils/speakerAttribution';
 import {
+  type TimedAudioChunk,
+  shouldUseSystemAudioReconstructionFallback,
+} from '../utils/systemAudioReconstruction';
+import {
   type CanonicalTranscriptSource,
+  type TranscriptPipelineMode,
+  type TranscriptTranscriptionMeta,
   buildTranscriptJsonPayload,
 } from '../utils/transcriptSchema';
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
   type TranscriptionSettings,
+  type WhisperComputeType,
+  type WhisperModel,
   resolveTranscriptionLanguage,
   resolveTranscriptionSettings,
 } from '../utils/transcriptionSettings';
@@ -119,8 +133,7 @@ interface AnalysisDocument {
 }
 
 interface AnalysisArtifacts {
-  markdown: string;
-  analysis: AnalysisDocument;
+  analysis: AnalysisDocumentV3 | AnalysisDocument;
   signals: InternalSignalDocument;
 }
 
@@ -132,12 +145,13 @@ const emptyValueSignals = (): InternalSignalDocument => ({
   extra_tags: [],
 });
 
-const emptyAnalysisDocument = (): AnalysisDocument => ({
-  analysis_schema_version: 2,
-  summary: [],
-  key_points: [],
-  action_items: [],
-  decisions: [],
+const emptyAnalysisDocument = (): AnalysisDocumentV3 => ({
+  analysis_schema_version: 3,
+  overview: 'Missing analysis document',
+  topics: [],
+  all_action_items: [],
+  all_decisions: [],
+  meeting_type: 'general',
   quality: {
     format_pass: false,
     retry_count: 1,
@@ -161,6 +175,12 @@ const TRANSCRIPT_PIPELINE_LOG: boolean =
   (typeof process !== 'undefined' &&
     typeof process.env !== 'undefined' &&
     process.env.PLUTO_TRANSCRIPT_PIPELINE_LOG === '1');
+
+const CANONICAL_SESSION_V2_ENABLED: boolean =
+  (typeof process !== 'undefined' &&
+    typeof process.env !== 'undefined' &&
+    process.env.PLUTO_CANONICAL_SESSION_V2 === '1') ||
+  false;
 
 const normalizeSignalTag = (value: unknown): InternalSignalTag | null => {
   if (!value || typeof value !== 'object') return null;
@@ -210,12 +230,23 @@ const normalizeValueSignals = (value: unknown): InternalSignalDocument => {
       .slice(0, 8),
   };
 };
-
-const normalizeAnalysisDocument = (value: unknown): AnalysisDocument => {
+// We keep these for v2 compatibility but prefer the v3 utilities in new code.
+// The raw artifacts now return v3 by default.
+const normalizeAnalysisDocument = (
+  value: unknown,
+): AnalysisDocumentV3 | AnalysisDocument => {
   if (!value || typeof value !== 'object') {
     return emptyAnalysisDocument();
   }
   const record = value as Record<string, unknown>;
+
+  if (record.analysis_schema_version === 3) {
+    // Rely on the imported parseAnalysisDocumentV3Json for normalization
+    const v3Doc = parseAnalysisDocumentV3Json(JSON.stringify(value));
+    return v3Doc || emptyAnalysisDocument();
+  }
+
+  // legacy v2 normalization
   const normalizeList = (raw: unknown): string[] => {
     if (!Array.isArray(raw)) return [];
     return raw
@@ -247,7 +278,7 @@ const normalizeAnalysisDocument = (value: unknown): AnalysisDocument => {
   };
 };
 
-const analysisDocumentToMarkdown = (doc: AnalysisDocument): string => {
+const analysisDocumentToMarkdownV2 = (doc: AnalysisDocument): string => {
   const summaryBody =
     doc.summary.length > 0
       ? doc.summary.join('\n\n')
@@ -278,6 +309,15 @@ const analysisDocumentToMarkdown = (doc: AnalysisDocument): string => {
     '## Decisions',
     decisionsBody,
   ].join('\n');
+};
+
+const analysisDocumentToMarkdown = (
+  doc: AnalysisDocument | AnalysisDocumentV3,
+): string => {
+  if (doc.analysis_schema_version === 3) {
+    return analysisDocumentV3ToMarkdown(doc as AnalysisDocumentV3);
+  }
+  return analysisDocumentToMarkdownV2(doc as AnalysisDocument);
 };
 
 export const AudioManager = ({
@@ -311,15 +351,48 @@ export const AudioManager = ({
     transcriptionSettings?.language,
   );
   const hfTokenValue = typeof hfToken === 'string' ? hfToken.trim() : '';
+  const resolveChunkModel = (model: WhisperModel | null): WhisperModel => {
+    const safeModel = model ?? 'small';
+    return safeModel === 'large-v2' || safeModel === 'large-v3'
+      ? 'medium'
+      : safeModel;
+  };
+  const resolveChunkComputeType = (
+    computeType: WhisperComputeType | null,
+  ): WhisperComputeType => {
+    const safeComputeType = computeType ?? 'int8';
+    return safeComputeType === 'float32' ? 'int8' : safeComputeType;
+  };
+  const resolvedChunkModel = resolveChunkModel(
+    resolvedTranscriptionSettings.model,
+  );
+  const resolvedChunkComputeType = resolveChunkComputeType(
+    resolvedTranscriptionSettings.computeType,
+  );
   const buildTranscriptionOptions = (
     overrides: Record<string, unknown> = {},
-  ) => ({
-    model: resolvedTranscriptionSettings.model,
-    device: resolvedTranscriptionSettings.device,
-    computeType: resolvedTranscriptionSettings.computeType,
-    language: resolvedLanguage,
-    ...overrides,
-  });
+  ) => {
+    const canonicalSource =
+      overrides.canonicalSource === 'mic' || overrides.canonicalSource === 'mix'
+        ? (overrides.canonicalSource as CanonicalTranscriptSource)
+        : null;
+    const isChunkTranscription = canonicalSource === null;
+
+    return {
+      backend: resolvedTranscriptionSettings.backend,
+      preset: resolvedTranscriptionSettings.preset,
+      model: isChunkTranscription
+        ? resolvedChunkModel
+        : resolvedTranscriptionSettings.model,
+      device: resolvedTranscriptionSettings.device,
+      computeType: isChunkTranscription
+        ? resolvedChunkComputeType
+        : resolvedTranscriptionSettings.computeType,
+      language: resolvedLanguage,
+      meetingId: currentMeetingIdRef.current,
+      ...overrides,
+    };
+  };
   const diarizationEnabled = hfTokenValue.length > 0;
 
   // Refs - Dual Recording for source-based speaker labeling
@@ -333,6 +406,7 @@ export const AudioManager = ({
   const systemChunkIndexRef = useRef(0);
 
   const systemPcmChunksRef = useRef<Float32Array[]>([]);
+  const fullSessionSystemPcmChunksRef = useRef<Float32Array[]>([]);
   const systemPcmCarryoverBytesRef = useRef<Uint8Array>(new Uint8Array(0));
   const systemPcmSampleRateRef = useRef(48000);
   const systemChunkDecodeDropCountRef = useRef(0);
@@ -368,6 +442,9 @@ export const AudioManager = ({
   const lastMicChunkBoundarySecRef = useRef(0);
   const systemRmsRef = useRef<number>(0);
   const systemRmsUpdatedAtRef = useRef<number>(0);
+  const savedSystemChunkAudioRef = useRef<Map<number, TimedAudioChunk>>(
+    new Map(),
+  );
   const processingQueueRef = useRef(Promise.resolve());
   const processedMicSegmentsRef = useRef<TranscriptionSegment[]>([]);
   const zeroMicChunkStreakRef = useRef(0);
@@ -381,6 +458,7 @@ export const AudioManager = ({
 
   const isRecordingRef = useRef(false);
   const isProcessingRef = useRef(false);
+  const currentMeetingIdRef = useRef<string | null>(null);
 
   // Keep state refs in sync
   useEffect(() => {
@@ -396,10 +474,14 @@ export const AudioManager = ({
 
   const startSession = async () => {
     try {
+      const meetingId = crypto.randomUUID();
+      currentMeetingIdRef.current = meetingId;
       startTimeRef.current = Date.now();
       setIsRecording(true);
 
-      console.log('[Pluto] Starting session (Robust Mic First)...');
+      console.log(
+        `[Pluto] Starting session ${meetingId} (Robust Mic First)...`,
+      );
 
       // 0. Preflight Permissions (Mic only)
       const micStatus = await window.ipcRenderer.invoke(
@@ -559,6 +641,7 @@ export const AudioManager = ({
             systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
             if (decoded.samples.length === 0) return;
             systemPcmChunksRef.current.push(decoded.samples);
+            fullSessionSystemPcmChunksRef.current.push(decoded.samples);
             const rms = computeRms(decoded.samples);
             systemRmsRef.current = rms;
             systemRmsUpdatedAtRef.current = performance.now();
@@ -581,11 +664,13 @@ export const AudioManager = ({
       lastMicChunkBoundarySecRef.current = 0;
       processedMicSegmentsRef.current = [];
       micPcmChunksRef.current = [];
+      fullSessionSystemPcmChunksRef.current = [];
       systemPcmCarryoverBytesRef.current = new Uint8Array(0);
       systemPcmSampleRateRef.current = 48000;
       systemChunkDecodeDropCountRef.current = 0;
       systemRmsRef.current = 0;
       systemRmsUpdatedAtRef.current = 0;
+      savedSystemChunkAudioRef.current = new Map();
       speakerTimelineRef.current = [];
       activeSpeakerWindowRef.current = null;
       zeroMicChunkStreakRef.current = 0;
@@ -1748,6 +1833,36 @@ export const AudioManager = ({
     return `${base} ${incoming}`;
   };
 
+  const mergeConsecutiveSpeakerSegments = (
+    segments: TranscriptionSegment[],
+    gapSeconds = 1,
+  ): TranscriptionSegment[] => {
+    const merged: TranscriptionSegment[] = [];
+    for (const segment of segments) {
+      const lastSegment = merged[merged.length - 1];
+      const gap =
+        lastSegment != null
+          ? segment.startTime - lastSegment.endTime
+          : Number.POSITIVE_INFINITY;
+
+      if (
+        lastSegment &&
+        lastSegment.speaker === segment.speaker &&
+        gap <= gapSeconds
+      ) {
+        lastSegment.text = mergeSegmentText(
+          lastSegment.text,
+          segment.text,
+          segment.speaker,
+        );
+        lastSegment.endTime = segment.endTime;
+      } else {
+        merged.push({ ...segment });
+      }
+    }
+    return merged;
+  };
+
   const splitCanonicalSegmentsForAttribution = (
     segments: TranscriptionSegment[],
   ): TranscriptionSegment[] => {
@@ -2346,6 +2461,7 @@ export const AudioManager = ({
           segments: [],
           rms: null as RmsData | null,
           conversionFailed: false,
+          audioPath: null as string | null,
         };
       }
       if (!blob || blob.size < 128) {
@@ -2511,6 +2627,7 @@ export const AudioManager = ({
                 segments: cumulativeSegments,
                 rms,
                 conversionFailed: false,
+                audioPath: cumulativeWavPath,
               };
             }
           }
@@ -2618,18 +2735,29 @@ export const AudioManager = ({
       const result = await window.ipcRenderer.invoke(
         'WHISPER_TRANSCRIBE',
         wavPath,
-        buildTranscriptionOptions({ diarize: false }),
+        buildTranscriptionOptions({
+          diarize: false,
+          meetingId: currentMeetingIdRef.current,
+        }),
       );
       const segments = Array.isArray(result?.segments)
         ? mapSegments(result.segments, chunkStartSec)
         : [];
-      return { segments, rms, conversionFailed: false };
+      return { segments, rms, conversionFailed: false, audioPath: wavPath };
     };
 
     const [micResult, systemResult] = await Promise.all([
       processStream('Me', opts.micBlob, opts.micFormat),
       processStream('Them', opts.systemBlob, 'wav'),
     ]);
+    if (systemResult.audioPath) {
+      savedSystemChunkAudioRef.current.set(opts.chunkIndex, {
+        chunkIndex: opts.chunkIndex,
+        path: systemResult.audioPath,
+        startSec: chunkStartSec,
+        endSec: chunkEndSec,
+      });
+    }
     if (micResult.conversionFailed) {
       micChunkConversionFailuresRef.current += 1;
       console.warn(
@@ -2986,7 +3114,10 @@ export const AudioManager = ({
   };
 
   const stopSession = async (endReason?: string) => {
-    console.log('[Pluto] Stopping session...', endReason ? `(reason: ${endReason})` : '');
+    console.log(
+      '[Pluto] Stopping session...',
+      endReason ? `(reason: ${endReason})` : '',
+    );
     setIsProcessing(true);
 
     try {
@@ -3038,20 +3169,36 @@ export const AudioManager = ({
 
       // Finalize System Audio
       let systemBlob: Blob | undefined;
-      if (systemPcmChunksRef.current.length > 0) {
+      let finalizedSystemDurationSec = 0;
+      if (fullSessionSystemPcmChunksRef.current.length > 0) {
         // Merge remaining
         let totalLen = 0;
-        for (const c of systemPcmChunksRef.current) totalLen += c.length;
+        for (const c of fullSessionSystemPcmChunksRef.current)
+          totalLen += c.length;
         const merged = new Float32Array(totalLen);
         let offset = 0;
-        for (const c of systemPcmChunksRef.current) {
+        for (const c of fullSessionSystemPcmChunksRef.current) {
           merged.set(c, offset);
           offset += c.length;
         }
         systemBlob = createWavBlob(merged, systemPcmSampleRateRef.current, 1);
-        systemPcmChunksRef.current = [];
-        console.log(`[Pluto] Finalized System Audio: ${systemBlob.size} bytes`);
+        const approximateDurationSec =
+          systemPcmSampleRateRef.current > 0
+            ? merged.length / systemPcmSampleRateRef.current
+            : 0;
+        finalizedSystemDurationSec = approximateDurationSec;
+        console.log(
+          `[Pluto] Finalized System Audio: ${systemBlob.size} bytes, duration≈${approximateDurationSec.toFixed(2)}s`,
+        );
+      } else {
+        console.warn(
+          '[Pluto] Finalized System Audio: no captured system PCM samples were available for the full session',
+        );
       }
+      if (systemPcmChunksRef.current.length > 0) {
+        systemPcmChunksRef.current = [];
+      }
+      fullSessionSystemPcmChunksRef.current = [];
 
       // Stop all tracks
       stopAllTracks();
@@ -3101,6 +3248,7 @@ export const AudioManager = ({
 
       // Wait for queue
       await processingQueueRef.current;
+      if (!currentMeetingIdRef.current) return; // Session aborted or never started
 
       // Store a single full audio file for playback
       let primaryAudioPath = '';
@@ -3133,6 +3281,38 @@ export const AudioManager = ({
           if (maybePath) systemAudioPath = maybePath;
         } catch (e) {
           console.warn('[Pluto] System audio save failed:', e);
+        }
+      }
+      const meetingDurationSec = getMeetingElapsedSeconds();
+      const savedSystemChunks = Array.from(
+        savedSystemChunkAudioRef.current.values(),
+      ).sort((left, right) => left.chunkIndex - right.chunkIndex);
+      if (
+        shouldUseSystemAudioReconstructionFallback({
+          primaryDurationSec: finalizedSystemDurationSec,
+          meetingDurationSec,
+          chunks: savedSystemChunks,
+        })
+      ) {
+        try {
+          const rebuiltSystemPath = await window.ipcRenderer.invoke(
+            'AUDIO_STITCH_WAV_SEGMENTS',
+            {
+              segments: savedSystemChunks,
+              outputTag: 'session-system-rebuilt',
+            },
+          );
+          if (rebuiltSystemPath) {
+            systemAudioPath = rebuiltSystemPath;
+            console.warn(
+              `[Pluto] Reconstructed session-system from ${savedSystemChunks.length} saved system chunks`,
+            );
+          }
+        } catch (e) {
+          console.warn(
+            '[Pluto] System audio reconstruction fallback failed:',
+            e,
+          );
         }
       }
       if (primaryAudioPath && systemAudioPath) {
@@ -3174,6 +3354,7 @@ export const AudioManager = ({
       let fullSessionRecoveredMeSegments: TranscriptionSegment[] = [];
       let fullSessionCanonicalSegments: TranscriptionSegment[] = [];
       let fullSessionValidationTexts: string[] = [];
+      let sessionTranscriptionMeta: TranscriptTranscriptionMeta | undefined;
       let sessionCanonicalSource: CanonicalTranscriptSource = 'mic';
       let postHydrationBleedPass = false;
       let postHydrationBleedDroppedMe = 0;
@@ -3185,6 +3366,34 @@ export const AudioManager = ({
         (segment) => segment.speaker === 'Them',
       );
       const hasChunkMeSegments = chunkMeSegments.length > 0;
+      const pipelineMode: TranscriptPipelineMode = CANONICAL_SESSION_V2_ENABLED
+        ? 'canonical_session_v2'
+        : 'legacy';
+      const chunkWordCount = collectedSegments.reduce((total, segment) => {
+        return total + segment.text.trim().split(/\s+/).filter(Boolean).length;
+      }, 0);
+      const provisionalMeetingDurationSeconds = Math.max(
+        0,
+        (Date.now() - (startTimeRef.current || Date.now())) / 1000,
+      );
+      const sessionFallbackDecision = getSessionFallbackDecision({
+        meetingDurationSeconds: provisionalMeetingDurationSeconds,
+        totalSpeakerWindowSeconds,
+        segmentCount: collectedSegments.length,
+        meSegmentCount: chunkMeSegments.length,
+        themSegmentCount: chunkThemSegments.length,
+        totalWords: chunkWordCount,
+        micChunkConversionFailures: micChunkConversionFailuresRef.current,
+        micTranscriptionDisabled: disableMicChunkTranscriptionRef.current,
+        systemChunkDecodeDropCount: systemChunkDecodeDropCountRef.current,
+      });
+      transcriptPipeline.sessionFallbackUsed = sessionFallbackDecision.shouldRun
+        ? 1
+        : 0;
+      if (sessionFallbackDecision.reasons.length > 0) {
+        transcriptPipeline.sessionFallbackReasons =
+          sessionFallbackDecision.reasons.join(',');
+      }
 
       const useMixForCanonical = shouldUseMixForCanonicalTranscript({
         preferMixDefault:
@@ -3192,12 +3401,17 @@ export const AudioManager = ({
         hasMixedAudioPath: Boolean(mixedAudioPath),
       });
       const canonicalAudioPath =
-        useMixForCanonical && mixedAudioPath
+        sessionFallbackDecision.shouldRun &&
+        useMixForCanonical &&
+        mixedAudioPath
           ? mixedAudioPath
-          : primaryAudioPath;
+          : sessionFallbackDecision.shouldRun
+            ? primaryAudioPath
+            : null;
 
       const whisperToMicLabeledSegments = (
         whisperResult: unknown,
+        speaker: string,
       ): TranscriptionSegment[] => {
         const raw = whisperResult as {
           segments?: Array<{
@@ -3215,7 +3429,7 @@ export const AudioManager = ({
                 startTime: s.start,
                 endTime: s.end,
                 text: s.text.trim(),
-                speaker: 'Me' as const,
+                speaker,
                 words: s.words?.map((w) => ({
                   word: w.word,
                   start: w.start,
@@ -3234,28 +3448,54 @@ export const AudioManager = ({
           : [];
       };
 
+      const extractTranscriptionMeta = (
+        whisperResult: unknown,
+      ): TranscriptTranscriptionMeta | undefined => {
+        const raw = whisperResult as {
+          meta?: TranscriptTranscriptionMeta | null;
+        };
+        return raw?.meta || undefined;
+      };
+
       if (canonicalAudioPath) {
         try {
+          const canonicalSource =
+            canonicalAudioPath === mixedAudioPath ? 'mix' : 'mic';
           const canonicalWhisper = await window.ipcRenderer.invoke(
             'WHISPER_TRANSCRIBE',
             canonicalAudioPath,
-            buildTranscriptionOptions({ diarize: false }),
+            buildTranscriptionOptions({
+              diarize: false,
+              canonicalSource,
+            }),
           );
-          fullSessionCanonicalSegments =
-            whisperToMicLabeledSegments(canonicalWhisper);
+          fullSessionCanonicalSegments = whisperToMicLabeledSegments(
+            canonicalWhisper,
+            'Unknown',
+          );
           fullSessionValidationTexts =
             whisperToValidationTexts(canonicalWhisper);
-          sessionCanonicalSource =
-            canonicalAudioPath === mixedAudioPath ? 'mix' : 'mic';
+          sessionCanonicalSource = canonicalSource;
+          sessionTranscriptionMeta =
+            extractTranscriptionMeta(canonicalWhisper) ||
+            sessionTranscriptionMeta;
 
           if (primaryAudioPath && primaryAudioPath !== canonicalAudioPath) {
             const micOnlyWhisper = await window.ipcRenderer.invoke(
               'WHISPER_TRANSCRIBE',
               primaryAudioPath,
-              buildTranscriptionOptions({ diarize: false }),
+              buildTranscriptionOptions({
+                diarize: false,
+                canonicalSource: 'mic',
+              }),
             );
-            fullSessionRecoveredMeSegments =
-              whisperToMicLabeledSegments(micOnlyWhisper);
+            fullSessionRecoveredMeSegments = whisperToMicLabeledSegments(
+              micOnlyWhisper,
+              'Me',
+            );
+            sessionTranscriptionMeta =
+              sessionTranscriptionMeta ||
+              extractTranscriptionMeta(micOnlyWhisper);
             console.log(
               `[Pluto] Full-session canonical source=${sessionCanonicalSource} (${fullSessionCanonicalSegments.length} segs); mic recovery=${fullSessionRecoveredMeSegments.length} segs`,
             );
@@ -3308,6 +3548,10 @@ export const AudioManager = ({
             recoveryErr,
           );
         }
+      } else {
+        console.log(
+          `[Pluto] Skipping full-session fallback; chunk transcript looks healthy`,
+        );
       }
 
       micChunkConversionFailuresRef.current = 0;
@@ -3572,17 +3816,16 @@ export const AudioManager = ({
           fullSessionCanonicalSegments,
           preCleanupChannelSegments,
         );
+        transcriptPipeline.channelBoundarySplits = channelSplit.splitsApplied;
         if (channelSplit.splitsApplied > 0) {
           console.log(
-            `[Pluto] Channel-boundary canonical splits: ${channelSplit.splitsApplied}`,
+            `[Pluto] Session fallback channel-boundary splits: ${channelSplit.splitsApplied}`,
           );
         }
-        transcriptPipeline.channelBoundarySplits = channelSplit.splitsApplied;
 
         const canonicalForAttribution = splitCanonicalSegmentsForAttribution(
           channelSplit.segments,
         );
-
         const canonicalAttribution = assignSpeakersToCanonicalSegments({
           canonicalSegments: canonicalForAttribution,
           attributedSegments: preCleanupChannelSegments,
@@ -3591,15 +3834,21 @@ export const AudioManager = ({
           finalizedSegments =
             canonicalAttribution.segments as TranscriptionSegment[];
           console.log(
-            `[Pluto] Session-canonical hydration: segments=${canonicalAttribution.segments.length}, ` +
+            `[Pluto] Session fallback transcript: segments=${canonicalAttribution.segments.length}, ` +
               `channelSplits=${channelSplit.splitsApplied}, ` +
               `byOverlap=${canonicalAttribution.stats.byOverlap}, ` +
               `fallback=${canonicalAttribution.stats.byFallback}`,
           );
+        } else {
+          finalizedSegments = fullSessionCanonicalSegments;
+          console.warn(
+            '[Pluto] Session fallback attribution returned no segments; using session transcript without channel attribution',
+          );
         }
       } else if (fullSessionCanonicalSegments.length > 0) {
+        finalizedSegments = fullSessionCanonicalSegments;
         console.log(
-          '[Pluto] Skipping session-canonical hydration: no channel segments',
+          '[Pluto] Session fallback: no channel segments, using session transcript directly',
         );
       }
 
@@ -3613,6 +3862,7 @@ export const AudioManager = ({
             buildTranscriptionOptions({
               diarize: true,
               hfToken: hfTokenValue,
+              meetingId: currentMeetingIdRef.current,
             }),
           );
           const diarizationSegments = Array.isArray(diarizationResult?.segments)
@@ -3720,30 +3970,11 @@ export const AudioManager = ({
         }
       }
 
-      // Merge consecutive segments from the same speaker
-      const newTranscription: TranscriptionSegment[] = [];
       const MERGE_SAME_SPEAKER_GAP_SECONDS = 1;
-      for (const segment of finalizedSegments) {
-        const lastSegment = newTranscription[newTranscription.length - 1];
-        const gapSeconds = lastSegment
-          ? segment.startTime - lastSegment.endTime
-          : Number.POSITIVE_INFINITY;
-
-        if (
-          lastSegment &&
-          lastSegment.speaker === segment.speaker &&
-          gapSeconds <= MERGE_SAME_SPEAKER_GAP_SECONDS
-        ) {
-          lastSegment.text = mergeSegmentText(
-            lastSegment.text,
-            segment.text,
-            segment.speaker,
-          );
-          lastSegment.endTime = segment.endTime;
-        } else {
-          newTranscription.push({ ...segment });
-        }
-      }
+      const newTranscription = mergeConsecutiveSpeakerSegments(
+        finalizedSegments,
+        MERGE_SAME_SPEAKER_GAP_SECONDS,
+      );
       const mergedSpeakerCounts = newTranscription.reduce(
         (acc, segment) => {
           if (segment.speaker === 'Me') acc.me++;
@@ -3756,6 +3987,7 @@ export const AudioManager = ({
         baselinePassThroughCheck.probable || passThroughCheck.probable;
 
       if (
+        sessionFallbackDecision.shouldRun &&
         mergedSpeakerCounts.me === 0 &&
         fullSessionRecoveredMeSegments.length > 0 &&
         !bleedLikelyForRescue
@@ -3787,27 +4019,12 @@ export const AudioManager = ({
         const rescueFinalizedSegments =
           rescueShortEchoPruned.segments as TranscriptionSegment[];
 
+        const rescuedTranscription = mergeConsecutiveSpeakerSegments(
+          rescueFinalizedSegments,
+          MERGE_SAME_SPEAKER_GAP_SECONDS,
+        );
         newTranscription.length = 0;
-        for (const segment of rescueFinalizedSegments) {
-          const lastSegment = newTranscription[newTranscription.length - 1];
-          const gapSeconds = lastSegment
-            ? segment.startTime - lastSegment.endTime
-            : Number.POSITIVE_INFINITY;
-          if (
-            lastSegment &&
-            lastSegment.speaker === segment.speaker &&
-            gapSeconds <= MERGE_SAME_SPEAKER_GAP_SECONDS
-          ) {
-            lastSegment.text = mergeSegmentText(
-              lastSegment.text,
-              segment.text,
-              segment.speaker,
-            );
-            lastSegment.endTime = segment.endTime;
-          } else {
-            newTranscription.push({ ...segment });
-          }
-        }
+        newTranscription.push(...rescuedTranscription);
 
         mergedSpeakerCounts.me = 0;
         mergedSpeakerCounts.them = 0;
@@ -3816,6 +4033,7 @@ export const AudioManager = ({
           if (segment.speaker === 'Them') mergedSpeakerCounts.them++;
         }
       } else if (
+        sessionFallbackDecision.shouldRun &&
         mergedSpeakerCounts.me === 0 &&
         fullSessionRecoveredMeSegments.length > 0 &&
         bleedLikelyForRescue
@@ -3830,11 +4048,12 @@ export const AudioManager = ({
       );
 
       console.log(
-        `[Pluto] Merged: ${finalizedSegments.length} channel-first segments → ${newTranscription.length} merged segments`,
+        `[Pluto] Pipeline=${pipelineMode} merged: ${finalizedSegments.length} finalized segments → ${newTranscription.length} merged segments`,
       );
 
       if (TRANSCRIPT_PIPELINE_LOG) {
         console.log('[Pluto][TranscriptPipeline]', {
+          pipelineMode,
           ...transcriptPipeline,
           mergedSegments: newTranscription.length,
           mergedMe: mergedSpeakerCounts.me,
@@ -3850,13 +4069,14 @@ export const AudioManager = ({
         console.warn('[Pluto] No transcription segments from either source');
       }
 
-      // 3. Generate Analysis V2 (canonical markdown + hidden signals)
+      // 3. Generate Analysis V3 (canonical markdown + hidden signals)
       const fullTranscript = newTranscription
         .map((s) => `${s.speaker}: ${s.text}`)
         .join('\n');
       let enhancedNotes = '';
       let valueSignals = emptyValueSignals();
-      let analysisDocument = emptyAnalysisDocument();
+      let analysisDocument: AnalysisDocument | AnalysisDocumentV3 =
+        emptyAnalysisDocument();
 
       try {
         const rawArtifacts = (await window.ipcRenderer.invoke(
@@ -3869,17 +4089,10 @@ export const AudioManager = ({
 
         analysisDocument = normalizeAnalysisDocument(rawArtifacts?.analysis);
         valueSignals = normalizeValueSignals(rawArtifacts?.signals);
-        enhancedNotes =
-          typeof rawArtifacts?.markdown === 'string'
-            ? rawArtifacts.markdown
-            : analysisDocumentToMarkdown(analysisDocument);
-
-        if (!enhancedNotes.trim()) {
-          enhancedNotes = analysisDocumentToMarkdown(analysisDocument);
-        }
+        enhancedNotes = analysisDocumentToMarkdown(analysisDocument);
 
         console.log(
-          '[Pluto] V2 analysis generated:',
+          '[Pluto] V3 analysis generated:',
           `formatPass=${analysisDocument.quality.format_pass},`,
           `retryCount=${analysisDocument.quality.retry_count},`,
           `fallback=${analysisDocument.quality.fallback_used},`,
@@ -3888,7 +4101,7 @@ export const AudioManager = ({
           `decisionImpact=${valueSignals.decision_impacts.length}`,
         );
       } catch (analysisErr) {
-        console.error('[Pluto] V2 analysis generation failed:', analysisErr);
+        console.error('[Pluto] V3 analysis generation failed:', analysisErr);
         analysisDocument = emptyAnalysisDocument();
         enhancedNotes = analysisDocumentToMarkdown(analysisDocument);
         valueSignals = emptyValueSignals();
@@ -3924,8 +4137,41 @@ export const AudioManager = ({
         }
       }
 
+      const chunkTranscriptMeta = {
+        backend: String(resolvedTranscriptionSettings.backend),
+        preset: String(resolvedTranscriptionSettings.preset),
+        model: String(resolvedChunkModel),
+        device: String(resolvedTranscriptionSettings.device),
+        computeType: String(resolvedChunkComputeType),
+        diarization: false,
+        elapsedMs: 0,
+      };
+      const sessionFallbackTranscriptMeta = sessionTranscriptionMeta
+        ? {
+            backend: String(sessionTranscriptionMeta.backend),
+            preset: String(sessionTranscriptionMeta.preset),
+            model: String(sessionTranscriptionMeta.model),
+            device: String(sessionTranscriptionMeta.device),
+            computeType: String(sessionTranscriptionMeta.computeType),
+            canonicalSource: sessionCanonicalSource,
+            diarization: diarizationEnabled,
+            elapsedMs: sessionTranscriptionMeta.elapsedMs || 0,
+            providerLabel: sessionTranscriptionMeta.providerLabel,
+            warnings: sessionTranscriptionMeta.warnings,
+          }
+        : undefined;
+      const transcriptMeta = {
+        backend: String(chunkTranscriptMeta.backend),
+        preset: String(chunkTranscriptMeta.preset),
+        model: String(chunkTranscriptMeta.model),
+        device: String(chunkTranscriptMeta.device),
+        computeType: String(chunkTranscriptMeta.computeType),
+        diarization: chunkTranscriptMeta.diarization,
+        elapsedMs: chunkTranscriptMeta.elapsedMs,
+      };
+
       const meetingData = {
-        id: crypto.randomUUID(),
+        id: currentMeetingIdRef.current!,
         title: title,
         meeting_type: 'Recording',
         started_at: startTime,
@@ -3934,9 +4180,14 @@ export const AudioManager = ({
         audio_path: primaryAudioPath,
         transcript_json: JSON.stringify(
           buildTranscriptJsonPayload(labeledTranscription, {
+            pipelineMode,
+            sessionFallbackUsed: sessionFallbackDecision.shouldRun,
+            sessionFallbackReasons: sessionFallbackDecision.reasons,
             canonicalSource: sessionCanonicalSource,
             postHydrationBleedPass,
             postHydrationBleedDroppedMe,
+            transcription: transcriptMeta,
+            sessionFallbackTranscription: sessionFallbackTranscriptMeta,
           }),
         ),
         user_notes: userNotes,
@@ -4029,6 +4280,7 @@ export const AudioManager = ({
       setIsRecording(false);
     } finally {
       setIsProcessing(false);
+      currentMeetingIdRef.current = null;
     }
   };
 
@@ -4051,9 +4303,33 @@ export const AudioManager = ({
     };
     window.addEventListener('STOP_RECORDING', handleStopRecording);
     window.addEventListener('START_RECORDING', handleStartRecording);
+
+    const handleMeetingDeleted = (_: any, deletedId: string) => {
+      if (deletedId === currentMeetingIdRef.current) {
+        console.warn(
+          `[Pluto] Active meeting ${deletedId} was deleted. Resetting state.`,
+        );
+        // Note: we don't call stopSession because that would try to save.
+        // We just reset local state. The main process handles task cancellation.
+        currentMeetingIdRef.current = null;
+        setIsRecording(false);
+        setIsProcessing(false);
+        // Kill active recorders
+        if (
+          micRecorderRef.current &&
+          micRecorderRef.current.state !== 'inactive'
+        ) {
+          micRecorderRef.current.stop();
+        }
+        window.ipcRenderer.invoke('NATIVE_AUDIO_STOP').catch(() => {});
+      }
+    };
+    window.ipcRenderer.on('MEETING_DELETED', handleMeetingDeleted);
+
     return () => {
       window.removeEventListener('STOP_RECORDING', handleStopRecording);
       window.removeEventListener('START_RECORDING', handleStartRecording);
+      window.ipcRenderer.off('MEETING_DELETED', handleMeetingDeleted);
     };
   });
 

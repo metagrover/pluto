@@ -104,6 +104,7 @@ type QueueState = {
 };
 
 const queueByDocId = new Map<string, QueueState>();
+let queuedSynthesisPaused = false;
 
 const normalizeText = (value: string): string =>
   value.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -159,6 +160,16 @@ const getState = (docId: string): QueueState => {
   const created: QueueState = { timer: null, inFlight: false, pending: false };
   queueByDocId.set(docId, created);
   return created;
+};
+
+const flushPendingKnowledgeDocRefreshes = (delayMs = 250): void => {
+  for (const [docId, state] of queueByDocId.entries()) {
+    if (!state.pending || state.inFlight || state.timer) continue;
+    state.timer = setTimeout(() => {
+      state.timer = null;
+      void runQueuedSynthesis(docId);
+    }, delayMs);
+  }
 };
 
 const extractTranscriptSegments = (
@@ -225,6 +236,47 @@ const parseAnalysisJson = (
   if (!raw || !raw.trim()) return emptyAnalysisEvidence();
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+    // v3 schema: extract from topic-structured document
+    if (parsed.analysis_schema_version === 3) {
+      const topics = Array.isArray(parsed.topics) ? parsed.topics : [];
+      const key_points = (topics as Array<Record<string, unknown>>).flatMap(
+        (t) =>
+          Array.isArray(t.key_points)
+            ? (t.key_points as Array<Record<string, unknown>>)
+                .map((p) => (typeof p.text === 'string' ? p.text.trim() : ''))
+                .filter(Boolean)
+            : [],
+      );
+      const allDecisions = Array.isArray(parsed.all_decisions)
+        ? (parsed.all_decisions as Array<Record<string, unknown>>)
+            .map((d) => (typeof d.text === 'string' ? d.text.trim() : ''))
+            .filter(Boolean)
+        : [];
+      const allActionItems = Array.isArray(parsed.all_action_items)
+        ? (parsed.all_action_items as Array<Record<string, unknown>>)
+            .map((a) => {
+              const text = typeof a.text === 'string' ? a.text.trim() : '';
+              const assignee =
+                typeof a.assignee === 'string' ? a.assignee.trim() : '';
+              return assignee ? `${assignee}: ${text}` : text;
+            })
+            .filter(Boolean)
+        : [];
+
+      return {
+        summary: [
+          typeof parsed.overview === 'string' ? parsed.overview.trim() : '',
+        ]
+          .filter(Boolean)
+          .slice(0, 6),
+        key_points: key_points.slice(0, 8),
+        action_items: allActionItems.slice(0, 6),
+        decisions: allDecisions.slice(0, 6),
+      };
+    }
+
+    // v2 schema: flat arrays
     return {
       summary: normalizeList(parsed.summary).slice(0, 6),
       key_points: normalizeList(parsed.key_points).slice(0, 8),
@@ -1159,6 +1211,10 @@ const synthesizeKnowledgeDocNowInternal = async (
 
 const runQueuedSynthesis = async (docId: string): Promise<void> => {
   const state = getState(docId);
+  if (queuedSynthesisPaused) {
+    state.pending = true;
+    return;
+  }
   if (state.inFlight) {
     state.pending = true;
     return;
@@ -1185,12 +1241,25 @@ export const queueKnowledgeDocRefresh = (
 
   if (state.timer) {
     clearTimeout(state.timer);
+    state.timer = null;
+  }
+
+  if (queuedSynthesisPaused) {
+    return;
   }
 
   state.timer = setTimeout(() => {
     state.timer = null;
     void runQueuedSynthesis(docId);
   }, delayMs);
+};
+
+export const setKnowledgeDocSynthesisPaused = (paused: boolean): void => {
+  if (queuedSynthesisPaused === paused) return;
+  queuedSynthesisPaused = paused;
+  if (!queuedSynthesisPaused) {
+    flushPendingKnowledgeDocRefreshes();
+  }
 };
 
 export const refreshKnowledgeDocNow = async (
@@ -1270,6 +1339,12 @@ const ensureDocsAndCollectActive = (): db.KnowledgeDoc[] => {
     minMentions: 3,
     inactiveDays: 45,
   });
+  db.syncKnowledgePersonLifecycle({
+    activeDays: 60,
+    minMeetings: 2,
+    minMentions: 3,
+    inactiveDays: 90,
+  });
   const docs = db.getKnowledgeDocs({ includeInactive: false });
   if (!docs.some((doc) => doc.id === globalDoc.id)) {
     return [globalDoc, ...docs];
@@ -1293,6 +1368,7 @@ export const queueKnowledgeDocsRefreshForMeeting = (
   const globalDoc = db.getKnowledgeDocByScope('global', 'global');
   if (globalDoc) docIds.add(globalDoc.id);
 
+  // Refresh project-scoped docs for projects mentioned in this meeting
   const projectIds = db.getProjectEntityIdsForMeeting(meetingId);
   for (const projectId of projectIds) {
     const projectDoc = db.getKnowledgeDocByScope('project', projectId);
@@ -1301,8 +1377,30 @@ export const queueKnowledgeDocsRefreshForMeeting = (
     }
   }
 
+  // Refresh person_context docs for people mentioned in this meeting
+  const personIds = db.getPersonEntityIdsForMeeting(meetingId);
+  for (const personId of personIds) {
+    const personDoc = db.getKnowledgeDocByScope('person_context', personId);
+    if (personDoc && personDoc.status !== 'inactive') {
+      docIds.add(personDoc.id);
+    }
+  }
+
+  // Refresh team_tracker docs whose members overlap with this meeting's people
   for (const doc of docs) {
-    if (doc.scope_type === 'global') docIds.add(doc.id);
+    if (doc.scope_type === 'global') {
+      docIds.add(doc.id);
+    } else if (doc.scope_type === 'team_tracker' && doc.config) {
+      try {
+        const config = JSON.parse(doc.config) as db.KnowledgeDocConfig;
+        const memberIds = config.member_entity_ids || [];
+        if (memberIds.some((id) => personIds.includes(id))) {
+          docIds.add(doc.id);
+        }
+      } catch {
+        // skip malformed config
+      }
+    }
   }
 
   for (const docId of docIds) {

@@ -90,7 +90,13 @@ export interface ParsedQuery {
   expanded_keywords: string[];
   entity_mentions: string[];
   temporal_range: { from?: string; to?: string } | null;
-  intent: 'factual' | 'temporal' | 'comparative' | 'exploratory';
+  intent:
+    | 'factual'
+    | 'temporal'
+    | 'comparative'
+    | 'exploratory'
+    | 'conversational';
+  cannedResponse?: string;
 }
 
 export interface ScoreBreakdown {

@@ -49,6 +49,38 @@ const jsonResponse = (
   } as unknown as Response;
 };
 
+const validStructuredAnalysis = {
+  overview: 'The team aligned on the API migration and a release follow-up.',
+  topics: [
+    {
+      title: 'API migration',
+      summary: 'The group discussed migration status and next steps.',
+      key_points: [{ text: 'GraphQL came up as an option under discussion.' }],
+      decisions: [{ text: 'Use REST for the rollout' }],
+      action_items: [
+        {
+          text: 'Send rollout email',
+          assignee: 'Sarah',
+          due: 'Friday',
+        },
+      ],
+      open_questions: [],
+      transcript_range: [0, 2],
+    },
+  ],
+  all_action_items: [
+    { text: 'Send rollout email', assignee: 'Sarah', due: 'Friday' },
+  ],
+  all_decisions: [{ text: 'Use REST for the rollout' }],
+  meeting_type: 'team_sync',
+  quality: {
+    format_pass: true,
+    retry_count: 0,
+    fallback_used: false,
+    issues: [],
+  },
+};
+
 const parseRequestBody = (init?: RequestInit): Record<string, unknown> => {
   if (typeof init?.body !== 'string') {
     return {};
@@ -106,7 +138,10 @@ describe('UnifiedLLMProvider', () => {
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
         return jsonResponse({
-          models: [{ name: 'kimike:latest' }, { name: 'phi4-mini:3.8b:latest' }],
+          models: [
+            { name: 'kimike:latest' },
+            { name: 'phi4-mini:3.8b:latest' },
+          ],
         });
       }
       if (url.endsWith('/api/generate')) {
@@ -329,6 +364,122 @@ describe('UnifiedLLMProvider', () => {
       model: 'gemini-2.0-flash',
       generationConfig: { responseMimeType: 'application/json' },
     });
+  });
+
+  it('retries structured analysis once before succeeding on repaired JSON', async () => {
+    let structuredCalls = 0;
+    installFetchMock((url, init) => {
+      expect(url).toContain('/chat/completions');
+      const body = parseRequestBody(init);
+      const messages = Array.isArray(body.messages)
+        ? (body.messages as Array<{ role: string; content: string }>)
+        : [];
+
+      if (
+        messages.some((m) =>
+          m.content?.includes('Repair this meeting analysis JSON'),
+        )
+      ) {
+        return jsonResponse({
+          choices: [
+            { message: { content: JSON.stringify(validStructuredAnalysis) } },
+          ],
+        });
+      }
+
+      structuredCalls += 1;
+      return jsonResponse({
+        choices: [{ message: { content: '{invalid json' } }],
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('openai', {
+      openai_api_key: 'test-key',
+      openai_model: 'gpt-4.1-mini',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      [
+        'Sarah: We discussed GraphQL but did not decide on it.',
+        'Deepak: Agreed, we will use REST for the rollout.',
+        "Sarah: I'll send the rollout email by Friday.",
+      ].join('\n'),
+    );
+
+    expect(structuredCalls).toBe(1);
+    expect(analysis.quality.retry_count).toBe(1);
+    expect(analysis.generation_metadata?.error_categories).toContain(
+      'repair_succeeded',
+    );
+    expect(analysis.generation_metadata?.provider).toBe('openai');
+  });
+
+  it('drops unsupported decisions and clears unsupported action item owner and due fields', async () => {
+    installFetchMock((url) => {
+      expect(url).toContain('/chat/completions');
+      return jsonResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                ...validStructuredAnalysis,
+                topics: [
+                  {
+                    ...validStructuredAnalysis.topics[0],
+                    decisions: [
+                      { text: 'Use GraphQL for the rollout' },
+                      { text: 'Use REST for the rollout' },
+                    ],
+                    action_items: [
+                      {
+                        text: 'Send rollout email',
+                        assignee: 'Bob',
+                        due: 'next Tuesday',
+                      },
+                    ],
+                  },
+                ],
+                all_decisions: [
+                  { text: 'Use GraphQL for the rollout' },
+                  { text: 'Use REST for the rollout' },
+                ],
+                all_action_items: [
+                  {
+                    text: 'Send rollout email',
+                    assignee: 'Bob',
+                    due: 'next Tuesday',
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('openai', {
+      openai_api_key: 'test-key',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      [
+        'Sarah: We discussed GraphQL as one option.',
+        'Deepak: Agreed, we will use REST for the rollout.',
+        "Sarah: I'll send the rollout email.",
+      ].join('\n'),
+    );
+
+    expect(analysis.all_decisions).toEqual([
+      { text: 'Use REST for the rollout' },
+    ]);
+    expect(analysis.all_action_items).toEqual([
+      { text: 'Send rollout email', topic: 'API migration' },
+    ]);
+    expect(analysis.generation_metadata?.error_categories).toEqual(
+      expect.arrayContaining([
+        'unsupported_decision',
+        'unsupported_action_item_owner',
+        'unsupported_action_item_due',
+      ]),
+    );
   });
 });
 

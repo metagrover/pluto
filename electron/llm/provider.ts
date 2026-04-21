@@ -1,3 +1,20 @@
+// Re-export v3 analysis types for centralized access
+export type {
+  AnalysisErrorCategory,
+  AnalysisGenerationMetadata,
+  AnalysisGenerationPath,
+  AnalysisProvider,
+  AnalysisDocumentV3,
+  AnalysisQualityV3,
+  TopicSection,
+  TopicPoint,
+  DecisionV3,
+  ActionItemV3,
+  MeetingType,
+  UserEditsMap,
+  UserEdit,
+} from './analysisTypes';
+
 // Structured entity extraction result
 export interface ExtractedEntities {
   people: Array<{
@@ -55,6 +72,7 @@ export interface AnalysisQuality {
   issues: string[];
 }
 
+/** @deprecated Use AnalysisDocumentV3 from analysisTypes for v3 pipeline */
 export interface AnalysisDocument {
   analysis_schema_version: number;
   summary: string[];
@@ -64,6 +82,7 @@ export interface AnalysisDocument {
   quality: AnalysisQuality;
 }
 
+/** @deprecated No longer returned from v3 pipeline */
 export interface AnalysisArtifacts {
   markdown: string;
   analysis: AnalysisDocument;
@@ -87,7 +106,14 @@ export interface LLMProvider {
   name: string;
   requiresApiKey: boolean;
   isAvailable(): Promise<boolean>;
+  /** v3: Generate topic-structured analysis document */
+  generateStructuredAnalysis(
+    transcript: string,
+    userNotes?: string,
+  ): Promise<import('./analysisTypes').AnalysisDocumentV3>;
+  /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
   generateSummary(transcript: string, userNotes?: string): Promise<string>;
+  /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
   generateUserAnalysisMarkdown(
     transcript: string,
     userNotes?: string,
@@ -96,6 +122,7 @@ export interface LLMProvider {
     transcript: string,
     summary?: string,
   ): Promise<InternalSignalDocument>;
+  /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
   generateAnalysisArtifacts(
     transcript: string,
     userNotes?: string,
@@ -107,6 +134,8 @@ export interface LLMProvider {
   extractSpeakerIdentity(transcript: string): Promise<string | null>;
   generateTitle(transcript: string): Promise<string>;
   synthesizeKnowledgeDocument(prompt: string): Promise<string>;
+  answerAskPluto(prompt: string): Promise<string>;
+  classifyQueryIntent(prompt: string): Promise<string>;
   extractEntities(
     transcript: string,
     context?: EntityExtractionContext,
