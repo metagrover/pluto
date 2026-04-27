@@ -151,11 +151,38 @@ Transcript:
 ${transcript}`;
 };
 
+export const buildRepresentativeTitleTranscript = (
+  transcript: string,
+  maxChars = 2400,
+): string => {
+  const normalized = transcript.trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  const excerptBudget = Math.floor(maxChars / 3);
+  const middleStart = Math.max(
+    0,
+    Math.floor(normalized.length / 2 - excerptBudget / 2),
+  );
+  const closingStart = Math.max(0, normalized.length - excerptBudget);
+
+  return [
+    `Opening:\n${normalized.slice(0, excerptBudget).trim()}`,
+    `Middle:\n${normalized
+      .slice(middleStart, middleStart + excerptBudget)
+      .trim()}`,
+    `Closing:\n${normalized.slice(closingStart).trim()}`,
+  ].join('\n\n[...]\n\n');
+};
+
 export const getTitlePrompt = (transcript: string): string => {
   return `Analyze this conversation transcript and generate a concise, descriptive meeting title (max 5-7 words).
 
 The title should:
 - Capture the main topic or purpose
+- Prefer sustained work topics over brief rapport, greetings, schedule chatter, travel, health, or family check-ins unless those personal topics are the main sustained subject
+- If a one-on-one covers several work topics, use the dominant work topic or a neutral one-on-one title
 - Be professional and clear
 - Not include quotes or special characters
 - Be in title case
@@ -163,7 +190,7 @@ The title should:
 Respond with ONLY the title, nothing else.
 
 Transcript:
-${transcript.substring(0, 1000)}`;
+${buildRepresentativeTitleTranscript(transcript)}`;
 };
 
 export const getEntitiesPrompt = (
@@ -445,6 +472,8 @@ Rules:
 - Use only transcript${userNotes ? ' and user-note' : ''} details. Never invent facts, owners, decisions, or deadlines.
 - Keep technical meaning exact. Do not flip problem/solution, cause/effect, shipped/planned, or agreed/questioned.
 - Treat the transcript as source of truth. User notes sharpen emphasis but do not override.
+- Brief rapport and personal check-ins may be included as minor context, but Do not make them major topics or lead the overview when most of the meeting is work-focused.
+- If a personal topic is sustained, produces follow-up, or is the clear purpose of the meeting, represent it normally.
 - If discussion is exploratory, say that. Do not convert brainstorming into decisions.
 - Distinguish between explicit decisions, proposals/recommendations, and unresolved questions.
 - Only mark something as a decision when the transcript shows explicit resolution language such as "decided", "agreed", "approved", "we will", "let's do that", or another clear commitment to a chosen path.
@@ -476,6 +505,8 @@ Return valid JSON only in the same schema as the original structured analysis ta
 Rules:
 - Preserve only facts supported by the transcript${userNotes ? ' and user notes' : ''}.
 - Keep technical meaning exact.
+- Brief rapport and personal check-ins may be included as minor context, but Do not make them major topics or lead the overview when most of the meeting is work-focused.
+- If a personal topic is sustained, produces follow-up, or is the clear purpose of the meeting, represent it normally.
 - Only mark something as a decision when the transcript shows explicit resolution language.
 - Only include an action item when the transcript shows an explicit commitment or assignment.
 - Keep unresolved questions out of decisions.

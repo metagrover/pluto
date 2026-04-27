@@ -1,7 +1,6 @@
 
 import Foundation
 import AudioToolbox
-import AVFoundation
 import OSLog
 
 let logger = Logger(subsystem: "com.metagrover.pluto.audiocap", category: "CLI")
@@ -54,72 +53,98 @@ func getAudioProcesses(includeSelf: Bool, targetPids: Set<Int32>? = nil) -> (pid
 
 
 class AudioCapCLI {
-    let tap: ProcessTap
+    private var tap: ProcessTap?
     let runLoop = CFRunLoopGetCurrent()
-    private var engine: AVAudioEngine?
-    private var player: AVAudioPlayerNode?
     private var loggedMultiBufferWarning = false
+    private let includeSelf: Bool
+    private let targetPids: [Int32]?
+    private var probePlayerProcess: Process?
     
     init(includeSelf: Bool, targetPids: [Int32]?) {
-        let targetSet = (targetPids != nil && !(targetPids?.isEmpty ?? true)) ? Set(targetPids!) : nil
-        // Dynamic discovery of PIDs
-        let processSelection = getAudioProcesses(includeSelf: includeSelf, targetPids: targetSet)
+        self.includeSelf = includeSelf
+        self.targetPids = targetPids
+    }
+
+    @discardableResult
+    private func refreshTapTargets() -> Bool {
+        let targetSet =
+            (targetPids != nil && !(targetPids?.isEmpty ?? true))
+            ? Set(targetPids!)
+            : nil
+        let processSelection = getAudioProcesses(
+            includeSelf: includeSelf,
+            targetPids: targetSet
+        )
         let pids = processSelection.pids
+
         logger.info("Found \(pids.count) audio processes to tap.")
         if let targetSet {
             fputs("[AudioCap] Requested target PIDs: \(Array(targetSet))\n", stderr)
         }
-        // Also print to stderr for Electron to see
-        // We can't easily get names here in this scope without helpers, but we have pids.
-        // Let's just print the PIDS
         fputs("[AudioCap] Found \(pids.count) processes: \(pids)\n", stderr)
         if !processSelection.excluded.isEmpty {
             fputs("[AudioCap] Excluded process PIDs: \(processSelection.excluded)\n", stderr)
         }
-      
-        self.tap = ProcessTap(pids: pids)
+
+        tap?.stop()
+        tap = ProcessTap(pids: pids)
+        return !pids.isEmpty
     }
     
     func start() {
         let queue = DispatchQueue(label: "AudioCapQueue")
         
         do {
-            try tap.activate()
-            if let desc = tap.tapStreamDescription {
-                let flags = desc.mFormatFlags
-                let nonInterleaved = (flags & UInt32(kAudioFormatFlagIsNonInterleaved)) != 0
-                fputs(
-                    "[AudioCap] Tap format: sampleRate=\(Int(desc.mSampleRate)), channels=\(desc.mChannelsPerFrame), " +
-                    "bytesPerFrame=\(desc.mBytesPerFrame), bitsPerChannel=\(desc.mBitsPerChannel), " +
-                    "nonInterleaved=\(nonInterleaved)\n",
-                    stderr
-                )
-            }
-            
-            // Standard Output Handle
-            let stdout = FileHandle.standardOutput
-            
-            try tap.start(on: queue) { (inNow, inInputData, inInputTime, outOutputData, inOutputTime) in
-                // Callback is on a realtime thread. Keep it light.
-                // inInputData is AudioBufferList.
-                // inInputData is UnsafePointer<AudioBufferList>
-                let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
-                let bufferList = UnsafeMutableAudioBufferListPointer(mutableInputData)
-                if bufferList.count > 1 && !self.loggedMultiBufferWarning {
-                    self.loggedMultiBufferWarning = true
-                    fputs("[AudioCap] Multiple channel buffers detected (\(bufferList.count)); streaming first buffer only.\n", stderr)
-                }
-                if let buffer = bufferList.first(where: { $0.mData != nil && $0.mDataByteSize > 0 }),
-                   let data = buffer.mData {
-                    let size = Int(buffer.mDataByteSize)
-                    if size > 0 {
-                        let pcmData = Data(bytes: data, count: size)
-                        // Writing to FileHandle might block?
-                        // In high-perf, we use a ring buffer. For CLI, explicit write is 'okay' usually.
-                        try? stdout.write(contentsOf: pcmData)
+            var attempts = 0
+            while true {
+                let foundTargets = refreshTapTargets()
+                if foundTargets, let tap {
+                    try tap.activate()
+                    if let desc = tap.tapStreamDescription {
+                        let flags = desc.mFormatFlags
+                        let nonInterleaved = (flags & UInt32(kAudioFormatFlagIsNonInterleaved)) != 0
+                        fputs(
+                            "[AudioCap] Tap format: sampleRate=\(Int(desc.mSampleRate)), channels=\(desc.mChannelsPerFrame), " +
+                            "bytesPerFrame=\(desc.mBytesPerFrame), bitsPerChannel=\(desc.mBitsPerChannel), " +
+                            "nonInterleaved=\(nonInterleaved)\n",
+                            stderr
+                        )
                     }
+
+                    // Standard Output Handle
+                    let stdout = FileHandle.standardOutput
+
+                    try tap.start(on: queue) { (inNow, inInputData, inInputTime, outOutputData, inOutputTime) in
+                        // Callback is on a realtime thread. Keep it light.
+                        // inInputData is AudioBufferList.
+                        // inInputData is UnsafePointer<AudioBufferList>
+                        let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
+                        let bufferList = UnsafeMutableAudioBufferListPointer(mutableInputData)
+                        if bufferList.count > 1 && !self.loggedMultiBufferWarning {
+                            self.loggedMultiBufferWarning = true
+                            fputs("[AudioCap] Multiple channel buffers detected (\(bufferList.count)); streaming first buffer only.\n", stderr)
+                        }
+                        if let buffer = bufferList.first(where: { $0.mData != nil && $0.mDataByteSize > 0 }),
+                           let data = buffer.mData {
+                            let size = Int(buffer.mDataByteSize)
+                            if size > 0 {
+                                let pcmData = Data(bytes: data, count: size)
+                                // Writing to FileHandle might block?
+                                // In high-perf, we use a ring buffer. For CLI, explicit write is 'okay' usually.
+                                try? stdout.write(contentsOf: pcmData)
+                            }
+                        }
+                        return
+                    }
+
+                    break
                 }
-                return
+
+                if attempts == 0 || attempts % 10 == 0 {
+                    fputs("[AudioCap] Waiting for audio processes...\n", stderr)
+                }
+                attempts += 1
+                Thread.sleep(forTimeInterval: 0.5)
             }
             
             // Keep runloop alive
@@ -135,6 +160,18 @@ class AudioCapCLI {
         let queue = DispatchQueue(label: "AudioCapProbeQueue")
         var sawNonZero = false
         do {
+            if emitProbeTone {
+                playProbeTone(durationMs: durationMs, frequency: 440, volume: 0.08)
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+
+            let foundTargets = refreshTapTargets()
+            guard foundTargets, let tap else {
+                stopProbeTone()
+                fputs("{\"status\":\"error\",\"message\":\"No audio processes available to tap\"}\n", stderr)
+                exit(1)
+            }
+
             try tap.activate()
             try tap.start(on: queue) { (_inNow, inInputData, _inInputTime, _outOutputData, _inOutputTime) in
                 let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
@@ -157,10 +194,6 @@ class AudioCapCLI {
                 return
             }
 
-            if emitProbeTone {
-                playProbeTone(durationMs: durationMs, frequency: 440, volume: 0.08)
-            }
-
             let start = Date()
             while Date().timeIntervalSince(start) < Double(durationMs) / 1000.0 {
                 CFRunLoopRunInMode(.defaultMode, 0.05, false)
@@ -178,80 +211,44 @@ class AudioCapCLI {
     }
 
     private func playProbeTone(durationMs: Int, frequency: Double, volume: Float) {
-        if playProbeFileIfAvailable() { return }
-        let engine = AVAudioEngine()
-        let player = AVAudioPlayerNode()
-        engine.attach(player)
-
-        let outputFormat = engine.outputNode.outputFormat(forBus: 0)
-        engine.connect(player, to: engine.mainMixerNode, format: outputFormat)
-
-        let sampleRate = outputFormat.sampleRate
-        let frameCount = AVAudioFrameCount(sampleRate * (Double(durationMs) / 1000.0))
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: frameCount) else { return }
-        buffer.frameLength = frameCount
-
-        let channels = Int(outputFormat.channelCount)
-        if let floatData = buffer.floatChannelData {
-            for ch in 0..<channels {
-                let channel = floatData[ch]
-                for i in 0..<Int(frameCount) {
-                    let t = Double(i) / sampleRate
-                    channel[i] = Float(sin(2.0 * Double.pi * frequency * t)) * volume
-                }
-            }
-        }
-
-        do {
-            try engine.start()
-            player.play()
-            player.scheduleBuffer(buffer, at: nil, options: .interrupts, completionHandler: nil)
-            self.engine = engine
-            self.player = player
-        } catch {
-            // Best-effort; probe still runs even if tone fails
-        }
+        let _ = frequency
+        startAfplayFallback(durationMs: durationMs, volume: volume)
     }
 
-    private func playProbeFileIfAvailable() -> Bool {
-        let execPath = CommandLine.arguments.first ?? ""
-        let execURL = URL(fileURLWithPath: execPath)
-        let soundsDir = execURL.deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("sounds")
-        let wavURL = soundsDir.appendingPathComponent("boot.wav")
-        let mp3URL = soundsDir.appendingPathComponent("boot.mp3")
-        let soundsURL = FileManager.default.fileExists(atPath: wavURL.path) ? wavURL : mp3URL
+    private func stopProbeTone() {
+        if let probePlayerProcess, probePlayerProcess.isRunning {
+            probePlayerProcess.terminate()
+        }
+        probePlayerProcess = nil
+    }
 
-        guard FileManager.default.fileExists(atPath: soundsURL.path) else { return false }
+    @discardableResult
+    private func startAfplayFallback(durationMs: Int? = nil, volume: Float) -> Bool {
+        let fallback = URL(fileURLWithPath: "/System/Library/Sounds/Glass.aiff")
+        guard FileManager.default.fileExists(atPath: fallback.path) else {
+            return false
+        }
+        return startAfplay(url: fallback, volume: volume, durationMs: durationMs)
+    }
+
+    @discardableResult
+    private func startAfplay(url: URL, volume: Float, durationMs: Int? = nil) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/afplay")
+
+        var arguments = ["-v", String(volume), url.path]
+        if let durationMs, durationMs > 0 {
+            arguments = ["-t", String(Double(durationMs) / 1000.0)] + arguments
+        }
+        process.arguments = arguments
 
         do {
-            let file = try AVAudioFile(forReading: soundsURL)
-            let engine = AVAudioEngine()
-            let player = AVAudioPlayerNode()
-            engine.attach(player)
-
-            let format = file.processingFormat
-            engine.connect(player, to: engine.mainMixerNode, format: format)
-            player.volume = 0.25
-
-            try engine.start()
-            player.play()
-            player.scheduleFile(file, at: nil, completionHandler: nil)
-
-            self.engine = engine
-            self.player = player
+            try process.run()
+            probePlayerProcess = process
             return true
         } catch {
             return false
         }
-    }
-
-    private func stopProbeTone() {
-        player?.stop()
-        engine?.stop()
-        player = nil
-        engine = nil
     }
 }
 

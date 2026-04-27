@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type React from 'react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { getKnowledgeDocSources } from '../../api/knowledgeDocs';
 import { getKnowledgeWorkspace } from '../../api/knowledgeWorkspace';
 import { useKnowledgeStore } from '../../store/knowledgeStore';
 import { FocusSheet } from './FocusSheet.tsx';
@@ -13,9 +14,10 @@ interface KnowledgeTabProps {
 
 export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
   onOpenMeeting: _onOpenMeeting,
-  onOpenProjectsTab,
+  onOpenProjectsTab: _onOpenProjectsTab,
 }) => {
   const { clearSelection } = useKnowledgeStore();
+  const [selectedDocId, setSelectedDocId] = useState<string | undefined>();
 
   // Handle ESC key to close the FocusSheet
   useEffect(() => {
@@ -30,8 +32,19 @@ export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
 
   // Fetch real data using React Query
   const { data: workspace, isLoading } = useQuery({
-    queryKey: ['knowledgeWorkspace'],
-    queryFn: () => getKnowledgeWorkspace({}),
+    queryKey: ['knowledgeWorkspace', selectedDocId],
+    queryFn: () => getKnowledgeWorkspace({ docId: selectedDocId }),
+  });
+
+  const selectedDoc = workspace?.selected_doc || null;
+  const selectedDocForSources = selectedDoc?.id;
+  const { data: sources = [], isLoading: sourcesLoading } = useQuery({
+    queryKey: ['knowledgeDocSources', selectedDocForSources],
+    queryFn: () =>
+      selectedDocForSources
+        ? getKnowledgeDocSources(selectedDocForSources)
+        : Promise.resolve([]),
+    enabled: Boolean(selectedDocForSources),
   });
 
   if (isLoading) {
@@ -48,27 +61,27 @@ export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
   }
 
   const nodes = workspace?.graph.nodes || [];
-  const edges = workspace?.graph.edges || [];
   const timeline = workspace?.timeline || [];
+  const edges = workspace?.graph.edges || [];
+  const backlinks = workspace?.backlinks || [];
+  const docs = workspace?.docs || [];
   const projectCards = workspace?.project_cards || [];
 
   return (
-    <div className="relative flex h-full w-full overflow-hidden bg-pro-bg rounded-2xl border border-pro-border shadow-soft">
-      {/* 1. The Stage (Main Workspace) */}
+    <div className="relative flex h-full w-full overflow-hidden bg-transparent">
       <MainStage
+        docs={docs}
+        selectedDoc={selectedDoc}
         nodes={nodes}
-        edges={edges}
         timeline={timeline}
+        backlinks={backlinks}
         projectCards={projectCards}
-        onOpenProjectsTab={onOpenProjectsTab}
+        sources={sources}
+        sourcesLoading={sourcesLoading}
+        onSelectDoc={setSelectedDocId}
       />
 
-      {/* 2. The Focus Sheet (The Anti-Sidebar Overlay) */}
-      <FocusSheet
-        nodes={nodes}
-        edges={edges}
-        onOpenProjectsTab={onOpenProjectsTab}
-      />
+      <FocusSheet nodes={nodes} edges={edges} />
     </div>
   );
 };

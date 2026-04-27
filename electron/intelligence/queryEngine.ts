@@ -58,6 +58,42 @@ export const parseQuery = async (text: string): Promise<ParsedQuery> => {
     'calls',
     'recorded',
     'recording',
+    // Query-framing words that add FTS noise
+    'summarize',
+    'summary',
+    'key',
+    'points',
+    'main',
+    'list',
+    'describe',
+    'explain',
+    'recent',
+    'latest',
+    'last',
+    'any',
+    'were',
+    'was',
+    'are',
+    'there',
+    'has',
+    'have',
+    'been',
+    'get',
+    'all',
+    'from',
+    'with',
+    'for',
+    'discussed',
+    'mentioned',
+    'talked',
+    'said',
+    'highlight',
+    'highlights',
+    'overview',
+    'brief',
+    'briefing',
+    'update',
+    'updates',
   ]);
   const keywords = tokens.filter((w) => !stopwords.has(w.toLowerCase()));
 
@@ -231,23 +267,45 @@ export const retrieveContext = async (
         // ignore JSON errors
       }
 
-      let evidence_text = `[FTS Match]: ${m.snippet || 'No direct match snippet'}\n`;
+      let evidence_text = `[FTS Match]: ${m.snippet || 'No snippet'}\n`;
+
+      // Prefer v3 analysis (topic-structured, richest content)
+      if (typeof (m as any).analysis_json === 'string') {
+        try {
+          const analysis = JSON.parse((m as any).analysis_json);
+          if (
+            analysis.analysis_schema_version === 3 &&
+            Array.isArray(analysis.topics)
+          ) {
+            const topicSummaries = analysis.topics
+              .map((t: any) => {
+                const points = Array.isArray(t.key_points)
+                  ? t.key_points
+                      .map((p: any) => `  - ${p.text || p}`)
+                      .join('\n')
+                  : '';
+                return `### ${t.title}\n${t.summary || ''}${
+                  points ? `\n${points}` : ''
+                }`;
+              })
+              .join('\n');
+            evidence_text += `[Analysis]:\n${topicSummaries.substring(0, 1500)}`;
+          } else if (analysis.overview) {
+            evidence_text += `[Overview]: ${String(analysis.overview).substring(0, 1500)}`;
+          } else if (analysis.summary) {
+            evidence_text += `[Summary]: ${String(analysis.summary).substring(0, 1500)}`;
+          }
+        } catch (e) {
+          // Fall through to enhanced_notes
+        }
+      }
+      // Fallback to enhanced_notes if evidence is still thin
       if (
+        evidence_text.length < 200 &&
         typeof m.enhanced_notes === 'string' &&
         m.enhanced_notes.length > 50
       ) {
-        evidence_text +=
-          `[Notes]: ` + m.enhanced_notes.substring(0, 800) + '...';
-      } else if (typeof (m as any).analysis_json === 'string') {
-        try {
-          const analysis = JSON.parse((m as any).analysis_json);
-          if (analysis.summary) {
-            evidence_text +=
-              `[Summary]: ` +
-              String(analysis.summary).substring(0, 800) +
-              '...';
-          }
-        } catch (e) {}
+        evidence_text += `[Notes]: ${m.enhanced_notes.substring(0, 1500)}`;
       }
 
       resultsMap[m.id as string] = {

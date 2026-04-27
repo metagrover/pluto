@@ -29,6 +29,11 @@ import { SettingsOverlay } from './components/overlays/SettingsOverlay';
 
 // Types
 import type { Meeting } from './types';
+import {
+  isGrantedStatus,
+  resolveMicrophoneStatus,
+  resolveSystemAudioStatus,
+} from './utils/permissions';
 import type {
   TranscriptionBackend,
   TranscriptionPreset,
@@ -52,8 +57,10 @@ function App() {
   >(null);
   const [activeTab, setActiveTab] = useState<
     'hub' | 'people' | 'projects' | 'wiki'
-  >('hub');
-  const [sidebarVisible, setSidebarVisible] = useState(true);
+  >(window.__PLUTO_BROWSER_PREVIEW__ ? 'wiki' : 'hub');
+  const [sidebarVisible, setSidebarVisible] = useState(
+    !window.__PLUTO_BROWSER_PREVIEW__,
+  );
   const [searchVisible, setSearchVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [permissionsVisible, setPermissionsVisible] = useState(false);
@@ -417,6 +424,21 @@ function App() {
 
   const intelligence = getProactiveIntelligence();
 
+  const probeMicrophonePermission = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const checkSystemAudioPermission = async (
     micStatus: string,
     allowSilent = true,
@@ -425,8 +447,9 @@ function App() {
       const ok = await window.ipcRenderer.invoke('SYSTEM_AUDIO_PROBE', {
         durationMs: 1500,
         allowSilent,
+        silentProbe: true,
       });
-      const systemAudioStatus = ok ? 'granted' : 'needs-audio';
+      const systemAudioStatus = resolveSystemAudioStatus(ok, allowSilent);
       setPermissionStatus((prev) => ({
         ...prev,
         mic: micStatus,
@@ -434,12 +457,13 @@ function App() {
       }));
       return { systemAudioStatus };
     } catch {
+      const systemAudioStatus = resolveSystemAudioStatus(false, allowSilent);
       setPermissionStatus((prev) => ({
         ...prev,
         mic: micStatus,
-        systemAudio: 'needs-audio',
+        systemAudio: systemAudioStatus,
       }));
-      return { systemAudioStatus: 'needs-audio' };
+      return { systemAudioStatus };
     }
   };
 
@@ -449,11 +473,18 @@ function App() {
       const alreadyDone = await window.ipcRenderer.invoke('BOOT_PROBE_STATUS');
       if (alreadyDone) return;
       await window.ipcRenderer.invoke('BOOT_PROBE_MARK');
-      const micStatus = await window.ipcRenderer.invoke(
+      const nativeMicStatus = await window.ipcRenderer.invoke(
         'CHECK_MICROPHONE_PERMISSION',
       );
+      const micProbeSucceeded = isGrantedStatus(nativeMicStatus)
+        ? true
+        : await probeMicrophonePermission();
+      const micStatus = resolveMicrophoneStatus(
+        nativeMicStatus,
+        micProbeSucceeded,
+      );
       const { systemAudioStatus } = await checkSystemAudioPermission(micStatus);
-      if (micStatus !== 'granted' || systemAudioStatus !== 'granted') {
+      if (!isGrantedStatus(micStatus)) {
         window.dispatchEvent(
           new CustomEvent('SHOW_PERMISSION_OVERLAY', {
             detail: { micStatus, systemAudioStatus },
@@ -483,12 +514,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const micGranted =
-      permissionStatus.mic === 'granted' ||
-      permissionStatus.mic === 'authorized';
-    const systemGranted =
-      permissionStatus.systemAudio === 'granted' ||
-      permissionStatus.systemAudio === 'authorized';
+    const micGranted = isGrantedStatus(permissionStatus.mic);
+    const systemGranted = isGrantedStatus(permissionStatus.systemAudio);
     if (micGranted && systemGranted) {
       setPermissionsVisible(false);
     }
@@ -606,7 +633,11 @@ function App() {
         />
       ) : (
         <main className="flex-1 flex flex-col bg-pro-bg h-full relative z-10 rounded-l-[2.5rem] overflow-hidden content-shift border-l border-pro-border/10">
-          <header className="app-titlebar h-28 flex items-center justify-between px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20">
+          <header
+            className={`app-titlebar flex items-center justify-between px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20 ${
+              !selectedMeetingId && activeTab === 'wiki' ? 'h-20' : 'h-28'
+            }`}
+          >
             <div className="flex items-center gap-8">
               <button
                 type="button"
@@ -638,15 +669,19 @@ function App() {
                         ? selectedMeeting?.title || 'Review'
                         : activeTab === 'hub'
                           ? 'Dashboard'
-                          : activeTab.charAt(0).toUpperCase() +
-                            activeTab.slice(1)}
+                          : activeTab === 'wiki'
+                            ? 'Knowledge Home'
+                            : activeTab.charAt(0).toUpperCase() +
+                              activeTab.slice(1)}
                 </h2>
                 <p className="text-[10px] font-bold text-pro-text-muted/60 uppercase tracking-widest mt-1">
                   {isRecording
                     ? 'Neural Stream Live'
                     : selectedMeetingId
                       ? 'Archived Context'
-                      : 'All Activities'}
+                      : activeTab === 'wiki'
+                        ? 'Compiled Intelligence'
+                        : 'All Activities'}
                 </p>
               </div>
             </div>
@@ -659,7 +694,7 @@ function App() {
               >
                 <span className="text-sm">🧠</span>
                 <span className="text-[9px] font-black text-pro-text-muted/60 dark:text-pro-text-main/70 uppercase tracking-[0.2em] pt-[1px]">
-                  Ask Pluto Intelligence
+                  Ask Pluto
                 </span>
                 <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity ml-2">
                   <span className="w-4 h-4 rounded border border-pro-border flex items-center justify-center text-[8px] font-bold">
@@ -702,7 +737,11 @@ function App() {
 
           <div
             ref={contentScrollRef}
-            className="flex-1 overflow-y-auto px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20 flex flex-col scroll-smooth relative"
+            className={`flex-1 overflow-y-auto flex flex-col scroll-smooth relative ${
+              !selectedMeetingId && activeTab === 'wiki'
+                ? 'px-0 py-0'
+                : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
+            }`}
           >
             <div className="fixed top-0 right-0 w-[800px] h-[800px] bg-pro-accent/5 rounded-full blur-[120px] -mr-96 -mt-96 pointer-events-none z-0" />
             <div className="fixed bottom-0 left-0 w-[600px] h-[600px] bg-pro-accent/5 rounded-full blur-[100px] -ml-40 -mb-40 pointer-events-none z-0" />
@@ -741,7 +780,7 @@ function App() {
                 <ProjectsExecutionTab />
               </div>
             ) : activeTab === 'wiki' ? (
-              <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
+              <div className="h-full w-full animate-in pb-10">
                 <KnowledgeTab
                   onOpenMeeting={(meetingId) => {
                     setSelectedMeetingId(meetingId);

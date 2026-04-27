@@ -2,40 +2,104 @@ import { getEntity, getMeetingMid } from '../db';
 import type { CitationChain, RetrievalResult } from './intelligenceTypes';
 
 /**
+ * Extract the sentence surrounding a given character index in a text.
+ */
+const extractSurroundingSentence = (
+  text: string,
+  matchIndex: number,
+): string => {
+  // Find the sentence boundaries around the match
+  const before = text.substring(0, matchIndex);
+  const after = text.substring(matchIndex);
+
+  // Look backwards for sentence start
+  const sentenceStartMatch = before.match(/(?:^|[.!?\n])\s*([^.!?\n]*)$/);
+  const sentenceStart = sentenceStartMatch
+    ? sentenceStartMatch[1]
+    : before.slice(-100);
+
+  // Look forwards for sentence end
+  const sentenceEndMatch = after.match(/^[^.!?\n]*[.!?\n]?/);
+  const sentenceEnd = sentenceEndMatch
+    ? sentenceEndMatch[0]
+    : after.slice(0, 100);
+
+  return (sentenceStart + sentenceEnd).replace(/\[Source\s+\d+\]/gi, '').trim();
+};
+
+/**
+ * Get the first meaningful evidence span from a retrieval result's MID.
+ */
+const getFirstEvidenceSpan = (source: RetrievalResult): string | undefined => {
+  if (source.mid?.evidence_spans && source.mid.evidence_spans.length > 0) {
+    return source.mid.evidence_spans[0].quote;
+  }
+  // Fallback: extract first useful segment from evidence text
+  const evidenceLines = source.evidence_text
+    .split('\n')
+    .filter((l) => l.trim().length > 20 && !l.startsWith('['));
+  return evidenceLines[0]?.trim().substring(0, 200);
+};
+
+/**
  * Builds a citation chain from the LLM's synthesized answer.
- * We parse out XML-like citation tags and validate them.
+ * Primary format: [Source N] bracket references.
+ * Fallback: legacy XML <cite> tags (including malformed ones).
  */
 export const buildCitationChain = (
   answer: string,
   sources: RetrievalResult[],
 ): CitationChain[] => {
   const citations: CitationChain[] = [];
-  
-  // Format we expect from the LLM:
-  // <cite meeting="meeting_id" entity="entity_id" quote="exact_quote">claim text</cite>
-  const citeRegex = /<cite\s+meeting="([^"]+)"(?:\s+entity="([^"]*)")?(?:\s+quote="([^"]*)")?>([\s\S]*?)<\/cite>/g;
-  
-  let match;
-  while ((match = citeRegex.exec(answer)) !== null) {
-    const meeting_id = match[1];
-    const entity_id = match[2];
-    const evidence_span = match[3];
-    const claim = match[4].trim();
-    
-    // Find the title matching this ID from our sources to populate it
-    const source = sources.find((s) => s.meeting_id === meeting_id);
-    const meetingTitle = source?.mid?.title || 'Unknown Meeting';
+  const seenSources = new Set<number>();
 
-    citations.push({
-      claim,
-      meeting_id,
-      meeting_title: meetingTitle,
-      entity_id: entity_id || undefined,
-      evidence_span: evidence_span || undefined,
-      evidence_valid: false, // will run structural audit later
-    });
+  // Primary: match [Source N] references
+  const sourceRefRegex = /\[Source\s+(\d+)\]/gi;
+  for (const match of answer.matchAll(sourceRefRegex)) {
+    const sourceIdx = Number.parseInt(match[1], 10) - 1; // 0-indexed
+    if (
+      sourceIdx >= 0 &&
+      sourceIdx < sources.length &&
+      !seenSources.has(sourceIdx)
+    ) {
+      seenSources.add(sourceIdx);
+      const source = sources[sourceIdx];
+      const claim = extractSurroundingSentence(answer, match.index ?? 0);
+
+      citations.push({
+        claim,
+        meeting_id: source.meeting_id,
+        meeting_title: source.mid?.title || 'Unknown Meeting',
+        evidence_span: getFirstEvidenceSpan(source),
+        evidence_valid: false, // set by auditCitations
+      });
+    }
   }
-  
+
+  // Fallback: legacy <cite> tag support (handle malformed tags like -cite, < cite)
+  if (citations.length === 0) {
+    const legacyCiteRegex =
+      /<?\-?cite\s+meeting="([^"]+)"(?:\s+entity="([^"]*)")?(?:\s+quote="([^"]*)")?>([\s\S]*?)<\/cite>/gi;
+    for (const legacyMatch of answer.matchAll(legacyCiteRegex)) {
+      const meeting_id = legacyMatch[1];
+      const entity_id = legacyMatch[2];
+      const evidence_span = legacyMatch[3];
+      const claim = legacyMatch[4].trim();
+
+      const source = sources.find((s) => s.meeting_id === meeting_id);
+      const meetingTitle = source?.mid?.title || 'Unknown Meeting';
+
+      citations.push({
+        claim,
+        meeting_id,
+        meeting_title: meetingTitle,
+        entity_id: entity_id || undefined,
+        evidence_span: evidence_span || undefined,
+        evidence_valid: false,
+      });
+    }
+  }
+
   return citations;
 };
 
@@ -62,13 +126,17 @@ export const auditCitations = (citations: CitationChain[]): CitationChain[] => {
       }
 
       // 3. Verify evidence span exists in MID spans if provided and not empty
-      if (evidence_valid && citation.evidence_span && citation.evidence_span.trim() !== '') {
+      if (
+        evidence_valid &&
+        citation.evidence_span &&
+        citation.evidence_span.trim() !== ''
+      ) {
         const needle = citation.evidence_span.toLowerCase().trim();
         const spanFound = mid.evidence_spans?.some((span) => {
           const haystack = span.quote.toLowerCase();
           return haystack.includes(needle) || needle.includes(haystack);
         });
-        
+
         if (!spanFound) {
           evidence_valid = false;
         }
