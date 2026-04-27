@@ -10,6 +10,7 @@ interface ImportMeta {
 }
 
 interface Window {
+  __PLUTO_BROWSER_PREVIEW__?: boolean;
   webkitAudioContext?: typeof AudioContext;
   ipcRenderer: {
     // biome-ignore lint/suspicious/noExplicitAny: IPC payloads are dynamic across channels.

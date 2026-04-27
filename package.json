@@ -23,6 +23,7 @@
     "replay:meeting": "node scripts/replay_meeting_attribution.js",
     "benchmark:transcription": "node scripts/benchmark_transcription_backends.js",
     "benchmark:meeting-notes-quality": "node scripts/evaluate_meeting_notes_quality.js",
+    "backfill:meeting-intelligence": "node scripts/backfill_meeting_title_analysis.mjs",
     "regenerate:meeting-transcript": "node scripts/replay_meeting_attribution.js",
     "test:meeting-regression": "node scripts/replay_meeting_attribution.js --fixture-file scripts/replay.local-fixtures.json --attempts 1 --require-expected --all-sets --transcript-regressions"
   },
@@ -42,6 +43,8 @@
     "lucide-react": "^0.563.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "undici": "^6.24.0",
     "zustand": "^5.0.11"
   },

@@ -483,32 +483,7 @@ export const AudioManager = ({
         `[Pluto] Starting session ${meetingId} (Robust Mic First)...`,
       );
 
-      // 0. Preflight Permissions (Mic only)
-      const micStatus = await window.ipcRenderer.invoke(
-        'CHECK_MICROPHONE_PERMISSION',
-      );
-      if (micStatus !== 'granted') {
-        window.dispatchEvent(
-          new CustomEvent('SHOW_PERMISSION_OVERLAY', {
-            detail: { micStatus },
-          }),
-        );
-        setIsRecording(false);
-        return;
-      }
-
-      // 1. System Audio Verification (Block start if unavailable)
-      if (systemAudioStatus !== 'granted') {
-        window.dispatchEvent(
-          new CustomEvent('SHOW_PERMISSION_OVERLAY', {
-            detail: { micStatus: 'granted', systemAudioStatus: 'needs-audio' },
-          }),
-        );
-        setIsRecording(false);
-        return;
-      }
-
-      // 2. Acquire Microphone Stream (Critical Path)
+      // 0. Acquire Microphone Stream (Critical Path)
       let micStream: MediaStream | null = null;
       try {
         micStream = await navigator.mediaDevices.getUserMedia({
@@ -529,7 +504,14 @@ export const AudioManager = ({
         }
       } catch (micErr) {
         console.warn('[Pluto] Failed to capture microphone:', micErr);
-        alert('Failed to access microphone. Please check permissions.');
+        const micStatus = await window.ipcRenderer.invoke(
+          'CHECK_MICROPHONE_PERMISSION',
+        );
+        window.dispatchEvent(
+          new CustomEvent('SHOW_PERMISSION_OVERLAY', {
+            detail: { micStatus, systemAudioStatus },
+          }),
+        );
         setIsRecording(false);
         return;
       }

@@ -107,6 +107,7 @@ import {
 } from './intelligence/proactiveEngine';
 import { parseQuery, retrieveContext } from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
+import { generateSuggestedQueries } from './intelligence/suggestedQueries';
 import {
   initializeKnowledgeDocs,
   queueAllKnowledgeDocsRefresh,
@@ -463,12 +464,12 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'SYSTEM_AUDIO_PROBE',
-    async (_event, { durationMs, allowSilent } = {}) => {
+    async (_event, { durationMs, allowSilent, silentProbe } = {}) => {
       return await runAudioProbe({
         durationMs,
         allowSilent: Boolean(allowSilent),
         includeSelf: true,
-        silentProbe: true,
+        silentProbe: Boolean(silentProbe),
       });
     },
   );
@@ -1774,25 +1775,27 @@ app.whenReady().then(async () => {
       const settings = await getAllSettings(db);
       const provider = await getProvider(settings);
 
-      const prompt = getAskPlutoPrompt(
-        queryText,
-        context,
-        'Use exact quotes wherever possible.',
-      );
+      const prompt = getAskPlutoPrompt(queryText, context, parsed.intent);
       console.log(
         `[Pluto] Generating answer via provider: ${provider.name} ...`,
       );
-      const answerHtml = await provider.answerAskPluto(prompt);
+      const answerRaw = await provider.answerAskPluto(prompt);
 
-      const rawCitations = buildCitationChain(answerHtml, context);
+      const rawCitations = buildCitationChain(answerRaw, context);
       const auditedCitations = auditCitations(rawCitations);
+
+      // Strip source references and any remaining legacy cite tags from display text
+      const cleanAnswer = answerRaw
+        .replace(/\[Source\s+\d+\]/gi, '')
+        .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
+        .trim();
 
       console.log(
         `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
       );
 
       return {
-        answer: answerHtml,
+        answer: cleanAnswer,
         citations: auditedCitations,
       };
     } catch (e) {
@@ -1820,6 +1823,15 @@ app.whenReady().then(async () => {
       }
     },
   );
+
+  ipcMain.handle('intelligence:suggested-queries', async () => {
+    try {
+      return generateSuggestedQueries();
+    } catch (e) {
+      console.error('[Pluto] intelligence:suggested-queries failed:', e);
+      return [];
+    }
+  });
 
   // =============================================
   // PROACTIVE INTELLIGENCE HANDLERS (Phase 4)

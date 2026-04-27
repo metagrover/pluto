@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { installBrowserIpcFallback } from './utils/browserIpcFallback.ts';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -13,6 +14,8 @@ if (!rootElement) {
   throw new Error('Root element not found');
 }
 
+installBrowserIpcFallback();
+
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
@@ -22,6 +25,6 @@ ReactDOM.createRoot(rootElement).render(
 );
 
 // Use contextBridge
-window.ipcRenderer.on('main-process-message', (_event, message) => {
+window.ipcRenderer?.on('main-process-message', (_event, message) => {
   console.log(message);
 });

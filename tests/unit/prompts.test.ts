@@ -5,9 +5,38 @@ import {
   getStructuredAnalysisPrompt,
   getSummaryPrompt,
   getSummaryRepairPrompt,
+  getTitlePrompt,
   getTopicAnalysisPrompt,
   getValueSignalsPrompt,
 } from '../../electron/llm/prompts';
+
+const neutralCheckinThenWorkTranscript = [
+  '0. Jordan: No worries.',
+  "1. Jordan: How's it going, Taylor?",
+  "2. Taylor: It's okay. A lot going on.",
+  "3. Jordan: How's your spouse doing? How is recovery?",
+  "4. Taylor: They're okay. We have fluids, and the kid is also under the weather, but we are managing fine.",
+  '5. Jordan: Hopefully catching it early means everyone is through the worst of it.',
+  '6. Jordan: Okay, switching gears, I wanted to discuss the context studio work for the API layer.',
+  '7. Taylor: The main thing is connecting snippets to reasoning chains so downstream users can inspect why an answer was produced.',
+  '8. Jordan: That should sit on top of the knowledge graph instead of being a separate document store.',
+  '9. Taylor: Right, and the Neo4j UI should expose those relationships across domain services.',
+  '10. Jordan: We also need the context studio to show provenance for each API response.',
+  '11. Taylor: The work item is to validate the graph schema and make sure agents can retrieve the right snippets.',
+  '12. Jordan: Let us keep the title focused on the knowledge graph and context studio work.',
+].join('\n');
+
+describe('getTitlePrompt', () => {
+  it('uses representative transcript context instead of only the opening check-in', () => {
+    const prompt = getTitlePrompt(neutralCheckinThenWorkTranscript);
+
+    expect(prompt).toContain('How is recovery?');
+    expect(prompt).toContain('context studio work for the API layer');
+    expect(prompt).toContain('Neo4j UI');
+    expect(prompt).toContain('Prefer sustained work topics');
+    expect(prompt).toContain('brief rapport');
+  });
+});
 
 describe('getSummaryPrompt', () => {
   it('enforces four sections and forbids internal label leakage', () => {
@@ -95,6 +124,17 @@ describe('getValueSignalsPrompt', () => {
 });
 
 describe('v3 accuracy prompts', () => {
+  it('treats brief personal check-ins as minor context when work discussion dominates', () => {
+    const prompt = getStructuredAnalysisPrompt(
+      neutralCheckinThenWorkTranscript,
+    );
+
+    expect(prompt).toContain('Brief rapport and personal check-ins');
+    expect(prompt).toContain('minor context');
+    expect(prompt).toContain('Do not make them major topics');
+    expect(prompt).toContain('work-focused');
+  });
+
   it('requires explicit resolution language before classifying decisions', () => {
     const prompt = getStructuredAnalysisPrompt(
       'Speaker A: We might use GraphQL. Speaker B: Let us do REST for now.',

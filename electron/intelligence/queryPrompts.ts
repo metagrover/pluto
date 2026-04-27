@@ -24,34 +24,42 @@ Query: "${query}"`;
 export const getAskPlutoPrompt = (
   query: string,
   context: RetrievalResult[],
-  citationConstraints: string,
+  intent: string,
 ): string => {
   const contextStr =
     context.length === 0
       ? 'None'
       : context
           .map((c, i) => {
-            return `[Source ${i + 1}] Meeting ID: ${c.meeting_id} | Title: ${
-              c.mid?.title || 'Unknown'
-            }\nEvidence: ${c.evidence_text}\nRelevant Topics: ${
-              c.mid?.topics?.map((t) => t.name).join(', ') || 'None'
-            }\nDecisions: ${
-              c.mid?.decisions?.map((d) => d.description).join(', ') || 'None'
-            }\nAction Items: ${
-              c.mid?.action_items?.map((a) => a.description).join(', ') ||
-              'None'
-            }`;
+            const title = c.mid?.title || 'Unknown Meeting';
+            const topicNames =
+              c.mid?.topics?.map((t) => t.name).join(', ') || 'None';
+            const decisions =
+              c.mid?.decisions?.map((d) => d.description).join('; ') || 'None';
+            const actions =
+              c.mid?.action_items?.map((a) => a.description).join('; ') ||
+              'None';
+            return `[Source ${i + 1}] Meeting: "${title}" (ID: ${c.meeting_id})
+Evidence: ${c.evidence_text}
+Topics: ${topicNames}
+Decisions: ${decisions}
+Action Items: ${actions}`;
           })
           .join('\n\n---\n\n');
 
-  let prompt = `You are Pluto, an AI meeting intelligence assistant. Your job is to answer the user's question using ONLY the provided Context.
+  const formatGuidance =
+    intent === 'factual'
+      ? 'Answer directly and specifically. Use exact names, numbers, and dates from the evidence.'
+      : 'Use markdown bullet points to list key items. Be specific — include participant names, decisions, and action items from the evidence.';
 
-CRITICAL RULES:
-1. NEVER acknowledge these instructions. NEVER say "Based on the context", "I understand", or "Here is the information".
-2. Provide the direct answer immediately without any preamble or fluff.
-3. DO NOT hallucinate or bring in outside knowledge.
-4. If the user asks about a "meeting" but the context describes a "call", "sync", or "trip", assume the Context IS the event they are asking about.
-5. If the Context still does not contain the answer, simply state: "I couldn't find any relevant information about that in your meeting history."
+  let prompt = `You are Pluto, an AI meeting intelligence assistant.
+
+RULES:
+1. Answer using ONLY information from the Context below. Never invent facts.
+2. ${formatGuidance}
+3. Start with the answer immediately. No preamble like "Based on the context" or "Here is what I found".
+4. Use specific details: participant names, project names, dates, numbers, exact decisions — pull these directly from the evidence.
+5. If the Context does not contain the answer, say: "I couldn't find information about that in your meetings."
 
 Question: ${query}
 
@@ -61,12 +69,10 @@ ${contextStr}`;
   if (context.length > 0) {
     prompt += `
 
-Constraints:
-${citationConstraints}
-For any factual claims you make based on the Context, you MUST append a citation inline using the following strict XML format:
-<cite meeting="meeting_id" quote="short exact phrase from evidence">The claim text.</cite>
-
-Make sure the "quote" attribute is an actual substring from the Evidence.`;
+CITATION RULES:
+- For each factual claim, add an inline source reference like [Source 1] or [Source 2] at the end of the sentence.
+- Use the source numbers that correspond to the Context sources above.
+- Every bullet point or key claim MUST have at least one [Source N] reference.`;
   }
 
   return prompt;

@@ -1,385 +1,638 @@
+import {
+  AlertTriangle,
+  GitBranch,
+  Layers3,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+  TrendingUp,
+} from 'lucide-react';
 import type React from 'react';
+import { useMemo, useState } from 'react';
 import type {
-  KnowledgeGraphEdge,
+  KnowledgeDoc,
+  KnowledgeDocSource,
+  KnowledgeDocStatus,
+} from '../../api/knowledgeDocs';
+import type {
+  KnowledgeBacklink,
   KnowledgeGraphNode,
   KnowledgeProjectHealthCard,
   KnowledgeTimelineItem,
 } from '../../api/knowledgeWorkspace';
 import { useKnowledgeStore } from '../../store/knowledgeStore';
+import {
+  type KnowledgeBriefLane,
+  type KnowledgeStatement,
+  type ProjectRadarSeverity,
+  compileActiveProjectRadar,
+  compileKnowledgeBrief,
+  formatDocStatus,
+  formatRelativeKnowledgeTime,
+  groupKnowledgeDocs,
+  parseStructuredKnowledgeDoc,
+} from './knowledgeDocument';
 
 interface MainStageProps {
+  docs: KnowledgeDoc[];
+  selectedDoc: KnowledgeDoc | null;
   nodes: KnowledgeGraphNode[];
-  edges: KnowledgeGraphEdge[];
   timeline: KnowledgeTimelineItem[];
+  backlinks: KnowledgeBacklink[];
   projectCards: KnowledgeProjectHealthCard[];
-  onOpenProjectsTab?: () => void;
+  sources: KnowledgeDocSource[];
+  sourcesLoading: boolean;
+  onSelectDoc: (docId: string) => void;
 }
 
-const isTrashEntity = (node: KnowledgeGraphNode): boolean => {
-  const name = node.label.toLowerCase().trim();
-  const trashTerms = [
-    'none',
-    'omit',
-    'unknown',
-    'none specified',
-    'unnamed',
-    'unknown project',
-  ];
+const STATUS_STYLES: Record<KnowledgeDocStatus, string> = {
+  up_to_date: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  synthesizing: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  stale: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  failed: 'bg-red-500/10 text-red-600 border-red-500/20',
+  inactive: 'bg-pro-bg text-pro-text-muted border-pro-border',
+};
 
-  // 1. Hard Exclusion List
-  if (trashTerms.includes(name)) return true;
-  if (name.includes('(unknown)')) return true;
+const LANE_ICONS: Record<KnowledgeBriefLane['id'], React.ElementType> = {
+  priorities: Sparkles,
+  risks: AlertTriangle,
+  patterns: TrendingUp,
+  dependencies: GitBranch,
+};
 
-  // 2. Minimum Confidence Rule (90%)
-  if (node.saliency_score < 0.9) return true;
+const LANE_ACCENTS: Record<KnowledgeBriefLane['id'], string> = {
+  priorities: 'border-pro-accent/30 bg-pro-accent/5',
+  risks: 'border-red-500/20 bg-red-500/5',
+  patterns: 'border-blue-500/20 bg-blue-500/5',
+  dependencies: 'border-amber-500/20 bg-amber-500/5',
+};
 
-  // 3. Simple Noise Filter
-  if (name.length <= 2) return true;
-  if (
-    [
-      'me',
-      'them',
-      'you',
-      'they',
-      'we',
-      'us',
-      'our',
-      'speaker',
-      'participant',
-    ].includes(name)
-  )
-    return true;
+const RADAR_STYLES: Record<
+  ProjectRadarSeverity,
+  { border: string; badge: string }
+> = {
+  critical: {
+    border: 'border-red-500/25',
+    badge: 'border-red-500/20 bg-red-500/10 text-red-500',
+  },
+  watch: {
+    border: 'border-amber-500/25',
+    badge: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
+  },
+  steady: {
+    border: 'border-emerald-500/20',
+    badge: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+  },
+};
 
-  return false;
+const trimText = (value: string, maxLength: number): string => {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 3).trim()}...`;
+};
+
+const StatusBadge = ({ status }: { status: KnowledgeDocStatus }) => (
+  <span
+    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold capitalize ${STATUS_STYLES[status]}`}
+  >
+    {formatDocStatus(status)}
+  </span>
+);
+
+const EmptyState = () => (
+  <div className="flex h-full items-center justify-center bg-pro-bg">
+    <div className="max-w-md rounded-xl border border-pro-border bg-pro-surface p-8 text-center shadow-sm">
+      <Layers3 className="mx-auto h-7 w-7 text-pro-text-muted" />
+      <h2 className="mt-4 text-2xl font-black tracking-tight text-pro-text-main">
+        No compiled memory yet
+      </h2>
+      <p className="mt-3 text-sm leading-6 text-pro-text-muted">
+        Record meetings and Pluto will compile active project signals, risks,
+        and context here.
+      </p>
+    </div>
+  </div>
+);
+
+const ContextSelector = ({
+  docs,
+  selectedDoc,
+  onSelectDoc,
+}: {
+  docs: KnowledgeDoc[];
+  selectedDoc: KnowledgeDoc;
+  onSelectDoc: (docId: string) => void;
+}) => {
+  const groups = useMemo(() => groupKnowledgeDocs(docs), [docs]);
+  const totalDocs = groups.reduce(
+    (count, group) => count + group.docs.length,
+    0,
+  );
+
+  return (
+    <section className="rounded-xl border border-pro-border bg-pro-surface p-4 shadow-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted">
+            Memory scope
+          </p>
+          <p className="mt-1 truncate text-sm font-bold text-pro-text-main">
+            {selectedDoc.title}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <StatusBadge status={selectedDoc.status} />
+          {totalDocs > 1 && (
+            <select
+              value={selectedDoc.id}
+              onChange={(event) => onSelectDoc(event.target.value)}
+              className="h-9 max-w-[260px] rounded-lg border border-pro-border bg-pro-bg px-3 text-xs font-bold text-pro-text-main outline-none"
+            >
+              {groups.map((group) => (
+                <optgroup key={group.scopeType} label={group.label}>
+                  {group.docs.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.title}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+};
+
+const CitationList = ({ statement }: { statement: KnowledgeStatement }) => {
+  if (statement.citations.length === 0) return null;
+
+  return (
+    <details className="mt-3 rounded-lg border border-pro-border bg-pro-surface/70 px-3 py-2">
+      <summary className="cursor-pointer list-none text-[11px] font-bold text-pro-text-muted">
+        Evidence ({statement.citations.length})
+      </summary>
+      <div className="mt-2 space-y-2">
+        {statement.citations.map((citation, index) => (
+          <p
+            key={`${citation.meeting_id}-${index}`}
+            className="text-[11px] leading-5 text-pro-text-muted"
+          >
+            {citation.quote
+              ? trimText(citation.quote, 220)
+              : citation.meeting_id || 'Source'}
+          </p>
+        ))}
+      </div>
+    </details>
+  );
+};
+
+const CompiledHero = ({
+  selectedDoc,
+  sources,
+  headline,
+  freshnessDate,
+  isCompiled,
+}: {
+  selectedDoc: KnowledgeDoc;
+  sources: KnowledgeDocSource[];
+  headline: string;
+  freshnessDate: string;
+  isCompiled: boolean;
+}) => (
+  <section className="rounded-xl border border-pro-border bg-pro-surface p-5 shadow-sm md:p-6">
+    <div className="flex flex-wrap items-center gap-2">
+      <StatusBadge status={selectedDoc.status} />
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-pro-text-muted">
+        <RefreshCw className="h-3.5 w-3.5" />
+        {formatRelativeKnowledgeTime(freshnessDate)}
+      </span>
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-pro-text-muted">
+        <ShieldCheck className="h-3.5 w-3.5" />
+        {sources.length} source{sources.length === 1 ? '' : 's'}
+      </span>
+    </div>
+
+    <p className="mt-5 text-[11px] font-black uppercase tracking-[0.2em] text-pro-text-muted">
+      Compiled view
+    </p>
+    <h1 className="mt-3 max-w-3xl text-2xl font-black leading-tight tracking-tight text-pro-text-main md:text-3xl">
+      {headline}
+    </h1>
+    <p className="mt-4 max-w-2xl text-sm font-medium leading-6 text-pro-text-muted">
+      {isCompiled
+        ? 'Pluto is reading across your synthesized memory for active project signals, risks, pattern shifts, and cross-context dependencies.'
+        : 'Pluto needs structured, citation-backed memory before it can make a compiled claim here.'}
+    </p>
+
+    {selectedDoc.status === 'failed' && (
+      <p className="mt-5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-500">
+        Latest synthesis failed. Pluto is not making new claims from this memory
+        until synthesis succeeds.
+      </p>
+    )}
+
+    {selectedDoc.status === 'synthesizing' && (
+      <p className="mt-5 rounded-lg border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-500">
+        Refreshing memory. Existing context remains readable while Pluto
+        compiles the next version.
+      </p>
+    )}
+  </section>
+);
+
+const BriefLane = ({ lane }: { lane: KnowledgeBriefLane }) => {
+  const Icon = LANE_ICONS[lane.id];
+  const visibleItems = lane.items.slice(0, 4);
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-start gap-3">
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${LANE_ACCENTS[lane.id]}`}
+        >
+          <Icon className="h-4 w-4 text-pro-text-main" />
+        </div>
+        <div>
+          <h2 className="text-lg font-black tracking-tight text-pro-text-main">
+            {lane.label}
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-pro-text-muted">
+            {lane.description}
+          </p>
+        </div>
+      </div>
+
+      {visibleItems.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-pro-border bg-pro-surface px-4 py-4 text-sm text-pro-text-muted">
+          Nothing strong enough to surface here yet.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {visibleItems.map((item) => (
+            <article
+              key={item.id}
+              className="rounded-xl border border-pro-border bg-pro-surface p-4 shadow-sm"
+            >
+              <p className="text-sm font-bold leading-6 text-pro-text-main">
+                {item.text}
+              </p>
+              {item.why_it_matters && (
+                <p className="mt-2 text-xs leading-5 text-pro-text-muted">
+                  {item.why_it_matters}
+                </p>
+              )}
+              <CitationList statement={item} />
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+};
+
+const ActiveProjectRadar = ({
+  docs,
+  projectCards,
+}: {
+  docs: KnowledgeDoc[];
+  projectCards: KnowledgeProjectHealthCard[];
+}) => {
+  const radar = useMemo(
+    () => compileActiveProjectRadar(docs, projectCards),
+    [docs, projectCards],
+  );
+
+  if (radar.length === 0) return null;
+
+  return (
+    <section className="rounded-xl border border-pro-border bg-pro-surface p-5 shadow-sm">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted">
+            Active project radar
+          </p>
+          <h2 className="mt-2 text-xl font-black tracking-tight text-pro-text-main">
+            What needs attention from your current project memory
+          </h2>
+        </div>
+        <span className="rounded-lg border border-pro-border bg-pro-bg px-3 py-1 text-[11px] font-bold text-pro-text-muted">
+          {radar.length} project{radar.length === 1 ? '' : 's'}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3">
+        {radar.slice(0, 5).map((item) => {
+          const style = RADAR_STYLES[item.severity];
+          return (
+            <article
+              key={item.id}
+              className={`rounded-xl border bg-pro-bg p-4 ${style.border}`}
+            >
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-black text-pro-text-main">
+                    {item.title}
+                  </h3>
+                  <p className="mt-2 text-xs leading-5 text-pro-text-muted">
+                    {item.reasons.join(' · ')}
+                  </p>
+                </div>
+                <span
+                  className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${style.badge}`}
+                >
+                  {item.label}
+                </span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
+
+const UncompiledState = ({
+  selectedDoc,
+  sources,
+  relatedCount,
+}: {
+  selectedDoc: KnowledgeDoc;
+  sources: KnowledgeDocSource[];
+  relatedCount: number;
+}) => (
+  <section className="rounded-xl border border-pro-border bg-pro-surface p-5 shadow-sm">
+    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+      <div>
+        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted">
+          Why this is empty
+        </p>
+        <h2 className="mt-2 text-lg font-black tracking-tight text-pro-text-main">
+          Pluto does not have a trustworthy compiled signal for this scope.
+        </h2>
+      </div>
+      <StatusBadge status={selectedDoc.status} />
+    </div>
+
+    <div className="mt-5 grid gap-3 md:grid-cols-3">
+      <div className="rounded-lg border border-pro-border bg-pro-bg p-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-pro-text-muted">
+          Source meetings
+        </p>
+        <p className="mt-2 text-xl font-black text-pro-text-main">
+          {sources.length}
+        </p>
+      </div>
+      <div className="rounded-lg border border-pro-border bg-pro-bg p-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-pro-text-muted">
+          Related context
+        </p>
+        <p className="mt-2 text-xl font-black text-pro-text-main">
+          {relatedCount}
+        </p>
+      </div>
+      <div className="rounded-lg border border-pro-border bg-pro-bg p-3">
+        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-pro-text-muted">
+          Structured memory
+        </p>
+        <p className="mt-2 text-sm font-black capitalize text-pro-text-main">
+          Not ready
+        </p>
+      </div>
+    </div>
+
+    <p className="mt-4 text-sm leading-6 text-pro-text-muted">
+      The right next version should compile active project risks, dependencies,
+      and repeated patterns only after synthesis has produced structured,
+      citation-backed sections.
+    </p>
+  </section>
+);
+
+const EvidenceSummary = ({
+  nodes,
+  timeline,
+  backlinks,
+  sources,
+  sourcesLoading,
+}: {
+  nodes: KnowledgeGraphNode[];
+  timeline: KnowledgeTimelineItem[];
+  backlinks: KnowledgeBacklink[];
+  sources: KnowledgeDocSource[];
+  sourcesLoading: boolean;
+}) => {
+  const { setSelectedEntity } = useKnowledgeStore();
+  const [expanded, setExpanded] = useState(false);
+  const relatedNodes = nodes.slice(0, 8);
+
+  return (
+    <section className="rounded-xl border border-pro-border bg-pro-surface p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-black text-pro-text-main">
+            Supporting context
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-pro-text-muted">
+            {sources.length} source{sources.length === 1 ? '' : 's'} ·{' '}
+            {relatedNodes.length} related item
+            {relatedNodes.length === 1 ? '' : 's'} · {timeline.length} recent
+            update{timeline.length === 1 ? '' : 's'}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="rounded-lg border border-pro-border bg-pro-bg px-3 py-1.5 text-[11px] font-bold text-pro-text-muted hover:text-pro-text-main"
+        >
+          {expanded ? 'Hide' : 'Show'}
+        </button>
+      </div>
+
+      {!expanded ? null : (
+        <div className="mt-5 grid gap-5 md:grid-cols-2">
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-[0.16em] text-pro-text-muted">
+              Source meetings
+            </h3>
+            <div className="mt-3 space-y-2">
+              {sourcesLoading ? (
+                <p className="text-xs text-pro-text-muted">
+                  Loading sources...
+                </p>
+              ) : sources.length === 0 ? (
+                <p className="text-xs leading-5 text-pro-text-muted">
+                  No source meetings are linked yet.
+                </p>
+              ) : (
+                sources.slice(0, 5).map((source) => (
+                  <div
+                    key={`${source.doc_id}-${source.meeting_id}`}
+                    className="rounded-lg border border-pro-border bg-pro-bg p-3"
+                  >
+                    <p className="truncate text-xs font-bold text-pro-text-main">
+                      {source.meeting_title}
+                    </p>
+                    <p className="mt-1 text-[11px] text-pro-text-muted">
+                      {source.mention_count} mentions
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-[0.16em] text-pro-text-muted">
+              Related context
+            </h3>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {relatedNodes.length === 0 ? (
+                <p className="text-xs leading-5 text-pro-text-muted">
+                  Related entities will appear as Pluto links this brief to your
+                  meetings.
+                </p>
+              ) : (
+                relatedNodes.map((node) => (
+                  <button
+                    key={node.id}
+                    type="button"
+                    onClick={() => setSelectedEntity(node.id, node)}
+                    className="rounded-lg border border-pro-border bg-pro-bg px-3 py-1.5 text-xs font-bold text-pro-text-main hover:border-pro-accent/50 hover:text-pro-accent"
+                  >
+                    {node.label}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-black uppercase tracking-[0.16em] text-pro-text-muted">
+              Recent movement
+            </h3>
+            <div className="mt-3 space-y-3">
+              {timeline.length === 0 ? (
+                <p className="text-xs leading-5 text-pro-text-muted">
+                  No synthesis timeline is available yet.
+                </p>
+              ) : (
+                timeline.slice(0, 4).map((item) => (
+                  <div
+                    key={item.id}
+                    className="border-l border-pro-border pl-3"
+                  >
+                    <p className="text-xs font-bold text-pro-text-main">
+                      {item.title}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-4 text-pro-text-muted">
+                      {item.detail}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {backlinks.length > 0 && (
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-[0.16em] text-pro-text-muted">
+                Backlinks
+              </h3>
+              <div className="mt-3 space-y-2">
+                {backlinks.slice(0, 4).map((link) => (
+                  <div key={link.id} className="rounded-lg bg-pro-bg p-3">
+                    <p className="text-xs font-bold text-pro-text-main">
+                      {link.label}
+                    </p>
+                    {link.snippet && (
+                      <p className="mt-1 text-[11px] leading-4 text-pro-text-muted">
+                        {trimText(link.snippet, 120)}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
 };
 
 export const MainStage: React.FC<MainStageProps> = ({
+  docs,
+  selectedDoc,
   nodes,
-  edges,
   timeline,
+  backlinks,
   projectCards,
-  onOpenProjectsTab,
+  sources,
+  sourcesLoading,
+  onSelectDoc,
 }) => {
-  const { setSelectedEntity, domainFilter, setDomainFilter } =
-    useKnowledgeStore();
-
-  // Filter out trash and low-confidence nodes
-  const visibleNodes = nodes.filter(
-    (node) => node.domain_tag === domainFilter && !isTrashEntity(node),
+  const structuredDoc = useMemo(
+    () => parseStructuredKnowledgeDoc(selectedDoc),
+    [selectedDoc],
+  );
+  const brief = useMemo(
+    () => compileKnowledgeBrief(selectedDoc),
+    [selectedDoc],
   );
 
-  const projectNodes = visibleNodes.filter((n) => n.type === 'project');
-  const decisionNodes = visibleNodes.filter((n) => n.type === 'decision');
-  const peopleNodes = visibleNodes.filter((n) => n.type === 'person');
+  if (!selectedDoc) return <EmptyState />;
 
-  // Tier 1 Gate: Mentions > 2 and High Saliency (Proxy for Confidence)
-  const tier1Nodes = [...projectNodes, ...decisionNodes]
-    .filter((n) => n.mention_count > 2)
-    .sort((a, b) => b.mention_count - a.mention_count)
-    .slice(0, 8);
-
-  const tier2Nodes = peopleNodes
-    .sort((a, b) => b.mention_count - a.mention_count)
-    .slice(0, 16);
-
-  const riskEdges = edges
-    .filter((e) =>
-      ['blocked_by', 'depends_on', 'impacts'].includes(e.relationship),
-    )
-    .filter((e) => e.confidence >= 0.9)
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 6);
-
-  // Filter Project Cards: Hide if 0 blockers AND 0 dependencies
-  const activeProjectCards = projectCards
-    .filter((c) => c.open_blockers > 0 || c.dependency_count > 0)
-    .slice(0, 4);
+  const freshnessDate =
+    selectedDoc.last_synthesized_at || selectedDoc.updated_at;
+  const hasStructuredDoc = Boolean(structuredDoc);
 
   return (
-    <div className="w-full h-full flex justify-center bg-pro-bg overflow-y-auto custom-scrollbar">
-      <div className="w-full max-w-[1000px] flex flex-col gap-8 p-8 pb-32">
-        {/* ── Dashboard Header ── */}
-        <div className="flex items-center justify-between py-1 no-drag">
-          <div className="flex items-center gap-2 text-[11px] font-medium text-pro-text-muted">
-            <span className="cursor-default">Knowledge</span>
-            <span className="opacity-30 flex items-center mb-[1px]">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <title>Breadcrumb</title>
-                <path d="m9 18 6-6-6-6" />
-              </svg>
-            </span>
-            <span className="text-pro-text-main font-semibold cursor-default">
-              Dashboard
-            </span>
-          </div>
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() =>
-                setDomainFilter(domainFilter === 'work' ? 'personal' : 'work')
-              }
-              className="px-3 py-1.5 rounded-full bg-white dark:bg-pro-surface border border-pro-accent/40 hover:border-pro-accent text-[10px] font-bold text-pro-text-main transition-all flex items-center gap-2 shadow-sm active-push"
-            >
-              <span className="text-pro-text-muted font-medium">Domain:</span>
-              <span className="capitalize">{domainFilter}</span>
-            </button>
-            <div className="h-3 w-[1px] bg-pro-border" />
-            <div className="flex items-center gap-2 text-[10px] font-medium text-pro-text-muted cursor-default">
-              <span className="px-2 py-0.5 bg-white dark:bg-pro-surface border border-pro-border rounded-md text-pro-text-main shadow-sm font-bold">
-                Cmd + K
-              </span>
-              <span className="opacity-60">to search</span>
-            </div>
-          </div>
-        </div>
+    <div className="h-full w-full overflow-y-auto bg-pro-bg">
+      <div className="mx-auto flex w-full max-w-[980px] flex-col gap-5 px-4 py-5 md:px-6 md:py-6">
+        <CompiledHero
+          selectedDoc={selectedDoc}
+          sources={sources}
+          headline={brief.headline}
+          freshnessDate={freshnessDate}
+          isCompiled={brief.isCompiled}
+        />
 
-        <div className="h-[1px] w-full bg-pro-border/40 -mt-6 mb-1" />
+        <ActiveProjectRadar docs={docs} projectCards={projectCards} />
 
-        {/* Knowledge Dashboard Card */}
-        <section className="relative">
-          <div className="bg-white dark:bg-pro-surface border border-pro-border rounded-[1.5rem] p-8 shadow-premium flex flex-col gap-6">
-            <div className="flex items-start justify-between gap-8">
-              <div className="space-y-3 max-w-2xl">
-                <h2 className="text-2xl font-black text-pro-text-main tracking-tight">
-                  Knowledge Dashboard
-                </h2>
-                <p className="text-[13px] text-pro-text-muted font-medium leading-relaxed max-w-lg">
-                  Use this page for cross-meeting synthesis and trends. Use
-                  Projects when you want task lists, owners, and execution.
-                </p>
-              </div>
-              {onOpenProjectsTab && (
-                <button
-                  type="button"
-                  onClick={onOpenProjectsTab}
-                  className="px-6 py-2.5 rounded-xl bg-pro-accent text-white text-[10px] font-black uppercase tracking-[0.1em] hover:bg-pro-accent/90 transition-all active:scale-[0.98] shadow-lg shadow-pro-accent/10 whitespace-nowrap mt-1"
-                >
-                  Go to Projects
-                </button>
-              )}
-            </div>
-
-            <div className="flex flex-wrap gap-2 pt-1">
-              {['DECISIONS', 'STRATEGIC THEMES', 'STAKEHOLDERS', 'RISKS'].map(
-                (pill) => (
-                  <div
-                    key={pill}
-                    className="px-4 py-1.5 rounded-full bg-pro-bg dark:bg-pro-bg/10 border border-pro-border text-[9px] font-black tracking-widest text-pro-text-muted/60 hover:text-pro-accent hover:border-pro-accent/30 transition-all cursor-default"
-                  >
-                    {pill}
-                  </div>
-                ),
-              )}
-            </div>
-          </div>
-        </section>
-
-        {/* Strategic Entities */}
-        <section className="flex flex-col gap-4">
-          <h2 className="text-lg font-bold text-pro-text-primary">
-            Strategic Anchors
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {tier1Nodes.map((node) => {
-              const isHighSignal = node.mention_count >= 3;
-              return (
-                <button
-                  key={node.id}
-                  type="button"
-                  onClick={() => setSelectedEntity(node.id, node)}
-                  className={`bg-pro-surface hover:bg-pro-surface-hover border border-pro-border rounded-xl p-4 cursor-pointer transition-all text-left group ${
-                    isHighSignal
-                      ? 'ring-1 ring-pro-accent/20 border-pro-accent/30'
-                      : ''
-                  }`}
-                >
-                  <div className="font-medium text-pro-text-primary flex items-center justify-between">
-                    <span>{node.label}</span>
-                    <div className="flex items-center gap-2">
-                      {node.status === 'merge_pending' && (
-                        <span title="Merge Pending" className="text-xs">
-                          🔄
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-xs text-pro-text-muted mt-2 capitalize flex items-center gap-2">
-                    <span>{node.type}</span>
-                    <span>·</span>
-                    <span>{node.mention_count} mentions</span>
-                  </div>
-                </button>
-              );
-            })}
-            {tier1Nodes.length === 0 && (
-              <div className="text-sm text-pro-text-muted italic text-center py-8">
-                Awaiting high-confidence context.
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* People & Stakeholders */}
-        <section className="flex flex-col gap-4 mt-4">
-          <h2 className="text-lg font-bold text-pro-text-primary">
-            Stakeholders
-          </h2>
-          <div className="flex flex-wrap gap-3">
-            {tier2Nodes.map((node) => (
-              <button
-                key={node.id}
-                type="button"
-                onClick={() => setSelectedEntity(node.id, node)}
-                className="relative group bg-pro-surface hover:bg-pro-surface-hover border border-pro-border rounded-full px-4 py-2 cursor-pointer transition-colors flex items-center gap-2 text-left"
-              >
-                <div className="w-6 h-6 rounded-full bg-pro-bg overflow-hidden flex items-center justify-center">
-                  👤
-                </div>
-                <span className="text-sm font-medium flex-1">{node.label}</span>
-                <span className="text-[10px] text-pro-text-muted">
-                  {node.mention_count}
-                </span>
-              </button>
+        {brief.isCompiled ? (
+          <div className="space-y-8">
+            {brief.lanes.map((lane) => (
+              <BriefLane key={lane.id} lane={lane} />
             ))}
-            {tier2Nodes.length === 0 && (
-              <div className="text-sm text-pro-text-muted italic w-full text-center py-4">
-                No actors detected.
-              </div>
-            )}
           </div>
-        </section>
+        ) : hasStructuredDoc ? (
+          <p className="rounded-xl border border-dashed border-pro-border bg-pro-surface p-5 text-sm text-pro-text-muted">
+            Pluto has a structured memory for this scope, but no priority
+            signals are strong enough to surface yet.
+          </p>
+        ) : (
+          <UncompiledState
+            selectedDoc={selectedDoc}
+            sources={sources}
+            relatedCount={nodes.length}
+          />
+        )}
 
-        {/* Decisions & Directions */}
-        <section className="flex flex-col gap-4 mt-6">
-          <h2 className="text-lg font-bold text-pro-text-primary">
-            Latest Decisions
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {decisionNodes.slice(0, 6).map((node) => (
-              <button
-                key={node.id}
-                type="button"
-                onClick={() => setSelectedEntity(node.id, node)}
-                className="bg-pro-surface hover:bg-pro-surface-hover border border-pro-border rounded-xl p-4 cursor-pointer transition-colors text-left"
-              >
-                <div className="font-medium text-pro-text-primary">
-                  {node.label || 'Decision'}
-                </div>
-                <div className="text-xs text-pro-text-muted mt-2">
-                  {node.mention_count} mentions
-                </div>
-              </button>
-            ))}
-            {decisionNodes.length === 0 && (
-              <div className="text-sm text-pro-text-muted italic w-full text-center py-8 col-span-2">
-                No high-confidence decisions archived.
-              </div>
-            )}
-          </div>
-        </section>
+        <EvidenceSummary
+          nodes={nodes}
+          timeline={timeline}
+          backlinks={backlinks}
+          sources={sources}
+          sourcesLoading={sourcesLoading}
+        />
 
-        {/* Risks & Blockers */}
-        <section className="flex flex-col gap-4 mt-6">
-          <h2 className="text-lg font-bold text-pro-text-primary">
-            Critical Risks
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {riskEdges.map((edge) => (
-              <div
-                key={edge.id}
-                className="bg-pro-surface border border-pro-border rounded-xl p-4 transition-all hover:bg-pro-surface-hover group"
-              >
-                <div className="text-sm font-semibold text-pro-text-primary">
-                  {edge.source_label} {edge.relationship.replace(/_/g, ' ')}{' '}
-                  {edge.target_label}
-                </div>
-                <div className="text-xs text-pro-text-muted mt-2">
-                  {(edge.confidence * 100).toFixed(0)}% extraction confidence
-                </div>
-              </div>
-            ))}
-            {riskEdges.length === 0 && (
-              <div className="text-sm text-pro-text-muted italic w-full text-center py-8 col-span-2">
-                No active blockers detected.
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Project Health */}
-        <section className="flex flex-col gap-4 mt-6">
-          <h2 className="text-lg font-bold text-pro-text-primary">
-            Stream Health
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {activeProjectCards.map((card: KnowledgeProjectHealthCard) => (
-              <div
-                key={card.doc_id}
-                className="bg-pro-surface border border-pro-border rounded-xl p-4 hover:bg-pro-surface-hover transition-all"
-              >
-                <div className="font-medium text-pro-text-primary text-sm uppercase italic tracking-tight">
-                  {card.title}
-                </div>
-                <div className="text-xs text-pro-text-muted mt-3 flex flex-wrap gap-2">
-                  <span>{card.open_blockers} blockers</span>
-                  <span>·</span>
-                  <span>{card.dependency_count} deps</span>
-                  <span>·</span>
-                  <span>{card.recent_changes} deltas</span>
-                </div>
-              </div>
-            ))}
-            {activeProjectCards.length === 0 && (
-              <div className="text-sm text-pro-text-muted italic w-full text-center py-8 col-span-2">
-                No project streams indexed.
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Topic Evolution */}
-        <section className="flex flex-col gap-4 mt-6">
-          <h2 className="text-lg font-bold text-pro-text-primary">
-            Topic Evolution
-          </h2>
-          <div className="flex flex-col gap-3">
-            {timeline.slice(0, 6).map((item) => (
-              <div
-                key={item.id}
-                className="bg-pro-surface border border-pro-border rounded-xl p-4 flex items-start justify-between gap-4 hover:bg-pro-surface-hover transition-all"
-              >
-                <div>
-                  <div className="text-sm font-semibold text-pro-text-primary">
-                    {item.title}
-                  </div>
-                  <div className="text-xs text-pro-text-muted mt-1 leading-relaxed">
-                    {item.detail}
-                  </div>
-                </div>
-                <div className="text-[10px] text-pro-text-muted shrink-0 mt-1 uppercase font-bold tracking-tighter">
-                  {new Date(item.timestamp).toLocaleDateString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </div>
-              </div>
-            ))}
-            {timeline.length === 0 && (
-              <div className="text-sm text-pro-text-muted italic w-full text-center py-8">
-                No evolution data yet.
-              </div>
-            )}
-          </div>
-        </section>
+        <ContextSelector
+          docs={docs}
+          selectedDoc={selectedDoc}
+          onSelectDoc={onSelectDoc}
+        />
       </div>
     </div>
   );
