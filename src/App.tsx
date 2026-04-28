@@ -16,6 +16,7 @@ import { AskPluto } from './components/features/AskPluto';
 import { Dashboard } from './components/features/Dashboard';
 import { MeetingView } from './components/features/MeetingView';
 import { ZenMode } from './components/features/ZenMode';
+import { useDashboardHome } from './components/features/useDashboardHome';
 
 // Knowledge Graph
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
@@ -199,7 +200,6 @@ function App() {
 
   const highlightEntities = (text: string) => {
     const entities = [
-      { pattern: /Sarah Chen|Sarah/g, type: 'person', icon: '👤' },
       { pattern: /Dave|David/g, type: 'person', icon: '👤' },
       { pattern: /API Migration|API/g, type: 'project', icon: '📁' },
       { pattern: /Knowledge Graph|Schema/g, type: 'topic', icon: '💡' },
@@ -373,6 +373,10 @@ function App() {
   };
 
   const safeMeetings = Array.isArray(meetings) ? meetings : [];
+  const dashboardHome = useDashboardHome({
+    isRecording,
+    meetings: safeMeetings,
+  });
   const selectedMeeting = safeMeetings.find(
     (m) => String(m.id) === String(selectedMeetingId),
   );
@@ -384,45 +388,6 @@ function App() {
         .toLowerCase()
         .includes(searchQuery.toLowerCase()),
   );
-
-  const getProactiveIntelligence = () => {
-    const upcomingMeeting = safeMeetings[0];
-    const hasOverdue = true;
-
-    if (isRecording)
-      return {
-        greeting: 'Capturing Intelligence',
-        detail: 'Neural Stream Live',
-        type: 'recording',
-      };
-
-    if (upcomingMeeting && !selectedMeetingId) {
-      return {
-        greeting: 'Upcoming Meeting Prep',
-        detail: `${upcomingMeeting.title} · Happening in 45 mins`,
-        type: 'meeting',
-        actionLabel: 'Review Prep Intel',
-        meetingId: upcomingMeeting.id,
-      };
-    }
-
-    if (hasOverdue) {
-      return {
-        greeting: '1 Overdue Item',
-        detail: 'Finalize Knowledge Graph Schema · Needed for Q1 Demo.',
-        type: 'urgent',
-        actionLabel: 'Clear Blocker',
-      };
-    }
-
-    return {
-      greeting: `Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}`,
-      detail: "You're all caught up for now.",
-      type: 'default',
-    };
-  };
-
-  const intelligence = getProactiveIntelligence();
 
   const probeMicrophonePermission = async () => {
     try {
@@ -764,10 +729,12 @@ function App() {
               />
             ) : activeTab === 'hub' ? (
               <Dashboard
-                intelligence={intelligence}
+                model={dashboardHome.model}
+                loading={dashboardHome.loading}
                 isRecording={isRecording}
                 setSelectedMeetingId={setSelectedMeetingId}
                 setActiveTab={setActiveTab}
+                setAskPlutoVisible={setAskPlutoVisible}
                 completedTasks={completedTasks}
                 handleCompleteTask={handleCompleteTask}
               />
