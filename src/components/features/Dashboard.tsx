@@ -64,6 +64,8 @@ export const Dashboard = ({
     `${action.target}-${action.label}-${
       action.target === 'meeting' ? action.meetingId : ''
     }`;
+  const isLoadingLatestMeeting =
+    loading && model.latestMeeting.state === 'empty';
 
   return (
     <div className="max-w-5xl mx-auto w-full space-y-16 animate-in relative pb-32">
@@ -146,7 +148,9 @@ export const Dashboard = ({
               <div className="space-y-4">
                 <div>
                   <h3 className="text-2xl md:text-3xl font-black tracking-tight leading-tight">
-                    {model.latestMeeting.title}
+                    {isLoadingLatestMeeting
+                      ? 'Syncing meeting memory'
+                      : model.latestMeeting.title}
                   </h3>
                   <p className="text-[12px] text-pro-text-muted font-bold opacity-40 mt-1 uppercase tracking-widest">
                     {model.latestMeeting.state === 'populated'
@@ -161,7 +165,9 @@ export const Dashboard = ({
                     Brief
                   </p>
                   <p className="text-[14px] font-bold text-pro-text-main leading-relaxed italic line-height-extra">
-                    {model.latestMeeting.detail}
+                    {isLoadingLatestMeeting
+                      ? 'Pluto is checking recent meetings and notes.'
+                      : model.latestMeeting.detail}
                   </p>
                 </div>
               </div>
