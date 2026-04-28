@@ -1,4 +1,4 @@
-import { net } from 'electron';
+import * as electron from 'electron';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
   analysisDocumentToMarkdown,
@@ -44,6 +44,19 @@ const OLLAMA_TIMEOUT_MS = 120_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v4';
+
+const getElectronNetFetch = (): typeof fetch | null => {
+  try {
+    const electronFetch = electron.net?.fetch;
+    if (!electronFetch) return null;
+    return async (input, init) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      return await electronFetch(url, init);
+    };
+  } catch {
+    return null;
+  }
+};
 
 type LLMTask =
   | 'summary'
@@ -1133,7 +1146,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     try {
       // Use Electron's net.fetch in-app to bypass Node fetch timeouts, but
       // fall back to global fetch in unit tests where Electron net is mocked.
-      const fetchImpl = net?.fetch ?? fetch;
+      const fetchImpl = getElectronNetFetch() ?? fetch;
       return await fetchImpl(`${this.ollamaBaseUrl}${path}`, {
         ...options,
         signal: controller.signal,
