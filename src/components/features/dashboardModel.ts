@@ -297,6 +297,15 @@ const getKnowledgeDocSourceCount = (doc: KnowledgeDoc): number | null => {
 const formatCountLabel = (count: number | null): string =>
   count === null ? 'No sources yet' : pluralize(count, 'source');
 
+const formatProjectHealthCountLabel = (
+  card: KnowledgeProjectHealthCard,
+): string =>
+  `${pluralize(card.open_blockers, 'blocker')} · ${pluralize(
+    card.dependency_count,
+    'dependency',
+    'dependencies',
+  )}`;
+
 const buildKnowledgeDocuments = (
   workspace: KnowledgeWorkspacePayload | null,
 ): DashboardKnowledgeDocuments => {
@@ -308,15 +317,21 @@ const buildKnowledgeDocuments = (
     };
   }
 
+  const projectCardsByDocId = new Map(
+    (workspace?.project_cards ?? []).map((card) => [card.doc_id, card]),
+  );
   const cards = sortByNewestTimestamp(docs, (doc) => doc.updated_at)
     .slice(0, 4)
     .map((doc) => {
       const sourceCount = getKnowledgeDocSourceCount(doc);
+      const projectCard = projectCardsByDocId.get(doc.id);
       return {
         id: doc.id,
         title: doc.title,
         description: getKnowledgeDocHeadline(doc),
-        countLabel: formatCountLabel(sourceCount),
+        countLabel: projectCard
+          ? formatProjectHealthCountLabel(projectCard)
+          : formatCountLabel(sourceCount),
         status: doc.status,
         scopeType: doc.scope_type,
       };

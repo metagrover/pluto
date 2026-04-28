@@ -135,7 +135,7 @@ describe('buildDashboardHomeModel', () => {
       id: 'doc-1',
       title: 'Indexing Rollout',
       description: 'Search indexing is converging around the rollout plan.',
-      countLabel: '4 sources',
+      countLabel: '1 blocker · 2 dependencies',
       status: 'up_to_date',
       scopeType: 'project',
     });
@@ -239,6 +239,71 @@ describe('buildDashboardHomeModel', () => {
       { label: 'Ask Pluto', target: 'ask' },
       { label: 'Knowledge home', target: 'wiki' },
     ]);
+  });
+
+  it('maps real knowledge docs and matching project health into document cards', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [
+          makeDoc({
+            id: 'doc-real',
+            title: 'Search Launch Plan',
+            structured_json: JSON.stringify({
+              current_read: {
+                headline: 'Launch readiness depends on search index signoff.',
+                source_count: 8,
+              },
+            }),
+            updated_at: '2026-04-27T19:00:00.000Z',
+          }),
+        ],
+        selected_doc: makeDoc({
+          id: 'doc-real',
+          title: 'Search Launch Plan',
+        }),
+        project_cards: [
+          makeProjectCard({
+            doc_id: 'doc-real',
+            title: 'Search Launch Plan',
+            open_blockers: 2,
+            dependency_count: 4,
+          }),
+        ],
+      }),
+      graphStats: null,
+    });
+
+    expect(model.knowledgeDocuments.state).toBe('populated');
+    expect(model.knowledgeDocuments.cards[0]).toMatchObject({
+      id: 'doc-real',
+      title: 'Search Launch Plan',
+      description: 'Launch readiness depends on search index signoff.',
+      countLabel: '2 blockers · 4 dependencies',
+    });
+  });
+
+  it('does not serialize old hardcoded homepage sample literals', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ name: 'Review indexing rollout' })],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const serializedModel = JSON.stringify(model);
+
+    expect(serializedModel).not.toContain('Sarah Chen');
+    expect(serializedModel).not.toContain('Product Alignment');
+    expect(serializedModel).not.toContain('Finalize Schema');
+    expect(serializedModel).not.toContain('API Migration Space');
   });
 
   it('uses only a clamped first enhanced-notes line when overview is absent', () => {
