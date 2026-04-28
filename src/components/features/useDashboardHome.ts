@@ -66,11 +66,11 @@ export const useDashboardHome = ({
   useEffect(() => {
     let cancelled = false;
 
-    setState({
-      model: buildEmptyDashboardHomeModel({ isRecording, meetings }),
+    setState((previous) => ({
+      model: previous.model,
       loading: true,
       error: null,
-    });
+    }));
 
     const loadDashboardHome = async () => {
       const [

@@ -350,6 +350,29 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('preserves numeric meeting ids in meeting actions', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting({ id: 0 })],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.hero.action).toEqual({
+      label: 'Review latest',
+      target: 'meeting',
+      meetingId: 0,
+    });
+    expect(model.quickActions).toContainEqual({
+      label: 'Review latest',
+      target: 'meeting',
+      meetingId: 0,
+    });
+  });
+
   it('falls back cleanly when no real data exists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

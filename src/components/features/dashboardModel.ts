@@ -8,11 +8,16 @@ import type { Meeting } from '../../types';
 
 export type DashboardTarget = 'ask' | 'meeting' | 'projects' | 'wiki';
 
-export interface DashboardAction {
-  label: string;
-  target: DashboardTarget;
-  meetingId?: Meeting['id'];
-}
+export type DashboardAction =
+  | {
+      label: string;
+      target: 'meeting';
+      meetingId: Meeting['id'];
+    }
+  | {
+      label: string;
+      target: Exclude<DashboardTarget, 'meeting'>;
+    };
 
 export type DashboardHeroKind =
   | 'recording'

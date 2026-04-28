@@ -47,7 +47,7 @@ export const Dashboard = ({
     }
 
     if (action.target === 'meeting') {
-      setSelectedMeetingId(action.meetingId || null);
+      setSelectedMeetingId(action.meetingId);
       return;
     }
 
@@ -59,6 +59,11 @@ export const Dashboard = ({
       setActiveTab(model.spotlight.target);
     }
   };
+
+  const getActionKey = (action: DashboardAction) =>
+    `${action.target}-${action.label}-${
+      action.target === 'meeting' ? action.meetingId : ''
+    }`;
 
   return (
     <div className="max-w-5xl mx-auto w-full space-y-16 animate-in relative pb-32">
@@ -94,7 +99,11 @@ export const Dashboard = ({
             <div className="pt-4 flex items-center gap-4">
               <button
                 type="button"
-                onClick={() => runAction(model.hero.action as DashboardAction)}
+                onClick={() => {
+                  if (model.hero.action) {
+                    runAction(model.hero.action);
+                  }
+                }}
                 className="px-8 py-3.5 rounded-full bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[11px] uppercase tracking-[.15em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 hover:scale-[1.02] transition-all active-push border border-pro-border/40 dark:border-pro-border/50"
               >
                 {model.hero.action.label}
@@ -107,7 +116,7 @@ export const Dashboard = ({
           {model.quickActions.map((action) => (
             <button
               type="button"
-              key={`${action.target}-${action.label}-${action.meetingId ?? ''}`}
+              key={getActionKey(action)}
               onClick={() => runAction(action)}
               className="px-5 py-2.5 rounded-full bg-pro-surface border border-pro-border shadow-sm hover:border-pro-accent/40 hover:scale-[1.02] transition-all active-push flex items-center gap-2 group"
             >
@@ -217,6 +226,7 @@ export const Dashboard = ({
                     <button
                       type="button"
                       key={item.id}
+                      aria-pressed={isDone}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleCompleteTask(item.id);
@@ -435,7 +445,7 @@ export const Dashboard = ({
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-[14px] font-black tracking-tight leading-loose uppercase">
+                    <h4 className="text-[14px] font-black tracking-tight leading-loose uppercase break-words line-clamp-2">
                       {item.title}
                     </h4>
                   </div>
