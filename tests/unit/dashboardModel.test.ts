@@ -6,7 +6,11 @@ import type {
   KnowledgeProjectHealthCard,
   KnowledgeWorkspacePayload,
 } from '../../src/api/knowledgeWorkspace';
-import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
+import {
+  type DashboardAction,
+  type DashboardTarget,
+  buildDashboardHomeModel,
+} from '../../src/components/features/dashboardModel';
 import type { Meeting } from '../../src/types';
 
 const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
@@ -85,6 +89,21 @@ const makeWorkspace = (
 });
 
 describe('buildDashboardHomeModel', () => {
+  it('exports the reviewed dashboard navigation contract', () => {
+    const target: DashboardTarget = 'meeting';
+    const action: DashboardAction = {
+      label: 'Review latest',
+      target,
+      meetingId: 'meeting-1',
+    };
+
+    expect(action).toEqual({
+      label: 'Review latest',
+      target: 'meeting',
+      meetingId: 'meeting-1',
+    });
+  });
+
   it('prioritizes an overdue action over the latest meeting in the hero', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -98,8 +117,40 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('overdue_action');
     expect(model.hero.title).toBe('1 overdue item');
+    expect(model.hero.severity).toBe('urgent');
     expect(model.hero.detail).toContain('Ship privacy review');
     expect(model.hero.action?.target).toBe('projects');
+    expect(model.latestMeeting.state).toBe('populated');
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-1',
+      title: 'Ship privacy review',
+      dueLabel: 'Due Apr 26',
+      status: 'overdue',
+      sourceLabel: 'Work',
+    });
+    expect(model.knowledgeDocuments.state).toBe('populated');
+    expect(model.knowledgeDocuments.cards[0]).toMatchObject({
+      id: 'doc-1',
+      title: 'Indexing Rollout',
+      description: 'Search indexing is converging around the rollout plan.',
+      countLabel: '4 sources',
+      status: 'up_to_date',
+      scopeType: 'project',
+    });
+    expect(model.spotlight).toMatchObject({
+      title: 'Indexing Rollout',
+      subtitle: 'Project spotlight',
+      detail: expect.stringContaining('1 blocker'),
+      tags: ['1 blocker', '2 dependencies', '3 recent changes'],
+      target: 'projects',
+    });
+    expect(model.quickActions).toEqual([
+      { label: 'Ask Pluto', target: 'ask' },
+      { label: 'Review latest', target: 'meeting', meetingId: 'meeting-1' },
+      { label: 'Open projects', target: 'projects' },
+      { label: 'Knowledge home', target: 'wiki' },
+    ]);
   });
 
   it('uses a stale action when there are no overdue actions', () => {
@@ -114,7 +165,32 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.hero.kind).toBe('stale_action');
+    expect(model.hero.severity).toBe('watch');
     expect(model.hero.detail).toContain('Revisit launch blockers');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      status: 'stale',
+      sourceLabel: 'Work',
+    });
+  });
+
+  it('uses the singular meeting target for latest meeting hero actions', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('latest_meeting');
+    expect(model.hero.severity).toBe('calm');
+    expect(model.hero.action).toEqual({
+      label: 'Review latest',
+      target: 'meeting',
+      meetingId: 'meeting-1',
+    });
   });
 
   it('falls back cleanly when no real data exists', () => {
@@ -129,9 +205,12 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.hero.kind).toBe('default');
+    expect(model.hero.severity).toBe('calm');
+    expect(model.hero.action?.target).toBe('ask');
     expect(model.latestMeeting.state).toBe('empty');
     expect(model.actionInsights.state).toBe('empty');
     expect(model.knowledgeDocuments.state).toBe('empty');
     expect(model.spotlight).toBeNull();
+    expect(model.quickActions).toEqual([{ label: 'Ask Pluto', target: 'ask' }]);
   });
 });

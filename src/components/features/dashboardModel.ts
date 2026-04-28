@@ -6,18 +6,12 @@ import type {
 } from '../../api/knowledgeWorkspace';
 import type { Meeting } from '../../types';
 
-export type DashboardActionTarget =
-  | 'hub'
-  | 'meetings'
-  | 'projects'
-  | 'wiki'
-  | 'recording';
+export type DashboardTarget = 'ask' | 'meeting' | 'projects' | 'wiki';
 
-export interface DashboardHeroAction {
+export interface DashboardAction {
   label: string;
-  target: DashboardActionTarget;
+  target: DashboardTarget;
   meetingId?: Meeting['id'];
-  docId?: string;
 }
 
 export type DashboardHeroKind =
@@ -32,7 +26,8 @@ export interface DashboardHero {
   kind: DashboardHeroKind;
   title: string;
   detail: string;
-  action?: DashboardHeroAction;
+  severity: 'live' | 'urgent' | 'watch' | 'calm';
+  action?: DashboardAction;
 }
 
 export type DashboardLatestMeeting =
@@ -42,7 +37,7 @@ export type DashboardLatestMeeting =
       detail: string;
     }
   | {
-      state: 'ready';
+      state: 'populated';
       meetingId: Meeting['id'];
       title: string;
       detail: string;
@@ -52,8 +47,9 @@ export type DashboardLatestMeeting =
 export interface DashboardActionInsightItem {
   id: string;
   title: string;
-  status: Entity['status'];
-  dueDate: string | null;
+  dueLabel: string;
+  status: 'overdue' | 'stale' | 'active';
+  sourceLabel: string;
 }
 
 export type DashboardActionInsights =
@@ -65,7 +61,7 @@ export type DashboardActionInsights =
       items: [];
     }
   | {
-      state: 'ready';
+      state: 'populated';
       overdueCount: number;
       staleCount: number;
       activeCount: number;
@@ -75,11 +71,10 @@ export type DashboardActionInsights =
 export interface DashboardKnowledgeDocumentCard {
   id: string;
   title: string;
-  scopeType: KnowledgeDoc['scope_type'];
+  description: string;
+  countLabel: string;
   status: KnowledgeDoc['status'];
-  headline: string;
-  sourceCount: number | null;
-  updatedAt: string;
+  scopeType: KnowledgeDoc['scope_type'];
 }
 
 export type DashboardKnowledgeDocuments =
@@ -88,31 +83,16 @@ export type DashboardKnowledgeDocuments =
       cards: [];
     }
   | {
-      state: 'ready';
+      state: 'populated';
       cards: DashboardKnowledgeDocumentCard[];
     };
 
-export type DashboardSpotlightSeverity = 'critical' | 'watch' | 'steady';
-
 export interface DashboardSpotlight {
-  id: string;
-  docId: string;
-  projectId: string;
   title: string;
-  severity: DashboardSpotlightSeverity;
+  subtitle: string;
   detail: string;
-  metrics: {
-    openBlockers: number;
-    dependencyCount: number;
-    recentChanges: number;
-    stalenessDays: number;
-  };
-}
-
-export interface DashboardQuickAction {
-  id: string;
-  label: string;
-  target: DashboardActionTarget;
+  tags: string[];
+  target: DashboardTarget;
 }
 
 export interface DashboardHomeModelInput {
@@ -131,7 +111,7 @@ export interface DashboardHomeModel {
   actionInsights: DashboardActionInsights;
   knowledgeDocuments: DashboardKnowledgeDocuments;
   spotlight: DashboardSpotlight | null;
-  quickActions: DashboardQuickAction[];
+  quickActions: DashboardAction[];
   graphStats: KnowledgeGraphStats | null;
 }
 
@@ -177,6 +157,24 @@ const parseJsonObject = <T>(value: string | null | undefined): T | null => {
   }
 };
 
+const titleCase = (value: string): string =>
+  value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+
+const formatDueLabel = (value: string | null): string => {
+  if (!value) return 'No due date';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Due date unknown';
+  return `Due ${date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })}`;
+};
+
 const getMeetingTimestamp = (meeting: Meeting): string =>
   meeting.started_at || meeting.created_at;
 
@@ -202,7 +200,7 @@ const buildLatestMeeting = (meetings: Meeting[]): DashboardLatestMeeting => {
   }
 
   return {
-    state: 'ready',
+    state: 'populated',
     meetingId: latest.id,
     title: latest.title,
     detail: getMeetingDetail(latest),
@@ -210,11 +208,15 @@ const buildLatestMeeting = (meetings: Meeting[]): DashboardLatestMeeting => {
   };
 };
 
-const actionToInsightItem = (action: Entity): DashboardActionInsightItem => ({
+const actionToInsightItem = (
+  action: Entity,
+  status: DashboardActionInsightItem['status'],
+): DashboardActionInsightItem => ({
   id: action.id,
   title: action.name,
-  status: action.status,
-  dueDate: action.due_date,
+  dueLabel: formatDueLabel(action.due_date),
+  status,
+  sourceLabel: titleCase(action.domain_tag || 'workspace'),
 });
 
 const buildActionInsights = (
@@ -222,9 +224,11 @@ const buildActionInsights = (
   staleActions: Entity[],
   activeActions: Entity[],
 ): DashboardActionInsights => {
-  const items = [...overdueActions, ...staleActions, ...activeActions].map(
-    actionToInsightItem,
-  );
+  const items = [
+    ...overdueActions.map((action) => actionToInsightItem(action, 'overdue')),
+    ...staleActions.map((action) => actionToInsightItem(action, 'stale')),
+    ...activeActions.map((action) => actionToInsightItem(action, 'active')),
+  ];
 
   if (items.length === 0) {
     return {
@@ -237,7 +241,7 @@ const buildActionInsights = (
   }
 
   return {
-    state: 'ready',
+    state: 'populated',
     overdueCount: overdueActions.length,
     staleCount: staleActions.length,
     activeCount: activeActions.length,
@@ -270,6 +274,9 @@ const getKnowledgeDocSourceCount = (doc: KnowledgeDoc): number | null => {
   return typeof sourceCount === 'number' ? sourceCount : null;
 };
 
+const formatCountLabel = (count: number | null): string =>
+  count === null ? 'No sources yet' : pluralize(count, 'source');
+
 const buildKnowledgeDocuments = (
   workspace: KnowledgeWorkspacePayload | null,
 ): DashboardKnowledgeDocuments => {
@@ -283,28 +290,22 @@ const buildKnowledgeDocuments = (
 
   const cards = sortByNewestTimestamp(docs, (doc) => doc.updated_at)
     .slice(0, 4)
-    .map((doc) => ({
-      id: doc.id,
-      title: doc.title,
-      scopeType: doc.scope_type,
-      status: doc.status,
-      headline: getKnowledgeDocHeadline(doc),
-      sourceCount: getKnowledgeDocSourceCount(doc),
-      updatedAt: doc.updated_at,
-    }));
+    .map((doc) => {
+      const sourceCount = getKnowledgeDocSourceCount(doc);
+      return {
+        id: doc.id,
+        title: doc.title,
+        description: getKnowledgeDocHeadline(doc),
+        countLabel: formatCountLabel(sourceCount),
+        status: doc.status,
+        scopeType: doc.scope_type,
+      };
+    });
 
   return {
-    state: 'ready',
+    state: 'populated',
     cards,
   };
-};
-
-const getProjectSeverity = (
-  card: KnowledgeProjectHealthCard,
-): DashboardSpotlightSeverity => {
-  if (card.open_blockers > 0) return 'critical';
-  if (card.dependency_count > 0 || card.staleness_days > 7) return 'watch';
-  return 'steady';
 };
 
 const getProjectPriorityScore = (card: KnowledgeProjectHealthCard): number =>
@@ -321,7 +322,7 @@ const buildSpotlight = (
   )[0];
   if (!card) return null;
 
-  const reasons = [
+  const tags = [
     card.open_blockers > 0 ? pluralize(card.open_blockers, 'blocker') : '',
     card.dependency_count > 0
       ? pluralize(card.dependency_count, 'dependency', 'dependencies')
@@ -333,18 +334,11 @@ const buildSpotlight = (
   ].filter(Boolean);
 
   return {
-    id: card.doc_id,
-    docId: card.doc_id,
-    projectId: card.project_id,
     title: card.title,
-    severity: getProjectSeverity(card),
-    detail: reasons.length > 0 ? reasons.join(' | ') : 'No blockers surfaced',
-    metrics: {
-      openBlockers: card.open_blockers,
-      dependencyCount: card.dependency_count,
-      recentChanges: card.recent_changes,
-      stalenessDays: card.staleness_days,
-    },
+    subtitle: 'Project spotlight',
+    detail: tags.length > 0 ? tags.join(' | ') : 'No blockers surfaced',
+    tags,
+    target: 'projects',
   };
 };
 
@@ -358,7 +352,8 @@ const buildHero = (
       kind: 'recording',
       title: 'Recording in progress',
       detail: 'Pluto is listening and will synthesize this conversation next.',
-      action: { label: 'View recorder', target: 'recording' },
+      severity: 'live',
+      action: { label: 'Ask Pluto', target: 'ask' },
     };
   }
 
@@ -368,7 +363,8 @@ const buildHero = (
       kind: 'overdue_action',
       title: pluralize(input.overdueActions.length, 'overdue item'),
       detail: `${overdueAction.name} needs attention.`,
-      action: { label: 'Review projects', target: 'projects' },
+      severity: 'urgent',
+      action: { label: 'Open projects', target: 'projects' },
     };
   }
 
@@ -378,18 +374,20 @@ const buildHero = (
       kind: 'stale_action',
       title: pluralize(input.staleActions.length, 'stale item'),
       detail: `${staleAction.name} has gone quiet.`,
-      action: { label: 'Review projects', target: 'projects' },
+      severity: 'watch',
+      action: { label: 'Open projects', target: 'projects' },
     };
   }
 
-  if (latestMeeting.state === 'ready') {
+  if (latestMeeting.state === 'populated') {
     return {
       kind: 'latest_meeting',
       title: latestMeeting.title,
       detail: latestMeeting.detail,
+      severity: 'calm',
       action: {
-        label: 'Open meeting',
-        target: 'meetings',
+        label: 'Review latest',
+        target: 'meeting',
         meetingId: latestMeeting.meetingId,
       },
     };
@@ -400,8 +398,9 @@ const buildHero = (
     return {
       kind: 'knowledge_doc',
       title: doc.title,
-      detail: doc.headline,
-      action: { label: 'Open knowledge', target: 'wiki', docId: doc.id },
+      detail: doc.description,
+      severity: 'calm',
+      action: { label: 'Knowledge home', target: 'wiki' },
     };
   }
 
@@ -410,29 +409,37 @@ const buildHero = (
     title: 'You are all caught up',
     detail:
       'Record a meeting or open knowledge to build your workspace memory.',
-    action: { label: 'Start recording', target: 'recording' },
+    severity: 'calm',
+    action: { label: 'Ask Pluto', target: 'ask' },
   };
 };
 
 const buildQuickActions = (
-  input: DashboardHomeModelInput,
-): DashboardQuickAction[] => [
-  {
-    id: input.isRecording ? 'view-recording' : 'start-recording',
-    label: input.isRecording ? 'View recording' : 'Start recording',
-    target: 'recording',
-  },
-  {
-    id: 'review-projects',
-    label: 'Review projects',
-    target: 'projects',
-  },
-  {
-    id: 'open-knowledge',
-    label: 'Open knowledge',
-    target: 'wiki',
-  },
-];
+  latestMeeting: DashboardLatestMeeting,
+  actionInsights: DashboardActionInsights,
+  knowledgeDocuments: DashboardKnowledgeDocuments,
+  spotlight: DashboardSpotlight | null,
+): DashboardAction[] => {
+  const actions: DashboardAction[] = [{ label: 'Ask Pluto', target: 'ask' }];
+
+  if (latestMeeting.state === 'populated') {
+    actions.push({
+      label: 'Review latest',
+      target: 'meeting',
+      meetingId: latestMeeting.meetingId,
+    });
+  }
+
+  if (actionInsights.state === 'populated' || spotlight) {
+    actions.push({ label: 'Open projects', target: 'projects' });
+  }
+
+  if (knowledgeDocuments.state === 'populated') {
+    actions.push({ label: 'Knowledge home', target: 'wiki' });
+  }
+
+  return actions;
+};
 
 export const buildDashboardHomeModel = (
   input: DashboardHomeModelInput,
@@ -452,7 +459,12 @@ export const buildDashboardHomeModel = (
     actionInsights,
     knowledgeDocuments,
     spotlight,
-    quickActions: buildQuickActions(input),
+    quickActions: buildQuickActions(
+      latestMeeting,
+      actionInsights,
+      knowledgeDocuments,
+      spotlight,
+    ),
     graphStats: input.graphStats,
   };
 };
