@@ -1,4 +1,5 @@
 import type { KnowledgeDoc } from '../api/knowledgeDocs';
+import type { KnowledgeGraphStats } from '../api/knowledgeGraph';
 import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 
 type IpcRendererLike = Window['ipcRenderer'];
@@ -40,6 +41,13 @@ const docs = [
     'inactive',
   ),
 ];
+
+const emptyGraphStats: KnowledgeGraphStats = {
+  total_entities: 0,
+  by_type: { person: 0, topic: 0, action_item: 0, decision: 0, project: 0 },
+  total_links: 0,
+  total_meeting_connections: 0,
+};
 
 const workspaceFor = (docId?: string): KnowledgeWorkspacePayload => {
   const selected_doc = docs.find((doc) => doc.id === docId) || docs[0];
@@ -130,6 +138,14 @@ const invokeFallback: IpcRendererLike['invoke'] = async <T = unknown>(
     }
     case 'GET_KNOWLEDGE_GRAPH':
       result = workspaceFor().graph;
+      break;
+    case 'GET_OVERDUE_ACTION_ITEMS':
+    case 'GET_STALE_ACTION_ITEMS':
+    case 'GET_ACTION_ITEMS_BY_STATUS':
+      result = [];
+      break;
+    case 'GET_KNOWLEDGE_GRAPH_STATS':
+      result = emptyGraphStats;
       break;
     case 'GET_KNOWLEDGE_TIMELINE':
       result = workspaceFor().timeline;
