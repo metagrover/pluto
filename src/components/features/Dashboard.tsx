@@ -151,7 +151,9 @@ export const Dashboard = ({
                   <p className="text-[12px] text-pro-text-muted font-bold opacity-40 mt-1 uppercase tracking-widest">
                     {model.latestMeeting.state === 'populated'
                       ? model.latestMeeting.occurredAt
-                      : 'No meeting memory yet'}
+                      : loading
+                        ? 'Syncing meeting memory'
+                        : 'No meeting memory yet'}
                   </p>
                 </div>
                 <div className="p-6 bg-pro-bg/50 rounded-3xl border border-pro-border/40 space-y-4">
@@ -212,11 +214,14 @@ export const Dashboard = ({
               {model.actionInsights.state === 'empty' ? (
                 <div className="h-full min-h-[220px] flex flex-col justify-center rounded-3xl border border-dashed border-pro-border bg-pro-bg/40 p-6 text-center">
                   <p className="text-[13px] font-black text-pro-text-main uppercase tracking-widest">
-                    No open action signals
+                    {loading
+                      ? 'Syncing action signals'
+                      : 'No open action signals'}
                   </p>
                   <p className="mt-3 text-[11px] font-bold text-pro-text-muted/50 leading-relaxed">
-                    Tasks from meetings and project memory will appear here when
-                    Pluto finds something that needs attention.
+                    {loading
+                      ? 'Pluto is checking meeting notes and project memory for current tasks.'
+                      : 'Tasks from meetings and project memory will appear here when Pluto finds something that needs attention.'}
                   </p>
                 </div>
               ) : (
@@ -424,11 +429,12 @@ export const Dashboard = ({
         {model.knowledgeDocuments.state === 'empty' ? (
           <div className="rounded-[2rem] border border-dashed border-pro-border bg-pro-surface/60 p-10 text-center">
             <p className="text-[13px] font-black text-pro-text-main uppercase tracking-widest">
-              No live documents yet
+              {loading ? 'Syncing live documents' : 'No live documents yet'}
             </p>
             <p className="mt-3 text-[12px] font-bold text-pro-text-muted/50">
-              Knowledge documents will appear here after Pluto synthesizes
-              workspace memory.
+              {loading
+                ? 'Pluto is loading synthesized workspace memory.'
+                : 'Knowledge documents will appear here after Pluto synthesizes workspace memory.'}
             </p>
           </div>
         ) : (
