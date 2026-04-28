@@ -128,6 +128,9 @@ interface KnowledgeDocStructuredSummary {
   current_read?: KnowledgeDocCurrentRead;
 }
 
+const MAX_MEETING_DETAIL_LENGTH = 180;
+const MAX_ACTION_INSIGHT_ITEMS = 5;
+
 const sortByNewestTimestamp = <T>(
   items: T[],
   getTimestamp: (item: T) => string | null | undefined,
@@ -144,6 +147,9 @@ const toTimestamp = (value: string | null | undefined): number => {
 
 const pluralize = (count: number, singular: string, plural = `${singular}s`) =>
   `${count} ${count === 1 ? singular : plural}`;
+
+const clampText = (value: string, maxLength: number): string =>
+  value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
 
 const parseJsonObject = <T>(value: string | null | undefined): T | null => {
   if (!value) return null;
@@ -185,7 +191,13 @@ const getMeetingDetail = (meeting: Meeting): string => {
   if (typeof analysis?.overview === 'string' && analysis.overview.trim()) {
     return analysis.overview.trim();
   }
-  if (meeting.enhanced_notes?.trim()) return meeting.enhanced_notes.trim();
+  const firstEnhancedNotesLine = meeting.enhanced_notes
+    ?.split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (firstEnhancedNotesLine) {
+    return clampText(firstEnhancedNotesLine, MAX_MEETING_DETAIL_LENGTH);
+  }
   return 'Open the latest meeting notes and extracted context.';
 };
 
@@ -224,11 +236,19 @@ const buildActionInsights = (
   staleActions: Entity[],
   activeActions: Entity[],
 ): DashboardActionInsights => {
-  const items = [
+  const prioritizedItems = [
     ...overdueActions.map((action) => actionToInsightItem(action, 'overdue')),
     ...staleActions.map((action) => actionToInsightItem(action, 'stale')),
     ...activeActions.map((action) => actionToInsightItem(action, 'active')),
   ];
+  const seenIds = new Set<string>();
+  const items = prioritizedItems
+    .filter((item) => {
+      if (seenIds.has(item.id)) return false;
+      seenIds.add(item.id);
+      return true;
+    })
+    .slice(0, MAX_ACTION_INSIGHT_ITEMS);
 
   if (items.length === 0) {
     return {
@@ -314,12 +334,18 @@ const getProjectPriorityScore = (card: KnowledgeProjectHealthCard): number =>
   card.staleness_days +
   card.recent_changes;
 
+const hasProjectSignal = (card: KnowledgeProjectHealthCard): boolean =>
+  card.open_blockers > 0 ||
+  card.dependency_count > 0 ||
+  card.recent_changes > 0 ||
+  card.staleness_days > 0;
+
 const buildSpotlight = (
   workspace: KnowledgeWorkspacePayload | null,
 ): DashboardSpotlight | null => {
-  const card = [...(workspace?.project_cards ?? [])].sort(
-    (a, b) => getProjectPriorityScore(b) - getProjectPriorityScore(a),
-  )[0];
+  const card = [...(workspace?.project_cards ?? [])]
+    .filter(hasProjectSignal)
+    .sort((a, b) => getProjectPriorityScore(b) - getProjectPriorityScore(a))[0];
   if (!card) return null;
 
   const tags = [
@@ -330,7 +356,7 @@ const buildSpotlight = (
     card.recent_changes > 0
       ? pluralize(card.recent_changes, 'recent change')
       : '',
-    card.staleness_days > 7 ? `${card.staleness_days}d stale` : '',
+    card.staleness_days > 0 ? `${card.staleness_days}d stale` : '',
   ].filter(Boolean);
 
   return {

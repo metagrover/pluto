@@ -6,11 +6,7 @@ import type {
   KnowledgeProjectHealthCard,
   KnowledgeWorkspacePayload,
 } from '../../src/api/knowledgeWorkspace';
-import {
-  type DashboardAction,
-  type DashboardTarget,
-  buildDashboardHomeModel,
-} from '../../src/components/features/dashboardModel';
+import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
 import type { Meeting } from '../../src/types';
 
 const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
@@ -89,19 +85,24 @@ const makeWorkspace = (
 });
 
 describe('buildDashboardHomeModel', () => {
-  it('exports the reviewed dashboard navigation contract', () => {
-    const target: DashboardTarget = 'meeting';
-    const action: DashboardAction = {
-      label: 'Review latest',
-      target,
-      meetingId: 'meeting-1',
-    };
-
-    expect(action).toEqual({
-      label: 'Review latest',
-      target: 'meeting',
-      meetingId: 'meeting-1',
+  it('exposes reviewed dashboard navigation targets from real model output', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [makeAction()],
+      workspace: makeWorkspace(),
+      graphStats: null,
     });
+
+    expect(model.hero.action?.target).toBe('meeting');
+    expect(model.quickActions.map((action) => action.target)).toEqual([
+      'ask',
+      'meeting',
+      'projects',
+      'wiki',
+    ]);
   });
 
   it('prioritizes an overdue action over the latest meeting in the hero', () => {
@@ -171,6 +172,97 @@ describe('buildDashboardHomeModel', () => {
       status: 'stale',
       sourceLabel: 'Work',
     });
+  });
+
+  it('deduplicates action insights by priority and caps displayed items', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [
+        makeAction({ id: 'shared', name: 'Shared overdue task' }),
+        makeAction({ id: 'overdue-2', name: 'Second overdue task' }),
+      ],
+      staleActions: [
+        makeAction({ id: 'shared', name: 'Shared stale task' }),
+        makeAction({ id: 'stale-1', name: 'First stale task' }),
+        makeAction({ id: 'stale-2', name: 'Second stale task' }),
+      ],
+      activeActions: [
+        makeAction({ id: 'shared', name: 'Shared active task' }),
+        makeAction({ id: 'active-1', name: 'First active task' }),
+        makeAction({ id: 'active-2', name: 'Second active task' }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.overdueCount).toBe(2);
+    expect(model.actionInsights.staleCount).toBe(3);
+    expect(model.actionInsights.activeCount).toBe(3);
+    expect(model.actionInsights.items).toHaveLength(5);
+    expect(model.actionInsights.items.map((item) => item.id)).toEqual([
+      'shared',
+      'overdue-2',
+      'stale-1',
+      'stale-2',
+      'active-1',
+    ]);
+    expect(model.actionInsights.items[0]).toMatchObject({
+      title: 'Shared overdue task',
+      status: 'overdue',
+    });
+  });
+
+  it('does not create a spotlight for projects without health signals', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        project_cards: [
+          makeProjectCard({
+            open_blockers: 0,
+            dependency_count: 0,
+            recent_changes: 0,
+            staleness_days: 0,
+          }),
+        ],
+      }),
+      graphStats: null,
+    });
+
+    expect(model.spotlight).toBeNull();
+    expect(model.quickActions).toEqual([
+      { label: 'Ask Pluto', target: 'ask' },
+      { label: 'Knowledge home', target: 'wiki' },
+    ]);
+  });
+
+  it('uses only a clamped first enhanced-notes line when overview is absent', () => {
+    const longLine = `${'A'.repeat(220)} should not be visible`;
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          analysis_json: undefined,
+          enhanced_notes: `\n\n${longLine}\n\nSecond paragraph should not appear.`,
+        }),
+      ],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.latestMeeting.state).toBe('populated');
+    expect(model.latestMeeting.detail).toHaveLength(183);
+    expect(model.latestMeeting.detail.endsWith('...')).toBe(true);
+    expect(model.latestMeeting.detail).not.toContain('Second paragraph');
+    expect(model.hero.detail).toBe(model.latestMeeting.detail);
   });
 
   it('uses the singular meeting target for latest meeting hero actions', () => {
