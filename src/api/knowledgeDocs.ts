@@ -12,6 +12,7 @@ export type KnowledgeDocStatus =
 
 export interface KnowledgeDocConfig {
   member_entity_ids?: string[];
+  synthesis_version?: number;
 }
 
 export interface KnowledgeDoc {
@@ -55,6 +56,27 @@ export interface KnowledgeDocUserEdit {
   edited_content: string;
   edited_at: string;
   edited_by: string;
+}
+
+export type KnowledgeCorrectionTargetKind = 'source' | 'stream' | 'item';
+export type KnowledgeCorrectionAction =
+  | 'exclude_source'
+  | 'rename_stream'
+  | 'merge_stream'
+  | 'split_stream'
+  | 'pin_stream'
+  | 'promote_item'
+  | 'demote_item'
+  | 'correct_classification';
+
+export interface KnowledgeCorrection {
+  id: string;
+  doc_id: string;
+  target_kind: KnowledgeCorrectionTargetKind;
+  target_id: string;
+  action: KnowledgeCorrectionAction;
+  payload_json: string | null;
+  created_at: string;
 }
 
 const invoke = <T = unknown>(
@@ -101,6 +123,22 @@ export const saveKnowledgeDocEdit = async (
   content: string,
 ): Promise<KnowledgeDocUserEdit> => {
   return invoke('SAVE_KNOWLEDGE_DOC_EDIT', { docId, content });
+};
+
+export const getKnowledgeCorrections = async (
+  docId: string,
+): Promise<KnowledgeCorrection[]> => {
+  return invoke('GET_KNOWLEDGE_CORRECTIONS', docId);
+};
+
+export const saveKnowledgeCorrection = async (params: {
+  docId: string;
+  targetKind: KnowledgeCorrectionTargetKind;
+  targetId: string;
+  action: KnowledgeCorrectionAction;
+  payload?: Record<string, unknown> | null;
+}): Promise<KnowledgeCorrection> => {
+  return invoke('SAVE_KNOWLEDGE_CORRECTION', params);
 };
 
 export const parseKnowledgeDocStructured = <T = Record<string, unknown>>(

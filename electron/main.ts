@@ -39,6 +39,20 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL
   ? path.join(process.env.APP_ROOT, 'public')
   : RENDERER_DIST;
 
+// Guard against broken-pipe errors (EPIPE / EIO) on stdout/stderr.
+// In packaged Electron the process is not attached to a TTY so any
+// console.log / console.error call can throw "write EIO". Without this
+// handler those errors become uncaught exceptions that kill the process
+// and halt background tasks like knowledge synthesis.
+process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EIO' || err.code === 'EPIPE') {
+    // Harmless broken-pipe on detached stdout — swallow silently.
+    return;
+  }
+  // Re-throw everything else so legitimate crashes are not hidden.
+  throw err;
+});
+
 let win: BrowserWindow | null;
 let tray: Tray | null = null;
 
@@ -1186,6 +1200,20 @@ app.whenReady().then(async () => {
   );
   ipcMain.handle('GET_KNOWLEDGE_DOC_SOURCES', (_event, docId) =>
     db.getKnowledgeDocSourceDetails(docId),
+  );
+  ipcMain.handle('GET_KNOWLEDGE_CORRECTIONS', (_event, docId) =>
+    db.getKnowledgeCorrections(docId),
+  );
+  ipcMain.handle(
+    'SAVE_KNOWLEDGE_CORRECTION',
+    (_event, { docId, targetKind, targetId, action, payload }) =>
+      db.saveKnowledgeCorrection({
+        doc_id: docId,
+        target_kind: targetKind,
+        target_id: targetId,
+        action,
+        payload,
+      }),
   );
   ipcMain.handle('SAVE_KNOWLEDGE_DOC_EDIT', (_event, { docId, content }) =>
     db.saveKnowledgeDocUserEdit(docId, content),

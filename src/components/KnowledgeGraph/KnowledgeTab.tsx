@@ -1,11 +1,16 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type React from 'react';
-import { useEffect, useState } from 'react';
-import { getKnowledgeDocSources } from '../../api/knowledgeDocs';
+import { useEffect } from 'react';
+import {
+  getKnowledgeDocSources,
+  refreshKnowledgeDoc,
+  saveKnowledgeCorrection,
+} from '../../api/knowledgeDocs';
 import { getKnowledgeWorkspace } from '../../api/knowledgeWorkspace';
 import { useKnowledgeStore } from '../../store/knowledgeStore';
 import { FocusSheet } from './FocusSheet.tsx';
 import { MainStage } from './MainStage.tsx';
+import { knowledgeDocsNeedPolling } from './knowledgeDocument';
 
 interface KnowledgeTabProps {
   onOpenMeeting?: (meetingId: string) => void;
@@ -17,7 +22,7 @@ export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
   onOpenProjectsTab: _onOpenProjectsTab,
 }) => {
   const { clearSelection } = useKnowledgeStore();
-  const [selectedDocId, setSelectedDocId] = useState<string | undefined>();
+  const queryClient = useQueryClient();
 
   // Handle ESC key to close the FocusSheet
   useEffect(() => {
@@ -32,8 +37,10 @@ export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
 
   // Fetch real data using React Query
   const { data: workspace, isLoading } = useQuery({
-    queryKey: ['knowledgeWorkspace', selectedDocId],
-    queryFn: () => getKnowledgeWorkspace({ docId: selectedDocId }),
+    queryKey: ['knowledgeWorkspace', 'global'],
+    queryFn: () => getKnowledgeWorkspace(),
+    refetchInterval: (query) =>
+      knowledgeDocsNeedPolling(query.state.data?.docs || []) ? 3000 : false,
   });
 
   const selectedDoc = workspace?.selected_doc || null;
@@ -61,24 +68,53 @@ export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
   }
 
   const nodes = workspace?.graph.nodes || [];
-  const timeline = workspace?.timeline || [];
   const edges = workspace?.graph.edges || [];
-  const backlinks = workspace?.backlinks || [];
   const docs = workspace?.docs || [];
   const projectCards = workspace?.project_cards || [];
+
+  const handleRetrySynthesis = async (docId: string) => {
+    await refreshKnowledgeDoc(docId);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['knowledgeWorkspace'] }),
+      queryClient.invalidateQueries({ queryKey: ['knowledgeDocSources'] }),
+    ]);
+  };
+
+  const handleSaveCorrection = async (params: {
+    targetKind: 'source' | 'stream' | 'item';
+    targetId: string;
+    action:
+      | 'exclude_source'
+      | 'rename_stream'
+      | 'merge_stream'
+      | 'split_stream'
+      | 'pin_stream'
+      | 'promote_item'
+      | 'demote_item'
+      | 'correct_classification';
+    payload?: Record<string, unknown> | null;
+  }) => {
+    if (!selectedDoc) return;
+    await saveKnowledgeCorrection({
+      docId: selectedDoc.id,
+      targetKind: params.targetKind,
+      targetId: params.targetId,
+      action: params.action,
+      payload: params.payload,
+    });
+    await queryClient.invalidateQueries({ queryKey: ['knowledgeWorkspace'] });
+  };
 
   return (
     <div className="relative flex h-full w-full overflow-hidden bg-transparent">
       <MainStage
         docs={docs}
         selectedDoc={selectedDoc}
-        nodes={nodes}
-        timeline={timeline}
-        backlinks={backlinks}
         projectCards={projectCards}
         sources={sources}
         sourcesLoading={sourcesLoading}
-        onSelectDoc={setSelectedDocId}
+        onRetrySynthesis={handleRetrySynthesis}
+        onSaveCorrection={handleSaveCorrection}
       />
 
       <FocusSheet nodes={nodes} edges={edges} />

@@ -33,6 +33,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   const [dynamicQueries, setDynamicQueries] = useState<string[]>([]);
   const [isLoadingQueries, setIsLoadingQueries] = useState(false);
+  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -42,12 +43,20 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   useEffect(() => {
     if (visible) {
+      // TTL cache: skip IPC if we fetched within the last 30 seconds
+      const cache = queryCacheRef.current;
+      if (cache && Date.now() - cache.fetchedAt < 30_000) {
+        setDynamicQueries(cache.queries);
+        return;
+      }
+
       if ((window as any).ipcRenderer) {
         setIsLoadingQueries(true);
         (window as any).ipcRenderer
           .invoke('intelligence:suggested-queries')
           .then((queries: string[]) => {
             setDynamicQueries(queries);
+            queryCacheRef.current = { queries, fetchedAt: Date.now() };
           })
           .catch((e: any) => {
             console.error('Failed to load dynamic queries', e);
@@ -57,7 +66,6 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             setIsLoadingQueries(false);
           });
       } else {
-        // Fallback or mock
         setDynamicQueries(['What decisions were made about API Migration?']);
       }
     }

@@ -29,9 +29,9 @@ const createDoc = (
 const docs = [
   createDoc(
     'global-preview-memory',
-    'Preview Memory',
+    'Global Knowledge Context',
     'global',
-    'synthesizing',
+    'inactive',
   ),
   createDoc('project-preview-memory', 'Project Memory', 'project', 'inactive'),
   createDoc(
@@ -109,6 +109,7 @@ const invokeFallback: IpcRendererLike['invoke'] = async <T = unknown>(
       break;
     case 'GET_MEETINGS':
     case 'GET_KNOWLEDGE_DOC_SOURCES':
+    case 'GET_KNOWLEDGE_CORRECTIONS':
       result = [];
       break;
     case 'BOOT_PROBE_STATUS':
@@ -136,6 +137,11 @@ const invokeFallback: IpcRendererLike['invoke'] = async <T = unknown>(
       result = docs.find((doc) => doc.id === id);
       break;
     }
+    case 'REFRESH_KNOWLEDGE_DOC': {
+      const id = String(args[0] || '');
+      result = docs.find((doc) => doc.id === id);
+      break;
+    }
     case 'GET_KNOWLEDGE_GRAPH':
       result = workspaceFor().graph;
       break;
@@ -155,6 +161,17 @@ const invokeFallback: IpcRendererLike['invoke'] = async <T = unknown>(
       break;
     case 'GET_KNOWLEDGE_DOC_NOTES':
       result = null;
+      break;
+    case 'SAVE_KNOWLEDGE_CORRECTION':
+      result = {
+        id: 'preview-correction',
+        doc_id: 'preview',
+        target_kind: 'item',
+        target_id: 'preview',
+        action: 'promote_item',
+        payload_json: null,
+        created_at: new Date().toISOString(),
+      };
       break;
     default:
       result = null;

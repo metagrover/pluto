@@ -68,20 +68,127 @@ export interface KnowledgeBriefLane {
   items: KnowledgeStatement[];
 }
 
+export interface KnowledgeBriefCoverage {
+  statementCount: number;
+  citedMeetingCount: number;
+  dependencyCount: number;
+}
+
+export interface KnowledgeV2EvidenceQuality {
+  mode: 'direct' | 'inferred';
+  confidence: number;
+  cited_meeting_count: number;
+  source_count: number;
+  last_reinforced_at: string | null;
+  freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+}
+
+export interface KnowledgeV2Item {
+  id: string;
+  title: string;
+  summary: string;
+  kind: string;
+  severity: 'needs_attention' | 'watch' | 'steady';
+  why_now: string;
+  stream_ids: string[];
+  citations: KnowledgeCitation[];
+  evidence_quality: KnowledgeV2EvidenceQuality;
+}
+
+export interface KnowledgeV2Stream {
+  id: string;
+  title: string;
+  domain: string;
+  status: string;
+  current_read: string;
+  last_touched_at: string | null;
+  source_count: number;
+  open_follow_up_count: number;
+  decision_count: number;
+  unresolved_question_count: number;
+  pinned: boolean;
+  evidence_quality: KnowledgeV2EvidenceQuality;
+}
+
+export interface KnowledgeV2EvidenceEntry {
+  id: string;
+  meeting_id: string;
+  meeting_title: string;
+  captured_at: string | null;
+  quote: string;
+  stream_ids: string[];
+  item_ids: string[];
+  mode: 'direct' | 'inferred';
+  confidence: number;
+}
+
+export interface KnowledgeV2SourceQualitySummary {
+  included_count: number;
+  excluded_count: number;
+  weak_count: number;
+  records: Array<{
+    meeting_id: string;
+    title: string;
+    usable: boolean;
+    domain: string;
+    score: number;
+    reasons: string[];
+  }>;
+}
+
+export interface StructuredKnowledgeV2Doc {
+  schema_version: 2;
+  scope: {
+    type: KnowledgeDocScopeType;
+    title: string;
+  };
+  current_read: {
+    headline: string;
+    supporting_bullets: string[];
+    freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+    source_count: number;
+    cited_item_count: number;
+    cited_meeting_count: number;
+    trust_message: string;
+    evidence_quality: KnowledgeV2EvidenceQuality;
+  };
+  active_streams: KnowledgeV2Stream[];
+  needs_attention: KnowledgeV2Item[];
+  patterns: KnowledgeV2Item[];
+  risks_and_unknowns: KnowledgeV2Item[];
+  evidence_index: KnowledgeV2EvidenceEntry[];
+  source_quality_summary: KnowledgeV2SourceQualitySummary;
+}
+
 export interface KnowledgeBrief {
   isCompiled: boolean;
   headline: string;
   lanes: KnowledgeBriefLane[];
+  coverage: KnowledgeBriefCoverage;
+  activeStreams: KnowledgeV2Stream[];
+  patterns: KnowledgeV2Item[];
+  risksAndUnknowns: KnowledgeV2Item[];
+  evidenceIndex: KnowledgeV2EvidenceEntry[];
+  sourceQuality: KnowledgeV2SourceQualitySummary | null;
+  trustMessage: string | null;
 }
 
-export type ProjectRadarSeverity = 'critical' | 'watch' | 'steady';
+export type AttentionSeverity = 'critical' | 'watch' | 'steady';
 
-export interface ActiveProjectRadarItem {
+export type NeedsAttentionKind =
+  | 'risk'
+  | 'project'
+  | 'dependency'
+  | 'follow_up';
+
+export interface NeedsAttentionItem {
   id: string;
   title: string;
-  label: string;
-  severity: ProjectRadarSeverity;
+  summary: string;
+  severity: AttentionSeverity;
+  kind: NeedsAttentionKind;
   reasons: string[];
+  citations: KnowledgeCitation[];
 }
 
 export const SECTION_LABELS: Record<KnowledgeSectionKey, string> = {
@@ -118,6 +225,26 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const asString = (value: unknown): string =>
   typeof value === 'string' ? value : '';
 
+const looksLikeRawId = (value: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value.trim(),
+  );
+
+const EMPTY_BRIEF_COVERAGE: KnowledgeBriefCoverage = {
+  statementCount: 0,
+  citedMeetingCount: 0,
+  dependencyCount: 0,
+};
+
+const EMPTY_V2_QUALITY: KnowledgeV2EvidenceQuality = {
+  mode: 'direct',
+  confidence: 0,
+  cited_meeting_count: 0,
+  source_count: 0,
+  last_reinforced_at: null,
+  freshness: 'unknown',
+};
+
 const parseCitations = (value: unknown): KnowledgeCitation[] => {
   if (!Array.isArray(value)) return [];
   return value
@@ -137,6 +264,273 @@ const parseStatements = (value: unknown): KnowledgeStatement[] => {
     why_it_matters: asString(statement.why_it_matters),
     citations: parseCitations(statement.citations),
   }));
+};
+
+const parseV2Quality = (value: unknown): KnowledgeV2EvidenceQuality => {
+  if (!isObject(value)) return EMPTY_V2_QUALITY;
+  return {
+    mode: asString(value.mode) === 'inferred' ? 'inferred' : 'direct',
+    confidence: typeof value.confidence === 'number' ? value.confidence : 0,
+    cited_meeting_count:
+      typeof value.cited_meeting_count === 'number'
+        ? value.cited_meeting_count
+        : 0,
+    source_count:
+      typeof value.source_count === 'number' ? value.source_count : 0,
+    last_reinforced_at: asString(value.last_reinforced_at) || null,
+    freshness:
+      asString(value.freshness) === 'fresh' ||
+      asString(value.freshness) === 'aging' ||
+      asString(value.freshness) === 'stale'
+        ? (asString(value.freshness) as KnowledgeV2EvidenceQuality['freshness'])
+        : 'unknown',
+  };
+};
+
+const parseV2Items = (value: unknown): KnowledgeV2Item[] => {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isObject).map((item, index) => ({
+    id: asString(item.id) || `v2-item-${index}`,
+    title: asString(item.title),
+    summary: asString(item.summary),
+    kind: asString(item.kind) || 'reference_context',
+    severity:
+      asString(item.severity) === 'needs_attention' ||
+      asString(item.severity) === 'watch'
+        ? (asString(item.severity) as KnowledgeV2Item['severity'])
+        : 'steady',
+    why_now: asString(item.why_now),
+    stream_ids: Array.isArray(item.stream_ids)
+      ? item.stream_ids.filter((id): id is string => typeof id === 'string')
+      : [],
+    citations: parseCitations(item.citations),
+    evidence_quality: parseV2Quality(item.evidence_quality),
+  }));
+};
+
+const WEAK_V2_HEADLINE_PATTERN =
+  /^(the team discusses|the team discussed|the meeting opened|the conversation revolves|conversation captured|the user is planning)\b/i;
+
+const WEAK_V2_STREAM_TITLE_PATTERN =
+  /^(you|me|i|them|they|we|someone|language|conversation|topic|unknown|none specified|not specified|aldo|adam)$/i;
+
+const WEAK_V2_STREAM_READ_PATTERN =
+  /^(conversation captured|key themes and follow-ups are summarized|the conversation revolves|the team discusses|discussion about)\b/i;
+
+const normalizeStreamId = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+
+const titleFromStreamRead = (value: string): string | null => {
+  const cleaned = value.replace(/\.$/, '').trim();
+  if (cleaned.length < 8 || cleaned.length > 90) return null;
+  if (WEAK_V2_STREAM_READ_PATTERN.test(cleaned)) return null;
+  if (!/[A-Z]/.test(cleaned)) return null;
+  return cleaned;
+};
+
+const repairV2Stream = (
+  stream: KnowledgeV2Stream,
+): KnowledgeV2Stream | null => {
+  if (WEAK_V2_STREAM_READ_PATTERN.test(stream.current_read.trim())) return null;
+  if (WEAK_V2_STREAM_TITLE_PATTERN.test(stream.title.trim())) {
+    const replacement = titleFromStreamRead(stream.current_read);
+    if (!replacement) return null;
+    return {
+      ...stream,
+      id: normalizeStreamId(replacement) || stream.id,
+      title: replacement,
+    };
+  }
+  return stream;
+};
+
+const repairedV2Headline = (
+  headline: string,
+  streams: KnowledgeV2Stream[],
+  attention: KnowledgeV2Item[],
+  patterns: KnowledgeV2Item[],
+): string => {
+  const weak =
+    WEAK_V2_HEADLINE_PATTERN.test(headline.trim()) || headline.length > 170;
+  if (!weak) return headline;
+  const attentionByStream = new Map<string, KnowledgeV2Item>();
+  for (const item of attention) {
+    const streamId = item.stream_ids[0];
+    if (streamId && !attentionByStream.has(streamId)) {
+      attentionByStream.set(streamId, item);
+    }
+  }
+  const reads = streams.slice(0, 2).map((stream) => {
+    const item = attentionByStream.get(stream.id);
+    return `${stream.title}: ${item?.title || stream.current_read}`;
+  });
+  if (reads.length >= 2) return `${reads[0]}; ${reads[1]}.`;
+  return reads[0] || patterns[0]?.title || 'No reliable compiled brief yet.';
+};
+
+const isReliableV2Headline = (headline: string): boolean => {
+  const normalized = headline.trim();
+  return (
+    Boolean(normalized) &&
+    normalized !== 'No reliable compiled brief yet.' &&
+    !WEAK_V2_HEADLINE_PATTERN.test(normalized)
+  );
+};
+
+export const parseStructuredKnowledgeV2Doc = (
+  doc: KnowledgeDoc | null | undefined,
+): StructuredKnowledgeV2Doc | null => {
+  if (!doc?.structured_json) return null;
+  try {
+    const parsed = JSON.parse(doc.structured_json) as unknown;
+    if (!isObject(parsed) || parsed.schema_version !== 2) return null;
+    const currentRead = isObject(parsed.current_read)
+      ? parsed.current_read
+      : {};
+    const sourceQuality = isObject(parsed.source_quality_summary)
+      ? parsed.source_quality_summary
+      : {};
+    const activeStreams = (
+      Array.isArray(parsed.active_streams)
+        ? parsed.active_streams.filter(isObject).map((stream, index) => ({
+            id: asString(stream.id) || `stream-${index}`,
+            title: asString(stream.title),
+            domain: asString(stream.domain) || 'unknown',
+            status: asString(stream.status),
+            current_read: asString(stream.current_read),
+            last_touched_at: asString(stream.last_touched_at) || null,
+            source_count:
+              typeof stream.source_count === 'number' ? stream.source_count : 0,
+            open_follow_up_count:
+              typeof stream.open_follow_up_count === 'number'
+                ? stream.open_follow_up_count
+                : 0,
+            decision_count:
+              typeof stream.decision_count === 'number'
+                ? stream.decision_count
+                : 0,
+            unresolved_question_count:
+              typeof stream.unresolved_question_count === 'number'
+                ? stream.unresolved_question_count
+                : 0,
+            pinned: Boolean(stream.pinned),
+            evidence_quality: parseV2Quality(stream.evidence_quality),
+          }))
+        : []
+    )
+      .map(repairV2Stream)
+      .filter((stream): stream is KnowledgeV2Stream => Boolean(stream));
+    const needsAttention = parseV2Items(parsed.needs_attention);
+    const patterns = parseV2Items(parsed.patterns).filter(
+      (pattern) =>
+        pattern.evidence_quality.cited_meeting_count >= 2 ||
+        /\b(repeated|multiple|recurring|again|across)\b/i.test(
+          `${pattern.title} ${pattern.why_now}`,
+        ),
+    );
+    return {
+      schema_version: 2,
+      scope: {
+        type: doc.scope_type,
+        title: doc.title,
+      },
+      current_read: {
+        headline: repairedV2Headline(
+          asString(currentRead.headline),
+          activeStreams,
+          needsAttention,
+          patterns,
+        ),
+        supporting_bullets: Array.isArray(currentRead.supporting_bullets)
+          ? currentRead.supporting_bullets.filter(
+              (item): item is string => typeof item === 'string',
+            )
+          : [],
+        freshness:
+          asString(currentRead.freshness) === 'fresh' ||
+          asString(currentRead.freshness) === 'aging' ||
+          asString(currentRead.freshness) === 'stale'
+            ? (asString(
+                currentRead.freshness,
+              ) as StructuredKnowledgeV2Doc['current_read']['freshness'])
+            : 'unknown',
+        source_count:
+          typeof currentRead.source_count === 'number'
+            ? currentRead.source_count
+            : 0,
+        cited_item_count:
+          typeof currentRead.cited_item_count === 'number'
+            ? currentRead.cited_item_count
+            : 0,
+        cited_meeting_count:
+          typeof currentRead.cited_meeting_count === 'number'
+            ? currentRead.cited_meeting_count
+            : 0,
+        trust_message: asString(currentRead.trust_message),
+        evidence_quality: parseV2Quality(currentRead.evidence_quality),
+      },
+      active_streams: activeStreams,
+      needs_attention: needsAttention,
+      patterns,
+      risks_and_unknowns: parseV2Items(parsed.risks_and_unknowns),
+      evidence_index: Array.isArray(parsed.evidence_index)
+        ? parsed.evidence_index.filter(isObject).map((entry, index) => ({
+            id: asString(entry.id) || `evidence-${index}`,
+            meeting_id: asString(entry.meeting_id),
+            meeting_title: asString(entry.meeting_title),
+            captured_at: asString(entry.captured_at) || null,
+            quote: asString(entry.quote),
+            stream_ids: Array.isArray(entry.stream_ids)
+              ? entry.stream_ids.filter(
+                  (id): id is string => typeof id === 'string',
+                )
+              : [],
+            item_ids: Array.isArray(entry.item_ids)
+              ? entry.item_ids.filter(
+                  (id): id is string => typeof id === 'string',
+                )
+              : [],
+            mode: asString(entry.mode) === 'inferred' ? 'inferred' : 'direct',
+            confidence:
+              typeof entry.confidence === 'number' ? entry.confidence : 0,
+          }))
+        : [],
+      source_quality_summary: {
+        included_count:
+          typeof sourceQuality.included_count === 'number'
+            ? sourceQuality.included_count
+            : 0,
+        excluded_count:
+          typeof sourceQuality.excluded_count === 'number'
+            ? sourceQuality.excluded_count
+            : 0,
+        weak_count:
+          typeof sourceQuality.weak_count === 'number'
+            ? sourceQuality.weak_count
+            : 0,
+        records: Array.isArray(sourceQuality.records)
+          ? sourceQuality.records.filter(isObject).map((record) => ({
+              meeting_id: asString(record.meeting_id),
+              title: asString(record.title),
+              usable: Boolean(record.usable),
+              domain: asString(record.domain) || 'unknown',
+              score: typeof record.score === 'number' ? record.score : 0,
+              reasons: Array.isArray(record.reasons)
+                ? record.reasons.filter(
+                    (reason): reason is string => typeof reason === 'string',
+                  )
+                : [],
+            }))
+          : [],
+      },
+    };
+  } catch {
+    return null;
+  }
 };
 
 export const parseStructuredKnowledgeDoc = (
@@ -184,7 +578,9 @@ export const parseStructuredKnowledgeDoc = (
           (suggestion) =>
             suggestion.source_name &&
             suggestion.target_name &&
-            suggestion.relationship,
+            suggestion.relationship &&
+            !looksLikeRawId(suggestion.source_name) &&
+            !looksLikeRawId(suggestion.target_name),
         ),
     };
   } catch {
@@ -245,7 +641,8 @@ export const deriveKnowledgeDigest = (
 export const compileKnowledgeBrief = (
   doc: KnowledgeDoc | null | undefined,
 ): KnowledgeBrief => {
-  const structured = parseStructuredKnowledgeDoc(doc);
+  const v2 = parseStructuredKnowledgeV2Doc(doc);
+  const structured = v2 ? null : parseStructuredKnowledgeDoc(doc);
   const emptyLanes: KnowledgeBriefLane[] = [
     {
       id: 'priorities',
@@ -273,11 +670,48 @@ export const compileKnowledgeBrief = (
     },
   ];
 
+  if (v2) {
+    const hasCompiledSurface =
+      v2.active_streams.length > 0 ||
+      v2.needs_attention.length > 0 ||
+      v2.patterns.length > 0 ||
+      v2.risks_and_unknowns.length > 0;
+    const isCompiled =
+      isReliableV2Headline(v2.current_read.headline) &&
+      v2.current_read.cited_meeting_count > 0 &&
+      hasCompiledSurface;
+    return {
+      isCompiled,
+      headline: v2.current_read.headline || 'No reliable compiled brief yet.',
+      lanes: emptyLanes,
+      coverage: {
+        statementCount: v2.current_read.cited_item_count,
+        citedMeetingCount: v2.current_read.cited_meeting_count,
+        dependencyCount: v2.needs_attention.filter((item) =>
+          ['dependency', 'blocker'].includes(item.kind),
+        ).length,
+      },
+      activeStreams: v2.active_streams,
+      patterns: v2.patterns,
+      risksAndUnknowns: v2.risks_and_unknowns,
+      evidenceIndex: v2.evidence_index,
+      sourceQuality: v2.source_quality_summary,
+      trustMessage: v2.current_read.trust_message,
+    };
+  }
+
   if (!structured) {
     return {
       isCompiled: false,
       headline: 'No reliable compiled brief yet.',
       lanes: emptyLanes,
+      coverage: EMPTY_BRIEF_COVERAGE,
+      activeStreams: [],
+      patterns: [],
+      risksAndUnknowns: [],
+      evidenceIndex: [],
+      sourceQuality: null,
+      trustMessage: null,
     };
   }
 
@@ -321,17 +755,118 @@ export const compileKnowledgeBrief = (
       items: dependencies,
     },
   ];
-  const hasCompiledItems = lanes.some((lane) => lane.items.length > 0);
+
+  const statementItems = [...signals, ...decisions, ...risks, ...patterns];
+  const citedMeetingIds = new Set(
+    [...statementItems, ...dependencies].flatMap((item) =>
+      item.citations
+        .map((citation) => citation.meeting_id.trim())
+        .filter(Boolean),
+    ),
+  );
+  const coverage: KnowledgeBriefCoverage = {
+    statementCount: statementItems.length,
+    citedMeetingCount: citedMeetingIds.size,
+    dependencyCount: dependencies.length,
+  };
+  const hasCompiledItems =
+    statementItems.length >= 2 && citedMeetingIds.size >= 2;
+
+  const scoreHeadlineCandidate = (
+    item: KnowledgeStatement,
+    section: KnowledgeSectionKey | 'dependencies',
+  ): number => {
+    const sectionScore: Record<KnowledgeSectionKey | 'dependencies', number> = {
+      signals: 21,
+      decisions: 20,
+      open_risks: 18,
+      topic_evolution: 14,
+      dependencies: 10,
+    };
+    const citedMeetings = new Set(
+      item.citations
+        .map((citation) => citation.meeting_id.trim())
+        .filter(Boolean),
+    );
+    const imperativePenalty =
+      /^(commit|research|schedule|follow up|send|review|prepare|create|update|finish)\b/i.test(
+        item.text.trim(),
+      )
+        ? 8
+        : 0;
+    const meetingSummaryPenalty =
+      /^(the team discusses|the meeting opened|the conversation revolves|the user is planning)\b/i.test(
+        item.text.trim(),
+      )
+        ? 10
+        : 0;
+    const lengthPenalty = item.text.length > 140 ? 4 : 0;
+    const contextBonus = item.why_it_matters.trim().length >= 80 ? 2 : 0;
+    return (
+      sectionScore[section] +
+      citedMeetings.size * 5 +
+      Math.min(item.citations.length, 3) +
+      contextBonus -
+      imperativePenalty -
+      meetingSummaryPenalty -
+      lengthPenalty
+    );
+  };
+
+  const headlineCandidates: Array<{
+    item: KnowledgeStatement;
+    section: KnowledgeSectionKey | 'dependencies';
+    index: number;
+  }> = [
+    ...signals.map((item, index) => ({
+      item,
+      section: 'signals' as const,
+      index,
+    })),
+    ...risks.map((item, index) => ({
+      item,
+      section: 'open_risks' as const,
+      index,
+    })),
+    ...decisions.map((item, index) => ({
+      item,
+      section: 'decisions' as const,
+      index,
+    })),
+    ...patterns.map((item, index) => ({
+      item,
+      section: 'topic_evolution' as const,
+      index,
+    })),
+    ...dependencies.map((item, index) => ({
+      item,
+      section: 'dependencies' as const,
+      index,
+    })),
+  ];
+  headlineCandidates.sort((a, b) => {
+    const scoreDelta =
+      scoreHeadlineCandidate(b.item, b.section) -
+      scoreHeadlineCandidate(a.item, a.section);
+    if (scoreDelta !== 0) return scoreDelta;
+    return a.index - b.index;
+  });
 
   return {
     isCompiled: hasCompiledItems,
-    headline:
-      signals[0]?.text ||
-      decisions[0]?.text ||
-      risks[0]?.text ||
-      patterns[0]?.text ||
-      'No reliable compiled brief yet.',
+    headline: hasCompiledItems
+      ? headlineCandidates[0]?.item.text || 'No reliable compiled brief yet.'
+      : statementItems.length > 0 || dependencies.length > 0
+        ? 'Indexed knowledge needs a stronger synthesis.'
+        : 'No reliable compiled brief yet.',
     lanes,
+    coverage,
+    activeStreams: [],
+    patterns: [],
+    risksAndUnknowns: [],
+    evidenceIndex: [],
+    sourceQuality: null,
+    trustMessage: null,
   };
 };
 
@@ -350,10 +885,118 @@ export const groupKnowledgeDocs = (
   })).filter((group) => group.docs.length > 0);
 };
 
-export const compileActiveProjectRadar = (
+export const knowledgeDocsNeedPolling = (docs: KnowledgeDoc[]): boolean =>
+  docs.some((doc) => doc.status === 'synthesizing' || doc.status === 'stale');
+
+const severityRank: Record<AttentionSeverity, number> = {
+  critical: 0,
+  watch: 1,
+  steady: 2,
+};
+
+const FOLLOW_UP_ACTION_PATTERN =
+  /^(review|research|investigate|merge|prepare|validate|follow up|send|schedule|create|update|resolve|check|confirm|clarify|draft|share|coordinate)\b/i;
+
+const FOLLOW_UP_SOURCE_PATTERN = /\bfollow-up or unresolved work\b/i;
+
+const ESCALATION_CUE_PATTERN =
+  /\b(approval|blocked?|confusion|delay|dependency|depends|failed|failure|missing|pending|risk|unresolved)\b/i;
+
+const classifyOpenRiskStatement = (
+  risk: KnowledgeStatement,
+): Pick<NeedsAttentionItem, 'kind' | 'severity'> => {
+  const isExtractedFollowUp =
+    FOLLOW_UP_SOURCE_PATTERN.test(risk.why_it_matters) ||
+    FOLLOW_UP_ACTION_PATTERN.test(risk.text.trim());
+
+  if (isExtractedFollowUp) {
+    return {
+      kind: 'follow_up',
+      severity: 'watch',
+    };
+  }
+
+  return {
+    kind: 'risk',
+    severity: 'critical',
+  };
+};
+
+const attentionSortScore = (item: NeedsAttentionItem): number => {
+  const escalationBonus = ESCALATION_CUE_PATTERN.test(item.title) ? 0 : 1;
+  const kindRank: Record<NeedsAttentionKind, number> = {
+    risk: 0,
+    dependency: 1,
+    project: 2,
+    follow_up: 3,
+  };
+  return (
+    severityRank[item.severity] * 10 + escalationBonus + kindRank[item.kind]
+  );
+};
+
+export const compileNeedsAttention = (
+  doc: KnowledgeDoc | null | undefined,
   docs: KnowledgeDoc[],
   projectCards: KnowledgeProjectHealthCard[],
-): ActiveProjectRadarItem[] => {
+): NeedsAttentionItem[] => {
+  const v2 = parseStructuredKnowledgeV2Doc(doc);
+  const structured = v2 ? null : parseStructuredKnowledgeDoc(doc);
+  const v2Items: NeedsAttentionItem[] = v2
+    ? v2.needs_attention.map((item) => ({
+        id: item.id,
+        title: item.title,
+        summary: item.summary || item.why_now,
+        severity:
+          item.severity === 'needs_attention'
+            ? 'critical'
+            : item.severity === 'watch'
+              ? 'watch'
+              : 'steady',
+        kind:
+          item.kind === 'follow_up'
+            ? 'follow_up'
+            : item.kind === 'risk'
+              ? 'risk'
+              : item.kind === 'blocker' || item.kind === 'dependency'
+                ? 'dependency'
+                : 'project',
+        reasons: [item.why_now || item.summary].filter(Boolean),
+        citations: item.citations,
+      }))
+    : [];
+  const riskItems: NeedsAttentionItem[] = structured
+    ? getSectionStatements(structured, 'open_risks').map((risk) => {
+        const classification = classifyOpenRiskStatement(risk);
+        return {
+          id: `risk-${risk.id}`,
+          title: risk.text,
+          summary:
+            risk.why_it_matters ||
+            (classification.kind === 'follow_up'
+              ? 'This follow-up is still open.'
+              : 'This risk is unresolved.'),
+          ...classification,
+          reasons: risk.why_it_matters ? [risk.why_it_matters] : [],
+          citations: risk.citations,
+        };
+      })
+    : [];
+
+  const dependencyItems: NeedsAttentionItem[] =
+    structured?.dependency_suggestions.map((suggestion, index) => ({
+      id: `dependency-attention-${index}`,
+      title: `${suggestion.source_name} ${suggestion.relationship.replace(
+        /_/g,
+        ' ',
+      )} ${suggestion.target_name}`,
+      summary: suggestion.why || 'This dependency may affect active work.',
+      severity: suggestion.relationship === 'blocked_by' ? 'critical' : 'watch',
+      kind: 'dependency',
+      reasons: suggestion.why ? [suggestion.why] : [],
+      citations: suggestion.citations,
+    })) || [];
+
   const projectDocs = docs.filter((doc) => doc.scope_type === 'project');
   const docsById = new Map(projectDocs.map((doc) => [doc.id, doc]));
   const cardItems = projectCards.map((card) => {
@@ -377,7 +1020,7 @@ export const compileActiveProjectRadar = (
       doc?.status === 'stale' ? 'doc stale' : '',
     ].filter(Boolean);
 
-    const severity: ProjectRadarSeverity =
+    const severity: AttentionSeverity =
       card.open_blockers > 0 || doc?.status === 'failed'
         ? 'critical'
         : card.dependency_count > 0 ||
@@ -386,21 +1029,19 @@ export const compileActiveProjectRadar = (
           ? 'watch'
           : 'steady';
 
-    const label =
-      severity === 'critical'
-        ? 'Needs attention'
-        : severity === 'watch'
-          ? card.staleness_days > 7 || doc?.status === 'stale'
-            ? 'Getting stale'
-            : 'Watch'
-          : 'Steady';
-
     return {
-      id: card.doc_id,
+      id: `project-${card.doc_id}`,
       title: card.title || doc?.title || 'Untitled project',
-      label,
+      summary:
+        severity === 'critical'
+          ? 'This active project has blockers or a failed synthesis.'
+          : severity === 'watch'
+            ? 'This active project is showing drift, dependencies, or stale context.'
+            : 'No blocker is currently surfaced for this project.',
       severity,
+      kind: 'project' as const,
       reasons: reasons.length > 0 ? reasons : ['No blockers surfaced'],
+      citations: [],
     };
   });
 
@@ -409,35 +1050,35 @@ export const compileActiveProjectRadar = (
     .filter((doc) => !cardDocIds.has(doc.id))
     .filter((doc) => doc.status !== 'inactive')
     .map((doc) => {
-      const severity: ProjectRadarSeverity =
+      const severity: AttentionSeverity =
         doc.status === 'failed'
           ? 'critical'
           : doc.status === 'stale'
             ? 'watch'
             : 'steady';
       return {
-        id: doc.id,
+        id: `project-${doc.id}`,
         title: doc.title,
-        label:
+        summary:
           severity === 'critical'
-            ? 'Needs attention'
+            ? 'This project synthesis failed.'
             : severity === 'watch'
-              ? 'Getting stale'
-              : 'Steady',
+              ? 'This project context may be getting stale.'
+              : 'This project is present in knowledge, with no surfaced blocker.',
         severity,
+        kind: 'project' as const,
         reasons: [formatDocStatus(doc.status)],
+        citations: [],
       };
     });
 
-  const severityRank: Record<ProjectRadarSeverity, number> = {
-    critical: 0,
-    watch: 1,
-    steady: 2,
-  };
-
-  return [...cardItems, ...docOnlyItems].sort(
-    (a, b) => severityRank[a.severity] - severityRank[b.severity],
-  );
+  return [
+    ...v2Items,
+    ...riskItems,
+    ...dependencyItems,
+    ...cardItems,
+    ...docOnlyItems,
+  ].sort((a, b) => attentionSortScore(a) - attentionSortScore(b));
 };
 
 export const formatDocStatus = (status: KnowledgeDoc['status']): string => {

@@ -14,6 +14,8 @@
 
 Pluto is a **local-first, open-source** desktop application that serves as your **second brain for work**. It captures meeting audio, transcribes locally, and builds a knowledge graph of your conversations—connecting people, topics, and action items—while proactively keeping you accountable.
 
+For the broader Knowledge product direction, see [Pluto Second Brain Knowledge Base PRD](./superpowers/specs/2026-04-28-second-brain-knowledge-base-prd.md). That spec defines Knowledge as a general personal second brain surface, not a work-only dashboard: it should include meaningful personal, travel, research, and routine context while ranking and classifying it honestly.
+
 ### The Problem
 
 Today's knowledge workers attend 15-25 meetings per week. Each meeting generates insights, decisions, and action items—but this knowledge lives fragmented across:

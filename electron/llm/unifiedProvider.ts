@@ -1,3 +1,4 @@
+import { net } from 'electron';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
   analysisDocumentToMarkdown,
@@ -40,6 +41,7 @@ import type {
 } from './provider';
 
 const OLLAMA_TIMEOUT_MS = 120_000;
+const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v4';
 
@@ -994,12 +996,16 @@ export class UnifiedLLMProvider implements LLMProvider {
     jsonMode,
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel();
+    const estimatedTokens = Math.ceil(prompt.length / 3) + 1000; // rough char-to-token heuristic + buffer
+    const num_ctx = Math.min(8192, Math.max(2048, Math.ceil(estimatedTokens / 1024) * 1024));
+
     const requestBody: Record<string, unknown> = {
       model,
       prompt,
       stream: false,
       options: {
-        num_ctx: 8192,
+        num_ctx,
+        num_predict: 2500, // strict cap to prevent massive infinite loops, but large enough for a legitimate 5-section structured JSON
         temperature: this.getTemperature(task),
         num_thread: 8, // Ensure multi-threading is utilized
       },
@@ -1011,15 +1017,25 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
 
     const start = Date.now();
-    console.log(
-      `[Ollama] Generating text for task: ${task} (model: ${model})...`,
-    );
+    try {
+      console.log(
+        `[Ollama] Generating text for task: ${task} (model: ${model})...`,
+      );
+    } catch (_ioErr) {
+      // stdout may be closed in packaged Electron — ignore write errors
+    }
 
-    const response = await this.ollamaFetch('/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody),
-    });
+    const response = await this.ollamaFetch(
+      '/api/generate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      },
+      task === 'knowledgeDoc'
+        ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
+        : OLLAMA_TIMEOUT_MS,
+    );
 
     if (!response.ok) {
       throw new Error(`Ollama API error: ${response.statusText}`);
@@ -1027,7 +1043,11 @@ export class UnifiedLLMProvider implements LLMProvider {
 
     const data = await response.json();
     const duration = Date.now() - start;
-    console.log(`[Ollama] Generation complete in ${duration}ms (${task})`);
+    try {
+      console.log(`[Ollama] Generation complete in ${duration}ms (${task})`);
+    } catch (_ioErr) {
+      // stdout may be closed in packaged Electron — ignore write errors
+    }
 
     return data.response ?? '';
   }
@@ -1105,12 +1125,16 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async ollamaFetch(
     path: string,
     options?: RequestInit,
+    timeoutMs = OLLAMA_TIMEOUT_MS,
   ): Promise<Response> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      return await fetch(`${this.ollamaBaseUrl}${path}`, {
+      // Use Electron's net.fetch in-app to bypass Node fetch timeouts, but
+      // fall back to global fetch in unit tests where Electron net is mocked.
+      const fetchImpl = net?.fetch ?? fetch;
+      return await fetchImpl(`${this.ollamaBaseUrl}${path}`, {
         ...options,
         signal: controller.signal,
       });

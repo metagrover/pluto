@@ -354,33 +354,116 @@ ${
 
 Return JSON in this exact shape:
 {
-  "schema_version": 1,
-  "scope": { "type": "meeting|entity|workspace|topic|person|project|decision|action_item|other", "title": "string" },
-  "chapters": [
+  "schema_version": 2,
+  "scope": { "type": "global|project|person_context|team_tracker", "title": "string" },
+  "current_read": {
+    "headline": "string",
+    "supporting_bullets": ["string"],
+    "freshness": "fresh|aging|stale|unknown",
+    "source_count": 0,
+    "cited_item_count": 0,
+    "cited_meeting_count": 0,
+    "trust_message": "string",
+    "evidence_quality": {"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}
+  },
+  "active_streams": [
     {
-      "chapter_id": "string",
+      "id": "string",
       "title": "string",
-      "decisions": [{"id":"string","text":"string","why_it_matters":"string","citations":[{"meeting_id":"string","quote":"string"}]}],
-      "topic_evolution": [{"id":"string","text":"string","why_it_matters":"string","citations":[{"meeting_id":"string","quote":"string"}]}],
-      "open_risks": [{"id":"string","text":"string","why_it_matters":"string","citations":[{"meeting_id":"string","quote":"string"}]}],
-      "signals": [{"id":"string","text":"string","why_it_matters":"string","citations":[{"meeting_id":"string","quote":"string"}]}]
+      "domain": "work|personal|travel|research|routine|unknown",
+      "status": "string",
+      "current_read": "string",
+      "last_touched_at": "string|null",
+      "source_count": 0,
+      "open_follow_up_count": 0,
+      "decision_count": 0,
+      "unresolved_question_count": 0,
+      "pinned": false,
+      "evidence_quality": {"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}
     }
   ],
-  "dependency_suggestions": [
-    {
-      "source_name": "string",
-      "target_name": "string",
-      "relationship": "depends_on|blocked_by|owns|impacts",
-      "why": "string",
-      "citations": [{"meeting_id":"string","quote":"string"}]
-    }
-  ]
+  "needs_attention": [{"id":"string","title":"string","summary":"string","kind":"decision|follow_up|risk|blocker|dependency|open_question|pattern|reference_context|stale_context|low_confidence","severity":"needs_attention|watch|steady","why_now":"string","stream_ids":["string"],"citations":[{"meeting_id":"string","quote":"string"}],"evidence_quality":{"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}}],
+  "patterns": [{"id":"string","title":"string","summary":"string","kind":"pattern","severity":"needs_attention|watch|steady","why_now":"string","stream_ids":["string"],"citations":[{"meeting_id":"string","quote":"string"}],"evidence_quality":{"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}}],
+  "risks_and_unknowns": [{"id":"string","title":"string","summary":"string","kind":"risk|blocker|dependency|open_question|stale_context","severity":"needs_attention|watch|steady","why_now":"string","stream_ids":["string"],"citations":[{"meeting_id":"string","quote":"string"}],"evidence_quality":{"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}}],
+  "evidence_index": [{"id":"string","meeting_id":"string","meeting_title":"string","captured_at":"string|null","quote":"string","stream_ids":["string"],"item_ids":["string"],"mode":"direct|inferred","confidence":0.0}],
+  "source_quality_summary": {"included_count":0,"excluded_count":0,"weak_count":0,"records":[]},
+  "change_summary": {"generated_at":"string","added_count":0,"removed_count":0,"updated_count":0,"notable_changes":["string"]}
 }
 
 Quality bar:
-- Prefer fewer, higher-signal items over volume.
+- Extract a living second-brain brief: current read, active streams, needs attention, patterns, risks, and evidence.
+- Current Read headline must synthesize across the scope. Never use a raw source summary as the headline.
+- Promote patterns only when supported by repeated evidence, breadth across sources, or explicit recurring-language in the evidence.
+- Classify before ranking. Split routine follow-ups from risks and blockers; do not label all unresolved work as risk.
+- Include meaningful work, personal, travel, research, and routine context when evidence supports it. Do not exclude domains globally.
+- Rank by importance, recency, breadth, explicitness, and citation quality.
+- Optimize for durable dashboard context: project direction, repeated signals, active risks, decisions with downstream impact, and cross-meeting changes.
+- Do not rewrite action items as imperatives. Describe the underlying committed context instead of saying "Commit to...", "Research...", or "Follow up...".
+- Avoid making a single narrow meeting sound like the current read for the whole scope. If evidence is narrow, keep the statement specific to that meeting/topic.
 - Avoid generic phrasing ("It is important..."). Be concrete.
 - Keep citations tight (short quotes that clearly support the statement).
+`;
+};
+
+export const getKnowledgeDocumentMergePrompt = (params: {
+  scopeType: string;
+  scopeTitle: string;
+  chunkDocuments: Array<{ label: string; structuredJson: string }>;
+  previousStructuredJson?: string | null;
+}): string => {
+  const { scopeType, scopeTitle, chunkDocuments, previousStructuredJson } =
+    params;
+  const chunksBlock = chunkDocuments
+    .map(
+      (chunk) =>
+        `## ${chunk.label}\n${chunk.structuredJson || '{"chapters":[],"dependency_suggestions":[]}'}`,
+    )
+    .join('\n\n');
+
+  return `You are an expert at producing strict, citation-grounded knowledge documents for Pluto.
+
+Your job is to merge already-cited chunk documents into one concise knowledge document.
+
+Non-negotiable requirements:
+- Use ONLY the provided chunk documents. Never invent facts.
+- Preserve citation meeting_id and quote values exactly as they appear.
+- Do not introduce new meeting_id values.
+- Every statement MUST include citations with meeting_id + quote.
+- Output MUST be valid JSON only (no markdown fences, no commentary).
+
+You are generating a structured knowledge document for this scope:
+- scope.type: ${scopeType}
+- scope.title: ${scopeTitle}
+
+Chunk documents:
+${chunksBlock || '(none)'}
+
+${
+  previousStructuredJson?.trim()
+    ? `Previous structured document JSON (use as a hint for stable wording when appropriate):\n${previousStructuredJson}`
+    : 'No previous structured document is provided.'
+}
+
+Return JSON in this exact shape:
+{
+  "schema_version": 2,
+  "scope": { "type": "global|project|person_context|team_tracker", "title": "string" },
+  "current_read": {"headline":"string","supporting_bullets":["string"],"freshness":"fresh|aging|stale|unknown","source_count":0,"cited_item_count":0,"cited_meeting_count":0,"trust_message":"string","evidence_quality":{"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}},
+  "active_streams": [{"id":"string","title":"string","domain":"work|personal|travel|research|routine|unknown","status":"string","current_read":"string","last_touched_at":"string|null","source_count":0,"open_follow_up_count":0,"decision_count":0,"unresolved_question_count":0,"pinned":false,"evidence_quality":{"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}}],
+  "needs_attention": [{"id":"string","title":"string","summary":"string","kind":"decision|follow_up|risk|blocker|dependency|open_question|pattern|reference_context|stale_context|low_confidence","severity":"needs_attention|watch|steady","why_now":"string","stream_ids":["string"],"citations":[{"meeting_id":"string","quote":"string"}],"evidence_quality":{"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}}],
+  "patterns": [{"id":"string","title":"string","summary":"string","kind":"pattern","severity":"needs_attention|watch|steady","why_now":"string","stream_ids":["string"],"citations":[{"meeting_id":"string","quote":"string"}],"evidence_quality":{"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}}],
+  "risks_and_unknowns": [{"id":"string","title":"string","summary":"string","kind":"risk|blocker|dependency|open_question|stale_context","severity":"needs_attention|watch|steady","why_now":"string","stream_ids":["string"],"citations":[{"meeting_id":"string","quote":"string"}],"evidence_quality":{"mode":"direct|inferred","confidence":0.0,"cited_meeting_count":0,"source_count":0,"last_reinforced_at":"string|null","freshness":"fresh|aging|stale|unknown"}}],
+  "evidence_index": [{"id":"string","meeting_id":"string","meeting_title":"string","captured_at":"string|null","quote":"string","stream_ids":["string"],"item_ids":["string"],"mode":"direct|inferred","confidence":0.0}],
+  "source_quality_summary": {"included_count":0,"excluded_count":0,"weak_count":0,"records":[]},
+  "change_summary": {"generated_at":"string","added_count":0,"removed_count":0,"updated_count":0,"notable_changes":["string"]}
+}
+
+Quality bar:
+- Combine overlapping or duplicate items across chunks, and resolve contradictions.
+- Preserve item classifications, evidence_quality, stream_ids, evidence_index entries, source_quality_summary counts, and citation meeting_id + quote values exactly when possible.
+- CRITICAL: You are acting as a lossless aggregator! You MUST copy over EVERY distinct active stream, needs_attention item, pattern, risk/unknown, and evidence entry from the chunks into the final JSON unless combining true duplicates.
+- You may output up to 15 distinct items per array. Be exhaustive and comprehensive without repeating duplicates.
+- Preserve concrete project, person, and risk names.
 `;
 };
 

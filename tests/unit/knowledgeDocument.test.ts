@@ -3,10 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../src/api/knowledgeWorkspace';
 import {
-  compileActiveProjectRadar,
   compileKnowledgeBrief,
+  compileNeedsAttention,
   deriveKnowledgeDigest,
   groupKnowledgeDocs,
+  knowledgeDocsNeedPolling,
   parseStructuredKnowledgeDoc,
 } from '../../src/components/KnowledgeGraph/knowledgeDocument';
 
@@ -39,6 +40,309 @@ const makeProjectCard = (
 });
 
 describe('knowledge document utilities', () => {
+  it('parses V2 knowledge docs and compiles PRD-native sections first', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline:
+            'Knowledge quality is moving from archive browsing to a living brief.',
+          supporting_bullets: [
+            'Knowledge Dashboard: synthesis quality is active.',
+          ],
+          freshness: 'fresh',
+          source_count: 3,
+          cited_item_count: 4,
+          cited_meeting_count: 3,
+          trust_message: 'Grounded in multiple cited sources.',
+          evidence_quality: {
+            mode: 'inferred',
+            confidence: 0.86,
+            cited_meeting_count: 3,
+            source_count: 3,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'knowledge-dashboard',
+            title: 'Knowledge Dashboard',
+            domain: 'work',
+            status: 'active',
+            current_read: 'Synthesis quality is the active stream.',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 3,
+            open_follow_up_count: 1,
+            decision_count: 1,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: {
+              mode: 'inferred',
+              confidence: 0.82,
+              cited_meeting_count: 3,
+              source_count: 3,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [
+          {
+            id: 'a1',
+            title: 'API instrumentation approval is still pending.',
+            summary: 'Approval blocks demo readiness.',
+            kind: 'blocker',
+            severity: 'needs_attention',
+            why_now: 'It blocks an active stream.',
+            stream_ids: ['knowledge-dashboard'],
+            citations: [
+              { meeting_id: 'm1', quote: 'approval is still pending' },
+            ],
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.9,
+              cited_meeting_count: 1,
+              source_count: 1,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [
+          {
+            id: 'e1',
+            meeting_id: 'm1',
+            meeting_title: 'Knowledge Review',
+            captured_at: '2026-04-25T10:00:00.000Z',
+            quote: 'approval is still pending',
+            stream_ids: ['knowledge-dashboard'],
+            item_ids: ['a1'],
+            mode: 'direct',
+            confidence: 0.9,
+          },
+        ],
+        source_quality_summary: {
+          included_count: 3,
+          excluded_count: 1,
+          weak_count: 1,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 2,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: ['Knowledge Dashboard'],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+    const attention = compileNeedsAttention(doc, [], []);
+
+    expect(brief.isCompiled).toBe(true);
+    expect(brief.headline).toBe(
+      'Knowledge quality is moving from archive browsing to a living brief.',
+    );
+    expect(brief.activeStreams[0].title).toBe('Knowledge Dashboard');
+    expect(brief.sourceQuality).toMatchObject({
+      included_count: 3,
+      excluded_count: 1,
+    });
+    expect(attention[0]).toMatchObject({
+      title: 'API instrumentation approval is still pending.',
+      severity: 'critical',
+      kind: 'dependency',
+    });
+  });
+
+  it('repairs weak V2 headlines and bad global stream titles at render time', () => {
+    const baseQuality = {
+      mode: 'direct',
+      confidence: 0.8,
+      cited_meeting_count: 1,
+      source_count: 1,
+      last_reinforced_at: '2026-04-25T10:00:00.000Z',
+      freshness: 'fresh',
+    };
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline:
+            "The team discusses transitioning user preferences and other data into the database for scaling purposes, with concerns about an advisor's container.",
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 4,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in multiple cited sources.',
+          evidence_quality: baseQuality,
+        },
+        active_streams: [
+          {
+            id: 'adam',
+            title: 'Adam',
+            domain: 'work',
+            status: 'active',
+            current_read: 'Hyper-Persona Leads',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 3,
+            open_follow_up_count: 1,
+            decision_count: 1,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: baseQuality,
+          },
+          {
+            id: 'you',
+            title: 'You',
+            domain: 'work',
+            status: 'active',
+            current_read: 'Impact of AI on Software Engineering Process',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 3,
+            open_follow_up_count: 0,
+            decision_count: 0,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: baseQuality,
+          },
+          {
+            id: 'language',
+            title: 'Language',
+            domain: 'work',
+            status: 'steady',
+            current_read: 'The conversation revolves around the concept of',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 2,
+            open_follow_up_count: 0,
+            decision_count: 0,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: baseQuality,
+          },
+        ],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 4,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.headline).toContain('Hyper-Persona Leads');
+    expect(brief.headline).toContain(
+      'Impact of AI on Software Engineering Process',
+    );
+    expect(brief.activeStreams.map((stream) => stream.title)).toEqual([
+      'Hyper-Persona Leads',
+      'Impact of AI on Software Engineering Process',
+    ]);
+    expect(brief.activeStreams.map((stream) => stream.current_read)).toEqual([
+      'Hyper-Persona Leads',
+      'Impact of AI on Software Engineering Process',
+    ]);
+  });
+
+  it('marks generic V2 briefs as uncompiled instead of presenting them as insight', () => {
+    const baseQuality = {
+      mode: 'direct',
+      confidence: 0.4,
+      cited_meeting_count: 1,
+      source_count: 1,
+      last_reinforced_at: '2026-04-25T10:00:00.000Z',
+      freshness: 'fresh',
+    };
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'The team discusses several topics from the meeting.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Evidence is thin.',
+          evidence_quality: baseQuality,
+        },
+        active_streams: [
+          {
+            id: 'language',
+            title: 'Language',
+            domain: 'unknown',
+            status: 'steady',
+            current_read: 'The conversation revolves around the concept of',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 1,
+            open_follow_up_count: 0,
+            decision_count: 0,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: baseQuality,
+          },
+        ],
+        needs_attention: [],
+        patterns: [
+          {
+            id: 'p1',
+            title: 'A single capture mentions the dashboard.',
+            summary: 'A single capture mentions the dashboard.',
+            kind: 'pattern',
+            severity: 'steady',
+            why_now: 'Only one capture mentioned this.',
+            stream_ids: ['language'],
+            citations: [{ meeting_id: 'm1', quote: 'dashboard' }],
+            evidence_quality: baseQuality,
+          },
+        ],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 1,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.isCompiled).toBe(false);
+    expect(brief.headline).toBe('No reliable compiled brief yet.');
+    expect(brief.activeStreams).toHaveLength(0);
+    expect(brief.patterns).toHaveLength(0);
+  });
+
   it('parses structured knowledge chapters and citations', () => {
     const doc = makeDoc({
       structured_json: JSON.stringify({
@@ -83,6 +387,42 @@ describe('knowledge document utilities', () => {
         },
       ],
     });
+  });
+
+  it('filters dependency suggestions that expose raw ids instead of names', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Global Knowledge Context' },
+        chapters: [],
+        dependency_suggestions: [
+          {
+            source_name: 'b302af40-809e-4139-8a85-36a9624c58f6',
+            target_name: 'Context Studio',
+            relationship: 'depends_on',
+            why: 'Raw IDs should not become user-facing knowledge.',
+            citations: [{ meeting_id: 'm1', quote: 'Context Studio' }],
+          },
+          {
+            source_name: 'Infrastructure Scaling',
+            target_name: 'Context Studio',
+            relationship: 'impacts',
+            why: 'This is a readable dependency.',
+            citations: [{ meeting_id: 'm2', quote: 'scaling decisions' }],
+          },
+        ],
+      }),
+    });
+
+    expect(parseStructuredKnowledgeDoc(doc)?.dependency_suggestions).toEqual([
+      {
+        source_name: 'Infrastructure Scaling',
+        target_name: 'Context Studio',
+        relationship: 'impacts',
+        why: 'This is a readable dependency.',
+        citations: [{ meeting_id: 'm2', quote: 'scaling decisions' }],
+      },
+    ]);
   });
 
   it('returns null for missing or malformed structured JSON', () => {
@@ -169,6 +509,24 @@ describe('knowledge document utilities', () => {
     );
   });
 
+  it('polls while background knowledge synthesis can change workspace state', () => {
+    expect(
+      knowledgeDocsNeedPolling([
+        makeDoc({ status: 'up_to_date' }),
+        makeDoc({ id: 'doc-2', status: 'synthesizing' }),
+      ]),
+    ).toBe(true);
+    expect(
+      knowledgeDocsNeedPolling([
+        makeDoc({ status: 'up_to_date' }),
+        makeDoc({ id: 'doc-2', status: 'stale' }),
+      ]),
+    ).toBe(true);
+    expect(knowledgeDocsNeedPolling([makeDoc({ status: 'up_to_date' })])).toBe(
+      false,
+    );
+  });
+
   it('compiles a brief with priority, risk, pattern, and dependency lanes', () => {
     const doc = makeDoc({
       structured_json: JSON.stringify({
@@ -183,7 +541,12 @@ describe('knowledge document utilities', () => {
                 id: 'd1',
                 text: 'Prioritize the active project intelligence surface.',
                 why_it_matters: 'It turns memory into a daily planning input.',
-                citations: [],
+                citations: [
+                  {
+                    meeting_id: 'm1',
+                    quote: 'prioritize the active project intelligence surface',
+                  },
+                ],
               },
             ],
             topic_evolution: [
@@ -191,7 +554,12 @@ describe('knowledge document utilities', () => {
                 id: 't1',
                 text: 'Knowledge moved from archive browsing to signal synthesis.',
                 why_it_matters: 'The interface should feel compiled.',
-                citations: [],
+                citations: [
+                  {
+                    meeting_id: 'm2',
+                    quote: 'move from archive browsing to signal synthesis',
+                  },
+                ],
               },
             ],
             open_risks: [
@@ -200,7 +568,12 @@ describe('knowledge document utilities', () => {
                 text: 'A document-first view can bury urgent project risks.',
                 why_it_matters:
                   'Risk should be visible before evidence drilldown.',
-                citations: [],
+                citations: [
+                  {
+                    meeting_id: 'm3',
+                    quote: 'document-first views can bury project risks',
+                  },
+                ],
               },
             ],
             signals: [
@@ -208,7 +581,12 @@ describe('knowledge document utilities', () => {
                 id: 's1',
                 text: 'Repeated reviews mention overwhelm and weak prioritization.',
                 why_it_matters: 'Pluto should reduce interpretation work.',
-                citations: [],
+                citations: [
+                  {
+                    meeting_id: 'm4',
+                    quote: 'reviews mention overwhelm',
+                  },
+                ],
               },
             ],
           },
@@ -219,7 +597,12 @@ describe('knowledge document utilities', () => {
             target_name: 'Projects',
             relationship: 'impacts',
             why: 'Project context should feed the compiled brief.',
-            citations: [],
+            citations: [
+              {
+                meeting_id: 'm5',
+                quote: 'project context should feed knowledge',
+              },
+            ],
           },
         ],
       }),
@@ -248,6 +631,183 @@ describe('knowledge document utilities', () => {
     );
   });
 
+  it('does not treat a single narrow extracted statement as a compiled brief', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Global Knowledge Context' },
+        chapters: [
+          {
+            chapter_id: 'single-meeting',
+            title: 'Exploration of Career Opportunities',
+            decisions: [
+              {
+                id: 'd1',
+                text: 'Commit to exploring opportunities with major VCs.',
+                why_it_matters:
+                  'Takes advantage of increased visibility and career growth.',
+                citations: [
+                  {
+                    meeting_id: 'm1',
+                    quote:
+                      'Committing to exploring opportunities with major VCs.',
+                  },
+                ],
+              },
+            ],
+            topic_evolution: [],
+            open_risks: [],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.isCompiled).toBe(false);
+    expect(brief.headline).toBe(
+      'Indexed knowledge needs a stronger synthesis.',
+    );
+    expect(brief.coverage).toMatchObject({
+      statementCount: 1,
+      citedMeetingCount: 1,
+    });
+    expect(brief.lanes[0].items[0].text).toBe(
+      'Commit to exploring opportunities with major VCs.',
+    );
+  });
+
+  it('selects a multi-source, high-context item as the compiled headline', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Global Knowledge Context' },
+        chapters: [
+          {
+            chapter_id: 'global',
+            title: 'Workspace',
+            decisions: [
+              {
+                id: 'd1',
+                text: 'Commit to exploring opportunities with major VCs.',
+                why_it_matters:
+                  'This came from one career exploration meeting.',
+                citations: [
+                  {
+                    meeting_id: 'm1',
+                    quote:
+                      'Committing to exploring opportunities with major VCs.',
+                  },
+                ],
+              },
+            ],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Advisor Agent Deployment may miss demo readiness without UAT and API instrumentation.',
+                why_it_matters:
+                  'The same blocker appears across planning and deployment conversations.',
+                citations: [
+                  {
+                    meeting_id: 'm2',
+                    quote: 'UAT setup is still active.',
+                  },
+                  {
+                    meeting_id: 'm3',
+                    quote: 'API instrumentation remains unresolved.',
+                  },
+                ],
+              },
+            ],
+            signals: [
+              {
+                id: 's1',
+                text: 'Repeated product reviews point toward a denser operating dashboard.',
+                why_it_matters:
+                  'This gives the workspace a current product direction.',
+                citations: [
+                  {
+                    meeting_id: 'm2',
+                    quote: 'The dashboard needs to feel dense.',
+                  },
+                  {
+                    meeting_id: 'm4',
+                    quote: 'The operating picture should be richer.',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.isCompiled).toBe(true);
+    expect(brief.headline).toBe(
+      'Repeated product reviews point toward a denser operating dashboard.',
+    );
+    expect(brief.coverage).toMatchObject({
+      statementCount: 3,
+      citedMeetingCount: 4,
+    });
+  });
+
+  it('prefers concise strategic statements over verbose meeting-summary headlines', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Global Knowledge Context' },
+        chapters: [
+          {
+            chapter_id: 'global',
+            title: 'Workspace',
+            decisions: [
+              {
+                id: 'd1',
+                text: 'Transition persistent state into the database for initial scalability.',
+                why_it_matters:
+                  'This is the clearest durable direction from the source meetings.',
+                citations: [{ meeting_id: 'm1', quote: 'persistent state' }],
+              },
+            ],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Advisor container ownership remains unresolved.',
+                why_it_matters:
+                  'This can block progress if ownership is not clarified.',
+                citations: [{ meeting_id: 'm2', quote: 'container' }],
+              },
+            ],
+            signals: [
+              {
+                id: 's1',
+                text: "The team discusses transitioning user preferences and other data into the database for scaling purposes, with concerns about an advisor's container possibly hindering progress.",
+                why_it_matters:
+                  'This is a broad meeting summary rather than a crisp current read.',
+                citations: [{ meeting_id: 'm1', quote: 'team discusses' }],
+              },
+            ],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.headline).toBe(
+      'Transition persistent state into the database for initial scalability.',
+    );
+  });
+
   it('marks unstructured documents as not compiled instead of inventing claims', () => {
     const brief = compileKnowledgeBrief(
       makeDoc({
@@ -263,8 +823,41 @@ describe('knowledge document utilities', () => {
     expect(brief.lanes.every((lane) => lane.items.length === 0)).toBe(true);
   });
 
-  it('compiles active project radar from project health and doc status', () => {
-    const radar = compileActiveProjectRadar(
+  it('compiles needs-attention items from risks and active project health', () => {
+    const sourceDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        chapters: [
+          {
+            chapter_id: 'global',
+            title: 'Workspace',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Advisor Agent Deployment may miss demo readiness without UAT and API instrumentation.',
+                why_it_matters:
+                  'The follow-up work is spread across setup, instrumentation, and deployment.',
+                citations: [
+                  {
+                    meeting_id: 'm1',
+                    quote:
+                      'UAT setup and API instrumentation are still active.',
+                  },
+                ],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
       [
         makeDoc({
           id: 'doc-blocked',
@@ -299,18 +892,87 @@ describe('knowledge document utilities', () => {
       ],
     );
 
-    expect(radar.map((item) => item.title)).toEqual([
+    expect(attention.map((item) => item.title)).toEqual([
+      'Advisor Agent Deployment may miss demo readiness without UAT and API instrumentation.',
       'Blocked Launch',
       'Stale Migration',
     ]);
-    expect(radar[0]).toMatchObject({
+    expect(attention[0]).toMatchObject({
       severity: 'critical',
-      label: 'Needs attention',
+      kind: 'risk',
+      reasons: [
+        'The follow-up work is spread across setup, instrumentation, and deployment.',
+      ],
     });
-    expect(radar[0].reasons).toContain('2 blockers');
-    expect(radar[1]).toMatchObject({
+    expect(attention[0].citations).toHaveLength(1);
+    expect(attention[1]).toMatchObject({
+      severity: 'critical',
+      kind: 'project',
+    });
+    expect(attention[1].reasons).toContain('2 blockers');
+    expect(attention[2]).toMatchObject({
       severity: 'watch',
-      label: 'Getting stale',
+      kind: 'project',
     });
+  });
+
+  it('classifies extracted follow-ups as watch items instead of critical risks', () => {
+    const sourceDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        chapters: [
+          {
+            chapter_id: 'global',
+            title: 'Workspace',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: "Review the user's travel dates and itinerary.",
+                why_it_matters:
+                  'Captured from Travel Plans for Berlin Trip as follow-up or unresolved work.',
+                citations: [
+                  {
+                    meeting_id: 'travel',
+                    quote: "Review the user's travel dates and itinerary.",
+                  },
+                ],
+              },
+              {
+                id: 'r2',
+                text: 'Approval is still pending for API instrumentation.',
+                why_it_matters:
+                  'Captured from Advisor Agent Deployment as follow-up or unresolved work.',
+                citations: [
+                  {
+                    meeting_id: 'deployment',
+                    quote: 'Approval is still pending for API instrumentation.',
+                  },
+                ],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(sourceDoc, [], []);
+
+    expect(attention).toMatchObject([
+      {
+        title: 'Approval is still pending for API instrumentation.',
+        severity: 'watch',
+        kind: 'follow_up',
+      },
+      {
+        title: "Review the user's travel dates and itinerary.",
+        severity: 'watch',
+        kind: 'follow_up',
+      },
+    ]);
   });
 });

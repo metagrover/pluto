@@ -1,14 +1,37 @@
 import * as db from './db';
+import {
+  type KnowledgeSourceChunk,
+  buildKnowledgeSourceChunks,
+  chooseKnowledgeMergeResult,
+  mergeChunkStructuredDocuments,
+  splitKnowledgeSourceChunk,
+} from './knowledgeChunking';
+import {
+  knowledgeDocNeedsSynthesis,
+  withCurrentKnowledgeSynthesisConfig,
+} from './knowledgeDocConfig';
+import { parseKnowledgeJsonResponse } from './knowledgeJson';
+import {
+  type KnowledgeV2Document,
+  buildDeterministicKnowledgeV2Document,
+  isKnowledgeV2Document,
+  mergeKnowledgeV2Documents,
+  parseKnowledgeV2Document,
+  repairKnowledgeV2Document,
+} from './knowledgeV2';
 import { parseAnalysisMarkdown } from './llm/analysisDocument';
 import { getAllSettings, getProvider } from './llm/factory';
 import {
   getEntitySummaryPrompt,
+  getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
 
 const SYNTHESIS_DEBOUNCE_MS = 2500;
 const MAX_SOURCE_MEETINGS = 80;
-const MAX_EVIDENCE_CHARS = 2500;
+const MAX_SOURCE_MEETINGS_PER_SYNTHESIS_CHUNK = 6; // smaller chunks fit in 8k ctx
+const MIN_RETRY_CHUNK_SOURCE_MEETINGS = 2;
+const MAX_EVIDENCE_CHARS = 1400; // ~350 tokens per meeting — fits 6 meetings in 8k ctx
 const MIN_EVIDENCE_CHARS = 140;
 const MIN_SOURCE_MEETINGS = 6;
 const MAX_TRANSCRIPT_HIGHLIGHTS = 10;
@@ -77,6 +100,10 @@ interface KnowledgeStructuredDocument {
   dependency_suggestions: KnowledgeDependencySuggestion[];
 }
 
+type KnowledgeCompiledDocument =
+  | KnowledgeStructuredDocument
+  | KnowledgeV2Document;
+
 interface KnowledgeSectionChange {
   section: string;
   added_count: number;
@@ -95,6 +122,11 @@ interface SynthSourceMeeting {
   title: string;
   occurred_at: string | null;
   evidence: string;
+  duration_seconds?: number | null;
+  analysis_format_pass?: boolean | number | null;
+  enhanced_notes?: string | null;
+  user_notes?: string | null;
+  entity_names?: string[];
 }
 
 type QueueState = {
@@ -105,6 +137,20 @@ type QueueState = {
 
 const queueByDocId = new Map<string, QueueState>();
 let queuedSynthesisPaused = false;
+
+// Global serial gate: ensures only ONE doc synthesis runs through Ollama at a
+// time. Ollama is single-threaded; concurrent requests queue inside it and the
+// later ones time out before they are processed.
+let globalSynthesisChain: Promise<void> = Promise.resolve();
+
+const runWithGlobalSynthesisGate = (fn: () => Promise<void>): Promise<void> => {
+  globalSynthesisChain = globalSynthesisChain
+    .then(() => fn())
+    .catch(() => {
+      // Errors are handled inside fn(); swallow here to keep the chain alive.
+    });
+  return globalSynthesisChain;
+};
 
 const normalizeText = (value: string): string =>
   value.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -607,14 +653,6 @@ const buildMeetingEvidence = (
   return { evidence, score };
 };
 
-const parseJsonResponse = (raw: string): unknown => {
-  const trimmed = raw.trim();
-  const cleaned = trimmed.startsWith('```')
-    ? trimmed.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-    : trimmed;
-  return JSON.parse(cleaned);
-};
-
 const sanitizeCitations = (
   list: unknown,
   sourceEvidenceByMeeting: Map<string, string>,
@@ -937,12 +975,339 @@ const parseStoredStructuredDoc = (
   }
 };
 
+const parseStoredCompiledDoc = (
+  raw: string | null,
+): KnowledgeCompiledDocument | null => {
+  return parseKnowledgeV2Document(raw) || parseStoredStructuredDoc(raw);
+};
+
+const isKnowledgeV1Document = (
+  doc: KnowledgeCompiledDocument,
+): doc is KnowledgeStructuredDocument => !isKnowledgeV2Document(doc);
+
+const hasStructuredContent = (doc: KnowledgeCompiledDocument): boolean => {
+  if (isKnowledgeV2Document(doc)) {
+    return (
+      doc.current_read.cited_item_count > 0 ||
+      doc.active_streams.length > 0 ||
+      doc.needs_attention.length > 0 ||
+      doc.patterns.length > 0 ||
+      doc.risks_and_unknowns.length > 0
+    );
+  }
+  return (
+    doc.chapters.some(
+      (chapter) =>
+        chapter.decisions.length > 0 ||
+        chapter.topic_evolution.length > 0 ||
+        chapter.open_risks.length > 0 ||
+        chapter.signals.length > 0,
+    ) || doc.dependency_suggestions.length > 0
+  );
+};
+
+const countStructuredStatements = (doc: KnowledgeCompiledDocument): number =>
+  isKnowledgeV2Document(doc)
+    ? doc.needs_attention.length +
+      doc.patterns.length +
+      doc.risks_and_unknowns.length +
+      doc.active_streams.length
+    : doc.chapters.reduce(
+        (sum, chapter) =>
+          sum +
+          chapter.decisions.length +
+          chapter.topic_evolution.length +
+          chapter.open_risks.length +
+          chapter.signals.length,
+        0,
+      );
+
+const MIN_USEFUL_SYNTHESIS_STATEMENTS = 4;
+
+const synthesizeStructuredFromPrompt = async (params: {
+  provider: Awaited<ReturnType<typeof getProvider>>;
+  prompt: string;
+  scopeType: db.KnowledgeDocScopeType;
+  scopeTitle: string;
+  sourceEvidenceByMeeting: Map<string, string>;
+}): Promise<KnowledgeCompiledDocument> => {
+  const raw = await params.provider.synthesizeKnowledgeDocument(params.prompt);
+  const parsed = parseKnowledgeJsonResponse(raw);
+  if (isKnowledgeV2Document(parsed)) {
+    return repairKnowledgeV2Document(parsed);
+  }
+  return sanitizeStructuredDocument({
+    parsed,
+    scopeType: params.scopeType,
+    scopeTitle: params.scopeTitle,
+    sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+  });
+};
+
+const synthesizeKnowledgeChunkWithRetry = async (params: {
+  provider: Awaited<ReturnType<typeof getProvider>>;
+  doc: db.KnowledgeDoc;
+  chunk: KnowledgeSourceChunk;
+  sourceEvidenceByMeeting: Map<string, string>;
+}): Promise<KnowledgeCompiledDocument[]> => {
+  try {
+    const prompt = getKnowledgeDocumentPrompt({
+      scopeType: params.doc.scope_type,
+      scopeTitle: `${params.doc.title} - ${params.chunk.label}`,
+      sourceMeetings: params.chunk.sourceMeetings,
+      previousStructuredJson: null,
+    });
+    const structured = await synthesizeStructuredFromPrompt({
+      provider: params.provider,
+      prompt,
+      scopeType: params.doc.scope_type,
+      scopeTitle: params.doc.title,
+      sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+    });
+    return hasStructuredContent(structured) ? [structured] : [];
+  } catch (error) {
+    if (params.chunk.sourceMeetings.length <= MIN_RETRY_CHUNK_SOURCE_MEETINGS) {
+      console.warn(
+        `[KnowledgeDoc] Chunk synthesis failed for ${params.doc.id} (${params.chunk.label}) at minimum retry size:`,
+        error,
+      );
+      return [];
+    }
+
+    console.warn(
+      `[KnowledgeDoc] Chunk synthesis failed for ${params.doc.id} (${params.chunk.label}); retrying smaller chunks:`,
+      error,
+    );
+
+    const retryDocs: KnowledgeCompiledDocument[] = [];
+    for (const retryChunk of splitKnowledgeSourceChunk(params.chunk)) {
+      const nestedDocs = await synthesizeKnowledgeChunkWithRetry({
+        ...params,
+        chunk: retryChunk,
+      });
+      retryDocs.push(...nestedDocs);
+    }
+    return retryDocs;
+  }
+};
+
+const synthesizeStructuredKnowledgeDoc = async (params: {
+  provider: Awaited<ReturnType<typeof getProvider>>;
+  doc: db.KnowledgeDoc;
+  sourceMeetings: SynthSourceMeeting[];
+  sourceEvidenceByMeeting: Map<string, string>;
+  onChunkProgress?: (partial: KnowledgeCompiledDocument) => void;
+}): Promise<KnowledgeCompiledDocument> => {
+  const chunks = buildKnowledgeSourceChunks(
+    params.sourceMeetings,
+    MAX_SOURCE_MEETINGS_PER_SYNTHESIS_CHUNK,
+  );
+
+  if (chunks.length > 1) {
+    console.log(
+      `[KnowledgeDoc] Synthesizing ${params.doc.id} in ${chunks.length} chunks`,
+    );
+  }
+
+  const chunkDocs: Array<{
+    label: string;
+    structured: KnowledgeCompiledDocument;
+  }> = [];
+
+  for (const chunk of chunks) {
+    const structuredDocs = await synthesizeKnowledgeChunkWithRetry({
+      provider: params.provider,
+      doc: params.doc,
+      chunk,
+      sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+    });
+    for (const [index, structured] of structuredDocs.entries()) {
+      chunkDocs.push({
+        label:
+          structuredDocs.length === 1
+            ? chunk.label
+            : `${chunk.label} part ${index + 1}`,
+        structured,
+      });
+    }
+
+    // Emit a deterministic partial merge after each chunk so the UI can
+    // render real content immediately instead of waiting for all chunks.
+    if (chunkDocs.length > 0 && params.onChunkProgress) {
+      const partial = chunkDocs.some((chunkDoc) =>
+        isKnowledgeV2Document(chunkDoc.structured),
+      )
+        ? mergeKnowledgeV2Documents(
+            { type: params.doc.scope_type, title: params.doc.title },
+            chunkDocs.map((c) =>
+              isKnowledgeV2Document(c.structured)
+                ? c.structured
+                : buildDeterministicKnowledgeV2Document(
+                    { type: params.doc.scope_type, title: params.doc.title },
+                    params.sourceMeetings,
+                  ),
+            ),
+          )
+        : (mergeChunkStructuredDocuments(
+            { type: params.doc.scope_type, title: params.doc.title },
+            chunkDocs.map((c) => c.structured as KnowledgeStructuredDocument),
+          ) as KnowledgeStructuredDocument);
+      params.onChunkProgress(partial);
+    }
+  }
+
+  if (chunkDocs.length === 0) {
+    console.log(
+      `[KnowledgeDoc] Synthesis returned no structured facts for ${params.doc.id}`,
+    );
+    return buildDeterministicKnowledgeV2Document(
+      { type: params.doc.scope_type, title: params.doc.title },
+      params.sourceMeetings,
+    );
+  }
+
+  if (chunkDocs.length === 1) {
+    const deterministic = buildDeterministicKnowledgeV2Document(
+      { type: params.doc.scope_type, title: params.doc.title },
+      params.sourceMeetings,
+    );
+    return countStructuredStatements(chunkDocs[0].structured) >=
+      MIN_USEFUL_SYNTHESIS_STATEMENTS
+      ? chunkDocs[0].structured
+      : mergeKnowledgeV2Documents(
+          { type: params.doc.scope_type, title: params.doc.title },
+          [
+            isKnowledgeV2Document(chunkDocs[0].structured)
+              ? chunkDocs[0].structured
+              : deterministic,
+            deterministic,
+          ],
+        );
+  }
+
+  const deterministic = buildDeterministicKnowledgeV2Document(
+    { type: params.doc.scope_type, title: params.doc.title },
+    params.sourceMeetings,
+  );
+  const fallbackMerged = chunkDocs.some((chunk) =>
+    isKnowledgeV2Document(chunk.structured),
+  )
+    ? mergeKnowledgeV2Documents(
+        { type: params.doc.scope_type, title: params.doc.title },
+        chunkDocs.map((chunk) =>
+          isKnowledgeV2Document(chunk.structured)
+            ? chunk.structured
+            : deterministic,
+        ),
+      )
+    : (mergeChunkStructuredDocuments(
+        { type: params.doc.scope_type, title: params.doc.title },
+        chunkDocs.map(
+          (chunk) => chunk.structured as KnowledgeStructuredDocument,
+        ),
+      ) as KnowledgeStructuredDocument);
+  const usefulFallback =
+    countStructuredStatements(fallbackMerged) >= MIN_USEFUL_SYNTHESIS_STATEMENTS
+      ? fallbackMerged
+      : mergeKnowledgeV2Documents(
+          { type: params.doc.scope_type, title: params.doc.title },
+          [
+            isKnowledgeV2Document(fallbackMerged)
+              ? fallbackMerged
+              : deterministic,
+            deterministic,
+          ],
+        );
+
+  if (params.provider.name.startsWith('Ollama')) {
+    console.log(
+      `[KnowledgeDoc] Performing LLM merge pass for ${params.doc.id}`,
+    );
+  }
+
+  try {
+    const mergePrompt = getKnowledgeDocumentMergePrompt({
+      scopeType: params.doc.scope_type,
+      scopeTitle: params.doc.title,
+      chunkDocuments: chunkDocs.map((chunk) => ({
+        label: chunk.label,
+        structuredJson: JSON.stringify(chunk.structured),
+      })),
+      previousStructuredJson: params.doc.structured_json,
+    });
+    const merged = await synthesizeStructuredFromPrompt({
+      provider: params.provider,
+      prompt: mergePrompt,
+      scopeType: params.doc.scope_type,
+      scopeTitle: params.doc.title,
+      sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+    });
+    return hasStructuredContent(merged)
+      ? isKnowledgeV2Document(merged) && isKnowledgeV2Document(usefulFallback)
+        ? repairKnowledgeV2Document(
+            mergeKnowledgeV2Documents(
+              { type: params.doc.scope_type, title: params.doc.title },
+              [usefulFallback, merged],
+            ),
+            usefulFallback,
+          )
+        : isKnowledgeV1Document(merged) && isKnowledgeV1Document(usefulFallback)
+          ? (chooseKnowledgeMergeResult(
+              usefulFallback,
+              merged,
+            ) as KnowledgeStructuredDocument)
+          : usefulFallback
+      : usefulFallback;
+  } catch (error) {
+    console.warn(
+      `[KnowledgeDoc] Merge synthesis failed for ${params.doc.id}; using deterministic chunk merge:`,
+      error,
+    );
+    return usefulFallback;
+  }
+};
+
 const computeChangelog = (
-  previousDoc: KnowledgeStructuredDocument | null,
-  nextDoc: KnowledgeStructuredDocument,
+  previousDoc: KnowledgeCompiledDocument | null,
+  nextDoc: KnowledgeCompiledDocument,
 ): KnowledgeChangelog => {
-  const previousSections = previousDoc
-    ? toSectionItems(previousDoc)
+  if (isKnowledgeV2Document(nextDoc)) {
+    const previousItems = new Set(
+      previousDoc && isKnowledgeV2Document(previousDoc)
+        ? [
+            ...previousDoc.active_streams.map((item) => item.title),
+            ...previousDoc.needs_attention.map((item) => item.title),
+            ...previousDoc.patterns.map((item) => item.title),
+            ...previousDoc.risks_and_unknowns.map((item) => item.title),
+          ].map(normalizeText)
+        : [],
+    );
+    const nextItems = [
+      ...nextDoc.active_streams.map((item) => item.title),
+      ...nextDoc.needs_attention.map((item) => item.title),
+      ...nextDoc.patterns.map((item) => item.title),
+      ...nextDoc.risks_and_unknowns.map((item) => item.title),
+    ];
+    const added = nextItems.filter(
+      (item) => !previousItems.has(normalizeText(item)),
+    );
+    return {
+      generated_at: new Date().toISOString(),
+      sections: [
+        {
+          section: 'Knowledge V2',
+          added_count: added.length,
+          removed_count: 0,
+          updated_count: 0,
+          sample_items: added.slice(0, 3),
+        },
+      ],
+    };
+  }
+  const previousV1Doc =
+    previousDoc && isKnowledgeV1Document(previousDoc) ? previousDoc : null;
+  const previousSections = previousV1Doc
+    ? toSectionItems(previousV1Doc)
     : new Map<string, Map<string, SectionItemSnapshot>>();
   const nextSections = toSectionItems(nextDoc);
   const sectionLabels: Array<{ key: KnowledgeSectionKey; label: string }> = [
@@ -996,7 +1361,66 @@ const computeChangelog = (
   };
 };
 
-const renderStructuredDocument = (doc: KnowledgeStructuredDocument): string => {
+const renderStructuredDocument = (doc: KnowledgeCompiledDocument): string => {
+  if (isKnowledgeV2Document(doc)) {
+    const lines: string[] = [
+      `# ${doc.scope.title}`,
+      '',
+      `Auto-synthesized on ${new Date().toLocaleString()}.`,
+      '',
+      '## Current Read',
+      '',
+      doc.current_read.headline,
+      '',
+    ];
+
+    if (doc.current_read.supporting_bullets.length > 0) {
+      for (const bullet of doc.current_read.supporting_bullets) {
+        lines.push(`- ${bullet}`);
+      }
+      lines.push('');
+    }
+
+    const sections = [
+      [
+        'Active Streams',
+        doc.active_streams.map(
+          (stream) => `${stream.title}: ${stream.current_read}`,
+        ),
+      ],
+      [
+        'Needs Attention',
+        doc.needs_attention.map(
+          (item) => `${item.title} (${item.kind}; ${item.severity})`,
+        ),
+      ],
+      ['Patterns', doc.patterns.map((item) => item.title)],
+      [
+        'Risks and Unknowns',
+        doc.risks_and_unknowns.map((item) => `${item.title} (${item.kind})`),
+      ],
+    ] as const;
+
+    for (const [title, items] of sections) {
+      if (items.length === 0) continue;
+      lines.push(`## ${title}`);
+      lines.push('');
+      for (const item of items) lines.push(`- ${item}`);
+      lines.push('');
+    }
+
+    lines.push('## Trust');
+    lines.push('');
+    lines.push(`- ${doc.current_read.trust_message}`);
+    lines.push(
+      `- Sources included: ${doc.source_quality_summary.included_count}`,
+    );
+    lines.push(
+      `- Sources excluded: ${doc.source_quality_summary.excluded_count}`,
+    );
+    return lines.join('\n').trim();
+  }
+
   const lines: string[] = [
     `# ${doc.scope.title}`,
     '',
@@ -1052,10 +1476,19 @@ const renderStructuredDocument = (doc: KnowledgeStructuredDocument): string => {
 };
 
 const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
-  const sourceMeetings = db.getKnowledgeDocSourceMeetings(
-    doc.id,
-    MAX_SOURCE_MEETINGS,
+  const excludedMeetingIds = new Set(
+    db
+      .getKnowledgeCorrections(doc.id)
+      .filter(
+        (correction) =>
+          correction.target_kind === 'source' &&
+          correction.action === 'exclude_source',
+      )
+      .map((correction) => correction.target_id),
   );
+  const sourceMeetings = db
+    .getKnowledgeDocSourceMeetings(doc.id, MAX_SOURCE_MEETINGS)
+    .filter((meeting) => !excludedMeetingIds.has(String(meeting.id)));
 
   const scored = sourceMeetings.map((meeting) => {
     const bundle = buildMeetingEvidence(meeting);
@@ -1087,6 +1520,20 @@ const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
     title: item.meeting.title || 'Untitled Session',
     occurred_at: item.occurred_at,
     evidence: item.evidence,
+    duration_seconds: item.meeting.duration_seconds,
+    analysis_format_pass: item.meeting.analysis_format_pass,
+    enhanced_notes: item.meeting.enhanced_notes,
+    user_notes: item.meeting.user_notes,
+    entity_names: (() => {
+      try {
+        return db
+          .getMeetingEntities(String(item.meeting.id))
+          .map((entity) => entity.name)
+          .filter(Boolean);
+      } catch {
+        return [];
+      }
+    })(),
   }));
 };
 
@@ -1108,14 +1555,12 @@ const synthesizeKnowledgeDocNowInternal = async (
   const sourceMeetingIds = sourceMeetings.map((meeting) => meeting.id);
 
   if (sourceMeetings.length === 0) {
-    const emptyDoc: KnowledgeStructuredDocument = {
-      schema_version: 1,
-      scope: { type: doc.scope_type, title: doc.title },
-      chapters: [],
-      dependency_suggestions: [],
-    };
+    const emptyDoc = buildDeterministicKnowledgeV2Document(
+      { type: doc.scope_type, title: doc.title },
+      [],
+    );
     const rendered = renderStructuredDocument(emptyDoc);
-    const previous = parseStoredStructuredDoc(doc.structured_json);
+    const previous = parseStoredCompiledDoc(doc.structured_json);
     const changelog = computeChangelog(previous, emptyDoc);
 
     db.replaceKnowledgeDocSources(doc.id, []);
@@ -1135,6 +1580,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       title: doc.title,
       structured_json: JSON.stringify(emptyDoc),
       rendered_content: rendered,
+      config: withCurrentKnowledgeSynthesisConfig(doc.config),
       status: 'up_to_date',
       last_synthesized_at: new Date().toISOString(),
       last_source_cursor: null,
@@ -1151,24 +1597,34 @@ const synthesizeKnowledgeDocNowInternal = async (
   try {
     const settings = await getAllSettings(db);
     const provider = await getProvider(settings);
-    const prompt = getKnowledgeDocumentPrompt({
-      scopeType: doc.scope_type,
-      scopeTitle: doc.title,
+    const structured = await synthesizeStructuredKnowledgeDoc({
+      provider,
+      doc,
       sourceMeetings,
-      previousStructuredJson: doc.structured_json,
-    });
-
-    const raw = await provider.synthesizeKnowledgeDocument(prompt);
-    const parsed = parseJsonResponse(raw);
-    const structured = sanitizeStructuredDocument({
-      parsed,
-      scopeType: doc.scope_type,
-      scopeTitle: doc.title,
       sourceEvidenceByMeeting,
+      // Flush partial content to DB after each chunk so the UI can render
+      // real content progressively instead of waiting for the full merge.
+      onChunkProgress: (partial) => {
+        try {
+          const partialRendered = renderStructuredDocument(partial);
+          db.upsertKnowledgeDoc({
+            id: doc.id,
+            scope_type: doc.scope_type,
+            scope_key: doc.scope_key,
+            title: doc.title,
+            structured_json: JSON.stringify(partial),
+            rendered_content: partialRendered,
+            status: 'synthesizing', // stays 'synthesizing' until the full merge completes
+          });
+        } catch (flushErr) {
+          // Non-fatal: if the partial flush fails, the final save will still work.
+          console.warn('[KnowledgeDoc] Partial flush failed:', flushErr);
+        }
+      },
     });
 
     const rendered = renderStructuredDocument(structured);
-    const previous = parseStoredStructuredDoc(doc.structured_json);
+    const previous = parseStoredCompiledDoc(doc.structured_json);
     const changelog = computeChangelog(previous, structured);
 
     db.replaceKnowledgeDocSources(doc.id, sourceMeetingIds);
@@ -1179,7 +1635,9 @@ const synthesizeKnowledgeDocNowInternal = async (
       changelog_json: JSON.stringify(changelog),
       source_count: sourceMeetings.length,
     });
-    persistDependencySuggestions(structured.dependency_suggestions);
+    if (isKnowledgeV1Document(structured)) {
+      persistDependencySuggestions(structured.dependency_suggestions);
+    }
     db.rebuildKnowledgeBacklinks(doc.id);
 
     const latestSource = sourceMeetings[0];
@@ -1191,6 +1649,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       title: doc.title,
       structured_json: JSON.stringify(structured),
       rendered_content: rendered,
+      config: withCurrentKnowledgeSynthesisConfig(doc.config),
       status: 'up_to_date',
       last_synthesized_at: new Date().toISOString(),
       last_source_cursor: latestSource
@@ -1209,7 +1668,7 @@ const synthesizeKnowledgeDocNowInternal = async (
   }
 };
 
-const runQueuedSynthesis = async (docId: string): Promise<void> => {
+const runQueuedSynthesis = (docId: string): void => {
   const state = getState(docId);
   if (queuedSynthesisPaused) {
     state.pending = true;
@@ -1220,16 +1679,20 @@ const runQueuedSynthesis = async (docId: string): Promise<void> => {
     return;
   }
 
+  // Mark in-flight immediately so subsequent debounced calls see it.
   state.inFlight = true;
   state.pending = false;
-  try {
-    await synthesizeKnowledgeDocNowInternal(docId);
-  } finally {
-    state.inFlight = false;
-    if (state.pending) {
-      queueKnowledgeDocRefresh(docId, 750);
+
+  void runWithGlobalSynthesisGate(async () => {
+    try {
+      await synthesizeKnowledgeDocNowInternal(docId);
+    } finally {
+      state.inFlight = false;
+      if (state.pending) {
+        queueKnowledgeDocRefresh(docId, 750);
+      }
     }
-  }
+  });
 };
 
 export const queueKnowledgeDocRefresh = (
@@ -1310,7 +1773,7 @@ export const synthesizeEntitySummary = async (
 
   const raw = await provider.synthesizeKnowledgeDocument(prompt); // Reusing the same provider method
   try {
-    const parsed = parseJsonResponse(raw) as {
+    const parsed = parseKnowledgeJsonResponse(raw) as {
       sentences: EntitySummarySentence[];
     };
     return {
@@ -1354,9 +1817,24 @@ const ensureDocsAndCollectActive = (): db.KnowledgeDoc[] => {
 
 export const initializeKnowledgeDocs = async (): Promise<void> => {
   const docs = ensureDocsAndCollectActive();
-  for (const doc of docs) {
-    queueKnowledgeDocRefresh(doc.id, 1000);
+  // Skip docs that are already synthesized with the current synthesis
+  // mechanics. Older up-to-date docs are intentionally refreshed once.
+  const needsWork = docs.filter(knowledgeDocNeedsSynthesis);
+  if (needsWork.length === 0) {
+    console.log(
+      '[KnowledgeDoc] All docs up-to-date, skipping startup synthesis',
+    );
+    return;
   }
+  console.log(
+    `[KnowledgeDoc] Queuing ${needsWork.length} of ${docs.length} docs for synthesis`,
+  );
+  // Stagger: each doc waits an extra 3 s so they enter the serial gate
+  // one at a time rather than flooding Ollama simultaneously.
+  const STAGGER_MS = 3000;
+  needsWork.forEach((doc, index) => {
+    queueKnowledgeDocRefresh(doc.id, 1000 + index * STAGGER_MS);
+  });
 };
 
 export const queueKnowledgeDocsRefreshForMeeting = (

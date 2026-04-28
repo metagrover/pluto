@@ -3,6 +3,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import type { MidFrontmatter } from './intelligence/intelligenceTypes';
+import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 
 const dbPath = path.join(app.getPath('userData'), 'pluto.db');
@@ -276,6 +277,19 @@ const initDb = () => {
         FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
       );
       CREATE INDEX IF NOT EXISTS idx_knowledge_doc_notes_updated_at ON knowledge_doc_notes(updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS knowledge_corrections (
+        id TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL,
+        target_kind TEXT NOT NULL CHECK(target_kind IN ('source', 'stream', 'item')),
+        target_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK(action IN ('exclude_source', 'rename_stream', 'merge_stream', 'split_stream', 'pin_stream', 'promote_item', 'demote_item', 'correct_classification')),
+        payload_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_doc ON knowledge_corrections(doc_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_target ON knowledge_corrections(doc_id, target_kind, target_id);
 
       CREATE TABLE IF NOT EXISTS knowledge_backlinks (
         id TEXT PRIMARY KEY,
@@ -552,6 +566,87 @@ const initDb = () => {
     }
   } catch (e) {
     console.warn('[DB] knowledge_docs v2 migration failed:', e);
+  }
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS knowledge_corrections (
+        id TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL,
+        target_kind TEXT NOT NULL CHECK(target_kind IN ('source', 'stream', 'item')),
+        target_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK(action IN ('exclude_source', 'rename_stream', 'merge_stream', 'split_stream', 'pin_stream', 'promote_item', 'demote_item', 'correct_classification')),
+        payload_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_doc ON knowledge_corrections(doc_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_target ON knowledge_corrections(doc_id, target_kind, target_id);
+    `);
+  } catch (e) {
+    console.warn('[DB] knowledge_corrections migration failed:', e);
+  }
+
+  // Hard reset generated Knowledge artifacts for the PRD-native V2 schema.
+  // This preserves raw meetings, transcripts, entities, settings, and
+  // user-authored knowledge notes while forcing generated docs to rebuild.
+  try {
+    const resetKey = `knowledge_generated_reset_v${KNOWLEDGE_V2_SYNTHESIS_VERSION}`;
+    const resetAlreadyApplied = db
+      .prepare('SELECT value FROM settings WHERE key = ?')
+      .get(resetKey) as { value: string } | undefined;
+
+    if (!resetAlreadyApplied) {
+      const hardResetGeneratedKnowledge = db.transaction(() => {
+        db.prepare("DELETE FROM entity_links WHERE source = 'synthesis'").run();
+        db.prepare('DELETE FROM knowledge_doc_versions').run();
+        db.prepare('DELETE FROM knowledge_doc_sources').run();
+        db.prepare('DELETE FROM knowledge_backlinks').run();
+        const docs = db
+          .prepare('SELECT id, status, config FROM knowledge_docs')
+          .all() as Array<{
+          id: string;
+          status: string;
+          config: string | null;
+        }>;
+        const resetDoc = db.prepare(`
+          UPDATE knowledge_docs
+          SET
+            rendered_content = NULL,
+            structured_json = NULL,
+            status = ?,
+            last_synthesized_at = NULL,
+            last_source_cursor = NULL,
+            config = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `);
+        for (const doc of docs) {
+          let config: Record<string, unknown> = {};
+          try {
+            config = doc.config
+              ? (JSON.parse(doc.config) as Record<string, unknown>)
+              : {};
+          } catch {
+            config = {};
+          }
+          config.synthesis_version = KNOWLEDGE_V2_SYNTHESIS_VERSION;
+          resetDoc.run(
+            doc.status === 'inactive' ? 'inactive' : 'stale',
+            JSON.stringify(config),
+            doc.id,
+          );
+        }
+        db.prepare(
+          'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+        ).run(resetKey, new Date().toISOString());
+      });
+
+      hardResetGeneratedKnowledge();
+      console.log('[DB] Reset generated Knowledge artifacts for V2 synthesis');
+    }
+  } catch (e) {
+    console.warn('[DB] Knowledge V2 generated reset failed:', e);
   }
 
   // Migration: rebuild entity_links with typed dependency semantics and state/evidence columns.
@@ -1125,6 +1220,7 @@ export type KnowledgeDocStatus =
 
 export interface KnowledgeDocConfig {
   member_entity_ids?: string[];
+  synthesis_version?: number;
 }
 
 export interface KnowledgeDoc {
@@ -1163,6 +1259,27 @@ export interface KnowledgeDocVersion {
   changelog_json: string | null;
   synthesized_at: string;
   source_count: number;
+}
+
+export type KnowledgeCorrectionTargetKind = 'source' | 'stream' | 'item';
+export type KnowledgeCorrectionAction =
+  | 'exclude_source'
+  | 'rename_stream'
+  | 'merge_stream'
+  | 'split_stream'
+  | 'pin_stream'
+  | 'promote_item'
+  | 'demote_item'
+  | 'correct_classification';
+
+export interface KnowledgeCorrection {
+  id: string;
+  doc_id: string;
+  target_kind: KnowledgeCorrectionTargetKind;
+  target_id: string;
+  action: KnowledgeCorrectionAction;
+  payload_json: string | null;
+  created_at: string;
 }
 
 export interface KnowledgeDocUserEdit {
@@ -1793,10 +1910,36 @@ export const getTeamTrackerDocsForPerson = (
  * Get source meetings used for synthesizing a given knowledge doc.
  */
 const MEETING_QUALITY_FILTER = `(
-  m.analysis_format_pass = 1
-  OR length(COALESCE(m.enhanced_notes, '')) >= 200
-  OR length(COALESCE(m.transcript_json, '')) >= 800
-  OR length(COALESCE(m.user_notes, '')) >= 80
+  COALESCE(m.duration_seconds, 0) >= 120
+  AND m.title NOT IN ('New Meeting', 'Meeting', 'Meeting (Mic Only)')
+  AND lower(trim(m.title)) NOT IN (
+    'test',
+    'testing',
+    'test meeting',
+    'audio test',
+    'mic test',
+    'microphone test',
+    'transcription test',
+    'recording test'
+  )
+  AND (
+    (
+      length(COALESCE(m.analysis_json, '')) >= 900
+      AND length(COALESCE(m.enhanced_notes, '')) >= 700
+    )
+    OR length(COALESCE(m.enhanced_notes, '')) >= 1000
+    OR length(COALESCE(m.user_notes, '')) >= 120
+    OR (
+      SELECT COUNT(*)
+      FROM meeting_entities me_quality
+      WHERE me_quality.meeting_id = m.id
+    ) >= 3
+    OR (
+      SELECT COALESCE(SUM(me_quality.mention_count), 0)
+      FROM meeting_entities me_quality
+      WHERE me_quality.meeting_id = m.id
+    ) >= 3
+  )
 )`;
 
 const MEETING_SOURCE_ORDER = `
@@ -2026,6 +2169,60 @@ export const getKnowledgeDocVersions = (
       LIMIT ?
     `)
     .all(docId, limit) as KnowledgeDocVersion[];
+};
+
+export const getKnowledgeCorrections = (
+  docId: string,
+): KnowledgeCorrection[] => {
+  return db
+    .prepare(
+      `
+        SELECT *
+        FROM knowledge_corrections
+        WHERE doc_id = ?
+        ORDER BY created_at DESC
+      `,
+    )
+    .all(docId) as KnowledgeCorrection[];
+};
+
+export const saveKnowledgeCorrection = (input: {
+  doc_id: string;
+  target_kind: KnowledgeCorrectionTargetKind;
+  target_id: string;
+  action: KnowledgeCorrectionAction;
+  payload?: Record<string, unknown> | null;
+}): KnowledgeCorrection => {
+  const id = generateId();
+  db.prepare(
+    `
+      INSERT INTO knowledge_corrections (
+        id, doc_id, target_kind, target_id, action, payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `,
+  ).run(
+    id,
+    input.doc_id,
+    input.target_kind,
+    input.target_id,
+    input.action,
+    input.payload ? JSON.stringify(input.payload) : null,
+  );
+
+  const doc = getKnowledgeDoc(input.doc_id);
+  if (doc) {
+    upsertKnowledgeDoc({
+      id: doc.id,
+      scope_type: doc.scope_type,
+      scope_key: doc.scope_key,
+      title: doc.title,
+      status: doc.status === 'inactive' ? 'inactive' : 'stale',
+    });
+  }
+
+  return db
+    .prepare('SELECT * FROM knowledge_corrections WHERE id = ?')
+    .get(id) as KnowledgeCorrection;
 };
 
 /**
@@ -3733,7 +3930,9 @@ export const walkEntityGraph = (
   const stateFilter = filters?.state || 'confirmed';
 
   while (queue.length > 0 && results.length < cap) {
-    const { id, level } = queue.shift()!;
+    const next = queue.shift();
+    if (!next) break;
+    const { id, level } = next;
     if (level > depth) continue;
 
     if (level > 0) {
@@ -3774,13 +3973,15 @@ export const getTemporalMeetings = (range: { from?: string; to?: string }) => {
         'SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ? AND started_at <= ?',
       )
       .all(range.from, range.to) as PersistedMeeting[];
-  } else if (range.from) {
+  }
+  if (range.from) {
     return db
       .prepare(
         'SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ?',
       )
       .all(range.from) as PersistedMeeting[];
-  } else if (range.to) {
+  }
+  if (range.to) {
     return db
       .prepare(
         'SELECT id, started_at, mid_json FROM meetings WHERE started_at <= ?',

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getEntitiesPrompt,
+  getKnowledgeDocumentMergePrompt,
+  getKnowledgeDocumentPrompt,
   getStructuredAnalysisPrompt,
   getSummaryPrompt,
   getSummaryRepairPrompt,
@@ -188,5 +190,80 @@ describe('getEntitiesPrompt', () => {
     expect(prompt).toContain(
       'prioritize what to extract from transcript text; never invent entities',
     );
+  });
+});
+
+describe('knowledge document prompts', () => {
+  it('asks knowledge synthesis for durable dashboard context instead of imperative tasks', () => {
+    const prompt = getKnowledgeDocumentPrompt({
+      scopeType: 'global',
+      scopeTitle: 'Global Knowledge Context',
+      sourceMeetings: [
+        {
+          id: 'm1',
+          title: 'Career Opportunities',
+          occurred_at: '2026-02-15T04:25:57.345Z',
+          evidence:
+            'Decisions: Implemented choice: Committing to exploring opportunities with major VCs.',
+        },
+      ],
+      previousStructuredJson: null,
+    });
+
+    expect(prompt).toContain('durable dashboard context');
+    expect(prompt).toContain('Do not rewrite action items as imperatives');
+    expect(prompt).toContain('Avoid making a single narrow meeting');
+    expect(prompt).toContain('"schema_version": 2');
+    expect(prompt).toContain('"current_read"');
+    expect(prompt).toContain('"active_streams"');
+    expect(prompt).toContain('"needs_attention"');
+    expect(prompt).toContain('"source_quality_summary"');
+    expect(prompt).not.toContain('"open_risks"');
+    expect(prompt).toContain(
+      'Current Read headline must synthesize across the scope',
+    );
+    expect(prompt).toContain(
+      'Promote patterns only when supported by repeated evidence',
+    );
+    expect(prompt).toContain('Never use a raw source summary as the headline');
+  });
+
+  it('builds a merge prompt from chunk documents instead of raw meeting evidence', () => {
+    const prompt = getKnowledgeDocumentMergePrompt({
+      scopeType: 'global',
+      scopeTitle: 'Global Knowledge Context',
+      chunkDocuments: [
+        {
+          label: 'Chunk 1 of 2',
+          structuredJson: JSON.stringify({
+            chapters: [
+              {
+                title: 'Infrastructure',
+                open_risks: [
+                  {
+                    text: 'Worker strategy remains unresolved.',
+                    citations: [
+                      {
+                        meeting_id: 'm1',
+                        quote: 'worker strategy remains unresolved',
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          }),
+        },
+      ],
+      previousStructuredJson: null,
+    });
+
+    expect(prompt).toContain('merge already-cited chunk documents');
+    expect(prompt).toContain('Chunk 1 of 2');
+    expect(prompt).toContain('Worker strategy remains unresolved');
+    expect(prompt).toContain('Do not introduce new meeting_id values');
+    expect(prompt).toContain('"schema_version": 2');
+    expect(prompt).toContain('Preserve item classifications');
+    expect(prompt).not.toContain('Available meeting evidence (newest first):');
   });
 });
