@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { generateMid, type MidGeneratorInput } from '../../electron/intelligence/midGenerator';
-import type { AnalysisDocument, InternalSignalDocument } from '../../electron/llm/provider';
 import type { Entity } from '../../electron/db';
+import {
+  type MidGeneratorInput,
+  generateMid,
+} from '../../electron/intelligence/midGenerator';
+import type {
+  AnalysisDocument,
+  InternalSignalDocument,
+} from '../../electron/llm/provider';
 
 // =============================================
 // Helpers
@@ -39,7 +45,10 @@ const mockSignals = (
 });
 
 const mockEntity = (
-  overrides: Partial<Entity> & { mention_count?: number; context?: string | null } = {},
+  overrides: Partial<Entity> & {
+    mention_count?: number;
+    context?: string | null;
+  } = {},
 ): Entity & { mention_count: number; context: string | null } => ({
   id: `ent-${Math.random().toString(36).slice(2, 8)}`,
   type: 'person',
@@ -120,7 +129,9 @@ const mockInput = (
     { text: 'Good morning everyone.' },
     { text: 'Sarah confirmed the migration target is end of Q2.' },
     { text: 'We should send the API spec to the team.' },
-    { text: 'We decided on GraphQL for the new endpoints because of type safety.' },
+    {
+      text: 'We decided on GraphQL for the new endpoints because of type safety.',
+    },
     { text: 'Alex will set up the playground.' },
   ],
   ...overrides,
@@ -225,9 +236,15 @@ describe('MID Generator', () => {
     it('copies signals from InternalSignalDocument', () => {
       const mid = generateMid(mockInput());
 
-      expect(mid.signals.continuity).toEqual(['API migration timeline is Q2-critical']);
-      expect(mid.signals.accountability_risks).toEqual(['No owner assigned for staging deployment']);
-      expect(mid.signals.decision_impacts).toEqual(['GraphQL choice affects mobile team']);
+      expect(mid.signals.continuity).toEqual([
+        'API migration timeline is Q2-critical',
+      ]);
+      expect(mid.signals.accountability_risks).toEqual([
+        'No owner assigned for staging deployment',
+      ]);
+      expect(mid.signals.decision_impacts).toEqual([
+        'GraphQL choice affects mobile team',
+      ]);
     });
   });
 
@@ -239,10 +256,14 @@ describe('MID Generator', () => {
       expect(mid.evidence_spans.length).toBeGreaterThan(0);
       for (const span of mid.evidence_spans) {
         expect(span.span_id).toBeTruthy();
-        expect(['summary', 'decision', 'key_point', 'action_item']).toContain(span.claim_type);
+        expect(['summary', 'decision', 'key_point', 'action_item']).toContain(
+          span.claim_type,
+        );
         expect(span.transcript_range).toHaveLength(2);
         expect(span.transcript_range[0]).toBeGreaterThanOrEqual(0);
-        expect(span.transcript_range[1]).toBeGreaterThanOrEqual(span.transcript_range[0]);
+        expect(span.transcript_range[1]).toBeGreaterThanOrEqual(
+          span.transcript_range[0],
+        );
         expect(span.quote).toBeTruthy();
         expect(span.quote.length).toBeLessThanOrEqual(300);
       }
@@ -315,9 +336,7 @@ describe('MID Generator', () => {
   describe('Speaker label fallback', () => {
     it('derives participants from transcript speakers when no person entities exist', () => {
       const input = mockInput({
-        meeting_entities: [
-          mockEntity({ type: 'topic', name: 'Some Topic' }),
-        ],
+        meeting_entities: [mockEntity({ type: 'topic', name: 'Some Topic' })],
         transcript_segments: [
           { text: 'Hello', speaker: 'Me' },
           { text: 'Hi there', speaker: 'Them' },
@@ -355,10 +374,7 @@ describe('MID Generator', () => {
     it('produces empty participants when segments have no speaker field', () => {
       const input = mockInput({
         meeting_entities: [],
-        transcript_segments: [
-          { text: 'Hello' },
-          { text: 'World' },
-        ],
+        transcript_segments: [{ text: 'Hello' }, { text: 'World' }],
       });
       const mid = generateMid(input);
 

@@ -32,9 +32,10 @@ export function getAlerts(options?: {
 }): IntelligenceAlert[] {
   let results = [...alertStore];
 
-  if (options?.meetingId) {
+  const meetingId = options?.meetingId;
+  if (meetingId) {
     results = results.filter((a) =>
-      a.related_meeting_ids.includes(options.meetingId!),
+      a.related_meeting_ids.includes(meetingId),
     );
   }
 

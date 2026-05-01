@@ -61,9 +61,7 @@ export function renderMidToMarkdown(mid: MidFrontmatter): string {
     for (const item of mid.action_items) {
       const checkbox = item.status === 'completed' ? '[x]' : '[ ]';
       const assignee = item.assignee ? ` *(${item.assignee})*` : '';
-      const due = item.due_date
-        ? ` — due ${formatDate(item.due_date)}`
-        : '';
+      const due = item.due_date ? ` — due ${formatDate(item.due_date)}` : '';
       sections.push(`- ${checkbox} ${item.description}${assignee}${due}`);
     }
   }
