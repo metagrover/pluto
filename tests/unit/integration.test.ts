@@ -1,9 +1,9 @@
-import * as path from 'path';
+import * as path from 'node:path';
 import { describe, it } from 'vitest';
 import { vi } from 'vitest';
 
 vi.mock('electron', () => {
-  const path = require('path');
+  const path = require('node:path');
   return {
     app: {
       getPath: (name: string) => {
@@ -66,7 +66,7 @@ describe('Local Integration Test', () => {
         `[TEST] Context 0 Evidence: ${context[0].evidence_text.substring(0, 150)}...`,
       );
     } else {
-      console.error(`[TEST ERROR] No context retrieved!`);
+      console.error('[TEST ERROR] No context retrieved!');
     }
 
     const settings = await getAllSettings(db);

@@ -373,8 +373,7 @@ const probeAudioFile = (audioPath) => {
 
 const isUsableSessionAudio = (probe) =>
   Boolean(
-    probe &&
-      probe.exists &&
+    probe?.exists &&
       probe.sizeBytes >= 1024 &&
       Number.isFinite(probe.durationSec) &&
       probe.durationSec >= 1,
@@ -1762,7 +1761,6 @@ const evaluateTranscriptRegressionChecks = (app, checks) => {
           `${type} missing ${failuresForCheck.length} ordered turn(s) in prefix`,
         );
       }
-      continue;
     }
   }
   return failures;

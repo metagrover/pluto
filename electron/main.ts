@@ -174,10 +174,12 @@ function endTranscriptionWork() {
 }
 
 function getAbortSignalForMeeting(meetingId: string): AbortSignal {
-  if (!activeMeetingTasks.has(meetingId)) {
-    activeMeetingTasks.set(meetingId, new AbortController());
+  let controller = activeMeetingTasks.get(meetingId);
+  if (!controller) {
+    controller = new AbortController();
+    activeMeetingTasks.set(meetingId, controller);
   }
-  return activeMeetingTasks.get(meetingId)!.signal;
+  return controller.signal;
 }
 
 function clearAbortControllerForMeeting(meetingId: string) {
@@ -281,8 +283,8 @@ app.whenReady().then(async () => {
         const durationMs = Date.now() - start;
         console.log(`[Pluto] Transcription completed in ${durationMs}ms`);
         return result;
-      } catch (err: any) {
-        if (err.name === 'AbortError') {
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') {
           console.log(`[Pluto] Transcription aborted for meeting ${meetingId}`);
           return {
             segments: [],
@@ -1742,6 +1744,28 @@ app.whenReady().then(async () => {
   );
 
   // Process pre-extracted entities (save to knowledge graph)
+  ipcMain.handle(
+    'GENERATE_FOLLOW_UPS',
+    async (_event, { meetingTitle, actionItems, decisions, customPrompt }) => {
+      try {
+        const settings = await getAllSettings(db);
+        const provider = await getProvider(settings);
+        console.log(
+          `[LLM] Generating follow-up drafts with provider: ${provider.name}`,
+        );
+        return await provider.generateFollowUpDrafts({
+          meetingTitle,
+          actionItems,
+          decisions,
+          customPrompt,
+        });
+      } catch (error) {
+        console.error('[LLM] Follow-up generation failed:', error);
+        return { drafts: [] };
+      }
+    },
+  );
+
   ipcMain.handle(
     'PROCESS_EXTRACTED_ENTITIES',
     async (_event, { entities, meetingId }) => {

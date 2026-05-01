@@ -18,7 +18,26 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-15
+
+### Improve contributor DevEx and onboarding path
+- **Issue:** [#56](https://github.com/metagrover/pluto/issues/56)
+- **PR:** Not opened yet.
+- **Changed:** Updated README with accurate prerequisites and clone URL; decoupled heavy Python/ML setup from standard Node installation; added `fix-sqlite-abi` script for native module recovery; brought Biome linter to green state.
+- **Why:** The initial /devex-review audit found the onboarding path was fragile for new developers, with misleading documentation and unexpected "heavy" side effects during dependency installation.
+- **Replaced:** Relying on `postinstall` for ML environment setup and outdated getting-started instructions.
+- **Notes:** Contributors must now explicitly run `pnpm run setup-python` after `pnpm install`.
+
 ## 2026-05-01
+
+### Add PM housekeeping GitHub preflight
+- **Issue:** [#67](https://github.com/metagrover/pluto/issues/67)
+- **PR:** Not opened yet.
+- **Changed:** Added a `pm:github-preflight` check that verifies environment-backed GitHub auth, API reachability, issue listing, repository write scope, and optional mutation smoke checks without logging token values.
+- **Why:** Recurring PM automation needs to distinguish missing secrets, invalid auth, network failures, and mutation failures before grooming issues.
+- **Replaced:** Relying on interactive `gh` keyring auth as evidence that cron automation can access GitHub.
+- **Notes:** The default permission check uses GraphQL `viewerPermission`, so recurring runs can verify write access without leaving test comments behind.
+
 
 ### Adopt issue-driven agentic development
 - **Issue:** [#55](https://github.com/metagrover/pluto/issues/55)

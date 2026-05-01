@@ -54,7 +54,7 @@ export const useAutoEndMonitor = ({
     }
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional ref-based polling lifecycle
+
   useEffect(() => {
     if (!isRecording || !autoEndEnabled) {
       clearGraceTimer();

@@ -149,7 +149,7 @@ export const SettingsOverlay = ({
 
       <div
         className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[2.5rem] border border-pro-border bg-pro-bg shadow-[0_32px_100px_-32px_rgba(0,0,0,0.5)] sm:max-h-[calc(100vh-4rem)] no-drag"
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="border-b border-pro-border/50 bg-gradient-to-br from-pro-surface via-pro-surface to-pro-bg/90 px-5 py-5 sm:px-7 sm:py-6 no-drag">
           <div className="flex items-start justify-between gap-6">

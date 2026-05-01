@@ -63,11 +63,11 @@ describe('parseAnalysisDocumentV3', () => {
   it('parses a valid v3 JSON string', () => {
     const result = parseAnalysisDocumentV3(JSON.stringify(validV3));
     expect(result).not.toBeNull();
-    expect(result!.analysis_schema_version).toBe(3);
-    expect(result!.topics).toHaveLength(1);
-    expect(result!.topics[0].title).toBe('Q2 Hiring Plan');
-    expect(result!.all_action_items).toHaveLength(1);
-    expect(result!.meeting_type).toBe('team_sync');
+    expect(result?.analysis_schema_version).toBe(3);
+    expect(result?.topics).toHaveLength(1);
+    expect(result?.topics[0].title).toBe('Q2 Hiring Plan');
+    expect(result?.all_action_items).toHaveLength(1);
+    expect(result?.meeting_type).toBe('team_sync');
   });
 
   it('returns null for empty/null input', () => {
@@ -101,20 +101,20 @@ describe('parseAnalysisDocumentV3', () => {
     };
     const result = parseAnalysisDocumentV3(JSON.stringify(minimal));
     expect(result).not.toBeNull();
-    expect(result!.topics[0].transcript_range).toBeUndefined();
+    expect(result?.topics[0].transcript_range).toBeUndefined();
   });
 
   it('coerces unknown meeting_type to general', () => {
     const unknown = { ...validV3, meeting_type: 'standup' };
     const result = parseAnalysisDocumentV3(JSON.stringify(unknown));
     expect(result).not.toBeNull();
-    expect(result!.meeting_type).toBe('general');
+    expect(result?.meeting_type).toBe('general');
   });
 
   it('preserves generation metadata when present', () => {
     const result = parseAnalysisDocumentV3(JSON.stringify(validV3));
     expect(result).not.toBeNull();
-    expect(result!.generation_metadata).toEqual(validV3.generation_metadata);
+    expect(result?.generation_metadata).toEqual(validV3.generation_metadata);
   });
 
   it('strips invalid topic points', () => {
@@ -135,9 +135,9 @@ describe('parseAnalysisDocumentV3', () => {
     };
     const result = parseAnalysisDocumentV3(JSON.stringify(withBadPoints));
     expect(result).not.toBeNull();
-    expect(result!.topics[0].key_points).toHaveLength(2);
-    expect(result!.topics[0].key_points[0].text).toBe('Valid point');
-    expect(result!.topics[0].key_points[1].speaker).toBe('Alex');
+    expect(result?.topics[0].key_points).toHaveLength(2);
+    expect(result?.topics[0].key_points[0].text).toBe('Valid point');
+    expect(result?.topics[0].key_points[1].speaker).toBe('Alex');
   });
 
   it('strips topics with no title', () => {
@@ -157,8 +157,8 @@ describe('parseAnalysisDocumentV3', () => {
     };
     const result = parseAnalysisDocumentV3(JSON.stringify(withBadTopic));
     expect(result).not.toBeNull();
-    expect(result!.topics).toHaveLength(1);
-    expect(result!.topics[0].title).toBe('Q2 Hiring Plan');
+    expect(result?.topics).toHaveLength(1);
+    expect(result?.topics[0].title).toBe('Q2 Hiring Plan');
   });
 });
 
