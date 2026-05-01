@@ -30,6 +30,57 @@ const getDocumentScopeIcon = (
   }
 };
 
+const getHeroTone = (
+  severity: DashboardHomeModel['hero']['severity'],
+  loading: boolean,
+) => {
+  if (loading) return 'text-pro-text-muted/60 border-pro-border bg-pro-surface';
+  if (severity === 'urgent') {
+    return 'text-pro-urgent border-pro-urgent/20 bg-pro-urgent/5';
+  }
+  if (severity === 'watch') {
+    return 'text-pro-warning border-pro-warning/20 bg-pro-warning/5';
+  }
+  if (severity === 'live') {
+    return 'text-pro-success border-pro-success/20 bg-pro-success/5';
+  }
+  return 'text-pro-accent border-pro-accent/20 bg-pro-accent/5';
+};
+
+const getHeroLabel = (
+  kind: DashboardHomeModel['hero']['kind'],
+  loading: boolean,
+) => {
+  if (loading) return 'Syncing';
+  switch (kind) {
+    case 'recording':
+      return 'Live capture';
+    case 'overdue_action':
+      return 'Needs attention';
+    case 'stale_action':
+      return 'Watch';
+    case 'latest_meeting':
+      return 'Latest meeting';
+    case 'knowledge_doc':
+      return 'Recent memory';
+    case 'default':
+      return 'Ready';
+  }
+};
+
+const getBriefingTone = (kind: DashboardHomeModel['briefingFocus']['kind']) => {
+  if (kind === 'attention') {
+    return 'border-pro-accent/30 bg-pro-surface dark:border-pro-border dark:bg-pro-surface/55';
+  }
+  if (kind === 'latest_meeting') {
+    return 'border-pro-accent/25 bg-pro-surface dark:bg-pro-surface/55';
+  }
+  if (kind === 'knowledge_doc') {
+    return 'border-pro-border bg-pro-surface dark:bg-pro-surface/55';
+  }
+  return 'border-pro-border bg-pro-surface dark:bg-pro-surface/55';
+};
+
 export const Dashboard = ({
   model,
   loading,
@@ -60,178 +111,88 @@ export const Dashboard = ({
     }
   };
 
-  const getActionKey = (action: DashboardAction) =>
-    `${action.target}-${action.label}-${
-      action.target === 'meeting' ? action.meetingId : ''
-    }`;
+  const visibleActionItems =
+    model.briefingFocus.kind === 'attention' &&
+    model.actionInsights.state === 'populated'
+      ? model.actionInsights.items.slice(0, 3)
+      : [];
+
+  const visibleDocuments =
+    model.knowledgeDocuments.state === 'populated'
+      ? model.knowledgeDocuments.cards.slice(0, 3)
+      : [];
+  const hiddenActionCount =
+    model.actionInsights.state === 'populated'
+      ? Math.max(
+          0,
+          model.actionInsights.items.length - visibleActionItems.length,
+        )
+      : 0;
+
   const isLoadingLatestMeeting =
     loading && model.latestMeeting.state === 'empty';
+  const memoryTitle =
+    visibleDocuments.length > 0 ? 'Knowledge documents' : 'Memory status';
 
   return (
-    <div className="max-w-5xl mx-auto w-full space-y-16 animate-in relative pb-32">
-      <div className="space-y-10 relative">
-        <div className="space-y-4 max-w-2xl">
-          <p className="text-[10px] font-black text-pro-accent uppercase tracking-[0.3em] mb-2">
-            Pluto Intelligence
-          </p>
-          <h1 className="text-4xl font-black heading-premium tracking-tight text-pro-text-main leading-tight">
-            {model.hero.title}
-          </h1>
-          <p className="text-xl text-pro-text-muted font-medium leading-relaxed">
+    <div className="max-w-[1360px] mx-auto w-full space-y-6 animate-in relative pb-20">
+      <header className="rounded-[1.25rem] border border-pro-border bg-pro-surface/65 dark:bg-pro-surface/35 px-5 py-4 shadow-sm">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-[10px] font-black text-pro-accent uppercase tracking-[0.24em]">
+                Pluto Intelligence
+              </p>
+              <span
+                className={`text-[9px] font-black uppercase tracking-[0.16em] px-2.5 py-1 rounded-full border ${getHeroTone(
+                  model.hero.severity,
+                  loading,
+                )}`}
+              >
+                {getHeroLabel(model.hero.kind, loading)}
+              </span>
+            </div>
+            <h1 className="text-2xl font-black tracking-tight text-pro-text-main leading-tight">
+              {model.hero.title}
+            </h1>
+          </div>
+          <p className="max-w-xl text-[14px] text-pro-text-muted font-semibold leading-relaxed xl:text-right">
             {model.hero.detail}
           </p>
-          <div className="pt-1 flex items-center gap-3">
-            <span
-              className={`text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1.5 rounded-full border ${
-                loading
-                  ? 'text-pro-text-muted/50 border-pro-border bg-pro-surface'
-                  : model.hero.severity === 'urgent'
-                    ? 'text-pro-urgent border-pro-urgent/20 bg-pro-urgent/5'
-                    : model.hero.severity === 'watch'
-                      ? 'text-pro-warning border-pro-warning/20 bg-pro-warning/5'
-                      : model.hero.severity === 'live'
-                        ? 'text-pro-success border-pro-success/20 bg-pro-success/5'
-                        : 'text-pro-accent border-pro-accent/20 bg-pro-accent/5'
-              }`}
-            >
-              {loading ? 'Syncing' : model.hero.kind.replace(/_/g, ' ')}
-            </span>
-          </div>
-          {model.hero.action && (
-            <div className="pt-4 flex items-center gap-4">
-              <button
-                type="button"
-                onClick={() => {
-                  if (model.hero.action) {
-                    runAction(model.hero.action);
-                  }
-                }}
-                className="px-8 py-3.5 rounded-full bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[11px] uppercase tracking-[.15em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 hover:scale-[1.02] transition-all active-push border border-pro-border/40 dark:border-pro-border/50"
-              >
-                {model.hero.action.label}
-              </button>
-            </div>
-          )}
         </div>
+      </header>
 
-        <div className="flex flex-wrap gap-2.5">
-          {model.quickActions.map((action) => (
-            <button
-              type="button"
-              key={getActionKey(action)}
-              onClick={() => runAction(action)}
-              className="px-5 py-2.5 rounded-full bg-pro-surface border border-pro-border shadow-sm hover:border-pro-accent/40 hover:scale-[1.02] transition-all active-push flex items-center gap-2 group"
-            >
-              <span className="w-2 h-2 rounded-full bg-pro-accent/40 group-hover:bg-pro-accent transition-colors" />
-              <span className="text-[10px] font-black uppercase tracking-widest text-pro-text-main opacity-60 group-hover:opacity-100">
-                {action.label}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-12 gap-6 items-start">
-        <div className="grid grid-cols-12 gap-6 col-span-12">
-          <div
-            className={`${!isRecording ? 'col-span-12 xl:col-span-8' : 'col-span-6'} bg-pro-surface border border-pro-border rounded-[2.5rem] p-10 flex flex-col justify-between min-h-[420px] shadow-sm relative overflow-hidden group hover:border-pro-accent/40 card-hover-effect`}
-          >
-            <div className="z-10 space-y-8">
-              <div className="flex items-center justify-between">
-                <div className="w-12 h-12 rounded-2xl bg-pro-bg border border-pro-border flex items-center justify-center text-xl shadow-soft group-hover:bg-pro-accent group-hover:text-white transition-all duration-700">
-                  M
-                </div>
-                <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] bg-pro-accent/5 px-3 py-1.5 rounded-full">
-                  Latest Meeting Brief
-                </span>
+      <section className="grid grid-cols-12 gap-4 items-stretch">
+        <div
+          className={`col-span-12 xl:col-span-8 rounded-[1.25rem] border p-5 shadow-sm ${getBriefingTone(
+            model.briefingFocus.kind,
+          )}`}
+        >
+          <div className="flex flex-col h-full gap-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-2">
+                <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
+                  Briefing
+                </p>
+                <h2 className="text-[22px] font-black tracking-tight text-pro-text-main">
+                  {model.briefingFocus.title}
+                </h2>
+                <p className="text-sm font-semibold text-pro-text-muted leading-relaxed max-w-2xl">
+                  {model.briefingFocus.detail}
+                </p>
               </div>
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-2xl md:text-3xl font-black tracking-tight leading-tight">
-                    {isLoadingLatestMeeting
-                      ? 'Syncing meeting memory'
-                      : model.latestMeeting.title}
-                  </h3>
-                  <p className="text-[12px] text-pro-text-muted font-bold opacity-40 mt-1 uppercase tracking-widest">
-                    {model.latestMeeting.state === 'populated'
-                      ? model.latestMeeting.occurredAt
-                      : loading
-                        ? 'Syncing meeting memory'
-                        : 'No meeting memory yet'}
-                  </p>
-                </div>
-                <div className="p-6 bg-pro-bg/50 rounded-3xl border border-pro-border/40 space-y-4">
-                  <p className="text-[9px] font-black text-pro-text-muted/40 uppercase tracking-[.2em]">
-                    Brief
-                  </p>
-                  <p className="text-[14px] font-bold text-pro-text-main leading-relaxed italic line-height-extra">
-                    {isLoadingLatestMeeting
-                      ? 'Pluto is checking recent meetings and notes.'
-                      : model.latestMeeting.detail}
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-3 relative z-10 pt-8">
               <button
                 type="button"
-                disabled={model.latestMeeting.state !== 'populated'}
-                onClick={() => {
-                  if (model.latestMeeting.state === 'populated') {
-                    setSelectedMeetingId(model.latestMeeting.meetingId);
-                  }
-                }}
-                className="flex-1 py-4 rounded-xl bg-[#1E1F24] text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl hover:bg-pro-accent transition-all active-push disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-[#1E1F24]"
+                onClick={() => runAction(model.briefingFocus.action)}
+                className="shrink-0 h-10 px-4 rounded-xl bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] font-black text-[10px] uppercase tracking-[0.16em] shadow-premium hover:bg-pro-accent transition-all active-push"
               >
-                Open Brief
-              </button>
-              <button
-                type="button"
-                disabled={model.latestMeeting.state !== 'populated'}
-                onClick={() => {
-                  if (model.latestMeeting.state === 'populated') {
-                    setSelectedMeetingId(model.latestMeeting.meetingId);
-                  }
-                }}
-                className="w-14 h-14 rounded-xl bg-pro-surface border border-pro-border flex items-center justify-center hover:bg-pro-bg transition-all active-push shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <span className="text-xs font-black">GO</span>
+                {model.briefingFocus.action.label}
               </button>
             </div>
-            <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-pro-accent/5 rounded-full blur-[100px] group-hover:bg-pro-accent/10 transition-colors pointer-events-none" />
-          </div>
 
-          <div
-            className={`${!isRecording ? 'col-span-12 xl:col-span-4' : 'col-span-6'} glass-card border border-pro-border rounded-[2.5rem] p-10 min-h-[420px] shadow-sm flex flex-col space-y-8 card-hover-effect overflow-hidden relative`}
-          >
-            <div className="flex items-center justify-between relative z-10">
-              <h3 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-                Action Insights
-              </h3>
-              <button
-                type="button"
-                className="h-8 px-4 rounded-lg bg-pro-bg border border-pro-border text-[9px] font-black text-pro-accent uppercase tracking-widest hover:bg-pro-accent hover:text-white transition-all active-push shadow-sm"
-                onClick={() => setActiveTab('projects')}
-              >
-                View all
-              </button>
-            </div>
-            <div className="flex-1 space-y-2 overflow-y-auto pr-2 custom-scrollbar relative z-10">
-              {model.actionInsights.state === 'empty' ? (
-                <div className="h-full min-h-[220px] flex flex-col justify-center rounded-3xl border border-dashed border-pro-border bg-pro-bg/40 p-6 text-center">
-                  <p className="text-[13px] font-black text-pro-text-main uppercase tracking-widest">
-                    {loading
-                      ? 'Syncing action signals'
-                      : 'No open action signals'}
-                  </p>
-                  <p className="mt-3 text-[11px] font-bold text-pro-text-muted/50 leading-relaxed">
-                    {loading
-                      ? 'Pluto is checking meeting notes and project memory for current tasks.'
-                      : 'Tasks from meetings and project memory will appear here when Pluto finds something that needs attention.'}
-                  </p>
-                </div>
-              ) : (
-                model.actionInsights.items.map((item) => {
+            {visibleActionItems.length > 0 && (
+              <div className="grid gap-2">
+                {visibleActionItems.map((item) => {
                   const isDone = completedTasks.has(item.id);
                   return (
                     <button
@@ -242,174 +203,246 @@ export const Dashboard = ({
                         e.stopPropagation();
                         handleCompleteTask(item.id);
                       }}
-                      className={`group/item w-full text-left p-4 rounded-2xl border transition-all cursor-pointer flex items-start gap-4 ${isDone ? 'bg-pro-success/5 border-pro-success/20 opacity-60 scale-[0.98] success-ring' : 'hover:border-pro-border/20 hover:bg-pro-surface border-transparent'}`}
+                      className={`group/item w-full text-left px-3.5 py-2.5 rounded-xl border transition-all flex items-start gap-3 ${
+                        isDone
+                          ? 'bg-pro-success/5 border-pro-success/20 opacity-60'
+                          : 'bg-pro-bg/35 border-pro-border/60 hover:border-pro-accent/30 hover:bg-pro-bg/55'
+                      }`}
                     >
                       <div
-                        className={`w-6 h-6 rounded-lg border-2 mt-0.5 flex items-center justify-center transition-all ${isDone ? 'bg-pro-success border-pro-success' : 'border-pro-border group-hover/item:border-pro-accent'}`}
+                        className={`w-4 h-4 rounded-md border-2 mt-0.5 flex items-center justify-center transition-all ${
+                          isDone
+                            ? 'bg-pro-success border-pro-success'
+                            : 'border-pro-border group-hover/item:border-pro-accent'
+                        }`}
                       >
                         {isDone && (
                           <span className="text-white text-[10px]">✓</span>
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex justify-between items-start gap-2 mb-1">
+                        <div className="flex items-start justify-between gap-3">
                           <span
-                            className={`text-[13px] font-bold leading-tight truncate transition-all ${isDone ? 'line-through text-pro-text-muted' : 'text-pro-text-main'}`}
+                            className={`text-[13px] font-bold leading-snug line-clamp-2 ${
+                              isDone
+                                ? 'line-through text-pro-text-muted'
+                                : 'text-pro-text-main'
+                            }`}
                           >
                             {item.title}
                           </span>
-                          {!isDone && (
-                            <div
-                              className={`w-2 h-2 rounded-full mt-1.5 shrink-0 shadow-sm ${item.status === 'overdue' ? 'bg-pro-urgent pulse-urgent' : item.status === 'stale' ? 'bg-pro-warning' : 'bg-pro-accent/20'}`}
-                            />
-                          )}
+                          <span
+                            className={`px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-widest shrink-0 ${
+                              item.status === 'overdue'
+                                ? 'bg-pro-urgent/10 text-pro-urgent'
+                                : item.status === 'stale'
+                                  ? 'bg-pro-warning/10 text-pro-warning'
+                                  : 'bg-pro-accent/10 text-pro-accent'
+                            }`}
+                          >
+                            {item.status}
+                          </span>
                         </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-[9px] font-bold text-pro-text-muted/30 uppercase tracking-widest">
+                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span className="text-[9px] font-bold text-pro-text-muted/45 uppercase tracking-widest">
                             {item.dueLabel}
                           </span>
-                          <span className="text-[9px] font-bold text-pro-accent/40 uppercase tracking-widest truncate">
+                          <span className="text-[9px] font-bold text-pro-accent/55 uppercase tracking-widest">
                             {item.sourceLabel}
                           </span>
                         </div>
                       </div>
                     </button>
                   );
-                })
+                })}
+                {hiddenActionCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('projects')}
+                    className="h-8 rounded-xl border border-dashed border-pro-border/70 bg-transparent text-[9px] font-black uppercase tracking-widest text-pro-text-muted/60 hover:text-pro-text-main hover:border-pro-accent/30 transition-all"
+                  >
+                    {hiddenActionCount} more in projects
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="col-span-12 xl:col-span-4 rounded-[1.25rem] border border-pro-border bg-pro-surface/80 dark:bg-pro-surface/55 p-5 md:p-6 shadow-sm">
+          <div className="flex h-full flex-col gap-5">
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
+                Latest Meeting
+              </p>
+              {model.latestMeeting.state === 'populated' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (model.latestMeeting.state === 'populated') {
+                      setSelectedMeetingId(model.latestMeeting.meetingId);
+                    }
+                  }}
+                  className="h-9 px-4 rounded-xl border border-pro-border bg-pro-bg text-[9px] font-black text-pro-text-main/70 uppercase tracking-widest hover:border-pro-accent/40 hover:text-pro-text-main transition-all active-push"
+                >
+                  Open
+                </button>
+              ) : (
+                <span className="rounded-full border border-pro-border bg-pro-bg px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-pro-text-muted/45">
+                  Waiting
+                </span>
               )}
             </div>
-            <div className="absolute -left-10 -bottom-10 w-40 h-40 bg-pro-urgent/5 rounded-full blur-3xl pointer-events-none" />
+            <div className="space-y-3">
+              <h3 className="text-lg font-black tracking-tight leading-tight text-pro-text-main">
+                {isLoadingLatestMeeting
+                  ? 'Syncing meeting memory'
+                  : model.latestMeeting.title}
+              </h3>
+              {(model.latestMeeting.state === 'populated' || loading) && (
+                <p className="text-[11px] text-pro-text-muted/50 font-bold uppercase tracking-widest">
+                  {model.latestMeeting.state === 'populated'
+                    ? model.latestMeeting.occurredAt
+                    : 'Syncing'}
+                </p>
+              )}
+              <p className="text-[13px] font-semibold text-pro-text-muted leading-relaxed line-clamp-5">
+                {isLoadingLatestMeeting
+                  ? 'Pluto is checking recent meetings and notes.'
+                  : model.latestMeeting.detail}
+              </p>
+            </div>
+            {isRecording && (
+              <div className="mt-auto rounded-2xl border border-pro-success/20 bg-pro-success/5 p-4">
+                <p className="text-[11px] font-black text-pro-success uppercase tracking-widest">
+                  Recording now
+                </p>
+              </div>
+            )}
           </div>
+        </div>
+      </section>
+
+      <section
+        className={`grid grid-cols-12 gap-4 ${
+          model.spotlight ? 'items-stretch' : 'items-start'
+        }`}
+      >
+        <div
+          className={`col-span-12 ${
+            model.spotlight ? 'xl:col-span-7' : ''
+          } rounded-[1.25rem] border border-pro-border bg-pro-surface/80 dark:bg-pro-surface/55 p-5 md:p-6 shadow-sm`}
+        >
+          <div className="flex items-center justify-between gap-4 mb-5">
+            <div>
+              <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
+                Recent Memory
+              </p>
+              <h2 className="mt-1 text-xl font-black tracking-tight text-pro-text-main">
+                {memoryTitle}
+              </h2>
+            </div>
+            {visibleDocuments.length > 0 ? (
+              <button
+                type="button"
+                className="h-9 px-4 rounded-xl border border-pro-border bg-pro-bg text-[9px] font-black text-pro-accent uppercase tracking-widest hover:border-pro-accent/40 transition-all active-push"
+                onClick={() => setActiveTab('wiki')}
+              >
+                Library
+              </button>
+            ) : (
+              <span className="rounded-full border border-pro-border bg-pro-bg px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-pro-text-muted/45">
+                No sources
+              </span>
+            )}
+          </div>
+
+          {visibleDocuments.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-pro-border bg-pro-bg/50 p-6">
+              <p className="text-[13px] font-black text-pro-text-main">
+                {loading ? 'Syncing live documents' : 'No live documents yet'}
+              </p>
+              <p className="mt-2 text-[12px] font-semibold text-pro-text-muted/60 leading-relaxed">
+                {loading
+                  ? 'Pluto is loading synthesized workspace memory.'
+                  : 'Recorded meetings will populate the knowledge base.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {visibleDocuments.map((item) => (
+                <button
+                  type="button"
+                  key={item.id}
+                  onClick={() => setActiveTab('wiki')}
+                  className="group text-left rounded-2xl border border-pro-border/60 bg-pro-bg/55 p-4 hover:border-pro-accent/30 hover:bg-pro-bg transition-all"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-pro-surface border border-pro-border flex items-center justify-center text-sm font-black text-pro-text-main/70 shadow-soft group-hover:text-pro-accent transition-colors">
+                      {getDocumentScopeIcon(item.scopeType)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-[14px] font-black tracking-tight text-pro-text-main">
+                          {item.title}
+                        </h3>
+                        <span className="text-[9px] font-black text-pro-accent/70 uppercase tracking-widest">
+                          {item.countLabel}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[12px] font-semibold text-pro-text-muted/65 leading-relaxed line-clamp-2">
+                        {item.description}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {model.spotlight && (
-          <div className="col-span-12 bg-pro-bg border border-pro-border rounded-[2.5rem] p-10 relative overflow-hidden group hover:border-pro-accent/40 card-hover-effect">
-            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-pro-accent/5 rounded-full blur-[120px] -mr-40 -mt-40 pointer-events-none opacity-50" />
-            <div className="absolute -left-20 -bottom-20 w-80 h-80 bg-pro-success/5 rounded-full blur-[100px] pointer-events-none" />
-
-            <div className="flex xl:hidden flex-col justify-between h-full relative z-10 gap-8">
-              <div className="space-y-8">
-                <div className="flex items-center justify-between">
-                  <div className="w-12 h-12 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-xl font-black shadow-soft">
-                    S
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                      Contextual Spotlight
-                    </span>
-                    <div className="w-1.5 h-1.5 rounded-full bg-pro-success shadow-status-ok" />
-                  </div>
-                </div>
-                <div className="space-y-6">
-                  <div>
-                    <h4 className="text-3xl font-black tracking-tighter leading-none mb-2 uppercase text-pro-text-main">
-                      {model.spotlight.title}
-                    </h4>
-                    <p className="text-[11px] font-bold text-pro-accent uppercase tracking-[.25em]">
-                      {model.spotlight.subtitle}
-                    </p>
-                  </div>
-                  <div className="p-8 bg-pro-bg/50 rounded-3xl border border-pro-border/40 space-y-6">
-                    <div className="flex items-center justify-between border-b border-pro-border/20 pb-4">
-                      <span className="text-[9px] font-black text-pro-text-muted/40 uppercase tracking-widest">
-                        Smart Insight
-                      </span>
-                      <span className="text-[9px] font-black text-pro-accent uppercase tracking-widest">
-                        Project Signal
-                      </span>
-                    </div>
-                    <p className="text-[16px] font-medium text-pro-text-main leading-relaxed italic">
-                      {model.spotlight.detail}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {model.spotlight.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="px-3 py-1.5 bg-pro-surface border border-pro-border rounded-lg text-[9px] font-black text-pro-text-main/60 uppercase tracking-tight"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-3 pt-4 mt-auto">
-                <button
-                  type="button"
-                  onClick={openSpotlightTarget}
-                  className="flex-1 py-4 rounded-xl bg-pro-surface border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-soft hover:bg-pro-bg transition-all active-push"
-                >
-                  Open Spotlight
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAskPlutoVisible(true)}
-                  className="flex-1 py-4 rounded-xl bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 transition-all active-push border border-pro-border/40 dark:border-pro-border/50"
-                >
-                  Ask Pluto
-                </button>
-              </div>
-            </div>
-
-            <div className="hidden xl:flex relative z-10 w-full h-full items-center justify-between gap-12">
-              <div className="flex flex-col gap-6 w-[280px] shrink-0">
-                <span className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] px-1">
-                  Contextual Spotlight
-                </span>
-                <div className="flex items-center gap-6">
-                  <div className="w-24 h-24 rounded-[1.5rem] bg-pro-surface border border-pro-border/10 flex items-center justify-center text-pro-accent shadow-sm relative overflow-hidden group-hover:scale-105 transition-transform duration-500 shrink-0">
-                    <span className="text-4xl font-black">
-                      {model.spotlight.title.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="space-y-1.5 flex-1 min-w-0">
-                    <h4 className="text-2xl font-black text-pro-text-main tracking-tight uppercase leading-none break-words">
-                      {model.spotlight.title}
-                    </h4>
-                    <p className="text-[10px] font-bold text-pro-accent uppercase tracking-[0.25em] leading-relaxed">
-                      {model.spotlight.subtitle}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex-1 bg-pro-bg rounded-[2.5rem] border border-pro-border/10 p-8 space-y-6 self-stretch flex flex-col justify-center max-w-2xl shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-[9px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                    Smart Insight
-                  </span>
-                  <span className="text-[9px] font-black text-pro-accent uppercase tracking-[0.2em]">
-                    Project Signal
-                  </span>
-                </div>
-                <p className="text-[13px] font-bold text-pro-text-main/80 leading-relaxed italic">
-                  {model.spotlight.detail}
+          <div className="col-span-12 xl:col-span-5 rounded-3xl border border-pro-border bg-pro-bg p-6 md:p-7 shadow-sm">
+            <div className="flex h-full flex-col gap-5">
+              <div>
+                <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
+                  Project Signal
                 </p>
-                <div className="flex gap-2">
-                  {model.spotlight.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-3 py-1.5 bg-pro-surface border border-pro-border/10 rounded-lg text-[9px] font-bold text-pro-text-muted uppercase tracking-wider shadow-sm"
-                    >
-                      {tag}
-                    </span>
-                  ))}
-                </div>
+                <h2 className="mt-2 text-2xl font-black tracking-tight text-pro-text-main">
+                  {model.spotlight.title}
+                </h2>
+                <p className="mt-1 text-[11px] font-bold text-pro-accent uppercase tracking-[0.2em]">
+                  {model.spotlight.subtitle}
+                </p>
               </div>
 
-              <div className="flex flex-col gap-4 w-[200px] shrink-0">
+              <p className="text-sm font-semibold text-pro-text-muted leading-relaxed">
+                {model.spotlight.detail}
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {model.spotlight.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-3 py-1.5 bg-pro-surface border border-pro-border rounded-lg text-[9px] font-black text-pro-text-main/60 uppercase tracking-tight"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+
+              <div className="mt-auto flex gap-3">
                 <button
                   type="button"
                   onClick={openSpotlightTarget}
-                  className="w-full py-4 rounded-xl bg-pro-surface border border-pro-border/10 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-sm hover:bg-pro-bg transition-all active-push"
+                  className="flex-1 h-11 rounded-xl bg-pro-surface border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.16em] shadow-soft hover:bg-pro-bg transition-all active-push"
                 >
-                  Open Spotlight
+                  Open
                 </button>
                 <button
                   type="button"
                   onClick={() => setAskPlutoVisible(true)}
-                  className="w-full py-4 rounded-xl bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 transition-all active-push border border-pro-border/40 dark:border-pro-border/50"
+                  className="flex-1 h-11 rounded-xl bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[10px] uppercase tracking-[0.16em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 transition-all active-push border border-pro-border/40"
                 >
                   Ask Pluto
                 </button>
@@ -417,67 +450,7 @@ export const Dashboard = ({
             </div>
           </div>
         )}
-      </div>
-
-      <div className="space-y-8">
-        <div className="flex items-center justify-between border-b border-pro-border/40 pb-6">
-          <h2 className="text-xl font-black tracking-tight">
-            Live Intelligence Documents
-          </h2>
-          <button
-            type="button"
-            className="text-[10px] font-black text-pro-accent uppercase tracking-[0.15em] hover:underline"
-            onClick={() => setActiveTab('wiki')}
-          >
-            Library Hub
-          </button>
-        </div>
-        {model.knowledgeDocuments.state === 'empty' ? (
-          <div className="rounded-[2rem] border border-dashed border-pro-border bg-pro-surface/60 p-10 text-center">
-            <p className="text-[13px] font-black text-pro-text-main uppercase tracking-widest">
-              {loading ? 'Syncing live documents' : 'No live documents yet'}
-            </p>
-            <p className="mt-3 text-[12px] font-bold text-pro-text-muted/50">
-              {loading
-                ? 'Pluto is loading synthesized workspace memory.'
-                : 'Knowledge documents will appear here after Pluto synthesizes workspace memory.'}
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-            {model.knowledgeDocuments.cards.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                onClick={() => setActiveTab('wiki')}
-                className="text-left glass-card border border-pro-border rounded-[2rem] p-8 space-y-6 hover:border-pro-accent/40 transition-all group card-hover-effect"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-lg font-black group-hover:scale-110 transition-transform shadow-soft">
-                  {getDocumentScopeIcon(item.scopeType)}
-                </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-[14px] font-black tracking-tight leading-loose uppercase break-words line-clamp-2">
-                      {item.title}
-                    </h4>
-                  </div>
-                  <p className="text-[11px] text-pro-text-muted font-bold leading-relaxed opacity-60 line-clamp-2">
-                    {item.description}
-                  </p>
-                </div>
-                <div className="pt-4 border-t border-pro-border/10 flex items-center justify-between">
-                  <span className="text-[9px] font-black text-pro-accent uppercase tracking-widest">
-                    {item.countLabel}
-                  </span>
-                  <span className="text-pro-text-muted/40 text-xs opacity-0 group-hover:opacity-100 transition-opacity">
-                    {item.status}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      </section>
     </div>
   );
 };

@@ -13,6 +13,9 @@ export default {
         'pro-primary': 'hsl(var(--pro-text-main) / <alpha-value>)',
         'pro-accent': 'hsl(var(--pro-accent) / <alpha-value>)',
         'pro-hover': 'hsl(var(--pro-hover) / <alpha-value>)',
+        'pro-urgent': 'hsl(var(--pro-urgent) / <alpha-value>)',
+        'pro-warning': 'hsl(var(--pro-warning) / <alpha-value>)',
+        'pro-success': 'hsl(var(--pro-success) / <alpha-value>)',
       },
       boxShadow: {
         premium:

@@ -121,6 +121,12 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.severity).toBe('urgent');
     expect(model.hero.detail).toContain('Ship privacy review');
     expect(model.hero.action?.target).toBe('projects');
+    expect(model.briefingFocus).toMatchObject({
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: '1 overdue item',
+      action: { label: 'Review actions', target: 'projects' },
+    });
     expect(model.latestMeeting.state).toBe('populated');
     expect(model.actionInsights.state).toBe('populated');
     expect(model.actionInsights.items[0]).toMatchObject({
@@ -168,10 +174,91 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.kind).toBe('stale_action');
     expect(model.hero.severity).toBe('watch');
     expect(model.hero.detail).toContain('Revisit launch blockers');
+    expect(model.briefingFocus).toMatchObject({
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: '1 stale item',
+      action: { label: 'Review actions', target: 'projects' },
+    });
     expect(model.actionInsights.items[0]).toMatchObject({
       status: 'stale',
       sourceLabel: 'Work',
     });
+  });
+
+  it('uses the latest meeting as the briefing focus when no actions need attention', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'latest_meeting',
+      title: 'Latest meeting',
+      detail: 'Indexing rollout is close, with launch risk around review.',
+      action: {
+        label: 'Open brief',
+        target: 'meeting',
+        meetingId: 'meeting-1',
+      },
+    });
+  });
+
+  it('uses knowledge as the briefing focus when only memory documents exist', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'knowledge_doc',
+      title: 'Recent memory',
+      detail: 'Search indexing is converging around the rollout plan.',
+      action: { label: 'Open knowledge', target: 'wiki' },
+    });
+  });
+
+  it('does not promote zero-source preview knowledge docs into the briefing', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [
+          makeDoc({
+            title: 'Global Knowledge Context',
+            status: 'inactive',
+            structured_json: JSON.stringify({
+              current_read: {
+                headline: 'Preview Memory',
+                source_count: 0,
+              },
+            }),
+            rendered_content: 'Preview Memory',
+          }),
+        ],
+        project_cards: [],
+      }),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('default');
+    expect(model.briefingFocus.kind).toBe('empty');
+    expect(model.knowledgeDocuments.state).toBe('empty');
+    expect(JSON.stringify(model)).not.toContain('Global Knowledge Context');
+    expect(JSON.stringify(model)).not.toContain('Preview Memory');
   });
 
   it('deduplicates action insights by priority and caps displayed items', () => {
@@ -384,13 +471,27 @@ describe('buildDashboardHomeModel', () => {
       graphStats: null,
     });
 
-    expect(model.hero.kind).toBe('default');
-    expect(model.hero.severity).toBe('calm');
-    expect(model.hero.action?.target).toBe('ask');
+    expect(model.hero).toMatchObject({
+      kind: 'default',
+      title: 'Start with a conversation',
+      detail:
+        'Record a meeting to build memory, or ask Pluto to help recover context from what is already here.',
+      severity: 'calm',
+      action: { label: 'Start with Ask Pluto', target: 'ask' },
+    });
     expect(model.latestMeeting.state).toBe('empty');
     expect(model.actionInsights.state).toBe('empty');
     expect(model.knowledgeDocuments.state).toBe('empty');
     expect(model.spotlight).toBeNull();
-    expect(model.quickActions).toEqual([{ label: 'Ask Pluto', target: 'ask' }]);
+    expect(model.briefingFocus).toEqual({
+      kind: 'empty',
+      title: 'Build your first briefing',
+      detail:
+        'Record a conversation and Pluto will turn it into memory, follow-ups, and cited context.',
+      action: { label: 'Ask Pluto', target: 'ask' },
+    });
+    expect(model.quickActions).toEqual([
+      { label: 'Start with Ask Pluto', target: 'ask' },
+    ]);
   });
 });

@@ -1,0 +1,48 @@
+name: Technical debt or architecture
+description: Track architecture changes, refactors, process improvements, or durable technical decisions.
+title: "[Architecture] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What technical or process limitation is creating friction?
+      placeholder: Planning artifacts live only in Markdown specs, so evolving product decisions are hard to track through implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: desired_direction
+    attributes:
+      label: Desired direction
+      description: What architecture or workflow should exist after this work?
+      placeholder: GitHub Issues should become the active source of truth, with repo docs preserving durable memory.
+    validations:
+      required: true
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Alternatives and tradeoffs
+      description: List credible options and why the preferred one fits Pluto now.
+      placeholder: |
+        - Issue-first: better for evolving product intent, lighter than PRDs.
+        - Docs-first: deeper context, but harder to keep current.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How will we know the architecture/process improvement is working?
+      placeholder: Future agents can identify the active issue, changed intent, durable decision, and shipped summary.
+    validations:
+      required: true
+  - type: checkboxes
+    id: memory
+    attributes:
+      label: Durable memory check
+      options:
+        - label: This may need a decision-log entry.
+        - label: This may need an ADR if it has long-lived technical consequences.
+        - label: This may need a changelog entry when completed.

@@ -62,3 +62,9 @@ scripts/replay.local-expected.json
 # Worktrees
 .worktrees/
 worktrees/
+
+# Agent brainstorming scratch space
+.agents/
+.claude/
+.superpowers/
+.gstack/

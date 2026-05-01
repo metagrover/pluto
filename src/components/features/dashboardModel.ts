@@ -100,6 +100,19 @@ export interface DashboardSpotlight {
   target: DashboardTarget;
 }
 
+export type DashboardBriefingFocusKind =
+  | 'attention'
+  | 'latest_meeting'
+  | 'knowledge_doc'
+  | 'empty';
+
+export interface DashboardBriefingFocus {
+  kind: DashboardBriefingFocusKind;
+  title: string;
+  detail: string;
+  action: DashboardAction;
+}
+
 export interface DashboardHomeModelInput {
   isRecording: boolean;
   meetings: Meeting[];
@@ -112,6 +125,7 @@ export interface DashboardHomeModelInput {
 
 export interface DashboardHomeModel {
   hero: DashboardHero;
+  briefingFocus: DashboardBriefingFocus;
   latestMeeting: DashboardLatestMeeting;
   actionInsights: DashboardActionInsights;
   knowledgeDocuments: DashboardKnowledgeDocuments;
@@ -311,6 +325,27 @@ const formatProjectHealthCountLabel = (
     'dependencies',
   )}`;
 
+const hasProjectHealthSignal = (
+  card: KnowledgeProjectHealthCard | undefined,
+): boolean =>
+  Boolean(
+    card &&
+      (card.open_blockers > 0 ||
+        card.dependency_count > 0 ||
+        card.recent_changes > 0 ||
+        card.staleness_days > 0),
+  );
+
+const isUsableKnowledgeDoc = (
+  doc: KnowledgeDoc,
+  projectCard: KnowledgeProjectHealthCard | undefined,
+): boolean => {
+  if (hasProjectHealthSignal(projectCard)) return true;
+  const sourceCount = getKnowledgeDocSourceCount(doc);
+  if (sourceCount !== null) return sourceCount > 0;
+  return doc.status !== 'inactive' && Boolean(getKnowledgeDocHeadline(doc));
+};
+
 const buildKnowledgeDocuments = (
   workspace: KnowledgeWorkspacePayload | null,
 ): DashboardKnowledgeDocuments => {
@@ -325,7 +360,17 @@ const buildKnowledgeDocuments = (
   const projectCardsByDocId = new Map(
     (workspace?.project_cards ?? []).map((card) => [card.doc_id, card]),
   );
-  const cards = sortByNewestTimestamp(docs, (doc) => doc.updated_at)
+  const usableDocs = docs.filter((doc) =>
+    isUsableKnowledgeDoc(doc, projectCardsByDocId.get(doc.id)),
+  );
+  if (usableDocs.length === 0) {
+    return {
+      state: 'empty',
+      cards: [],
+    };
+  }
+
+  const cards = sortByNewestTimestamp(usableDocs, (doc) => doc.updated_at)
     .slice(0, 4)
     .map((doc) => {
       const sourceCount = getKnowledgeDocSourceCount(doc);
@@ -355,10 +400,7 @@ const getProjectPriorityScore = (card: KnowledgeProjectHealthCard): number =>
   card.recent_changes;
 
 const hasProjectSignal = (card: KnowledgeProjectHealthCard): boolean =>
-  card.open_blockers > 0 ||
-  card.dependency_count > 0 ||
-  card.recent_changes > 0 ||
-  card.staleness_days > 0;
+  hasProjectHealthSignal(card);
 
 const buildSpotlight = (
   workspace: KnowledgeWorkspacePayload | null,
@@ -408,7 +450,12 @@ const buildHero = (
     return {
       kind: 'overdue_action',
       title: pluralize(input.overdueActions.length, 'overdue item'),
-      detail: `${overdueAction.name} needs attention.`,
+      detail: joinCountLabels([
+        `${overdueAction.name} needs attention`,
+        input.staleActions.length > 0
+          ? pluralize(input.staleActions.length, 'stale item')
+          : '',
+      ]),
       severity: 'urgent',
       action: { label: 'Open projects', target: 'projects' },
     };
@@ -452,11 +499,11 @@ const buildHero = (
 
   return {
     kind: 'default',
-    title: 'You are all caught up',
+    title: 'Start with a conversation',
     detail:
-      'Record a meeting or open knowledge to build your workspace memory.',
+      'Record a meeting to build memory, or ask Pluto to help recover context from what is already here.',
     severity: 'calm',
-    action: { label: 'Ask Pluto', target: 'ask' },
+    action: { label: 'Start with Ask Pluto', target: 'ask' },
   };
 };
 
@@ -466,7 +513,18 @@ const buildQuickActions = (
   knowledgeDocuments: DashboardKnowledgeDocuments,
   spotlight: DashboardSpotlight | null,
 ): DashboardAction[] => {
-  const actions: DashboardAction[] = [{ label: 'Ask Pluto', target: 'ask' }];
+  const actions: DashboardAction[] = [
+    {
+      label:
+        latestMeeting.state === 'empty' &&
+        actionInsights.state === 'empty' &&
+        knowledgeDocuments.state === 'empty' &&
+        !spotlight
+          ? 'Start with Ask Pluto'
+          : 'Ask Pluto',
+      target: 'ask',
+    },
+  ];
 
   if (latestMeeting.state === 'populated') {
     actions.push({
@@ -487,6 +545,65 @@ const buildQuickActions = (
   return actions;
 };
 
+const joinCountLabels = (labels: string[]): string =>
+  labels.filter(Boolean).join(' · ');
+
+const buildBriefingFocus = (
+  actionInsights: DashboardActionInsights,
+  latestMeeting: DashboardLatestMeeting,
+  knowledgeDocuments: DashboardKnowledgeDocuments,
+): DashboardBriefingFocus => {
+  if (
+    actionInsights.state === 'populated' &&
+    (actionInsights.overdueCount > 0 || actionInsights.staleCount > 0)
+  ) {
+    return {
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: joinCountLabels([
+        actionInsights.overdueCount > 0
+          ? pluralize(actionInsights.overdueCount, 'overdue item')
+          : '',
+        actionInsights.staleCount > 0
+          ? pluralize(actionInsights.staleCount, 'stale item')
+          : '',
+      ]),
+      action: { label: 'Review actions', target: 'projects' },
+    };
+  }
+
+  if (latestMeeting.state === 'populated') {
+    return {
+      kind: 'latest_meeting',
+      title: 'Latest meeting',
+      detail: latestMeeting.detail,
+      action: {
+        label: 'Open brief',
+        target: 'meeting',
+        meetingId: latestMeeting.meetingId,
+      },
+    };
+  }
+
+  const doc = knowledgeDocuments.cards[0];
+  if (doc) {
+    return {
+      kind: 'knowledge_doc',
+      title: 'Recent memory',
+      detail: doc.description,
+      action: { label: 'Open knowledge', target: 'wiki' },
+    };
+  }
+
+  return {
+    kind: 'empty',
+    title: 'Build your first briefing',
+    detail:
+      'Record a conversation and Pluto will turn it into memory, follow-ups, and cited context.',
+    action: { label: 'Ask Pluto', target: 'ask' },
+  };
+};
+
 export const buildDashboardHomeModel = (
   input: DashboardHomeModelInput,
 ): DashboardHomeModel => {
@@ -501,6 +618,11 @@ export const buildDashboardHomeModel = (
 
   return {
     hero: buildHero(input, latestMeeting, knowledgeDocuments),
+    briefingFocus: buildBriefingFocus(
+      actionInsights,
+      latestMeeting,
+      knowledgeDocuments,
+    ),
     latestMeeting,
     actionInsights,
     knowledgeDocuments,

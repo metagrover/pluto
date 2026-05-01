@@ -1,0 +1,61 @@
+name: Product outcome
+description: Track a focused user or product outcome that can ship in one PR or a small PR stack.
+title: "[Outcome] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for outcome-sized product work. Keep it current as the product thinking changes.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should be true for the user or product when this ships?
+      placeholder: Users can review real meeting follow-ups from the home screen without reading raw transcripts.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What led to this issue? Link source notes, prior issues, PRs, specs, or observed behavior.
+      placeholder: The current dashboard shows stale sample content, but the real action-item pipeline already exists.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Concrete checks that prove this outcome shipped.
+      placeholder: |
+        - Home screen renders only evidence-backed action items.
+        - Empty states appear when no real actions exist.
+        - Non-UI data shaping has focused tests.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and non-goals
+      description: Boundaries that should prevent scope drift.
+      placeholder: Do not add calendar integration in this pass.
+    validations:
+      required: false
+  - type: textarea
+    id: open_questions
+    attributes:
+      label: Open questions
+      description: Decisions that are still unresolved.
+      placeholder: Should unsupported sections be hidden or replaced with empty states?
+    validations:
+      required: false
+  - type: textarea
+    id: agent_notes
+    attributes:
+      label: Agent notes
+      description: Notes for future agents, including current assumptions and useful entry points.
+      placeholder: Start by inspecting src/components/features/dashboardModel.ts and its unit tests.
+    validations:
+      required: false
