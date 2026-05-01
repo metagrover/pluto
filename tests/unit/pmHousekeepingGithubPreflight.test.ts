@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildPreflightReport,
   classifyPreflightResult,
   envTokenNames,
   resolvePreflightOptions,
@@ -84,6 +85,157 @@ describe('PM housekeeping GitHub preflight helpers', () => {
     ).toEqual({
       runMutationCheck: true,
       mutationIssueNumber: '123',
+    });
+  });
+
+  it('includes command-level diagnostics in the preflight report', () => {
+    expect(
+      buildPreflightReport({
+        classification: {
+          ok: false,
+          failureKind: 'network',
+          message: 'GitHub API reachability failed.',
+        },
+        tokenNames: ['GH_TOKEN'],
+        auth: {
+          command: 'gh auth status --hostname github.com',
+          exitCode: 0,
+          stdout: 'Logged in to github.com',
+          stderr: '',
+        },
+        api: {
+          command: 'curl -fsSIL https://api.github.com',
+          exitCode: 6,
+          stdout: '',
+          stderr: 'Could not resolve host: api.github.com',
+        },
+        issueList: {
+          command: 'gh issue list --repo metagrover/pluto --limit 1',
+          exitCode: 1,
+          stdout: '',
+          stderr: 'error connecting to api.github.com',
+        },
+        mutation: {
+          command: 'gh issue comment 67 --repo metagrover/pluto --body test',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+      }),
+    ).toEqual({
+      ok: false,
+      failureKind: 'network',
+      message: 'GitHub API reachability failed.',
+      tokenNames: ['GH_TOKEN'],
+      checks: {
+        auth: {
+          command: 'gh auth status --hostname github.com',
+          exitCode: 0,
+          stdout: 'Logged in to github.com',
+          stderr: '',
+        },
+        api: {
+          command: 'curl -fsSIL https://api.github.com',
+          exitCode: 6,
+          stdout: '',
+          stderr: 'Could not resolve host: api.github.com',
+        },
+        issueList: {
+          command: 'gh issue list --repo metagrover/pluto --limit 1',
+          exitCode: 1,
+          stdout: '',
+          stderr: 'error connecting to api.github.com',
+        },
+        mutation: {
+          command: 'gh issue comment 67 --repo metagrover/pluto --body test',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+      },
+    });
+  });
+
+  it('captures spawn failures in command diagnostics', () => {
+    expect(
+      buildPreflightReport({
+        classification: {
+          ok: false,
+          failureKind: 'auth',
+          message: 'GitHub CLI auth failed with the environment-backed token.',
+        },
+        tokenNames: ['GITHUB_TOKEN'],
+        auth: {
+          command: 'gh auth status --hostname github.com',
+          exitCode: 1,
+          stdout: '',
+          stderr: '',
+          error: 'spawnSync gh ENOENT',
+        },
+        api: {
+          command: 'curl -fsSIL https://api.github.com',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+        issueList: {
+          command: 'gh issue list --repo metagrover/pluto --limit 1',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+        mutation: {
+          command: '',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+      }).checks.auth,
+    ).toEqual({
+      command: 'gh auth status --hostname github.com',
+      exitCode: 1,
+      stdout: '',
+      stderr: '',
+      error: 'spawnSync gh ENOENT',
+    });
+  });
+
+  it('preserves a stable mutation check shape when mutation checks are disabled', () => {
+    expect(
+      buildPreflightReport({
+        classification: {
+          ok: true,
+          failureKind: null,
+          message: 'GitHub preflight passed with an environment-backed token.',
+        },
+        tokenNames: ['GH_TOKEN'],
+        auth: {
+          command: 'gh auth status --hostname github.com',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+        api: {
+          command: 'curl -fsSIL https://api.github.com',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+        issueList: {
+          command: 'gh issue list --repo metagrover/pluto --limit 1',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+        mutation: {
+          exitCode: 0,
+        },
+      }).checks.mutation,
+    ).toEqual({
+      command: '',
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
     });
   });
 });

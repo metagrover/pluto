@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import {
+  buildPreflightReport,
   classifyPreflightResult,
   envTokenNames,
   resolvePreflightOptions,
@@ -50,18 +51,14 @@ const classification = classifyPreflightResult({
   mutationExitCode: mutation.exitCode,
 });
 
-const report = {
-  ok: classification.ok,
-  failureKind: classification.failureKind,
-  message: classification.message,
+const report = buildPreflightReport({
+  classification,
   tokenNames,
-  checks: {
-    auth: auth.exitCode,
-    api: api.exitCode,
-    issueList: issueList.exitCode,
-    mutation: mutation.exitCode,
-  },
-};
+  auth,
+  api,
+  issueList,
+  mutation,
+});
 
 console.log(JSON.stringify(report, null, 2));
 process.exit(classification.ok ? 0 : 1);

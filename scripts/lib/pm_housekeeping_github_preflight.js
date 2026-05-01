@@ -82,6 +82,36 @@ export function classifyPreflightResult({
   };
 }
 
+export function buildPreflightReport({
+  classification,
+  tokenNames,
+  auth,
+  api,
+  issueList,
+  mutation,
+}) {
+  const normalizeCheck = (check) => ({
+    command: check.command ?? '',
+    exitCode: check.exitCode ?? 1,
+    stdout: check.stdout ?? '',
+    stderr: check.stderr ?? '',
+    ...(check.error ? { error: check.error } : {}),
+  });
+
+  return {
+    ok: classification.ok,
+    failureKind: classification.failureKind,
+    message: classification.message,
+    tokenNames,
+    checks: {
+      auth: normalizeCheck(auth),
+      api: normalizeCheck(api),
+      issueList: normalizeCheck(issueList),
+      mutation: normalizeCheck(mutation),
+    },
+  };
+}
+
 export function runCommand(command, args, { env = process.env } = {}) {
   const result = spawnSync(command, args, {
     env: { ...env, GH_PROMPT_DISABLED: '1' },
@@ -91,7 +121,8 @@ export function runCommand(command, args, { env = process.env } = {}) {
   return {
     command: [command, ...args].join(' '),
     exitCode: result.status ?? 1,
-    stdout: result.stdout.trim(),
-    stderr: result.stderr.trim(),
+    stdout: result.stdout?.trim() ?? '',
+    stderr: result.stderr?.trim() ?? '',
+    error: result.error?.message ?? '',
   };
 }
