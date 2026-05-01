@@ -4,11 +4,13 @@ import {
   buildPreflightReport,
   classifyPreflightResult,
   envTokenNames,
+  parseRepoSlug,
   resolvePreflightOptions,
   runCommand,
 } from './lib/pm_housekeeping_github_preflight.js';
 
 const repo = 'metagrover/pluto';
+parseRepoSlug(repo);
 const tokenNames = envTokenNames();
 const { runMutationCheck, mutationIssueNumber } = resolvePreflightOptions(
   process.argv.slice(2),
@@ -31,6 +33,13 @@ const issueList = runCommand('gh', [
   '--limit',
   '1',
 ]);
+const permission = runCommand('gh', [
+  'repo',
+  'view',
+  repo,
+  '--json',
+  'viewerPermission',
+]);
 const mutation = runMutationCheck
   ? runCommand('gh', [
       'issue',
@@ -42,12 +51,22 @@ const mutation = runMutationCheck
       `PM housekeeping mutation preflight passed at ${new Date().toISOString()}.`,
     ])
   : { exitCode: 0 };
+let permissionPayload = {};
+if (permission.exitCode === 0) {
+  try {
+    permissionPayload = JSON.parse(permission.stdout || '{}');
+  } catch {
+    permissionPayload = {};
+  }
+}
 
 const classification = classifyPreflightResult({
   envTokenNames: tokenNames,
   authExitCode: auth.exitCode,
   apiExitCode: api.exitCode,
   issueListExitCode: issueList.exitCode,
+  permissionExitCode: permission.exitCode,
+  viewerPermission: permissionPayload.viewerPermission ?? null,
   mutationExitCode: mutation.exitCode,
 });
 

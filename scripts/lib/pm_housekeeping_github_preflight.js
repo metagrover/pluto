@@ -1,6 +1,9 @@
 import { spawnSync } from 'node:child_process';
 
 const TOKEN_NAME_PATTERN = /(^|_)(GH|GITHUB|TOKEN|PAT|OAUTH|AUTH)(_|$)|GITHUB/i;
+const TOKEN_VALUE_PATTERN = /\bgh[opusr]_[A-Za-z0-9_*]+\b/gi;
+const TOKEN_ASSIGNMENT_PATTERN = /\b(GH_TOKEN|GITHUB_TOKEN)=\S+/g;
+const TOKEN_STATUS_LINE_PATTERN = /^(\s*-\s*Token:\s*).+$/gm;
 
 export function envTokenNames(env = process.env) {
   return Object.keys(env)
@@ -8,6 +11,26 @@ export function envTokenNames(env = process.env) {
     .filter((name) => name === 'GH_TOKEN' || name === 'GITHUB_TOKEN')
     .filter((name) => `${env[name] ?? ''}`.trim().length > 0)
     .sort();
+}
+
+export function parseRepoSlug(repoSlug) {
+  const [owner, name, ...rest] = `${repoSlug ?? ''}`
+    .trim()
+    .split('/')
+    .filter(Boolean);
+
+  if (!owner || !name || rest.length > 0) {
+    throw new Error('Expected --repo in owner/name format.');
+  }
+
+  return { owner, name };
+}
+
+export function hasRepoWritePermission(viewerPermission) {
+  if (typeof viewerPermission !== 'string') return false;
+  return ['ADMIN', 'MAINTAIN', 'WRITE'].includes(
+    viewerPermission.trim().toUpperCase(),
+  );
 }
 
 export function resolvePreflightOptions(argv = []) {
@@ -32,6 +55,8 @@ export function classifyPreflightResult({
   authExitCode,
   apiExitCode,
   issueListExitCode,
+  permissionExitCode = 0,
+  viewerPermission = null,
   mutationExitCode = 0,
 }) {
   if (tokenNames.length === 0) {
@@ -67,6 +92,23 @@ export function classifyPreflightResult({
     };
   }
 
+  if (permissionExitCode !== 0) {
+    return {
+      ok: false,
+      failureKind: 'permission-check',
+      message: 'GitHub repository permission check failed.',
+    };
+  }
+
+  if (!hasRepoWritePermission(viewerPermission)) {
+    return {
+      ok: false,
+      failureKind: 'write-permission',
+      message:
+        'GitHub token is valid, but it does not have write-level access to the repository.',
+    };
+  }
+
   if (mutationExitCode !== 0) {
     return {
       ok: false,
@@ -78,8 +120,16 @@ export function classifyPreflightResult({
   return {
     ok: true,
     failureKind: null,
-    message: 'GitHub preflight passed with an environment-backed token.',
+    message:
+      'GitHub preflight passed with an environment-backed token and write-level repository access.',
   };
+}
+
+function sanitizeOutput(value) {
+  return `${value ?? ''}`
+    .replace(TOKEN_STATUS_LINE_PATTERN, '$1[redacted]')
+    .replace(TOKEN_ASSIGNMENT_PATTERN, '$1=[redacted]')
+    .replace(TOKEN_VALUE_PATTERN, '[redacted]');
 }
 
 export function buildPreflightReport({
@@ -93,8 +143,8 @@ export function buildPreflightReport({
   const normalizeCheck = (check) => ({
     command: check.command ?? '',
     exitCode: check.exitCode ?? 1,
-    stdout: check.stdout ?? '',
-    stderr: check.stderr ?? '',
+    stdout: sanitizeOutput(check.stdout),
+    stderr: sanitizeOutput(check.stderr),
     ...(check.error ? { error: check.error } : {}),
   });
 
