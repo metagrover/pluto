@@ -153,7 +153,7 @@ export const ZenMode = ({
                 </div>
                 {meetingParticipants.map((p, i) => (
                   <div
-                    // biome-ignore lint/suspicious/noArrayIndexKey: Participant names are not guaranteed unique, so index is used for deterministic removal.
+
                     key={i}
                     className="flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-full bg-stone-100 border border-stone-200 text-sm font-medium text-stone-600 animate-in fade-in zoom-in group"
                   >

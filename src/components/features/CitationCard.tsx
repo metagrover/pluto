@@ -23,13 +23,14 @@ export const CitationCard: React.FC<CitationCardProps> = ({
   onNavigateToMeeting,
 }) => {
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
       className={`p-5 rounded-2xl border transition-all cursor-pointer group flex flex-col gap-4 ${
         isActive
           ? 'bg-pro-surface border-pro-accent/40 shadow-[0_8px_30px_rgba(0,0,0,0.12)] -translate-y-1'
           : 'bg-pro-surface/40 border-pro-border/40 hover:border-pro-border/80 hover:bg-pro-surface/80 selection-none'
-      }`}
+      } text-left w-full`}
     >
       <div className="flex items-start justify-between">
         <div className="flex flex-col gap-1 pr-4">
@@ -73,6 +74,7 @@ export const CitationCard: React.FC<CitationCardProps> = ({
           </span>
         </div>
         <button
+          type="button"
           onClick={(e) => {
             e.stopPropagation();
             onNavigateToMeeting(citation.meeting_id);
@@ -85,6 +87,6 @@ export const CitationCard: React.FC<CitationCardProps> = ({
           </span>
         </button>
       </div>
-    </div>
+    </button>
   );
 };

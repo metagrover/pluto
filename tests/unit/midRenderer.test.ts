@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { renderMidToMarkdown } from '../../electron/intelligence/midRenderer';
 import type { MidFrontmatter } from '../../electron/intelligence/intelligenceTypes';
+import { renderMidToMarkdown } from '../../electron/intelligence/midRenderer';
 
 // =============================================
 // Helpers
@@ -98,7 +98,9 @@ describe('MID Renderer', () => {
       const md = renderMidToMarkdown(mockMid());
       expect(md).toContain('## Decisions');
       expect(md).toContain('**Use GraphQL for new endpoints**');
-      expect(md).toContain('Rationale: Better type safety and query flexibility');
+      expect(md).toContain(
+        'Rationale: Better type safety and query flexibility',
+      );
     });
 
     it('renders signals section', () => {
