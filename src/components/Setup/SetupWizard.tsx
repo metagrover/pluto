@@ -18,7 +18,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [hydrated, setHydrated] = useState(false);
 
   // Restore saved progress so user doesn't redo first screens
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Setup restoration intentionally runs once on mount.
+
   useEffect(() => {
     const load = async () => {
       const [setupComplete, savedStep, savedHf, savedLlm] = await Promise.all([

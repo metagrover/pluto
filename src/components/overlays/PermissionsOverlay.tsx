@@ -59,7 +59,7 @@ export const PermissionsOverlay = ({
       />
       <div
         className="relative z-10 w-full max-w-lg overflow-hidden rounded-[2rem] border border-pro-border bg-pro-surface shadow-2xl scale-in-center"
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="p-8 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg/50">
           <div className="flex items-center gap-5">

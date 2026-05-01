@@ -28,3 +28,10 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Decision:** Record most durable decisions in this chronological log. Create ADRs only for high-impact technical decisions with meaningful alternatives and long-lived consequences.
 - **Rationale:** Pluto needs low-friction memory for frequent product and design evolution, plus deeper records for architecture choices that future engineers will need to understand.
 - **Consequences:** The decision log becomes the fast map of project direction. ADRs become detailed landmarks, not the default workflow.
+
+## 2026-05-01 - Require environment-backed GitHub auth for PM automation
+- **Status:** Accepted
+- **Source:** [Issue #67](https://github.com/metagrover/pluto/issues/67), PM housekeeping automation readiness
+- **Decision:** Recurring PM housekeeping should treat `GH_TOKEN` or `GITHUB_TOKEN` as the supported authentication path and run a preflight that verifies API reachability, issue listing, and repository write scope before mutating issues, labels, PRs, or milestones.
+- **Rationale:** Keyring-backed `gh` auth can work in an interactive desktop session while failing in the cron automation runtime. An environment-backed token plus explicit diagnostics makes failures actionable and non-interactive.
+- **Consequences:** PM automation runs should report missing token, auth, network, issue-list, permission-probe, write-permission, and mutation failures separately, and should never print token values.

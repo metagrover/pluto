@@ -12,6 +12,7 @@ interface AskPlutoProps {
 }
 
 interface Message {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
   citations?: CitationChain[];
@@ -33,13 +34,18 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   const [dynamicQueries, setDynamicQueries] = useState<string[]>([]);
   const [isLoadingQueries, setIsLoadingQueries] = useState(false);
-  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(null);
+  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(
+    null,
+  );
+  const messageCounterRef = useRef(0);
+  const nextMessageId = () =>
+    `msg-${Date.now()}-${messageCounterRef.current++}`;
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  });
 
   useEffect(() => {
     if (visible) {
@@ -50,15 +56,15 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         return;
       }
 
-      if ((window as any).ipcRenderer) {
+      if (window.ipcRenderer) {
         setIsLoadingQueries(true);
-        (window as any).ipcRenderer
+        window.ipcRenderer
           .invoke('intelligence:suggested-queries')
           .then((queries: string[]) => {
             setDynamicQueries(queries);
             queryCacheRef.current = { queries, fetchedAt: Date.now() };
           })
-          .catch((e: any) => {
+          .catch((e: unknown) => {
             console.error('Failed to load dynamic queries', e);
             setDynamicQueries([]);
           })
@@ -79,30 +85,33 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     setQuery('');
     setMessages((prev) => [
       ...prev,
-      { role: 'user', content: submitQuery.trim() },
+      { id: nextMessageId(), role: 'user', content: submitQuery.trim() },
     ]);
     setIsProcessing(true);
     setActiveCitationKey(null);
 
     setMessages((prev) => [
       ...prev,
-      { role: 'assistant', content: '', isLoading: true },
+      { id: nextMessageId(), role: 'assistant', content: '', isLoading: true },
     ]);
 
     try {
-      if ((window as any).ipcRenderer) {
-        const response = await (window as any).ipcRenderer.invoke(
-          'intelligence:query',
-          submitQuery.trim(),
-        );
+      if (window.ipcRenderer) {
+        const response = await window.ipcRenderer.invoke<
+          string | { answer?: string; citations?: CitationChain[] }
+        >('intelligence:query', submitQuery.trim());
 
         setMessages((prev) => {
           const newMsg = [...prev];
           newMsg.pop();
+          const content =
+            typeof response === 'string' ? response : (response.answer ?? '');
           newMsg.push({
+            id: nextMessageId(),
             role: 'assistant',
-            content: response.answer || response,
-            citations: response.citations,
+            content,
+            citations:
+              typeof response === 'string' ? undefined : response.citations,
           });
           return newMsg;
         });
@@ -112,6 +121,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             const newMsg = [...prev];
             newMsg.pop();
             newMsg.push({
+              id: nextMessageId(),
               role: 'assistant',
               content:
                 'Based on the recent standup, the **API migration** was delayed by 2 days. The engineering team decided to use GraphQL over REST for the new endpoints.',
@@ -139,11 +149,11 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           setIsProcessing(false);
         }, 2000);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Ask Pluto error:', e);
 
       let errorMsg = "I'm sorry, there was an error processing your request.";
-      if (e?.message) {
+      if (e instanceof Error && e.message) {
         let msg = e.message.replace(/^Error:\s*/, '');
         if (
           msg.includes('SqliteError') ||
@@ -161,6 +171,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         const newMsg = [...prev];
         newMsg.pop();
         newMsg.push({
+          id: nextMessageId(),
           role: 'assistant',
           content: errorMsg,
         });
@@ -180,11 +191,13 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         className="absolute top-8 right-8 z-[1010] w-10 h-10 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all hover:scale-105 active-push group"
       >
         <svg
+          aria-hidden="true"
           className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300"
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
         >
+          <title>Close Ask Pluto</title>
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -236,6 +249,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   dynamicQueries.map((sq) => (
                     <button
                       key={sq}
+                      type="button"
                       onClick={() => handleSubmit(undefined, sq)}
                       className="px-5 py-3 rounded-2xl bg-pro-surface/40 hover:bg-pro-surface hover:scale-[1.02] border border-pro-border text-pro-text-muted hover:text-pro-text-main hover:border-pro-accent/40 text-[13px] font-semibold transition-all shadow-sm flex items-center gap-2 group/btn"
                     >
@@ -249,9 +263,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               </div>
             </div>
           ) : (
-            messages.map((msg, idx) => (
+            messages.map((msg) => (
               <div
-                key={idx}
+                key={msg.id}
                 className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'assistant' && (
@@ -304,8 +318,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                           </span>
                         </div>
                         <div className="space-y-3">
-                          {msg.citations.map((cit, citIdx) => {
-                            const citationKey = `${idx}-${citIdx}`;
+                          {msg.citations.map((cit) => {
+                            const citationKey = `${msg.id}-${cit.meeting_id}-${cit.claim}`;
 
                             return (
                               <CitationCard

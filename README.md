@@ -8,7 +8,7 @@ Intelligent meeting assistant and "second brain" application.
 
 - **Node.js** (v24.11)
 - **pnpm** (enable via `corepack enable` or install directly)
-- **Python** (v3.9+ recommended)
+- **Python** (v3.10.x recommended, via `pyenv`)
     - *Note: You do NOT need to install Python libraries globally. The project handles this for you.*
 - **FFmpeg** (`brew install ffmpeg` on macOS)
 - **macOS only:** Xcode Command Line Tools (`xcode-select --install`) for Swift builds
@@ -17,26 +17,41 @@ Intelligent meeting assistant and "second brain" application.
 
 1.  **Clone the repository**
     ```bash
-    git clone https://github.com/your-org/pluto.git
+    git clone https://github.com/metagrover/pluto.git
     cd pluto
     ```
 
-2.  **Install Dependencies**
-    This will install Node packages AND set up a local Python virtual environment automatically.
+2.  **Install Node Dependencies**
     ```bash
     pnpm install
     ```
 
-3.  **Build native audio tools (macOS)**
+3.  **Set up Python Environment**
+    This installs WhisperX and ML dependencies into a local virtual environment. This may take a few minutes.
+    ```bash
+    pnpm run setup-python
+    ```
+
+4.  **Build native audio tools (macOS)**
     This builds the Swift binaries used for microphone + system audio capture.
     ```bash
     pnpm run build-native
     ```
 
-4.  **Run the App**
+5.  **Run the App**
     ```bash
     pnpm run dev
     ```
+
+### 🛠 Troubleshooting
+
+#### Electron ABI Mismatch (`better-sqlite3`)
+If you see an error like `NODE_MODULE_VERSION mismatch` or tests fail because of `better-sqlite3`, run:
+```bash
+pnpm run fix-sqlite-abi
+```
+
+For more detailed troubleshooting, see [docs/dev.md](docs/dev.md).
 
 ### macOS Permissions
 

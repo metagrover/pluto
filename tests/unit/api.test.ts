@@ -2,7 +2,7 @@ import { describe, it } from 'vitest';
 import { vi } from 'vitest';
 
 vi.mock('electron', () => {
-  const path = require('path');
+  const path = require('node:path');
   return {
     app: {
       getPath: (name: string) => {
@@ -43,14 +43,14 @@ describe('REAL API E2E', () => {
 
     // 2. Parse Query
     const parsed = await parseQuery(query);
-    console.log(`\n=== PARSED INTENT ===`);
+    console.log('\n=== PARSED INTENT ===');
     console.log(
       `Intent: ${parsed.intent}\nKeywords: ${parsed.keywords}\nExpanded: ${parsed.expanded_keywords}`,
     );
 
     // 3. Retrieve Context
     const context = await retrieveContext(parsed);
-    console.log(`\n=== RETRIEVED CONTEXT ===`);
+    console.log('\n=== RETRIEVED CONTEXT ===');
     console.log(`Count: ${context.length}`);
     if (context.length > 0) {
       console.log(
@@ -63,14 +63,14 @@ describe('REAL API E2E', () => {
     // 4. Hit LLM
     try {
       const settings = await getAllSettings();
-      console.log(`\n=== LLM Settings ===`);
+      console.log('\n=== LLM Settings ===');
       console.log(`Provider: ${settings.llm_provider}`);
       const provider = await getProvider(settings);
 
       const prompt = getAskPlutoPrompt(query, context, 'Use exact quotes.');
       console.log(`\n=== LLM PROMPT ===\n${prompt}`);
 
-      console.log(`\n=== QUERYING LLM ===`);
+      console.log('\n=== QUERYING LLM ===');
       const answer = await provider.answerAskPluto(prompt);
       console.log(`\n=== FINAL ASSISTANT COMPLETED ===\n\n${answer}\n\n`);
     } catch (e) {
