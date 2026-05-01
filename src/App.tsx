@@ -165,7 +165,7 @@ function App() {
     }
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: This effect is intentionally scoped to meeting selection changes.
+
   useEffect(() => {
     setTranscriptVisible(false);
     if (contentScrollRef.current) {
@@ -432,7 +432,7 @@ function App() {
     }
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: This boot probe should run once and intentionally captures initial handlers.
+
   useEffect(() => {
     const probeOnBoot = async () => {
       const alreadyDone = await window.ipcRenderer.invoke('BOOT_PROBE_STATUS');
