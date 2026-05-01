@@ -3532,7 +3532,7 @@ export const AudioManager = ({
         }
       } else {
         console.log(
-          `[Pluto] Skipping full-session fallback; chunk transcript looks healthy`,
+          '[Pluto] Skipping full-session fallback; chunk transcript looks healthy',
         );
       }
 
@@ -4152,8 +4152,12 @@ export const AudioManager = ({
         elapsedMs: chunkTranscriptMeta.elapsedMs,
       };
 
+      const currentMeetingId = currentMeetingIdRef.current;
+      if (!currentMeetingId) {
+        throw new Error('No active meeting ID while finalizing recording');
+      }
       const meetingData = {
-        id: currentMeetingIdRef.current!,
+        id: currentMeetingId,
         title: title,
         meeting_type: 'Recording',
         started_at: startTime,
@@ -4286,7 +4290,7 @@ export const AudioManager = ({
     window.addEventListener('STOP_RECORDING', handleStopRecording);
     window.addEventListener('START_RECORDING', handleStartRecording);
 
-    const handleMeetingDeleted = (_: any, deletedId: string) => {
+    const handleMeetingDeleted = (_event: unknown, deletedId: string) => {
       if (deletedId === currentMeetingIdRef.current) {
         console.warn(
           `[Pluto] Active meeting ${deletedId} was deleted. Resetting state.`,

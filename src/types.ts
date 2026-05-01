@@ -129,6 +129,7 @@ export interface Meeting {
   transcript_json?: string;
   user_notes?: string;
   value_signals_json?: string;
+  follow_up_drafts_json?: string;
   analysis_json?: string;
   analysis_schema_version?: number;
   analysis_format_pass?: number | boolean;
