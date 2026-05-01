@@ -3,13 +3,15 @@
 import {
   classifyPreflightResult,
   envTokenNames,
+  resolvePreflightOptions,
   runCommand,
 } from './lib/pm_housekeeping_github_preflight.js';
 
 const repo = 'metagrover/pluto';
 const tokenNames = envTokenNames();
-const args = new Set(process.argv.slice(2));
-const runMutationCheck = args.has('--mutation-check');
+const { runMutationCheck, mutationIssueNumber } = resolvePreflightOptions(
+  process.argv.slice(2),
+);
 
 const auth = runCommand('gh', ['auth', 'status', '--hostname', 'github.com']);
 const api = runCommand('curl', [
@@ -32,7 +34,7 @@ const mutation = runMutationCheck
   ? runCommand('gh', [
       'issue',
       'comment',
-      '67',
+      mutationIssueNumber,
       '--repo',
       repo,
       '--body',

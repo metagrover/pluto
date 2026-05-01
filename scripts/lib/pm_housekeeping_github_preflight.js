@@ -6,7 +6,25 @@ export function envTokenNames(env = process.env) {
   return Object.keys(env)
     .filter((name) => TOKEN_NAME_PATTERN.test(name))
     .filter((name) => name === 'GH_TOKEN' || name === 'GITHUB_TOKEN')
+    .filter((name) => `${env[name] ?? ''}`.trim().length > 0)
     .sort();
+}
+
+export function resolvePreflightOptions(argv = []) {
+  const args = new Set(argv);
+  const issueNumberIndex = argv.indexOf('--issue-number');
+  const mutationIssueNumber =
+    issueNumberIndex >= 0 ? (argv[issueNumberIndex + 1] ?? '') : '';
+  const runMutationCheck = args.has('--mutation-check');
+
+  if (runMutationCheck && mutationIssueNumber.trim().length === 0) {
+    throw new Error('--mutation-check requires --issue-number <number>.');
+  }
+
+  return {
+    runMutationCheck,
+    mutationIssueNumber: mutationIssueNumber.trim(),
+  };
 }
 
 export function classifyPreflightResult({
