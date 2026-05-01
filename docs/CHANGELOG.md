@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-01
 
+### Add PM housekeeping GitHub preflight
+- **Issue:** [#67](https://github.com/metagrover/pluto/issues/67)
+- **PR:** Not opened yet.
+- **Changed:** Added a `pm:github-preflight` check that verifies environment-backed GitHub auth, API reachability, issue listing, and optional issue-comment mutation without logging token values.
+- **Why:** Recurring PM automation needs to distinguish missing secrets, invalid auth, network failures, and mutation failures before grooming issues.
+- **Replaced:** Relying on interactive `gh` keyring auth as evidence that cron automation can access GitHub.
+- **Notes:** The local interactive shell still has keyring-backed auth only; the recurring runtime needs `GH_TOKEN` or `GITHUB_TOKEN` injected by the host environment.
+
 ### Adopt issue-driven agentic development
 - **Issue:** [#55](https://github.com/metagrover/pluto/issues/55)
 - **PR:** Not opened yet.
