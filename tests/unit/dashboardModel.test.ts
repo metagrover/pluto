@@ -289,16 +289,80 @@ describe('buildDashboardHomeModel', () => {
     expect(model.actionInsights.activeCount).toBe(3);
     expect(model.actionInsights.items).toHaveLength(5);
     expect(model.actionInsights.items.map((item) => item.id)).toEqual([
-      'shared',
       'overdue-2',
+      'shared',
       'stale-1',
       'stale-2',
-      'active-1',
+      'active-2',
     ]);
-    expect(model.actionInsights.items[0]).toMatchObject({
-      title: 'Shared overdue task',
-      status: 'overdue',
+    expect(
+      model.actionInsights.items.filter((item) => item.id === 'shared'),
+    ).toEqual([
+      expect.objectContaining({
+        title: 'Shared overdue task',
+        status: 'overdue',
+      }),
+    ]);
+  });
+
+  it('orders action insights by urgency, due date, and recency within each bucket', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [
+        makeAction({
+          id: 'overdue-later',
+          name: 'Later overdue task',
+          due_date: '2026-04-29T12:00:00.000Z',
+          updated_at: '2026-04-29T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'overdue-sooner',
+          name: 'Sooner overdue task',
+          due_date: '2026-04-20T12:00:00.000Z',
+          updated_at: '2026-04-21T18:00:00.000Z',
+        }),
+      ],
+      staleActions: [
+        makeAction({
+          id: 'stale-newer',
+          name: 'Newer stale task',
+          due_date: null,
+          updated_at: '2026-04-28T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'stale-older',
+          name: 'Older stale task',
+          due_date: null,
+          updated_at: '2026-04-10T18:00:00.000Z',
+        }),
+      ],
+      activeActions: [
+        makeAction({
+          id: 'active-undated',
+          name: 'Undated active task',
+          due_date: null,
+          updated_at: '2026-04-29T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'active-sooner',
+          name: 'Sooner active task',
+          due_date: '2026-05-01T12:00:00.000Z',
+          updated_at: '2026-04-11T18:00:00.000Z',
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
     });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items.map((item) => item.id)).toEqual([
+      'overdue-sooner',
+      'overdue-later',
+      'stale-older',
+      'stale-newer',
+      'active-sooner',
+    ]);
   });
 
   it('does not create a spotlight for projects without health signals', () => {
