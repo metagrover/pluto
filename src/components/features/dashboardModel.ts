@@ -281,12 +281,15 @@ const buildActionInsights = (
   activeActions: Entity[],
 ): DashboardActionInsights => {
   const prioritizedItems = [
-    ...sortActions(overdueActions, compareActionsByDueDate)
-      .map((action) => actionToInsightItem(action, 'overdue')),
-    ...sortActions(staleActions, compareActionsByOldestUpdate)
-      .map((action) => actionToInsightItem(action, 'stale')),
-    ...sortActions(activeActions, compareActionsByDueDate)
-      .map((action) => actionToInsightItem(action, 'active')),
+    ...sortActions(overdueActions, compareActionsByDueDate).map((action) =>
+      actionToInsightItem(action, 'overdue'),
+    ),
+    ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) =>
+      actionToInsightItem(action, 'stale'),
+    ),
+    ...sortActions(activeActions, compareActionsByDueDate).map((action) =>
+      actionToInsightItem(action, 'active'),
+    ),
   ];
   const seenIds = new Set<string>();
   const items = prioritizedItems
