@@ -297,9 +297,7 @@ export const retrieveContext = async (
             const topicSummaries = analysis.topics
               .map((t) => {
                 const points = Array.isArray(t.key_points)
-                  ? t.key_points
-                      .map((p) => `  - ${p.text || ''}`)
-                      .join('\n')
+                  ? t.key_points.map((p) => `  - ${p.text || ''}`).join('\n')
                   : '';
                 return `### ${t.title}\n${t.summary || ''}${
                   points ? `\n${points}` : ''

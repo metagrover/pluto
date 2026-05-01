@@ -38,7 +38,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     null,
   );
   const messageCounterRef = useRef(0);
-  const nextMessageId = () => `msg-${Date.now()}-${messageCounterRef.current++}`;
+  const nextMessageId = () =>
+    `msg-${Date.now()}-${messageCounterRef.current++}`;
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -98,10 +99,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       if (window.ipcRenderer) {
         const response = await window.ipcRenderer.invoke<
           string | { answer?: string; citations?: CitationChain[] }
-        >(
-          'intelligence:query',
-          submitQuery.trim(),
-        );
+        >('intelligence:query', submitQuery.trim());
 
         setMessages((prev) => {
           const newMsg = [...prev];
@@ -112,7 +110,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             id: nextMessageId(),
             role: 'assistant',
             content,
-            citations: typeof response === 'string' ? undefined : response.citations,
+            citations:
+              typeof response === 'string' ? undefined : response.citations,
           });
           return newMsg;
         });

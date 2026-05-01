@@ -34,9 +34,7 @@ export function getAlerts(options?: {
 
   const meetingId = options?.meetingId;
   if (meetingId) {
-    results = results.filter((a) =>
-      a.related_meeting_ids.includes(meetingId),
-    );
+    results = results.filter((a) => a.related_meeting_ids.includes(meetingId));
   }
 
   results.sort(

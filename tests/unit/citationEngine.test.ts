@@ -54,9 +54,9 @@ describe('Citation Engine', () => {
         evidence_spans: [{ quote: 'hello this is a test' }],
       } as unknown as ReturnType<typeof dbModule.getMeetingMid>);
 
-      vi.mocked(dbModule.getEntity).mockReturnValue(
-        { id: 'e1' } as unknown as dbModule.Entity,
-      );
+      vi.mocked(dbModule.getEntity).mockReturnValue({
+        id: 'e1',
+      } as unknown as dbModule.Entity);
 
       const citations = [
         {
