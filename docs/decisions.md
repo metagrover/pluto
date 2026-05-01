@@ -32,6 +32,6 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 ## 2026-05-01 - Require environment-backed GitHub auth for PM automation
 - **Status:** Accepted
 - **Source:** [Issue #67](https://github.com/metagrover/pluto/issues/67), PM housekeeping automation readiness
-- **Decision:** Recurring PM housekeeping should treat `GH_TOKEN` or `GITHUB_TOKEN` as the supported authentication path and run a preflight before mutating issues, labels, PRs, or milestones.
+- **Decision:** Recurring PM housekeeping should treat `GH_TOKEN` or `GITHUB_TOKEN` as the supported authentication path and run a preflight that verifies API reachability, issue listing, and repository write scope before mutating issues, labels, PRs, or milestones.
 - **Rationale:** Keyring-backed `gh` auth can work in an interactive desktop session while failing in the cron automation runtime. An environment-backed token plus explicit diagnostics makes failures actionable and non-interactive.
-- **Consequences:** PM automation runs should report missing token, auth, network, issue-list, and mutation failures separately, and should never print token values.
+- **Consequences:** PM automation runs should report missing token, auth, network, issue-list, permission-probe, write-permission, and mutation failures separately, and should never print token values.
