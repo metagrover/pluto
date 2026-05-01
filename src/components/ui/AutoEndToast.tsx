@@ -16,7 +16,7 @@ export const AutoEndToast = ({
   onReopen,
   onDismiss,
 }: AutoEndToastProps) => {
-  const label = reason ? reasonLabels[reason] || reason : 'Call ended';
+  const label = reason ? (reasonLabels[reason] || reason) : 'Call ended';
   const detail = appName ? `${appName} — ${label}` : label;
 
   return (
