@@ -174,10 +174,12 @@ function endTranscriptionWork() {
 }
 
 function getAbortSignalForMeeting(meetingId: string): AbortSignal {
-  if (!activeMeetingTasks.has(meetingId)) {
-    activeMeetingTasks.set(meetingId, new AbortController());
+  let controller = activeMeetingTasks.get(meetingId);
+  if (!controller) {
+    controller = new AbortController();
+    activeMeetingTasks.set(meetingId, controller);
   }
-  return activeMeetingTasks.get(meetingId)!.signal;
+  return controller.signal;
 }
 
 function clearAbortControllerForMeeting(meetingId: string) {

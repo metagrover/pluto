@@ -29,7 +29,7 @@ function shuffle<T>(array: T[]): T[] {
 
 function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
-  return str.slice(0, maxLength).trim() + '…';
+  return `${str.slice(0, maxLength).trim()}…`;
 }
 
 function pickRandom<T>(array: T[]): T | null {
@@ -47,8 +47,14 @@ function getTemporalLabel(dateStr: string | null | undefined): string | null {
   if (Number.isNaN(date.getTime())) return null;
 
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const diffMs = startOfToday.getTime() - new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
+  const diffMs =
+    startOfToday.getTime() -
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
 
   if (diffDays === 0) return "today's";
@@ -67,11 +73,17 @@ function getTemporalLabel(dateStr: string | null | undefined): string | null {
 
 interface V3Extracted {
   topics: string[];
-  actionItems: Array<{ description: string; assignee?: string; status?: string }>;
+  actionItems: Array<{
+    description: string;
+    assignee?: string;
+    status?: string;
+  }>;
   decisions: Array<{ description: string }>;
 }
 
-function extractFromV3Analysis(analysisJson: string | null | undefined): V3Extracted | null {
+function extractFromV3Analysis(
+  analysisJson: string | null | undefined,
+): V3Extracted | null {
   if (!analysisJson || typeof analysisJson !== 'string') return null;
   try {
     const analysis = JSON.parse(analysisJson);
@@ -155,23 +167,28 @@ export function generateSuggestedQueries(): string[] {
     if (mid) {
       if (Array.isArray(mid.topics)) {
         for (const t of mid.topics) {
-          if (t.name) topicFrequency[t.name] = (topicFrequency[t.name] || 0) + 1;
+          if (t.name)
+            topicFrequency[t.name] = (topicFrequency[t.name] || 0) + 1;
         }
       }
       if (Array.isArray(mid.projects)) {
         for (const p of mid.projects) {
-          if (p.name) projectFrequency[p.name] = (projectFrequency[p.name] || 0) + 1;
+          if (p.name)
+            projectFrequency[p.name] = (projectFrequency[p.name] || 0) + 1;
         }
       }
       if (Array.isArray(mid.participants)) {
         for (const p of mid.participants) {
-          if (p.name) participantFrequency[p.name] = (participantFrequency[p.name] || 0) + 1;
+          if (p.name)
+            participantFrequency[p.name] =
+              (participantFrequency[p.name] || 0) + 1;
         }
       }
       if (Array.isArray(mid.action_items)) {
         for (const a of mid.action_items) {
           if (a.assignee && a.status === 'active') {
-            globalAssignees[a.assignee] = (globalAssignees[a.assignee] || 0) + 1;
+            globalAssignees[a.assignee] =
+              (globalAssignees[a.assignee] || 0) + 1;
           }
         }
       }
@@ -186,7 +203,8 @@ export function generateSuggestedQueries(): string[] {
         }
         for (const a of v3.actionItems) {
           if (a.assignee && a.status !== 'completed') {
-            globalAssignees[a.assignee] = (globalAssignees[a.assignee] || 0) + 1;
+            globalAssignees[a.assignee] =
+              (globalAssignees[a.assignee] || 0) + 1;
           }
         }
       }
@@ -215,7 +233,9 @@ export function generateSuggestedQueries(): string[] {
     // ── P0: Action Accountability ──
     const activeItems: Array<{ description: string; assignee?: string }> = [];
     if (mid && Array.isArray(mid.action_items)) {
-      activeItems.push(...mid.action_items.filter((a) => a.status === 'active'));
+      activeItems.push(
+        ...mid.action_items.filter((a) => a.status === 'active'),
+      );
     } else if (v3) {
       activeItems.push(
         ...v3.actionItems.filter((a) => a.status !== 'completed'),
@@ -238,7 +258,8 @@ export function generateSuggestedQueries(): string[] {
       const decision = pickRandom(decisions);
       if (decision?.description) {
         // Try to pair with a topic for richer queries
-        const topicNames = mid?.topics?.map((t) => t.name).filter(Boolean) || v3?.topics || [];
+        const topicNames =
+          mid?.topics?.map((t) => t.name).filter(Boolean) || v3?.topics || [];
         if (topicNames.length > 0) {
           const topic = pickRandom(topicNames);
           if (topic) {
@@ -266,7 +287,8 @@ export function generateSuggestedQueries(): string[] {
     }
 
     // ── P2: Cross-meeting Continuity (topics) ──
-    const topicNames = mid?.topics?.map((t) => t.name).filter(Boolean) || v3?.topics || [];
+    const topicNames =
+      mid?.topics?.map((t) => t.name).filter(Boolean) || v3?.topics || [];
     for (const name of topicNames) {
       if (name && topicFrequency[name] > 1) {
         const variants = [
@@ -317,8 +339,9 @@ export function generateSuggestedQueries(): string[] {
   // ── Global candidates (not per-meeting) ────────────────────
 
   // P0: Deduplicated assignee queries — pick top assignee by count
-  const sortedAssignees = Object.entries(globalAssignees)
-    .sort((a, b) => b[1] - a[1]);
+  const sortedAssignees = Object.entries(globalAssignees).sort(
+    (a, b) => b[1] - a[1],
+  );
   if (sortedAssignees.length > 0) {
     const [topAssignee] = sortedAssignees[0];
     candidates.push({
@@ -358,7 +381,9 @@ export function generateSuggestedQueries(): string[] {
   // ── Temporal summary queries ───────────────────────────────
   const latestMeeting = recentMeetings[0];
   if (latestMeeting) {
-    const latestDate = new Date(latestMeeting.started_at || latestMeeting.created_at || '');
+    const latestDate = new Date(
+      latestMeeting.started_at || latestMeeting.created_at || '',
+    );
     const now = new Date();
     const diffDays = Math.round(
       (now.getTime() - latestDate.getTime()) / (1000 * 60 * 60 * 24),
@@ -367,9 +392,10 @@ export function generateSuggestedQueries(): string[] {
       candidates.push({
         tier: 3,
         category: 'temporal_summary',
-        query: diffDays <= 1
-          ? "Summarize today's meetings"
-          : 'What happened in my meetings this week?',
+        query:
+          diffDays <= 1
+            ? "Summarize today's meetings"
+            : 'What happened in my meetings this week?',
       });
     }
   }

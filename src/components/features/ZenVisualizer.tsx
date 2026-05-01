@@ -13,7 +13,7 @@ export const ZenVisualizer = ({
   const [level, setLevel] = useState(0);
 
   // Count up while recording; freeze when processing starts
-  // biome-ignore lint/correctness/useExhaustiveDependencies: This timer intentionally rebinds only on processing state transitions.
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (!isProcessing) {

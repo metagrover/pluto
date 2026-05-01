@@ -3532,7 +3532,7 @@ export const AudioManager = ({
         }
       } else {
         console.log(
-          `[Pluto] Skipping full-session fallback; chunk transcript looks healthy`,
+          '[Pluto] Skipping full-session fallback; chunk transcript looks healthy',
         );
       }
 

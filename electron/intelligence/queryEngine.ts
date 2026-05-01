@@ -244,7 +244,7 @@ export const retrieveContext = async (
     .map((k) => {
       const parts = k.split(/\s+/).filter((p) => p.length > 0);
       if (parts.length > 1) {
-        return '(' + parts.map((p) => `"${p}"`).join(' AND ') + ')';
+        return `(${parts.map((p) => `"${p}"`).join(' AND ')})`;
       }
       return `"${parts[0]}"`;
     })
@@ -253,10 +253,12 @@ export const retrieveContext = async (
   // 2. FTS Search
   if (ftsQueryStr) {
     const meetings = searchMeetingsFts(ftsQueryStr, { limit: 20 });
-    meetings.forEach((m, idx) => {
+    let idx = 0;
+    for (const m of meetings) {
       // rank is an implicit SQLite FTS score, we mock it via idx if it's not exposed
       // Assuming return order is rank order
       const fts_rank = 1.0 / (idx + 1);
+      idx++;
       let mid: MidFrontmatter | null = null;
       try {
         const midJsonStr = (m as any).mid_json;
@@ -320,7 +322,7 @@ export const retrieveContext = async (
           mention_weight: 0,
         },
       };
-    });
+    }
   }
 
   const walkedMeetingCount = new Map<
@@ -334,7 +336,7 @@ export const retrieveContext = async (
 
     // Find meetings directly linked to this entity first
     const directMeetings = dbModule.getMeetingsForEntity(entityId);
-    directMeetings.forEach((dm) => {
+    for (const dm of directMeetings) {
       const existing = walkedMeetingCount.get(dm.meeting_id) || {
         proximity: 0,
         count: 0,
@@ -343,7 +345,7 @@ export const retrieveContext = async (
         proximity: Math.max(existing.proximity, 1.0), // direct hit
         count: existing.count + 1,
       });
-    });
+    }
 
     // Walk the graph for related entities
     const relatedEntities = walkEntityGraph(entityId, 2, {
@@ -353,7 +355,7 @@ export const retrieveContext = async (
       if (Date.now() - startTime > TIME_BUDGET) break;
 
       const relatedMeetings = dbModule.getMeetingsForEntity(rel.id);
-      relatedMeetings.forEach((rm) => {
+      for (const rm of relatedMeetings) {
         const existing = walkedMeetingCount.get(rm.meeting_id) || {
           proximity: 0,
           count: 0,
@@ -362,7 +364,7 @@ export const retrieveContext = async (
           proximity: Math.max(existing.proximity, 0.5), // indirect (graph-walked) hit
           count: existing.count + 1,
         });
-      });
+      }
     }
   }
 

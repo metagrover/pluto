@@ -1,6 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { buildCitationChain, auditCitations } from '../../electron/intelligence/citationEngine';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../electron/db';
+import {
+  auditCitations,
+  buildCitationChain,
+} from '../../electron/intelligence/citationEngine';
 
 vi.mock('../../electron/db', () => ({
   getEntity: vi.fn(),
@@ -14,11 +17,12 @@ describe('Citation Engine', () => {
 
   describe('buildCitationChain', () => {
     it('extracts citation tags from LLM output correctly', () => {
-      const answer = 'Here is what happened: <cite meeting="m1" entity="e1" quote="let\'s migrate">We decided to migrate</cite>. Later, <cite meeting="m2">No quote</cite>.';
-      
+      const answer =
+        'Here is what happened: <cite meeting="m1" entity="e1" quote="let\'s migrate">We decided to migrate</cite>. Later, <cite meeting="m2">No quote</cite>.';
+
       const context = [
         { meeting_id: 'm1', mid: { title: 'First Meeting' } } as any,
-        { meeting_id: 'm2', mid: { title: 'Second Meeting' } } as any
+        { meeting_id: 'm2', mid: { title: 'Second Meeting' } } as any,
       ];
 
       const citations = buildCitationChain(answer, context);
@@ -46,9 +50,7 @@ describe('Citation Engine', () => {
   describe('auditCitations', () => {
     it('audits valid citations successfully', () => {
       vi.mocked(dbModule.getMeetingMid).mockReturnValue({
-        evidence_spans: [
-          { quote: "hello this is a test" }
-        ]
+        evidence_spans: [{ quote: 'hello this is a test' }],
       } as any);
 
       vi.mocked(dbModule.getEntity).mockReturnValue({ id: 'e1' } as any);
@@ -61,7 +63,7 @@ describe('Citation Engine', () => {
           evidence_span: 'this is a test',
           evidence_valid: false,
           meeting_title: 'Meeting 1',
-        }
+        },
       ];
 
       const audited = auditCitations(citations);
@@ -72,7 +74,12 @@ describe('Citation Engine', () => {
       vi.mocked(dbModule.getMeetingMid).mockReturnValue(null);
 
       const citations = [
-        { claim: 'test', meeting_id: 'm1', evidence_valid: false, meeting_title: 'M1' }
+        {
+          claim: 'test',
+          meeting_id: 'm1',
+          evidence_valid: false,
+          meeting_title: 'M1',
+        },
       ];
 
       const audited = auditCitations(citations);
@@ -84,7 +91,13 @@ describe('Citation Engine', () => {
       vi.mocked(dbModule.getEntity).mockReturnValue(undefined);
 
       const citations = [
-        { claim: 'test', meeting_id: 'm1', entity_id: 'e_invalid', evidence_valid: false, meeting_title: 'M1' }
+        {
+          claim: 'test',
+          meeting_id: 'm1',
+          entity_id: 'e_invalid',
+          evidence_valid: false,
+          meeting_title: 'M1',
+        },
       ];
 
       const audited = auditCitations(citations);
@@ -93,13 +106,17 @@ describe('Citation Engine', () => {
 
     it('fails audit if evidence span is missing from MID', () => {
       vi.mocked(dbModule.getMeetingMid).mockReturnValue({
-        evidence_spans: [
-          { quote: "some other thing entirely" }
-        ]
+        evidence_spans: [{ quote: 'some other thing entirely' }],
       } as any);
 
       const citations = [
-        { claim: 'test', meeting_id: 'm1', evidence_span: 'not found quote', evidence_valid: false, meeting_title: 'M1' }
+        {
+          claim: 'test',
+          meeting_id: 'm1',
+          evidence_span: 'not found quote',
+          evidence_valid: false,
+          meeting_title: 'M1',
+        },
       ];
 
       const audited = auditCitations(citations);

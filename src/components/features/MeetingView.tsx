@@ -89,7 +89,7 @@ export const MeetingView = ({
     string | null
   >(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: The selected meeting fields are intentionally included to recalculate measured height when content changes.
+
   useLayoutEffect(() => {
     if (!transcriptVisible) {
       setTranscriptBodyHeight(0);
@@ -119,7 +119,7 @@ export const MeetingView = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [transcriptVisible]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: This effect intentionally resets local entity detail state when the selected meeting id changes.
+
   useEffect(() => {
     setSelectedEntity(null);
     setEntityMeetings([]);

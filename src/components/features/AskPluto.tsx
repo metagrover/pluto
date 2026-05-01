@@ -33,7 +33,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   const [dynamicQueries, setDynamicQueries] = useState<string[]>([]);
   const [isLoadingQueries, setIsLoadingQueries] = useState(false);
-  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(null);
+  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(
+    null,
+  );
 
   const bottomRef = useRef<HTMLDivElement>(null);
 

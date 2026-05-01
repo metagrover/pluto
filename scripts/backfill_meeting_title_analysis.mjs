@@ -152,7 +152,9 @@ const representativeTitleTranscript = (transcript, maxChars = 2400) => {
   ].join('\n\n[...]\n\n');
 };
 
-const titlePrompt = (transcript) => `Analyze this conversation transcript and generate a concise, descriptive meeting title (max 5-7 words).
+const titlePrompt = (
+  transcript,
+) => `Analyze this conversation transcript and generate a concise, descriptive meeting title (max 5-7 words).
 
 The title should:
 - Capture the main topic or purpose
@@ -167,7 +169,10 @@ Respond with ONLY the title, nothing else.
 Transcript:
 ${representativeTitleTranscript(transcript)}`;
 
-const analysisPrompt = (transcript, userNotes) => `You are a rigorous meeting analyst for Pluto. Produce a structured JSON document that reads like well-organized meeting notes.
+const analysisPrompt = (
+  transcript,
+  userNotes,
+) => `You are a rigorous meeting analyst for Pluto. Produce a structured JSON document that reads like well-organized meeting notes.
 
 Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON object with this exact schema:
 {
@@ -196,7 +201,8 @@ const extractJsonObject = (text) => {
   } catch {
     const start = trimmed.indexOf('{');
     const end = trimmed.lastIndexOf('}');
-    if (start === -1 || end === -1 || end <= start) throw new Error('No JSON object in LLM response');
+    if (start === -1 || end === -1 || end <= start)
+      throw new Error('No JSON object in LLM response');
     return JSON.parse(trimmed.slice(start, end + 1));
   }
 };
@@ -243,7 +249,13 @@ const normalizeAnalysis = (analysis, metadata) => {
 const analysisToMarkdown = (analysis) => {
   const lines = [analysis.overview || 'Meeting analysis regenerated.'];
   for (const topic of analysis.topics) {
-    lines.push('', '─────────────────────────────────────────────────', '', `## ${topic.title}`, '');
+    lines.push(
+      '',
+      '─────────────────────────────────────────────────',
+      '',
+      `## ${topic.title}`,
+      '',
+    );
     if (topic.summary) lines.push(topic.summary, '');
     for (const point of topic.key_points || []) {
       const speaker = point?.speaker ? `${point.speaker}: ` : '';
@@ -263,7 +275,8 @@ const analysisToMarkdown = (analysis) => {
 };
 
 const ollamaGenerate = async (prompt, settings, jsonMode = false) => {
-  const model = settings.ollama_model || settings.llm_model || OLLAMA_DEFAULT_MODEL;
+  const model =
+    settings.ollama_model || settings.llm_model || OLLAMA_DEFAULT_MODEL;
   const response = await fetch('http://127.0.0.1:11434/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -275,7 +288,9 @@ const ollamaGenerate = async (prompt, settings, jsonMode = false) => {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Ollama API error: ${response.status} ${response.statusText}`,
+    );
   }
   const body = await response.json();
   return { text: body.response || '', model };
@@ -297,21 +312,29 @@ const main = async () => {
   if (rows.length === 0) return;
   if (options.dryRun) {
     for (const row of rows) {
-      console.log(`- rowid=${row.rowid} id=${row.id ?? 'NULL'} title="${row.title}"`);
+      console.log(
+        `- rowid=${row.rowid} id=${row.id ?? 'NULL'} title="${row.title}"`,
+      );
     }
-    console.log('[Backfill] Dry run only. Re-run with --write to regenerate and update matching meetings.');
+    console.log(
+      '[Backfill] Dry run only. Re-run with --write to regenerate and update matching meetings.',
+    );
     return;
   }
 
   const settings = fetchSettings(dbPath);
   if ((settings.llm_provider || 'ollama') !== 'ollama') {
-    throw new Error('This backfill script currently supports the configured Ollama provider. Switch Pluto to Ollama or use --dry-run.');
+    throw new Error(
+      'This backfill script currently supports the configured Ollama provider. Switch Pluto to Ollama or use --dry-run.',
+    );
   }
 
   for (const row of rows) {
     const transcript = transcriptTextFromJson(row.transcript_json);
     if (!transcript.trim()) {
-      console.log(`[Backfill] Skipping rowid=${row.rowid}; transcript is empty.`);
+      console.log(
+        `[Backfill] Skipping rowid=${row.rowid}; transcript is empty.`,
+      );
       continue;
     }
     const titleResult = await ollamaGenerate(titlePrompt(transcript), settings);
@@ -349,11 +372,15 @@ const main = async () => {
       analysis_generated_at: metadata.generated_at,
       analysis_error_categories_json: JSON.stringify([]),
     });
-    console.log(`[Backfill] Updated rowid=${row.rowid}: "${row.title}" -> "${title}"`);
+    console.log(
+      `[Backfill] Updated rowid=${row.rowid}: "${row.title}" -> "${title}"`,
+    );
   }
 };
 
 main().catch((error) => {
-  console.error(`[Backfill] ${error instanceof Error ? error.message : String(error)}`);
+  console.error(
+    `[Backfill] ${error instanceof Error ? error.message : String(error)}`,
+  );
   process.exitCode = 1;
 });
