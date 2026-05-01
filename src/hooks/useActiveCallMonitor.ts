@@ -60,7 +60,7 @@ export const useActiveCallMonitor = ({
     return true;
   };
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Poll lifecycle intentionally depends on external refs and stable closure behavior.
+
   useEffect(() => {
     let cancelled = false;
     let intervalId: number | null = null;

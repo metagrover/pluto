@@ -16,7 +16,7 @@
     "test:synthetic-attribution": "vitest run tests/unit/speakerAttribution.synthetic.test.ts",
     "setup-python": "./scripts/setup_python.sh",
     "build-python": "./scripts/build_python.sh",
-    "postinstall": "pnpm run setup-python",
+    "fix-sqlite-abi": "npx electron-rebuild -f -w better-sqlite3",
     "prepare": "lefthook install",
     "audit:high": "pnpm audit --audit-level high",
     "test": "vitest",

@@ -22,13 +22,12 @@ if command -v pyenv &> /dev/null; then
     echo "Using pyenv..."
     if ! pyenv versions | grep -q "3.10"; then
         echo "Installing Python 3.10..."
-        pyenv install 3.10.13
+        pyenv install 3.10.13 || echo "Warning: pyenv install failed. Attempting to use existing python."
     fi
-    pyenv local 3.10.13
-    PYTHON_CMD=$(pyenv which python)
+    pyenv local 3.10.13 || echo "Warning: pyenv local failed."
+    PYTHON_CMD=$(pyenv which python 2>/dev/null || true)
 else
-    echo "pyenv not found. Please install pyenv."
-    exit 1
+    echo "pyenv not found. Looking for system python..."
 fi
 
 # Fallback/Primary detection if pyenv didn't yield a specific python
