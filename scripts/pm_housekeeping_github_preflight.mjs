@@ -5,16 +5,16 @@ import {
   classifyPreflightResult,
   envTokenNames,
   parseRepoSlug,
+  parseViewerPermission,
   resolvePreflightOptions,
   runCommand,
 } from './lib/pm_housekeeping_github_preflight.js';
 
-const repo = 'metagrover/pluto';
-parseRepoSlug(repo);
 const tokenNames = envTokenNames();
-const { runMutationCheck, mutationIssueNumber } = resolvePreflightOptions(
+const { repo, runMutationCheck, mutationIssueNumber } = resolvePreflightOptions(
   process.argv.slice(2),
 );
+const { owner, name } = parseRepoSlug(repo);
 
 const auth = runCommand('gh', ['auth', 'status', '--hostname', 'github.com']);
 const api = runCommand('curl', [
@@ -33,13 +33,20 @@ const issueList = runCommand('gh', [
   '--limit',
   '1',
 ]);
-const permission = runCommand('gh', [
-  'repo',
-  'view',
-  repo,
-  '--json',
-  'viewerPermission',
+const permissionProbe = runCommand('gh', [
+  'api',
+  'graphql',
+  '-f',
+  `owner=${owner}`,
+  '-f',
+  `name=${name}`,
+  '-f',
+  'query=query($owner:String!, $name:String!) { repository(owner: $owner, name: $name) { viewerPermission } }',
 ]);
+const viewerPermission =
+  permissionProbe.exitCode === 0
+    ? parseViewerPermission(permissionProbe.stdout)
+    : null;
 const mutation = runMutationCheck
   ? runCommand('gh', [
       'issue',
@@ -51,31 +58,26 @@ const mutation = runMutationCheck
       `PM housekeeping mutation preflight passed at ${new Date().toISOString()}.`,
     ])
   : { exitCode: 0 };
-let permissionPayload = {};
-if (permission.exitCode === 0) {
-  try {
-    permissionPayload = JSON.parse(permission.stdout || '{}');
-  } catch {
-    permissionPayload = {};
-  }
-}
 
 const classification = classifyPreflightResult({
   envTokenNames: tokenNames,
   authExitCode: auth.exitCode,
   apiExitCode: api.exitCode,
   issueListExitCode: issueList.exitCode,
-  permissionExitCode: permission.exitCode,
-  viewerPermission: permissionPayload.viewerPermission ?? null,
+  permissionExitCode: permissionProbe.exitCode,
+  viewerPermission,
   mutationExitCode: mutation.exitCode,
 });
 
 const report = buildPreflightReport({
   classification,
   tokenNames,
+  repo,
+  viewerPermission,
   auth,
   api,
   issueList,
+  permissionProbe,
   mutation,
 });
 

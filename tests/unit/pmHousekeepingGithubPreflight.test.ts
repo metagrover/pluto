@@ -128,6 +128,7 @@ describe('PM housekeeping GitHub preflight helpers', () => {
     expect(
       resolvePreflightOptions(['--mutation-check', '--issue-number', '123']),
     ).toEqual({
+      repo: 'metagrover/pluto',
       runMutationCheck: true,
       mutationIssueNumber: '123',
     });
@@ -141,7 +142,9 @@ describe('PM housekeeping GitHub preflight helpers', () => {
           failureKind: 'network',
           message: 'GitHub API reachability failed.',
         },
+        repo: 'metagrover/pluto',
         tokenNames: ['GH_TOKEN'],
+        viewerPermission: 'WRITE',
         auth: {
           command: 'gh auth status --hostname github.com',
           exitCode: 0,
@@ -160,6 +163,12 @@ describe('PM housekeeping GitHub preflight helpers', () => {
           stdout: '',
           stderr: 'error connecting to api.github.com',
         },
+        permissionProbe: {
+          command: 'gh api graphql -f owner=metagrover -f name=pluto ...',
+          exitCode: 0,
+          stdout: '{"data":{"repository":{"viewerPermission":"WRITE"}}}',
+          stderr: '',
+        },
         mutation: {
           command: 'gh issue comment 67 --repo metagrover/pluto --body test',
           exitCode: 0,
@@ -171,7 +180,9 @@ describe('PM housekeeping GitHub preflight helpers', () => {
       ok: false,
       failureKind: 'network',
       message: 'GitHub API reachability failed.',
+      repo: 'metagrover/pluto',
       tokenNames: ['GH_TOKEN'],
+      viewerPermission: 'WRITE',
       checks: {
         auth: {
           command: 'gh auth status --hostname github.com',
@@ -191,6 +202,12 @@ describe('PM housekeeping GitHub preflight helpers', () => {
           stdout: '',
           stderr: 'error connecting to api.github.com',
         },
+        permissionProbe: {
+          command: 'gh api graphql -f owner=metagrover -f name=pluto ...',
+          exitCode: 0,
+          stdout: '{"data":{"repository":{"viewerPermission":"WRITE"}}}',
+          stderr: '',
+        },
         mutation: {
           command: 'gh issue comment 67 --repo metagrover/pluto --body test',
           exitCode: 0,
@@ -209,7 +226,9 @@ describe('PM housekeeping GitHub preflight helpers', () => {
           failureKind: 'auth',
           message: 'GitHub CLI auth failed with the environment-backed token.',
         },
+        repo: 'metagrover/pluto',
         tokenNames: ['GITHUB_TOKEN'],
+        viewerPermission: null,
         auth: {
           command: 'gh auth status --hostname github.com',
           exitCode: 1,
@@ -226,6 +245,12 @@ describe('PM housekeeping GitHub preflight helpers', () => {
         issueList: {
           command: 'gh issue list --repo metagrover/pluto --limit 1',
           exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+        permissionProbe: {
+          command: '',
+          exitCode: 1,
           stdout: '',
           stderr: '',
         },
@@ -253,7 +278,9 @@ describe('PM housekeeping GitHub preflight helpers', () => {
           failureKind: 'auth',
           message: 'GitHub CLI auth failed with the environment-backed token.',
         },
+        repo: 'metagrover/pluto',
         tokenNames: ['GH_TOKEN'],
+        viewerPermission: null,
         auth: {
           command: 'gh auth status --hostname github.com',
           exitCode: 1,
@@ -270,6 +297,12 @@ describe('PM housekeeping GitHub preflight helpers', () => {
         },
         issueList: {
           command: 'gh issue list --repo metagrover/pluto --limit 1',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+        },
+        permissionProbe: {
+          command: '',
           exitCode: 0,
           stdout: '',
           stderr: '',
@@ -293,9 +326,12 @@ describe('PM housekeeping GitHub preflight helpers', () => {
         classification: {
           ok: true,
           failureKind: null,
-          message: 'GitHub preflight passed with an environment-backed token.',
+          message:
+            'GitHub preflight passed with an environment-backed token and write-level repository access.',
         },
+        repo: 'metagrover/pluto',
         tokenNames: ['GH_TOKEN'],
+        viewerPermission: 'WRITE',
         auth: {
           command: 'gh auth status --hostname github.com',
           exitCode: 0,
@@ -312,6 +348,12 @@ describe('PM housekeeping GitHub preflight helpers', () => {
           command: 'gh issue list --repo metagrover/pluto --limit 1',
           exitCode: 0,
           stdout: '',
+          stderr: '',
+        },
+        permissionProbe: {
+          command: 'gh api graphql -f owner=metagrover -f name=pluto ...',
+          exitCode: 0,
+          stdout: '{"data":{"repository":{"viewerPermission":"WRITE"}}}',
           stderr: '',
         },
         mutation: {

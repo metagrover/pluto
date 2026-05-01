@@ -1,9 +1,15 @@
 import { spawnSync } from 'node:child_process';
 
 const TOKEN_NAME_PATTERN = /(^|_)(GH|GITHUB|TOKEN|PAT|OAUTH|AUTH)(_|$)|GITHUB/i;
-const TOKEN_VALUE_PATTERN = /\bgh[opusr]_[A-Za-z0-9_*]+\b/gi;
-const TOKEN_ASSIGNMENT_PATTERN = /\b(GH_TOKEN|GITHUB_TOKEN)=\S+/g;
-const TOKEN_STATUS_LINE_PATTERN = /^(\s*-\s*Token:\s*).+$/gm;
+const WRITE_PERMISSIONS = new Set(['ADMIN', 'MAINTAIN', 'WRITE']);
+
+const redactTokens = (value) =>
+  value
+    .replace(/- Token:\s*[^\n]+/g, '- Token: [redacted]')
+    .replace(/\b(?:GH_TOKEN|GITHUB_TOKEN)=([^\s]+)/g, (match) => {
+      const name = match.split('=')[0];
+      return `${name}=[redacted]`;
+    });
 
 export function envTokenNames(env = process.env) {
   return Object.keys(env)
@@ -13,38 +19,59 @@ export function envTokenNames(env = process.env) {
     .sort();
 }
 
-export function parseRepoSlug(repoSlug) {
-  const [owner, name, ...rest] = `${repoSlug ?? ''}`
-    .trim()
-    .split('/')
-    .filter(Boolean);
-
-  if (!owner || !name || rest.length > 0) {
+export function parseRepoSlug(repo) {
+  const match = /^([^/\s]+)\/([^/\s]+)$/.exec(repo);
+  if (!match) {
     throw new Error('Expected --repo in owner/name format.');
   }
 
-  return { owner, name };
+  return {
+    owner: match[1],
+    name: match[2],
+  };
 }
 
 export function hasRepoWritePermission(viewerPermission) {
-  if (typeof viewerPermission !== 'string') return false;
-  return ['ADMIN', 'MAINTAIN', 'WRITE'].includes(
-    viewerPermission.trim().toUpperCase(),
-  );
+  return viewerPermission ? WRITE_PERMISSIONS.has(viewerPermission) : false;
+}
+
+export function parseViewerPermission(stdout) {
+  try {
+    const parsed = JSON.parse(stdout);
+    const viewerPermission = parsed?.data?.repository?.viewerPermission;
+    return typeof viewerPermission === 'string' ? viewerPermission : null;
+  } catch {
+    return null;
+  }
 }
 
 export function resolvePreflightOptions(argv = []) {
-  const args = new Set(argv);
+  let repo = 'metagrover/pluto';
   const issueNumberIndex = argv.indexOf('--issue-number');
   const mutationIssueNumber =
     issueNumberIndex >= 0 ? (argv[issueNumberIndex + 1] ?? '') : '';
-  const runMutationCheck = args.has('--mutation-check');
+  const runMutationCheck = argv.includes('--mutation-check');
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--repo') {
+      repo = (argv[index + 1] ?? '').trim();
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('--repo=')) {
+      repo = arg.slice('--repo='.length).trim();
+    }
+  }
+
+  parseRepoSlug(repo);
 
   if (runMutationCheck && mutationIssueNumber.trim().length === 0) {
     throw new Error('--mutation-check requires --issue-number <number>.');
   }
 
   return {
+    repo,
     runMutationCheck,
     mutationIssueNumber: mutationIssueNumber.trim(),
   };
@@ -95,8 +122,8 @@ export function classifyPreflightResult({
   if (permissionExitCode !== 0) {
     return {
       ok: false,
-      failureKind: 'permission-check',
-      message: 'GitHub repository permission check failed.',
+      failureKind: 'permission-probe',
+      message: 'GitHub repository permission probe failed.',
     };
   }
 
@@ -113,7 +140,7 @@ export function classifyPreflightResult({
     return {
       ok: false,
       failureKind: 'mutation',
-      message: 'GitHub dry-run-safe mutation failed.',
+      message: 'GitHub mutation smoke check failed.',
     };
   }
 
@@ -125,38 +152,37 @@ export function classifyPreflightResult({
   };
 }
 
-function sanitizeOutput(value) {
-  return `${value ?? ''}`
-    .replace(TOKEN_STATUS_LINE_PATTERN, '$1[redacted]')
-    .replace(TOKEN_ASSIGNMENT_PATTERN, '$1=[redacted]')
-    .replace(TOKEN_VALUE_PATTERN, '[redacted]');
-}
-
 export function buildPreflightReport({
   classification,
   tokenNames,
+  repo,
+  viewerPermission,
   auth,
   api,
   issueList,
+  permissionProbe,
   mutation,
 }) {
-  const normalizeCheck = (check) => ({
+  const normalizeCheck = (check = {}) => ({
     command: check.command ?? '',
     exitCode: check.exitCode ?? 1,
-    stdout: sanitizeOutput(check.stdout),
-    stderr: sanitizeOutput(check.stderr),
-    ...(check.error ? { error: check.error } : {}),
+    stdout: redactTokens(check.stdout ?? ''),
+    stderr: redactTokens(check.stderr ?? ''),
+    ...(check.error ? { error: redactTokens(check.error) } : {}),
   });
 
   return {
     ok: classification.ok,
     failureKind: classification.failureKind,
     message: classification.message,
+    repo,
     tokenNames,
+    viewerPermission,
     checks: {
       auth: normalizeCheck(auth),
       api: normalizeCheck(api),
       issueList: normalizeCheck(issueList),
+      permissionProbe: normalizeCheck(permissionProbe),
       mutation: normalizeCheck(mutation),
     },
   };
