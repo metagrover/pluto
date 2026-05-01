@@ -26,7 +26,13 @@
       "**/dist-electron/**",
       "**/python/**",
       "**/release/**",
-      "**/resources/bin/**"
+      "**/resources/bin/**",
+      ".agent/**",
+      ".agents/**",
+      ".claude/**",
+      ".superpowers/**",
+      ".worktrees/**",
+      "tmp/**"
     ]
   }
 }

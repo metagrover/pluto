@@ -705,7 +705,9 @@ function App() {
             className={`flex-1 overflow-y-auto flex flex-col scroll-smooth relative ${
               !selectedMeetingId && activeTab === 'wiki'
                 ? 'px-0 py-0'
-                : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
+                : !selectedMeetingId && activeTab === 'hub'
+                  ? 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
+                  : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
             }`}
           >
             <div className="fixed top-0 right-0 w-[800px] h-[800px] bg-pro-accent/5 rounded-full blur-[120px] -mr-96 -mt-96 pointer-events-none z-0" />

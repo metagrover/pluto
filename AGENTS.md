@@ -24,6 +24,16 @@ This repository is equipped with **Superpowers** skills. These skills provide a 
 
 **REQUIRED:** You MUST check for relevant skills before taking any action.
 
+## 🧭 Issue-Driven Development
+
+GitHub Issues are Pluto's source of truth for active product and implementation work. PRDs and Markdown specs are supporting artifacts, not the live backlog.
+
+- Before starting feature work, product changes, architecture/process changes, or meaningful bug fixes, use `.agent/skills/issue-driven-development/SKILL.md`.
+- Find or create an outcome-sized GitHub Issue before writing a design, implementation plan, or code.
+- Keep the issue current when scope, acceptance criteria, constraints, or product direction change materially.
+- Record durable decisions in `docs/decisions.md`; create ADRs in `docs/adr/` only for high-impact technical choices.
+- Update `docs/CHANGELOG.md` when work ships or materially changes Pluto's product/development direction.
+
 ### How to use:
 1.  **Search:** Check the `.agent/skills` directory for a skill that matches your current task.
 2.  **Activate:** If using a platform with a `Skill` or `activate_skill` tool, use it. Otherwise, read the `SKILL.md` file and follow its instructions exactly.
