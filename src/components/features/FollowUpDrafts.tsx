@@ -11,8 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
-import { getMeetingEntities } from '../../api/knowledgeGraph';
+import { useEffect, useMemo, useState } from 'react';
 import type { Meeting } from '../../types';
 
 interface FollowUpDraftsProps {
@@ -28,62 +27,71 @@ const DRAFT_TYPES = [
   { id: 'slack', title: 'Slack Update', icon: MessageSquare },
 ] as const;
 
+type DraftId = (typeof DRAFT_TYPES)[number]['id'];
+type Drafts = Partial<Record<DraftId, string>>;
+
+const toBullets = (items: string[], fallback: string) =>
+  items.length ? items.map((item) => `- ${item}`).join('\n') : fallback;
+
+const buildDefaultDrafts = ({
+  actionItems,
+  decisions,
+  meetingTitle,
+}: {
+  actionItems: string[];
+  decisions: string[];
+  meetingTitle: string;
+}): Drafts => {
+  const actions = toBullets(actionItems, '- None');
+  const decisionBullets = toBullets(decisions, '- None');
+
+  return {
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
+    internal: `Team, session on ${meetingTitle}:\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
+    slack: `*Recap: ${meetingTitle}*\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
+  };
+};
+
+const parseSavedDrafts = (value?: string): Drafts | null => {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Drafts;
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (error) {
+    console.error('Failed to parse saved follow-up drafts:', error);
+    return null;
+  }
+};
+
 export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   meeting,
   actionItems,
   decisions,
   fetchMeetings,
 }) => {
-  const [participants, setParticipants] = useState<string[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Drafts>({});
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [copyId, setCopyId] = useState<string | null>(null);
   const [customPrompt, setCustomPrompt] = useState('');
   const [isExpanded, setIsExpanded] = useState(true);
 
-  const meetingId = meeting.id;
   const meetingTitle = meeting.title;
+  const actionItemsKey = actionItems.join('\n');
+  const decisionsKey = decisions.join('\n');
+  const defaultDrafts = useMemo(
+    () =>
+      buildDefaultDrafts({
+        actionItems: actionItemsKey ? actionItemsKey.split('\n') : [],
+        decisions: decisionsKey ? decisionsKey.split('\n') : [],
+        meetingTitle,
+      }),
+    [actionItemsKey, decisionsKey, meetingTitle],
+  );
 
   useEffect(() => {
-    getMeetingEntities(String(meetingId)).then((entities) =>
-      setParticipants(
-        entities.filter((e) => e.type === 'person').map((e) => e.name),
-      ),
-    );
-
-    // Load drafts from database if they exist
-    if (meeting.follow_up_drafts_json) {
-      try {
-        const savedDrafts = JSON.parse(meeting.follow_up_drafts_json);
-        setDrafts(savedDrafts);
-      } catch (e) {
-        console.error('Failed to parse saved drafts:', e);
-        setDrafts({});
-      }
-    } else {
-      setDrafts({});
-    }
-  }, [meetingId, meeting.follow_up_drafts_json]);
-
-  const generateDefaults = useCallback(() => {
-    const people = participants.join(', ') || 'Team';
-    const actions = actionItems.map((i) => `- ${i}`).join('\n') || '- None';
-    const decs = decisions.map((i) => `- ${i}`).join('\n') || '- None';
-
-    setDrafts({
-      client: `Subject: Recap: ${meetingTitle}\n\nHi ${people},\n\nDecisions:\n${decs}\n\nNext Steps:\n${actions}`,
-      internal: `Team, session on ${meetingTitle}:\n\nParticipants: ${people}\n\nDecisions:\n${decs}\n\nActions:\n${actions}`,
-      slack: `*Recap: ${meetingTitle}*\n\n*Decisions:*\n${decs}\n\n*Action Items:*\n${actions}`,
-    });
-  }, [participants, meetingTitle, actionItems, decisions]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Only generate defaults when there are no drafts and meeting changes
-  useEffect(() => {
-    if (Object.keys(drafts).length === 0 && !meeting.follow_up_drafts_json) {
-      generateDefaults();
-    }
-  }, [generateDefaults, meetingId, meeting.follow_up_drafts_json]);
+    setDrafts(parseSavedDrafts(meeting.follow_up_drafts_json) || defaultDrafts);
+  }, [defaultDrafts, meeting.follow_up_drafts_json]);
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -91,7 +99,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     setTimeout(() => setCopyId(null), 2000);
   };
 
-  const handleSave = async (updatedDrafts = drafts) => {
+  const saveDrafts = async (updatedDrafts = drafts) => {
     setSaving(true);
     try {
       await window.ipcRenderer.invoke('SAVE_MEETING', {
@@ -106,27 +114,31 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     }
   };
 
+  const resetToDefaults = () => {
+    setDrafts(defaultDrafts);
+  };
+
   const handleRegenerate = async () => {
     setLoading(true);
     try {
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
-        participants,
         actionItems,
         decisions,
         customPrompt: customPrompt.trim() || undefined,
       });
       if (res?.drafts) {
-        const nextDrafts: Record<string, string> = {};
+        const nextDrafts: Drafts = {};
         res.drafts.forEach((d: { content: string }, i: number) => {
-          nextDrafts[DRAFT_TYPES[i]?.id || `draft-${i}`] = d.content;
+          const draftType = DRAFT_TYPES[i];
+          if (draftType) nextDrafts[draftType.id] = d.content;
         });
         setDrafts(nextDrafts);
-        await handleSave(nextDrafts);
+        await saveDrafts(nextDrafts);
       }
     } catch (e) {
       console.error(e);
-      generateDefaults();
+      resetToDefaults();
     } finally {
       setLoading(false);
     }
@@ -160,7 +172,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           {Object.keys(drafts).length > 0 && (
             <button
               type="button"
-              onClick={() => handleSave()}
+              onClick={() => saveDrafts()}
               disabled={saving}
               className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-pro-accent/5 border border-pro-accent/10 text-[9px] font-black text-pro-accent uppercase tracking-widest hover:bg-pro-accent/10 transition-all disabled:opacity-50"
             >
@@ -196,7 +208,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleCopy(id, drafts[id])}
+                    onClick={() => handleCopy(id, drafts[id] || '')}
                     className={`p-1 rounded-lg transition-all ${copyId === id ? 'bg-green-500 text-white' : 'text-pro-text-muted hover:text-pro-text-main'}`}
                   >
                     {copyId === id ? <Check size={12} /> : <Copy size={12} />}
@@ -205,7 +217,10 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
                 <textarea
                   value={drafts[id] || ''}
                   onChange={(e) =>
-                    setDrafts({ ...drafts, [id]: e.target.value })
+                    setDrafts((current) => ({
+                      ...current,
+                      [id]: e.target.value,
+                    }))
                   }
                   className="flex-1 min-h-[160px] p-3 rounded-xl bg-pro-surface border border-pro-border/40 text-[12px] leading-relaxed text-pro-text-main/80 focus:border-pro-accent/40 outline-none resize-none shadow-sm"
                 />

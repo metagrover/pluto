@@ -1,4 +1,3 @@
-import { FOLLOW_UP_PROMPT } from './followUpPrompts';
 import type {
   ExtractionPriorityHints,
   InternalSignalDocument,
@@ -678,25 +677,39 @@ ${transcriptSlice}`;
 
 export const getFollowUpDraftsPrompt = (params: {
   meetingTitle: string;
-  participants: string[];
   actionItems: string[];
   decisions: string[];
   customPrompt?: string;
 }): string => {
-  const { meetingTitle, participants, actionItems, decisions, customPrompt } =
-    params;
+  const { meetingTitle, actionItems, decisions, customPrompt } = params;
 
-  const meetingContext = `Meeting: ${meetingTitle}
-Participants: ${participants.join(', ') || 'Team'}
+  return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
+
+Meeting: ${meetingTitle}
 Decisions:
 ${decisions.map((d) => `- ${d}`).join('\n') || '- None recorded'}
 Action Items:
-${actionItems.map((a) => `- ${a}`).join('\n') || '- None recorded'}`;
+${actionItems.map((a) => `- ${a}`).join('\n') || '- None recorded'}
 
-  return `${FOLLOW_UP_PROMPT}
+${customPrompt ? `Additional Instruction: ${customPrompt}\n` : ''}
 
-Details for this meeting:
-${meetingContext}
+Generate exactly three drafts:
+1. "Client Recap Email": Professional, polished, suitable for external stakeholders.
+2. "Internal Summary": Action-oriented, concise, suitable for the immediate team.
+3. "Slack Update": Casual but informative, using emoji and bolding where appropriate.
 
-${customPrompt ? `Additional Instruction: ${customPrompt}\n` : ''}`;
+Rules:
+- Output MUST be valid JSON only.
+- Do not include placeholders like "[Your Name]" if you can avoid it, or use "The Pluto Team".
+- Ensure the tone matches the specified audience for each draft.
+
+Return JSON in this exact shape:
+{
+  "drafts": [
+    { "title": "Client Recap Email", "content": "string" },
+    { "title": "Internal Summary", "content": "string" },
+    { "title": "Slack Update", "content": "string" }
+  ]
+}
+`;
 };
