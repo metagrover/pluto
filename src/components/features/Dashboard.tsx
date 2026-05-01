@@ -81,6 +81,12 @@ const getBriefingTone = (kind: DashboardHomeModel['briefingFocus']['kind']) => {
   return 'border-pro-border bg-pro-surface dark:bg-pro-surface/55';
 };
 
+const isSameAction = (left: DashboardAction, right: DashboardAction): boolean =>
+  left.target === right.target &&
+  (left.target !== 'meeting' ||
+    right.target !== 'meeting' ||
+    left.meetingId === right.meetingId);
+
 export const Dashboard = ({
   model,
   loading,
@@ -121,6 +127,9 @@ export const Dashboard = ({
     model.knowledgeDocuments.state === 'populated'
       ? model.knowledgeDocuments.cards.slice(0, 3)
       : [];
+  const heroQuickActions = model.quickActions.filter(
+    (action) => !isSameAction(action, model.briefingFocus.action),
+  );
   const hiddenActionCount =
     model.actionInsights.state === 'populated'
       ? Math.max(
@@ -131,67 +140,92 @@ export const Dashboard = ({
 
   const isLoadingLatestMeeting =
     loading && model.latestMeeting.state === 'empty';
-  const memoryTitle =
-    visibleDocuments.length > 0 ? 'Knowledge documents' : 'Memory status';
+  const memoryTitle = visibleDocuments.length > 0 ? 'Recent memory' : 'Memory';
 
   return (
-    <div className="max-w-[1360px] mx-auto w-full space-y-6 animate-in relative pb-20">
-      <header className="rounded-[1.25rem] border border-pro-border bg-pro-surface/65 dark:bg-pro-surface/35 px-5 py-4 shadow-sm">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-3">
-              <p className="text-[10px] font-black text-pro-accent uppercase tracking-[0.24em]">
-                Pluto Intelligence
-              </p>
-              <span
-                className={`text-[9px] font-black uppercase tracking-[0.16em] px-2.5 py-1 rounded-full border ${getHeroTone(
-                  model.hero.severity,
-                  loading,
-                )}`}
-              >
-                {getHeroLabel(model.hero.kind, loading)}
-              </span>
+    <div className="mx-auto w-full max-w-[1240px] space-y-5 animate-in pb-20">
+      <header className="rounded-[1.5rem] border border-pro-border bg-pro-surface/75 px-5 py-5 shadow-sm md:px-6">
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 space-y-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="text-[11px] font-black tracking-[0.18em] text-pro-accent/80">
+                  Daily briefing
+                </p>
+                <span
+                  className={`rounded-full border px-2.5 py-1 text-[9px] font-black tracking-[0.14em] ${getHeroTone(
+                    model.hero.severity,
+                    loading,
+                  )}`}
+                >
+                  {getHeroLabel(model.hero.kind, loading)}
+                </span>
+              </div>
+              <h1 className="max-w-3xl text-[29px] font-black leading-tight tracking-[-0.03em] text-pro-text-main">
+                {model.hero.title}
+              </h1>
             </div>
-            <h1 className="text-2xl font-black tracking-tight text-pro-text-main leading-tight">
-              {model.hero.title}
-            </h1>
+            <p className="max-w-xl text-[14px] font-semibold leading-relaxed text-pro-text-muted xl:text-right">
+              {model.hero.detail}
+            </p>
           </div>
-          <p className="max-w-xl text-[14px] text-pro-text-muted font-semibold leading-relaxed xl:text-right">
-            {model.hero.detail}
-          </p>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => runAction(model.briefingFocus.action)}
+              className="h-10 rounded-xl bg-pro-text-main px-4 text-[11px] font-black text-white shadow-premium transition-all hover:bg-pro-accent active-push dark:bg-pro-accent dark:text-[#1A2340]"
+            >
+              {model.briefingFocus.action.label}
+            </button>
+            {heroQuickActions.map((action) => (
+              <button
+                type="button"
+                key={
+                  action.target === 'meeting'
+                    ? `${action.target}-${action.meetingId}`
+                    : action.target
+                }
+                onClick={() => runAction(action)}
+                className="h-10 rounded-xl border border-pro-border bg-pro-bg/70 px-4 text-[11px] font-bold text-pro-text-main/75 transition-all hover:border-pro-accent/35 hover:text-pro-text-main active-push"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
       <section className="grid grid-cols-12 gap-4 items-stretch">
         <div
-          className={`col-span-12 xl:col-span-8 rounded-[1.25rem] border p-5 shadow-sm ${getBriefingTone(
+          className={`col-span-12 xl:col-span-7 rounded-[1.5rem] border p-5 shadow-sm md:p-6 ${getBriefingTone(
             model.briefingFocus.kind,
           )}`}
         >
-          <div className="flex flex-col h-full gap-4">
-            <div className="flex items-start justify-between gap-4">
+          <div className="flex h-full flex-col gap-5">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div className="space-y-2">
-                <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
-                  Briefing
+                <p className="text-[11px] font-black tracking-[0.16em] text-pro-text-muted/55">
+                  Focus now
                 </p>
-                <h2 className="text-[22px] font-black tracking-tight text-pro-text-main">
+                <h2 className="text-[24px] font-black tracking-[-0.02em] text-pro-text-main">
                   {model.briefingFocus.title}
                 </h2>
-                <p className="text-sm font-semibold text-pro-text-muted leading-relaxed max-w-2xl">
+                <p className="max-w-2xl text-[14px] font-semibold leading-relaxed text-pro-text-muted">
                   {model.briefingFocus.detail}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => runAction(model.briefingFocus.action)}
-                className="shrink-0 h-10 px-4 rounded-xl bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] font-black text-[10px] uppercase tracking-[0.16em] shadow-premium hover:bg-pro-accent transition-all active-push"
+                className="h-10 shrink-0 rounded-xl border border-pro-border bg-pro-bg px-4 text-[11px] font-black text-pro-text-main transition-all hover:border-pro-accent/35 hover:bg-pro-surface active-push"
               >
                 {model.briefingFocus.action.label}
               </button>
             </div>
 
-            {visibleActionItems.length > 0 && (
-              <div className="grid gap-2">
+            {visibleActionItems.length > 0 ? (
+              <div className="grid gap-2.5">
                 {visibleActionItems.map((item) => {
                   const isDone = completedTasks.has(item.id);
                   return (
@@ -203,36 +237,36 @@ export const Dashboard = ({
                         e.stopPropagation();
                         handleCompleteTask(item.id);
                       }}
-                      className={`group/item w-full text-left px-3.5 py-2.5 rounded-xl border transition-all flex items-start gap-3 ${
+                      className={`group/item flex w-full items-start gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all ${
                         isDone
-                          ? 'bg-pro-success/5 border-pro-success/20 opacity-60'
-                          : 'bg-pro-bg/35 border-pro-border/60 hover:border-pro-accent/30 hover:bg-pro-bg/55'
+                          ? 'border-pro-success/20 bg-pro-success/5 opacity-60'
+                          : 'border-pro-border/60 bg-pro-bg/35 hover:border-pro-accent/30 hover:bg-pro-bg/55'
                       }`}
                     >
                       <div
-                        className={`w-4 h-4 rounded-md border-2 mt-0.5 flex items-center justify-center transition-all ${
+                        className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded-md border-2 transition-all ${
                           isDone
-                            ? 'bg-pro-success border-pro-success'
+                            ? 'border-pro-success bg-pro-success'
                             : 'border-pro-border group-hover/item:border-pro-accent'
                         }`}
                       >
                         {isDone && (
-                          <span className="text-white text-[10px]">✓</span>
+                          <span className="text-[10px] text-white">✓</span>
                         )}
                       </div>
-                      <div className="flex-1 min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-3">
                           <span
-                            className={`text-[13px] font-bold leading-snug line-clamp-2 ${
+                            className={`text-[13px] font-bold leading-snug ${
                               isDone
-                                ? 'line-through text-pro-text-muted'
+                                ? 'text-pro-text-muted line-through'
                                 : 'text-pro-text-main'
                             }`}
                           >
                             {item.title}
                           </span>
                           <span
-                            className={`px-2 py-1 rounded-md text-[8px] font-black uppercase tracking-widest shrink-0 ${
+                            className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${
                               item.status === 'overdue'
                                 ? 'bg-pro-urgent/10 text-pro-urgent'
                                 : item.status === 'stale'
@@ -243,14 +277,9 @@ export const Dashboard = ({
                             {item.status}
                           </span>
                         </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <span className="text-[9px] font-bold text-pro-text-muted/45 uppercase tracking-widest">
-                            {item.dueLabel}
-                          </span>
-                          <span className="text-[9px] font-bold text-pro-accent/55 uppercase tracking-widest">
-                            {item.sourceLabel}
-                          </span>
-                        </div>
+                        <p className="mt-1 text-[11px] font-semibold text-pro-text-muted/70">
+                          {item.dueLabel} · {item.sourceLabel}
+                        </p>
                       </div>
                     </button>
                   );
@@ -259,22 +288,55 @@ export const Dashboard = ({
                   <button
                     type="button"
                     onClick={() => setActiveTab('projects')}
-                    className="h-8 rounded-xl border border-dashed border-pro-border/70 bg-transparent text-[9px] font-black uppercase tracking-widest text-pro-text-muted/60 hover:text-pro-text-main hover:border-pro-accent/30 transition-all"
+                    className="h-9 rounded-xl border border-dashed border-pro-border bg-transparent px-4 text-[11px] font-bold text-pro-text-muted/70 transition-all hover:border-pro-accent/35 hover:text-pro-text-main"
                   >
-                    {hiddenActionCount} more in projects
+                    See {hiddenActionCount} more in projects
                   </button>
                 )}
+              </div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-2xl border border-pro-border/60 bg-pro-bg/35 p-4">
+                  <p className="text-[11px] font-black tracking-[0.14em] text-pro-text-muted/55">
+                    Latest meeting
+                  </p>
+                  <p className="mt-2 text-[15px] font-black leading-snug text-pro-text-main">
+                    {model.latestMeeting.title}
+                  </p>
+                  <p className="mt-2 line-clamp-3 text-[12px] font-semibold leading-relaxed text-pro-text-muted">
+                    {model.latestMeeting.detail}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-pro-border/60 bg-pro-bg/35 p-4">
+                  <p className="text-[11px] font-black tracking-[0.14em] text-pro-text-muted/55">
+                    Memory
+                  </p>
+                  <p className="mt-2 text-[15px] font-black leading-snug text-pro-text-main">
+                    {visibleDocuments[0]?.title || 'Waiting for context'}
+                  </p>
+                  <p className="mt-2 line-clamp-3 text-[12px] font-semibold leading-relaxed text-pro-text-muted">
+                    {visibleDocuments[0]?.description ||
+                      'Recent meetings will surface the most relevant project and knowledge context here.'}
+                  </p>
+                </div>
               </div>
             )}
           </div>
         </div>
 
-        <div className="col-span-12 xl:col-span-4 rounded-[1.25rem] border border-pro-border bg-pro-surface/80 dark:bg-pro-surface/55 p-5 md:p-6 shadow-sm">
+        <div className="col-span-12 xl:col-span-5 rounded-[1.5rem] border border-pro-border bg-pro-surface/80 p-5 shadow-sm md:p-6 dark:bg-pro-surface/55">
           <div className="flex h-full flex-col gap-5">
             <div className="flex items-center justify-between gap-4">
-              <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
-                Latest Meeting
-              </p>
+              <div>
+                <p className="text-[11px] font-black tracking-[0.16em] text-pro-text-muted/55">
+                  Latest meeting
+                </p>
+                {model.latestMeeting.state === 'populated' && (
+                  <p className="mt-1 text-[11px] font-semibold text-pro-text-muted/65">
+                    {model.latestMeeting.occurredAt}
+                  </p>
+                )}
+              </div>
               {model.latestMeeting.state === 'populated' ? (
                 <button
                   type="button"
@@ -283,171 +345,136 @@ export const Dashboard = ({
                       setSelectedMeetingId(model.latestMeeting.meetingId);
                     }
                   }}
-                  className="h-9 px-4 rounded-xl border border-pro-border bg-pro-bg text-[9px] font-black text-pro-text-main/70 uppercase tracking-widest hover:border-pro-accent/40 hover:text-pro-text-main transition-all active-push"
+                  className="h-9 rounded-xl border border-pro-border bg-pro-bg px-4 text-[11px] font-bold text-pro-text-main/75 transition-all hover:border-pro-accent/35 hover:text-pro-text-main active-push"
                 >
-                  Open
+                  Open brief
                 </button>
               ) : (
-                <span className="rounded-full border border-pro-border bg-pro-bg px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-pro-text-muted/45">
+                <span className="rounded-full border border-pro-border bg-pro-bg px-3 py-1.5 text-[10px] font-bold text-pro-text-muted/55">
                   Waiting
                 </span>
               )}
             </div>
             <div className="space-y-3">
-              <h3 className="text-lg font-black tracking-tight leading-tight text-pro-text-main">
+              <h3 className="text-[23px] font-black tracking-[-0.02em] leading-tight text-pro-text-main">
                 {isLoadingLatestMeeting
                   ? 'Syncing meeting memory'
                   : model.latestMeeting.title}
               </h3>
-              {(model.latestMeeting.state === 'populated' || loading) && (
-                <p className="text-[11px] text-pro-text-muted/50 font-bold uppercase tracking-widest">
-                  {model.latestMeeting.state === 'populated'
-                    ? model.latestMeeting.occurredAt
-                    : 'Syncing'}
-                </p>
-              )}
-              <p className="text-[13px] font-semibold text-pro-text-muted leading-relaxed line-clamp-5">
+              <p className="text-[13px] font-semibold leading-relaxed text-pro-text-muted line-clamp-6">
                 {isLoadingLatestMeeting
                   ? 'Pluto is checking recent meetings and notes.'
                   : model.latestMeeting.detail}
               </p>
             </div>
+
             {isRecording && (
-              <div className="mt-auto rounded-2xl border border-pro-success/20 bg-pro-success/5 p-4">
-                <p className="text-[11px] font-black text-pro-success uppercase tracking-widest">
+              <div className="rounded-2xl border border-pro-success/20 bg-pro-success/5 p-4">
+                <p className="text-[11px] font-black tracking-[0.14em] text-pro-success">
                   Recording now
                 </p>
+                <p className="mt-1 text-[12px] font-semibold text-pro-text-muted">
+                  Pluto will fold this conversation into the next briefing
+                  automatically.
+                </p>
               </div>
+            )}
+
+            {model.spotlight && (
+              <button
+                type="button"
+                onClick={openSpotlightTarget}
+                className="mt-auto rounded-2xl border border-pro-border/70 bg-pro-bg/45 p-4 text-left transition-all hover:border-pro-accent/30 hover:bg-pro-bg/65"
+              >
+                <p className="text-[11px] font-black tracking-[0.14em] text-pro-text-muted/55">
+                  Project signal
+                </p>
+                <div className="mt-2 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[15px] font-black leading-snug text-pro-text-main">
+                      {model.spotlight.title}
+                    </p>
+                    <p className="mt-1 text-[12px] font-semibold leading-relaxed text-pro-text-muted">
+                      {model.spotlight.detail}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-pro-accent/10 px-2.5 py-1 text-[10px] font-black text-pro-accent">
+                    Projects
+                  </span>
+                </div>
+              </button>
             )}
           </div>
         </div>
       </section>
 
-      <section
-        className={`grid grid-cols-12 gap-4 ${
-          model.spotlight ? 'items-stretch' : 'items-start'
-        }`}
-      >
-        <div
-          className={`col-span-12 ${
-            model.spotlight ? 'xl:col-span-7' : ''
-          } rounded-[1.25rem] border border-pro-border bg-pro-surface/80 dark:bg-pro-surface/55 p-5 md:p-6 shadow-sm`}
-        >
-          <div className="flex items-center justify-between gap-4 mb-5">
-            <div>
-              <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
-                Recent Memory
-              </p>
-              <h2 className="mt-1 text-xl font-black tracking-tight text-pro-text-main">
-                {memoryTitle}
-              </h2>
-            </div>
-            {visibleDocuments.length > 0 ? (
-              <button
-                type="button"
-                className="h-9 px-4 rounded-xl border border-pro-border bg-pro-bg text-[9px] font-black text-pro-accent uppercase tracking-widest hover:border-pro-accent/40 transition-all active-push"
-                onClick={() => setActiveTab('wiki')}
-              >
-                Library
-              </button>
-            ) : (
-              <span className="rounded-full border border-pro-border bg-pro-bg px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-pro-text-muted/45">
-                No sources
-              </span>
-            )}
+      <section className="rounded-[1.5rem] border border-pro-border bg-pro-surface/80 p-5 shadow-sm md:p-6 dark:bg-pro-surface/55">
+        <div className="flex items-center justify-between gap-4 mb-5">
+          <div>
+            <p className="text-[11px] font-black tracking-[0.16em] text-pro-text-muted/55">
+              {memoryTitle}
+            </p>
+            <h2 className="mt-1 text-[22px] font-black tracking-[-0.02em] text-pro-text-main">
+              {visibleDocuments.length > 0
+                ? 'Recent knowledge'
+                : 'Memory status'}
+            </h2>
           </div>
-
-          {visibleDocuments.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-pro-border bg-pro-bg/50 p-6">
-              <p className="text-[13px] font-black text-pro-text-main">
-                {loading ? 'Syncing live documents' : 'No live documents yet'}
-              </p>
-              <p className="mt-2 text-[12px] font-semibold text-pro-text-muted/60 leading-relaxed">
-                {loading
-                  ? 'Pluto is loading synthesized workspace memory.'
-                  : 'Recorded meetings will populate the knowledge base.'}
-              </p>
-            </div>
+          {visibleDocuments.length > 0 ? (
+            <button
+              type="button"
+              className="h-9 rounded-xl border border-pro-border bg-pro-bg px-4 text-[11px] font-bold text-pro-text-main/75 transition-all hover:border-pro-accent/35 hover:text-pro-text-main active-push"
+              onClick={() => setActiveTab('wiki')}
+            >
+              Open knowledge
+            </button>
           ) : (
-            <div className="grid gap-3">
-              {visibleDocuments.map((item) => (
-                <button
-                  type="button"
-                  key={item.id}
-                  onClick={() => setActiveTab('wiki')}
-                  className="group text-left rounded-2xl border border-pro-border/60 bg-pro-bg/55 p-4 hover:border-pro-accent/30 hover:bg-pro-bg transition-all"
-                >
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-pro-surface border border-pro-border flex items-center justify-center text-sm font-black text-pro-text-main/70 shadow-soft group-hover:text-pro-accent transition-colors">
-                      {getDocumentScopeIcon(item.scopeType)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 className="text-[14px] font-black tracking-tight text-pro-text-main">
-                          {item.title}
-                        </h3>
-                        <span className="text-[9px] font-black text-pro-accent/70 uppercase tracking-widest">
-                          {item.countLabel}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-[12px] font-semibold text-pro-text-muted/65 leading-relaxed line-clamp-2">
-                        {item.description}
-                      </p>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
+            <span className="rounded-full border border-pro-border bg-pro-bg px-3 py-1.5 text-[10px] font-bold text-pro-text-muted/55">
+              No sources
+            </span>
           )}
         </div>
 
-        {model.spotlight && (
-          <div className="col-span-12 xl:col-span-5 rounded-3xl border border-pro-border bg-pro-bg p-6 md:p-7 shadow-sm">
-            <div className="flex h-full flex-col gap-5">
-              <div>
-                <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
-                  Project Signal
-                </p>
-                <h2 className="mt-2 text-2xl font-black tracking-tight text-pro-text-main">
-                  {model.spotlight.title}
-                </h2>
-                <p className="mt-1 text-[11px] font-bold text-pro-accent uppercase tracking-[0.2em]">
-                  {model.spotlight.subtitle}
-                </p>
-              </div>
-
-              <p className="text-sm font-semibold text-pro-text-muted leading-relaxed">
-                {model.spotlight.detail}
-              </p>
-
-              <div className="flex flex-wrap gap-2">
-                {model.spotlight.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="px-3 py-1.5 bg-pro-surface border border-pro-border rounded-lg text-[9px] font-black text-pro-text-main/60 uppercase tracking-tight"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-
-              <div className="mt-auto flex gap-3">
-                <button
-                  type="button"
-                  onClick={openSpotlightTarget}
-                  className="flex-1 h-11 rounded-xl bg-pro-surface border border-pro-border text-pro-text-main font-black text-[10px] uppercase tracking-[0.16em] shadow-soft hover:bg-pro-bg transition-all active-push"
-                >
-                  Open
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAskPlutoVisible(true)}
-                  className="flex-1 h-11 rounded-xl bg-white dark:bg-pro-surface text-pro-text-main dark:text-pro-text-main font-black text-[10px] uppercase tracking-[0.16em] shadow-premium hover:bg-white/90 dark:hover:bg-pro-surface/80 transition-all active-push border border-pro-border/40"
-                >
-                  Ask Pluto
-                </button>
-              </div>
-            </div>
+        {visibleDocuments.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-pro-border bg-pro-bg/50 p-6">
+            <p className="text-[14px] font-black text-pro-text-main">
+              {loading ? 'Syncing live documents' : 'No live documents yet'}
+            </p>
+            <p className="mt-2 text-[13px] font-semibold leading-relaxed text-pro-text-muted/70">
+              {loading
+                ? 'Pluto is loading synthesized workspace memory.'
+                : 'Recorded meetings will populate the knowledge base.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-3">
+            {visibleDocuments.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                onClick={() => setActiveTab('wiki')}
+                className="group rounded-2xl border border-pro-border/60 bg-pro-bg/55 p-4 text-left transition-all hover:border-pro-accent/30 hover:bg-pro-bg"
+              >
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-pro-border bg-pro-surface text-sm font-black text-pro-text-main/70 shadow-soft transition-colors group-hover:text-pro-accent">
+                    {getDocumentScopeIcon(item.scopeType)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h3 className="text-[14px] font-black tracking-tight text-pro-text-main">
+                        {item.title}
+                      </h3>
+                      <span className="text-[10px] font-bold text-pro-accent/70">
+                        {item.countLabel}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[12px] font-semibold leading-relaxed text-pro-text-muted/70 line-clamp-3">
+                      {item.description}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            ))}
           </div>
         )}
       </section>
