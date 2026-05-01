@@ -72,9 +72,9 @@ export const V3AnalysisViewer = ({
             Cross-Meeting Continuity
           </h3>
           <ul className="space-y-2">
-            {valueSignals.continuity.map((link, j) => (
+            {valueSignals.continuity.map((link) => (
               <li
-                key={j}
+                key={link}
                 className="text-sm font-medium text-blue-900/80 dark:text-blue-200/80 pl-4 relative"
               >
                 <span className="absolute left-0 top-1.5 w-1.5 h-1.5 rounded-full bg-blue-400" />
@@ -93,7 +93,7 @@ export const V3AnalysisViewer = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {doc.all_action_items.map((item, i) => (
               <ActionItemCard
-                key={`global-action-${i}`}
+                key={`global-action-${item.text}-${item.assignee ?? 'none'}-${item.due ?? 'none'}`}
                 item={item}
                 path={`all_action_items:${i}`}
                 editsMap={editsMap}
@@ -150,7 +150,7 @@ const TopicCard = ({
           <div className="space-y-3">
             {topic.key_points.map((point, kpi) => (
               <EditableItem
-                key={kpi}
+                key={`${point.text}-${point.speaker ?? 'unknown'}`}
                 path={`topic:${index}:point:${kpi}`}
                 originalText={point.text}
                 meetingId={meetingId}
@@ -172,7 +172,7 @@ const TopicCard = ({
             </h4>
             {topic.decisions.map((decision, di) => (
               <EditableItem
-                key={di}
+                key={`${decision.text}-${decision.decided_by ?? 'unknown'}`}
                 path={`topic:${index}:decision:${di}`}
                 originalText={decision.text}
                 meetingId={meetingId}
@@ -193,7 +193,7 @@ const TopicCard = ({
             </h4>
             {topic.open_questions.map((q, qi) => (
               <div
-                key={qi}
+                key={q}
                 className="text-sm font-medium text-amber-700/80 dark:text-amber-300/80 flex gap-3 items-start"
               >
                 <span className="shrink-0 mt-0.5 text-amber-500">?</span>
@@ -317,6 +317,7 @@ const EditableItem = ({
         />
         <div className="flex flex-col gap-1 shrink-0">
           <button
+            type="button"
             onClick={handleSave}
             disabled={isSaving}
             className="p-1.5 rounded-lg bg-pro-accent text-white hover:bg-pro-accent/80 transition-colors"
@@ -324,6 +325,7 @@ const EditableItem = ({
             <Check size={14} />
           </button>
           <button
+            type="button"
             onClick={() => setIsEditing(false)}
             disabled={isSaving}
             className="p-1.5 rounded-lg bg-stone-200 dark:bg-stone-800 text-pro-text-muted hover:text-pro-text-main transition-colors"
@@ -378,6 +380,7 @@ const EditableItem = ({
       <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 h-6">
         {hasEdit && (
           <button
+            type="button"
             onClick={handleRevert}
             className="p-1.5 rounded-md text-pro-text-muted hover:bg-stone-200 dark:hover:bg-stone-800 hover:text-red-500 transition-colors"
             title="Revert to original"
@@ -386,6 +389,7 @@ const EditableItem = ({
           </button>
         )}
         <button
+          type="button"
           onClick={() => setIsEditing(true)}
           className="p-1.5 rounded-md text-pro-text-muted hover:bg-stone-200 dark:hover:bg-stone-800 hover:text-pro-accent transition-colors"
           title="Edit point"

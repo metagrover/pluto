@@ -41,6 +41,7 @@ export interface PersistedMeeting {
   analysis_generated_at?: string | null;
   analysis_error_categories_json?: string | null;
   value_signals_json?: string | null;
+  follow_up_drafts_json?: string | null;
   folder_id?: string | null;
   is_favorite?: boolean | number | null;
   end_reason?: string | null;
@@ -122,6 +123,7 @@ const initDb = () => {
         analysis_generated_at DATETIME,
         analysis_error_categories_json TEXT,
         value_signals_json TEXT,
+        follow_up_drafts_json TEXT,
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -407,6 +409,10 @@ const initDb = () => {
     if (!meetingColumns.some((col) => col.name === 'user_edits_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN user_edits_json TEXT');
       console.log('[DB] Added meetings.user_edits_json column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'follow_up_drafts_json')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN follow_up_drafts_json TEXT');
+      console.log('[DB] Added meetings.follow_up_drafts_json column');
     }
   } catch (e) {
     console.warn('[DB] Optional column migration failed:', e);
@@ -902,6 +908,7 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
         ? JSON.stringify(metadataRecord.error_categories)
         : null),
     meeting.value_signals_json || null,
+    meeting.follow_up_drafts_json || null,
     meeting.folder_id,
     meeting.is_favorite ? 1 : 0,
     meeting.end_reason || 'manual',

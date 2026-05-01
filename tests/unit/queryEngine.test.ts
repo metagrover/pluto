@@ -5,6 +5,14 @@ import {
   retrieveContext,
 } from '../../electron/intelligence/queryEngine';
 import * as factoryModule from '../../electron/llm/factory';
+import type { LLMProvider, LLMSettings } from '../../electron/llm/provider';
+
+type MockProvider = Pick<LLMProvider, 'classifyQueryIntent'>;
+type EntitySearchRow = ReturnType<
+  typeof dbModule.searchEntitiesWithMeetingContext
+>[number];
+type FtsRow = ReturnType<typeof dbModule.searchMeetingsFts>[number];
+type GraphEntity = ReturnType<typeof dbModule.walkEntityGraph>[number];
 
 vi.mock('../../electron/db', () => ({
   searchMeetingsFts: vi.fn(),
@@ -45,11 +53,13 @@ describe('Query Engine', () => {
         classifyQueryIntent: vi
           .fn()
           .mockResolvedValue('{"intent":"factual","expanded_keywords":[]}'),
-      };
+      } satisfies MockProvider;
       vi.mocked(factoryModule.getProvider).mockResolvedValue(
-        mockProvider as any,
+        mockProvider as unknown as LLMProvider,
       );
-      vi.mocked(factoryModule.getAllSettings).mockResolvedValue({} as any);
+      vi.mocked(factoryModule.getAllSettings).mockResolvedValue(
+        {} as LLMSettings,
+      );
 
       vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([
         {
@@ -60,7 +70,7 @@ describe('Query Engine', () => {
           context: '',
           meeting_id: 'm1',
         },
-      ] as any);
+      ] as EntitySearchRow[]);
 
       const result = await parseQuery('Tell me about GraphQL');
       expect(result.entity_mentions).toContain('123');
@@ -81,11 +91,13 @@ describe('Query Engine', () => {
           .mockResolvedValue(
             '{"intent":"conversational","expanded_keywords":[]}',
           ),
-      };
+      } satisfies MockProvider;
       vi.mocked(factoryModule.getProvider).mockResolvedValue(
-        mockProvider as any,
+        mockProvider as unknown as LLMProvider,
       );
-      vi.mocked(factoryModule.getAllSettings).mockResolvedValue({} as any);
+      vi.mocked(factoryModule.getAllSettings).mockResolvedValue(
+        {} as LLMSettings,
+      );
       vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([]);
 
       // Not a greeting, but LLM classifies it as conversational
@@ -101,11 +113,13 @@ describe('Query Engine', () => {
           .mockResolvedValue(
             '{"intent":"factual","expanded_keywords":["API","backend"]}',
           ),
-      };
+      } satisfies MockProvider;
       vi.mocked(factoryModule.getProvider).mockResolvedValue(
-        mockProvider as any,
+        mockProvider as unknown as LLMProvider,
       );
-      vi.mocked(factoryModule.getAllSettings).mockResolvedValue({} as any);
+      vi.mocked(factoryModule.getAllSettings).mockResolvedValue(
+        {} as LLMSettings,
+      );
       vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([]);
 
       const result = await parseQuery('GraphQL');
@@ -119,11 +133,13 @@ describe('Query Engine', () => {
         classifyQueryIntent: vi
           .fn()
           .mockRejectedValue(new Error('Out of quota')),
-      };
+      } satisfies MockProvider;
       vi.mocked(factoryModule.getProvider).mockResolvedValue(
-        mockProvider as any,
+        mockProvider as unknown as LLMProvider,
       );
-      vi.mocked(factoryModule.getAllSettings).mockResolvedValue({} as any);
+      vi.mocked(factoryModule.getAllSettings).mockResolvedValue(
+        {} as LLMSettings,
+      );
 
       const result = await parseQuery('when is the meeting');
       expect(result.intent).toBe('temporal'); // Fallback logic
@@ -134,9 +150,9 @@ describe('Query Engine', () => {
     it('merges FTS search and graph walk seamlessly', async () => {
       const mockProvider = {
         classifyQueryIntent: vi.fn().mockResolvedValue('{"intent":"factual"}'),
-      };
+      } satisfies MockProvider;
       vi.mocked(factoryModule.getProvider).mockResolvedValue(
-        mockProvider as any,
+        mockProvider as unknown as LLMProvider,
       );
 
       // Mock DB FTS
@@ -146,15 +162,15 @@ describe('Query Engine', () => {
           snippet: 'some api stuff',
           started_at: '2026-01-01T00:00:00Z',
           title: 'Meeting 1',
-        } as any,
+        } as FtsRow,
       ]);
 
       // Mock DB Entity resolution & Walk
       vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([
-        { id: 'e1' } as any,
+        { id: 'e1' } as EntitySearchRow,
       ]);
       vi.mocked(dbModule.walkEntityGraph).mockReturnValue([
-        { id: 'e2', name: 'Frontend', type: 'topic' } as any,
+        { id: 'e2', name: 'Frontend', type: 'topic' } as GraphEntity,
       ]);
 
       const result = await retrieveContext({

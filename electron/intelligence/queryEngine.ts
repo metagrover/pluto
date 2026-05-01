@@ -11,6 +11,23 @@ import * as dbModule from '../db';
 import { getAllSettings, getProvider } from '../llm/factory';
 import { getIntentClassificationPrompt } from './queryPrompts';
 
+interface AnalysisPoint {
+  text?: string;
+}
+
+interface AnalysisTopic {
+  title?: string;
+  summary?: string;
+  key_points?: AnalysisPoint[];
+}
+
+interface V3AnalysisDocument {
+  analysis_schema_version?: number;
+  topics?: AnalysisTopic[];
+  overview?: string;
+  summary?: string;
+}
+
 /**
  * Parses a query string to extract intent, entities and semantic bounds.
  */
@@ -253,15 +270,13 @@ export const retrieveContext = async (
   // 2. FTS Search
   if (ftsQueryStr) {
     const meetings = searchMeetingsFts(ftsQueryStr, { limit: 20 });
-    let idx = 0;
-    for (const m of meetings) {
+    for (const [idx, m] of meetings.entries()) {
       // rank is an implicit SQLite FTS score, we mock it via idx if it's not exposed
       // Assuming return order is rank order
       const fts_rank = 1.0 / (idx + 1);
-      idx++;
       let mid: MidFrontmatter | null = null;
       try {
-        const midJsonStr = (m as any).mid_json;
+        const midJsonStr = m.mid_json;
         if (typeof midJsonStr === 'string' && midJsonStr.trim()) {
           mid = JSON.parse(midJsonStr);
         }
@@ -272,19 +287,17 @@ export const retrieveContext = async (
       let evidence_text = `[FTS Match]: ${m.snippet || 'No snippet'}\n`;
 
       // Prefer v3 analysis (topic-structured, richest content)
-      if (typeof (m as any).analysis_json === 'string') {
+      if (typeof m.analysis_json === 'string') {
         try {
-          const analysis = JSON.parse((m as any).analysis_json);
+          const analysis = JSON.parse(m.analysis_json) as V3AnalysisDocument;
           if (
             analysis.analysis_schema_version === 3 &&
             Array.isArray(analysis.topics)
           ) {
             const topicSummaries = analysis.topics
-              .map((t: any) => {
+              .map((t) => {
                 const points = Array.isArray(t.key_points)
-                  ? t.key_points
-                      .map((p: any) => `  - ${p.text || p}`)
-                      .join('\n')
+                  ? t.key_points.map((p) => `  - ${p.text || ''}`).join('\n')
                   : '';
                 return `### ${t.title}\n${t.summary || ''}${
                   points ? `\n${points}` : ''

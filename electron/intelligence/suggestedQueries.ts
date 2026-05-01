@@ -138,7 +138,7 @@ interface Candidate {
 
 export function generateSuggestedQueries(): string[] {
   console.log('[suggestedQueries] Generating dynamic suggested queries...');
-  const meetings = db.getMeetings() as any[];
+  const meetings = db.getMeetings() as db.PersistedMeeting[];
   if (!meetings || meetings.length === 0) {
     return [];
   }
@@ -296,10 +296,12 @@ export function generateSuggestedQueries(): string[] {
           `What's the latest update on ${truncate(name, 30)}?`,
           `Has ${truncate(name, 30)} come up before?`,
         ];
+        const selectedVariant = pickRandom(variants);
+        if (!selectedVariant) continue;
         candidates.push({
           tier: 2,
           category: 'continuity_topic',
-          query: pickRandom(variants)!,
+          query: selectedVariant,
         });
         break; // One per meeting is enough
       }
@@ -313,10 +315,12 @@ export function generateSuggestedQueries(): string[] {
             `What are the open blockers for ${truncate(p.name, 30)}?`,
             `How is ${truncate(p.name, 30)} progressing?`,
           ];
+          const selectedVariant = pickRandom(variants);
+          if (!selectedVariant) continue;
           candidates.push({
             tier: 2,
             category: 'continuity_project',
-            query: pickRandom(variants)!,
+            query: selectedVariant,
           });
           break;
         }
@@ -329,10 +333,12 @@ export function generateSuggestedQueries(): string[] {
       `What were the key takeaways from ${framedTitle}?`,
       `What did we cover in ${framedTitle}?`,
     ];
+    const selectedVariant = pickRandom(variants);
+    if (!selectedVariant) continue;
     candidates.push({
       tier: 3,
       category: 'recap',
-      query: pickRandom(variants)!,
+      query: selectedVariant,
     });
   }
 
@@ -371,11 +377,14 @@ export function generateSuggestedQueries(): string[] {
       `What has ${topPerson} been involved in?`,
       `Summarize ${topPerson}'s recent contributions`,
     ];
-    candidates.push({
-      tier: 2,
-      category: 'continuity_person',
-      query: pickRandom(variants)!,
-    });
+    const selectedVariant = pickRandom(variants);
+    if (selectedVariant) {
+      candidates.push({
+        tier: 2,
+        category: 'continuity_person',
+        query: selectedVariant,
+      });
+    }
   }
 
   // ── Temporal summary queries ───────────────────────────────

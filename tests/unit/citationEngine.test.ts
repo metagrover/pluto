@@ -4,6 +4,7 @@ import {
   auditCitations,
   buildCitationChain,
 } from '../../electron/intelligence/citationEngine';
+import type { RetrievalResult } from '../../electron/intelligence/intelligenceTypes';
 
 vi.mock('../../electron/db', () => ({
   getEntity: vi.fn(),
@@ -21,9 +22,9 @@ describe('Citation Engine', () => {
         'Here is what happened: <cite meeting="m1" entity="e1" quote="let\'s migrate">We decided to migrate</cite>. Later, <cite meeting="m2">No quote</cite>.';
 
       const context = [
-        { meeting_id: 'm1', mid: { title: 'First Meeting' } } as any,
-        { meeting_id: 'm2', mid: { title: 'Second Meeting' } } as any,
-      ];
+        { meeting_id: 'm1', mid: { title: 'First Meeting' } },
+        { meeting_id: 'm2', mid: { title: 'Second Meeting' } },
+      ] as RetrievalResult[];
 
       const citations = buildCitationChain(answer, context);
 
@@ -51,9 +52,11 @@ describe('Citation Engine', () => {
     it('audits valid citations successfully', () => {
       vi.mocked(dbModule.getMeetingMid).mockReturnValue({
         evidence_spans: [{ quote: 'hello this is a test' }],
-      } as any);
+      } as unknown as ReturnType<typeof dbModule.getMeetingMid>);
 
-      vi.mocked(dbModule.getEntity).mockReturnValue({ id: 'e1' } as any);
+      vi.mocked(dbModule.getEntity).mockReturnValue({
+        id: 'e1',
+      } as unknown as dbModule.Entity);
 
       const citations = [
         {
@@ -87,7 +90,9 @@ describe('Citation Engine', () => {
     });
 
     it('fails audit if entity is not found', () => {
-      vi.mocked(dbModule.getMeetingMid).mockReturnValue({} as any);
+      vi.mocked(dbModule.getMeetingMid).mockReturnValue(
+        {} as ReturnType<typeof dbModule.getMeetingMid>,
+      );
       vi.mocked(dbModule.getEntity).mockReturnValue(undefined);
 
       const citations = [
@@ -107,7 +112,7 @@ describe('Citation Engine', () => {
     it('fails audit if evidence span is missing from MID', () => {
       vi.mocked(dbModule.getMeetingMid).mockReturnValue({
         evidence_spans: [{ quote: 'some other thing entirely' }],
-      } as any);
+      } as unknown as ReturnType<typeof dbModule.getMeetingMid>);
 
       const citations = [
         {
