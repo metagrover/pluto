@@ -6,17 +6,21 @@ import {
   envTokenNames,
   parseRepoSlug,
   parseViewerPermission,
+  prepareGithubEnv,
   resolvePreflightOptions,
   runCommand,
 } from './lib/pm_housekeeping_github_preflight.js';
 
-const tokenNames = envTokenNames();
+const githubEnv = prepareGithubEnv();
+const tokenNames = envTokenNames(githubEnv);
 const { repo, runMutationCheck, mutationIssueNumber } = resolvePreflightOptions(
   process.argv.slice(2),
 );
 const { owner, name } = parseRepoSlug(repo);
 
-const auth = runCommand('gh', ['auth', 'status', '--hostname', 'github.com']);
+const auth = runCommand('gh', ['auth', 'status', '--hostname', 'github.com'], {
+  env: githubEnv,
+});
 const api = runCommand('curl', [
   '-fsSIL',
   '--connect-timeout',
@@ -24,7 +28,9 @@ const api = runCommand('curl', [
   '--max-time',
   '20',
   'https://api.github.com',
-]);
+], {
+  env: githubEnv,
+});
 const issueList = runCommand('gh', [
   'issue',
   'list',
@@ -32,7 +38,9 @@ const issueList = runCommand('gh', [
   repo,
   '--limit',
   '1',
-]);
+], {
+  env: githubEnv,
+});
 const permissionProbe = runCommand('gh', [
   'api',
   'graphql',
@@ -42,7 +50,9 @@ const permissionProbe = runCommand('gh', [
   `name=${name}`,
   '-f',
   'query=query($owner:String!, $name:String!) { repository(owner: $owner, name: $name) { viewerPermission } }',
-]);
+], {
+  env: githubEnv,
+});
 const viewerPermission =
   permissionProbe.exitCode === 0
     ? parseViewerPermission(permissionProbe.stdout)
@@ -56,7 +66,9 @@ const mutation = runMutationCheck
       repo,
       '--body',
       `PM housekeeping mutation preflight passed at ${new Date().toISOString()}.`,
-    ])
+    ], {
+      env: githubEnv,
+    })
   : { exitCode: 0 };
 
 const classification = classifyPreflightResult({

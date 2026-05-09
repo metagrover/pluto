@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 
 const TOKEN_NAME_PATTERN = /(^|_)(GH|GITHUB|TOKEN|PAT|OAUTH|AUTH)(_|$)|GITHUB/i;
 const WRITE_PERMISSIONS = new Set(['ADMIN', 'MAINTAIN', 'WRITE']);
@@ -17,6 +19,70 @@ export function envTokenNames(env = process.env) {
     .filter((name) => name === 'GH_TOKEN' || name === 'GITHUB_TOKEN')
     .filter((name) => `${env[name] ?? ''}`.trim().length > 0)
     .sort();
+}
+
+function stripEnvQuotes(value) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
+export function loadBuilderEnv({ content, env = process.env } = {}) {
+  const loaded = { ...env };
+
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex <= 0) continue;
+
+    const name = trimmed.slice(0, separatorIndex).trim();
+    const value = stripEnvQuotes(trimmed.slice(separatorIndex + 1));
+    if (!Object.hasOwn(loaded, name) || `${loaded[name] ?? ''}`.length === 0) {
+      loaded[name] = value;
+    }
+  }
+
+  return loaded;
+}
+
+export function prepareGithubEnv({
+  env = process.env,
+  cwd = process.cwd(),
+  builderEnvPath = path.join(cwd, '.builder.env'),
+  loadLocalEnv,
+} = {}) {
+  const localEnv =
+    loadLocalEnv ??
+    (() => {
+      if (!existsSync(builderEnvPath)) return {};
+      return loadBuilderEnv({
+        content: readFileSync(builderEnvPath, 'utf8'),
+        env: {},
+      });
+    });
+  const prepared = { ...localEnv() };
+  for (const [name, value] of Object.entries(env)) {
+    if (`${value ?? ''}`.length > 0 || !Object.hasOwn(prepared, name)) {
+      prepared[name] = value;
+    }
+  }
+
+  if (prepared.GH_TOKEN && !prepared.GITHUB_TOKEN) {
+    prepared.GITHUB_TOKEN = prepared.GH_TOKEN;
+  }
+  if (prepared.GITHUB_TOKEN && !prepared.GH_TOKEN) {
+    prepared.GH_TOKEN = prepared.GITHUB_TOKEN;
+  }
+
+  return prepared;
 }
 
 export function parseRepoSlug(repo) {
@@ -86,14 +152,6 @@ export function classifyPreflightResult({
   viewerPermission = null,
   mutationExitCode = 0,
 }) {
-  if (authExitCode !== 0) {
-    return {
-      ok: false,
-      failureKind: 'auth',
-      message: 'GitHub CLI auth failed.',
-    };
-  }
-
   if (apiExitCode !== 0) {
     return {
       ok: false,
@@ -105,8 +163,12 @@ export function classifyPreflightResult({
   if (issueListExitCode !== 0) {
     return {
       ok: false,
-      failureKind: 'issue-list',
-      message: 'GitHub issue listing failed.',
+      failureKind:
+        tokenNames.length === 0 && authExitCode !== 0 ? 'auth' : 'issue-list',
+      message:
+        tokenNames.length === 0 && authExitCode !== 0
+          ? 'GitHub CLI auth failed.'
+          : 'GitHub issue listing failed.',
     };
   }
 

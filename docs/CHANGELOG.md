@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-09
 
+### Align automation GitHub auth preflights
+- **Issue:** [#67](https://github.com/metagrover/pluto/issues/67)
+- **PR:** Not opened yet.
+- **Changed:** Updated PM GitHub preflight to load `.builder.env`, mirror `GH_TOKEN` and `GITHUB_TOKEN`, and treat repo-scoped issue/permission checks as authoritative even when `gh auth status` is noisy. Aligned the live PM and Engineering Housekeeping automation prompts with the same bootstrap and classification rules.
+- **Why:** Recurring automations were failing early because some runs used stale keyring/auth-status checks or missed the project-local token env that had already been configured.
+- **Replaced:** Treating `gh auth status` as a blocking source of truth for automation readiness.
+- **Notes:** `pnpm run pm:github-preflight` now reports token variable names only, keeps token values redacted, and succeeds locally with `viewerPermission: ADMIN`.
+
 ### Improve contributor DevEx and onboarding path
 - **Issue:** [#56](https://github.com/metagrover/pluto/issues/56)
 - **PR:** Not opened yet.

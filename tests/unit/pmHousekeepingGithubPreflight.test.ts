@@ -5,7 +5,9 @@ import {
   classifyPreflightResult,
   envTokenNames,
   hasRepoWritePermission,
+  loadBuilderEnv,
   parseRepoSlug,
+  prepareGithubEnv,
   resolvePreflightOptions,
 } from '../../scripts/lib/pm_housekeeping_github_preflight.js';
 
@@ -52,11 +54,11 @@ describe('PM housekeeping GitHub preflight helpers', () => {
     expect(hasRepoWritePermission(null)).toBe(false);
   });
 
-  it('accepts keyring-backed gh auth when repo checks pass', () => {
+  it('accepts repo checks as authoritative when gh auth status is noisy', () => {
     expect(
       classifyPreflightResult({
         envTokenNames: [],
-        authExitCode: 0,
+        authExitCode: 1,
         apiExitCode: 0,
         issueListExitCode: 0,
         permissionExitCode: 0,
@@ -67,6 +69,36 @@ describe('PM housekeeping GitHub preflight helpers', () => {
       failureKind: null,
       message:
         'GitHub preflight passed with valid gh auth and write-level repository access.',
+    });
+  });
+
+  it('loads project-local builder env values without overriding caller env', () => {
+    expect(
+      loadBuilderEnv({
+        content:
+          '# local automation env\nGH_TOKEN=from-file\nGITHUB_TOKEN="from quoted file"\nCODEX_HOME=/tmp/codex\n',
+        env: {
+          GH_TOKEN: 'from-caller',
+        },
+      }),
+    ).toEqual({
+      GH_TOKEN: 'from-caller',
+      GITHUB_TOKEN: 'from quoted file',
+      CODEX_HOME: '/tmp/codex',
+    });
+  });
+
+  it('mirrors GitHub token variables for gh callers', () => {
+    expect(
+      prepareGithubEnv({
+        env: {
+          GITHUB_TOKEN: 'token',
+        },
+        loadLocalEnv: () => ({}),
+      }),
+    ).toMatchObject({
+      GH_TOKEN: 'token',
+      GITHUB_TOKEN: 'token',
     });
   });
 
