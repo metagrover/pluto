@@ -118,6 +118,15 @@ export function classifyPreflightResult({
     };
   }
 
+  if (viewerPermission === null) {
+    return {
+      ok: false,
+      failureKind: 'permission-probe',
+      message:
+        'GitHub repository permission probe returned an unreadable permission payload.',
+    };
+  }
+
   if (!hasRepoWritePermission(viewerPermission)) {
     return {
       ok: false,

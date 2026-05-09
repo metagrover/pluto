@@ -120,6 +120,24 @@ describe('PM housekeeping GitHub preflight helpers', () => {
     });
   });
 
+  it('treats unreadable permission probe output as its own failure', () => {
+    expect(
+      classifyPreflightResult({
+        envTokenNames: ['GH_TOKEN'],
+        authExitCode: 0,
+        apiExitCode: 0,
+        issueListExitCode: 0,
+        permissionExitCode: 0,
+        viewerPermission: null,
+      }),
+    ).toEqual({
+      ok: false,
+      failureKind: 'permission-probe',
+      message:
+        'GitHub repository permission probe returned an unreadable permission payload.',
+    });
+  });
+
   it('requires an explicit issue number for mutation checks', () => {
     expect(() => resolvePreflightOptions(['--mutation-check'])).toThrow(
       '--mutation-check requires --issue-number <number>.',
