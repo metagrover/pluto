@@ -68,3 +68,5 @@ worktrees/
 .claude/
 .superpowers/
 .gstack/
+
+.builder.env
