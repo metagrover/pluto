@@ -20,6 +20,7 @@
     "prepare": "lefthook install",
     "audit:high": "pnpm audit --audit-level high",
     "test": "vitest",
+    "test:manual": "vitest run tests/manual/**/*.test.ts",
     "replay:meeting": "node scripts/replay_meeting_attribution.js",
     "benchmark:transcription": "node scripts/benchmark_transcription_backends.js",
     "benchmark:meeting-notes-quality": "node scripts/evaluate_meeting_notes_quality.js",

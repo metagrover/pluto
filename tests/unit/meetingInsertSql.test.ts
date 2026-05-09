@@ -16,7 +16,9 @@ describe('MEETING_INSERT_SQL', () => {
       .map((column) => column.trim())
       .filter(Boolean);
 
-    expect(columns).toHaveLength(27);
-    expect(countMatches(MEETING_INSERT_SQL, /\?/g)).toBe(27);
+    expect(columns?.length).toBeGreaterThan(0);
+    expect(countMatches(MEETING_INSERT_SQL, /\?/g)).toBe(columns?.length ?? 0);
+    expect(columns).toContain('created_at');
+    expect(MEETING_INSERT_SQL).toContain('COALESCE(?, CURRENT_TIMESTAMP)');
   });
 });

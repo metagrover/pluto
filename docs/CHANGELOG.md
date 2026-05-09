@@ -18,15 +18,15 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
-## 2026-05-15
+## 2026-05-09
 
 ### Improve contributor DevEx and onboarding path
 - **Issue:** [#56](https://github.com/metagrover/pluto/issues/56)
 - **PR:** Not opened yet.
-- **Changed:** Updated README with accurate prerequisites and clone URL; decoupled heavy Python/ML setup from standard Node installation; added `fix-sqlite-abi` script for native module recovery; brought Biome linter to green state.
-- **Why:** The initial /devex-review audit found the onboarding path was fragile for new developers, with misleading documentation and unexpected "heavy" side effects during dependency installation.
-- **Replaced:** Relying on `postinstall` for ML environment setup and outdated getting-started instructions.
-- **Notes:** Contributors must now explicitly run `pnpm run setup-python` after `pnpm install`.
+- **Changed:** Split environment-coupled local probe tests out of the default Vitest suite, added a `pnpm run test:manual` path for those probes, refreshed contributor docs around the explicit setup/build/verification flow, and made the meeting insert SQL assertion resilient to schema growth.
+- **Why:** The default contributor verification path should be green from a normal checkout without requiring a warmed personal database, a provider-backed LLM setup, or brittle test maintenance after routine schema additions.
+- **Replaced:** Treating local database / LLM probes as ordinary unit tests and relying on a fixed column count in the meeting insert SQL guard.
+- **Notes:** `pnpm run lint` and `pnpm test -- --run` are now the contributor-safe baseline checks. Manual probe tests still exist under `tests/manual/` for local debugging.
 
 ## 2026-05-01
 

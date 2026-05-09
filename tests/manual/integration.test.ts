@@ -1,4 +1,3 @@
-import * as path from 'node:path';
 import { describe, it } from 'vitest';
 import { vi } from 'vitest';
 
@@ -47,7 +46,6 @@ describe('Local Integration Test', () => {
     const query = 'What do you know about the Berlin meeting?';
     console.log(`[TEST] User Query: "${query}"`);
 
-    // The query parser goes through an LLM. It may fail if keys aren't set, but should fallback.
     const parsed = await parseQuery(query);
     console.log(
       `[TEST] Parsed Intent: ${parsed.intent}, Keywords: ${parsed.keywords.join(', ')}, Expanded: ${parsed.expanded_keywords?.join(', ')}`,
