@@ -203,6 +203,31 @@ const formatDueLabel = (value: string | null): string => {
 const getMeetingTimestamp = (meeting: Meeting): string =>
   meeting.started_at || meeting.created_at;
 
+const compareActionsByDueDate = (a: Entity, b: Entity): number => {
+  const aDue = toTimestamp(a.due_date);
+  const bDue = toTimestamp(b.due_date);
+
+  if (aDue > 0 && bDue > 0 && aDue !== bDue) {
+    return aDue - bDue;
+  }
+  if (aDue > 0) return -1;
+  if (bDue > 0) return 1;
+
+  return toTimestamp(a.updated_at) - toTimestamp(b.updated_at);
+};
+
+const compareActionsByOldestUpdate = (a: Entity, b: Entity): number =>
+  toTimestamp(a.updated_at) - toTimestamp(b.updated_at);
+
+const sortActions = (
+  actions: Entity[],
+  compare: (a: Entity, b: Entity) => number,
+): Entity[] =>
+  actions
+    .map((action, index) => ({ action, index }))
+    .sort((a, b) => compare(a.action, b.action) || a.index - b.index)
+    .map(({ action }) => action);
+
 const getMeetingDetail = (meeting: Meeting): string => {
   const analysis = parseJsonObject<MeetingAnalysisOverview>(
     meeting.analysis_json,
@@ -256,9 +281,15 @@ const buildActionInsights = (
   activeActions: Entity[],
 ): DashboardActionInsights => {
   const prioritizedItems = [
-    ...overdueActions.map((action) => actionToInsightItem(action, 'overdue')),
-    ...staleActions.map((action) => actionToInsightItem(action, 'stale')),
-    ...activeActions.map((action) => actionToInsightItem(action, 'active')),
+    ...sortActions(overdueActions, compareActionsByDueDate).map((action) =>
+      actionToInsightItem(action, 'overdue'),
+    ),
+    ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) =>
+      actionToInsightItem(action, 'stale'),
+    ),
+    ...sortActions(activeActions, compareActionsByDueDate).map((action) =>
+      actionToInsightItem(action, 'active'),
+    ),
   ];
   const seenIds = new Set<string>();
   const items = prioritizedItems
