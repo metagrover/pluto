@@ -17,6 +17,7 @@ import {
 import { useKnowledgeStore } from '../../store/knowledgeStore';
 import { EvolutionCard } from './EvolutionCard';
 import { MentionedWithCard } from './MentionedWithCard';
+import { resolveFocusSheetSummary } from './focusSheetSummary';
 
 interface FocusSheetProps {
   nodes: KnowledgeGraphNode[];
@@ -168,18 +169,10 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
       (hasAnyContext ? 0.9 : entityMeetings.length > 1 ? 0.5 : 0.2);
   }
 
-  // --- MOCK DATA HIJACK (V1.8 PR) ---
-  const isPlutoMock = selectedEntityNode?.label.toLowerCase() === 'pluto';
-  const displaySummary = isPlutoMock
-    ? {
-        sentences: [
-          {
-            text: 'The team is shifting to `Vector DB` for the `Persona API` to handle high-latency spikes identified in the March 12th standup [ID: 001]. [[Sarah Chen]] raised a concern regarding data privacy limits that remains a **primary blocker** [ID: 002].',
-            source_meeting_ids: ['m-001', 'm-002'],
-          },
-        ],
-      }
-    : summary;
+  const displaySummary = resolveFocusSheetSummary(
+    selectedEntityNode?.label || '',
+    summary,
+  );
 
   const activeMeeting = entityMeetings.find((m) => m.id === activeMeetingId);
 
