@@ -52,19 +52,21 @@ describe('PM housekeeping GitHub preflight helpers', () => {
     expect(hasRepoWritePermission(null)).toBe(false);
   });
 
-  it('classifies missing token environment separately from keyring auth', () => {
+  it('accepts keyring-backed gh auth when repo checks pass', () => {
     expect(
       classifyPreflightResult({
         envTokenNames: [],
         authExitCode: 0,
         apiExitCode: 0,
         issueListExitCode: 0,
+        permissionExitCode: 0,
+        viewerPermission: 'ADMIN',
       }),
     ).toEqual({
-      ok: false,
-      failureKind: 'missing-env-token',
+      ok: true,
+      failureKind: null,
       message:
-        'GitHub CLI works, but GH_TOKEN/GITHUB_TOKEN is not present for the automation runtime.',
+        'GitHub preflight passed with valid gh auth and write-level repository access.',
     });
   });
 
@@ -82,7 +84,7 @@ describe('PM housekeeping GitHub preflight helpers', () => {
     });
   });
 
-  it('passes when token-backed auth, API reachability, and issue listing pass', () => {
+  it('passes when env-token-backed auth, API reachability, and issue listing pass', () => {
     expect(
       classifyPreflightResult({
         envTokenNames: ['GITHUB_TOKEN'],
@@ -96,7 +98,7 @@ describe('PM housekeeping GitHub preflight helpers', () => {
       ok: true,
       failureKind: null,
       message:
-        'GitHub preflight passed with an environment-backed token and write-level repository access.',
+        'GitHub preflight passed with valid gh auth and write-level repository access.',
     });
   });
 
@@ -114,7 +116,7 @@ describe('PM housekeeping GitHub preflight helpers', () => {
       ok: false,
       failureKind: 'write-permission',
       message:
-        'GitHub token is valid, but it does not have write-level access to the repository.',
+        'GitHub auth is valid, but it does not have write-level access to the repository.',
     });
   });
 
@@ -224,7 +226,7 @@ describe('PM housekeeping GitHub preflight helpers', () => {
         classification: {
           ok: false,
           failureKind: 'auth',
-          message: 'GitHub CLI auth failed with the environment-backed token.',
+          message: 'GitHub CLI auth failed.',
         },
         repo: 'metagrover/pluto',
         tokenNames: ['GITHUB_TOKEN'],
@@ -276,7 +278,7 @@ describe('PM housekeeping GitHub preflight helpers', () => {
         classification: {
           ok: false,
           failureKind: 'auth',
-          message: 'GitHub CLI auth failed with the environment-backed token.',
+          message: 'GitHub CLI auth failed.',
         },
         repo: 'metagrover/pluto',
         tokenNames: ['GH_TOKEN'],
@@ -327,7 +329,7 @@ describe('PM housekeeping GitHub preflight helpers', () => {
           ok: true,
           failureKind: null,
           message:
-            'GitHub preflight passed with an environment-backed token and write-level repository access.',
+            'GitHub preflight passed with valid gh auth and write-level repository access.',
         },
         repo: 'metagrover/pluto',
         tokenNames: ['GH_TOKEN'],

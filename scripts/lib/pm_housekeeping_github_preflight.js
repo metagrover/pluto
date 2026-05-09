@@ -86,20 +86,11 @@ export function classifyPreflightResult({
   viewerPermission = null,
   mutationExitCode = 0,
 }) {
-  if (tokenNames.length === 0) {
-    return {
-      ok: false,
-      failureKind: 'missing-env-token',
-      message:
-        'GitHub CLI works, but GH_TOKEN/GITHUB_TOKEN is not present for the automation runtime.',
-    };
-  }
-
   if (authExitCode !== 0) {
     return {
       ok: false,
       failureKind: 'auth',
-      message: 'GitHub CLI auth failed with the environment-backed token.',
+      message: 'GitHub CLI auth failed.',
     };
   }
 
@@ -132,7 +123,7 @@ export function classifyPreflightResult({
       ok: false,
       failureKind: 'write-permission',
       message:
-        'GitHub token is valid, but it does not have write-level access to the repository.',
+        'GitHub auth is valid, but it does not have write-level access to the repository.',
     };
   }
 
@@ -148,7 +139,7 @@ export function classifyPreflightResult({
     ok: true,
     failureKind: null,
     message:
-      'GitHub preflight passed with an environment-backed token and write-level repository access.',
+      'GitHub preflight passed with valid gh auth and write-level repository access.',
   };
 }
 

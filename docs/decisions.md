@@ -29,9 +29,9 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Rationale:** Pluto needs low-friction memory for frequent product and design evolution, plus deeper records for architecture choices that future engineers will need to understand.
 - **Consequences:** The decision log becomes the fast map of project direction. ADRs become detailed landmarks, not the default workflow.
 
-## 2026-05-01 - Require environment-backed GitHub auth for PM automation
+## 2026-05-01 - Accept valid `gh` auth for PM automation preflight
 - **Status:** Accepted
 - **Source:** [Issue #67](https://github.com/metagrover/pluto/issues/67), PM housekeeping automation readiness
-- **Decision:** Recurring PM housekeeping should treat `GH_TOKEN` or `GITHUB_TOKEN` as the supported authentication path and run a preflight that verifies API reachability, issue listing, and repository write scope before mutating issues, labels, PRs, or milestones.
-- **Rationale:** Keyring-backed `gh` auth can work in an interactive desktop session while failing in the cron automation runtime. An environment-backed token plus explicit diagnostics makes failures actionable and non-interactive.
-- **Consequences:** PM automation runs should report missing token, auth, network, issue-list, permission-probe, write-permission, and mutation failures separately, and should never print token values.
+- **Decision:** Recurring PM housekeeping should accept any valid non-interactive `gh` authentication path, including keychain-backed login or `GH_TOKEN`/`GITHUB_TOKEN`, and run a preflight that verifies API reachability, issue listing, and repository write scope before mutating issues, labels, PRs, or milestones.
+- **Rationale:** Pluto is run both from interactive desktop sessions and more automation-like contexts. Requiring environment tokens rejected working keychain-backed `gh` auth even when GitHub API access and repository permissions were already proven by the preflight itself.
+- **Consequences:** PM automation runs should report auth, network, issue-list, permission-probe, write-permission, and mutation failures separately, should continue redacting token values from diagnostics, and should prefer repository capability checks over assumptions about how `gh` obtained credentials.

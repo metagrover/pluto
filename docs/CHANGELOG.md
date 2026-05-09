@@ -41,10 +41,10 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 ### Add PM housekeeping GitHub preflight
 - **Issue:** [#67](https://github.com/metagrover/pluto/issues/67)
 - **PR:** Not opened yet.
-- **Changed:** Added a `pm:github-preflight` check that verifies environment-backed GitHub auth, API reachability, issue listing, repository write scope, and optional mutation smoke checks without logging token values.
+- **Changed:** Added a `pm:github-preflight` check that verifies valid `gh` auth, API reachability, issue listing, repository write scope, and optional mutation smoke checks without logging token values.
 - **Why:** Recurring PM automation needs to distinguish missing secrets, invalid auth, network failures, and mutation failures before grooming issues.
-- **Replaced:** Relying on interactive `gh` keyring auth as evidence that cron automation can access GitHub.
-- **Notes:** The default permission check uses GraphQL `viewerPermission`, so recurring runs can verify write access without leaving test comments behind. The local interactive shell still has keyring-backed auth only; the recurring runtime needs `GH_TOKEN` or `GITHUB_TOKEN` injected by the host environment.
+- **Replaced:** Blind trust in auth configuration without confirming live GitHub access and repository permissions.
+- **Notes:** The default permission check uses GraphQL `viewerPermission`, so recurring runs can verify write access without leaving test comments behind. The preflight now accepts either keychain-backed `gh` login or env-backed tokens as long as the live checks pass.
 
 ### Adopt issue-driven agentic development
 - **Issue:** [#55](https://github.com/metagrover/pluto/issues/55)
