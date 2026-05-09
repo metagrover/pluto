@@ -72,6 +72,16 @@ npx electron-rebuild -f -w better-sqlite3
 pnpm exec electron-rebuild -f -w better-sqlite3
 ```
 
+**Node test / script fallback**
+
+If a plain Node-based command still reports `Could not locate the bindings file`, rebuild `better-sqlite3` for the current Node runtime:
+
+```bash
+pnpm rebuild better-sqlite3
+```
+
+Default contributor verification uses `pnpm run lint` and `pnpm test -- --run`. Local database / provider probe tests now live behind `pnpm run test:manual` so contributors do not need a warmed personal database to get a green baseline.
+
 ## 4) Swift build error: duplicate method redeclaration
 
 **Symptoms**
@@ -101,8 +111,12 @@ xcode-select --install
 
 1. Install Xcode Command Line Tools (if missing)
 2. `pnpm install`
-3. If WhisperX fails: pin `setuptools<82` (see above) and re-run `pnpm run setup-python`
-4. If Electron throws ABI mismatch: run `pnpm exec electron-rebuild -f -w better-sqlite3`
+3. `pnpm run setup-python`
+4. `pnpm run build-native`
+5. `pnpm run lint`
+6. `pnpm test -- --run`
+7. If WhisperX fails: pin `setuptools<82` (see above) and re-run `pnpm run setup-python`
+8. If Electron throws ABI mismatch: run `pnpm exec electron-rebuild -f -w better-sqlite3`
 
 ## Code Formatting with Biome
 

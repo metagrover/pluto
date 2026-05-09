@@ -25,6 +25,7 @@ Intelligent meeting assistant and "second brain" application.
     ```bash
     pnpm install
     ```
+    This installs JavaScript dependencies only. Python and native capture tooling stay explicit so setup is easier to reason about.
 
 3.  **Set up Python Environment**
     This installs WhisperX and ML dependencies into a local virtual environment. This may take a few minutes.
@@ -43,12 +44,35 @@ Intelligent meeting assistant and "second brain" application.
     pnpm run dev
     ```
 
+### Contributor Verification
+
+Run the default contributor checks from a plain local checkout:
+
+```bash
+pnpm run lint
+pnpm test -- --run
+```
+
+If you want to run the local database / LLM probe tests as well, use:
+
+```bash
+pnpm run test:manual
+```
+
+Those manual probes expect a populated local Pluto database plus any provider credentials they exercise, so they are intentionally excluded from the default contributor verification path.
+
 ### 🛠 Troubleshooting
 
 #### Electron ABI Mismatch (`better-sqlite3`)
 If you see an error like `NODE_MODULE_VERSION mismatch` or tests fail because of `better-sqlite3`, run:
 ```bash
 pnpm run fix-sqlite-abi
+```
+
+If a manual test or ad hoc Node script still cannot find the local `better-sqlite3` binding afterward, rebuild it for the current Node runtime:
+
+```bash
+pnpm rebuild better-sqlite3
 ```
 
 For more detailed troubleshooting, see [docs/dev.md](docs/dev.md).

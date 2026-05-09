@@ -23,7 +23,6 @@ vi.mock('electron', () => {
 });
 
 import { searchMeetingsFts } from '../../electron/db';
-import * as db from '../../electron/db';
 import {
   parseQuery,
   retrieveContext,
@@ -35,20 +34,17 @@ describe('REAL API E2E', () => {
   it('should find berlin meeting', async () => {
     const query = 'do you know about Berlin meeting?';
 
-    // 1. Raw search to confirm it's in DB right now
     const raw = searchMeetingsFts('Berlin');
     console.log(`\n\n=== RAW FTS SEARCH FOR 'Berlin' ===`);
     console.log(`Found ${raw.length} matches.`);
     if (raw.length > 0) console.log(`Snippet 1: ${raw[0].snippet}`);
 
-    // 2. Parse Query
     const parsed = await parseQuery(query);
     console.log('\n=== PARSED INTENT ===');
     console.log(
       `Intent: ${parsed.intent}\nKeywords: ${parsed.keywords}\nExpanded: ${parsed.expanded_keywords}`,
     );
 
-    // 3. Retrieve Context
     const context = await retrieveContext(parsed);
     console.log('\n=== RETRIEVED CONTEXT ===');
     console.log(`Count: ${context.length}`);
@@ -60,7 +56,6 @@ describe('REAL API E2E', () => {
       console.log(`WHY DID IT FAIL? Let's check intent:`, parsed);
     }
 
-    // 4. Hit LLM
     try {
       const settings = await getAllSettings();
       console.log('\n=== LLM Settings ===');
