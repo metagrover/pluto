@@ -22,7 +22,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ### Clear the high-severity dependency audit gate
 - **Issue:** [#87](https://github.com/metagrover/pluto/issues/87)
-- **PR:** Not opened yet.
+- **PR:** [#88](https://github.com/metagrover/pluto/pull/88)
 - **Changed:** Upgraded the direct `electron` and `vite` versions and pinned vulnerable transitive `picomatch`, `lodash`, and `@xmldom/xmldom` packages through `pnpm.overrides`, bringing `pnpm audit --audit-level high` back to green.
 - **Why:** Pluto's pre-commit hook treats high-severity dependency advisories as a landing blocker, and that blocker was preventing normal roadmap and runtime PRs from shipping cleanly.
 - **Replaced:** Accepting a permanently failing audit hook that forced code changes to stop or bypass verification.
