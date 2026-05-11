@@ -890,6 +890,42 @@ app.whenReady().then(async () => {
     },
   );
 
+  ipcMain.handle('AUDIO_DELETE_FILES', async (_event, pathsToDelete = []) => {
+    if (!Array.isArray(pathsToDelete) || pathsToDelete.length === 0) {
+      return { deleted: 0 };
+    }
+
+    const allowedRoots = [
+      path.join(app.getPath('userData'), 'meetings'),
+      app.getPath('temp'),
+    ].map((root) => path.resolve(root));
+
+    let deleted = 0;
+    for (const rawPath of pathsToDelete) {
+      if (typeof rawPath !== 'string' || rawPath.length === 0) continue;
+
+      const resolvedPath = path.resolve(rawPath);
+      const allowed = allowedRoots.some(
+        (root) =>
+          resolvedPath === root ||
+          resolvedPath.startsWith(`${root}${path.sep}`),
+      );
+      if (!allowed || !fs.existsSync(resolvedPath)) continue;
+
+      try {
+        fs.unlinkSync(resolvedPath);
+        deleted += 1;
+      } catch (error) {
+        console.warn(
+          `[Pluto] Failed to delete recording artifact ${resolvedPath}:`,
+          error,
+        );
+      }
+    }
+
+    return { deleted };
+  });
+
   // Database handlers
   const cleanupTranscriptJson = (
     transcriptJson: unknown,
