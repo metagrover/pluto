@@ -12,8 +12,8 @@ import {
 } from './knowledgeDocConfig';
 import { parseKnowledgeJsonResponse } from './knowledgeJson';
 import {
-  applyKnowledgeCorrectionsToDocument,
   type KnowledgeV2Document,
+  applyKnowledgeCorrectionsToDocument,
   buildDeterministicKnowledgeV2Document,
   isKnowledgeV2Document,
   mergeKnowledgeV2Documents,

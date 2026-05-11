@@ -626,7 +626,9 @@ export const applyKnowledgeCorrectionsToDocument = (
 
   for (const correction of orderedCorrections) {
     if (correction.target_kind === 'stream') {
-      const stream = activeStreams.find((item) => item.id === correction.target_id);
+      const stream = activeStreams.find(
+        (item) => item.id === correction.target_id,
+      );
       if (!stream) continue;
 
       if (correction.action === 'rename_stream') {
@@ -696,7 +698,9 @@ export const applyKnowledgeCorrectionsToDocument = (
     if (right.source_count !== left.source_count) {
       return right.source_count - left.source_count;
     }
-    return (right.last_touched_at || '').localeCompare(left.last_touched_at || '');
+    return (right.last_touched_at || '').localeCompare(
+      left.last_touched_at || '',
+    );
   });
 
   return {
@@ -718,7 +722,9 @@ export const applyKnowledgeCorrectionsToDocument = (
       .map((state) => state.item)
       .slice(0, 12),
     risks_and_unknowns: overlayItems
-      .filter((state) => state.item.kind === 'risk' || state.item.kind === 'blocker')
+      .filter(
+        (state) => state.item.kind === 'risk' || state.item.kind === 'blocker',
+      )
       .sort((left, right) => left.originalIndex - right.originalIndex)
       .map((state) => state.item)
       .slice(0, 12),
