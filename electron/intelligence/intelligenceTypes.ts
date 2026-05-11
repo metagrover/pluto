@@ -115,7 +115,85 @@ export interface RetrievalResult {
 }
 
 // =============================================
-// Proactive Intelligence Types
+// Attention Queue Types
+// =============================================
+
+export type AttentionItemKind =
+  | 'follow_up'
+  | 'blocker'
+  | 'risk'
+  | 'dependency'
+  | 'open_question'
+  | 'stale_context'
+  | 'repeated_pattern'
+  | 'decision_conflict'
+  | 'duplicate_commitment'
+  | 'reference_context'
+  | 'source_quality';
+
+export type AttentionItemSeverity = 'critical' | 'watch' | 'steady';
+
+export type AttentionItemStatus =
+  | 'active'
+  | 'snoozed'
+  | 'dismissed'
+  | 'resolved'
+  | 'pinned'
+  | 'stale'
+  | 'superseded';
+
+export type AttentionItemSource =
+  | 'proactive_engine'
+  | 'knowledge_v2'
+  | 'dashboard'
+  | 'action_tracker'
+  | 'manual';
+
+export interface AttentionEvidenceReference {
+  meeting_id: string;
+  quote: string;
+  entity_id?: string | null;
+  source_kind?: string | null;
+}
+
+export interface AttentionItem {
+  id: string;
+  dedupe_key: string;
+  kind: AttentionItemKind;
+  severity: AttentionItemSeverity;
+  score: number;
+  status: AttentionItemStatus;
+  title: string;
+  reason: string;
+  source: AttentionItemSource;
+  evidence: AttentionEvidenceReference[];
+  related_entity_ids: string[];
+  related_stream_ids: string[];
+  related_meeting_ids: string[];
+  created_at: string;
+  updated_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+}
+
+export interface AttentionItemUpsert {
+  dedupe_key: string;
+  kind: AttentionItemKind;
+  severity: AttentionItemSeverity;
+  score: number;
+  status: AttentionItemStatus;
+  title: string;
+  reason: string;
+  source: AttentionItemSource;
+  evidence: AttentionEvidenceReference[];
+  related_entity_ids: string[];
+  related_stream_ids: string[];
+  related_meeting_ids: string[];
+  resolved_at?: string | null;
+}
+
+// =============================================
+// Legacy Proactive Trigger Types
 // =============================================
 
 export type IntelligenceAlertType =

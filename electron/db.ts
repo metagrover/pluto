@@ -1,8 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { app } from 'electron';
-import type { MidFrontmatter } from './intelligence/intelligenceTypes';
+import type {
+  AttentionEvidenceReference,
+  AttentionItem,
+  AttentionItemStatus,
+  AttentionItemUpsert,
+  MidFrontmatter,
+} from './intelligence/intelligenceTypes';
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 
@@ -16,6 +23,26 @@ const db = new Database(dbPath);
 
 type TableInfoColumn = {
   name: string;
+};
+
+type AttentionItemRow = {
+  id: string;
+  dedupe_key: string;
+  kind: string;
+  severity: string;
+  score: number;
+  status: string;
+  title: string;
+  reason: string;
+  source: string;
+  evidence_json: string | null;
+  related_entity_ids_json: string | null;
+  related_stream_ids_json: string | null;
+  related_meeting_ids_json: string | null;
+  created_at: string;
+  updated_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
 };
 
 export interface PersistedMeeting {
@@ -172,6 +199,29 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
       CREATE INDEX IF NOT EXISTS idx_entities_normalized_name ON entities(normalized_name);
       CREATE INDEX IF NOT EXISTS idx_entities_status ON entities(status);
+
+      CREATE TABLE IF NOT EXISTS attention_items (
+        id TEXT PRIMARY KEY,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        score REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active',
+        title TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_json TEXT,
+        related_entity_ids_json TEXT,
+        related_stream_ids_json TEXT,
+        related_meeting_ids_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        resolved_at DATETIME
+      );
+      CREATE INDEX IF NOT EXISTS idx_attention_items_status ON attention_items(status);
+      CREATE INDEX IF NOT EXISTS idx_attention_items_score ON attention_items(score DESC);
+      CREATE INDEX IF NOT EXISTS idx_attention_items_updated_at ON attention_items(updated_at DESC);
 
       -- Relationships between entities
       CREATE TABLE IF NOT EXISTS entity_links (
@@ -833,6 +883,136 @@ export const setSetting = (key: string, value: string) => {
   return stmt.run(key, value);
 };
 
+export const upsertAttentionItem = (
+  input: AttentionItemUpsert,
+): AttentionItem => {
+  const dedupeKey = input.dedupe_key.trim();
+  const now = new Date().toISOString();
+  const existing = db
+    .prepare('SELECT * FROM attention_items WHERE dedupe_key = ?')
+    .get(dedupeKey) as AttentionItemRow | undefined;
+  const resolvedAt =
+    input.status === 'resolved' ||
+    input.status === 'dismissed' ||
+    input.status === 'superseded'
+      ? input.resolved_at ?? existing?.resolved_at ?? now
+      : null;
+
+  if (existing) {
+    db.prepare(`
+      UPDATE attention_items
+      SET severity = ?, score = ?, status = ?, title = ?, reason = ?, source = ?,
+          evidence_json = ?, related_entity_ids_json = ?, related_stream_ids_json = ?,
+          related_meeting_ids_json = ?, updated_at = ?, last_seen_at = ?, resolved_at = ?
+      WHERE dedupe_key = ?
+    `).run(
+      input.severity,
+      input.score,
+      input.status,
+      input.title,
+      input.reason,
+      input.source,
+      serializeAttentionEvidence(input.evidence),
+      serializeAttentionStringArray(input.related_entity_ids),
+      serializeAttentionStringArray(input.related_stream_ids),
+      serializeAttentionStringArray(input.related_meeting_ids),
+      now,
+      now,
+      resolvedAt,
+      dedupeKey,
+    );
+  } else {
+    db.prepare(`
+      INSERT INTO attention_items (
+        id, dedupe_key, kind, severity, score, status, title, reason, source,
+        evidence_json, related_entity_ids_json, related_stream_ids_json,
+        related_meeting_ids_json, created_at, updated_at, last_seen_at, resolved_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      randomUUID(),
+      dedupeKey,
+      input.kind,
+      input.severity,
+      input.score,
+      input.status,
+      input.title,
+      input.reason,
+      input.source,
+      serializeAttentionEvidence(input.evidence),
+      serializeAttentionStringArray(input.related_entity_ids),
+      serializeAttentionStringArray(input.related_stream_ids),
+      serializeAttentionStringArray(input.related_meeting_ids),
+      now,
+      now,
+      now,
+      resolvedAt,
+    );
+  }
+
+  const row = db
+    .prepare('SELECT * FROM attention_items WHERE dedupe_key = ?')
+    .get(dedupeKey) as AttentionItemRow | undefined;
+
+  if (!row) {
+    throw new Error(`Failed to upsert attention item ${dedupeKey}`);
+  }
+
+  return mapAttentionItemRow(row);
+};
+
+export const listAttentionItems = (options?: {
+  status?: AttentionItemStatus | AttentionItemStatus[];
+  limit?: number;
+  meetingId?: string;
+}): AttentionItem[] => {
+  const statusFilter = options?.status
+    ? new Set(
+        Array.isArray(options.status) ? options.status : [options.status],
+      )
+    : null;
+  const meetingId = options?.meetingId?.trim();
+  const rows = db
+    .prepare('SELECT * FROM attention_items')
+    .all() as AttentionItemRow[];
+
+  const items = rows
+    .map(mapAttentionItemRow)
+    .filter((item) => {
+      if (statusFilter && !statusFilter.has(item.status)) return false;
+      if (meetingId && !item.related_meeting_ids.includes(meetingId)) {
+        return false;
+      }
+      return true;
+    })
+    .sort((left, right) => {
+      const statusDelta =
+        ATTENTION_STATUS_ORDER[left.status] - ATTENTION_STATUS_ORDER[right.status];
+      if (statusDelta !== 0) return statusDelta;
+      if (left.score !== right.score) return right.score - left.score;
+      return (
+        new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
+      );
+    });
+
+  return typeof options?.limit === 'number'
+    ? items.slice(0, options.limit)
+    : items;
+};
+
+export const clearAttentionItemsForMeeting = (meetingId: string): void => {
+  const normalizedMeetingId = meetingId.trim();
+  if (!normalizedMeetingId) return;
+  const rows = db
+    .prepare('SELECT * FROM attention_items')
+    .all() as AttentionItemRow[];
+
+  for (const row of rows) {
+    const relatedMeetingIds = parseAttentionJsonArray(row.related_meeting_ids_json);
+    if (!relatedMeetingIds.includes(normalizedMeetingId)) continue;
+    db.prepare('DELETE FROM attention_items WHERE id = ?').run(row.id);
+  }
+};
+
 /**
  * Meeting Management
  */
@@ -1320,6 +1500,96 @@ export interface KnowledgeDocWikiLink {
   target_id: string | null;
   snippet: string;
 }
+
+const ATTENTION_STATUS_ORDER: Record<AttentionItemStatus, number> = {
+  pinned: 0,
+  active: 1,
+  snoozed: 2,
+  stale: 3,
+  dismissed: 4,
+  resolved: 5,
+  superseded: 6,
+};
+
+const parseAttentionJsonArray = (value: string | null): string[] => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+const serializeAttentionStringArray = (values: string[]): string =>
+  JSON.stringify(
+    [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort(),
+  );
+
+const parseAttentionEvidence = (
+  value: string | null,
+): AttentionEvidenceReference[] => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const meetingId =
+        typeof entry.meeting_id === 'string' ? entry.meeting_id : '';
+      const quote = typeof entry.quote === 'string' ? entry.quote : '';
+      if (!meetingId || !quote) return [];
+      return [
+        {
+          meeting_id: meetingId,
+          quote,
+          entity_id:
+            typeof entry.entity_id === 'string' ? entry.entity_id : null,
+          source_kind:
+            typeof entry.source_kind === 'string' ? entry.source_kind : null,
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
+};
+
+const serializeAttentionEvidence = (
+  evidence: AttentionEvidenceReference[],
+): string =>
+  JSON.stringify(
+    evidence
+      .filter((entry) => entry.meeting_id && entry.quote)
+      .map((entry) => ({
+        meeting_id: entry.meeting_id,
+        quote: entry.quote,
+        entity_id: entry.entity_id ?? null,
+        source_kind: entry.source_kind ?? null,
+      })),
+  );
+
+const mapAttentionItemRow = (row: AttentionItemRow): AttentionItem => ({
+  id: row.id,
+  dedupe_key: row.dedupe_key,
+  kind: row.kind as AttentionItem['kind'],
+  severity: row.severity as AttentionItem['severity'],
+  score: typeof row.score === 'number' ? row.score : Number(row.score || 0),
+  status: row.status as AttentionItem['status'],
+  title: row.title,
+  reason: row.reason,
+  source: row.source as AttentionItem['source'],
+  evidence: parseAttentionEvidence(row.evidence_json),
+  related_entity_ids: parseAttentionJsonArray(row.related_entity_ids_json),
+  related_stream_ids: parseAttentionJsonArray(row.related_stream_ids_json),
+  related_meeting_ids: parseAttentionJsonArray(row.related_meeting_ids_json),
+  created_at: row.created_at,
+  updated_at: row.updated_at,
+  last_seen_at: row.last_seen_at,
+  resolved_at: row.resolved_at,
+});
 
 export interface KnowledgeGraphNode {
   id: string;
@@ -3758,6 +4028,7 @@ export const resetKnowledge = () => {
   // 2. Clear tables within a transaction
   const tables = [
     'auto_end_log',
+    'attention_items',
     'knowledge_backlinks',
     'knowledge_doc_notes',
     'knowledge_doc_user_edits',
