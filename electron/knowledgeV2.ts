@@ -141,6 +141,22 @@ export interface KnowledgeV2SourceMeeting {
   entity_names?: string[];
 }
 
+export interface KnowledgeV2Correction {
+  target_kind: 'source' | 'stream' | 'item';
+  target_id: string;
+  action:
+    | 'exclude_source'
+    | 'rename_stream'
+    | 'merge_stream'
+    | 'split_stream'
+    | 'pin_stream'
+    | 'promote_item'
+    | 'demote_item'
+    | 'correct_classification';
+  payload_json: string | null;
+  created_at: string;
+}
+
 const normalizeText = (value: string): string =>
   value.toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -337,6 +353,27 @@ const severityForKind = (kind: KnowledgeV2ItemKind): KnowledgeV2Severity => {
   return 'steady';
 };
 
+const ATTENTION_ITEM_KINDS = new Set<KnowledgeV2ItemKind>([
+  'follow_up',
+  'dependency',
+  'open_question',
+  'risk',
+  'blocker',
+]);
+
+const validKnowledgeV2Kinds = new Set<KnowledgeV2ItemKind>([
+  'decision',
+  'follow_up',
+  'risk',
+  'blocker',
+  'dependency',
+  'open_question',
+  'pattern',
+  'reference_context',
+  'stale_context',
+  'low_confidence',
+]);
+
 const freshnessForDate = (date: string | null): KnowledgeV2Freshness => {
   if (!date) return 'unknown';
   const timestamp = new Date(date).getTime();
@@ -527,6 +564,165 @@ const headlineForDocument = (
     streamReads[0] ||
     'Pluto has source material, but no trustworthy current read yet.'
   );
+};
+
+const parseCorrectionPayload = (
+  payloadJson: string | null,
+): Record<string, unknown> | null => {
+  if (!payloadJson) return null;
+  try {
+    const parsed = JSON.parse(payloadJson) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+};
+
+type KnowledgeV2OverlayItemState = {
+  item: KnowledgeV2Item;
+  originalIndex: number;
+  forceAttention: boolean | null;
+};
+
+export const applyKnowledgeCorrectionsToDocument = (
+  doc: KnowledgeV2Document,
+  corrections: KnowledgeV2Correction[],
+): KnowledgeV2Document => {
+  if (corrections.length === 0) return doc;
+
+  const activeStreams = doc.active_streams.map((stream) => ({ ...stream }));
+  const patternItems = doc.patterns.map((item, index) => ({
+    item: { ...item },
+    originalIndex: index,
+    forceAttention: null,
+  }));
+  const riskItems = doc.risks_and_unknowns.map((item, index) => ({
+    item: { ...item },
+    originalIndex: doc.patterns.length + index,
+    forceAttention: null,
+  }));
+  const attentionItems = doc.needs_attention.map((item, index) => ({
+    item: { ...item },
+    originalIndex: doc.patterns.length + doc.risks_and_unknowns.length + index,
+    forceAttention: null,
+  }));
+
+  const itemStates = new Map<string, KnowledgeV2OverlayItemState>();
+  for (const state of [...patternItems, ...riskItems, ...attentionItems]) {
+    const existing = itemStates.get(state.item.id);
+    if (existing) {
+      existing.forceAttention ??= state.forceAttention;
+      continue;
+    }
+    itemStates.set(state.item.id, state);
+  }
+
+  const orderedCorrections = [...corrections].sort((left, right) =>
+    left.created_at.localeCompare(right.created_at),
+  );
+
+  for (const correction of orderedCorrections) {
+    if (correction.target_kind === 'stream') {
+      const stream = activeStreams.find((item) => item.id === correction.target_id);
+      if (!stream) continue;
+
+      if (correction.action === 'rename_stream') {
+        const payload = parseCorrectionPayload(correction.payload_json);
+        const candidate = [
+          payload?.title,
+          payload?.new_title,
+          payload?.name,
+          payload?.rename_to,
+        ].find((value) => typeof value === 'string' && value.trim().length > 0);
+        if (typeof candidate === 'string') {
+          stream.title = clipText(candidate, 90);
+        }
+      }
+
+      if (correction.action === 'pin_stream') {
+        stream.pinned = true;
+      }
+      continue;
+    }
+
+    if (correction.target_kind !== 'item') continue;
+    const state = itemStates.get(correction.target_id);
+    if (!state) continue;
+
+    if (correction.action === 'promote_item') {
+      state.forceAttention = true;
+      continue;
+    }
+
+    if (correction.action === 'demote_item') {
+      state.forceAttention = false;
+      continue;
+    }
+
+    if (correction.action === 'correct_classification') {
+      const payload = parseCorrectionPayload(correction.payload_json);
+      const candidate = payload?.kind;
+      if (
+        typeof candidate === 'string' &&
+        validKnowledgeV2Kinds.has(candidate as KnowledgeV2ItemKind)
+      ) {
+        const kind = candidate as KnowledgeV2ItemKind;
+        state.item.kind = kind;
+        state.item.severity = severityForKind(kind);
+      }
+    }
+  }
+
+  const overlayItems = Array.from(itemStates.values());
+  const promotedAttention = overlayItems
+    .filter((state) => state.forceAttention === true)
+    .sort((left, right) => left.originalIndex - right.originalIndex)
+    .map((state) => state.item);
+  const defaultAttention = overlayItems
+    .filter(
+      (state) =>
+        state.forceAttention !== false &&
+        state.forceAttention !== true &&
+        ATTENTION_ITEM_KINDS.has(state.item.kind),
+    )
+    .sort((left, right) => left.originalIndex - right.originalIndex)
+    .map((state) => state.item);
+
+  const activeStreamsSorted = [...activeStreams].sort((left, right) => {
+    if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+    if (right.source_count !== left.source_count) {
+      return right.source_count - left.source_count;
+    }
+    return (right.last_touched_at || '').localeCompare(left.last_touched_at || '');
+  });
+
+  return {
+    ...doc,
+    current_read: {
+      ...doc.current_read,
+      supporting_bullets: activeStreamsSorted
+        .slice(0, 3)
+        .map((stream) => `${stream.title}: ${stream.current_read}`),
+    },
+    active_streams: activeStreamsSorted,
+    needs_attention: dedupeBy(
+      [...promotedAttention, ...defaultAttention],
+      (item) => item.id,
+    ).slice(0, 12),
+    patterns: overlayItems
+      .filter((state) => state.item.kind === 'pattern')
+      .sort((left, right) => left.originalIndex - right.originalIndex)
+      .map((state) => state.item)
+      .slice(0, 12),
+    risks_and_unknowns: overlayItems
+      .filter((state) => state.item.kind === 'risk' || state.item.kind === 'blocker')
+      .sort((left, right) => left.originalIndex - right.originalIndex)
+      .map((state) => state.item)
+      .slice(0, 12),
+  };
 };
 
 const WEAK_HEADLINE_PATTERN =

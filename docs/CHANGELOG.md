@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-10
 
+### Apply knowledge corrections to synthesized output
+- **Issue:** [#94](https://github.com/metagrover/pluto/issues/94)
+- **PR:** Not opened yet.
+- **Changed:** Made Knowledge V2 synthesis apply durable `knowledge_corrections` overlays before saving or progressively flushing docs, so stream renames/pins and item promote/demote/classification corrections now change the synthesized output instead of only persisting in SQLite.
+- **Why:** Pluto already stored correction feedback as part of the trust spine, but most of that feedback was inert because synthesis only honored source exclusion. Trusted Attention needs user corrections to shape the shared memory layer before ranking and explanations depend on it.
+- **Replaced:** Persisting stream/item correction records without feeding them back into synthesized Knowledge state.
+- **Notes:** `exclude_source` still filters source meetings before synthesis, while the new overlay path handles stream/item corrections on both partial and final V2 documents.
+
 ### Clear the high-severity dependency audit gate
 - **Issue:** [#87](https://github.com/metagrover/pluto/issues/87)
 - **PR:** [#88](https://github.com/metagrover/pluto/pull/88)
