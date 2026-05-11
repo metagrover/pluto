@@ -1,4 +1,6 @@
 import type React from 'react';
+import { getTrustStatusMeta } from '../../utils/trustStatus';
+import type { TrustStatus } from '../../utils/trustStatus';
 
 export interface CitationChain {
   claim: string;
@@ -7,6 +9,7 @@ export interface CitationChain {
   entity_id?: string;
   evidence_span?: string;
   evidence_valid: boolean;
+  trust_status: TrustStatus;
 }
 
 interface CitationCardProps {
@@ -22,6 +25,24 @@ export const CitationCard: React.FC<CitationCardProps> = ({
   onClick,
   onNavigateToMeeting,
 }) => {
+  const trustMeta = getTrustStatusMeta(citation.trust_status);
+  const trustTone =
+    trustMeta.tone === 'success'
+      ? 'bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]'
+      : trustMeta.tone === 'warning'
+        ? 'bg-amber-500/10 border-amber-500/20 text-amber-600'
+        : trustMeta.tone === 'accent'
+          ? 'bg-pro-accent/10 border-pro-accent/20 text-pro-accent'
+          : 'bg-red-500/10 border-red-500/20 text-red-500';
+  const trustDot =
+    trustMeta.tone === 'success'
+      ? 'bg-[#10B981] shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+      : trustMeta.tone === 'warning'
+        ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.35)]'
+        : trustMeta.tone === 'accent'
+          ? 'bg-pro-accent shadow-[0_0_8px_rgba(198,170,121,0.35)]'
+          : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]';
+
   return (
     <button
       type="button"
@@ -43,17 +64,11 @@ export const CitationCard: React.FC<CitationCardProps> = ({
         </div>
 
         <div
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm shrink-0 ${
-            citation.evidence_valid
-              ? 'bg-[#10B981]/10 border-[#10B981]/20 text-[#10B981]'
-              : 'bg-red-500/10 border-red-500/20 text-red-500'
-          }`}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm shrink-0 ${trustTone}`}
         >
-          <div
-            className={`w-1.5 h-1.5 rounded-full ${citation.evidence_valid ? 'bg-[#10B981] shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`}
-          />
+          <div className={`w-1.5 h-1.5 rounded-full ${trustDot}`} />
           <span className="text-[9px] font-black uppercase tracking-widest">
-            {citation.evidence_valid ? 'Verified' : 'Flagged'}
+            {trustMeta.label}
           </span>
         </div>
       </div>

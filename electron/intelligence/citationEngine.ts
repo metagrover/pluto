@@ -1,5 +1,6 @@
 import { getEntity, getMeetingMid } from '../db';
 import type { CitationChain, RetrievalResult } from './intelligenceTypes';
+import { deriveCitationTrustStatus } from '../../src/utils/trustStatus';
 
 /**
  * Extract the sentence surrounding a given character index in a text.
@@ -72,6 +73,7 @@ export const buildCitationChain = (
         meeting_title: source.mid?.title || 'Unknown Meeting',
         evidence_span: getFirstEvidenceSpan(source),
         evidence_valid: false, // set by auditCitations
+        trust_status: 'needs_review',
       });
     }
   }
@@ -96,6 +98,7 @@ export const buildCitationChain = (
         entity_id: entity_id || undefined,
         evidence_span: evidence_span || undefined,
         evidence_valid: false,
+        trust_status: 'needs_review',
       });
     }
   }
@@ -146,6 +149,7 @@ export const auditCitations = (citations: CitationChain[]): CitationChain[] => {
     return {
       ...citation,
       evidence_valid,
+      trust_status: deriveCitationTrustStatus({ evidenceValid: evidence_valid }),
     };
   });
 };

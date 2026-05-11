@@ -1,3 +1,5 @@
+import type { TrustStatus } from '../../src/utils/trustStatus';
+
 /**
  * Intelligence Types
  *
@@ -79,6 +81,7 @@ export interface CitationChain {
   entity_id?: string;
   evidence_span?: string;
   evidence_valid: boolean;
+  trust_status: TrustStatus;
 }
 
 // =============================================
