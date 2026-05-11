@@ -19,6 +19,7 @@ import {
   parseKnowledgeV2Document,
   repairKnowledgeV2Document,
 } from './knowledgeV2';
+import { syncGlobalKnowledgeAttentionQueue } from './intelligence/attentionSync';
 import { parseAnalysisMarkdown } from './llm/analysisDocument';
 import { getAllSettings, getProvider } from './llm/factory';
 import {
@@ -1571,6 +1572,13 @@ const synthesizeKnowledgeDocNowInternal = async (
       changelog_json: JSON.stringify(changelog),
       source_count: 0,
     });
+    if (doc.scope_type === 'global') {
+      try {
+        syncGlobalKnowledgeAttentionQueue(emptyDoc);
+      } catch (error) {
+        console.warn('[KnowledgeDoc] Failed to sync global attention queue:', error);
+      }
+    }
     db.rebuildKnowledgeBacklinks(doc.id);
 
     return db.upsertKnowledgeDoc({
@@ -1635,6 +1643,13 @@ const synthesizeKnowledgeDocNowInternal = async (
       changelog_json: JSON.stringify(changelog),
       source_count: sourceMeetings.length,
     });
+    if (doc.scope_type === 'global' && isKnowledgeV2Document(structured)) {
+      try {
+        syncGlobalKnowledgeAttentionQueue(structured);
+      } catch (error) {
+        console.warn('[KnowledgeDoc] Failed to sync global attention queue:', error);
+      }
+    }
     if (isKnowledgeV1Document(structured)) {
       persistDependencySuggestions(structured.dependency_suggestions);
     }

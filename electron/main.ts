@@ -119,6 +119,7 @@ import {
   getAlerts,
   runPostMeetingTriggers,
 } from './intelligence/proactiveEngine';
+import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
 import { parseQuery, retrieveContext } from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
 import { generateSuggestedQueries } from './intelligence/suggestedQueries';
@@ -1746,6 +1747,14 @@ app.whenReady().then(async () => {
             // Phase 4: Run proactive triggers (non-blocking, fire-and-forget)
             runPostMeetingTriggers(String(meetingId), mid)
               .then((alerts) => {
+                try {
+                  syncActionTrackerAttentionQueue();
+                } catch (error) {
+                  console.warn(
+                    '[AttentionSync] Failed to refresh action-tracker signals:',
+                    error,
+                  );
+                }
                 if (
                   alerts.length > 0 &&
                   win &&
@@ -1977,6 +1986,14 @@ app.whenReady().then(async () => {
       error,
     );
   });
+  try {
+    syncActionTrackerAttentionQueue();
+  } catch (error) {
+    console.warn(
+      '[AttentionSync] Failed to bootstrap action-tracker signals:',
+      error,
+    );
+  }
 
   // macOS: Proactively request microphone access
   if (process.platform === 'darwin') {
