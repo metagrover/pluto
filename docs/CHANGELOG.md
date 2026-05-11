@@ -28,6 +28,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** The ad hoc mix of freeform trust messages and Ask Pluto's one-off verified/flagged citation badge without a shared cross-surface contract.
 - **Notes:** This slice is intentionally UI-light: it reuses existing evidence fields and surfaces the normalized status without adding new persistence or redesigning the broader Knowledge experience.
 
+### Add a durable attention queue foundation
+- **Issue:** [#77](https://github.com/metagrover/pluto/issues/77)
+- **PR:** Pending.
+- **Changed:** Replaced the session-only proactive alert array with a SQLite-backed attention queue that stores durable items, deterministic dedupe keys, severity/score/status metadata, evidence references, and related meeting/entity/stream IDs. The proactive trigger pipeline now upserts duplicate-action, decision-conflict, and cross-reference signals into that queue, and the branch adds unit coverage for queue ordering, dedupe, meeting cleanup, and proactive idempotency.
+- **Why:** `#77` is the canonical Phase 1 substrate for later signal unification, scoring, lifecycle controls, and briefing work. Pluto needed a durable attention model before more features could safely stack on top of ephemeral trigger output.
+- **Replaced:** Keeping proactive intelligence in an in-memory array that disappeared on restart and could create duplicate entries on repeated synthesis runs.
+- **Notes:** This PR does not migrate dashboard or Knowledge UI surfaces to the queue yet; it establishes the persistent backend contract those follow-up issues can consume.
+
 ### Clear the high-severity dependency audit gate
 - **Issue:** [#87](https://github.com/metagrover/pluto/issues/87)
 - **PR:** [#88](https://github.com/metagrover/pluto/pull/88)
@@ -45,6 +53,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** The roadmap needed one accepted model that explains how meetings, entities, Knowledge, Ask Pluto, proactive signals, and future briefings fit together before building Trusted Attention features on top.
 - **Replaced:** Treating Knowledge V2, proactive alerts, dashboard briefings, and action lifecycle logic as adjacent systems without one explicit memory-and-attention contract.
 - **Notes:** This change intentionally defers the 10-agent rewrite and broader ingestion expansion until the local evidence-backed loop is trustworthy.
+
+### Move provider credentials into secure settings
+- **Issue:** [#86](https://github.com/metagrover/pluto/issues/86)
+- **PR:** Not opened yet.
+- **Changed:** Routed `gemini_api_key`, `openai_api_key`, `claude_api_key`, and `hf_token` through an Electron secure-settings layer that reads encrypted values first, migrates legacy plaintext values on first successful read, and keeps the renderer IPC API unchanged.
+- **Why:** Pluto's trust foundation cannot leave provider credentials in plaintext SQLite while claiming local-first privacy and evidence-backed memory.
+- **Replaced:** Storing these secrets directly in the `settings` table as ordinary plaintext values.
+- **Notes:** If encrypted persistence is unavailable or fails, Pluto keeps the plaintext fallback in place and logs a named secure-settings failure instead of silently dropping the user's working configuration.
 
 ### Align automation GitHub auth preflights
 - **Issue:** [#67](https://github.com/metagrover/pluto/issues/67)

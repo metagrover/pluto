@@ -1,0 +1,291 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const storeState = vi.hoisted(() => ({
+  items: [] as Array<Record<string, unknown>>,
+}));
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => '/tmp',
+  },
+}));
+
+vi.mock('better-sqlite3', () => {
+  class FakeStatement {
+    constructor(private sql: string) {}
+
+    run(...args: unknown[]) {
+      if (this.sql.includes('INSERT INTO attention_items')) {
+        const [
+          id,
+          dedupe_key,
+          kind,
+          severity,
+          score,
+          status,
+          title,
+          reason,
+          source,
+          evidence_json,
+          related_entity_ids_json,
+          related_stream_ids_json,
+          related_meeting_ids_json,
+          created_at,
+          updated_at,
+          last_seen_at,
+          resolved_at,
+        ] = args;
+        storeState.items.push({
+          id,
+          dedupe_key,
+          kind,
+          severity,
+          score,
+          status,
+          title,
+          reason,
+          source,
+          evidence_json,
+          related_entity_ids_json,
+          related_stream_ids_json,
+          related_meeting_ids_json,
+          created_at,
+          updated_at,
+          last_seen_at,
+          resolved_at,
+        });
+      }
+
+      if (this.sql.includes('UPDATE attention_items')) {
+        const [
+          severity,
+          score,
+          status,
+          title,
+          reason,
+          source,
+          evidence_json,
+          related_entity_ids_json,
+          related_stream_ids_json,
+          related_meeting_ids_json,
+          updated_at,
+          last_seen_at,
+          resolved_at,
+          dedupe_key,
+        ] = args;
+        const existing = storeState.items.find(
+          (item) => item.dedupe_key === dedupe_key,
+        );
+        if (existing) {
+          Object.assign(existing, {
+            severity,
+            score,
+            status,
+            title,
+            reason,
+            source,
+            evidence_json,
+            related_entity_ids_json,
+            related_stream_ids_json,
+            related_meeting_ids_json,
+            updated_at,
+            last_seen_at,
+            resolved_at,
+          });
+        }
+      }
+
+      if (this.sql.includes('DELETE FROM attention_items WHERE id = ?')) {
+        const [id] = args;
+        storeState.items = storeState.items.filter((item) => item.id !== id);
+      }
+
+      return { changes: 1 };
+    }
+
+    get(...args: unknown[]) {
+      if (this.sql.includes('PRAGMA table_info')) return undefined;
+      if (
+        this.sql.includes('SELECT * FROM attention_items WHERE dedupe_key = ?')
+      ) {
+        const [dedupeKey] = args;
+        return (
+          storeState.items.find((item) => item.dedupe_key === dedupeKey) ?? null
+        );
+      }
+      return undefined;
+    }
+
+    all() {
+      if (this.sql.includes('PRAGMA table_info')) return [];
+      if (this.sql.includes('SELECT * FROM attention_items')) {
+        return [...storeState.items];
+      }
+      return [];
+    }
+  }
+
+  class FakeDatabase {
+    prepare(sql: string) {
+      return new FakeStatement(sql);
+    }
+
+    exec() {}
+
+    transaction<T extends (...args: never[]) => unknown>(fn: T): T {
+      return fn;
+    }
+  }
+
+  return {
+    default: FakeDatabase,
+  };
+});
+
+import {
+  clearAttentionItemsForMeeting,
+  listAttentionItems,
+  upsertAttentionItem,
+} from '../../electron/db';
+
+describe('attention queue persistence', () => {
+  beforeEach(() => {
+    storeState.items = [];
+  });
+
+  it('upserts by dedupe key instead of creating duplicates', () => {
+    upsertAttentionItem({
+      dedupe_key: 'duplicate_action:ship-followup',
+      kind: 'duplicate_commitment',
+      severity: 'watch',
+      score: 0.45,
+      status: 'active',
+      title: 'Duplicate follow-up',
+      reason: 'Two meetings committed to the same ship task.',
+      source: 'proactive_engine',
+      evidence: [{ meeting_id: 'm1', quote: 'Ship it this week.' }],
+      related_entity_ids: ['action-1'],
+      related_stream_ids: ['stream-ship'],
+      related_meeting_ids: ['m1'],
+    });
+
+    upsertAttentionItem({
+      dedupe_key: 'duplicate_action:ship-followup',
+      kind: 'duplicate_commitment',
+      severity: 'critical',
+      score: 0.91,
+      status: 'active',
+      title: 'Duplicate follow-up',
+      reason: 'The duplicate commitment still appears unresolved.',
+      source: 'proactive_engine',
+      evidence: [{ meeting_id: 'm2', quote: 'We are still both tracking it.' }],
+      related_entity_ids: ['action-1', 'action-2'],
+      related_stream_ids: ['stream-ship'],
+      related_meeting_ids: ['m1', 'm2'],
+    });
+
+    const items = listAttentionItems();
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      dedupe_key: 'duplicate_action:ship-followup',
+      severity: 'critical',
+      score: 0.91,
+      reason: 'The duplicate commitment still appears unresolved.',
+    });
+    expect(items[0].related_meeting_ids).toEqual(['m1', 'm2']);
+  });
+
+  it('returns active attention items ahead of resolved ones, then by score', () => {
+    upsertAttentionItem({
+      dedupe_key: 'risk:blocker',
+      kind: 'blocker',
+      severity: 'critical',
+      score: 0.99,
+      status: 'resolved',
+      title: 'Resolved blocker',
+      reason: 'Already handled.',
+      source: 'knowledge_v2',
+      evidence: [],
+      related_entity_ids: [],
+      related_stream_ids: [],
+      related_meeting_ids: [],
+    });
+
+    upsertAttentionItem({
+      dedupe_key: 'follow_up:brief',
+      kind: 'follow_up',
+      severity: 'watch',
+      score: 0.4,
+      status: 'active',
+      title: 'Prepare brief',
+      reason: 'Needs action before tomorrow.',
+      source: 'dashboard',
+      evidence: [],
+      related_entity_ids: [],
+      related_stream_ids: [],
+      related_meeting_ids: [],
+    });
+
+    upsertAttentionItem({
+      dedupe_key: 'risk:dependency',
+      kind: 'dependency',
+      severity: 'critical',
+      score: 0.8,
+      status: 'active',
+      title: 'Waiting on dependency',
+      reason: 'External blocker remains open.',
+      source: 'knowledge_v2',
+      evidence: [],
+      related_entity_ids: [],
+      related_stream_ids: [],
+      related_meeting_ids: [],
+    });
+
+    const titles = listAttentionItems().map((item) => item.title);
+
+    expect(titles).toEqual([
+      'Waiting on dependency',
+      'Prepare brief',
+      'Resolved blocker',
+    ]);
+  });
+
+  it('clears items for a deleted meeting without touching unrelated rows', () => {
+    upsertAttentionItem({
+      dedupe_key: 'meeting:m1',
+      kind: 'open_question',
+      severity: 'watch',
+      score: 0.5,
+      status: 'active',
+      title: 'Question from m1',
+      reason: 'Pending answer.',
+      source: 'proactive_engine',
+      evidence: [],
+      related_entity_ids: [],
+      related_stream_ids: [],
+      related_meeting_ids: ['m1'],
+    });
+
+    upsertAttentionItem({
+      dedupe_key: 'meeting:m2',
+      kind: 'open_question',
+      severity: 'watch',
+      score: 0.5,
+      status: 'active',
+      title: 'Question from m2',
+      reason: 'Still open.',
+      source: 'proactive_engine',
+      evidence: [],
+      related_entity_ids: [],
+      related_stream_ids: [],
+      related_meeting_ids: ['m2'],
+    });
+
+    clearAttentionItemsForMeeting('m1');
+
+    expect(listAttentionItems().map((item) => item.title)).toEqual([
+      'Question from m2',
+    ]);
+  });
+});

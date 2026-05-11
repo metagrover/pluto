@@ -11,6 +11,12 @@ import {
   decodeFloat32PcmChunk,
 } from '../utils/audio';
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
+import {
+  beginRecordingFinalization,
+  buildMeetingTiming,
+  collectRecordingArtifactPaths,
+  resolveFinalizationCleanupPaths,
+} from '../utils/recordingFinalization';
 import { getSessionFallbackDecision } from '../utils/sessionTranscriptionFallback';
 import {
   type SpeakerActivityWindow,
@@ -452,18 +458,24 @@ export const AudioManager = ({
   const disableMicChunkTranscriptionRef = useRef(false);
   const micWebmInitSegmentRef = useRef<ArrayBuffer | null>(null);
   const startTimeRef = useRef<number>(0);
+  const recordingEndedAtRef = useRef<number>(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const visStreamRef = useRef<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
 
   const isRecordingRef = useRef(false);
   const isProcessingRef = useRef(false);
+  const stopInFlightRef = useRef(false);
   const currentMeetingIdRef = useRef<string | null>(null);
 
   // Keep state refs in sync
   useEffect(() => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
+
+  useEffect(() => {
+    isProcessingRef.current = isProcessing;
+  }, [isProcessing]);
 
   useEffect(() => {
     onProcessingChange?.(isProcessing);
@@ -473,10 +485,22 @@ export const AudioManager = ({
   // Functions defined below, event listeners set up after
 
   const startSession = async () => {
+    if (
+      isRecordingRef.current ||
+      isProcessingRef.current ||
+      stopInFlightRef.current
+    ) {
+      console.warn('[Pluto] Ignoring duplicate start request');
+      return;
+    }
+
     try {
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
       startTimeRef.current = Date.now();
+      recordingEndedAtRef.current = 0;
+      stopInFlightRef.current = false;
+      isRecordingRef.current = true;
       setIsRecording(true);
 
       console.log(
@@ -512,6 +536,11 @@ export const AudioManager = ({
             detail: { micStatus, systemAudioStatus },
           }),
         );
+        currentMeetingIdRef.current = null;
+        startTimeRef.current = 0;
+        recordingEndedAtRef.current = 0;
+        stopInFlightRef.current = false;
+        isRecordingRef.current = false;
         setIsRecording(false);
         return;
       }
@@ -832,6 +861,11 @@ export const AudioManager = ({
       // 6. No restart loop needed
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
+      currentMeetingIdRef.current = null;
+      startTimeRef.current = 0;
+      recordingEndedAtRef.current = 0;
+      stopInFlightRef.current = false;
+      isRecordingRef.current = false;
       setIsRecording(false);
     }
   };
@@ -843,7 +877,8 @@ export const AudioManager = ({
 
   const getMeetingElapsedSeconds = (): number => {
     if (!startTimeRef.current) return 0;
-    return Math.max(0, (Date.now() - startTimeRef.current) / 1000);
+    const effectiveEndAt = recordingEndedAtRef.current || Date.now();
+    return Math.max(0, (effectiveEndAt - startTimeRef.current) / 1000);
   };
 
   const flushActiveSpeakerWindow = (endTime: number) => {
@@ -3096,11 +3131,30 @@ export const AudioManager = ({
   };
 
   const stopSession = async (endReason?: string) => {
+    const stopSnapshot = beginRecordingFinalization({
+      meetingId: currentMeetingIdRef.current,
+      stopInFlight: stopInFlightRef.current,
+      recordingStartedAtMs: startTimeRef.current,
+      nowMs: Date.now(),
+    });
+    if (!stopSnapshot) {
+      console.warn('[Pluto] Ignoring duplicate or orphaned stop request');
+      return;
+    }
+
+    stopInFlightRef.current = true;
+    recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
+    isProcessingRef.current = true;
     console.log(
       '[Pluto] Stopping session...',
       endReason ? `(reason: ${endReason})` : '',
     );
     setIsProcessing(true);
+
+    let primaryAudioPath = '';
+    let systemAudioPath = '';
+    let mixedAudioPath = '';
+    let rebuiltSystemAudioPath = '';
 
     try {
       // Helper to stop a recorder and get its blob
@@ -3205,6 +3259,7 @@ export const AudioManager = ({
         visStreamRef.current = null;
       }
       setAnalyser(null);
+      isRecordingRef.current = false;
       setIsRecording(false);
 
       // Process final chunks
@@ -3233,9 +3288,6 @@ export const AudioManager = ({
       if (!currentMeetingIdRef.current) return; // Session aborted or never started
 
       // Store a single full audio file for playback
-      let primaryAudioPath = '';
-      let systemAudioPath = '';
-      let mixedAudioPath = '';
       const primaryBlob = micBlob; // Default to mic
       if (primaryBlob && primaryBlob.size > 0) {
         try {
@@ -3285,6 +3337,7 @@ export const AudioManager = ({
             },
           );
           if (rebuiltSystemPath) {
+            rebuiltSystemAudioPath = rebuiltSystemPath;
             systemAudioPath = rebuiltSystemPath;
             console.warn(
               `[Pluto] Reconstructed session-system from ${savedSystemChunks.length} saved system chunks`,
@@ -3354,10 +3407,7 @@ export const AudioManager = ({
       const chunkWordCount = collectedSegments.reduce((total, segment) => {
         return total + segment.text.trim().split(/\s+/).filter(Boolean).length;
       }, 0);
-      const provisionalMeetingDurationSeconds = Math.max(
-        0,
-        (Date.now() - (startTimeRef.current || Date.now())) / 1000,
-      );
+      const provisionalMeetingDurationSeconds = getMeetingElapsedSeconds();
       const sessionFallbackDecision = getSessionFallbackDecision({
         meetingDurationSeconds: provisionalMeetingDurationSeconds,
         totalSpeakerWindowSeconds,
@@ -4093,11 +4143,7 @@ export const AudioManager = ({
       const labeledTranscription = newTranscription;
 
       // 4. Save to DB
-      const duration = (Date.now() - (startTimeRef.current || 0)) / 1000;
-      const startTime = new Date(
-        startTimeRef.current || Date.now(),
-      ).toISOString();
-      const endTime = new Date().toISOString();
+      const meetingTiming = buildMeetingTiming(stopSnapshot);
 
       // Generate intelligent title
       let title = userTitle || 'Meeting';
@@ -4160,9 +4206,9 @@ export const AudioManager = ({
         id: currentMeetingId,
         title: title,
         meeting_type: 'Recording',
-        started_at: startTime,
-        ended_at: endTime,
-        duration_seconds: Math.floor(duration),
+        started_at: meetingTiming.startedAtIso,
+        ended_at: meetingTiming.endedAtIso,
+        duration_seconds: meetingTiming.durationSeconds,
         audio_path: primaryAudioPath,
         transcript_json: JSON.stringify(
           buildTranscriptJsonPayload(labeledTranscription, {
@@ -4197,6 +4243,23 @@ export const AudioManager = ({
         'summary length:',
         enhancedNotes.length,
       );
+
+      const cleanupPaths = resolveFinalizationCleanupPaths({
+        primaryAudioPath,
+        systemAudioPath,
+        rebuiltSystemAudioPath,
+        mixedAudioPath,
+      });
+      if (cleanupPaths.length > 0) {
+        try {
+          await window.ipcRenderer.invoke('AUDIO_DELETE_FILES', cleanupPaths);
+        } catch (cleanupErr) {
+          console.warn(
+            '[Pluto] Failed to clean superseded recording artifacts:',
+            cleanupErr,
+          );
+        }
+      }
 
       // 5. Extract & Process Entities for Knowledge Graph (Sprint 2)
       void (async () => {
@@ -4262,9 +4325,30 @@ export const AudioManager = ({
       }
     } catch (e) {
       console.error('[Pluto] Processing failed:', e);
+      const artifactPaths = collectRecordingArtifactPaths(
+        primaryAudioPath,
+        systemAudioPath,
+        mixedAudioPath,
+        rebuiltSystemAudioPath,
+      );
+      if (artifactPaths.length > 0) {
+        void window.ipcRenderer
+          .invoke('AUDIO_DELETE_FILES', artifactPaths)
+          .catch((cleanupErr) => {
+            console.warn(
+              '[Pluto] Failed to clean recording artifacts after finalization error:',
+              cleanupErr,
+            );
+          });
+      }
       alert(`Failed to process recording: ${(e as Error).message}`);
+      isRecordingRef.current = false;
       setIsRecording(false);
     } finally {
+      stopInFlightRef.current = false;
+      startTimeRef.current = 0;
+      recordingEndedAtRef.current = 0;
+      isProcessingRef.current = false;
       setIsProcessing(false);
       currentMeetingIdRef.current = null;
     }
@@ -4298,6 +4382,10 @@ export const AudioManager = ({
         // Note: we don't call stopSession because that would try to save.
         // We just reset local state. The main process handles task cancellation.
         currentMeetingIdRef.current = null;
+        stopInFlightRef.current = false;
+        startTimeRef.current = 0;
+        recordingEndedAtRef.current = 0;
+        isProcessingRef.current = false;
         setIsRecording(false);
         setIsProcessing(false);
         // Kill active recorders
