@@ -6,9 +6,9 @@ import { app } from 'electron';
 import type {
   AttentionEvidenceReference,
   AttentionItem,
-  AttentionScoreBreakdown,
   AttentionItemStatus,
   AttentionItemUpsert,
+  AttentionScoreBreakdown,
   MidFrontmatter,
 } from './intelligence/intelligenceTypes';
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
@@ -560,7 +560,9 @@ const initDb = () => {
       attentionColumns.length > 0 &&
       !attentionColumns.some((col) => col.name === 'score_breakdown_json')
     ) {
-      db.exec('ALTER TABLE attention_items ADD COLUMN score_breakdown_json TEXT');
+      db.exec(
+        'ALTER TABLE attention_items ADD COLUMN score_breakdown_json TEXT',
+      );
       console.log('[DB] Added attention_items.score_breakdown_json column');
     }
   } catch (e) {
@@ -1633,7 +1635,8 @@ const parseAttentionScoreBreakdown = (
     ] as const;
     if (
       keys.every(
-        (key) => typeof parsed[key] === 'number' && Number.isFinite(parsed[key]),
+        (key) =>
+          typeof parsed[key] === 'number' && Number.isFinite(parsed[key]),
       )
     ) {
       return parsed as AttentionScoreBreakdown;

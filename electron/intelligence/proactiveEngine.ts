@@ -13,13 +13,13 @@
 import { randomUUID } from 'node:crypto';
 import * as db from '../db';
 import { findSimilarEntity } from '../entityPipeline';
+import { scoreAttentionItem } from './attentionScoring';
 import type {
   AttentionItem,
   AttentionItemKind,
   AttentionItemUpsert,
   MidFrontmatter,
 } from './intelligenceTypes';
-import { scoreAttentionItem } from './attentionScoring';
 import { retrieveContext } from './queryEngine';
 
 /**
@@ -318,17 +318,17 @@ function detectDecisionConflicts(
 
       if (candidateMeetingIds.length === 0) continue;
 
-        items.push(
-          makeAttentionItem({
-            dedupe_key: buildDedupeKey('decision_conflict', [
+      items.push(
+        makeAttentionItem({
+          dedupe_key: buildDedupeKey('decision_conflict', [
             newDecision.entity_id,
             candidate.id,
             newMeetingId,
             ...candidateMeetingIds.slice(0, 2),
-            ]),
-            kind: 'decision_conflict',
-            title: 'Potential decision conflict',
-            reason: `New decision: "${newText.slice(0, 80)}" may conflict with a prior decision: "${candidate.name.slice(0, 80)}"`,
+          ]),
+          kind: 'decision_conflict',
+          title: 'Potential decision conflict',
+          reason: `New decision: "${newText.slice(0, 80)}" may conflict with a prior decision: "${candidate.name.slice(0, 80)}"`,
           evidence: [
             {
               meeting_id: newMeetingId,
@@ -346,16 +346,16 @@ function detectDecisionConflicts(
           related_meeting_ids: [
             newMeetingId,
             ...candidateMeetingIds.slice(0, 2),
-            ],
-            related_entity_ids: [newDecision.entity_id, candidate.id],
-            related_stream_ids: [],
-            confidence: 0.84,
-            evidence_mode: 'direct',
-            freshness: 'fresh',
-            source_count: candidateMeetingIds.length + 1,
-            cited_meeting_count: candidateMeetingIds.length + 1,
-          }),
-        );
+          ],
+          related_entity_ids: [newDecision.entity_id, candidate.id],
+          related_stream_ids: [],
+          confidence: 0.84,
+          evidence_mode: 'direct',
+          freshness: 'fresh',
+          source_count: candidateMeetingIds.length + 1,
+          cited_meeting_count: candidateMeetingIds.length + 1,
+        }),
+      );
     }
   }
 

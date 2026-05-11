@@ -106,9 +106,15 @@ const evidenceScore = (
   sourceCount: number,
 ): number => {
   const modeBase =
-    evidenceMode === 'direct' ? 0.08 : evidenceMode === 'inferred' ? 0.04 : 0.02;
+    evidenceMode === 'direct'
+      ? 0.08
+      : evidenceMode === 'inferred'
+        ? 0.04
+        : 0.02;
   return clamp(
-    modeBase + clamp(confidence, 0, 1) * 0.14 + Math.max(0, sourceCount - 1) * 0.02,
+    modeBase +
+      clamp(confidence, 0, 1) * 0.14 +
+      Math.max(0, sourceCount - 1) * 0.02,
     0,
     0.24,
   );
@@ -211,12 +217,7 @@ export const scoreAttentionItem = (
 
   return {
     score: breakdown.total,
-    severity: severityFromScore(
-      breakdown.total,
-      confidence,
-      freshness,
-      status,
-    ),
+    severity: severityFromScore(breakdown.total, confidence, freshness, status),
     score_breakdown: breakdown,
   };
 };

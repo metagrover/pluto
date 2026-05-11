@@ -1,13 +1,13 @@
 import * as db from '../db';
 import type { Entity } from '../db';
 import type { KnowledgeV2Document, KnowledgeV2Item } from '../knowledgeV2';
+import { scoreAttentionItem } from './attentionScoring';
 import type {
   AttentionEvidenceReference,
   AttentionItem,
   AttentionItemKind,
   AttentionItemUpsert,
 } from './intelligenceTypes';
-import { scoreAttentionItem } from './attentionScoring';
 
 const KNOWLEDGE_PREFIX = 'knowledge_v2:global:';
 const ACTION_PREFIX = 'action_tracker:';
