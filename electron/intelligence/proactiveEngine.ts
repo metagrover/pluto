@@ -2,7 +2,7 @@
  * Proactive Intelligence Engine (Phase 4)
  *
  * Post-meeting triggers that surface cross-meeting intelligence automatically.
- * Runs after MID generation and emits IntelligenceAlert objects stored in SQLite.
+ * Runs after MID generation and emits durable attention items stored in SQLite.
  *
  * Scope: Post-meeting triggers only (MVP). Three trigger types:
  *   1. cross_reference    — same entities/topics appear in a previous meeting
@@ -13,64 +13,76 @@
 import { randomUUID } from 'node:crypto';
 import * as db from '../db';
 import { findSimilarEntity } from '../entityPipeline';
-import type { IntelligenceAlert, MidFrontmatter } from './intelligenceTypes';
+import type {
+  AttentionItem,
+  AttentionItemKind,
+  AttentionItemSeverity,
+  AttentionItemUpsert,
+  MidFrontmatter,
+} from './intelligenceTypes';
 import { retrieveContext } from './queryEngine';
 
-// =============================================
-// In-memory alert store (persisted per session)
-// Production: replace with SQLite table.
-// =============================================
-
-const alertStore: IntelligenceAlert[] = [];
-
 /**
- * Retrieve stored alerts, newest first. Pass `meetingId` to scope to one meeting.
+ * Retrieve stored attention items. Pass `meetingId` to scope to one meeting.
  */
 export function getAlerts(options?: {
   meetingId?: string;
   limit?: number;
-}): IntelligenceAlert[] {
-  let results = [...alertStore];
-
-  const meetingId = options?.meetingId;
-  if (meetingId) {
-    results = results.filter((a) => a.related_meeting_ids.includes(meetingId));
-  }
-
-  results.sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
-
-  return results.slice(0, options?.limit ?? 50);
+}): AttentionItem[] {
+  return db.listAttentionItems(options);
 }
 
 /**
- * Clear alerts for a meeting (called when meeting is deleted).
+ * Clear attention items for a meeting (called when meeting is deleted).
  */
 export function clearAlertsForMeeting(meetingId: string): void {
-  const before = alertStore.length;
-  for (let i = alertStore.length - 1; i >= 0; i--) {
-    if (alertStore[i].related_meeting_ids.includes(meetingId)) {
-      alertStore.splice(i, 1);
-    }
-  }
+  db.clearAttentionItemsForMeeting(meetingId);
   console.log(
-    `[ProactiveEngine] Cleared ${before - alertStore.length} alerts for meeting ${meetingId}`,
+    `[ProactiveEngine] Cleared attention items for meeting ${meetingId}`,
   );
 }
 
-// =============================================
-// Helpers
-// =============================================
+function sanitizeDedupePart(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64);
+}
 
-function makeAlert(
-  partial: Omit<IntelligenceAlert, 'id' | 'created_at'>,
-): IntelligenceAlert {
+function buildDedupeKey(
+  kind: AttentionItemKind,
+  parts: Array<string | undefined | null>,
+): string {
+  const suffix = parts
+    .map((part) => sanitizeDedupePart(part ?? ''))
+    .filter(Boolean)
+    .join(':');
+  return suffix ? `${kind}:${suffix}` : `${kind}:${randomUUID()}`;
+}
+
+function scoreForSeverity(severity: AttentionItemSeverity): number {
+  switch (severity) {
+    case 'critical':
+      return 0.95;
+    case 'watch':
+      return 0.72;
+    default:
+      return 0.48;
+  }
+}
+
+function makeAttentionItem(
+  partial: Omit<AttentionItemUpsert, 'score' | 'status' | 'source'> & {
+    score?: number;
+    status?: AttentionItemUpsert['status'];
+  },
+): AttentionItemUpsert {
   return {
     ...partial,
-    id: randomUUID(),
-    created_at: new Date().toISOString(),
+    score: partial.score ?? scoreForSeverity(partial.severity),
+    status: partial.status ?? 'active',
+    source: 'proactive_engine',
   };
 }
 
@@ -92,243 +104,256 @@ function jaccardSimilarity(a: string, b: string): number {
   if (setA.size === 0 && setB.size === 0) return 1;
   if (setA.size === 0 || setB.size === 0) return 0;
   let intersection = 0;
-  for (const t of setA) {
-    if (setB.has(t)) intersection++;
+  for (const token of setA) {
+    if (setB.has(token)) intersection++;
   }
   const union = setA.size + setB.size - intersection;
   return intersection / union;
 }
 
-// =============================================
-// Trigger 1: Cross-reference detection
-// =============================================
-
-/**
- * Finds previous meetings that share entities/topics with the new meeting.
- * Uses the query engine's retrieveContext to leverage FTS + graph walk.
- */
 async function detectCrossReferences(
   newMeetingId: string,
   mid: MidFrontmatter,
-): Promise<IntelligenceAlert[]> {
-  const alerts: IntelligenceAlert[] = [];
-
-  // Build a query string from the new meeting's key topics and participants
+): Promise<AttentionItemUpsert[]> {
+  const items: AttentionItemUpsert[] = [];
   const queryParts: string[] = [
-    ...mid.topics.map((t) => t.name),
-    ...mid.participants.map((p) => p.name),
-    ...mid.projects.map((p) => p.name),
-  ].slice(0, 8); // cap at 8 terms
+    ...mid.topics.map((topic) => topic.name),
+    ...mid.participants.map((participant) => participant.name),
+    ...mid.projects.map((project) => project.name),
+  ].slice(0, 8);
 
-  if (queryParts.length === 0) return alerts;
+  if (queryParts.length === 0) return items;
 
   try {
     const context = await retrieveContext({
       keywords: queryParts,
       expanded_keywords: [],
-      entity_mentions: mid.participants.map((p) => p.entity_id),
+      entity_mentions: mid.participants.map(
+        (participant) => participant.entity_id,
+      ),
       temporal_range: null,
       intent: 'factual',
     });
 
-    // Filter out the meeting we just processed
     const relatedMeetings = context.filter(
-      (r) => r.meeting_id !== newMeetingId && r.score > 0.15,
+      (result) => result.meeting_id !== newMeetingId && result.score > 0.15,
     );
 
-    if (relatedMeetings.length === 0) return alerts;
+    if (relatedMeetings.length === 0) return items;
 
-    const relatedIds = relatedMeetings.map((r) => r.meeting_id);
-    const topicNames = mid.topics
-      .map((t) => t.name)
-      .slice(0, 3)
-      .join(', ');
+    const relatedIds = relatedMeetings.map((result) => result.meeting_id);
+    const topicSummary =
+      mid.topics
+        .map((topic) => topic.name)
+        .slice(0, 3)
+        .join(', ') || mid.title;
 
-    alerts.push(
-      makeAlert({
-        type: 'cross_reference',
-        severity: 'info',
+    items.push(
+      makeAttentionItem({
+        dedupe_key: buildDedupeKey('reference_context', [
+          newMeetingId,
+          ...mid.topics.map((topic) => topic.entity_id).sort(),
+        ]),
+        kind: 'reference_context',
+        severity: 'steady',
         title: `Cross-reference: ${mid.title}`,
-        detail: `This meeting shares themes (${topicNames}) with ${relatedMeetings.length} previous meeting(s). Consider reviewing for continuity.`,
+        reason: `This meeting shares themes (${topicSummary}) with ${relatedMeetings.length} previous meeting(s). Consider reviewing for continuity.`,
+        evidence: [
+          {
+            meeting_id: newMeetingId,
+            quote: topicSummary,
+            source_kind: 'cross_reference',
+          },
+          ...relatedIds.slice(0, 3).map((meetingId) => ({
+            meeting_id: meetingId,
+            quote: topicSummary,
+            source_kind: 'cross_reference',
+          })),
+        ],
         related_meeting_ids: [newMeetingId, ...relatedIds.slice(0, 3)],
         related_entity_ids: [
-          ...mid.topics.map((t) => t.entity_id),
-          ...mid.participants.map((p) => p.entity_id),
+          ...mid.topics.map((topic) => topic.entity_id),
+          ...mid.participants.map((participant) => participant.entity_id),
         ].slice(0, 6),
+        related_stream_ids: [],
       }),
     );
   } catch (err) {
     console.warn('[ProactiveEngine] Cross-reference detection failed:', err);
   }
 
-  return alerts;
+  return items;
 }
 
-// =============================================
-// Trigger 2: Duplicate action item detection
-// =============================================
-
-/**
- * Flags new action items that overlap with open items from previous meetings.
- * Uses Jaccard similarity (threshold 0.45) + findSimilarEntity fallback.
- */
 function detectDuplicateActions(
   newMeetingId: string,
   mid: MidFrontmatter,
-): IntelligenceAlert[] {
-  const alerts: IntelligenceAlert[] = [];
+): AttentionItemUpsert[] {
+  const items: AttentionItemUpsert[] = [];
+  const newActiveItems = mid.action_items.filter(
+    (item) => item.status === 'active',
+  );
+  if (newActiveItems.length === 0) return items;
 
-  const newActiveItems = mid.action_items.filter((a) => a.status === 'active');
-  if (newActiveItems.length === 0) return alerts;
-
-  // Fetch existing action_item entities from the knowledge graph (confirmed only)
   const existingActionEntities = db
     .getAllEntities()
-    .filter((e) => e.type === 'action_item' && e.status === 'active');
+    .filter(
+      (entity) => entity.type === 'action_item' && entity.status === 'active',
+    );
 
-  if (existingActionEntities.length === 0) return alerts;
+  if (existingActionEntities.length === 0) return items;
 
   for (const newItem of newActiveItems) {
     const newText = newItem.description;
-
-    // 1. Fuzzy text similarity check
     const fuzzyMatch = existingActionEntities.find(
       (existing) => jaccardSimilarity(newText, existing.name) >= 0.45,
     );
-
-    // 2. Entity name similarity via findSimilarEntity
     const entityMatch =
       !fuzzyMatch &&
       findSimilarEntity('action_item', newText, existingActionEntities, 0.75);
-
     const duplicate = fuzzyMatch || entityMatch;
     if (!duplicate) continue;
 
-    // Find which meeting the duplicate belongs to
-    const duplicateMeetings = db.getMeetingsForEntity(duplicate.id);
-    const duplicateMeetingIds = duplicateMeetings
-      .map((m) => m.meeting_id)
-      .filter((id) => id !== newMeetingId);
+    const duplicateMeetingIds = db
+      .getMeetingsForEntity(duplicate.id)
+      .map((meeting) => meeting.meeting_id)
+      .filter((meetingId) => meetingId !== newMeetingId);
 
     if (duplicateMeetingIds.length === 0) continue;
 
-    alerts.push(
-      makeAlert({
-        type: 'duplicate_action',
-        severity: 'warning',
+    items.push(
+      makeAttentionItem({
+        dedupe_key: buildDedupeKey('duplicate_commitment', [
+          newItem.entity_id,
+          duplicate.id,
+          newMeetingId,
+          ...duplicateMeetingIds.slice(0, 2),
+        ]),
+        kind: 'duplicate_commitment',
+        severity: 'watch',
         title: 'Duplicate action item detected',
-        detail: `"${newText.slice(0, 80)}" appears to overlap with an existing open action item: "${duplicate.name.slice(0, 80)}"`,
+        reason: `"${newText.slice(0, 80)}" appears to overlap with an existing open action item: "${duplicate.name.slice(0, 80)}"`,
+        evidence: [
+          {
+            meeting_id: newMeetingId,
+            quote: newText.slice(0, 160),
+            entity_id: newItem.entity_id,
+            source_kind: 'duplicate_action',
+          },
+          ...duplicateMeetingIds.slice(0, 2).map((meetingId) => ({
+            meeting_id: meetingId,
+            quote: duplicate.name.slice(0, 160),
+            entity_id: duplicate.id,
+            source_kind: 'duplicate_action',
+          })),
+        ],
         related_meeting_ids: [newMeetingId, ...duplicateMeetingIds.slice(0, 2)],
         related_entity_ids: [newItem.entity_id, duplicate.id],
+        related_stream_ids: [],
       }),
     );
   }
 
-  return alerts;
+  return items;
 }
 
-// =============================================
-// Trigger 3: Decision conflict detection
-// =============================================
-
-/**
- * Flags new decisions that potentially conflict with prior decisions on the same topic.
- * Uses Jaccard similarity (threshold 0.4) for topic overlap detection.
- */
 function detectDecisionConflicts(
   newMeetingId: string,
   mid: MidFrontmatter,
-): IntelligenceAlert[] {
-  const alerts: IntelligenceAlert[] = [];
+): AttentionItemUpsert[] {
+  const items: AttentionItemUpsert[] = [];
+  if (mid.decisions.length === 0) return items;
 
-  if (mid.decisions.length === 0) return alerts;
-
-  // Fetch all decision entities from the knowledge graph
   const existingDecisionEntities = db
     .getAllEntities()
-    .filter((e) => e.type === 'decision' && e.status === 'active');
+    .filter(
+      (entity) => entity.type === 'decision' && entity.status === 'active',
+    );
 
-  if (existingDecisionEntities.length === 0) return alerts;
+  if (existingDecisionEntities.length === 0) return items;
 
   for (const newDecision of mid.decisions) {
     const newText = newDecision.description;
-
-    // Detect potential conflicts: high similarity suggests same topic, possibly contradicting
     const conflictCandidates = existingDecisionEntities.filter((existing) => {
       const similarity = jaccardSimilarity(newText, existing.name);
-      // High overlap (same topic) but not identical (different decision)
       return similarity >= 0.4 && similarity < 0.85;
     });
 
     for (const candidate of conflictCandidates) {
-      const candidateMeetings = db.getMeetingsForEntity(candidate.id);
-      const candidateMeetingIds = candidateMeetings
-        .map((m) => m.meeting_id)
-        .filter((id) => id !== newMeetingId);
+      const candidateMeetingIds = db
+        .getMeetingsForEntity(candidate.id)
+        .map((meeting) => meeting.meeting_id)
+        .filter((meetingId) => meetingId !== newMeetingId);
 
       if (candidateMeetingIds.length === 0) continue;
 
-      alerts.push(
-        makeAlert({
-          type: 'decision_conflict',
-          severity: 'warning',
+      items.push(
+        makeAttentionItem({
+          dedupe_key: buildDedupeKey('decision_conflict', [
+            newDecision.entity_id,
+            candidate.id,
+            newMeetingId,
+            ...candidateMeetingIds.slice(0, 2),
+          ]),
+          kind: 'decision_conflict',
+          severity: 'critical',
           title: 'Potential decision conflict',
-          detail: `New decision: "${newText.slice(0, 80)}" may conflict with a prior decision: "${candidate.name.slice(0, 80)}"`,
+          reason: `New decision: "${newText.slice(0, 80)}" may conflict with a prior decision: "${candidate.name.slice(0, 80)}"`,
+          evidence: [
+            {
+              meeting_id: newMeetingId,
+              quote: newText.slice(0, 160),
+              entity_id: newDecision.entity_id,
+              source_kind: 'decision_conflict',
+            },
+            ...candidateMeetingIds.slice(0, 2).map((meetingId) => ({
+              meeting_id: meetingId,
+              quote: candidate.name.slice(0, 160),
+              entity_id: candidate.id,
+              source_kind: 'decision_conflict',
+            })),
+          ],
           related_meeting_ids: [
             newMeetingId,
             ...candidateMeetingIds.slice(0, 2),
           ],
           related_entity_ids: [newDecision.entity_id, candidate.id],
+          related_stream_ids: [],
         }),
       );
     }
   }
 
-  return alerts;
+  return items;
 }
-
-// =============================================
-// Main entry point
-// =============================================
 
 /**
  * Run all post-meeting proactive triggers for a newly processed meeting.
  * Called after MID generation completes in the main process pipeline.
- *
- * @param meetingId - The ID of the newly processed meeting
- * @param mid       - The generated MidFrontmatter for that meeting
- * @returns Array of generated IntelligenceAlerts (also stored in alertStore)
  */
 export async function runPostMeetingTriggers(
   meetingId: string,
   mid: MidFrontmatter,
-): Promise<IntelligenceAlert[]> {
+): Promise<AttentionItem[]> {
   console.log(
     `[ProactiveEngine] Running post-meeting triggers for: ${meetingId}`,
   );
 
-  const allAlerts: IntelligenceAlert[] = [];
+  const candidates: AttentionItemUpsert[] = [];
 
   try {
-    // Run sync triggers first (no async overhead)
-    const duplicateAlerts = detectDuplicateActions(meetingId, mid);
-    const conflictAlerts = detectDecisionConflicts(meetingId, mid);
-
-    allAlerts.push(...duplicateAlerts, ...conflictAlerts);
-
-    // Run async cross-reference trigger
-    const crossRefAlerts = await detectCrossReferences(meetingId, mid);
-    allAlerts.push(...crossRefAlerts);
+    candidates.push(...detectDuplicateActions(meetingId, mid));
+    candidates.push(...detectDecisionConflicts(meetingId, mid));
+    candidates.push(...(await detectCrossReferences(meetingId, mid)));
   } catch (err) {
     console.error('[ProactiveEngine] Trigger run failed:', err);
   }
 
-  // Store in memory
-  alertStore.push(...allAlerts);
+  const persisted = candidates.map((item) => db.upsertAttentionItem(item));
 
   console.log(
-    `[ProactiveEngine] Generated ${allAlerts.length} alert(s) for meeting ${meetingId}`,
+    `[ProactiveEngine] Generated ${persisted.length} attention item(s) for meeting ${meetingId}`,
   );
 
-  return allAlerts;
+  return persisted;
 }
