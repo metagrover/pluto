@@ -5,9 +5,9 @@ import type {
   AttentionEvidenceReference,
   AttentionItem,
   AttentionItemKind,
-  AttentionItemSeverity,
   AttentionItemUpsert,
 } from './intelligenceTypes';
+import { scoreAttentionItem } from './attentionScoring';
 
 const KNOWLEDGE_PREFIX = 'knowledge_v2:global:';
 const ACTION_PREFIX = 'action_tracker:';
@@ -21,14 +21,6 @@ const sanitizeKeyPart = (value: string): string =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 72);
-
-const demoteSeverity = (
-  severity: AttentionItemSeverity,
-): AttentionItemSeverity => {
-  if (severity === 'critical') return 'watch';
-  if (severity === 'watch') return 'steady';
-  return 'steady';
-};
 
 const mapKnowledgeKind = (item: KnowledgeV2Item): AttentionItemKind => {
   switch (item.kind) {
@@ -47,38 +39,6 @@ const mapKnowledgeKind = (item: KnowledgeV2Item): AttentionItemKind => {
     default:
       return 'reference_context';
   }
-};
-
-const mapKnowledgeSeverity = (
-  item: KnowledgeV2Item,
-): AttentionItemSeverity | null => {
-  const confidence = item.evidence_quality.confidence;
-  if (confidence < 0.55) return null;
-
-  let severity: AttentionItemSeverity =
-    item.severity === 'needs_attention'
-      ? 'critical'
-      : item.severity === 'watch'
-        ? 'watch'
-        : 'steady';
-
-  if (
-    item.evidence_quality.freshness === 'stale' ||
-    item.evidence_quality.confidence < 0.7
-  ) {
-    severity = demoteSeverity(severity);
-  }
-
-  return severity;
-};
-
-const scoreForSeverity = (
-  severity: AttentionItemSeverity,
-  confidence: number,
-): number => {
-  const base =
-    severity === 'critical' ? 0.92 : severity === 'watch' ? 0.72 : 0.48;
-  return Math.min(0.99, Math.max(0.2, base + (confidence - 0.5) * 0.2));
 };
 
 const unique = (values: string[]): string[] => Array.from(new Set(values));
@@ -108,6 +68,7 @@ const syncResolvedItems = (
       title: item.title,
       reason: item.reason,
       source: item.source,
+      score_breakdown: item.score_breakdown,
       evidence: item.evidence,
       related_entity_ids: item.related_entity_ids,
       related_stream_ids: item.related_stream_ids,
@@ -120,10 +81,9 @@ const syncResolvedItems = (
 const buildKnowledgeAttentionItem = (
   item: KnowledgeV2Item,
 ): AttentionItemUpsert | null => {
-  const severity = mapKnowledgeSeverity(item);
-  if (!severity) return null;
-
   const kind = mapKnowledgeKind(item);
+  const confidence = item.evidence_quality.confidence;
+  if (confidence < 0.55) return null;
   const keyParts = [item.stream_ids.join('-'), item.kind, item.id, item.title]
     .map(sanitizeKeyPart)
     .filter(Boolean)
@@ -136,16 +96,29 @@ const buildKnowledgeAttentionItem = (
       source_kind: 'knowledge_v2',
     }),
   );
+  const scored = scoreAttentionItem({
+    kind,
+    status: 'active',
+    confidence,
+    evidence_mode: item.evidence_quality.mode,
+    freshness: item.evidence_quality.freshness,
+    last_reinforced_at: item.evidence_quality.last_reinforced_at,
+    cited_meeting_count: item.evidence_quality.cited_meeting_count,
+    source_count: item.evidence_quality.source_count,
+    related_stream_count: item.stream_ids.length,
+    is_explicit_commitment: kind === 'follow_up',
+  });
 
   return {
     dedupe_key: dedupeKey,
     kind,
-    severity,
-    score: scoreForSeverity(severity, item.evidence_quality.confidence),
+    severity: scored.severity,
+    score: scored.score,
     status: 'active',
     title: item.title,
     reason: item.why_now,
     source: 'knowledge_v2',
+    score_breakdown: scored.score_breakdown,
     evidence,
     related_entity_ids: [],
     related_stream_ids: item.stream_ids,
@@ -198,41 +171,76 @@ const actionEvidence = (
       source_kind: sourceKind,
     }));
 
-const buildOverdueActionItem = (action: Entity): AttentionItemUpsert => ({
-  dedupe_key: `${ACTION_PREFIX}overdue:${sanitizeKeyPart(action.id)}`,
-  kind: 'follow_up',
-  severity: 'critical',
-  score: 0.94,
-  status: 'active',
-  title: action.name,
-  reason: action.due_date
-    ? `This action item is overdue since ${action.due_date}.`
-    : 'This action item is overdue.',
-  source: 'action_tracker',
-  evidence: actionEvidence(action, 'overdue_action'),
-  related_entity_ids: [action.id],
-  related_stream_ids: [],
-  related_meeting_ids: unique(
+const buildOverdueActionItem = (action: Entity): AttentionItemUpsert => {
+  const relatedMeetingIds = unique(
     db.getMeetingsForEntity(action.id).map((meeting) => meeting.meeting_id),
-  ),
-});
+  );
+  const scored = scoreAttentionItem({
+    kind: 'follow_up',
+    status: 'active',
+    confidence: 0.95,
+    evidence_mode: 'direct',
+    freshness: 'fresh',
+    due_at: action.due_date ?? null,
+    updated_at: action.updated_at ?? null,
+    cited_meeting_count: relatedMeetingIds.length || 1,
+    source_count: relatedMeetingIds.length || 1,
+    related_stream_count: 0,
+    is_explicit_commitment: true,
+  });
 
-const buildStaleActionItem = (action: Entity): AttentionItemUpsert => ({
-  dedupe_key: `${ACTION_PREFIX}stale:${sanitizeKeyPart(action.id)}`,
-  kind: 'stale_context',
-  severity: 'watch',
-  score: 0.68,
-  status: 'active',
-  title: action.name,
-  reason: `This action item has not been updated in ${STALE_ACTION_DAYS}+ days.`,
-  source: 'action_tracker',
-  evidence: actionEvidence(action, 'stale_action'),
-  related_entity_ids: [action.id],
-  related_stream_ids: [],
-  related_meeting_ids: unique(
+  return {
+    dedupe_key: `${ACTION_PREFIX}overdue:${sanitizeKeyPart(action.id)}`,
+    kind: 'follow_up',
+    severity: scored.severity,
+    score: scored.score,
+    status: 'active',
+    title: action.name,
+    reason: action.due_date
+      ? `This action item is overdue since ${action.due_date}.`
+      : 'This action item is overdue.',
+    source: 'action_tracker',
+    score_breakdown: scored.score_breakdown,
+    evidence: actionEvidence(action, 'overdue_action'),
+    related_entity_ids: [action.id],
+    related_stream_ids: [],
+    related_meeting_ids: relatedMeetingIds,
+  };
+};
+
+const buildStaleActionItem = (action: Entity): AttentionItemUpsert => {
+  const relatedMeetingIds = unique(
     db.getMeetingsForEntity(action.id).map((meeting) => meeting.meeting_id),
-  ),
-});
+  );
+  const scored = scoreAttentionItem({
+    kind: 'stale_context',
+    status: 'active',
+    confidence: 0.72,
+    evidence_mode: 'direct',
+    freshness: 'stale',
+    updated_at: action.updated_at ?? null,
+    cited_meeting_count: relatedMeetingIds.length || 1,
+    source_count: relatedMeetingIds.length || 1,
+    related_stream_count: 0,
+    is_explicit_commitment: true,
+  });
+
+  return {
+    dedupe_key: `${ACTION_PREFIX}stale:${sanitizeKeyPart(action.id)}`,
+    kind: 'stale_context',
+    severity: scored.severity,
+    score: scored.score,
+    status: 'active',
+    title: action.name,
+    reason: `This action item has not been updated in ${STALE_ACTION_DAYS}+ days.`,
+    source: 'action_tracker',
+    score_breakdown: scored.score_breakdown,
+    evidence: actionEvidence(action, 'stale_action'),
+    related_entity_ids: [action.id],
+    related_stream_ids: [],
+    related_meeting_ids: relatedMeetingIds,
+  };
+};
 
 export const syncActionTrackerAttentionQueue = (): AttentionItem[] => {
   const overdue = db.getOverdueActionItems();

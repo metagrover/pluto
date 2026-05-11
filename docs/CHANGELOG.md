@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-11
+
+### Add deterministic attention scoring
+- **Issue:** [#79](https://github.com/metagrover/pluto/issues/79)
+- **PR:** Pending.
+- **Changed:** Added a deterministic attention-scoring module with explicit urgency, recency, repetition, commitment, evidence, project relevance, feedback, and penalty breakdowns; persisted those score breakdowns on `attention_items`; and routed the current knowledge, action-tracker, and proactive attention producers through that scorer with focused unit coverage.
+- **Why:** Trusted Attention needs explainable ranking before Pluto can safely build richer queue controls and briefing surfaces on top of it. This pass makes urgent commitments, repeated blockers, stale weak claims, and pinned or dismissed feedback behave predictably instead of relying on source-specific hard-coded scores.
+- **Replaced:** Fixed per-source attention scores and severity heuristics that could not explain why one item outranked another.
+- **Notes:** Low-confidence knowledge signals are still suppressed at the sync layer for now; this issue focuses on deterministic ranking and persisted breakdown metadata rather than new UI.
+
 ## 2026-05-10
 
 ### Unify durable attention inputs behind the queue

@@ -26,6 +26,7 @@ vi.mock('better-sqlite3', () => {
           title,
           reason,
           source,
+          score_breakdown_json,
           evidence_json,
           related_entity_ids_json,
           related_stream_ids_json,
@@ -45,6 +46,7 @@ vi.mock('better-sqlite3', () => {
           title,
           reason,
           source,
+          score_breakdown_json,
           evidence_json,
           related_entity_ids_json,
           related_stream_ids_json,
@@ -64,6 +66,7 @@ vi.mock('better-sqlite3', () => {
           title,
           reason,
           source,
+          score_breakdown_json,
           evidence_json,
           related_entity_ids_json,
           related_stream_ids_json,
@@ -84,6 +87,7 @@ vi.mock('better-sqlite3', () => {
             title,
             reason,
             source,
+            score_breakdown_json,
             evidence_json,
             related_entity_ids_json,
             related_stream_ids_json,
@@ -249,6 +253,43 @@ describe('attention queue persistence', () => {
       'Prepare brief',
       'Resolved blocker',
     ]);
+  });
+
+  it('round-trips score breakdown metadata with queue items', () => {
+    upsertAttentionItem({
+      dedupe_key: 'risk:scored',
+      kind: 'risk',
+      severity: 'critical',
+      score: 0.87,
+      status: 'active',
+      title: 'Scored risk',
+      reason: 'Evidence-backed attention score is persisted.',
+      source: 'knowledge_v2',
+      score_breakdown: {
+        urgency: 0.14,
+        recency: 0.08,
+        repetition: 0.09,
+        commitment: 0,
+        blocker: 0.24,
+        project_relevance: 0.04,
+        evidence: 0.18,
+        feedback: 0,
+        stale_penalty: 0,
+        weak_evidence_penalty: 0,
+        total: 0.87,
+      },
+      evidence: [],
+      related_entity_ids: [],
+      related_stream_ids: ['stream-risk'],
+      related_meeting_ids: ['m1', 'm2'],
+    });
+
+    const [item] = listAttentionItems();
+    expect(item.score_breakdown).toMatchObject({
+      blocker: 0.24,
+      evidence: 0.18,
+      total: 0.87,
+    });
   });
 
   it('clears items for a deleted meeting without touching unrelated rows', () => {
