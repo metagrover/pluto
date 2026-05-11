@@ -108,6 +108,7 @@ import {
   extractAndProcessEntities,
   processExtractedEntities,
 } from './entityPipeline';
+import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
 import {
   auditCitations,
   buildCitationChain,
@@ -119,7 +120,6 @@ import {
   getAlerts,
   runPostMeetingTriggers,
 } from './intelligence/proactiveEngine';
-import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
 import { parseQuery, retrieveContext } from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
 import { generateSuggestedQueries } from './intelligence/suggestedQueries';

@@ -124,12 +124,7 @@ const buildKnowledgeAttentionItem = (
   if (!severity) return null;
 
   const kind = mapKnowledgeKind(item);
-  const keyParts = [
-    item.stream_ids.join('-'),
-    item.kind,
-    item.id,
-    item.title,
-  ]
+  const keyParts = [item.stream_ids.join('-'), item.kind, item.id, item.title]
     .map(sanitizeKeyPart)
     .filter(Boolean)
     .join(':');
@@ -154,7 +149,9 @@ const buildKnowledgeAttentionItem = (
     evidence,
     related_entity_ids: [],
     related_stream_ids: item.stream_ids,
-    related_meeting_ids: unique(item.citations.map((citation) => citation.meeting_id)),
+    related_meeting_ids: unique(
+      item.citations.map((citation) => citation.meeting_id),
+    ),
   };
 };
 
@@ -191,12 +188,15 @@ const actionEvidence = (
   action: Entity,
   sourceKind: string,
 ): AttentionEvidenceReference[] =>
-  db.getMeetingsForEntity(action.id).slice(0, 3).map((meeting) => ({
-    meeting_id: meeting.meeting_id,
-    quote: action.name,
-    entity_id: action.id,
-    source_kind: sourceKind,
-  }));
+  db
+    .getMeetingsForEntity(action.id)
+    .slice(0, 3)
+    .map((meeting) => ({
+      meeting_id: meeting.meeting_id,
+      quote: action.name,
+      entity_id: action.id,
+      source_kind: sourceKind,
+    }));
 
 const buildOverdueActionItem = (action: Entity): AttentionItemUpsert => ({
   dedupe_key: `${ACTION_PREFIX}overdue:${sanitizeKeyPart(action.id)}`,

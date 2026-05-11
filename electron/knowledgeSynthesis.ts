@@ -1,4 +1,5 @@
 import * as db from './db';
+import { syncGlobalKnowledgeAttentionQueue } from './intelligence/attentionSync';
 import {
   type KnowledgeSourceChunk,
   buildKnowledgeSourceChunks,
@@ -19,7 +20,6 @@ import {
   parseKnowledgeV2Document,
   repairKnowledgeV2Document,
 } from './knowledgeV2';
-import { syncGlobalKnowledgeAttentionQueue } from './intelligence/attentionSync';
 import { parseAnalysisMarkdown } from './llm/analysisDocument';
 import { getAllSettings, getProvider } from './llm/factory';
 import {
@@ -1576,7 +1576,10 @@ const synthesizeKnowledgeDocNowInternal = async (
       try {
         syncGlobalKnowledgeAttentionQueue(emptyDoc);
       } catch (error) {
-        console.warn('[KnowledgeDoc] Failed to sync global attention queue:', error);
+        console.warn(
+          '[KnowledgeDoc] Failed to sync global attention queue:',
+          error,
+        );
       }
     }
     db.rebuildKnowledgeBacklinks(doc.id);
@@ -1647,7 +1650,10 @@ const synthesizeKnowledgeDocNowInternal = async (
       try {
         syncGlobalKnowledgeAttentionQueue(structured);
       } catch (error) {
-        console.warn('[KnowledgeDoc] Failed to sync global attention queue:', error);
+        console.warn(
+          '[KnowledgeDoc] Failed to sync global attention queue:',
+          error,
+        );
       }
     }
     if (isKnowledgeV1Document(structured)) {

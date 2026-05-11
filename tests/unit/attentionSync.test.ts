@@ -39,11 +39,11 @@ vi.mock('../../electron/db', () => ({
   }),
 }));
 
-import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 import {
   syncActionTrackerAttentionQueue,
   syncGlobalKnowledgeAttentionQueue,
 } from '../../electron/intelligence/attentionSync';
+import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 
 const makeKnowledgeDoc = (): KnowledgeV2Document => ({
   schema_version: 2,
@@ -78,7 +78,9 @@ const makeKnowledgeDoc = (): KnowledgeV2Document => ({
       severity: 'watch',
       why_now: 'Unresolved follow-up.',
       stream_ids: ['stream-launch'],
-      citations: [{ meeting_id: 'meeting-1', quote: 'Follow up with launch owner' }],
+      citations: [
+        { meeting_id: 'meeting-1', quote: 'Follow up with launch owner' },
+      ],
       evidence_quality: {
         mode: 'direct',
         confidence: 0.74,
@@ -99,7 +101,9 @@ const makeKnowledgeDoc = (): KnowledgeV2Document => ({
       severity: 'needs_attention',
       why_now: 'Evidence points to a delivery risk.',
       stream_ids: ['stream-launch'],
-      citations: [{ meeting_id: 'meeting-2', quote: 'Timeline still looks risky' }],
+      citations: [
+        { meeting_id: 'meeting-2', quote: 'Timeline still looks risky' },
+      ],
       evidence_quality: {
         mode: 'inferred',
         confidence: 0.88,
@@ -177,12 +181,11 @@ describe('attention sync', () => {
 
     expect(
       dbState.items
-        .filter((item) => item.source === 'knowledge_v2' && item.status === 'active')
+        .filter(
+          (item) => item.source === 'knowledge_v2' && item.status === 'active',
+        )
         .map((item) => item.title),
-    ).toEqual([
-      'Follow up with launch owner',
-      'Launch timeline may slip',
-    ]);
+    ).toEqual(['Follow up with launch owner', 'Launch timeline may slip']);
     expect(
       dbState.items.find((item) => item.title === 'Old item')?.status,
     ).toBe('resolved');
@@ -236,7 +239,9 @@ describe('attention sync', () => {
         updated_at: '2026-04-20T00:00:00.000Z',
       },
     ];
-    dbState.meetingsByEntity.set('action-overdue', [{ meeting_id: 'meeting-1' }]);
+    dbState.meetingsByEntity.set('action-overdue', [
+      { meeting_id: 'meeting-1' },
+    ]);
     dbState.meetingsByEntity.set('action-stale', [{ meeting_id: 'meeting-2' }]);
 
     syncActionTrackerAttentionQueue();
@@ -249,8 +254,9 @@ describe('attention sync', () => {
       'action_tracker:stale:action-stale',
     ]);
     expect(
-      dbState.items.find((item) => item.dedupe_key === 'action_tracker:stale:action-retired')
-        ?.status,
+      dbState.items.find(
+        (item) => item.dedupe_key === 'action_tracker:stale:action-retired',
+      )?.status,
     ).toBe('resolved');
   });
 });
