@@ -8,6 +8,7 @@ import type {
   AttentionItem,
   AttentionItemStatus,
   AttentionItemUpsert,
+  AttentionScoreBreakdown,
   MidFrontmatter,
 } from './intelligence/intelligenceTypes';
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
@@ -36,6 +37,7 @@ type AttentionItemRow = {
   title: string;
   reason: string;
   source: string;
+  score_breakdown_json: string | null;
   evidence_json: string | null;
   related_entity_ids_json: string | null;
   related_stream_ids_json: string | null;
@@ -211,6 +213,7 @@ const initDb = () => {
         title TEXT NOT NULL,
         reason TEXT NOT NULL,
         source TEXT NOT NULL,
+        score_breakdown_json TEXT,
         evidence_json TEXT,
         related_entity_ids_json TEXT,
         related_stream_ids_json TEXT,
@@ -547,6 +550,23 @@ const initDb = () => {
     }
   } catch (e) {
     console.warn('[DB] Entity optional column migration failed:', e);
+  }
+
+  try {
+    const attentionColumns = db
+      .prepare('PRAGMA table_info(attention_items)')
+      .all() as Array<{ name: string }>;
+    if (
+      attentionColumns.length > 0 &&
+      !attentionColumns.some((col) => col.name === 'score_breakdown_json')
+    ) {
+      db.exec(
+        'ALTER TABLE attention_items ADD COLUMN score_breakdown_json TEXT',
+      );
+      console.log('[DB] Added attention_items.score_breakdown_json column');
+    }
+  } catch (e) {
+    console.warn('[DB] Attention-item optional column migration failed:', e);
   }
 
   // Additive migration for knowledge doc columns
@@ -919,8 +939,9 @@ export const upsertAttentionItem = (
     db.prepare(`
       UPDATE attention_items
       SET severity = ?, score = ?, status = ?, title = ?, reason = ?, source = ?,
-          evidence_json = ?, related_entity_ids_json = ?, related_stream_ids_json = ?,
-          related_meeting_ids_json = ?, updated_at = ?, last_seen_at = ?, resolved_at = ?
+          score_breakdown_json = ?, evidence_json = ?, related_entity_ids_json = ?,
+          related_stream_ids_json = ?, related_meeting_ids_json = ?, updated_at = ?,
+          last_seen_at = ?, resolved_at = ?
       WHERE dedupe_key = ?
     `).run(
       input.severity,
@@ -929,6 +950,7 @@ export const upsertAttentionItem = (
       input.title,
       input.reason,
       input.source,
+      serializeAttentionScoreBreakdown(input.score_breakdown),
       serializeAttentionEvidence(input.evidence),
       serializeAttentionStringArray(input.related_entity_ids),
       serializeAttentionStringArray(input.related_stream_ids),
@@ -942,9 +964,10 @@ export const upsertAttentionItem = (
     db.prepare(`
       INSERT INTO attention_items (
         id, dedupe_key, kind, severity, score, status, title, reason, source,
-        evidence_json, related_entity_ids_json, related_stream_ids_json,
-        related_meeting_ids_json, created_at, updated_at, last_seen_at, resolved_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        score_breakdown_json, evidence_json, related_entity_ids_json,
+        related_stream_ids_json, related_meeting_ids_json, created_at, updated_at,
+        last_seen_at, resolved_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       randomUUID(),
       dedupeKey,
@@ -955,6 +978,7 @@ export const upsertAttentionItem = (
       input.title,
       input.reason,
       input.source,
+      serializeAttentionScoreBreakdown(input.score_breakdown),
       serializeAttentionEvidence(input.evidence),
       serializeAttentionStringArray(input.related_entity_ids),
       serializeAttentionStringArray(input.related_stream_ids),
@@ -1590,6 +1614,46 @@ const serializeAttentionEvidence = (
       })),
   );
 
+const parseAttentionScoreBreakdown = (
+  value: string | null,
+): AttentionScoreBreakdown | null => {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const keys = [
+      'urgency',
+      'recency',
+      'repetition',
+      'commitment',
+      'blocker',
+      'project_relevance',
+      'evidence',
+      'feedback',
+      'stale_penalty',
+      'weak_evidence_penalty',
+      'total',
+    ] as const;
+    if (
+      keys.every(
+        (key) =>
+          typeof parsed[key] === 'number' && Number.isFinite(parsed[key]),
+      )
+    ) {
+      return parsed as AttentionScoreBreakdown;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+};
+
+const serializeAttentionScoreBreakdown = (
+  scoreBreakdown?: AttentionScoreBreakdown | null,
+): string | null => {
+  if (!scoreBreakdown) return null;
+  return JSON.stringify(scoreBreakdown);
+};
+
 const mapAttentionItemRow = (row: AttentionItemRow): AttentionItem => ({
   id: row.id,
   dedupe_key: row.dedupe_key,
@@ -1600,6 +1664,7 @@ const mapAttentionItemRow = (row: AttentionItemRow): AttentionItem => ({
   title: row.title,
   reason: row.reason,
   source: row.source as AttentionItem['source'],
+  score_breakdown: parseAttentionScoreBreakdown(row.score_breakdown_json),
   evidence: parseAttentionEvidence(row.evidence_json),
   related_entity_ids: parseAttentionJsonArray(row.related_entity_ids_json),
   related_stream_ids: parseAttentionJsonArray(row.related_stream_ids_json),

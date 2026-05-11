@@ -13,10 +13,10 @@
 import { randomUUID } from 'node:crypto';
 import * as db from '../db';
 import { findSimilarEntity } from '../entityPipeline';
+import { scoreAttentionItem } from './attentionScoring';
 import type {
   AttentionItem,
   AttentionItemKind,
-  AttentionItemSeverity,
   AttentionItemUpsert,
   MidFrontmatter,
 } from './intelligenceTypes';
@@ -61,28 +61,50 @@ function buildDedupeKey(
   return suffix ? `${kind}:${suffix}` : `${kind}:${randomUUID()}`;
 }
 
-function scoreForSeverity(severity: AttentionItemSeverity): number {
-  switch (severity) {
-    case 'critical':
-      return 0.95;
-    case 'watch':
-      return 0.72;
-    default:
-      return 0.48;
-  }
-}
-
 function makeAttentionItem(
-  partial: Omit<AttentionItemUpsert, 'score' | 'status' | 'source'> & {
-    score?: number;
+  partial: Omit<
+    AttentionItemUpsert,
+    'score' | 'severity' | 'status' | 'source' | 'score_breakdown'
+  > & {
     status?: AttentionItemUpsert['status'];
+    confidence?: number;
+    evidence_mode?: 'direct' | 'inferred' | 'unknown';
+    freshness?: 'fresh' | 'aging' | 'stale' | 'unknown';
+    due_at?: string | null;
+    updated_at?: string | null;
+    last_reinforced_at?: string | null;
+    source_count?: number;
+    cited_meeting_count?: number;
+    related_stream_count?: number;
+    is_explicit_commitment?: boolean;
   },
 ): AttentionItemUpsert {
+  const status = partial.status ?? 'active';
+  const scored = scoreAttentionItem({
+    kind: partial.kind,
+    status,
+    confidence: partial.confidence,
+    evidence_mode: partial.evidence_mode,
+    freshness: partial.freshness,
+    due_at: partial.due_at,
+    updated_at: partial.updated_at,
+    last_reinforced_at: partial.last_reinforced_at,
+    source_count:
+      partial.source_count ?? Math.max(1, partial.related_meeting_ids.length),
+    cited_meeting_count:
+      partial.cited_meeting_count ??
+      Math.max(1, partial.related_meeting_ids.length),
+    related_stream_count: partial.related_stream_count ?? 0,
+    is_explicit_commitment: partial.is_explicit_commitment,
+  });
+
   return {
     ...partial,
-    score: partial.score ?? scoreForSeverity(partial.severity),
-    status: partial.status ?? 'active',
+    score: scored.score,
+    severity: scored.severity,
+    status,
     source: 'proactive_engine',
+    score_breakdown: scored.score_breakdown,
   };
 }
 
@@ -155,7 +177,6 @@ async function detectCrossReferences(
           ...mid.topics.map((topic) => topic.entity_id).sort(),
         ]),
         kind: 'reference_context',
-        severity: 'steady',
         title: `Cross-reference: ${mid.title}`,
         reason: `This meeting shares themes (${topicSummary}) with ${relatedMeetings.length} previous meeting(s). Consider reviewing for continuity.`,
         evidence: [
@@ -176,6 +197,11 @@ async function detectCrossReferences(
           ...mid.participants.map((participant) => participant.entity_id),
         ].slice(0, 6),
         related_stream_ids: [],
+        confidence: 0.68,
+        evidence_mode: 'direct',
+        freshness: 'fresh',
+        source_count: relatedMeetings.length + 1,
+        cited_meeting_count: relatedMeetings.length + 1,
       }),
     );
   } catch (err) {
@@ -230,7 +256,6 @@ function detectDuplicateActions(
           ...duplicateMeetingIds.slice(0, 2),
         ]),
         kind: 'duplicate_commitment',
-        severity: 'watch',
         title: 'Duplicate action item detected',
         reason: `"${newText.slice(0, 80)}" appears to overlap with an existing open action item: "${duplicate.name.slice(0, 80)}"`,
         evidence: [
@@ -250,6 +275,12 @@ function detectDuplicateActions(
         related_meeting_ids: [newMeetingId, ...duplicateMeetingIds.slice(0, 2)],
         related_entity_ids: [newItem.entity_id, duplicate.id],
         related_stream_ids: [],
+        confidence: 0.76,
+        evidence_mode: 'direct',
+        freshness: 'fresh',
+        source_count: duplicateMeetingIds.length + 1,
+        cited_meeting_count: duplicateMeetingIds.length + 1,
+        is_explicit_commitment: true,
       }),
     );
   }
@@ -296,7 +327,6 @@ function detectDecisionConflicts(
             ...candidateMeetingIds.slice(0, 2),
           ]),
           kind: 'decision_conflict',
-          severity: 'critical',
           title: 'Potential decision conflict',
           reason: `New decision: "${newText.slice(0, 80)}" may conflict with a prior decision: "${candidate.name.slice(0, 80)}"`,
           evidence: [
@@ -319,6 +349,11 @@ function detectDecisionConflicts(
           ],
           related_entity_ids: [newDecision.entity_id, candidate.id],
           related_stream_ids: [],
+          confidence: 0.84,
+          evidence_mode: 'direct',
+          freshness: 'fresh',
+          source_count: candidateMeetingIds.length + 1,
+          cited_meeting_count: candidateMeetingIds.length + 1,
         }),
       );
     }
