@@ -5,6 +5,7 @@ import { app } from 'electron';
 import type { MidFrontmatter } from './intelligence/intelligenceTypes';
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
+import { createSecureSettingsManager } from './secureSettings';
 
 const dbPath = path.join(app.getPath('userData'), 'pluto.db');
 
@@ -819,18 +820,34 @@ initDb();
 /**
  * Settings Management
  */
+const plaintextSettingsStore = {
+  get(key: string) {
+    const row = db
+      .prepare('SELECT value FROM settings WHERE key = ?')
+      .get(key) as { value: string } | undefined;
+    return row ? row.value : null;
+  },
+  set(key: string, value: string) {
+    const stmt = db.prepare(
+      'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+    );
+    return stmt.run(key, value);
+  },
+  delete(key: string) {
+    return db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+  },
+};
+
+const secureSettings = createSecureSettingsManager({
+  plaintext: plaintextSettingsStore,
+});
+
 export const getSetting = (key: string) => {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
-    | { value: string }
-    | undefined;
-  return row ? row.value : null;
+  return secureSettings.get(key);
 };
 
 export const setSetting = (key: string, value: string) => {
-  const stmt = db.prepare(
-    'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-  );
-  return stmt.run(key, value);
+  return secureSettings.set(key, value);
 };
 
 /**
