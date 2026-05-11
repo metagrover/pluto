@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyKnowledgeCorrectionsToDocument,
   buildDeterministicKnowledgeV2Document,
   classifyKnowledgeV2Item,
   mergeKnowledgeV2Documents,
@@ -20,6 +21,17 @@ const makeSource = (overrides = {}) => ({
   enhanced_notes: 'Detailed notes about the knowledge dashboard and evidence.',
   user_notes: '',
   entity_names: ['Knowledge Dashboard', 'API Instrumentation'],
+  ...overrides,
+});
+
+const makeCorrection = (overrides = {}) => ({
+  id: 'correction-1',
+  doc_id: 'doc-1',
+  target_kind: 'item',
+  target_id: 'target-1',
+  action: 'promote_item',
+  payload_json: null,
+  created_at: '2026-05-10T10:00:00.000Z',
   ...overrides,
 });
 
@@ -252,6 +264,129 @@ describe('knowledge V2 utilities', () => {
     expect(
       merged.evidence_index.map((evidence) => evidence.meeting_id),
     ).toEqual(expect.arrayContaining(['m1', 'm2']));
+  });
+
+  it('applies durable correction overlays to synthesized streams and items', () => {
+    const base = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [
+        makeSource(),
+        makeSource({
+          id: 'review-2',
+          occurred_at: '2026-04-22T10:00:00.000Z',
+          evidence:
+            'Summary: Knowledge needs better synthesis quality.\nKey points: Better citations would improve trust. | Prepare deployment instrumentation.',
+          entity_names: ['Knowledge Dashboard'],
+        }),
+      ],
+    );
+    const doc = {
+      ...base,
+      needs_attention: [
+        {
+          ...base.needs_attention[0],
+          id: 'follow-up-1',
+          kind: 'follow_up' as const,
+          severity: 'watch' as const,
+        },
+      ],
+      patterns: [
+        {
+          ...base.needs_attention[0],
+          id: 'pattern-1',
+          kind: 'pattern' as const,
+          severity: 'steady' as const,
+          title: 'Repeated trust gap across reviews',
+          summary: 'Repeated trust gap across reviews appears repeatedly.',
+        },
+      ],
+      risks_and_unknowns: [],
+    };
+
+    const stream = doc.active_streams[0];
+    const attentionItem = doc.needs_attention[0];
+    const patternItem = doc.patterns[0];
+
+    expect(stream).toBeDefined();
+    expect(attentionItem).toBeDefined();
+    expect(patternItem).toBeDefined();
+
+    const corrected = applyKnowledgeCorrectionsToDocument(doc, [
+      makeCorrection({
+        target_kind: 'stream',
+        target_id: stream!.id,
+        action: 'rename_stream',
+        payload_json: JSON.stringify({ title: 'Trusted Knowledge Dashboard' }),
+        created_at: '2026-05-10T09:00:00.000Z',
+      }),
+      makeCorrection({
+        target_kind: 'stream',
+        target_id: stream!.id,
+        action: 'rename_stream',
+        payload_json: JSON.stringify({ title: 'Final Dashboard Name' }),
+        created_at: '2026-05-10T11:00:00.000Z',
+      }),
+      makeCorrection({
+        target_kind: 'stream',
+        target_id: stream!.id,
+        action: 'pin_stream',
+      }),
+      makeCorrection({
+        target_id: attentionItem!.id,
+        action: 'demote_item',
+      }),
+      makeCorrection({
+        target_id: patternItem!.id,
+        action: 'promote_item',
+      }),
+      makeCorrection({
+        target_id: patternItem!.id,
+        action: 'correct_classification',
+        payload_json: JSON.stringify({ kind: 'blocker' }),
+        created_at: '2026-05-10T12:00:00.000Z',
+      }),
+    ]);
+
+    expect(corrected.active_streams[0]).toMatchObject({
+      id: stream!.id,
+      title: 'Final Dashboard Name',
+      pinned: true,
+    });
+    expect(corrected.current_read.supporting_bullets[0]).toContain(
+      'Final Dashboard Name',
+    );
+    expect(
+      corrected.needs_attention.some((item) => item.id === attentionItem!.id),
+    ).toBe(false);
+    expect(corrected.needs_attention[0]).toMatchObject({
+      id: patternItem!.id,
+      kind: 'blocker',
+    });
+    expect(
+      corrected.risks_and_unknowns.some((item) => item.id === patternItem!.id),
+    ).toBe(true);
+  });
+
+  it('ignores invalid classification payloads when applying corrections', () => {
+    const doc = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [makeSource()],
+    );
+    const target = doc.needs_attention[0];
+
+    const corrected = applyKnowledgeCorrectionsToDocument(doc, [
+      makeCorrection({
+        target_id: target.id,
+        action: 'correct_classification',
+        payload_json: JSON.stringify({ kind: 'not-a-real-kind' }),
+      }),
+    ]);
+
+    expect(corrected.needs_attention[0]).toMatchObject({
+      id: target.id,
+      kind: target.kind,
+      severity: target.severity,
+    });
   });
 
   it('repairs weak LLM headlines and person/pronoun streams before rendering', () => {

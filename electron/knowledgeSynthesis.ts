@@ -14,6 +14,7 @@ import {
 import { parseKnowledgeJsonResponse } from './knowledgeJson';
 import {
   type KnowledgeV2Document,
+  applyKnowledgeCorrectionsToDocument,
   buildDeterministicKnowledgeV2Document,
   isKnowledgeV2Document,
   mergeKnowledgeV2Documents,
@@ -1543,6 +1544,11 @@ const synthesizeKnowledgeDocNowInternal = async (
 ): Promise<db.KnowledgeDoc | undefined> => {
   const doc = db.getKnowledgeDoc(docId);
   if (!doc) return undefined;
+  const knowledgeCorrections = db.getKnowledgeCorrections(doc.id);
+  const applyCorrections = (structured: KnowledgeCompiledDocument) =>
+    isKnowledgeV2Document(structured)
+      ? applyKnowledgeCorrectionsToDocument(structured, knowledgeCorrections)
+      : structured;
 
   db.upsertKnowledgeDoc({
     id: doc.id,
@@ -1556,9 +1562,11 @@ const synthesizeKnowledgeDocNowInternal = async (
   const sourceMeetingIds = sourceMeetings.map((meeting) => meeting.id);
 
   if (sourceMeetings.length === 0) {
-    const emptyDoc = buildDeterministicKnowledgeV2Document(
-      { type: doc.scope_type, title: doc.title },
-      [],
+    const emptyDoc = applyCorrections(
+      buildDeterministicKnowledgeV2Document(
+        { type: doc.scope_type, title: doc.title },
+        [],
+      ),
     );
     const rendered = renderStructuredDocument(emptyDoc);
     const previous = parseStoredCompiledDoc(doc.structured_json);
@@ -1617,13 +1625,14 @@ const synthesizeKnowledgeDocNowInternal = async (
       // real content progressively instead of waiting for the full merge.
       onChunkProgress: (partial) => {
         try {
-          const partialRendered = renderStructuredDocument(partial);
+          const correctedPartial = applyCorrections(partial);
+          const partialRendered = renderStructuredDocument(correctedPartial);
           db.upsertKnowledgeDoc({
             id: doc.id,
             scope_type: doc.scope_type,
             scope_key: doc.scope_key,
             title: doc.title,
-            structured_json: JSON.stringify(partial),
+            structured_json: JSON.stringify(correctedPartial),
             rendered_content: partialRendered,
             status: 'synthesizing', // stays 'synthesizing' until the full merge completes
           });
@@ -1633,22 +1642,26 @@ const synthesizeKnowledgeDocNowInternal = async (
         }
       },
     });
+    const correctedStructured = applyCorrections(structured);
 
-    const rendered = renderStructuredDocument(structured);
+    const rendered = renderStructuredDocument(correctedStructured);
     const previous = parseStoredCompiledDoc(doc.structured_json);
-    const changelog = computeChangelog(previous, structured);
+    const changelog = computeChangelog(previous, correctedStructured);
 
     db.replaceKnowledgeDocSources(doc.id, sourceMeetingIds);
     db.saveKnowledgeDocVersion({
       doc_id: doc.id,
-      structured_json: JSON.stringify(structured),
+      structured_json: JSON.stringify(correctedStructured),
       rendered_content: rendered,
       changelog_json: JSON.stringify(changelog),
       source_count: sourceMeetings.length,
     });
-    if (doc.scope_type === 'global' && isKnowledgeV2Document(structured)) {
+    if (
+      doc.scope_type === 'global' &&
+      isKnowledgeV2Document(correctedStructured)
+    ) {
       try {
-        syncGlobalKnowledgeAttentionQueue(structured);
+        syncGlobalKnowledgeAttentionQueue(correctedStructured);
       } catch (error) {
         console.warn(
           '[KnowledgeDoc] Failed to sync global attention queue:',
@@ -1656,8 +1669,8 @@ const synthesizeKnowledgeDocNowInternal = async (
         );
       }
     }
-    if (isKnowledgeV1Document(structured)) {
-      persistDependencySuggestions(structured.dependency_suggestions);
+    if (isKnowledgeV1Document(correctedStructured)) {
+      persistDependencySuggestions(correctedStructured.dependency_suggestions);
     }
     db.rebuildKnowledgeBacklinks(doc.id);
 
@@ -1668,7 +1681,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       scope_type: doc.scope_type,
       scope_key: doc.scope_key,
       title: doc.title,
-      structured_json: JSON.stringify(structured),
+      structured_json: JSON.stringify(correctedStructured),
       rendered_content: rendered,
       config: withCurrentKnowledgeSynthesisConfig(doc.config),
       status: 'up_to_date',
