@@ -48,12 +48,12 @@ vi.mock('../../electron/entityPipeline', () => ({
   findSimilarEntity: vi.fn(() => null),
 }));
 
+import type { MidFrontmatter } from '../../electron/intelligence/intelligenceTypes';
 import {
   clearAlertsForMeeting,
   getAlerts,
   runPostMeetingTriggers,
 } from '../../electron/intelligence/proactiveEngine';
-import type { MidFrontmatter } from '../../electron/intelligence/intelligenceTypes';
 
 const makeMid = (): MidFrontmatter => ({
   mid_version: 1,

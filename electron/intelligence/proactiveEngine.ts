@@ -37,7 +37,9 @@ export function getAlerts(options?: {
  */
 export function clearAlertsForMeeting(meetingId: string): void {
   db.clearAttentionItemsForMeeting(meetingId);
-  console.log(`[ProactiveEngine] Cleared attention items for meeting ${meetingId}`);
+  console.log(
+    `[ProactiveEngine] Cleared attention items for meeting ${meetingId}`,
+  );
 }
 
 function sanitizeDedupePart(value: string): string {
@@ -126,7 +128,9 @@ async function detectCrossReferences(
     const context = await retrieveContext({
       keywords: queryParts,
       expanded_keywords: [],
-      entity_mentions: mid.participants.map((participant) => participant.entity_id),
+      entity_mentions: mid.participants.map(
+        (participant) => participant.entity_id,
+      ),
       temporal_range: null,
       intent: 'factual',
     });
@@ -186,12 +190,16 @@ function detectDuplicateActions(
   mid: MidFrontmatter,
 ): AttentionItemUpsert[] {
   const items: AttentionItemUpsert[] = [];
-  const newActiveItems = mid.action_items.filter((item) => item.status === 'active');
+  const newActiveItems = mid.action_items.filter(
+    (item) => item.status === 'active',
+  );
   if (newActiveItems.length === 0) return items;
 
   const existingActionEntities = db
     .getAllEntities()
-    .filter((entity) => entity.type === 'action_item' && entity.status === 'active');
+    .filter(
+      (entity) => entity.type === 'action_item' && entity.status === 'active',
+    );
 
   if (existingActionEntities.length === 0) return items;
 
@@ -258,7 +266,9 @@ function detectDecisionConflicts(
 
   const existingDecisionEntities = db
     .getAllEntities()
-    .filter((entity) => entity.type === 'decision' && entity.status === 'active');
+    .filter(
+      (entity) => entity.type === 'decision' && entity.status === 'active',
+    );
 
   if (existingDecisionEntities.length === 0) return items;
 
@@ -303,7 +313,10 @@ function detectDecisionConflicts(
               source_kind: 'decision_conflict',
             })),
           ],
-          related_meeting_ids: [newMeetingId, ...candidateMeetingIds.slice(0, 2)],
+          related_meeting_ids: [
+            newMeetingId,
+            ...candidateMeetingIds.slice(0, 2),
+          ],
           related_entity_ids: [newDecision.entity_id, candidate.id],
           related_stream_ids: [],
         }),

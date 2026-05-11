@@ -895,7 +895,7 @@ export const upsertAttentionItem = (
     input.status === 'resolved' ||
     input.status === 'dismissed' ||
     input.status === 'superseded'
-      ? input.resolved_at ?? existing?.resolved_at ?? now
+      ? (input.resolved_at ?? existing?.resolved_at ?? now)
       : null;
 
   if (existing) {
@@ -966,9 +966,7 @@ export const listAttentionItems = (options?: {
   meetingId?: string;
 }): AttentionItem[] => {
   const statusFilter = options?.status
-    ? new Set(
-        Array.isArray(options.status) ? options.status : [options.status],
-      )
+    ? new Set(Array.isArray(options.status) ? options.status : [options.status])
     : null;
   const meetingId = options?.meetingId?.trim();
   const rows = db
@@ -986,11 +984,13 @@ export const listAttentionItems = (options?: {
     })
     .sort((left, right) => {
       const statusDelta =
-        ATTENTION_STATUS_ORDER[left.status] - ATTENTION_STATUS_ORDER[right.status];
+        ATTENTION_STATUS_ORDER[left.status] -
+        ATTENTION_STATUS_ORDER[right.status];
       if (statusDelta !== 0) return statusDelta;
       if (left.score !== right.score) return right.score - left.score;
       return (
-        new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
+        new Date(right.updated_at).getTime() -
+        new Date(left.updated_at).getTime()
       );
     });
 
@@ -1007,7 +1007,9 @@ export const clearAttentionItemsForMeeting = (meetingId: string): void => {
     .all() as AttentionItemRow[];
 
   for (const row of rows) {
-    const relatedMeetingIds = parseAttentionJsonArray(row.related_meeting_ids_json);
+    const relatedMeetingIds = parseAttentionJsonArray(
+      row.related_meeting_ids_json,
+    );
     if (!relatedMeetingIds.includes(normalizedMeetingId)) continue;
     db.prepare('DELETE FROM attention_items WHERE id = ?').run(row.id);
   }

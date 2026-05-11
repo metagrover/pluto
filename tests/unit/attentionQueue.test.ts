@@ -105,7 +105,9 @@ vi.mock('better-sqlite3', () => {
 
     get(...args: unknown[]) {
       if (this.sql.includes('PRAGMA table_info')) return undefined;
-      if (this.sql.includes('SELECT * FROM attention_items WHERE dedupe_key = ?')) {
+      if (
+        this.sql.includes('SELECT * FROM attention_items WHERE dedupe_key = ?')
+      ) {
         const [dedupeKey] = args;
         return (
           storeState.items.find((item) => item.dedupe_key === dedupeKey) ?? null
@@ -141,9 +143,9 @@ vi.mock('better-sqlite3', () => {
 });
 
 import {
+  clearAttentionItemsForMeeting,
   listAttentionItems,
   upsertAttentionItem,
-  clearAttentionItemsForMeeting,
 } from '../../electron/db';
 
 describe('attention queue persistence', () => {
