@@ -45,9 +45,34 @@ const makeDoc = (overrides: Partial<KnowledgeDoc> = {}): KnowledgeDoc => ({
   title: 'Indexing Rollout',
   rendered_content: null,
   structured_json: JSON.stringify({
+    schema_version: 2,
+    scope: { type: 'project', title: 'Indexing Rollout' },
     current_read: {
       headline: 'Search indexing is converging around the rollout plan.',
+      trust_message: 'Grounded in direct meeting evidence.',
+      evidence_quality: {
+        mode: 'direct',
+        confidence: 0.9,
+        cited_meeting_count: 3,
+        source_count: 4,
+        last_reinforced_at: '2026-04-27T16:00:00.000Z',
+        freshness: 'fresh',
+      },
       source_count: 4,
+      cited_item_count: 3,
+      cited_meeting_count: 3,
+      freshness: 'fresh',
+    },
+    active_streams: [],
+    needs_attention: [],
+    patterns: [],
+    risks_and_unknowns: [],
+    evidence_index: [],
+    source_quality_summary: {
+      included_count: 4,
+      excluded_count: 0,
+      weak_count: 0,
+      records: [],
     },
   }),
   config: null,
@@ -144,6 +169,7 @@ describe('buildDashboardHomeModel', () => {
       countLabel: '1 blocker · 2 dependencies',
       status: 'up_to_date',
       scopeType: 'project',
+      trustStatus: 'grounded',
     });
     expect(model.spotlight).toMatchObject({
       title: 'Indexing Rollout',

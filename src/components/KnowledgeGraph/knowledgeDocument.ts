@@ -3,6 +3,8 @@ import type {
   KnowledgeDocScopeType,
 } from '../../api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../api/knowledgeWorkspace';
+import type { TrustStatus } from '../../utils/trustStatus';
+import { deriveKnowledgeTrustStatus } from '../../utils/trustStatus';
 
 export type KnowledgeSectionKey =
   | 'decisions'
@@ -171,6 +173,7 @@ export interface KnowledgeBrief {
   evidenceIndex: KnowledgeV2EvidenceEntry[];
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
   trustMessage: string | null;
+  trustStatus: TrustStatus | null;
 }
 
 export type AttentionSeverity = 'critical' | 'watch' | 'steady';
@@ -697,6 +700,10 @@ export const compileKnowledgeBrief = (
       evidenceIndex: v2.evidence_index,
       sourceQuality: v2.source_quality_summary,
       trustMessage: v2.current_read.trust_message,
+      trustStatus: deriveKnowledgeTrustStatus({
+        docStatus: doc?.status ?? 'up_to_date',
+        evidenceQuality: v2.current_read.evidence_quality,
+      }),
     };
   }
 
@@ -712,6 +719,7 @@ export const compileKnowledgeBrief = (
       evidenceIndex: [],
       sourceQuality: null,
       trustMessage: null,
+      trustStatus: null,
     };
   }
 
@@ -867,6 +875,7 @@ export const compileKnowledgeBrief = (
     evidenceIndex: [],
     sourceQuality: null,
     trustMessage: null,
+    trustStatus: null,
   };
 };
 

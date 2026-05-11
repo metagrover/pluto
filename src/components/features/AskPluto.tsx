@@ -131,6 +131,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   meeting_id: '1',
                   meeting_title: 'Monday Tech Sync',
                   evidence_valid: true,
+                  trust_status: 'grounded',
                   evidence_span:
                     'We need to push the api migration by 2 days due to integration testing issues.',
                 },
@@ -139,6 +140,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   meeting_id: '2',
                   meeting_title: 'Architecture Review',
                   evidence_valid: false,
+                  trust_status: 'needs_review',
                   evidence_span:
                     "I'm thinking we should probably use GraphQL for that new service.",
                 },

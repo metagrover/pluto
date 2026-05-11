@@ -29,6 +29,8 @@ import {
   formatDocStatus,
   formatRelativeKnowledgeTime,
 } from './knowledgeDocument';
+import type { TrustStatus } from '../../utils/trustStatus';
+import { getTrustStatusMeta } from '../../utils/trustStatus';
 
 interface MainStageProps {
   docs: KnowledgeDoc[];
@@ -72,6 +74,17 @@ const STATUS_STYLES: Record<KnowledgeDocStatus, string> = {
   stale: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
   failed: 'bg-red-500/10 text-red-600 border-red-500/20',
   inactive: 'bg-pro-bg text-pro-text-muted border-pro-border',
+};
+
+const TRUST_STYLES: Record<
+  ReturnType<typeof getTrustStatusMeta>['tone'],
+  string
+> = {
+  success: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+  accent: 'border-pro-accent/20 bg-pro-accent/10 text-pro-accent',
+  warning: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
+  danger: 'border-red-500/20 bg-red-500/10 text-red-500',
+  muted: 'border-pro-border bg-pro-bg text-pro-text-muted',
 };
 
 const ATTENTION_STYLES: Record<
@@ -190,6 +203,7 @@ const CurrentRead = ({
   supportingItems,
   coverage,
   trustMessage,
+  trustStatus,
   sourceQuality,
   isCompiled,
   isRetrying,
@@ -202,6 +216,7 @@ const CurrentRead = ({
   supportingItems: KnowledgeStatement[];
   coverage: KnowledgeBriefCoverage;
   trustMessage: string | null;
+  trustStatus: TrustStatus | null;
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
   isCompiled: boolean;
   isRetrying: boolean;
@@ -316,12 +331,23 @@ const CurrentRead = ({
         )}
 
         {trustMessage && (
-          <p className="mt-4 rounded-lg border border-pro-border bg-pro-bg px-3 py-2 text-xs font-semibold text-pro-text-muted">
+          <div className="mt-4 rounded-lg border border-pro-border bg-pro-bg px-3 py-2">
+            {trustStatus && (
+              <span
+                className={`mb-2 inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
+                  TRUST_STYLES[getTrustStatusMeta(trustStatus).tone]
+                }`}
+              >
+                {getTrustStatusMeta(trustStatus).label}
+              </span>
+            )}
+            <p className="text-xs font-semibold text-pro-text-muted">
             {trustMessage}
             {sourceQuality
               ? ` Included ${sourceQuality.included_count}, excluded ${sourceQuality.excluded_count}, weak ${sourceQuality.weak_count}.`
               : ''}
-          </p>
+            </p>
+          </div>
         )}
 
         {supportingItems.length > 0 && (
@@ -815,6 +841,7 @@ export const MainStage: React.FC<MainStageProps> = ({
           supportingItems={supportingItems}
           coverage={brief.coverage}
           trustMessage={brief.trustMessage}
+          trustStatus={brief.trustStatus}
           sourceQuality={brief.sourceQuality}
           isCompiled={brief.isCompiled}
           isRetrying={retryingDocId === selectedDoc.id}

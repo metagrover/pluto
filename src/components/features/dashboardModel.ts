@@ -4,6 +4,9 @@ import type {
   KnowledgeProjectHealthCard,
   KnowledgeWorkspacePayload,
 } from '../../api/knowledgeWorkspace';
+import { parseStructuredKnowledgeV2Doc } from '../KnowledgeGraph/knowledgeDocument';
+import type { TrustStatus } from '../../utils/trustStatus';
+import { deriveKnowledgeTrustStatus } from '../../utils/trustStatus';
 import type { Meeting } from '../../types';
 
 export type DashboardTarget = 'ask' | 'meeting' | 'projects' | 'wiki';
@@ -80,6 +83,7 @@ export interface DashboardKnowledgeDocumentCard {
   countLabel: string;
   status: KnowledgeDoc['status'];
   scopeType: KnowledgeDoc['scope_type'];
+  trustStatus: TrustStatus | null;
 }
 
 export type DashboardKnowledgeDocuments =
@@ -415,6 +419,14 @@ const buildKnowledgeDocuments = (
           : formatCountLabel(sourceCount),
         status: doc.status,
         scopeType: doc.scope_type,
+        trustStatus: (() => {
+          const v2 = parseStructuredKnowledgeV2Doc(doc);
+          if (!v2) return null;
+          return deriveKnowledgeTrustStatus({
+            docStatus: doc.status,
+            evidenceQuality: v2.current_read.evidence_quality,
+          });
+        })(),
       };
     });
 

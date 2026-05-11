@@ -153,6 +153,7 @@ describe('knowledge document utilities', () => {
       included_count: 3,
       excluded_count: 1,
     });
+    expect(brief.trustStatus).toBe('inferred');
     expect(attention[0]).toMatchObject({
       title: 'API instrumentation approval is still pending.',
       severity: 'critical',
@@ -262,6 +263,55 @@ describe('knowledge document utilities', () => {
       'Hyper-Persona Leads',
       'Impact of AI on Software Engineering Process',
     ]);
+  });
+
+  it('derives stale trust state for stale V2 docs', () => {
+    const doc = makeDoc({
+      status: 'stale',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'The rollout context has not been refreshed recently.',
+          supporting_bullets: [],
+          freshness: 'stale',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'This read may be stale.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.75,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-01T10:00:00.000Z',
+            freshness: 'stale',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.trustStatus).toBe('stale');
   });
 
   it('marks generic V2 briefs as uncompiled instead of presenting them as insight', () => {
