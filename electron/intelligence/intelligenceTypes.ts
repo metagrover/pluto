@@ -1,3 +1,5 @@
+import type { TrustStatus } from '../../src/utils/trustStatus';
+
 /**
  * Intelligence Types
  *
@@ -79,6 +81,7 @@ export interface CitationChain {
   entity_id?: string;
   evidence_span?: string;
   evidence_valid: boolean;
+  trust_status: TrustStatus;
 }
 
 // =============================================
@@ -149,6 +152,42 @@ export type AttentionItemSource =
   | 'action_tracker'
   | 'manual';
 
+export interface AttentionScoreBreakdown {
+  urgency: number;
+  recency: number;
+  repetition: number;
+  commitment: number;
+  blocker: number;
+  project_relevance: number;
+  evidence: number;
+  feedback: number;
+  stale_penalty: number;
+  weak_evidence_penalty: number;
+  total: number;
+}
+
+export interface AttentionScoreInput {
+  kind: AttentionItemKind;
+  status?: AttentionItemStatus;
+  confidence?: number;
+  evidence_mode?: 'direct' | 'inferred' | 'unknown';
+  freshness?: 'fresh' | 'aging' | 'stale' | 'unknown';
+  due_at?: string | null;
+  updated_at?: string | null;
+  last_reinforced_at?: string | null;
+  cited_meeting_count?: number;
+  source_count?: number;
+  related_stream_count?: number;
+  is_explicit_commitment?: boolean;
+  now?: string;
+}
+
+export interface AttentionScoreResult {
+  score: number;
+  severity: AttentionItemSeverity;
+  score_breakdown: AttentionScoreBreakdown;
+}
+
 export interface AttentionEvidenceReference {
   meeting_id: string;
   quote: string;
@@ -166,6 +205,7 @@ export interface AttentionItem {
   title: string;
   reason: string;
   source: AttentionItemSource;
+  score_breakdown?: AttentionScoreBreakdown | null;
   evidence: AttentionEvidenceReference[];
   related_entity_ids: string[];
   related_stream_ids: string[];
@@ -185,6 +225,7 @@ export interface AttentionItemUpsert {
   title: string;
   reason: string;
   source: AttentionItemSource;
+  score_breakdown?: AttentionScoreBreakdown | null;
   evidence: AttentionEvidenceReference[];
   related_entity_ids: string[];
   related_stream_ids: string[];

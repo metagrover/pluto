@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-11
+
+### Add deterministic attention scoring
+- **Issue:** [#79](https://github.com/metagrover/pluto/issues/79)
+- **PR:** Pending.
+- **Changed:** Added a deterministic attention-scoring module with explicit urgency, recency, repetition, commitment, evidence, project relevance, feedback, and penalty breakdowns; persisted those score breakdowns on `attention_items`; and routed the current knowledge, action-tracker, and proactive attention producers through that scorer with focused unit coverage.
+- **Why:** Trusted Attention needs explainable ranking before Pluto can safely build richer queue controls and briefing surfaces on top of it. This pass makes urgent commitments, repeated blockers, stale weak claims, and pinned or dismissed feedback behave predictably instead of relying on source-specific hard-coded scores.
+- **Replaced:** Fixed per-source attention scores and severity heuristics that could not explain why one item outranked another.
+- **Notes:** Low-confidence knowledge signals are still suppressed at the sync layer for now; this issue focuses on deterministic ranking and persisted breakdown metadata rather than new UI.
+
 ## 2026-05-10
 
 ### Apply knowledge corrections to synthesized output
@@ -27,6 +37,22 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** Pluto already stored correction feedback as part of the trust spine, but most of that feedback was inert because synthesis only honored source exclusion. Trusted Attention needs user corrections to shape the shared memory layer before ranking and explanations depend on it.
 - **Replaced:** Persisting stream/item correction records without feeding them back into synthesized Knowledge state.
 - **Notes:** `exclude_source` still filters source meetings before synthesis, while the new overlay path handles stream/item corrections on both partial and final V2 documents.
+
+### Normalize trust status across Knowledge and Ask Pluto
+- **Issue:** [#91](https://github.com/metagrover/pluto/issues/91)
+- **PR:** Not opened yet.
+- **Changed:** Added a canonical trust-status model shared by Knowledge V2, dashboard knowledge cards, and Ask Pluto citation results, normalizing them around grounded, inferred, weak-evidence, stale, synthesis-failed, and needs-review states.
+- **Why:** Pluto already had evidence-quality metadata and citation audits, but each surface interpreted trust independently. Trusted Attention work needs one deterministic trust vocabulary before ranking and explanation logic can build on top.
+- **Replaced:** The ad hoc mix of freeform trust messages and Ask Pluto's one-off verified/flagged citation badge without a shared cross-surface contract.
+- **Notes:** This slice is intentionally UI-light: it reuses existing evidence fields and surfaces the normalized status without adding new persistence or redesigning the broader Knowledge experience.
+
+### Unify durable attention inputs behind the queue
+- **Issue:** [#78](https://github.com/metagrover/pluto/issues/78)
+- **PR:** Pending.
+- **Changed:** Added a deterministic attention-sync layer that projects global Knowledge V2 `needs_attention` and high-confidence risk/question signals plus overdue/stale action-item lifecycle signals into the SQLite `attention_items` queue. Global knowledge synthesis now reconciles those queue rows after each refresh, and app startup plus post-meeting processing refresh the action-tracker slice without removing the existing dashboard/proactive compatibility paths.
+- **Why:** `#78` is the first Trusted Attention integration step after the durable queue foundation. Pluto needed one persistent prioritization backend for knowledge and action signals before scoring, lifecycle controls, and briefing surfaces can rely on the same state.
+- **Replaced:** Keeping Knowledge V2 attention and action-lifecycle urgency in separate read paths that never reconciled into the durable attention queue.
+- **Notes:** This pass deliberately leaves current UI consumers intact while introducing suppression for low-confidence knowledge items, stale-item resolution when signals disappear, and unit coverage for queue reconciliation behavior.
 
 ### Add a durable attention queue foundation
 - **Issue:** [#77](https://github.com/metagrover/pluto/issues/77)

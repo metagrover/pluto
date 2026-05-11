@@ -1,4 +1,5 @@
 import type { DashboardAction, DashboardHomeModel } from './dashboardModel';
+import { getTrustStatusMeta } from '../../utils/trustStatus';
 
 interface DashboardProps {
   model: DashboardHomeModel;
@@ -28,6 +29,17 @@ const getDocumentScopeIcon = (
     case 'person_context':
       return 'U';
   }
+};
+
+const TRUST_BADGE_TONES: Record<
+  ReturnType<typeof getTrustStatusMeta>['tone'],
+  string
+> = {
+  success: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+  accent: 'border-pro-accent/20 bg-pro-accent/10 text-pro-accent',
+  warning: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
+  danger: 'border-red-500/20 bg-red-500/10 text-red-500',
+  muted: 'border-pro-border bg-pro-bg text-pro-text-muted',
 };
 
 const getHeroTone = (
@@ -468,6 +480,17 @@ export const Dashboard = ({
                         {item.countLabel}
                       </span>
                     </div>
+                    {item.trustStatus && (
+                      <span
+                        className={`mt-2 inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
+                          TRUST_BADGE_TONES[
+                            getTrustStatusMeta(item.trustStatus).tone
+                          ]
+                        }`}
+                      >
+                        {getTrustStatusMeta(item.trustStatus).label}
+                      </span>
+                    )}
                     <p className="mt-1 text-[12px] font-semibold leading-relaxed text-pro-text-muted/70 line-clamp-3">
                       {item.description}
                     </p>
