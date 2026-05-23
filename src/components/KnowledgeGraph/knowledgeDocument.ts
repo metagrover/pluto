@@ -4,7 +4,10 @@ import type {
 } from '../../api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../api/knowledgeWorkspace';
 import type { TrustStatus } from '../../utils/trustStatus';
-import { deriveKnowledgeTrustStatus } from '../../utils/trustStatus';
+import {
+  deriveKnowledgeTrustStatus,
+  getTrustStatusMeta,
+} from '../../utils/trustStatus';
 
 export type KnowledgeSectionKey =
   | 'decisions'
@@ -174,6 +177,7 @@ export interface KnowledgeBrief {
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
   trustMessage: string | null;
   trustStatus: TrustStatus | null;
+  trustDescription: string | null;
 }
 
 export type AttentionSeverity = 'critical' | 'watch' | 'steady';
@@ -674,6 +678,10 @@ export const compileKnowledgeBrief = (
   ];
 
   if (v2) {
+    const trustStatus = deriveKnowledgeTrustStatus({
+      docStatus: doc?.status ?? 'up_to_date',
+      evidenceQuality: v2.current_read.evidence_quality,
+    });
     const hasCompiledSurface =
       v2.active_streams.length > 0 ||
       v2.needs_attention.length > 0 ||
@@ -700,10 +708,8 @@ export const compileKnowledgeBrief = (
       evidenceIndex: v2.evidence_index,
       sourceQuality: v2.source_quality_summary,
       trustMessage: v2.current_read.trust_message,
-      trustStatus: deriveKnowledgeTrustStatus({
-        docStatus: doc?.status ?? 'up_to_date',
-        evidenceQuality: v2.current_read.evidence_quality,
-      }),
+      trustStatus,
+      trustDescription: getTrustStatusMeta(trustStatus).description,
     };
   }
 
@@ -720,6 +726,7 @@ export const compileKnowledgeBrief = (
       sourceQuality: null,
       trustMessage: null,
       trustStatus: null,
+      trustDescription: null,
     };
   }
 
@@ -876,6 +883,7 @@ export const compileKnowledgeBrief = (
     sourceQuality: null,
     trustMessage: null,
     trustStatus: null,
+    trustDescription: null,
   };
 };
 

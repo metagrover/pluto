@@ -65,6 +65,7 @@ export const CitationCard: React.FC<CitationCardProps> = ({
 
         <div
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm shrink-0 ${trustTone}`}
+          title={trustMeta.description}
         >
           <div className={`w-1.5 h-1.5 rounded-full ${trustDot}`} />
           <span className="text-[9px] font-black uppercase tracking-widest">
@@ -72,6 +73,10 @@ export const CitationCard: React.FC<CitationCardProps> = ({
           </span>
         </div>
       </div>
+
+      <p className="text-[11px] font-semibold leading-relaxed text-pro-text-muted/75">
+        {trustMeta.description}
+      </p>
 
       {citation.evidence_span && (
         <blockquote className="text-[13px] text-pro-text-muted/80 italic border-l-[3px] border-pro-accent/40 pl-4 py-1 my-1">

@@ -170,6 +170,7 @@ describe('buildDashboardHomeModel', () => {
       status: 'up_to_date',
       scopeType: 'project',
       trustStatus: 'grounded',
+      trustDescription: 'Backed by direct evidence from cited source material.',
     });
     expect(model.spotlight).toMatchObject({
       title: 'Indexing Rollout',

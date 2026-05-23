@@ -15,6 +15,8 @@ import type {
   KnowledgeDocStatus,
 } from '../../api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../api/knowledgeWorkspace';
+import type { TrustStatus } from '../../utils/trustStatus';
+import { getTrustStatusMeta } from '../../utils/trustStatus';
 import {
   type KnowledgeBriefCoverage,
   type KnowledgeCitation,
@@ -29,8 +31,6 @@ import {
   formatDocStatus,
   formatRelativeKnowledgeTime,
 } from './knowledgeDocument';
-import type { TrustStatus } from '../../utils/trustStatus';
-import { getTrustStatusMeta } from '../../utils/trustStatus';
 
 interface MainStageProps {
   docs: KnowledgeDoc[];
@@ -204,6 +204,7 @@ const CurrentRead = ({
   coverage,
   trustMessage,
   trustStatus,
+  trustDescription,
   sourceQuality,
   isCompiled,
   isRetrying,
@@ -217,6 +218,7 @@ const CurrentRead = ({
   coverage: KnowledgeBriefCoverage;
   trustMessage: string | null;
   trustStatus: TrustStatus | null;
+  trustDescription: string | null;
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
   isCompiled: boolean;
   isRetrying: boolean;
@@ -330,22 +332,32 @@ const CurrentRead = ({
           </p>
         )}
 
-        {trustMessage && (
+        {(trustStatus || trustMessage) && (
           <div className="mt-4 rounded-lg border border-pro-border bg-pro-bg px-3 py-2">
             {trustStatus && (
-              <span
-                className={`mb-2 inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
-                  TRUST_STYLES[getTrustStatusMeta(trustStatus).tone]
-                }`}
-              >
-                {getTrustStatusMeta(trustStatus).label}
-              </span>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
+                    TRUST_STYLES[getTrustStatusMeta(trustStatus).tone]
+                  }`}
+                  title={
+                    trustDescription ??
+                    getTrustStatusMeta(trustStatus).description
+                  }
+                >
+                  {getTrustStatusMeta(trustStatus).label}
+                </span>
+                <span className="text-[11px] font-semibold text-pro-text-muted">
+                  {trustDescription ??
+                    getTrustStatusMeta(trustStatus).description}
+                </span>
+              </div>
             )}
             <p className="text-xs font-semibold text-pro-text-muted">
-            {trustMessage}
-            {sourceQuality
-              ? ` Included ${sourceQuality.included_count}, excluded ${sourceQuality.excluded_count}, weak ${sourceQuality.weak_count}.`
-              : ''}
+              {trustMessage}
+              {sourceQuality
+                ? ` Included ${sourceQuality.included_count}, excluded ${sourceQuality.excluded_count}, weak ${sourceQuality.weak_count}.`
+                : ''}
             </p>
           </div>
         )}
@@ -842,6 +854,7 @@ export const MainStage: React.FC<MainStageProps> = ({
           coverage={brief.coverage}
           trustMessage={brief.trustMessage}
           trustStatus={brief.trustStatus}
+          trustDescription={brief.trustDescription}
           sourceQuality={brief.sourceQuality}
           isCompiled={brief.isCompiled}
           isRetrying={retryingDocId === selectedDoc.id}

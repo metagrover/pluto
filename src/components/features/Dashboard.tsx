@@ -1,5 +1,5 @@
-import type { DashboardAction, DashboardHomeModel } from './dashboardModel';
 import { getTrustStatusMeta } from '../../utils/trustStatus';
+import type { DashboardAction, DashboardHomeModel } from './dashboardModel';
 
 interface DashboardProps {
   model: DashboardHomeModel;
@@ -481,15 +481,25 @@ export const Dashboard = ({
                       </span>
                     </div>
                     {item.trustStatus && (
-                      <span
-                        className={`mt-2 inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
-                          TRUST_BADGE_TONES[
-                            getTrustStatusMeta(item.trustStatus).tone
-                          ]
-                        }`}
-                      >
-                        {getTrustStatusMeta(item.trustStatus).label}
-                      </span>
+                      <div className="mt-2 space-y-1">
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
+                            TRUST_BADGE_TONES[
+                              getTrustStatusMeta(item.trustStatus).tone
+                            ]
+                          }`}
+                          title={
+                            item.trustDescription ??
+                            getTrustStatusMeta(item.trustStatus).description
+                          }
+                        >
+                          {getTrustStatusMeta(item.trustStatus).label}
+                        </span>
+                        <p className="text-[11px] font-semibold leading-relaxed text-pro-text-muted/70">
+                          {item.trustDescription ??
+                            getTrustStatusMeta(item.trustStatus).description}
+                        </p>
+                      </div>
                     )}
                     <p className="mt-1 text-[12px] font-semibold leading-relaxed text-pro-text-muted/70 line-clamp-3">
                       {item.description}
