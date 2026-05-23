@@ -1020,7 +1020,9 @@ export const updateAttentionItemStatus = (
   const normalizedId = id.trim();
   if (!normalizedId) return null;
 
-  const existing = listAttentionItems().find((item) => item.id === normalizedId);
+  const existing = listAttentionItems().find(
+    (item) => item.id === normalizedId,
+  );
   if (!existing) return null;
 
   return upsertAttentionItem({
@@ -1039,10 +1041,8 @@ export const updateAttentionItemStatus = (
     related_meeting_ids: existing.related_meeting_ids,
     preserve_status: false,
     resolved_at:
-      status === 'resolved' ||
-      status === 'dismissed' ||
-      status === 'superseded'
-        ? existing.resolved_at ?? new Date().toISOString()
+      status === 'resolved' || status === 'dismissed' || status === 'superseded'
+        ? (existing.resolved_at ?? new Date().toISOString())
         : null,
   });
 };
