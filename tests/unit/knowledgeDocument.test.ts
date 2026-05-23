@@ -154,6 +154,9 @@ describe('knowledge document utilities', () => {
       excluded_count: 1,
     });
     expect(brief.trustStatus).toBe('inferred');
+    expect(brief.trustDescription).toBe(
+      'Supported by evidence, but synthesized across sources.',
+    );
     expect(attention[0]).toMatchObject({
       title: 'API instrumentation approval is still pending.',
       severity: 'critical',
@@ -312,6 +315,9 @@ describe('knowledge document utilities', () => {
     const brief = compileKnowledgeBrief(doc);
 
     expect(brief.trustStatus).toBe('stale');
+    expect(brief.trustDescription).toBe(
+      'The evidence has aged and should be refreshed before relying on it.',
+    );
   });
 
   it('marks generic V2 briefs as uncompiled instead of presenting them as insight', () => {

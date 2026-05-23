@@ -111,5 +111,11 @@ describe('trustStatus', () => {
   it('returns stable labels for the canonical vocabulary', () => {
     expect(getTrustStatusMeta('weak_evidence').label).toBe('Weak evidence');
     expect(getTrustStatusMeta('needs_review').label).toBe('Needs review');
+    expect(getTrustStatusMeta('grounded').description).toBe(
+      'Backed by direct evidence from cited source material.',
+    );
+    expect(getTrustStatusMeta('stale').description).toBe(
+      'The evidence has aged and should be refreshed before relying on it.',
+    );
   });
 });

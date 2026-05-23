@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-22
+
+### Explain trust badges across Pluto surfaces
+- **Issue:** [#98](https://github.com/metagrover/pluto/issues/98)
+- **PR:** Pending.
+- **Changed:** Reused the shared trust-status metadata to surface explanatory copy anywhere the current dashboard memory cards, Knowledge current read, and Ask Pluto citation cards already show trust badges.
+- **Why:** Phase 0 trust work promised that important claims would show provenance or explain why provenance is unavailable. Badge labels alone were too terse to help users judge whether a claim was direct, inferred, weak, stale, or needs review.
+- **Replaced:** Treating trust badges as mostly decorative labels without consistent cross-surface explanation text.
+- **Notes:** This is intentionally a narrow explanatory UX slice; it does not reopen trust-status semantics, secure-storage migration, or correction-overlay behavior.
+
 ## 2026-05-11
 
 ### Add deterministic attention scoring
