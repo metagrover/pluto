@@ -1,9 +1,9 @@
+import type { WorkingMemorySnapshot } from '../../../electron/db';
 import type {
   KnowledgeDoc,
   KnowledgeDocScopeType,
 } from '../../api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../api/knowledgeWorkspace';
-import type { WorkingMemorySnapshot } from '../../../electron/db';
 import type { TrustStatus } from '../../utils/trustStatus';
 import {
   deriveKnowledgeTrustStatus,
@@ -166,7 +166,10 @@ export interface StructuredKnowledgeV2Doc {
   source_quality_summary: KnowledgeV2SourceQualitySummary;
 }
 
-type StructuredKnowledgeV2Source = Pick<KnowledgeDoc, 'scope_type' | 'title'> & {
+type StructuredKnowledgeV2Source = Pick<
+  KnowledgeDoc,
+  'scope_type' | 'title'
+> & {
   structured_json: string | null;
 };
 

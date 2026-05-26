@@ -578,9 +578,7 @@ describe('knowledge document utilities', () => {
       'Snapshot-backed current read is now the durable source.',
     );
     expect(brief.activeStreams[0].title).toBe('Launch');
-    expect(brief.trustMessage).toBe(
-      'Backed by the persisted global snapshot.',
-    );
+    expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
     expect(brief.coverage).toMatchObject({
       statementCount: 2,
       citedMeetingCount: 2,

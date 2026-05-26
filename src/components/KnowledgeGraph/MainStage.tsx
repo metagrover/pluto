@@ -9,14 +9,14 @@ import {
 } from 'lucide-react';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
+import type { WorkingMemorySnapshot } from '../../../electron/db';
 import type {
   KnowledgeDoc,
   KnowledgeDocSource,
   KnowledgeDocStatus,
 } from '../../api/knowledgeDocs';
-import { getWorkingMemorySnapshot } from '../../api/workingMemory';
 import type { KnowledgeProjectHealthCard } from '../../api/knowledgeWorkspace';
-import type { WorkingMemorySnapshot } from '../../../electron/db';
+import { getWorkingMemorySnapshot } from '../../api/workingMemory';
 import type { TrustStatus } from '../../utils/trustStatus';
 import { getTrustStatusMeta } from '../../utils/trustStatus';
 import {
