@@ -119,6 +119,7 @@ import {
   clearAlertsForMeeting,
   getAlerts,
   runPostMeetingTriggers,
+  updateAlertStatus,
 } from './intelligence/proactiveEngine';
 import { parseQuery, retrieveContext } from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
@@ -1945,6 +1946,13 @@ app.whenReady().then(async () => {
     clearAlertsForMeeting(meetingId);
     return true;
   });
+
+  ipcMain.handle(
+    'intelligence:alerts:update-status',
+    (_event, id: string, status: db.AttentionItemStatus) => {
+      return updateAlertStatus(id, status);
+    },
+  );
 
   // Permissions handlers
   ipcMain.handle('CHECK_MICROPHONE_PERMISSION', () => {

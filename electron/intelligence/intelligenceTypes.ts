@@ -231,6 +231,7 @@ export interface AttentionItemUpsert {
   related_stream_ids: string[];
   related_meeting_ids: string[];
   resolved_at?: string | null;
+  preserve_status?: boolean;
 }
 
 // =============================================

@@ -928,10 +928,22 @@ export const upsertAttentionItem = (
   const existing = db
     .prepare('SELECT * FROM attention_items WHERE dedupe_key = ?')
     .get(dedupeKey) as AttentionItemRow | undefined;
+  const existingItem = existing ? mapAttentionItemRow(existing) : null;
+  const preservedStatus =
+    input.preserve_status !== false &&
+    input.status === 'active' &&
+    input.source !== 'manual' &&
+    existingItem &&
+    (existingItem.status === 'resolved' ||
+      existingItem.status === 'dismissed' ||
+      existingItem.status === 'snoozed' ||
+      existingItem.status === 'pinned')
+      ? existingItem.status
+      : input.status;
   const resolvedAt =
-    input.status === 'resolved' ||
-    input.status === 'dismissed' ||
-    input.status === 'superseded'
+    preservedStatus === 'resolved' ||
+    preservedStatus === 'dismissed' ||
+    preservedStatus === 'superseded'
       ? (input.resolved_at ?? existing?.resolved_at ?? now)
       : null;
 
@@ -946,7 +958,7 @@ export const upsertAttentionItem = (
     `).run(
       input.severity,
       input.score,
-      input.status,
+      preservedStatus,
       input.title,
       input.reason,
       input.source,
@@ -999,6 +1011,40 @@ export const upsertAttentionItem = (
   }
 
   return mapAttentionItemRow(row);
+};
+
+export const updateAttentionItemStatus = (
+  id: string,
+  status: AttentionItemStatus,
+): AttentionItem | null => {
+  const normalizedId = id.trim();
+  if (!normalizedId) return null;
+
+  const existing = listAttentionItems().find(
+    (item) => item.id === normalizedId,
+  );
+  if (!existing) return null;
+
+  return upsertAttentionItem({
+    dedupe_key: existing.dedupe_key,
+    kind: existing.kind,
+    severity: existing.severity,
+    score: existing.score,
+    status,
+    title: existing.title,
+    reason: existing.reason,
+    source: existing.source,
+    score_breakdown: existing.score_breakdown,
+    evidence: existing.evidence,
+    related_entity_ids: existing.related_entity_ids,
+    related_stream_ids: existing.related_stream_ids,
+    related_meeting_ids: existing.related_meeting_ids,
+    preserve_status: false,
+    resolved_at:
+      status === 'resolved' || status === 'dismissed' || status === 'superseded'
+        ? (existing.resolved_at ?? new Date().toISOString())
+        : null,
+  });
 };
 
 export const listAttentionItems = (options?: {
