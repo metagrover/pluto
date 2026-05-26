@@ -65,7 +65,8 @@ vi.mock('better-sqlite3', () => {
         ] = args;
         const existing = storeState.snapshots.find(
           (snapshot) =>
-            snapshot.scope_type === scope_type && snapshot.scope_key === scope_key,
+            snapshot.scope_type === scope_type &&
+            snapshot.scope_key === scope_key,
         );
         if (existing) {
           Object.assign(existing, {
@@ -97,7 +98,8 @@ vi.mock('better-sqlite3', () => {
         return (
           storeState.snapshots.find(
             (snapshot) =>
-              snapshot.scope_type === scopeType && snapshot.scope_key === scopeKey,
+              snapshot.scope_type === scopeType &&
+              snapshot.scope_key === scopeKey,
           ) ?? null
         );
       }
@@ -135,12 +137,12 @@ import {
   listWorkingMemorySnapshots,
   upsertWorkingMemorySnapshot,
 } from '../../electron/db';
+import type { KnowledgeDoc } from '../../electron/db';
+import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 import {
   buildGlobalWorkingMemorySnapshot,
   persistGlobalWorkingMemorySnapshot,
 } from '../../electron/workingMemory';
-import type { KnowledgeDoc } from '../../electron/db';
-import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 
 const makeKnowledgeDoc = (): KnowledgeDoc => ({
   id: 'doc-global',
@@ -411,7 +413,9 @@ describe('working memory snapshots', () => {
     expect(listWorkingMemorySnapshots()).toHaveLength(1);
     expect(saved.generated_at).toBe('2026-05-26T17:00:00.000Z');
     expect(saved.freshness).toBe('aging');
-    expect(saved.payload.current_read.headline).toBe('Launch is back on track.');
+    expect(saved.payload.current_read.headline).toBe(
+      'Launch is back on track.',
+    );
     expect(saved.payload.evidence_index).toHaveLength(2);
   });
 
@@ -456,7 +460,9 @@ describe('working memory snapshots', () => {
     });
 
     expect(saved.payload.current_read.trust_status).toBe('grounded');
-    expect(getWorkingMemorySnapshot('global', 'global')?.payload.source).toEqual({
+    expect(
+      getWorkingMemorySnapshot('global', 'global')?.payload.source,
+    ).toEqual({
       knowledge_doc_id: 'doc-global',
       knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
     });

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { app } from 'electron';
+import type { TrustStatus } from '../src/utils/trustStatus';
 import type {
   AttentionEvidenceReference,
   AttentionItem,
@@ -14,7 +15,6 @@ import type {
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { createSecureSettingsManager } from './secureSettings';
-import type { TrustStatus } from '../src/utils/trustStatus';
 
 const dbPath = path.join(app.getPath('userData'), 'pluto.db');
 

@@ -1,3 +1,4 @@
+import { deriveKnowledgeTrustStatus } from '../src/utils/trustStatus';
 import type {
   KnowledgeDoc,
   WorkingMemorySnapshot,
@@ -5,7 +6,6 @@ import type {
 } from './db';
 import { upsertWorkingMemorySnapshot } from './db';
 import type { KnowledgeV2Document } from './knowledgeV2';
-import { deriveKnowledgeTrustStatus } from '../src/utils/trustStatus';
 
 export const buildGlobalWorkingMemorySnapshot = ({
   knowledgeDoc,

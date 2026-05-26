@@ -1,6 +1,5 @@
 import * as db from './db';
 import { syncGlobalKnowledgeAttentionQueue } from './intelligence/attentionSync';
-import { persistGlobalWorkingMemorySnapshot } from './workingMemory';
 import {
   type KnowledgeSourceChunk,
   buildKnowledgeSourceChunks,
@@ -29,6 +28,7 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
+import { persistGlobalWorkingMemorySnapshot } from './workingMemory';
 
 const SYNTHESIS_DEBOUNCE_MS = 2500;
 const MAX_SOURCE_MEETINGS = 80;
