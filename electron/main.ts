@@ -1234,6 +1234,14 @@ app.whenReady().then(async () => {
     db.getKnowledgeDocs(filters),
   );
   ipcMain.handle('GET_KNOWLEDGE_DOC', (_event, id) => db.getKnowledgeDoc(id));
+  ipcMain.handle(
+    'GET_WORKING_MEMORY_SNAPSHOT',
+    (_event, { scopeType, scopeKey }) =>
+      db.getWorkingMemorySnapshot(scopeType, scopeKey),
+  );
+  ipcMain.handle('LIST_WORKING_MEMORY_SNAPSHOTS', () =>
+    db.listWorkingMemorySnapshots(),
+  );
   ipcMain.handle('GET_KNOWLEDGE_DOC_VERSIONS', (_event, { docId, limit }) =>
     db.getKnowledgeDocVersions(docId, limit),
   );

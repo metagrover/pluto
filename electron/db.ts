@@ -14,6 +14,7 @@ import type {
 import { KNOWLEDGE_V2_SYNTHESIS_VERSION } from './knowledgeV2';
 import { MEETING_INSERT_SQL } from './meetingInsertSql';
 import { createSecureSettingsManager } from './secureSettings';
+import type { TrustStatus } from '../src/utils/trustStatus';
 
 const dbPath = path.join(app.getPath('userData'), 'pluto.db');
 
@@ -46,6 +47,22 @@ type AttentionItemRow = {
   updated_at: string;
   last_seen_at: string;
   resolved_at: string | null;
+};
+
+type WorkingMemorySnapshotRow = {
+  id: string;
+  scope_type: string;
+  scope_key: string;
+  title: string;
+  source_doc_id: string;
+  source_doc_last_synthesized_at: string | null;
+  freshness: string;
+  trust_status: string;
+  source_count: number;
+  cited_meeting_count: number;
+  payload_json: string;
+  generated_at: string;
+  updated_at: string;
 };
 
 export interface PersistedMeeting {
@@ -226,6 +243,25 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_attention_items_status ON attention_items(status);
       CREATE INDEX IF NOT EXISTS idx_attention_items_score ON attention_items(score DESC);
       CREATE INDEX IF NOT EXISTS idx_attention_items_updated_at ON attention_items(updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS working_memory_snapshots (
+        id TEXT PRIMARY KEY,
+        scope_type TEXT NOT NULL,
+        scope_key TEXT NOT NULL,
+        title TEXT NOT NULL,
+        source_doc_id TEXT NOT NULL,
+        source_doc_last_synthesized_at DATETIME,
+        freshness TEXT NOT NULL,
+        trust_status TEXT NOT NULL,
+        source_count INTEGER NOT NULL DEFAULT 0,
+        cited_meeting_count INTEGER NOT NULL DEFAULT 0,
+        payload_json TEXT NOT NULL,
+        generated_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        UNIQUE(scope_type, scope_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_working_memory_snapshots_scope ON working_memory_snapshots(scope_type, scope_key);
+      CREATE INDEX IF NOT EXISTS idx_working_memory_snapshots_generated_at ON working_memory_snapshots(generated_at DESC);
 
       -- Relationships between entities
       CREATE TABLE IF NOT EXISTS entity_links (
@@ -1056,6 +1092,121 @@ export const clearAttentionItemsForMeeting = (meetingId: string): void => {
   }
 };
 
+export const getWorkingMemorySnapshot = (
+  scopeType: WorkingMemorySnapshotScopeType,
+  scopeKey: string,
+): WorkingMemorySnapshot | undefined => {
+  const row = db
+    .prepare(
+      'SELECT * FROM working_memory_snapshots WHERE scope_type = ? AND scope_key = ?',
+    )
+    .get(scopeType, scopeKey) as WorkingMemorySnapshotRow | undefined;
+
+  return row ? mapWorkingMemorySnapshotRow(row) : undefined;
+};
+
+export const listWorkingMemorySnapshots = (): WorkingMemorySnapshot[] => {
+  const rows = db
+    .prepare('SELECT * FROM working_memory_snapshots')
+    .all() as WorkingMemorySnapshotRow[];
+
+  return rows
+    .map(mapWorkingMemorySnapshotRow)
+    .sort(
+      (left, right) =>
+        new Date(right.generated_at).getTime() -
+        new Date(left.generated_at).getTime(),
+    );
+};
+
+export const upsertWorkingMemorySnapshot = (input: {
+  scope_type: WorkingMemorySnapshotScopeType;
+  scope_key: string;
+  title: string;
+  source_doc_id: string;
+  source_doc_last_synthesized_at: string | null;
+  freshness: WorkingMemorySnapshot['freshness'];
+  trust_status: TrustStatus;
+  source_count: number;
+  cited_meeting_count: number;
+  payload: WorkingMemorySnapshotPayload;
+  generated_at?: string;
+}): WorkingMemorySnapshot => {
+  const existing = getWorkingMemorySnapshot(input.scope_type, input.scope_key);
+  const payloadJson = JSON.stringify(input.payload);
+  const generatedAt = input.generated_at ?? new Date().toISOString();
+  const updatedAt = generatedAt;
+
+  if (
+    existing &&
+    existing.title === input.title &&
+    existing.source_doc_id === input.source_doc_id &&
+    existing.source_doc_last_synthesized_at ===
+      input.source_doc_last_synthesized_at &&
+    existing.freshness === input.freshness &&
+    existing.trust_status === input.trust_status &&
+    existing.source_count === input.source_count &&
+    existing.cited_meeting_count === input.cited_meeting_count &&
+    JSON.stringify(existing.payload) === payloadJson
+  ) {
+    return existing;
+  }
+
+  if (existing) {
+    db.prepare(`
+      UPDATE working_memory_snapshots
+      SET title = ?, source_doc_id = ?, source_doc_last_synthesized_at = ?,
+          freshness = ?, trust_status = ?, source_count = ?, cited_meeting_count = ?,
+          payload_json = ?, generated_at = ?, updated_at = ?
+      WHERE scope_type = ? AND scope_key = ?
+    `).run(
+      input.title,
+      input.source_doc_id,
+      input.source_doc_last_synthesized_at,
+      input.freshness,
+      input.trust_status,
+      input.source_count,
+      input.cited_meeting_count,
+      payloadJson,
+      generatedAt,
+      updatedAt,
+      input.scope_type,
+      input.scope_key,
+    );
+  } else {
+    db.prepare(`
+      INSERT INTO working_memory_snapshots (
+        id, scope_type, scope_key, title, source_doc_id,
+        source_doc_last_synthesized_at, freshness, trust_status,
+        source_count, cited_meeting_count, payload_json, generated_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      randomUUID(),
+      input.scope_type,
+      input.scope_key,
+      input.title,
+      input.source_doc_id,
+      input.source_doc_last_synthesized_at,
+      input.freshness,
+      input.trust_status,
+      input.source_count,
+      input.cited_meeting_count,
+      payloadJson,
+      generatedAt,
+      updatedAt,
+    );
+  }
+
+  const saved = getWorkingMemorySnapshot(input.scope_type, input.scope_key);
+  if (!saved) {
+    throw new Error(
+      `Failed to upsert working-memory snapshot ${input.scope_type}:${input.scope_key}`,
+    );
+  }
+
+  return saved;
+};
+
 /**
  * Meeting Management
  */
@@ -1544,6 +1695,51 @@ export interface KnowledgeDocWikiLink {
   snippet: string;
 }
 
+export type WorkingMemorySnapshotScopeType = 'global';
+
+export interface WorkingMemorySnapshotPayload {
+  schema_version: 1;
+  scope: {
+    type: WorkingMemorySnapshotScopeType;
+    key: string;
+    title: string;
+  };
+  source: {
+    knowledge_doc_id: string;
+    knowledge_doc_last_synthesized_at: string | null;
+  };
+  current_read: {
+    headline: string;
+    supporting_bullets: string[];
+    freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+    trust_status: TrustStatus;
+    trust_message: string;
+    source_count: number;
+    cited_meeting_count: number;
+  };
+  active_streams: unknown[];
+  open_loops: unknown[];
+  patterns: unknown[];
+  risks_and_unknowns: unknown[];
+  evidence_index: unknown[];
+}
+
+export interface WorkingMemorySnapshot {
+  id: string;
+  scope_type: WorkingMemorySnapshotScopeType;
+  scope_key: string;
+  title: string;
+  source_doc_id: string;
+  source_doc_last_synthesized_at: string | null;
+  freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+  trust_status: TrustStatus;
+  source_count: number;
+  cited_meeting_count: number;
+  payload: WorkingMemorySnapshotPayload;
+  generated_at: string;
+  updated_at: string;
+}
+
 const ATTENTION_STATUS_ORDER: Record<AttentionItemStatus, number> = {
   pinned: 0,
   active: 1,
@@ -1654,6 +1850,16 @@ const serializeAttentionScoreBreakdown = (
   return JSON.stringify(scoreBreakdown);
 };
 
+const parseWorkingMemoryPayload = (
+  value: string,
+): WorkingMemorySnapshotPayload => {
+  try {
+    return JSON.parse(value) as WorkingMemorySnapshotPayload;
+  } catch {
+    throw new Error('Invalid working-memory snapshot payload');
+  }
+};
+
 const mapAttentionItemRow = (row: AttentionItemRow): AttentionItem => ({
   id: row.id,
   dedupe_key: row.dedupe_key,
@@ -1673,6 +1879,24 @@ const mapAttentionItemRow = (row: AttentionItemRow): AttentionItem => ({
   updated_at: row.updated_at,
   last_seen_at: row.last_seen_at,
   resolved_at: row.resolved_at,
+});
+
+const mapWorkingMemorySnapshotRow = (
+  row: WorkingMemorySnapshotRow,
+): WorkingMemorySnapshot => ({
+  id: row.id,
+  scope_type: row.scope_type as WorkingMemorySnapshotScopeType,
+  scope_key: row.scope_key,
+  title: row.title,
+  source_doc_id: row.source_doc_id,
+  source_doc_last_synthesized_at: row.source_doc_last_synthesized_at,
+  freshness: row.freshness as WorkingMemorySnapshot['freshness'],
+  trust_status: row.trust_status as TrustStatus,
+  source_count: Number(row.source_count || 0),
+  cited_meeting_count: Number(row.cited_meeting_count || 0),
+  payload: parseWorkingMemoryPayload(row.payload_json),
+  generated_at: row.generated_at,
+  updated_at: row.updated_at,
 });
 
 export interface KnowledgeGraphNode {
