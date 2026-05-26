@@ -28,6 +28,7 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
+import { persistGlobalWorkingMemorySnapshot } from './workingMemory';
 
 const SYNTHESIS_DEBOUNCE_MS = 2500;
 const MAX_SOURCE_MEETINGS = 80;
@@ -1592,7 +1593,7 @@ const synthesizeKnowledgeDocNowInternal = async (
     }
     db.rebuildKnowledgeBacklinks(doc.id);
 
-    return db.upsertKnowledgeDoc({
+    const savedDoc = db.upsertKnowledgeDoc({
       id: doc.id,
       scope_type: doc.scope_type,
       scope_key: doc.scope_key,
@@ -1604,6 +1605,16 @@ const synthesizeKnowledgeDocNowInternal = async (
       last_synthesized_at: new Date().toISOString(),
       last_source_cursor: null,
     });
+
+    if (savedDoc.scope_type === 'global') {
+      persistGlobalWorkingMemorySnapshot({
+        knowledgeDoc: savedDoc,
+        structured: emptyDoc,
+        generatedAt: savedDoc.last_synthesized_at ?? undefined,
+      });
+    }
+
+    return savedDoc;
   }
 
   const sourceEvidenceByMeeting = new Map<string, string>(
@@ -1676,7 +1687,7 @@ const synthesizeKnowledgeDocNowInternal = async (
 
     const latestSource = sourceMeetings[0];
 
-    return db.upsertKnowledgeDoc({
+    const savedDoc = db.upsertKnowledgeDoc({
       id: doc.id,
       scope_type: doc.scope_type,
       scope_key: doc.scope_key,
@@ -1690,6 +1701,19 @@ const synthesizeKnowledgeDocNowInternal = async (
         ? `${latestSource.occurred_at || ''}:${latestSource.id}`
         : null,
     });
+
+    if (
+      savedDoc.scope_type === 'global' &&
+      isKnowledgeV2Document(correctedStructured)
+    ) {
+      persistGlobalWorkingMemorySnapshot({
+        knowledgeDoc: savedDoc,
+        structured: correctedStructured,
+        generatedAt: savedDoc.last_synthesized_at ?? undefined,
+      });
+    }
+
+    return savedDoc;
   } catch (error) {
     console.error(`[KnowledgeDoc] Synthesis failed for doc ${doc.id}:`, error);
     return db.upsertKnowledgeDoc({

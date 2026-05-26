@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-22
 
+### Persist the first global working-memory snapshot
+- **Issue:** [#102](https://github.com/metagrover/pluto/issues/102)
+- **PR:** Pending.
+- **Changed:** Added a durable `working_memory_snapshots` persistence layer plus a global snapshot builder that stores the current read, active streams, open loops, patterns, risks, evidence index, and trust/freshness metadata derived from the canonical global Knowledge V2 document. Global knowledge synthesis now refreshes that snapshot automatically, and the branch adds a small IPC/API read surface plus focused unit coverage for idempotent regeneration.
+- **Why:** `#80` needs a real durable substrate before dashboard, Ask Pluto, briefings, or later scoped snapshots can share one inspectable memory state. Reusing the global Knowledge V2 document avoids inventing a second synthesis pipeline while still giving Pluto a persistent working-memory record.
+- **Replaced:** Recomputing Pluto's global operational state only from transient Knowledge V2 synthesis output with no durable snapshot layer for downstream consumers or debugging.
+- **Notes:** This slice is intentionally global-only. Project/person-scoped working-memory expansion remains under `#80`.
+
 ### Add durable attention-item lifecycle transitions
 - **Issue:** [#100](https://github.com/metagrover/pluto/issues/100)
 - **PR:** Pending.
