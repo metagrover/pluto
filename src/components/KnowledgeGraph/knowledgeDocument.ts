@@ -1,3 +1,4 @@
+import type { WorkingMemorySnapshot } from '../../../electron/db';
 import type {
   KnowledgeDoc,
   KnowledgeDocScopeType,
@@ -164,6 +165,13 @@ export interface StructuredKnowledgeV2Doc {
   evidence_index: KnowledgeV2EvidenceEntry[];
   source_quality_summary: KnowledgeV2SourceQualitySummary;
 }
+
+type StructuredKnowledgeV2Source = Pick<
+  KnowledgeDoc,
+  'scope_type' | 'title'
+> & {
+  structured_json: string | null;
+};
 
 export interface KnowledgeBrief {
   isCompiled: boolean;
@@ -388,8 +396,8 @@ const isReliableV2Headline = (headline: string): boolean => {
   );
 };
 
-export const parseStructuredKnowledgeV2Doc = (
-  doc: KnowledgeDoc | null | undefined,
+const parseStructuredKnowledgeV2Value = (
+  doc: StructuredKnowledgeV2Source | null | undefined,
 ): StructuredKnowledgeV2Doc | null => {
   if (!doc?.structured_json) return null;
   try {
@@ -540,6 +548,86 @@ export const parseStructuredKnowledgeV2Doc = (
   }
 };
 
+export const parseStructuredKnowledgeV2Doc = (
+  doc: KnowledgeDoc | null | undefined,
+): StructuredKnowledgeV2Doc | null => parseStructuredKnowledgeV2Value(doc);
+
+const toWorkingMemorySnapshotStructuredDoc = (
+  snapshot: WorkingMemorySnapshot,
+): StructuredKnowledgeV2Doc | null => {
+  if (snapshot.scope_type !== 'global' || snapshot.freshness === 'stale') {
+    return null;
+  }
+
+  const payload = snapshot.payload;
+  if (
+    payload?.scope?.type !== 'global' ||
+    payload.current_read == null ||
+    !Array.isArray(payload.active_streams) ||
+    !Array.isArray(payload.open_loops) ||
+    !Array.isArray(payload.patterns) ||
+    !Array.isArray(payload.risks_and_unknowns) ||
+    !Array.isArray(payload.evidence_index)
+  ) {
+    return null;
+  }
+
+  const citedItemCount =
+    payload.open_loops.length +
+    payload.patterns.length +
+    payload.risks_and_unknowns.length;
+
+  const syntheticStructuredJson = JSON.stringify({
+    schema_version: 2,
+    scope: {
+      type: 'global',
+      title: payload.scope.title || snapshot.title,
+    },
+    current_read: {
+      headline: payload.current_read.headline,
+      supporting_bullets: payload.current_read.supporting_bullets,
+      freshness: payload.current_read.freshness,
+      source_count: payload.current_read.source_count,
+      cited_item_count: citedItemCount,
+      cited_meeting_count: payload.current_read.cited_meeting_count,
+      trust_message: payload.current_read.trust_message,
+      evidence_quality: {
+        mode: snapshot.trust_status === 'inferred' ? 'inferred' : 'direct',
+        confidence:
+          snapshot.trust_status === 'grounded'
+            ? 0.9
+            : snapshot.trust_status === 'inferred'
+              ? 0.72
+              : snapshot.trust_status === 'stale'
+                ? 0.45
+                : 0,
+        cited_meeting_count: snapshot.cited_meeting_count,
+        source_count: snapshot.source_count,
+        last_reinforced_at:
+          snapshot.source_doc_last_synthesized_at || snapshot.generated_at,
+        freshness: snapshot.freshness,
+      },
+    },
+    active_streams: payload.active_streams,
+    needs_attention: payload.open_loops,
+    patterns: payload.patterns,
+    risks_and_unknowns: payload.risks_and_unknowns,
+    evidence_index: payload.evidence_index,
+    source_quality_summary: {
+      included_count: snapshot.source_count,
+      excluded_count: 0,
+      weak_count: 0,
+      records: [],
+    },
+  });
+
+  return parseStructuredKnowledgeV2Value({
+    scope_type: 'global',
+    title: payload.scope.title || snapshot.title,
+    structured_json: syntheticStructuredJson,
+  });
+};
+
 export const parseStructuredKnowledgeDoc = (
   doc: KnowledgeDoc | null | undefined,
 ): StructuredKnowledgeDoc | null => {
@@ -645,9 +733,91 @@ export const deriveKnowledgeDigest = (
     .slice(0, maxItems);
 };
 
+const buildKnowledgeBriefFromV2 = ({
+  v2,
+  trustStatus,
+  sourceQuality,
+}: {
+  v2: StructuredKnowledgeV2Doc;
+  trustStatus: TrustStatus;
+  sourceQuality: KnowledgeV2SourceQualitySummary | null;
+}): KnowledgeBrief => {
+  const hasCompiledSurface =
+    v2.active_streams.length > 0 ||
+    v2.needs_attention.length > 0 ||
+    v2.patterns.length > 0 ||
+    v2.risks_and_unknowns.length > 0;
+  const isCompiled =
+    isReliableV2Headline(v2.current_read.headline) &&
+    v2.current_read.cited_meeting_count > 0 &&
+    hasCompiledSurface;
+  const emptyLanes: KnowledgeBriefLane[] = [
+    {
+      id: 'priorities',
+      label: 'What matters now',
+      description: 'Signals and decisions that should shape attention.',
+      items: [],
+    },
+    {
+      id: 'risks',
+      label: 'Risks to watch',
+      description: 'Failure modes, blockers, and unresolved commitments.',
+      items: [],
+    },
+    {
+      id: 'patterns',
+      label: 'Patterns changing',
+      description: 'How themes are evolving across conversations.',
+      items: [],
+    },
+    {
+      id: 'dependencies',
+      label: 'Cross-project links',
+      description: 'Potential dependencies and impact paths Pluto inferred.',
+      items: [],
+    },
+  ];
+
+  return {
+    isCompiled,
+    headline: v2.current_read.headline || 'No reliable compiled brief yet.',
+    lanes: emptyLanes,
+    coverage: {
+      statementCount: v2.current_read.cited_item_count,
+      citedMeetingCount: v2.current_read.cited_meeting_count,
+      dependencyCount: v2.needs_attention.filter((item) =>
+        ['dependency', 'blocker'].includes(item.kind),
+      ).length,
+    },
+    activeStreams: v2.active_streams,
+    patterns: v2.patterns,
+    risksAndUnknowns: v2.risks_and_unknowns,
+    evidenceIndex: v2.evidence_index,
+    sourceQuality,
+    trustMessage: v2.current_read.trust_message,
+    trustStatus,
+    trustDescription: getTrustStatusMeta(trustStatus).description,
+  };
+};
+
 export const compileKnowledgeBrief = (
   doc: KnowledgeDoc | null | undefined,
+  workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): KnowledgeBrief => {
+  const snapshotV2 =
+    doc?.scope_type === 'global' &&
+    workingMemorySnapshot?.scope_key === doc.scope_key &&
+    workingMemorySnapshot?.source_doc_id === doc.id
+      ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
+      : null;
+  if (snapshotV2 && workingMemorySnapshot) {
+    return buildKnowledgeBriefFromV2({
+      v2: snapshotV2,
+      trustStatus: workingMemorySnapshot.trust_status,
+      sourceQuality: null,
+    });
+  }
+
   const v2 = parseStructuredKnowledgeV2Doc(doc);
   const structured = v2 ? null : parseStructuredKnowledgeDoc(doc);
   const emptyLanes: KnowledgeBriefLane[] = [
@@ -678,39 +848,14 @@ export const compileKnowledgeBrief = (
   ];
 
   if (v2) {
-    const trustStatus = deriveKnowledgeTrustStatus({
-      docStatus: doc?.status ?? 'up_to_date',
-      evidenceQuality: v2.current_read.evidence_quality,
-    });
-    const hasCompiledSurface =
-      v2.active_streams.length > 0 ||
-      v2.needs_attention.length > 0 ||
-      v2.patterns.length > 0 ||
-      v2.risks_and_unknowns.length > 0;
-    const isCompiled =
-      isReliableV2Headline(v2.current_read.headline) &&
-      v2.current_read.cited_meeting_count > 0 &&
-      hasCompiledSurface;
-    return {
-      isCompiled,
-      headline: v2.current_read.headline || 'No reliable compiled brief yet.',
-      lanes: emptyLanes,
-      coverage: {
-        statementCount: v2.current_read.cited_item_count,
-        citedMeetingCount: v2.current_read.cited_meeting_count,
-        dependencyCount: v2.needs_attention.filter((item) =>
-          ['dependency', 'blocker'].includes(item.kind),
-        ).length,
-      },
-      activeStreams: v2.active_streams,
-      patterns: v2.patterns,
-      risksAndUnknowns: v2.risks_and_unknowns,
-      evidenceIndex: v2.evidence_index,
+    return buildKnowledgeBriefFromV2({
+      v2,
+      trustStatus: deriveKnowledgeTrustStatus({
+        docStatus: doc?.status ?? 'up_to_date',
+        evidenceQuality: v2.current_read.evidence_quality,
+      }),
       sourceQuality: v2.source_quality_summary,
-      trustMessage: v2.current_read.trust_message,
-      trustStatus,
-      trustDescription: getTrustStatusMeta(trustStatus).description,
-    };
+    });
   }
 
   if (!structured) {

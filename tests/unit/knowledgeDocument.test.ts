@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { WorkingMemorySnapshot } from '../../electron/db';
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../src/api/knowledgeWorkspace';
 import {
@@ -36,6 +37,135 @@ const makeProjectCard = (
   dependency_count: 0,
   recent_changes: 0,
   staleness_days: 0,
+  ...overrides,
+});
+
+const makeWorkingMemorySnapshot = (
+  overrides: Partial<WorkingMemorySnapshot> = {},
+): WorkingMemorySnapshot => ({
+  id: 'snapshot-1',
+  scope_type: 'global',
+  scope_key: 'global',
+  title: 'Global Knowledge Context',
+  source_doc_id: 'doc-1',
+  source_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+  freshness: 'fresh',
+  trust_status: 'grounded',
+  source_count: 3,
+  cited_meeting_count: 2,
+  payload: {
+    schema_version: 1,
+    scope: {
+      type: 'global',
+      key: 'global',
+      title: 'Global Knowledge Context',
+    },
+    source: {
+      knowledge_doc_id: 'doc-1',
+      knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+    },
+    current_read: {
+      headline: 'Snapshot-backed current read is now the durable source.',
+      supporting_bullets: [
+        'The durable snapshot preserves the main thread.',
+        'Fallback still exists for missing snapshots.',
+      ],
+      freshness: 'fresh',
+      trust_status: 'grounded',
+      trust_message: 'Backed by the persisted global snapshot.',
+      source_count: 3,
+      cited_meeting_count: 2,
+    },
+    active_streams: [
+      {
+        id: 'stream-launch',
+        title: 'Launch',
+        domain: 'work',
+        status: 'active',
+        current_read: 'Launch work remains active in the durable snapshot.',
+        last_touched_at: '2026-04-25T10:00:00.000Z',
+        source_count: 2,
+        open_follow_up_count: 1,
+        decision_count: 1,
+        unresolved_question_count: 0,
+        pinned: true,
+        evidence_quality: {
+          mode: 'direct',
+          confidence: 0.86,
+          cited_meeting_count: 2,
+          source_count: 2,
+          last_reinforced_at: '2026-04-25T10:00:00.000Z',
+          freshness: 'fresh',
+        },
+      },
+    ],
+    open_loops: [
+      {
+        id: 'loop-1',
+        title: 'Assign launch owner',
+        summary: 'Launch owner is still missing.',
+        kind: 'follow_up',
+        severity: 'watch',
+        why_now: 'The current launch plan still lacks an owner.',
+        stream_ids: ['stream-launch'],
+        citations: [
+          {
+            meeting_id: 'm-launch',
+            quote: 'We still need to assign a launch owner.',
+          },
+        ],
+        evidence_quality: {
+          mode: 'direct',
+          confidence: 0.81,
+          cited_meeting_count: 1,
+          source_count: 1,
+          last_reinforced_at: '2026-04-25T10:00:00.000Z',
+          freshness: 'fresh',
+        },
+      },
+    ],
+    patterns: [],
+    risks_and_unknowns: [
+      {
+        id: 'risk-1',
+        title: 'Approval path still risks launch timing.',
+        summary: 'Approval path still risks launch timing.',
+        kind: 'risk',
+        severity: 'needs_attention',
+        why_now: 'Approval remains unresolved across current meetings.',
+        stream_ids: ['stream-launch'],
+        citations: [
+          {
+            meeting_id: 'm-risk',
+            quote: 'Approval is still unresolved.',
+          },
+        ],
+        evidence_quality: {
+          mode: 'inferred',
+          confidence: 0.77,
+          cited_meeting_count: 2,
+          source_count: 2,
+          last_reinforced_at: '2026-04-25T10:00:00.000Z',
+          freshness: 'fresh',
+        },
+      },
+    ],
+    evidence_index: [
+      {
+        id: 'evidence-1',
+        meeting_id: 'm-launch',
+        meeting_title: 'Launch Review',
+        captured_at: '2026-04-25T10:00:00.000Z',
+        quote: 'We still need to assign a launch owner.',
+        stream_ids: ['stream-launch'],
+        item_ids: ['loop-1'],
+        mode: 'direct',
+        confidence: 0.91,
+      },
+    ],
+  },
+  generated_at: '2026-04-25T10:00:00.000Z',
+  updated_at: '2026-04-25T10:00:00.000Z',
   ...overrides,
 });
 
@@ -397,6 +527,196 @@ describe('knowledge document utilities', () => {
     expect(brief.headline).toBe('No reliable compiled brief yet.');
     expect(brief.activeStreams).toHaveLength(0);
     expect(brief.patterns).toHaveLength(0);
+  });
+
+  it('prefers a valid global working-memory snapshot over transient doc JSON', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Transient doc JSON should not win when a snapshot exists.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc fallback only.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.5,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc, makeWorkingMemorySnapshot());
+
+    expect(brief.headline).toBe(
+      'Snapshot-backed current read is now the durable source.',
+    );
+    expect(brief.activeStreams[0].title).toBe('Launch');
+    expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
+    expect(brief.coverage).toMatchObject({
+      statementCount: 2,
+      citedMeetingCount: 2,
+    });
+  });
+
+  it('falls back to doc JSON when the global working-memory snapshot is stale', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Fresh doc fallback should remain available.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Doc fallback stays intact.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.82,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'doc-stream',
+            title: 'Fallback Stream',
+            domain: 'work',
+            status: 'active',
+            current_read: 'Fallback stream stays visible.',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 2,
+            open_follow_up_count: 0,
+            decision_count: 1,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.82,
+              cited_meeting_count: 2,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(
+      doc,
+      makeWorkingMemorySnapshot({ freshness: 'stale' }),
+    );
+
+    expect(brief.headline).toBe('Fresh doc fallback should remain available.');
+    expect(brief.activeStreams[0].title).toBe('Fallback Stream');
+    expect(brief.trustMessage).toBe('Doc fallback stays intact.');
+  });
+
+  it('falls back to doc JSON when the global working-memory snapshot payload is invalid', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Doc fallback should survive invalid snapshot payloads.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Snapshot payload validation failed.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.8,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(
+      doc,
+      makeWorkingMemorySnapshot({
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          active_streams: null as unknown as [],
+        },
+      }),
+    );
+
+    expect(brief.headline).toBe(
+      'Doc fallback should survive invalid snapshot payloads.',
+    );
+    expect(brief.trustMessage).toBe('Snapshot payload validation failed.');
   });
 
   it('parses structured knowledge chapters and citations', () => {

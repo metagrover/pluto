@@ -1,3 +1,4 @@
+import type { WorkingMemorySnapshot } from '../../../electron/db';
 import type { KnowledgeDoc } from '../../api/knowledgeDocs';
 import type { Entity, KnowledgeGraphStats } from '../../api/knowledgeGraph';
 import type {
@@ -10,7 +11,10 @@ import {
   deriveKnowledgeTrustStatus,
   getTrustStatusMeta,
 } from '../../utils/trustStatus';
-import { parseStructuredKnowledgeV2Doc } from '../KnowledgeGraph/knowledgeDocument';
+import {
+  compileKnowledgeBrief,
+  parseStructuredKnowledgeV2Doc,
+} from '../KnowledgeGraph/knowledgeDocument';
 
 export type DashboardTarget = 'ask' | 'meeting' | 'projects' | 'wiki';
 
@@ -128,6 +132,7 @@ export interface DashboardHomeModelInput {
   staleActions: Entity[];
   activeActions: Entity[];
   workspace: KnowledgeWorkspacePayload | null;
+  workingMemorySnapshot?: WorkingMemorySnapshot | null;
   graphStats: KnowledgeGraphStats | null;
 }
 
@@ -385,8 +390,57 @@ const isUsableKnowledgeDoc = (
   return doc.status !== 'inactive' && Boolean(getKnowledgeDocHeadline(doc));
 };
 
+const matchesWorkingMemorySnapshot = (
+  doc: KnowledgeDoc,
+  workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
+): workingMemorySnapshot is WorkingMemorySnapshot =>
+  doc.scope_type === 'global' &&
+  workingMemorySnapshot?.scope_type === 'global' &&
+  workingMemorySnapshot.freshness !== 'stale' &&
+  workingMemorySnapshot.scope_key === doc.scope_key &&
+  workingMemorySnapshot.source_doc_id === doc.id;
+
+const getKnowledgeDocCardDetail = (
+  doc: KnowledgeDoc,
+  workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
+): {
+  description: string;
+  sourceCount: number | null;
+  trustStatus: TrustStatus | null;
+  trustDescription: string | null;
+} => {
+  if (matchesWorkingMemorySnapshot(doc, workingMemorySnapshot)) {
+    const brief = compileKnowledgeBrief(doc, workingMemorySnapshot);
+    return {
+      description: brief.headline,
+      sourceCount: workingMemorySnapshot.source_count,
+      trustStatus: brief.trustStatus,
+      trustDescription: brief.trustDescription,
+    };
+  }
+
+  const v2 = parseStructuredKnowledgeV2Doc(doc);
+  const trustStatus = (() => {
+    if (!v2) return null;
+    return deriveKnowledgeTrustStatus({
+      docStatus: doc.status,
+      evidenceQuality: v2.current_read.evidence_quality,
+    });
+  })();
+
+  return {
+    description: getKnowledgeDocHeadline(doc),
+    sourceCount: getKnowledgeDocSourceCount(doc),
+    trustStatus,
+    trustDescription: trustStatus
+      ? getTrustStatusMeta(trustStatus).description
+      : null,
+  };
+};
+
 const buildKnowledgeDocuments = (
   workspace: KnowledgeWorkspacePayload | null,
+  workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
 ): DashboardKnowledgeDocuments => {
   const docs = workspace?.docs ?? [];
   if (docs.length === 0) {
@@ -412,29 +466,19 @@ const buildKnowledgeDocuments = (
   const cards = sortByNewestTimestamp(usableDocs, (doc) => doc.updated_at)
     .slice(0, 4)
     .map((doc) => {
-      const sourceCount = getKnowledgeDocSourceCount(doc);
       const projectCard = projectCardsByDocId.get(doc.id);
-      const trustStatus = (() => {
-        const v2 = parseStructuredKnowledgeV2Doc(doc);
-        if (!v2) return null;
-        return deriveKnowledgeTrustStatus({
-          docStatus: doc.status,
-          evidenceQuality: v2.current_read.evidence_quality,
-        });
-      })();
+      const detail = getKnowledgeDocCardDetail(doc, workingMemorySnapshot);
       return {
         id: doc.id,
         title: doc.title,
-        description: getKnowledgeDocHeadline(doc),
+        description: detail.description,
         countLabel: projectCard
           ? formatProjectHealthCountLabel(projectCard)
-          : formatCountLabel(sourceCount),
+          : formatCountLabel(detail.sourceCount),
         status: doc.status,
         scopeType: doc.scope_type,
-        trustStatus,
-        trustDescription: trustStatus
-          ? getTrustStatusMeta(trustStatus).description
-          : null,
+        trustStatus: detail.trustStatus,
+        trustDescription: detail.trustDescription,
       };
     });
 
@@ -664,7 +708,10 @@ export const buildDashboardHomeModel = (
     input.staleActions,
     input.activeActions,
   );
-  const knowledgeDocuments = buildKnowledgeDocuments(input.workspace);
+  const knowledgeDocuments = buildKnowledgeDocuments(
+    input.workspace,
+    input.workingMemorySnapshot,
+  );
   const spotlight = buildSpotlight(input.workspace);
 
   return {
