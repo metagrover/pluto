@@ -42,6 +42,13 @@ export function clearAlertsForMeeting(meetingId: string): void {
   );
 }
 
+export function updateAlertStatus(
+  id: string,
+  status: AttentionItem['status'],
+): AttentionItem | null {
+  return db.updateAttentionItemStatus(id, status);
+}
+
 function sanitizeDedupePart(value: string): string {
   return value
     .toLowerCase()

@@ -19,9 +19,26 @@ vi.mock('../../electron/db', () => ({
       (entry) => entry.dedupe_key === item.dedupe_key,
     );
     if (existingIndex >= 0) {
+      const existing = dbState.items[existingIndex];
+      const nextStatus =
+        item.preserve_status !== false &&
+        item.status === 'active' &&
+        (existing.status === 'resolved' ||
+          existing.status === 'dismissed' ||
+          existing.status === 'snoozed' ||
+          existing.status === 'pinned')
+          ? existing.status
+          : item.status;
       dbState.items[existingIndex] = {
-        ...dbState.items[existingIndex],
+        ...existing,
         ...item,
+        status: nextStatus,
+        resolved_at:
+          nextStatus === 'resolved' ||
+          nextStatus === 'dismissed' ||
+          nextStatus === 'superseded'
+            ? (existing.resolved_at ?? '2026-05-10T00:00:00.000Z')
+            : null,
       };
       return dbState.items[existingIndex];
     }
@@ -258,5 +275,80 @@ describe('attention sync', () => {
         (item) => item.dedupe_key === 'action_tracker:stale:action-retired',
       )?.status,
     ).toBe('resolved');
+  });
+
+  it('preserves manual lifecycle states when the same action signal syncs again', () => {
+    dbState.items.push({
+      id: 'attention-action-dismissed',
+      dedupe_key: 'action_tracker:overdue:action-overdue',
+      kind: 'follow_up',
+      severity: 'critical',
+      score: 0.83,
+      status: 'dismissed',
+      title: 'Send launch brief',
+      reason: 'Previously dismissed by the user.',
+      source: 'action_tracker',
+      evidence: [],
+      related_entity_ids: ['action-overdue'],
+      related_stream_ids: [],
+      related_meeting_ids: ['meeting-1'],
+      created_at: '2026-05-10T00:00:00.000Z',
+      updated_at: '2026-05-10T00:00:00.000Z',
+      last_seen_at: '2026-05-10T00:00:00.000Z',
+      resolved_at: '2026-05-10T00:00:00.000Z',
+    });
+    dbState.items.push({
+      id: 'attention-action-pinned',
+      dedupe_key: 'action_tracker:stale:action-stale',
+      kind: 'stale_context',
+      severity: 'watch',
+      score: 0.51,
+      status: 'pinned',
+      title: 'Review backlog cleanup',
+      reason: 'Previously pinned by the user.',
+      source: 'action_tracker',
+      evidence: [],
+      related_entity_ids: ['action-stale'],
+      related_stream_ids: [],
+      related_meeting_ids: ['meeting-2'],
+      created_at: '2026-05-10T00:00:00.000Z',
+      updated_at: '2026-05-10T00:00:00.000Z',
+      last_seen_at: '2026-05-10T00:00:00.000Z',
+      resolved_at: null,
+    });
+
+    dbState.overdueActions = [
+      {
+        id: 'action-overdue',
+        name: 'Send launch brief',
+        due_date: '2026-05-09T00:00:00.000Z',
+        updated_at: '2026-05-08T00:00:00.000Z',
+      },
+    ];
+    dbState.staleActions = [
+      {
+        id: 'action-stale',
+        name: 'Review backlog cleanup',
+        due_date: null,
+        updated_at: '2026-04-20T00:00:00.000Z',
+      },
+    ];
+    dbState.meetingsByEntity.set('action-overdue', [
+      { meeting_id: 'meeting-1' },
+    ]);
+    dbState.meetingsByEntity.set('action-stale', [{ meeting_id: 'meeting-2' }]);
+
+    syncActionTrackerAttentionQueue();
+
+    expect(
+      dbState.items.find(
+        (item) => item.dedupe_key === 'action_tracker:overdue:action-overdue',
+      )?.status,
+    ).toBe('dismissed');
+    expect(
+      dbState.items.find(
+        (item) => item.dedupe_key === 'action_tracker:stale:action-stale',
+      )?.status,
+    ).toBe('pinned');
   });
 });

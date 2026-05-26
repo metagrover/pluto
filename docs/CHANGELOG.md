@@ -28,6 +28,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Recomputing Pluto's global operational state only from transient Knowledge V2 synthesis output with no durable snapshot layer for downstream consumers or debugging.
 - **Notes:** This slice is intentionally global-only. Project/person-scoped working-memory expansion remains under `#80`.
 
+### Add durable attention-item lifecycle transitions
+- **Issue:** [#100](https://github.com/metagrover/pluto/issues/100)
+- **PR:** Pending.
+- **Changed:** Added a durable attention-item status mutation path, exposed it through the Electron attention IPC surface, and taught queue upserts to preserve resolved, dismissed, snoozed, and pinned lifecycle states when the same attention signal syncs again unchanged.
+- **Why:** Pluto's follow-up loop could not become trustworthy while automated queue sync kept resetting handled items back to `active`. This foundation lets later dashboard, Meeting View, and draft work build on stable lifecycle state instead of one-off heuristics.
+- **Replaced:** Treating the durable attention queue as effectively read-only user state and allowing unchanged automated sync inputs to clobber prior lifecycle decisions.
+- **Notes:** This slice is intentionally non-UI; it establishes the persistence and sync contract that later follow-up surfaces can call.
+
 ### Explain trust badges across Pluto surfaces
 - **Issue:** [#98](https://github.com/metagrover/pluto/issues/98)
 - **PR:** Pending.

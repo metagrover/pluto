@@ -149,6 +149,7 @@ vi.mock('better-sqlite3', () => {
 import {
   clearAttentionItemsForMeeting,
   listAttentionItems,
+  updateAttentionItemStatus,
   upsertAttentionItem,
 } from '../../electron/db';
 
@@ -328,5 +329,36 @@ describe('attention queue persistence', () => {
     expect(listAttentionItems().map((item) => item.title)).toEqual([
       'Question from m2',
     ]);
+  });
+
+  it('persists manual lifecycle transitions for existing items', () => {
+    const created = upsertAttentionItem({
+      dedupe_key: 'follow_up:launch-brief',
+      kind: 'follow_up',
+      severity: 'watch',
+      score: 0.62,
+      status: 'active',
+      title: 'Send launch brief',
+      reason: 'The launch brief still needs a reply.',
+      source: 'action_tracker',
+      evidence: [{ meeting_id: 'm1', quote: 'Send the launch brief today.' }],
+      related_entity_ids: ['action-1'],
+      related_stream_ids: [],
+      related_meeting_ids: ['m1'],
+    });
+
+    const dismissed = updateAttentionItemStatus(created.id, 'dismissed');
+    expect(dismissed).toMatchObject({
+      id: created.id,
+      status: 'dismissed',
+    });
+    expect(dismissed?.resolved_at).toBeTruthy();
+
+    const reactivated = updateAttentionItemStatus(created.id, 'active');
+    expect(reactivated).toMatchObject({
+      id: created.id,
+      status: 'active',
+      resolved_at: null,
+    });
   });
 });
