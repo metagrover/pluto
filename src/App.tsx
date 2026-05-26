@@ -14,6 +14,10 @@ import { Sidebar } from './components/layout/Sidebar';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
+import {
+  DASHBOARD_ACTION_COMPLETION_ERROR,
+  persistDashboardActionCompletion,
+} from './components/features/dashboardActionCompletion';
 import { MeetingView } from './components/features/MeetingView';
 import { ZenMode } from './components/features/ZenMode';
 import { useDashboardHome } from './components/features/useDashboardHome';
@@ -22,6 +26,7 @@ import { useDashboardHome } from './components/features/useDashboardHome';
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
+import { updateEntityStatus } from './api/knowledgeGraph';
 
 // Overlays
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
@@ -92,7 +97,12 @@ function App() {
   const [titleValue, setTitleValue] = useState('');
   const [askPlutoVisible, setAskPlutoVisible] = useState(false);
   const [query, setQuery] = useState('');
-  const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
+  const [updatingDashboardTaskIds, setUpdatingDashboardTaskIds] = useState<
+    Set<string>
+  >(new Set());
+  const [dashboardActionError, setDashboardActionError] = useState<
+    string | null
+  >(null);
   const [currentNotes, setCurrentNotes] = useState('');
   const [inlineAskPluto, setInlineAskPluto] = useState(false);
   const [plutoResponse, setPlutoResponse] = useState('');
@@ -140,13 +150,27 @@ function App() {
     setTimeout(() => setCopySuccess(false), 2000);
   };
 
-  const handleCompleteTask = (taskId: string) => {
-    setCompletedTasks((prev) => {
-      const next = new Set(prev);
-      if (next.has(taskId)) next.delete(taskId);
-      else next.add(taskId);
-      return next;
-    });
+  const handleCompleteTask = async (taskId: string) => {
+    if (updatingDashboardTaskIds.has(taskId)) return;
+
+    setDashboardActionError(null);
+    setUpdatingDashboardTaskIds((prev) => new Set(prev).add(taskId));
+
+    try {
+      await persistDashboardActionCompletion(taskId, {
+        updateEntityStatus,
+        refreshDashboard: dashboardHome.refresh,
+      });
+    } catch (error) {
+      console.error('Failed to complete dashboard follow-up', error);
+      setDashboardActionError(DASHBOARD_ACTION_COMPLETION_ERROR);
+    } finally {
+      setUpdatingDashboardTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(taskId);
+        return next;
+      });
+    }
   };
 
   const handleDeleteMeeting = async (id: string | number) => {
@@ -737,7 +761,8 @@ function App() {
                 setSelectedMeetingId={setSelectedMeetingId}
                 setActiveTab={setActiveTab}
                 setAskPlutoVisible={setAskPlutoVisible}
-                completedTasks={completedTasks}
+                updatingTaskIds={updatingDashboardTaskIds}
+                actionError={dashboardActionError}
                 handleCompleteTask={handleCompleteTask}
               />
             ) : activeTab === 'people' ? (

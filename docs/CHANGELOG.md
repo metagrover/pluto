@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-26
+
+### Persist dashboard follow-up completion
+- **Issue:** [#109](https://github.com/metagrover/pluto/issues/109)
+- **PR:** Pending.
+- **Changed:** Replaced the dashboard's local-only follow-up completion toggle with a durable `action_item` status update, refreshed the homepage briefing after successful completion writes, and surfaced an inline error when the write fails instead of silently claiming success.
+- **Why:** `#61` requires homepage follow-up surfaces to participate in a real lifecycle. The prior checkbox only mutated React state, so completed items came back after reload and never updated Pluto's underlying action memory.
+- **Replaced:** Treating dashboard completion as a cosmetic per-session toggle detached from the stored action lifecycle.
+- **Notes:** This slice only covers durable completion from the Dashboard. Dismiss/demote flows, Meeting View lifecycle controls, and attention-queue-specific UI remain follow-up work under `#61`.
+
 ## 2026-05-22
 
 ### Explain trust badges across Pluto surfaces
