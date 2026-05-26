@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-26
 
+### Prefer working-memory snapshots in the Dashboard workspace memory brief
+- **Issue:** [#107](https://github.com/metagrover/pluto/issues/107)
+- **PR:** Pending.
+- **Changed:** The Dashboard home model now loads the persisted global working-memory snapshot and prefers its headline, source count, and trust metadata for the global Workspace Memory card when the snapshot matches the current global Knowledge doc. The Dashboard still falls back to the existing Knowledge-doc path when the snapshot is missing, stale, malformed, or sourced from a different doc, and focused tests now cover both the snapshot-backed card path and fallback behavior.
+- **Why:** `#81` needs durable working-memory consumers beyond the Knowledge main stage so Pluto's re-entry surfaces stop depending only on transient doc JSON. The Dashboard is the next smallest consumer because it already renders the global memory card and uses that card for its fallback briefing state when no meeting or urgent action should dominate.
+- **Replaced:** Treating the Dashboard's global Workspace Memory summary as a direct read of Knowledge-doc JSON even after Pluto had begun persisting and consuming a durable working-memory snapshot elsewhere.
+- **Notes:** This slice intentionally keeps the Dashboard's priority rules unchanged: overdue or stale actions and the latest meeting still outrank memory cards, and broader Ask Pluto or non-global consumers remain follow-up work under `#81`.
+
 ### Prefer working-memory snapshots in global Knowledge Current Read
 - **Issue:** [#105](https://github.com/metagrover/pluto/issues/105)
 - **PR:** Pending.

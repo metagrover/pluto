@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { WorkingMemorySnapshot } from '../../electron/db';
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import type {
@@ -106,6 +107,50 @@ const makeWorkspace = (
   timeline: [],
   backlinks: [],
   project_cards: [makeProjectCard()],
+  ...overrides,
+});
+
+const makeWorkingMemorySnapshot = (
+  overrides: Partial<WorkingMemorySnapshot> = {},
+): WorkingMemorySnapshot => ({
+  id: 'snapshot-1',
+  scope_type: 'global',
+  scope_key: 'global',
+  title: 'Workspace Memory',
+  source_doc_id: 'doc-global',
+  source_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
+  freshness: 'fresh',
+  trust_status: 'inferred',
+  source_count: 7,
+  cited_meeting_count: 5,
+  payload: {
+    schema_version: 1,
+    scope: {
+      type: 'global',
+      key: 'global',
+      title: 'Workspace Memory',
+    },
+    source: {
+      knowledge_doc_id: 'doc-global',
+      knowledge_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
+    },
+    current_read: {
+      headline: 'Working memory says launch readiness still depends on search signoff.',
+      supporting_bullets: ['Search signoff is the gating dependency.'],
+      freshness: 'fresh',
+      trust_status: 'inferred',
+      trust_message: 'Synthesized from converging evidence across recent meetings.',
+      source_count: 7,
+      cited_meeting_count: 5,
+    },
+    active_streams: [],
+    open_loops: [],
+    patterns: [],
+    risks_and_unknowns: [],
+    evidence_index: [],
+  },
+  generated_at: '2026-04-27T18:00:00.000Z',
+  updated_at: '2026-04-27T18:00:00.000Z',
   ...overrides,
 });
 
@@ -244,6 +289,7 @@ describe('buildDashboardHomeModel', () => {
       staleActions: [],
       activeActions: [],
       workspace: makeWorkspace(),
+      workingMemorySnapshot: null,
       graphStats: null,
     });
 
@@ -251,6 +297,166 @@ describe('buildDashboardHomeModel', () => {
       kind: 'knowledge_doc',
       title: 'Recent memory',
       detail: 'Search indexing is converging around the rollout plan.',
+      action: { label: 'Open knowledge', target: 'wiki' },
+    });
+  });
+
+  it('prefers a matching working-memory snapshot for the global workspace memory card', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [
+          makeDoc({
+            id: 'doc-global',
+            scope_type: 'global',
+            scope_key: 'global',
+            title: 'Workspace Memory',
+            structured_json: JSON.stringify({
+              schema_version: 2,
+              scope: { type: 'global', title: 'Workspace Memory' },
+              current_read: {
+                headline: 'Doc JSON says the old launch story.',
+                trust_message: 'Grounded in direct meeting evidence.',
+                evidence_quality: {
+                  mode: 'direct',
+                  confidence: 0.9,
+                  cited_meeting_count: 2,
+                  source_count: 3,
+                  last_reinforced_at: '2026-04-27T16:00:00.000Z',
+                  freshness: 'fresh',
+                },
+                source_count: 3,
+                cited_item_count: 2,
+                cited_meeting_count: 2,
+                freshness: 'fresh',
+              },
+              active_streams: [],
+              needs_attention: [],
+              patterns: [],
+              risks_and_unknowns: [],
+              evidence_index: [],
+              source_quality_summary: {
+                included_count: 3,
+                excluded_count: 0,
+                weak_count: 0,
+                records: [],
+              },
+            }),
+          }),
+        ],
+        selected_doc: makeDoc({
+          id: 'doc-global',
+          scope_type: 'global',
+          scope_key: 'global',
+          title: 'Workspace Memory',
+        }),
+        project_cards: [],
+      }),
+      workingMemorySnapshot: makeWorkingMemorySnapshot(),
+      graphStats: null,
+    });
+
+    expect(model.knowledgeDocuments.state).toBe('populated');
+    expect(model.knowledgeDocuments.cards[0]).toMatchObject({
+      id: 'doc-global',
+      title: 'Workspace Memory',
+      description:
+        'Working memory says launch readiness still depends on search signoff.',
+      countLabel: '7 sources',
+      trustStatus: 'inferred',
+      trustDescription:
+        'Supported by evidence, but synthesized across sources.',
+    });
+    expect(model.briefingFocus).toEqual({
+      kind: 'knowledge_doc',
+      title: 'Recent memory',
+      detail:
+        'Working memory says launch readiness still depends on search signoff.',
+      action: { label: 'Open knowledge', target: 'wiki' },
+    });
+    expect(model.hero).toMatchObject({
+      kind: 'knowledge_doc',
+      title: 'Workspace Memory',
+      detail:
+        'Working memory says launch readiness still depends on search signoff.',
+      action: { label: 'Knowledge home', target: 'wiki' },
+    });
+  });
+
+  it('falls back to knowledge-doc data when the working-memory snapshot is stale', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [
+          makeDoc({
+            id: 'doc-global',
+            scope_type: 'global',
+            scope_key: 'global',
+            title: 'Workspace Memory',
+            structured_json: JSON.stringify({
+              schema_version: 2,
+              scope: { type: 'global', title: 'Workspace Memory' },
+              current_read: {
+                headline: 'Doc JSON remains the trusted fallback.',
+                trust_message: 'Grounded in direct meeting evidence.',
+                evidence_quality: {
+                  mode: 'direct',
+                  confidence: 0.9,
+                  cited_meeting_count: 2,
+                  source_count: 3,
+                  last_reinforced_at: '2026-04-27T16:00:00.000Z',
+                  freshness: 'fresh',
+                },
+                source_count: 3,
+                cited_item_count: 2,
+                cited_meeting_count: 2,
+                freshness: 'fresh',
+              },
+              active_streams: [],
+              needs_attention: [],
+              patterns: [],
+              risks_and_unknowns: [],
+              evidence_index: [],
+              source_quality_summary: {
+                included_count: 3,
+                excluded_count: 0,
+                weak_count: 0,
+                records: [],
+              },
+            }),
+          }),
+        ],
+        selected_doc: makeDoc({
+          id: 'doc-global',
+          scope_type: 'global',
+          scope_key: 'global',
+          title: 'Workspace Memory',
+        }),
+        project_cards: [],
+      }),
+      workingMemorySnapshot: makeWorkingMemorySnapshot({ freshness: 'stale' }),
+      graphStats: null,
+    });
+
+    expect(model.knowledgeDocuments.state).toBe('populated');
+    expect(model.knowledgeDocuments.cards[0]).toMatchObject({
+      description: 'Doc JSON remains the trusted fallback.',
+      countLabel: '3 sources',
+      trustStatus: 'grounded',
+      trustDescription: 'Backed by direct evidence from cited source material.',
+    });
+    expect(model.briefingFocus).toEqual({
+      kind: 'knowledge_doc',
+      title: 'Recent memory',
+      detail: 'Doc JSON remains the trusted fallback.',
       action: { label: 'Open knowledge', target: 'wiki' },
     });
   });
