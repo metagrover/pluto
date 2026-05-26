@@ -14,19 +14,19 @@ import { Sidebar } from './components/layout/Sidebar';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
+import { MeetingView } from './components/features/MeetingView';
+import { ZenMode } from './components/features/ZenMode';
 import {
   DASHBOARD_ACTION_COMPLETION_ERROR,
   persistDashboardActionCompletion,
 } from './components/features/dashboardActionCompletion';
-import { MeetingView } from './components/features/MeetingView';
-import { ZenMode } from './components/features/ZenMode';
 import { useDashboardHome } from './components/features/useDashboardHome';
 
+import { updateEntityStatus } from './api/knowledgeGraph';
 // Knowledge Graph
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
-import { updateEntityStatus } from './api/knowledgeGraph';
 
 // Overlays
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
@@ -188,7 +188,6 @@ function App() {
       }
     }
   };
-
 
   useEffect(() => {
     setTranscriptVisible(false);
@@ -455,7 +454,6 @@ function App() {
       return { systemAudioStatus };
     }
   };
-
 
   useEffect(() => {
     const probeOnBoot = async () => {

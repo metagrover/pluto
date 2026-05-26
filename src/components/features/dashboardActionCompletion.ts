@@ -6,10 +6,7 @@ export const DASHBOARD_ACTION_COMPLETION_ERROR =
 export const persistDashboardActionCompletion = async (
   taskId: string,
   deps: {
-    updateEntityStatus: (
-      id: string,
-      status: EntityStatus,
-    ) => Promise<unknown>;
+    updateEntityStatus: (id: string, status: EntityStatus) => Promise<unknown>;
     refreshDashboard: () => Promise<void>;
   },
 ): Promise<void> => {
