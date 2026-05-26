@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-26
+
+### Prefer working-memory snapshots in global Knowledge Current Read
+- **Issue:** [#105](https://github.com/metagrover/pluto/issues/105)
+- **PR:** Pending.
+- **Changed:** The global Knowledge Current Read now prefers the persisted working-memory snapshot created in `#102` when one is available and valid. The main Knowledge stage fetches that durable snapshot for the global doc, compiles the headline/streams/risks from the snapshot payload, and falls back to the existing Knowledge V2 document path when the snapshot is missing, stale, or malformed. Focused tests now cover snapshot-backed compilation plus stale and invalid fallback behavior.
+- **Why:** `#81` needs downstream Knowledge surfaces to read from durable working memory instead of transient synthesis output. Using the first persisted global snapshot proves the consumer path without widening scope into dashboard, Ask Pluto, or non-global memory consumers yet.
+- **Replaced:** Treating the global Knowledge brief as a transient read of the doc JSON even after Pluto had started persisting an inspectable working-memory snapshot.
+- **Notes:** This is intentionally limited to the global Knowledge surface and stacks on the snapshot foundation branch from `#102` / PR `#103`.
+
 ## 2026-05-22
 
 ### Persist the first global working-memory snapshot
