@@ -135,11 +135,13 @@ const makeWorkingMemorySnapshot = (
       knowledge_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
     },
     current_read: {
-      headline: 'Working memory says launch readiness still depends on search signoff.',
+      headline:
+        'Working memory says launch readiness still depends on search signoff.',
       supporting_bullets: ['Search signoff is the gating dependency.'],
       freshness: 'fresh',
       trust_status: 'inferred',
-      trust_message: 'Synthesized from converging evidence across recent meetings.',
+      trust_message:
+        'Synthesized from converging evidence across recent meetings.',
       source_count: 7,
       cited_meeting_count: 5,
     },
