@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-27
+
+### Restore the high-severity dependency audit gate
+- **Issue:** [#123](https://github.com/metagrover/pluto/issues/123)
+- **PR:** Pending.
+- **Changed:** Added a narrow `pnpm.overrides` pin so the transitive `tmp` dependency pulled through `electron-builder` resolves to `0.2.6` instead of vulnerable `0.2.5`, and refreshed the lockfile to match.
+- **Why:** Pluto's required pre-commit audit gate on current `master` was failing on `GHSA-ph9p-34f9-6g65`, which blocked otherwise-green code PRs from committing without bypassing verification.
+- **Replaced:** Accepting a broken repo-level audit gate on `master` or forcing unrelated code branches to carry the security remediation themselves.
+- **Notes:** This is intentionally a minimal dependency unblocker, not a broader package upgrade sweep.
+
 ## 2026-05-26
 
 ### Prefer working-memory snapshots in the Dashboard workspace memory brief
