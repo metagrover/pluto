@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { getMeetingAlerts, updateAlertStatus } from '../../api/intelligence';
 import {
   ENTITY_ICONS,
   type Entity,
@@ -27,7 +28,6 @@ import {
   getRelatedEntities,
   updateEntityStatus,
 } from '../../api/knowledgeGraph';
-import { getMeetingAlerts, updateAlertStatus } from '../../api/intelligence';
 import type {
   AnalysisDocument,
   AnalysisDocumentV3,
@@ -177,13 +177,17 @@ export const MeetingView = ({
           }
           if (alertsResult.status === 'fulfilled') {
             const linkedAlerts = Array.isArray(alertsResult.value)
-              ? (alertsResult.value as Array<{
-                  id?: unknown;
-                  status?: unknown;
-                  related_entity_ids?: unknown;
-                }>)
+              ? (
+                  alertsResult.value as Array<{
+                    id?: unknown;
+                    status?: unknown;
+                    related_entity_ids?: unknown;
+                  }>
+                )
                   .filter(
-                    (item): item is {
+                    (
+                      item,
+                    ): item is {
                       id: string;
                       status: 'active' | 'dismissed';
                       related_entity_ids: string[];
@@ -1058,7 +1062,7 @@ export const MeetingView = ({
                           className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all ${
                             item.status === 'completed'
                               ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
-                            : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
+                              : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
                           } ${
                             !item.actionable ||
                             pendingActionId === item.id ||
