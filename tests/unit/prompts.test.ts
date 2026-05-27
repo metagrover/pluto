@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getEntitiesPrompt,
+  getFollowUpDraftsPrompt,
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
   getStructuredAnalysisPrompt,
@@ -265,5 +266,22 @@ describe('knowledge document prompts', () => {
     expect(prompt).toContain('"schema_version": 2');
     expect(prompt).toContain('Preserve item classifications');
     expect(prompt).not.toContain('Available meeting evidence (newest first):');
+  });
+});
+
+describe('getFollowUpDraftsPrompt', () => {
+  it('includes participant context alongside decisions and action items', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      participants: ['Sarah Chen', 'Alex Rivera'],
+      decisions: ['Use REST for the rollout'],
+      actionItems: ['Send rollout email (Owner: Sarah Chen | Due: Friday)'],
+    });
+
+    expect(prompt).toContain('Participants:');
+    expect(prompt).toContain('- Sarah Chen');
+    expect(prompt).toContain('- Alex Rivera');
+    expect(prompt).toContain('Decisions:');
+    expect(prompt).toContain('Action Items:');
   });
 });
