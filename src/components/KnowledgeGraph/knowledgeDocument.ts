@@ -1,4 +1,5 @@
 import type { WorkingMemorySnapshot } from '../../../electron/db';
+import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
 import type {
   KnowledgeDoc,
   KnowledgeDocScopeType,
@@ -1097,11 +1098,42 @@ const attentionSortScore = (item: NeedsAttentionItem): number => {
   );
 };
 
+const mapAttentionKind = (kind: AttentionItem['kind']): NeedsAttentionKind => {
+  if (kind === 'follow_up' || kind === 'duplicate_commitment') {
+    return 'follow_up';
+  }
+  if (kind === 'blocker' || kind === 'dependency') {
+    return 'dependency';
+  }
+  return 'risk';
+};
+
 export const compileNeedsAttention = (
   doc: KnowledgeDoc | null | undefined,
   docs: KnowledgeDoc[],
   projectCards: KnowledgeProjectHealthCard[],
+  attentionItems: AttentionItem[] = [],
 ): NeedsAttentionItem[] => {
+  if (
+    doc?.scope_type === 'global' &&
+    attentionItems.some((item) => item.status === 'active')
+  ) {
+    return attentionItems
+      .filter((item) => item.status === 'active')
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        summary: item.reason,
+        severity: item.severity,
+        kind: mapAttentionKind(item.kind),
+        reasons: item.reason ? [item.reason] : [],
+        citations: item.evidence.map((evidence) => ({
+          meeting_id: evidence.meeting_id,
+          quote: evidence.quote,
+        })),
+      }));
+  }
+
   const v2 = parseStructuredKnowledgeV2Doc(doc);
   const structured = v2 ? null : parseStructuredKnowledgeDoc(doc);
   const v2Items: NeedsAttentionItem[] = v2
