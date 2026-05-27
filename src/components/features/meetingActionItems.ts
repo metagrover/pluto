@@ -12,6 +12,14 @@ export type MeetingActionItemStatus =
   | 'overdue'
   | 'fallback';
 
+export type MeetingActionDismissalState = 'active' | 'dismissed' | null;
+
+export interface MeetingLinkedAttentionItem {
+  id: string;
+  status: 'active' | 'dismissed';
+  related_entity_ids: string[];
+}
+
 export interface MeetingActionItemCard {
   id: string;
   title: string;
@@ -21,10 +29,14 @@ export interface MeetingActionItemCard {
   context: string | null;
   actionable: boolean;
   toggleLabel: 'Mark complete' | 'Reopen' | null;
+  attentionItemId: string | null;
+  dismissalState: MeetingActionDismissalState;
+  dismissalLabel: 'Dismiss' | 'Reopen' | null;
 }
 
 interface BuildMeetingActionItemsParams {
   meetingEntities: MeetingActionEntity[];
+  linkedAttentionItems?: MeetingLinkedAttentionItem[];
   fallbackActionItems: string[];
 }
 
@@ -71,8 +83,24 @@ const sortMeetingActionEntities = (
 
 export const buildMeetingActionItems = ({
   meetingEntities,
+  linkedAttentionItems = [],
   fallbackActionItems,
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
+  const attentionByEntityId = new Map<
+    string,
+    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
+  >();
+
+  for (const item of linkedAttentionItems) {
+    for (const relatedEntityId of item.related_entity_ids) {
+      if (attentionByEntityId.has(relatedEntityId)) continue;
+      attentionByEntityId.set(relatedEntityId, {
+        id: item.id,
+        status: item.status,
+      });
+    }
+  }
+
   const linkedActionItems = meetingEntities
     .filter(
       (entity): entity is MeetingActionEntity =>
@@ -81,6 +109,8 @@ export const buildMeetingActionItems = ({
     .sort(sortMeetingActionEntities)
     .map((entity) => {
       const status = entity.status ?? 'active';
+      const linkedAttention = attentionByEntityId.get(entity.id);
+      const dismissalState = linkedAttention?.status ?? null;
       return {
         id: entity.id,
         title: entity.name,
@@ -88,8 +118,16 @@ export const buildMeetingActionItems = ({
         assignee: entity.assigned_to,
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,
-        actionable: true,
+        actionable: dismissalState !== 'dismissed',
         toggleLabel: status === 'completed' ? 'Reopen' : 'Mark complete',
+        attentionItemId: linkedAttention?.id ?? null,
+        dismissalState,
+        dismissalLabel:
+          dismissalState === null
+            ? null
+            : dismissalState === 'dismissed'
+              ? 'Reopen'
+              : 'Dismiss',
       } satisfies MeetingActionItemCard;
     });
 
@@ -107,6 +145,9 @@ export const buildMeetingActionItems = ({
       context: null,
       actionable: false,
       toggleLabel: null,
+      attentionItemId: null,
+      dismissalState: null,
+      dismissalLabel: null,
     }))
     .filter((item) => item.title.length > 0);
 };
