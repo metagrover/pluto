@@ -26,7 +26,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Changed:** Pluto's Meeting View follow-up draft regeneration path now derives a stable participant list from transcript speakers and passes that context into the follow-up prompt. The prompt explicitly includes a deterministic participants block and tells the model to keep drafts generic instead of inventing attendees when no participant context is available. Focused tests now cover both participant extraction and prompt fallback behavior.
 - **Why:** `#61` calls for follow-up drafts to use existing meeting entities, decisions, participants, and action items. Before this slice, draft generation only received the meeting title plus action/decision text, which made recaps less grounded in who was actually in the room.
 - **Replaced:** Treating follow-up draft generation as generic meeting text generation with no explicit participant context even when transcript speaker data was already available locally.
-- **Notes:** This slice intentionally stops at prompt/context wiring. It does not redesign the Meeting View draft panel or expand into lifecycle controls, email sending, or Slack integrations.
+- **Notes:** This slice intentionally stops at prompt/context wiring. It does not redesign the Meeting View draft panel or expand into lifecycle controls, email sending, or Slack integrations. The landing branch also refreshes Pluto's transitive `tmp` override to keep the high-severity audit gate green after `pnpm audit` started flagging `electron-builder -> tmp-promise -> tmp`.
 
 ### Prefer working-memory snapshots in the Dashboard workspace memory brief
 - **Issue:** [#107](https://github.com/metagrover/pluto/issues/107)
