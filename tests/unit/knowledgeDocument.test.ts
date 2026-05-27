@@ -1044,7 +1044,7 @@ describe('knowledge document utilities', () => {
 
     expect(brief.isCompiled).toBe(false);
     expect(brief.headline).toBe(
-      'Indexed knowledge needs a stronger synthesis.',
+      'Commit to exploring opportunities with major VCs.',
     );
     expect(brief.coverage).toMatchObject({
       statementCount: 1,
@@ -1052,6 +1052,53 @@ describe('knowledge document utilities', () => {
     });
     expect(brief.lanes[0].items[0].text).toBe(
       'Commit to exploring opportunities with major VCs.',
+    );
+  });
+
+  it('keeps a reliable V2 headline visible during weak synthesis', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline:
+            'API context work is moving from architecture into validation.',
+          supporting_bullets: [
+            'Demo readiness still depends on instrumentation and approval.',
+          ],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Evidence is thin but cited.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.61,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 1,
+          records: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.isCompiled).toBe(false);
+    expect(brief.headline).toBe(
+      'API context work is moving from architecture into validation.',
     );
   });
 
