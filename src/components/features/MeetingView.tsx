@@ -23,6 +23,7 @@ import {
   extractAndProcessEntities,
   getEntityMeetings,
   getEntityTypeLabel,
+  getMeetingEntities,
   getRelatedEntities,
 } from '../../api/knowledgeGraph';
 import type {
@@ -47,6 +48,7 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
+import { buildFollowUpContext } from './followUpDraftBuilder';
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
@@ -82,6 +84,9 @@ export const MeetingView = ({
   const transcriptBodyRef = useRef<HTMLDivElement>(null);
   const [transcriptBodyHeight, setTranscriptBodyHeight] = useState(0);
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
+  const [meetingEntities, setMeetingEntities] = useState<
+    (Entity & { mention_count: number; context: string | null })[]
+  >([]);
   const [entityMeetings, setEntityMeetings] = useState<EntityMeeting[]>([]);
   const [relatedEntities, setRelatedEntities] = useState<
     (Entity & { relationship: string; direction: 'outgoing' | 'incoming' })[]
@@ -126,11 +131,49 @@ export const MeetingView = ({
 
   useEffect(() => {
     setSelectedEntity(null);
+    setMeetingEntities([]);
     setEntityMeetings([]);
     setRelatedEntities([]);
     setEntityDetailsError(null);
     setIsRegeneratingNotes(false);
     setRegenerateNotesError(null);
+  }, [selectedMeeting.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchMeetingEntities = async () => {
+      try {
+        const entities = await getMeetingEntities(String(selectedMeeting.id));
+        if (cancelled) return;
+        setMeetingEntities(entities);
+      } catch (error) {
+        if (cancelled) return;
+        console.error(
+          'Failed to fetch meeting entities for follow-up drafts:',
+          error,
+        );
+        setMeetingEntities([]);
+      }
+    };
+
+    const handleEntitiesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ meetingId?: string | number }>)
+        .detail;
+      if (!detail?.meetingId) return;
+      if (String(detail.meetingId) !== String(selectedMeeting.id)) return;
+      void fetchMeetingEntities();
+    };
+
+    void fetchMeetingEntities();
+    window.addEventListener('MEETING_ENTITIES_UPDATED', handleEntitiesUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        'MEETING_ENTITIES_UPDATED',
+        handleEntitiesUpdated,
+      );
+    };
   }, [selectedMeeting.id]);
 
   useEffect(() => {
@@ -197,6 +240,12 @@ export const MeetingView = ({
     [];
   const decisions =
     v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const followUpDraftContext = buildFollowUpContext({
+    meetingTitle: selectedMeeting.title,
+    fallbackActionItems: actionItems,
+    decisions,
+    meetingEntities,
+  });
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
     0,
@@ -577,8 +626,9 @@ export const MeetingView = ({
       <div className="mb-12 space-y-6">
         <FollowUpDrafts
           meeting={selectedMeeting}
-          actionItems={actionItems}
+          actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
+          participants={followUpDraftContext.participants}
           fetchMeetings={fetchMeetings}
         />
 

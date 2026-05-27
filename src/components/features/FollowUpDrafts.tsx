@@ -13,11 +13,13 @@ import {
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { Meeting } from '../../types';
+import { type Drafts, buildDefaultDrafts } from './followUpDraftBuilder';
 
 interface FollowUpDraftsProps {
   meeting: Meeting;
   actionItems: string[];
   decisions: string[];
+  participants: string[];
   fetchMeetings: () => void;
 }
 
@@ -28,29 +30,6 @@ const DRAFT_TYPES = [
 ] as const;
 
 type DraftId = (typeof DRAFT_TYPES)[number]['id'];
-type Drafts = Partial<Record<DraftId, string>>;
-
-const toBullets = (items: string[], fallback: string) =>
-  items.length ? items.map((item) => `- ${item}`).join('\n') : fallback;
-
-const buildDefaultDrafts = ({
-  actionItems,
-  decisions,
-  meetingTitle,
-}: {
-  actionItems: string[];
-  decisions: string[];
-  meetingTitle: string;
-}): Drafts => {
-  const actions = toBullets(actionItems, '- None');
-  const decisionBullets = toBullets(decisions, '- None');
-
-  return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
-    internal: `Team, session on ${meetingTitle}:\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
-    slack: `*Recap: ${meetingTitle}*\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
-  };
-};
 
 const parseSavedDrafts = (value?: string): Drafts | null => {
   if (!value) return null;
@@ -67,6 +46,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   meeting,
   actionItems,
   decisions,
+  participants,
   fetchMeetings,
 }) => {
   const [drafts, setDrafts] = useState<Drafts>({});
@@ -85,8 +65,9 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         actionItems: actionItemsKey ? actionItemsKey.split('\n') : [],
         decisions: decisionsKey ? decisionsKey.split('\n') : [],
         meetingTitle,
+        participants,
       }),
-    [actionItemsKey, decisionsKey, meetingTitle],
+    [actionItemsKey, decisionsKey, meetingTitle, participants],
   );
 
   useEffect(() => {
@@ -125,6 +106,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         meetingTitle,
         actionItems,
         decisions,
+        participants,
         customPrompt: customPrompt.trim() || undefined,
       });
       if (res?.drafts) {

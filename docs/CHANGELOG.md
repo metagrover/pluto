@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-27
 
+### Enrich Meeting follow-up drafts from linked context
+- **Issue:** [#120](https://github.com/metagrover/pluto/issues/120)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now prefer linked meeting `action_item` entities when they exist, carrying owner and due-date metadata into the draft defaults and regenerate prompt. The draft context also includes linked participant names, while preserving the prior plain-string fallback when entity links are missing.
+- **Why:** `#61` calls for follow-up generation that reflects the same durable meeting context Pluto already extracted elsewhere. Flat action-item strings made recap drafts less accountable and missed participant context even when the meeting graph already knew both.
+- **Replaced:** Treating follow-up draft generation as a formatter over analysis text alone, without reusing linked entity metadata from the meeting knowledge graph.
+- **Notes:** This slice stays inside Meeting View and the existing follow-up draft surface. It does not add sending integrations or redesign the draft editor.
+
 ### Restore the high-severity dependency audit gate
 - **Issue:** [#123](https://github.com/metagrover/pluto/issues/123)
 - **PR:** Pending.

@@ -679,13 +679,22 @@ export const getFollowUpDraftsPrompt = (params: {
   meetingTitle: string;
   actionItems: string[];
   decisions: string[];
+  participants?: string[];
   customPrompt?: string;
 }): string => {
-  const { meetingTitle, actionItems, decisions, customPrompt } = params;
+  const {
+    meetingTitle,
+    actionItems,
+    decisions,
+    participants = [],
+    customPrompt,
+  } = params;
 
   return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
 
 Meeting: ${meetingTitle}
+Participants:
+${participants.map((participant) => `- ${participant}`).join('\n') || '- None recorded'}
 Decisions:
 ${decisions.map((d) => `- ${d}`).join('\n') || '- None recorded'}
 Action Items:
