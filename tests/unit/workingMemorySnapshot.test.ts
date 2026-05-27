@@ -140,10 +140,10 @@ import {
 import type { KnowledgeDoc } from '../../electron/db';
 import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 import {
-  buildProjectWorkingMemorySnapshot,
   buildGlobalWorkingMemorySnapshot,
-  persistProjectWorkingMemorySnapshot,
+  buildProjectWorkingMemorySnapshot,
   persistGlobalWorkingMemorySnapshot,
+  persistProjectWorkingMemorySnapshot,
 } from '../../electron/workingMemory';
 
 const makeKnowledgeDoc = (
