@@ -3,17 +3,20 @@ import type {
   KnowledgeDoc,
   WorkingMemorySnapshot,
   WorkingMemorySnapshotPayload,
+  WorkingMemorySnapshotScopeType,
 } from './db';
 import { upsertWorkingMemorySnapshot } from './db';
 import type { KnowledgeV2Document } from './knowledgeV2';
 
-export const buildGlobalWorkingMemorySnapshot = ({
+const buildWorkingMemorySnapshot = ({
   knowledgeDoc,
   structured,
+  scopeType,
   generatedAt = new Date().toISOString(),
 }: {
   knowledgeDoc: KnowledgeDoc;
   structured: KnowledgeV2Document;
+  scopeType: WorkingMemorySnapshotScopeType;
   generatedAt?: string;
 }): Omit<WorkingMemorySnapshot, 'id' | 'updated_at'> => {
   const trustStatus = deriveKnowledgeTrustStatus({
@@ -24,7 +27,7 @@ export const buildGlobalWorkingMemorySnapshot = ({
   const payload: WorkingMemorySnapshotPayload = {
     schema_version: 1,
     scope: {
-      type: 'global',
+      type: scopeType,
       key: knowledgeDoc.scope_key,
       title: knowledgeDoc.title,
     },
@@ -51,7 +54,7 @@ export const buildGlobalWorkingMemorySnapshot = ({
   };
 
   return {
-    scope_type: 'global',
+    scope_type: scopeType,
     scope_key: knowledgeDoc.scope_key,
     title: knowledgeDoc.title,
     source_doc_id: knowledgeDoc.id,
@@ -65,6 +68,43 @@ export const buildGlobalWorkingMemorySnapshot = ({
   };
 };
 
+const persistWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  scopeType,
+  generatedAt,
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  scopeType: WorkingMemorySnapshotScopeType;
+  generatedAt?: string;
+}): WorkingMemorySnapshot => {
+  const snapshot = buildWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType,
+    generatedAt,
+  });
+
+  return upsertWorkingMemorySnapshot(snapshot);
+};
+
+export const buildGlobalWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt = new Date().toISOString(),
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): Omit<WorkingMemorySnapshot, 'id' | 'updated_at'> =>
+  buildWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'global',
+    generatedAt,
+  });
+
 export const persistGlobalWorkingMemorySnapshot = ({
   knowledgeDoc,
   structured,
@@ -73,12 +113,42 @@ export const persistGlobalWorkingMemorySnapshot = ({
   knowledgeDoc: KnowledgeDoc;
   structured: KnowledgeV2Document;
   generatedAt?: string;
-}): WorkingMemorySnapshot => {
-  const snapshot = buildGlobalWorkingMemorySnapshot({
+}): WorkingMemorySnapshot =>
+  persistWorkingMemorySnapshot({
     knowledgeDoc,
     structured,
+    scopeType: 'global',
     generatedAt,
   });
 
-  return upsertWorkingMemorySnapshot(snapshot);
-};
+export const buildProjectWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt = new Date().toISOString(),
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): Omit<WorkingMemorySnapshot, 'id' | 'updated_at'> =>
+  buildWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'project',
+    generatedAt,
+  });
+
+export const persistProjectWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt,
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): WorkingMemorySnapshot =>
+  persistWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'project',
+    generatedAt,
+  });
