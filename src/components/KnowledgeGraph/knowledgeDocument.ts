@@ -555,13 +555,17 @@ export const parseStructuredKnowledgeV2Doc = (
 const toWorkingMemorySnapshotStructuredDoc = (
   snapshot: WorkingMemorySnapshot,
 ): StructuredKnowledgeV2Doc | null => {
-  if (snapshot.scope_type !== 'global' || snapshot.freshness === 'stale') {
+  if (
+    !['global', 'project'].includes(snapshot.scope_type) ||
+    snapshot.freshness === 'stale'
+  ) {
     return null;
   }
 
   const payload = snapshot.payload;
   if (
-    payload?.scope?.type !== 'global' ||
+    !payload?.scope ||
+    !['global', 'project'].includes(payload.scope.type) ||
     payload.current_read == null ||
     !Array.isArray(payload.active_streams) ||
     !Array.isArray(payload.open_loops) ||
@@ -580,7 +584,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
   const syntheticStructuredJson = JSON.stringify({
     schema_version: 2,
     scope: {
-      type: 'global',
+      type: payload.scope.type,
       title: payload.scope.title || snapshot.title,
     },
     current_read: {
@@ -622,7 +626,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
   });
 
   return parseStructuredKnowledgeV2Value({
-    scope_type: 'global',
+    scope_type: payload.scope.type,
     title: payload.scope.title || snapshot.title,
     structured_json: syntheticStructuredJson,
   });
@@ -805,7 +809,8 @@ export const compileKnowledgeBrief = (
   workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): KnowledgeBrief => {
   const snapshotV2 =
-    doc?.scope_type === 'global' &&
+    (doc?.scope_type === 'global' || doc?.scope_type === 'project') &&
+    workingMemorySnapshot?.scope_type === doc.scope_type &&
     workingMemorySnapshot?.scope_key === doc.scope_key &&
     workingMemorySnapshot?.source_doc_id === doc.id
       ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)

@@ -28,6 +28,22 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Treating the Meeting View action-items rail as a hover-only visual treatment over summary text instead of a durable follow-up control surface tied to the extracted action-item entities.
 - **Notes:** This slice intentionally stops at complete/reopen controls. Dismiss/demote/snooze flows and broader follow-up draft placement remain follow-up work under `#61`.
 
+### Persist project-scoped working-memory snapshots for Knowledge docs
+- **Issue:** [#112](https://github.com/metagrover/pluto/issues/112)
+- **PR:** Pending.
+- **Changed:** Expanded the durable working-memory snapshot layer to support `project` scope in addition to `global`, persisted project-scoped snapshots during project Knowledge V2 synthesis, and taught the selected project Knowledge brief to prefer a matching fresh project snapshot while preserving the existing doc-JSON fallback when the snapshot is missing, stale, invalid, or mismatched. Focused tests now cover project snapshot persistence and project brief snapshot consumption.
+- **Why:** Pluto had already started persisting and consuming global working memory, but project Knowledge docs still could not use that durable path because the snapshot model and synthesis hooks were hardcoded to `global`. Landing one non-global scope proves the next foundation step without widening into person/stream scopes or new surfaces.
+- **Replaced:** Treating project Knowledge docs as permanently tied to transient structured JSON even when the working-memory consumer path already existed conceptually in the UI and brief compiler.
+- **Notes:** This slice is intentionally limited to project-scoped Knowledge docs. Dashboard, Ask Pluto, and broader briefing adoption remain follow-up work under `#81` and `#82`.
+
+### Persist dashboard follow-up completion
+- **Issue:** [#109](https://github.com/metagrover/pluto/issues/109)
+- **PR:** Pending.
+- **Changed:** Replaced the dashboard's local-only follow-up completion toggle with a durable `action_item` status update, refreshed the homepage briefing after successful completion writes, and surfaced an inline error when the write fails instead of silently claiming success.
+- **Why:** `#61` requires homepage follow-up surfaces to participate in a real lifecycle. The prior checkbox only mutated React state, so completed items came back after reload and never updated Pluto's underlying action memory.
+- **Replaced:** Treating dashboard completion as a cosmetic per-session toggle detached from the stored action lifecycle.
+- **Notes:** This slice only covers durable completion from the Dashboard. Dismiss/demote flows, Meeting View lifecycle controls, and attention-queue-specific UI remain follow-up work under `#61`.
+
 ### Prefer working-memory snapshots in the Dashboard workspace memory brief
 - **Issue:** [#107](https://github.com/metagrover/pluto/issues/107)
 - **PR:** Pending.
