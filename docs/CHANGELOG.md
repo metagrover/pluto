@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-27
 
+### Keep Knowledge attention items from repeating in the risks lane
+- **Issue:** [#125](https://github.com/metagrover/pluto/issues/125)
+- **PR:** Pending.
+- **Changed:** The Knowledge main stage now filters `Risks and Unknowns` items that are already promoted into `Needs Attention`, using citation-aware matching for both legacy structured docs and Knowledge V2 items. A focused render regression test now covers duplicate suppression and preserves distinct V2 risks that were not promoted into the primary attention lane.
+- **Why:** `#58` defines Knowledge as a concise re-entry surface, but current `master` could repeat the same blocker in both the primary attention lane and the risks lane. Removing that duplication keeps the page focused without redesigning the layout or changing ranking rules.
+- **Replaced:** Rendering promoted blockers twice on the same Knowledge page and forcing users to infer that both cards describe the same underlying issue.
+- **Notes:** This slice intentionally keeps distinct non-promoted risks visible and does not broaden into new scoring, lifecycle controls, or section redesign.
+
 ### Let Meeting View dismiss extracted follow-ups
 - **Issue:** [#121](https://github.com/metagrover/pluto/issues/121)
 - **PR:** Pending.
