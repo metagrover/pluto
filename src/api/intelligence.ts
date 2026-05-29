@@ -1,4 +1,7 @@
-import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
+import type {
+  AttentionItem,
+  AttentionItemStatus,
+} from '../../electron/intelligence/intelligenceTypes';
 
 const invoke = <T = unknown>(
   channel: string,
@@ -9,4 +12,20 @@ const invoke = <T = unknown>(
 
 export const getAttentionAlerts = async (): Promise<AttentionItem[]> => {
   return invoke('intelligence:alerts');
+};
+
+export const getMeetingAlerts = async (
+  meetingId: string,
+): Promise<AttentionItem[]> => {
+  return invoke('intelligence:alerts', {
+    meetingId,
+    status: ['active', 'dismissed'],
+  });
+};
+
+export const updateAlertStatus = async (
+  id: string,
+  status: AttentionItemStatus,
+): Promise<AttentionItem | null> => {
+  return invoke('intelligence:alerts:update-status', id, status);
 };

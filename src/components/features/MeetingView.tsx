@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { getMeetingAlerts, updateAlertStatus } from '../../api/intelligence';
 import {
   ENTITY_ICONS,
   type Entity,
@@ -51,6 +52,7 @@ import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
 import {
   type MeetingActionEntity,
+  type MeetingLinkedAttentionItem,
   buildMeetingActionItems,
 } from './meetingActionItems';
 
@@ -103,11 +105,15 @@ export const MeetingView = ({
   const [meetingEntities, setMeetingEntities] = useState<MeetingActionEntity[]>(
     [],
   );
+  const [meetingAttentionItems, setMeetingAttentionItems] = useState<
+    MeetingLinkedAttentionItem[]
+  >([]);
   const [meetingEntitiesLoading, setMeetingEntitiesLoading] = useState(false);
   const [meetingActionError, setMeetingActionError] = useState<string | null>(
     null,
   );
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [pendingDismissId, setPendingDismissId] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     if (!transcriptVisible) {
@@ -147,6 +153,7 @@ export const MeetingView = ({
     setRegenerateNotesError(null);
     setMeetingActionError(null);
     setPendingActionId(null);
+    setPendingDismissId(null);
   }, [selectedMeeting.id]);
 
   useEffect(() => {
@@ -155,11 +162,58 @@ export const MeetingView = ({
     const fetchMeetingEntities = async () => {
       setMeetingEntitiesLoading(true);
       try {
-        const data = (await getMeetingEntities(
-          String(selectedMeeting.id),
-        )) as MeetingActionEntity[];
+        const [entitiesResult, alertsResult] = await Promise.allSettled([
+          getMeetingEntities(String(selectedMeeting.id)),
+          getMeetingAlerts(String(selectedMeeting.id)),
+        ]);
+
+        const data =
+          entitiesResult.status === 'fulfilled'
+            ? (entitiesResult.value as MeetingActionEntity[])
+            : null;
         if (!cancelled) {
-          setMeetingEntities(data);
+          if (data) {
+            setMeetingEntities(data);
+          }
+          if (alertsResult.status === 'fulfilled') {
+            const linkedAlerts = Array.isArray(alertsResult.value)
+              ? (
+                  alertsResult.value as Array<{
+                    id?: unknown;
+                    status?: unknown;
+                    related_entity_ids?: unknown;
+                  }>
+                )
+                  .filter(
+                    (
+                      item,
+                    ): item is {
+                      id: string;
+                      status: 'active' | 'dismissed';
+                      related_entity_ids: string[];
+                    } =>
+                      typeof item.id === 'string' &&
+                      (item.status === 'active' ||
+                        item.status === 'dismissed') &&
+                      Array.isArray(item.related_entity_ids),
+                  )
+                  .map((item) => ({
+                    id: item.id,
+                    status: item.status,
+                    related_entity_ids: item.related_entity_ids,
+                  }))
+              : [];
+            setMeetingAttentionItems(linkedAlerts);
+          } else {
+            console.error(
+              'Failed to fetch meeting attention items:',
+              alertsResult.reason,
+            );
+            setMeetingAttentionItems([]);
+          }
+        }
+        if (entitiesResult.status === 'rejected') {
+          throw entitiesResult.reason;
         }
       } catch (error) {
         if (!cancelled) {
@@ -262,6 +316,7 @@ export const MeetingView = ({
   );
   const meetingActionItems = buildMeetingActionItems({
     meetingEntities,
+    linkedAttentionItems: meetingAttentionItems,
     fallbackActionItems: actionItems,
   });
 
@@ -478,6 +533,47 @@ export const MeetingView = ({
       );
     } finally {
       setPendingActionId(null);
+    }
+  };
+
+  const toggleMeetingActionDismissal = async (
+    attentionItemId: string,
+    dismissed: boolean,
+  ) => {
+    if (pendingDismissId) return;
+
+    setMeetingActionError(null);
+    setPendingDismissId(attentionItemId);
+    const nextStatus = dismissed ? 'active' : 'dismissed';
+
+    setMeetingAttentionItems((prev) =>
+      prev.map((item) =>
+        item.id === attentionItemId ? { ...item, status: nextStatus } : item,
+      ),
+    );
+
+    try {
+      await updateAlertStatus(attentionItemId, nextStatus);
+      window.dispatchEvent(
+        new CustomEvent('MEETING_ENTITIES_UPDATED', {
+          detail: { meetingId: String(selectedMeeting.id) },
+        }),
+      );
+    } catch (error) {
+      console.error('Failed to update meeting follow-up dismissal:', error);
+      setMeetingActionError('Could not update this follow-up right now.');
+      setMeetingAttentionItems((prev) =>
+        prev.map((item) =>
+          item.id === attentionItemId
+            ? {
+                ...item,
+                status: dismissed ? 'dismissed' : 'active',
+              }
+            : item,
+        ),
+      );
+    } finally {
+      setPendingDismissId(null);
     }
   };
 
@@ -941,13 +1037,18 @@ export const MeetingView = ({
                     ) : (
                       <div
                         key={item.id}
-                        className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-premium flex gap-4 transition-all card-hover-effect"
+                        className={`p-6 rounded-2xl border shadow-premium flex gap-4 transition-all card-hover-effect ${
+                          item.dismissalState === 'dismissed'
+                            ? 'bg-amber-500/5 border-amber-500/20'
+                            : 'bg-pro-surface border-pro-border'
+                        }`}
                       >
                         <button
                           type="button"
                           disabled={
                             !item.actionable ||
                             pendingActionId === item.id ||
+                            pendingDismissId === item.attentionItemId ||
                             meetingEntitiesLoading
                           }
                           onClick={() =>
@@ -963,7 +1064,9 @@ export const MeetingView = ({
                               ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
                               : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
                           } ${
-                            !item.actionable || pendingActionId === item.id
+                            !item.actionable ||
+                            pendingActionId === item.id ||
+                            pendingDismissId === item.attentionItemId
                               ? 'cursor-not-allowed opacity-70'
                               : ''
                           }`}
@@ -1000,6 +1103,11 @@ export const MeetingView = ({
                                 Owner: {item.assignee}
                               </span>
                             ) : null}
+                            {item.dismissalState === 'dismissed' ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+                                Dismissed
+                              </span>
+                            ) : null}
                             {item.dueLabel ? (
                               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
                                 {item.dueLabel}
@@ -1013,6 +1121,34 @@ export const MeetingView = ({
                             <p className="text-[12px] font-medium leading-relaxed text-pro-text-muted">
                               {highlightEntities(item.context)}
                             </p>
+                          ) : null}
+                          {item.attentionItemId && item.dismissalLabel ? (
+                            <div>
+                              <button
+                                type="button"
+                                disabled={
+                                  pendingDismissId === item.attentionItemId ||
+                                  meetingEntitiesLoading
+                                }
+                                onClick={() =>
+                                  toggleMeetingActionDismissal(
+                                    item.attentionItemId as string,
+                                    item.dismissalState === 'dismissed',
+                                  )
+                                }
+                                className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                                  pendingDismissId === item.attentionItemId
+                                    ? 'cursor-not-allowed text-pro-text-muted/50'
+                                    : item.dismissalState === 'dismissed'
+                                      ? 'text-amber-700 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200'
+                                      : 'text-pro-text-muted/70 hover:text-pro-accent'
+                                }`}
+                              >
+                                {pendingDismissId === item.attentionItemId
+                                  ? 'Updating...'
+                                  : item.dismissalLabel}
+                              </button>
+                            </div>
                           ) : null}
                         </div>
                       </div>

@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-27
 
+### Let Meeting View dismiss extracted follow-ups
+- **Issue:** [#121](https://github.com/metagrover/pluto/issues/121)
+- **PR:** Pending.
+- **Changed:** Meeting View now loads meeting-linked durable attention items alongside extracted `action_item` entities, shows a visible dismissed state for false-positive follow-ups, and lets users dismiss or reopen those linked follow-ups through the existing attention-item status IPC. The completion rail still works for active follow-ups, while dismissed items no longer present as normal active work.
+- **Why:** `#61` still requires users to demote false-positive follow-ups without them reappearing unchanged. The linked action-item rail from `#114` already exposed the right meeting context, so adding dismiss/reopen there closes the next accountability gap without redesigning dashboard or draft-generation flows.
+- **Replaced:** Treating Meeting View follow-ups as only complete-or-active lifecycle items even when Pluto's durable attention queue already tracked dismissed false positives separately.
+- **Notes:** This slice stays scoped to dismiss/reopen for meeting-linked attention items. Snooze, broader demotion taxonomy, and follow-up draft changes remain separate work under `#61`.
+
 ### Restore the high-severity dependency audit gate
 - **Issue:** [#123](https://github.com/metagrover/pluto/issues/123)
 - **PR:** Pending.

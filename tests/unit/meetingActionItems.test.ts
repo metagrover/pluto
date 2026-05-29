@@ -93,6 +93,9 @@ describe('buildMeetingActionItems', () => {
         context: null,
         actionable: false,
         toggleLabel: null,
+        attentionItemId: null,
+        dismissalState: null,
+        dismissalLabel: null,
       },
       {
         id: 'fallback-2',
@@ -103,7 +106,51 @@ describe('buildMeetingActionItems', () => {
         context: null,
         actionable: false,
         toggleLabel: null,
+        attentionItemId: null,
+        dismissalState: null,
+        dismissalLabel: null,
       },
     ]);
+  });
+
+  it('maps linked attention items to dismiss and reopen affordances', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'active-follow-up',
+          name: 'Send partner recap',
+        }),
+        makeMeetingEntity({
+          id: 'dismissed-follow-up',
+          name: 'Schedule optional sync',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-active',
+          status: 'active',
+          related_entity_ids: ['active-follow-up'],
+        },
+        {
+          id: 'attention-dismissed',
+          status: 'dismissed',
+          related_entity_ids: ['dismissed-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items[0]).toMatchObject({
+      id: 'active-follow-up',
+      attentionItemId: 'attention-active',
+      dismissalLabel: 'Dismiss',
+      dismissalState: 'active',
+    });
+    expect(items[1]).toMatchObject({
+      id: 'dismissed-follow-up',
+      attentionItemId: 'attention-dismissed',
+      dismissalLabel: 'Reopen',
+      dismissalState: 'dismissed',
+    });
   });
 });
