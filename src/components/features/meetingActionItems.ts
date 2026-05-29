@@ -12,11 +12,15 @@ export type MeetingActionItemStatus =
   | 'overdue'
   | 'fallback';
 
-export type MeetingActionDismissalState = 'active' | 'dismissed' | null;
+export type MeetingActionAttentionStatus =
+  | 'active'
+  | 'dismissed'
+  | 'snoozed'
+  | null;
 
 export interface MeetingLinkedAttentionItem {
   id: string;
-  status: 'active' | 'dismissed';
+  status: 'active' | 'dismissed' | 'snoozed';
   related_entity_ids: string[];
 }
 
@@ -30,8 +34,9 @@ export interface MeetingActionItemCard {
   actionable: boolean;
   toggleLabel: 'Mark complete' | 'Reopen' | null;
   attentionItemId: string | null;
-  dismissalState: MeetingActionDismissalState;
-  dismissalLabel: 'Dismiss' | 'Reopen' | null;
+  attentionStatus: MeetingActionAttentionStatus;
+  dismissLabel: 'Dismiss' | 'Reopen' | null;
+  snoozeLabel: 'Snooze' | 'Reopen' | null;
 }
 
 interface BuildMeetingActionItemsParams {
@@ -110,7 +115,6 @@ export const buildMeetingActionItems = ({
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);
-      const dismissalState = linkedAttention?.status ?? null;
       return {
         id: entity.id,
         title: entity.name,
@@ -118,16 +122,26 @@ export const buildMeetingActionItems = ({
         assignee: entity.assigned_to,
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,
-        actionable: dismissalState !== 'dismissed',
+        actionable: linkedAttention?.status !== 'dismissed',
         toggleLabel: status === 'completed' ? 'Reopen' : 'Mark complete',
         attentionItemId: linkedAttention?.id ?? null,
-        dismissalState,
-        dismissalLabel:
-          dismissalState === null
+        attentionStatus: linkedAttention?.status ?? null,
+        dismissLabel:
+          linkedAttention == null
             ? null
-            : dismissalState === 'dismissed'
+            : linkedAttention.status === 'dismissed'
               ? 'Reopen'
+              : linkedAttention.status === 'snoozed'
+                ? null
               : 'Dismiss',
+        snoozeLabel:
+          linkedAttention == null
+            ? null
+            : linkedAttention.status === 'dismissed'
+              ? null
+              : linkedAttention.status === 'snoozed'
+                ? 'Reopen'
+                : 'Snooze',
       } satisfies MeetingActionItemCard;
     });
 
@@ -146,8 +160,9 @@ export const buildMeetingActionItems = ({
       actionable: false,
       toggleLabel: null,
       attentionItemId: null,
-      dismissalState: null,
-      dismissalLabel: null,
+      attentionStatus: null,
+      dismissLabel: null,
+      snoozeLabel: null,
     }))
     .filter((item) => item.title.length > 0);
 };

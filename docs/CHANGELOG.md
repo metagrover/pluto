@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-29
+
+### Let Meeting View snooze extracted follow-ups
+- **Issue:** [#132](https://github.com/metagrover/pluto/issues/132)
+- **PR:** Pending.
+- **Changed:** Meeting View now surfaces the durable `snoozed` attention lifecycle state for linked follow-ups, lets users snooze active follow-ups or reopen snoozed ones back to active, and keeps the existing complete and dismiss controls intact. The linked follow-up mapping test coverage now includes snooze/reopen affordances alongside the prior dismiss/reopen behavior.
+- **Why:** `#61` still requires the commitment lifecycle to support more than complete-or-dismiss semantics. Pluto's backend and sync path already preserved `snoozed`, but current `master` had no source-meeting UI for deferring routine follow-ups without resolving them or treating them as false positives.
+- **Replaced:** Forcing users to choose only between completing a follow-up or dismissing it entirely even when the real intent was to defer it and come back later.
+- **Notes:** This slice stays scoped to Meeting View follow-ups. It does not add reminder scheduling, notifications, or broader follow-up surfaces.
+
 ## 2026-05-27
 
 ### Keep Knowledge attention items from repeating in the risks lane

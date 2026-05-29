@@ -113,7 +113,9 @@ export const MeetingView = ({
     null,
   );
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
-  const [pendingDismissId, setPendingDismissId] = useState<string | null>(null);
+  const [pendingAttentionId, setPendingAttentionId] = useState<string | null>(
+    null,
+  );
 
   useLayoutEffect(() => {
     if (!transcriptVisible) {
@@ -153,7 +155,7 @@ export const MeetingView = ({
     setRegenerateNotesError(null);
     setMeetingActionError(null);
     setPendingActionId(null);
-    setPendingDismissId(null);
+    setPendingAttentionId(null);
   }, [selectedMeeting.id]);
 
   useEffect(() => {
@@ -189,12 +191,13 @@ export const MeetingView = ({
                       item,
                     ): item is {
                       id: string;
-                      status: 'active' | 'dismissed';
+                      status: 'active' | 'dismissed' | 'snoozed';
                       related_entity_ids: string[];
                     } =>
                       typeof item.id === 'string' &&
                       (item.status === 'active' ||
-                        item.status === 'dismissed') &&
+                        item.status === 'dismissed' ||
+                        item.status === 'snoozed') &&
                       Array.isArray(item.related_entity_ids),
                   )
                   .map((item) => ({
@@ -538,13 +541,14 @@ export const MeetingView = ({
 
   const toggleMeetingActionDismissal = async (
     attentionItemId: string,
-    dismissed: boolean,
+    nextStatus: 'active' | 'dismissed' | 'snoozed',
   ) => {
-    if (pendingDismissId) return;
+    if (pendingAttentionId) return;
 
     setMeetingActionError(null);
-    setPendingDismissId(attentionItemId);
-    const nextStatus = dismissed ? 'active' : 'dismissed';
+    setPendingAttentionId(attentionItemId);
+    const previous = meetingAttentionItems.find((item) => item.id === attentionItemId);
+    const previousStatus = previous?.status ?? 'active';
 
     setMeetingAttentionItems((prev) =>
       prev.map((item) =>
@@ -567,13 +571,13 @@ export const MeetingView = ({
           item.id === attentionItemId
             ? {
                 ...item,
-                status: dismissed ? 'dismissed' : 'active',
+                status: previousStatus,
               }
             : item,
         ),
       );
     } finally {
-      setPendingDismissId(null);
+      setPendingAttentionId(null);
     }
   };
 
@@ -1038,8 +1042,10 @@ export const MeetingView = ({
                       <div
                         key={item.id}
                         className={`p-6 rounded-2xl border shadow-premium flex gap-4 transition-all card-hover-effect ${
-                          item.dismissalState === 'dismissed'
+                          item.attentionStatus === 'dismissed'
                             ? 'bg-amber-500/5 border-amber-500/20'
+                            : item.attentionStatus === 'snoozed'
+                              ? 'bg-sky-500/5 border-sky-500/20'
                             : 'bg-pro-surface border-pro-border'
                         }`}
                       >
@@ -1048,7 +1054,7 @@ export const MeetingView = ({
                           disabled={
                             !item.actionable ||
                             pendingActionId === item.id ||
-                            pendingDismissId === item.attentionItemId ||
+                            pendingAttentionId === item.attentionItemId ||
                             meetingEntitiesLoading
                           }
                           onClick={() =>
@@ -1062,11 +1068,11 @@ export const MeetingView = ({
                           className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all ${
                             item.status === 'completed'
                               ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
-                              : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
+                            : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
                           } ${
                             !item.actionable ||
                             pendingActionId === item.id ||
-                            pendingDismissId === item.attentionItemId
+                            pendingAttentionId === item.attentionItemId
                               ? 'cursor-not-allowed opacity-70'
                               : ''
                           }`}
@@ -1103,9 +1109,13 @@ export const MeetingView = ({
                                 Owner: {item.assignee}
                               </span>
                             ) : null}
-                            {item.dismissalState === 'dismissed' ? (
+                            {item.attentionStatus === 'dismissed' ? (
                               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
                                 Dismissed
+                              </span>
+                            ) : item.attentionStatus === 'snoozed' ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">
+                                Snoozed
                               </span>
                             ) : null}
                             {item.dueLabel ? (
@@ -1122,32 +1132,65 @@ export const MeetingView = ({
                               {highlightEntities(item.context)}
                             </p>
                           ) : null}
-                          {item.attentionItemId && item.dismissalLabel ? (
-                            <div>
-                              <button
-                                type="button"
-                                disabled={
-                                  pendingDismissId === item.attentionItemId ||
-                                  meetingEntitiesLoading
-                                }
-                                onClick={() =>
-                                  toggleMeetingActionDismissal(
-                                    item.attentionItemId as string,
-                                    item.dismissalState === 'dismissed',
-                                  )
-                                }
-                                className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
-                                  pendingDismissId === item.attentionItemId
-                                    ? 'cursor-not-allowed text-pro-text-muted/50'
-                                    : item.dismissalState === 'dismissed'
-                                      ? 'text-amber-700 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200'
-                                      : 'text-pro-text-muted/70 hover:text-pro-accent'
-                                }`}
-                              >
-                                {pendingDismissId === item.attentionItemId
-                                  ? 'Updating...'
-                                  : item.dismissalLabel}
-                              </button>
+                          {item.attentionItemId &&
+                          (item.dismissLabel || item.snoozeLabel) ? (
+                            <div className="flex flex-wrap gap-3">
+                              {item.dismissLabel ? (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    pendingAttentionId === item.attentionItemId ||
+                                    meetingEntitiesLoading
+                                  }
+                                  onClick={() =>
+                                    toggleMeetingActionDismissal(
+                                      item.attentionItemId as string,
+                                      item.attentionStatus === 'dismissed'
+                                        ? 'active'
+                                        : 'dismissed',
+                                    )
+                                  }
+                                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                                    pendingAttentionId === item.attentionItemId
+                                      ? 'cursor-not-allowed text-pro-text-muted/50'
+                                      : item.attentionStatus === 'dismissed'
+                                        ? 'text-amber-700 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200'
+                                        : 'text-pro-text-muted/70 hover:text-pro-accent'
+                                  }`}
+                                >
+                                  {pendingAttentionId === item.attentionItemId
+                                    ? 'Updating...'
+                                    : item.dismissLabel}
+                                </button>
+                              ) : null}
+                              {item.snoozeLabel ? (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    pendingAttentionId === item.attentionItemId ||
+                                    meetingEntitiesLoading
+                                  }
+                                  onClick={() =>
+                                    toggleMeetingActionDismissal(
+                                      item.attentionItemId as string,
+                                      item.attentionStatus === 'snoozed'
+                                        ? 'active'
+                                        : 'snoozed',
+                                    )
+                                  }
+                                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                                    pendingAttentionId === item.attentionItemId
+                                      ? 'cursor-not-allowed text-pro-text-muted/50'
+                                      : item.attentionStatus === 'snoozed'
+                                        ? 'text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200'
+                                        : 'text-pro-text-muted/70 hover:text-sky-600 dark:hover:text-sky-300'
+                                  }`}
+                                >
+                                  {pendingAttentionId === item.attentionItemId
+                                    ? 'Updating...'
+                                    : item.snoozeLabel}
+                                </button>
+                              ) : null}
                             </div>
                           ) : null}
                         </div>
