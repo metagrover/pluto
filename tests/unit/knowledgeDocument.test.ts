@@ -585,6 +585,84 @@ describe('knowledge document utilities', () => {
     });
   });
 
+  it('prefers a matching project working-memory snapshot for a project knowledge doc', () => {
+    const doc = makeDoc({
+      id: 'doc-project',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project Atlas',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'project', title: 'Project Atlas' },
+        current_read: {
+          headline: 'Doc JSON fallback should not win when snapshot matches.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc fallback only.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.5,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project Atlas',
+      source_doc_id: 'doc-project',
+      payload: {
+        ...baseSnapshot.payload,
+        scope: {
+          type: 'project',
+          key: 'project-1',
+          title: 'Project Atlas',
+        },
+        source: {
+          knowledge_doc_id: 'doc-project',
+          knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+        },
+        current_read: {
+          ...baseSnapshot.payload.current_read,
+          headline: 'Project snapshot-backed current read should win.',
+        },
+      },
+    });
+
+    expect(brief.headline).toBe(
+      'Project snapshot-backed current read should win.',
+    );
+    expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
+  });
+
   it('falls back to doc JSON when the global working-memory snapshot is stale', () => {
     const doc = makeDoc({
       structured_json: JSON.stringify({

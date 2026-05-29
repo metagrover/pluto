@@ -792,14 +792,18 @@ export const MainStage: React.FC<MainStageProps> = ({
   useEffect(() => {
     let cancelled = false;
 
-    if (!selectedDoc || selectedDoc.scope_type !== 'global') {
+    if (
+      !selectedDoc ||
+      (selectedDoc.scope_type !== 'global' &&
+        selectedDoc.scope_type !== 'project')
+    ) {
       setWorkingMemorySnapshot(null);
       return () => {
         cancelled = true;
       };
     }
 
-    void getWorkingMemorySnapshot('global', selectedDoc.scope_key)
+    void getWorkingMemorySnapshot(selectedDoc.scope_type, selectedDoc.scope_key)
       .then((snapshot) => {
         if (!cancelled) {
           setWorkingMemorySnapshot(snapshot ?? null);
