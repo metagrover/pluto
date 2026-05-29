@@ -10,6 +10,8 @@ import {
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { WorkingMemorySnapshot } from '../../../electron/db';
+import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
+import { getAttentionAlerts } from '../../api/intelligence';
 import type {
   KnowledgeDoc,
   KnowledgeDocSource,
@@ -788,18 +790,23 @@ export const MainStage: React.FC<MainStageProps> = ({
   const [retryingDocId, setRetryingDocId] = useState<string | null>(null);
   const [workingMemorySnapshot, setWorkingMemorySnapshot] =
     useState<WorkingMemorySnapshot | null>(null);
+  const [attentionAlerts, setAttentionAlerts] = useState<AttentionItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!selectedDoc || selectedDoc.scope_type !== 'global') {
+    if (
+      !selectedDoc ||
+      (selectedDoc.scope_type !== 'global' &&
+        selectedDoc.scope_type !== 'project')
+    ) {
       setWorkingMemorySnapshot(null);
       return () => {
         cancelled = true;
       };
     }
 
-    void getWorkingMemorySnapshot('global', selectedDoc.scope_key)
+    void getWorkingMemorySnapshot(selectedDoc.scope_type, selectedDoc.scope_key)
       .then((snapshot) => {
         if (!cancelled) {
           setWorkingMemorySnapshot(snapshot ?? null);
@@ -816,13 +823,41 @@ export const MainStage: React.FC<MainStageProps> = ({
     };
   }, [selectedDoc]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedDoc || selectedDoc.scope_type !== 'global') {
+      setAttentionAlerts([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getAttentionAlerts()
+      .then((items) => {
+        if (!cancelled) {
+          setAttentionAlerts(items.filter((item) => item.status === 'active'));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAttentionAlerts([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDoc]);
+
   const brief = useMemo(
     () => compileKnowledgeBrief(selectedDoc, workingMemorySnapshot),
     [selectedDoc, workingMemorySnapshot],
   );
   const attentionItems = useMemo(
-    () => compileNeedsAttention(selectedDoc, docs, projectCards),
-    [selectedDoc, docs, projectCards],
+    () =>
+      compileNeedsAttention(selectedDoc, docs, projectCards, attentionAlerts),
+    [selectedDoc, docs, projectCards, attentionAlerts],
   );
 
   if (!selectedDoc) return <EmptyState />;

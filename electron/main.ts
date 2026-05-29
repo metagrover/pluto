@@ -1800,7 +1800,10 @@ app.whenReady().then(async () => {
   // Process pre-extracted entities (save to knowledge graph)
   ipcMain.handle(
     'GENERATE_FOLLOW_UPS',
-    async (_event, { meetingTitle, actionItems, decisions, customPrompt }) => {
+    async (
+      _event,
+      { meetingTitle, participants, actionItems, decisions, customPrompt },
+    ) => {
       try {
         const settings = await getAllSettings(db);
         const provider = await getProvider(settings);
@@ -1809,6 +1812,7 @@ app.whenReady().then(async () => {
         );
         return await provider.generateFollowUpDrafts({
           meetingTitle,
+          participants,
           actionItems,
           decisions,
           customPrompt,

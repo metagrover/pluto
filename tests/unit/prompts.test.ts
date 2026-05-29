@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getEntitiesPrompt,
+  getFollowUpDraftsPrompt,
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
   getStructuredAnalysisPrompt,
@@ -265,5 +266,34 @@ describe('knowledge document prompts', () => {
     expect(prompt).toContain('"schema_version": 2');
     expect(prompt).toContain('Preserve item classifications');
     expect(prompt).not.toContain('Available meeting evidence (newest first):');
+  });
+});
+
+describe('getFollowUpDraftsPrompt', () => {
+  it('includes participant context when it is available', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'Launch Review',
+      participants: ['Jordan', 'Taylor'],
+      actionItems: ['Jordan will send the recap.'],
+      decisions: ['Ship on Friday.'],
+    });
+
+    expect(prompt).toContain('Participants:');
+    expect(prompt).toContain('- Jordan');
+    expect(prompt).toContain('- Taylor');
+    expect(prompt).toContain(
+      'Use participant names only when they appear in the participant list or action/decision evidence.',
+    );
+  });
+
+  it('falls back to a safe no-participants block when none are available', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'Launch Review',
+      actionItems: [],
+      decisions: [],
+    });
+
+    expect(prompt).toContain('Participants:');
+    expect(prompt).toContain('- None recorded');
   });
 });
