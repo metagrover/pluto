@@ -1,4 +1,5 @@
 import type { WorkingMemorySnapshot } from '../../../electron/db';
+import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
 import type {
   KnowledgeDoc,
   KnowledgeDocScopeType,
@@ -396,6 +397,20 @@ const isReliableV2Headline = (headline: string): boolean => {
   );
 };
 
+const isReliableLegacyHeadline = (headline: string): boolean => {
+  const normalized = headline.trim();
+  return (
+    Boolean(normalized) &&
+    normalized !== 'No reliable compiled brief yet.' &&
+    normalized !== 'Indexed knowledge needs a stronger synthesis.' &&
+    !looksLikeRawId(normalized) &&
+    !/^(the team discusses|the meeting opened|the conversation revolves|the user is planning)\b/i.test(
+      normalized,
+    ) &&
+    normalized.length <= 170
+  );
+};
+
 const parseStructuredKnowledgeV2Value = (
   doc: StructuredKnowledgeV2Source | null | undefined,
 ): StructuredKnowledgeV2Doc | null => {
@@ -555,13 +570,17 @@ export const parseStructuredKnowledgeV2Doc = (
 const toWorkingMemorySnapshotStructuredDoc = (
   snapshot: WorkingMemorySnapshot,
 ): StructuredKnowledgeV2Doc | null => {
-  if (snapshot.scope_type !== 'global' || snapshot.freshness === 'stale') {
+  if (
+    !['global', 'project'].includes(snapshot.scope_type) ||
+    snapshot.freshness === 'stale'
+  ) {
     return null;
   }
 
   const payload = snapshot.payload;
   if (
-    payload?.scope?.type !== 'global' ||
+    !payload?.scope ||
+    !['global', 'project'].includes(payload.scope.type) ||
     payload.current_read == null ||
     !Array.isArray(payload.active_streams) ||
     !Array.isArray(payload.open_loops) ||
@@ -580,7 +599,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
   const syntheticStructuredJson = JSON.stringify({
     schema_version: 2,
     scope: {
-      type: 'global',
+      type: payload.scope.type,
       title: payload.scope.title || snapshot.title,
     },
     current_read: {
@@ -622,7 +641,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
   });
 
   return parseStructuredKnowledgeV2Value({
-    scope_type: 'global',
+    scope_type: payload.scope.type,
     title: payload.scope.title || snapshot.title,
     structured_json: syntheticStructuredJson,
   });
@@ -805,7 +824,8 @@ export const compileKnowledgeBrief = (
   workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): KnowledgeBrief => {
   const snapshotV2 =
-    doc?.scope_type === 'global' &&
+    (doc?.scope_type === 'global' || doc?.scope_type === 'project') &&
+    workingMemorySnapshot?.scope_type === doc.scope_type &&
     workingMemorySnapshot?.scope_key === doc.scope_key &&
     workingMemorySnapshot?.source_doc_id === doc.id
       ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
@@ -1011,14 +1031,19 @@ export const compileKnowledgeBrief = (
     if (scoreDelta !== 0) return scoreDelta;
     return a.index - b.index;
   });
+  const weakSynthesisHeadline = headlineCandidates.find((candidate) =>
+    isReliableLegacyHeadline(candidate.item.text),
+  )?.item.text;
 
   return {
     isCompiled: hasCompiledItems,
     headline: hasCompiledItems
       ? headlineCandidates[0]?.item.text || 'No reliable compiled brief yet.'
-      : statementItems.length > 0 || dependencies.length > 0
-        ? 'Indexed knowledge needs a stronger synthesis.'
-        : 'No reliable compiled brief yet.',
+      : weakSynthesisHeadline
+        ? weakSynthesisHeadline
+        : statementItems.length > 0 || dependencies.length > 0
+          ? 'Indexed knowledge needs a stronger synthesis.'
+          : 'No reliable compiled brief yet.',
     lanes,
     coverage,
     activeStreams: [],
@@ -1097,11 +1122,42 @@ const attentionSortScore = (item: NeedsAttentionItem): number => {
   );
 };
 
+const mapAttentionKind = (kind: AttentionItem['kind']): NeedsAttentionKind => {
+  if (kind === 'follow_up' || kind === 'duplicate_commitment') {
+    return 'follow_up';
+  }
+  if (kind === 'blocker' || kind === 'dependency') {
+    return 'dependency';
+  }
+  return 'risk';
+};
+
 export const compileNeedsAttention = (
   doc: KnowledgeDoc | null | undefined,
   docs: KnowledgeDoc[],
   projectCards: KnowledgeProjectHealthCard[],
+  attentionItems: AttentionItem[] = [],
 ): NeedsAttentionItem[] => {
+  if (
+    doc?.scope_type === 'global' &&
+    attentionItems.some((item) => item.status === 'active')
+  ) {
+    return attentionItems
+      .filter((item) => item.status === 'active')
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        summary: item.reason,
+        severity: item.severity,
+        kind: mapAttentionKind(item.kind),
+        reasons: item.reason ? [item.reason] : [],
+        citations: item.evidence.map((evidence) => ({
+          meeting_id: evidence.meeting_id,
+          quote: evidence.quote,
+        })),
+      }));
+  }
+
   const v2 = parseStructuredKnowledgeV2Doc(doc);
   const structured = v2 ? null : parseStructuredKnowledgeDoc(doc);
   const v2Items: NeedsAttentionItem[] = v2

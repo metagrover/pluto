@@ -102,9 +102,9 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     try {
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
+        participants,
         actionItems,
         decisions,
-        participants,
         customPrompt: customPrompt.trim() || undefined,
       });
       if (res?.drafts) {

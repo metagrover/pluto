@@ -677,24 +677,23 @@ ${transcriptSlice}`;
 
 export const getFollowUpDraftsPrompt = (params: {
   meetingTitle: string;
+  participants?: string[];
   actionItems: string[];
   decisions: string[];
-  participants?: string[];
   customPrompt?: string;
 }): string => {
-  const {
-    meetingTitle,
-    actionItems,
-    decisions,
-    participants = [],
-    customPrompt,
-  } = params;
+  const { meetingTitle, participants, actionItems, decisions, customPrompt } =
+    params;
+  const participantBullets =
+    participants?.length && participants.length > 0
+      ? participants.map((participant) => `- ${participant}`).join('\n')
+      : '- None recorded';
 
   return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
 
 Meeting: ${meetingTitle}
 Participants:
-${participants.map((participant) => `- ${participant}`).join('\n') || '- None recorded'}
+${participantBullets}
 Decisions:
 ${decisions.map((d) => `- ${d}`).join('\n') || '- None recorded'}
 Action Items:
@@ -711,6 +710,8 @@ Rules:
 - Output MUST be valid JSON only.
 - Do not include placeholders like "[Your Name]" if you can avoid it, or use "The Pluto Team".
 - Ensure the tone matches the specified audience for each draft.
+- Use participant names only when they appear in the participant list or action/decision evidence.
+- If participant context is missing, keep the draft generic rather than inventing attendees or recipients.
 
 Return JSON in this exact shape:
 {
