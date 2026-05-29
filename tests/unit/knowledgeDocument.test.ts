@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { WorkingMemorySnapshot } from '../../electron/db';
+import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../src/api/knowledgeWorkspace';
 import {
@@ -166,6 +167,36 @@ const makeWorkingMemorySnapshot = (
   },
   generated_at: '2026-04-25T10:00:00.000Z',
   updated_at: '2026-04-25T10:00:00.000Z',
+  ...overrides,
+});
+
+const makeAttentionItem = (
+  overrides: Partial<AttentionItem> = {},
+): AttentionItem => ({
+  id: 'attention-1',
+  dedupe_key: 'knowledge_v2:attention-1',
+  kind: 'blocker',
+  severity: 'critical',
+  score: 0.95,
+  status: 'active',
+  title: 'API instrumentation approval is still pending.',
+  reason: 'Approval still blocks the active launch stream.',
+  source: 'knowledge_v2',
+  score_breakdown: null,
+  evidence: [
+    {
+      meeting_id: 'm-approval',
+      quote: 'Approval is still pending for instrumentation.',
+      source_kind: 'knowledge_v2',
+    },
+  ],
+  related_entity_ids: [],
+  related_stream_ids: ['stream-launch'],
+  related_meeting_ids: ['m-approval'],
+  created_at: '2026-04-25T10:00:00.000Z',
+  updated_at: '2026-04-25T10:00:00.000Z',
+  last_seen_at: '2026-04-25T10:00:00.000Z',
+  resolved_at: null,
   ...overrides,
 });
 
@@ -1415,6 +1446,136 @@ describe('knowledge document utilities', () => {
       severity: 'watch',
       kind: 'project',
     });
+  });
+
+  it('prefers active durable attention items for the global Knowledge doc', () => {
+    const sourceDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        chapters: [
+          {
+            chapter_id: 'global',
+            title: 'Workspace',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Legacy fallback risk item',
+                why_it_matters:
+                  'This should be ignored when queue items exist.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [
+        makeAttentionItem(),
+        makeAttentionItem({
+          id: 'attention-2',
+          dedupe_key: 'action_tracker:attention-2',
+          kind: 'follow_up',
+          severity: 'watch',
+          score: 0.64,
+          title: 'Confirm launch owner',
+          reason: 'The current launch plan still lacks an owner.',
+          evidence: [
+            {
+              meeting_id: 'm-launch',
+              quote: 'We still need to assign a launch owner.',
+              source_kind: 'action_tracker',
+            },
+          ],
+        }),
+      ],
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'attention-1',
+        title: 'API instrumentation approval is still pending.',
+        summary: 'Approval still blocks the active launch stream.',
+        severity: 'critical',
+        kind: 'dependency',
+        reasons: ['Approval still blocks the active launch stream.'],
+        citations: [
+          {
+            meeting_id: 'm-approval',
+            quote: 'Approval is still pending for instrumentation.',
+          },
+        ],
+      },
+      {
+        id: 'attention-2',
+        title: 'Confirm launch owner',
+        summary: 'The current launch plan still lacks an owner.',
+        severity: 'watch',
+        kind: 'follow_up',
+        reasons: ['The current launch plan still lacks an owner.'],
+        citations: [
+          {
+            meeting_id: 'm-launch',
+            quote: 'We still need to assign a launch owner.',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('keeps fallback needs-attention logic for non-global docs even when queue items exist', () => {
+    const sourceDoc = makeDoc({
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'project', title: 'Project One' },
+        chapters: [
+          {
+            chapter_id: 'project',
+            title: 'Project One',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Project synthesis needs a dependency review.',
+                why_it_matters:
+                  'A blocker is unresolved in the current project.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [makeAttentionItem()],
+    );
+
+    expect(attention).toMatchObject([
+      {
+        title: 'Project synthesis needs a dependency review.',
+        severity: 'critical',
+        kind: 'risk',
+      },
+    ]);
   });
 
   it('classifies extracted follow-ups as watch items instead of critical risks', () => {

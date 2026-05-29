@@ -30,6 +30,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-26
 
+### Let Knowledge Needs Attention read from the durable queue
+- **Issue:** [#118](https://github.com/metagrover/pluto/issues/118)
+- **PR:** Pending.
+- **Changed:** The global Knowledge main stage now loads active durable attention items and uses them as the source of truth for the `Needs Attention` lane when they exist. Queue-backed items preserve their severity, reason, and citations, while non-global docs and empty-queue states still fall back to the existing Knowledge-doc and project-health heuristics. Focused unit coverage now proves both the queue-backed and fallback paths.
+- **Why:** `#81` promises that Knowledge can read from the durable attention queue when available. Before this slice, Pluto already persisted ranked attention items from Knowledge V2 synthesis and the action tracker, but the Knowledge surface still rebuilt a disconnected heuristic list instead of reflecting the same prioritized queue.
+- **Replaced:** Treating the global Knowledge `Needs Attention` lane as a local reconstruction from doc sections and project cards even when a durable ranked attention queue already existed.
+- **Notes:** This slice is intentionally read-only. It does not add lifecycle controls inside Knowledge or redesign the page layout.
+
 ### Keep weak-synthesis Knowledge Current Read useful
 - **Issue:** [#116](https://github.com/metagrover/pluto/issues/116)
 - **PR:** Pending.
