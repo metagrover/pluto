@@ -28,7 +28,39 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Treating dashboard completion as a cosmetic per-session toggle detached from the stored action lifecycle.
 - **Notes:** This slice only covers durable completion from the Dashboard. Dismiss/demote flows, Meeting View lifecycle controls, and attention-queue-specific UI remain follow-up work under `#61`.
 
+### Prefer working-memory snapshots in the Dashboard workspace memory brief
+- **Issue:** [#107](https://github.com/metagrover/pluto/issues/107)
+- **PR:** Pending.
+- **Changed:** The Dashboard home model now loads the persisted global working-memory snapshot and prefers its headline, source count, and trust metadata for the global Workspace Memory card when the snapshot matches the current global Knowledge doc. The Dashboard still falls back to the existing Knowledge-doc path when the snapshot is missing, stale, malformed, or sourced from a different doc, and focused tests now cover both the snapshot-backed card path and fallback behavior.
+- **Why:** `#81` needs durable working-memory consumers beyond the Knowledge main stage so Pluto's re-entry surfaces stop depending only on transient doc JSON. The Dashboard is the next smallest consumer because it already renders the global memory card and uses that card for its fallback briefing state when no meeting or urgent action should dominate.
+- **Replaced:** Treating the Dashboard's global Workspace Memory summary as a direct read of Knowledge-doc JSON even after Pluto had begun persisting and consuming a durable working-memory snapshot elsewhere.
+- **Notes:** This slice intentionally keeps the Dashboard's priority rules unchanged: overdue or stale actions and the latest meeting still outrank memory cards, and broader Ask Pluto or non-global consumers remain follow-up work under `#81`.
+
+### Prefer working-memory snapshots in global Knowledge Current Read
+- **Issue:** [#105](https://github.com/metagrover/pluto/issues/105)
+- **PR:** Pending.
+- **Changed:** The global Knowledge Current Read now prefers the persisted working-memory snapshot created in `#102` when one is available and valid. The main Knowledge stage fetches that durable snapshot for the global doc, compiles the headline/streams/risks from the snapshot payload, and falls back to the existing Knowledge V2 document path when the snapshot is missing, stale, or malformed. Focused tests now cover snapshot-backed compilation plus stale and invalid fallback behavior.
+- **Why:** `#81` needs downstream Knowledge surfaces to read from durable working memory instead of transient synthesis output. Using the first persisted global snapshot proves the consumer path without widening scope into dashboard, Ask Pluto, or non-global memory consumers yet.
+- **Replaced:** Treating the global Knowledge brief as a transient read of the doc JSON even after Pluto had started persisting an inspectable working-memory snapshot.
+- **Notes:** This is intentionally limited to the global Knowledge surface and stacks on the snapshot foundation branch from `#102` / PR `#103`.
+
 ## 2026-05-22
+
+### Persist the first global working-memory snapshot
+- **Issue:** [#102](https://github.com/metagrover/pluto/issues/102)
+- **PR:** Pending.
+- **Changed:** Added a durable `working_memory_snapshots` persistence layer plus a global snapshot builder that stores the current read, active streams, open loops, patterns, risks, evidence index, and trust/freshness metadata derived from the canonical global Knowledge V2 document. Global knowledge synthesis now refreshes that snapshot automatically, and the branch adds a small IPC/API read surface plus focused unit coverage for idempotent regeneration.
+- **Why:** `#80` needs a real durable substrate before dashboard, Ask Pluto, briefings, or later scoped snapshots can share one inspectable memory state. Reusing the global Knowledge V2 document avoids inventing a second synthesis pipeline while still giving Pluto a persistent working-memory record.
+- **Replaced:** Recomputing Pluto's global operational state only from transient Knowledge V2 synthesis output with no durable snapshot layer for downstream consumers or debugging.
+- **Notes:** This slice is intentionally global-only. Project/person-scoped working-memory expansion remains under `#80`.
+
+### Add durable attention-item lifecycle transitions
+- **Issue:** [#100](https://github.com/metagrover/pluto/issues/100)
+- **PR:** Pending.
+- **Changed:** Added a durable attention-item status mutation path, exposed it through the Electron attention IPC surface, and taught queue upserts to preserve resolved, dismissed, snoozed, and pinned lifecycle states when the same attention signal syncs again unchanged.
+- **Why:** Pluto's follow-up loop could not become trustworthy while automated queue sync kept resetting handled items back to `active`. This foundation lets later dashboard, Meeting View, and draft work build on stable lifecycle state instead of one-off heuristics.
+- **Replaced:** Treating the durable attention queue as effectively read-only user state and allowing unchanged automated sync inputs to clobber prior lifecycle decisions.
+- **Notes:** This slice is intentionally non-UI; it establishes the persistence and sync contract that later follow-up surfaces can call.
 
 ### Explain trust badges across Pluto surfaces
 - **Issue:** [#98](https://github.com/metagrover/pluto/issues/98)

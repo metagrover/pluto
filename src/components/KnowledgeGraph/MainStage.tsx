@@ -8,13 +8,15 @@ import {
   X,
 } from 'lucide-react';
 import type React from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import type { WorkingMemorySnapshot } from '../../../electron/db';
 import type {
   KnowledgeDoc,
   KnowledgeDocSource,
   KnowledgeDocStatus,
 } from '../../api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../api/knowledgeWorkspace';
+import { getWorkingMemorySnapshot } from '../../api/workingMemory';
 import type { TrustStatus } from '../../utils/trustStatus';
 import { getTrustStatusMeta } from '../../utils/trustStatus';
 import {
@@ -784,9 +786,39 @@ export const MainStage: React.FC<MainStageProps> = ({
   void onSaveCorrection;
   const [whyItem, setWhyItem] = useState<WhyItem | null>(null);
   const [retryingDocId, setRetryingDocId] = useState<string | null>(null);
+  const [workingMemorySnapshot, setWorkingMemorySnapshot] =
+    useState<WorkingMemorySnapshot | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedDoc || selectedDoc.scope_type !== 'global') {
+      setWorkingMemorySnapshot(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getWorkingMemorySnapshot('global', selectedDoc.scope_key)
+      .then((snapshot) => {
+        if (!cancelled) {
+          setWorkingMemorySnapshot(snapshot ?? null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkingMemorySnapshot(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDoc]);
+
   const brief = useMemo(
-    () => compileKnowledgeBrief(selectedDoc),
-    [selectedDoc],
+    () => compileKnowledgeBrief(selectedDoc, workingMemorySnapshot),
+    [selectedDoc, workingMemorySnapshot],
   );
   const attentionItems = useMemo(
     () => compileNeedsAttention(selectedDoc, docs, projectCards),

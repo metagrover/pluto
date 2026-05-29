@@ -119,6 +119,7 @@ import {
   clearAlertsForMeeting,
   getAlerts,
   runPostMeetingTriggers,
+  updateAlertStatus,
 } from './intelligence/proactiveEngine';
 import { parseQuery, retrieveContext } from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
@@ -1234,6 +1235,14 @@ app.whenReady().then(async () => {
     db.getKnowledgeDocs(filters),
   );
   ipcMain.handle('GET_KNOWLEDGE_DOC', (_event, id) => db.getKnowledgeDoc(id));
+  ipcMain.handle(
+    'GET_WORKING_MEMORY_SNAPSHOT',
+    (_event, { scopeType, scopeKey }) =>
+      db.getWorkingMemorySnapshot(scopeType, scopeKey),
+  );
+  ipcMain.handle('LIST_WORKING_MEMORY_SNAPSHOTS', () =>
+    db.listWorkingMemorySnapshots(),
+  );
   ipcMain.handle('GET_KNOWLEDGE_DOC_VERSIONS', (_event, { docId, limit }) =>
     db.getKnowledgeDocVersions(docId, limit),
   );
@@ -1945,6 +1954,13 @@ app.whenReady().then(async () => {
     clearAlertsForMeeting(meetingId);
     return true;
   });
+
+  ipcMain.handle(
+    'intelligence:alerts:update-status',
+    (_event, id: string, status: db.AttentionItemStatus) => {
+      return updateAlertStatus(id, status);
+    },
+  );
 
   // Permissions handlers
   ipcMain.handle('CHECK_MICROPHONE_PERMISSION', () => {

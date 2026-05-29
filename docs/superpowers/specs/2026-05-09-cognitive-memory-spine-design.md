@@ -154,7 +154,7 @@ Trust status is the user-facing explanation of how Pluto wants a claim interpret
 Phase 0 decision:
 
 - Trust status should normalize around grounded, inferred, weak evidence, stale, synthesis failed, and needs review semantics.
-- Existing `trust_message`, evidence mode, freshness, and source-quality summaries are the starting contract until Issue #57 hardens labels across surfaces.
+- Issue #57 established the shared trust contract across Knowledge, Dashboard, and Ask Pluto: existing `trust_message`, evidence mode, freshness, and source-quality summaries now flow through those canonical labels and their shared explanations.
 
 ### Correction feedback
 
@@ -292,8 +292,7 @@ These are named so later issues make them explicit rather than rediscovering the
 
 1. When Phase 2 persists working memory, should snapshots be full documents, normalized tables, or both?
 2. When Phase 1 creates attention storage, should evidence references point directly to meetings/entities or support a normalized evidence-reference table?
-3. How much of trust-status labeling belongs in Issue #57 versus the future attention schema itself?
-4. What is the smallest durable stream identity Pluto needs once working memory and attention share the same state?
+3. What is the smallest durable stream identity Pluto needs once working memory and attention share the same state?
 
 ## Guidance For Phase 1 Issues
 
