@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { WorkingMemorySnapshot } from '../../electron/db';
+import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../src/api/knowledgeWorkspace';
 import {
@@ -166,6 +167,36 @@ const makeWorkingMemorySnapshot = (
   },
   generated_at: '2026-04-25T10:00:00.000Z',
   updated_at: '2026-04-25T10:00:00.000Z',
+  ...overrides,
+});
+
+const makeAttentionItem = (
+  overrides: Partial<AttentionItem> = {},
+): AttentionItem => ({
+  id: 'attention-1',
+  dedupe_key: 'knowledge_v2:attention-1',
+  kind: 'blocker',
+  severity: 'critical',
+  score: 0.95,
+  status: 'active',
+  title: 'API instrumentation approval is still pending.',
+  reason: 'Approval still blocks the active launch stream.',
+  source: 'knowledge_v2',
+  score_breakdown: null,
+  evidence: [
+    {
+      meeting_id: 'm-approval',
+      quote: 'Approval is still pending for instrumentation.',
+      source_kind: 'knowledge_v2',
+    },
+  ],
+  related_entity_ids: [],
+  related_stream_ids: ['stream-launch'],
+  related_meeting_ids: ['m-approval'],
+  created_at: '2026-04-25T10:00:00.000Z',
+  updated_at: '2026-04-25T10:00:00.000Z',
+  last_seen_at: '2026-04-25T10:00:00.000Z',
+  resolved_at: null,
   ...overrides,
 });
 
@@ -583,6 +614,84 @@ describe('knowledge document utilities', () => {
       statementCount: 2,
       citedMeetingCount: 2,
     });
+  });
+
+  it('prefers a matching project working-memory snapshot for a project knowledge doc', () => {
+    const doc = makeDoc({
+      id: 'doc-project',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project Atlas',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'project', title: 'Project Atlas' },
+        current_read: {
+          headline: 'Doc JSON fallback should not win when snapshot matches.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc fallback only.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.5,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project Atlas',
+      source_doc_id: 'doc-project',
+      payload: {
+        ...baseSnapshot.payload,
+        scope: {
+          type: 'project',
+          key: 'project-1',
+          title: 'Project Atlas',
+        },
+        source: {
+          knowledge_doc_id: 'doc-project',
+          knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+        },
+        current_read: {
+          ...baseSnapshot.payload.current_read,
+          headline: 'Project snapshot-backed current read should win.',
+        },
+      },
+    });
+
+    expect(brief.headline).toBe(
+      'Project snapshot-backed current read should win.',
+    );
+    expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
   });
 
   it('falls back to doc JSON when the global working-memory snapshot is stale', () => {
@@ -1044,7 +1153,7 @@ describe('knowledge document utilities', () => {
 
     expect(brief.isCompiled).toBe(false);
     expect(brief.headline).toBe(
-      'Indexed knowledge needs a stronger synthesis.',
+      'Commit to exploring opportunities with major VCs.',
     );
     expect(brief.coverage).toMatchObject({
       statementCount: 1,
@@ -1052,6 +1161,53 @@ describe('knowledge document utilities', () => {
     });
     expect(brief.lanes[0].items[0].text).toBe(
       'Commit to exploring opportunities with major VCs.',
+    );
+  });
+
+  it('keeps a reliable V2 headline visible during weak synthesis', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline:
+            'API context work is moving from architecture into validation.',
+          supporting_bullets: [
+            'Demo readiness still depends on instrumentation and approval.',
+          ],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Evidence is thin but cited.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.61,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 1,
+          records: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.isCompiled).toBe(false);
+    expect(brief.headline).toBe(
+      'API context work is moving from architecture into validation.',
     );
   });
 
@@ -1290,6 +1446,136 @@ describe('knowledge document utilities', () => {
       severity: 'watch',
       kind: 'project',
     });
+  });
+
+  it('prefers active durable attention items for the global Knowledge doc', () => {
+    const sourceDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        chapters: [
+          {
+            chapter_id: 'global',
+            title: 'Workspace',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Legacy fallback risk item',
+                why_it_matters:
+                  'This should be ignored when queue items exist.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [
+        makeAttentionItem(),
+        makeAttentionItem({
+          id: 'attention-2',
+          dedupe_key: 'action_tracker:attention-2',
+          kind: 'follow_up',
+          severity: 'watch',
+          score: 0.64,
+          title: 'Confirm launch owner',
+          reason: 'The current launch plan still lacks an owner.',
+          evidence: [
+            {
+              meeting_id: 'm-launch',
+              quote: 'We still need to assign a launch owner.',
+              source_kind: 'action_tracker',
+            },
+          ],
+        }),
+      ],
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'attention-1',
+        title: 'API instrumentation approval is still pending.',
+        summary: 'Approval still blocks the active launch stream.',
+        severity: 'critical',
+        kind: 'dependency',
+        reasons: ['Approval still blocks the active launch stream.'],
+        citations: [
+          {
+            meeting_id: 'm-approval',
+            quote: 'Approval is still pending for instrumentation.',
+          },
+        ],
+      },
+      {
+        id: 'attention-2',
+        title: 'Confirm launch owner',
+        summary: 'The current launch plan still lacks an owner.',
+        severity: 'watch',
+        kind: 'follow_up',
+        reasons: ['The current launch plan still lacks an owner.'],
+        citations: [
+          {
+            meeting_id: 'm-launch',
+            quote: 'We still need to assign a launch owner.',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('keeps fallback needs-attention logic for non-global docs even when queue items exist', () => {
+    const sourceDoc = makeDoc({
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'project', title: 'Project One' },
+        chapters: [
+          {
+            chapter_id: 'project',
+            title: 'Project One',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Project synthesis needs a dependency review.',
+                why_it_matters:
+                  'A blocker is unresolved in the current project.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [makeAttentionItem()],
+    );
+
+    expect(attention).toMatchObject([
+      {
+        title: 'Project synthesis needs a dependency review.',
+        severity: 'critical',
+        kind: 'risk',
+      },
+    ]);
   });
 
   it('classifies extracted follow-ups as watch items instead of critical risks', () => {
