@@ -28,7 +28,71 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Rendering promoted blockers twice on the same Knowledge page and forcing users to infer that both cards describe the same underlying issue.
 - **Notes:** This slice intentionally keeps distinct non-promoted risks visible and does not broaden into new scoring, lifecycle controls, or section redesign.
 
+### Let Meeting View dismiss extracted follow-ups
+- **Issue:** [#121](https://github.com/metagrover/pluto/issues/121)
+- **PR:** Pending.
+- **Changed:** Meeting View now loads meeting-linked durable attention items alongside extracted `action_item` entities, shows a visible dismissed state for false-positive follow-ups, and lets users dismiss or reopen those linked follow-ups through the existing attention-item status IPC. The completion rail still works for active follow-ups, while dismissed items no longer present as normal active work.
+- **Why:** `#61` still requires users to demote false-positive follow-ups without them reappearing unchanged. The linked action-item rail from `#114` already exposed the right meeting context, so adding dismiss/reopen there closes the next accountability gap without redesigning dashboard or draft-generation flows.
+- **Replaced:** Treating Meeting View follow-ups as only complete-or-active lifecycle items even when Pluto's durable attention queue already tracked dismissed false positives separately.
+- **Notes:** This slice stays scoped to dismiss/reopen for meeting-linked attention items. Snooze, broader demotion taxonomy, and follow-up draft changes remain separate work under `#61`.
+
+### Restore the high-severity dependency audit gate
+- **Issue:** [#123](https://github.com/metagrover/pluto/issues/123)
+- **PR:** Pending.
+- **Changed:** Added a narrow `pnpm.overrides` pin so the transitive `tmp` dependency pulled through `electron-builder` resolves to `0.2.6` instead of vulnerable `0.2.5`, and refreshed the lockfile to match.
+- **Why:** Pluto's required pre-commit audit gate on current `master` was failing on `GHSA-ph9p-34f9-6g65`, which blocked otherwise-green code PRs from committing without bypassing verification.
+- **Replaced:** Accepting a broken repo-level audit gate on `master` or forcing unrelated code branches to carry the security remediation themselves.
+- **Notes:** This is intentionally a minimal dependency unblocker, not a broader package upgrade sweep.
+
 ## 2026-05-26
+
+### Include participant context in meeting follow-up drafts
+- **Issue:** [#122](https://github.com/metagrover/pluto/issues/122)
+- **PR:** Pending.
+- **Changed:** Pluto's Meeting View follow-up draft regeneration path now derives a stable participant list from transcript speakers and passes that context into the follow-up prompt. The prompt explicitly includes a deterministic participants block and tells the model to keep drafts generic instead of inventing attendees when no participant context is available. Focused tests now cover both participant extraction and prompt fallback behavior.
+- **Why:** `#61` calls for follow-up drafts to use existing meeting entities, decisions, participants, and action items. Before this slice, draft generation only received the meeting title plus action/decision text, which made recaps less grounded in who was actually in the room.
+- **Replaced:** Treating follow-up draft generation as generic meeting text generation with no explicit participant context even when transcript speaker data was already available locally.
+- **Notes:** This slice intentionally stops at prompt/context wiring. It does not redesign the Meeting View draft panel or expand into lifecycle controls, email sending, or Slack integrations.
+
+### Let Knowledge Needs Attention read from the durable queue
+- **Issue:** [#118](https://github.com/metagrover/pluto/issues/118)
+- **PR:** Pending.
+- **Changed:** The global Knowledge main stage now loads active durable attention items and uses them as the source of truth for the `Needs Attention` lane when they exist. Queue-backed items preserve their severity, reason, and citations, while non-global docs and empty-queue states still fall back to the existing Knowledge-doc and project-health heuristics. Focused unit coverage now proves both the queue-backed and fallback paths.
+- **Why:** `#81` promises that Knowledge can read from the durable attention queue when available. Before this slice, Pluto already persisted ranked attention items from Knowledge V2 synthesis and the action tracker, but the Knowledge surface still rebuilt a disconnected heuristic list instead of reflecting the same prioritized queue.
+- **Replaced:** Treating the global Knowledge `Needs Attention` lane as a local reconstruction from doc sections and project cards even when a durable ranked attention queue already existed.
+- **Notes:** This slice is intentionally read-only. It does not add lifecycle controls inside Knowledge or redesign the page layout.
+
+### Keep weak-synthesis Knowledge Current Read useful
+- **Issue:** [#116](https://github.com/metagrover/pluto/issues/116)
+- **PR:** Pending.
+- **Changed:** Legacy structured Knowledge briefs now keep the best reliable cited statement visible as the Current Read headline even when Pluto does not have enough evidence to mark the view as fully compiled. The compiled threshold stays strict, the generic weak-synthesis fallback still appears for empty or obviously low-quality summaries, and focused tests now cover both the legacy fallback and the existing weak V2 headline path.
+- **Why:** `#58` explicitly calls out the generic "Indexed knowledge needs a stronger synthesis" fallback as bad re-entry behavior when source-backed context already exists. This slice improves the shipped Knowledge surface on current `master` without weakening trust semantics or stacking on the open working-memory scope PRs.
+- **Replaced:** Hiding the best available cited legacy statement behind the generic weak-synthesis headline whenever only one narrow statement survived the compiled-surface threshold.
+- **Notes:** This is intentionally a narrow fallback-quality fix. It does not redesign the Knowledge layout or relax the bar for what Pluto labels as a compiled Current Read.
+
+### Add durable Meeting View follow-up completion controls
+- **Issue:** [#114](https://github.com/metagrover/pluto/issues/114)
+- **PR:** Pending.
+- **Changed:** Meeting View now prefers linked `action_item` entities over plain analysis prose for its follow-up rail, shows each meeting follow-up with lifecycle state, owner, due date, and source context, and lets users mark a follow-up completed or reopen it back to active through the existing durable entity-status path. When no linked action-item entities exist, the existing analysis-text fallback still renders so the surface stays useful.
+- **Why:** `#61` is still the earliest unfinished roadmap outcome under Trusted Attention, and `master` still exposed meeting commitments as passive prose with no durable lifecycle control at the source meeting. This slice closes that specific gap without waiting on the open Dashboard lifecycle PR or broadening scope into draft-generation decisions.
+- **Replaced:** Treating the Meeting View action-items rail as a hover-only visual treatment over summary text instead of a durable follow-up control surface tied to the extracted action-item entities.
+- **Notes:** This slice intentionally stops at complete/reopen controls. Dismiss/demote/snooze flows and broader follow-up draft placement remain follow-up work under `#61`.
+
+### Persist project-scoped working-memory snapshots for Knowledge docs
+- **Issue:** [#112](https://github.com/metagrover/pluto/issues/112)
+- **PR:** Pending.
+- **Changed:** Expanded the durable working-memory snapshot layer to support `project` scope in addition to `global`, persisted project-scoped snapshots during project Knowledge V2 synthesis, and taught the selected project Knowledge brief to prefer a matching fresh project snapshot while preserving the existing doc-JSON fallback when the snapshot is missing, stale, invalid, or mismatched. Focused tests now cover project snapshot persistence and project brief snapshot consumption.
+- **Why:** Pluto had already started persisting and consuming global working memory, but project Knowledge docs still could not use that durable path because the snapshot model and synthesis hooks were hardcoded to `global`. Landing one non-global scope proves the next foundation step without widening into person/stream scopes or new surfaces.
+- **Replaced:** Treating project Knowledge docs as permanently tied to transient structured JSON even when the working-memory consumer path already existed conceptually in the UI and brief compiler.
+- **Notes:** This slice is intentionally limited to project-scoped Knowledge docs. Dashboard, Ask Pluto, and broader briefing adoption remain follow-up work under `#81` and `#82`.
+
+### Persist dashboard follow-up completion
+- **Issue:** [#109](https://github.com/metagrover/pluto/issues/109)
+- **PR:** Pending.
+- **Changed:** Replaced the dashboard's local-only follow-up completion toggle with a durable `action_item` status update, refreshed the homepage briefing after successful completion writes, and surfaced an inline error when the write fails instead of silently claiming success.
+- **Why:** `#61` requires homepage follow-up surfaces to participate in a real lifecycle. The prior checkbox only mutated React state, so completed items came back after reload and never updated Pluto's underlying action memory.
+- **Replaced:** Treating dashboard completion as a cosmetic per-session toggle detached from the stored action lifecycle.
+- **Notes:** This slice only covers durable completion from the Dashboard. Dismiss/demote flows, Meeting View lifecycle controls, and attention-queue-specific UI remain follow-up work under `#61`.
 
 ### Prefer working-memory snapshots in the Dashboard workspace memory brief
 - **Issue:** [#107](https://github.com/metagrover/pluto/issues/107)

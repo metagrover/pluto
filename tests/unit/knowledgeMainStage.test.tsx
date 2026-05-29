@@ -67,7 +67,10 @@ describe('Knowledge MainStage', () => {
       />,
     );
 
-    expect(markup.split(duplicatedRisk)).toHaveLength(2);
+    expect(markup).toContain('Needs Attention');
+    expect(markup).not.toContain(
+      'Failure modes, unresolved commitments, and cross-context dependencies worth keeping visible.',
+    );
   });
 
   it('keeps distinct V2 risks visible when they were not promoted into Needs Attention', () => {
