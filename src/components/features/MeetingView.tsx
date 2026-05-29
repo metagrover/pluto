@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { getMeetingAlerts, updateAlertStatus } from '../../api/intelligence';
 import {
   ENTITY_ICONS,
   type Entity,
@@ -25,6 +26,7 @@ import {
   getEntityTypeLabel,
   getMeetingEntities,
   getRelatedEntities,
+  updateEntityStatus,
 } from '../../api/knowledgeGraph';
 import type {
   AnalysisDocument,
@@ -48,7 +50,13 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
-import { buildFollowUpContext } from './followUpDraftBuilder';
+import { buildFollowUpDraftContext } from './followUpDraftContext';
+import { getMeetingParticipants } from './followUpDraftParticipants';
+import {
+  type MeetingActionEntity,
+  type MeetingLinkedAttentionItem,
+  buildMeetingActionItems,
+} from './meetingActionItems';
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
@@ -84,9 +92,6 @@ export const MeetingView = ({
   const transcriptBodyRef = useRef<HTMLDivElement>(null);
   const [transcriptBodyHeight, setTranscriptBodyHeight] = useState(0);
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
-  const [meetingEntities, setMeetingEntities] = useState<
-    (Entity & { mention_count: number; context: string | null })[]
-  >([]);
   const [entityMeetings, setEntityMeetings] = useState<EntityMeeting[]>([]);
   const [relatedEntities, setRelatedEntities] = useState<
     (Entity & { relationship: string; direction: 'outgoing' | 'incoming' })[]
@@ -99,6 +104,18 @@ export const MeetingView = ({
   const [regenerateNotesError, setRegenerateNotesError] = useState<
     string | null
   >(null);
+  const [meetingEntities, setMeetingEntities] = useState<MeetingActionEntity[]>(
+    [],
+  );
+  const [meetingAttentionItems, setMeetingAttentionItems] = useState<
+    MeetingLinkedAttentionItem[]
+  >([]);
+  const [meetingEntitiesLoading, setMeetingEntitiesLoading] = useState(false);
+  const [meetingActionError, setMeetingActionError] = useState<string | null>(
+    null,
+  );
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [pendingDismissId, setPendingDismissId] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     if (!transcriptVisible) {
@@ -137,6 +154,99 @@ export const MeetingView = ({
     setEntityDetailsError(null);
     setIsRegeneratingNotes(false);
     setRegenerateNotesError(null);
+    setMeetingActionError(null);
+    setPendingActionId(null);
+    setPendingDismissId(null);
+  }, [selectedMeeting.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchMeetingEntities = async () => {
+      setMeetingEntitiesLoading(true);
+      try {
+        const [entitiesResult, alertsResult] = await Promise.allSettled([
+          getMeetingEntities(String(selectedMeeting.id)),
+          getMeetingAlerts(String(selectedMeeting.id)),
+        ]);
+
+        const data =
+          entitiesResult.status === 'fulfilled'
+            ? (entitiesResult.value as MeetingActionEntity[])
+            : null;
+        if (!cancelled) {
+          if (data) {
+            setMeetingEntities(data);
+          }
+          if (alertsResult.status === 'fulfilled') {
+            const linkedAlerts = Array.isArray(alertsResult.value)
+              ? (
+                  alertsResult.value as Array<{
+                    id?: unknown;
+                    status?: unknown;
+                    related_entity_ids?: unknown;
+                  }>
+                )
+                  .filter(
+                    (
+                      item,
+                    ): item is {
+                      id: string;
+                      status: 'active' | 'dismissed';
+                      related_entity_ids: string[];
+                    } =>
+                      typeof item.id === 'string' &&
+                      (item.status === 'active' ||
+                        item.status === 'dismissed') &&
+                      Array.isArray(item.related_entity_ids),
+                  )
+                  .map((item) => ({
+                    id: item.id,
+                    status: item.status,
+                    related_entity_ids: item.related_entity_ids,
+                  }))
+              : [];
+            setMeetingAttentionItems(linkedAlerts);
+          } else {
+            console.error(
+              'Failed to fetch meeting attention items:',
+              alertsResult.reason,
+            );
+            setMeetingAttentionItems([]);
+          }
+        }
+        if (entitiesResult.status === 'rejected') {
+          throw entitiesResult.reason;
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to fetch meeting action items:', error);
+          setMeetingActionError('Could not load linked follow-ups.');
+        }
+      } finally {
+        if (!cancelled) {
+          setMeetingEntitiesLoading(false);
+        }
+      }
+    };
+
+    const handleEntitiesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ meetingId?: string | number }>)
+        .detail;
+      if (!detail?.meetingId) return;
+      if (String(detail.meetingId) !== String(selectedMeeting.id)) return;
+      void fetchMeetingEntities();
+    };
+
+    void fetchMeetingEntities();
+    window.addEventListener('MEETING_ENTITIES_UPDATED', handleEntitiesUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        'MEETING_ENTITIES_UPDATED',
+        handleEntitiesUpdated,
+      );
+    };
   }, [selectedMeeting.id]);
 
   useEffect(() => {
@@ -240,16 +350,25 @@ export const MeetingView = ({
     [];
   const decisions =
     v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
-  const followUpDraftContext = buildFollowUpContext({
-    meetingTitle: selectedMeeting.title,
+  const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
-    decisions,
-    meetingEntities,
+    linkedEntities: meetingEntities,
   });
+  const followUpDraftParticipants = Array.from(
+    new Set([
+      ...followUpDraftContext.participants,
+      ...getMeetingParticipants(selectedMeeting),
+    ]),
+  );
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
     0,
   );
+  const meetingActionItems = buildMeetingActionItems({
+    meetingEntities,
+    linkedAttentionItems: meetingAttentionItems,
+    fallbackActionItems: actionItems,
+  });
 
   const formatEntityMeetingDate = (meeting: EntityMeeting): string => {
     const value = meeting.started_at || meeting.created_at;
@@ -423,6 +542,88 @@ export const MeetingView = ({
       );
     } finally {
       setIsRegeneratingNotes(false);
+    }
+  };
+
+  const toggleMeetingActionItem = async (
+    actionId: string,
+    completed: boolean,
+  ) => {
+    if (pendingActionId) return;
+
+    setMeetingActionError(null);
+    setPendingActionId(actionId);
+    const nextStatus = completed ? 'active' : 'completed';
+
+    setMeetingEntities((prev) =>
+      prev.map((entity) =>
+        entity.id === actionId ? { ...entity, status: nextStatus } : entity,
+      ),
+    );
+
+    try {
+      await updateEntityStatus(actionId, nextStatus);
+      window.dispatchEvent(
+        new CustomEvent('MEETING_ENTITIES_UPDATED', {
+          detail: { meetingId: String(selectedMeeting.id) },
+        }),
+      );
+    } catch (error) {
+      console.error('Failed to update meeting action item status:', error);
+      setMeetingActionError('Could not update this follow-up right now.');
+      setMeetingEntities((prev) =>
+        prev.map((entity) =>
+          entity.id === actionId
+            ? {
+                ...entity,
+                status: completed ? 'completed' : 'active',
+              }
+            : entity,
+        ),
+      );
+    } finally {
+      setPendingActionId(null);
+    }
+  };
+
+  const toggleMeetingActionDismissal = async (
+    attentionItemId: string,
+    dismissed: boolean,
+  ) => {
+    if (pendingDismissId) return;
+
+    setMeetingActionError(null);
+    setPendingDismissId(attentionItemId);
+    const nextStatus = dismissed ? 'active' : 'dismissed';
+
+    setMeetingAttentionItems((prev) =>
+      prev.map((item) =>
+        item.id === attentionItemId ? { ...item, status: nextStatus } : item,
+      ),
+    );
+
+    try {
+      await updateAlertStatus(attentionItemId, nextStatus);
+      window.dispatchEvent(
+        new CustomEvent('MEETING_ENTITIES_UPDATED', {
+          detail: { meetingId: String(selectedMeeting.id) },
+        }),
+      );
+    } catch (error) {
+      console.error('Failed to update meeting follow-up dismissal:', error);
+      setMeetingActionError('Could not update this follow-up right now.');
+      setMeetingAttentionItems((prev) =>
+        prev.map((item) =>
+          item.id === attentionItemId
+            ? {
+                ...item,
+                status: dismissed ? 'dismissed' : 'active',
+              }
+            : item,
+        ),
+      );
+    } finally {
+      setPendingDismissId(null);
     }
   };
 
@@ -628,7 +829,7 @@ export const MeetingView = ({
           meeting={selectedMeeting}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
-          participants={followUpDraftContext.participants}
+          participants={followUpDraftParticipants}
           fetchMeetings={fetchMeetings}
         />
 
@@ -862,23 +1063,148 @@ export const MeetingView = ({
                 <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
                   Action Items
                 </h2>
+                {meetingActionError ? (
+                  <p className="-mt-2 text-xs font-semibold text-red-600">
+                    {meetingActionError}
+                  </p>
+                ) : null}
                 <div className="space-y-4">
-                  {(actionItems.length > 0
-                    ? actionItems
+                  {(meetingActionItems.length > 0
+                    ? meetingActionItems
                     : ['No concrete action items were explicitly committed.']
-                  ).map((item) => (
-                    <div
-                      key={`${item}-${item.length}`}
-                      className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect"
-                    >
-                      <div className="w-6 h-6 rounded-lg border border-pro-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-pro-accent group-hover:bg-pro-accent/5 transition-all">
-                        <Check className="w-3.5 h-3.5 text-pro-accent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  ).map((item) =>
+                    typeof item === 'string' ? (
+                      <div
+                        key={`${item}-${item.length}`}
+                        className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect"
+                      >
+                        <div className="w-6 h-6 rounded-lg border border-pro-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-pro-accent group-hover:bg-pro-accent/5 transition-all">
+                          <Check className="w-3.5 h-3.5 text-pro-accent opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                        <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
+                          {highlightEntities(item)}
+                        </p>
                       </div>
-                      <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
-                        {highlightEntities(item)}
-                      </p>
-                    </div>
-                  ))}
+                    ) : (
+                      <div
+                        key={item.id}
+                        className={`p-6 rounded-2xl border shadow-premium flex gap-4 transition-all card-hover-effect ${
+                          item.dismissalState === 'dismissed'
+                            ? 'bg-amber-500/5 border-amber-500/20'
+                            : 'bg-pro-surface border-pro-border'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          disabled={
+                            !item.actionable ||
+                            pendingActionId === item.id ||
+                            pendingDismissId === item.attentionItemId ||
+                            meetingEntitiesLoading
+                          }
+                          onClick={() =>
+                            item.actionable
+                              ? toggleMeetingActionItem(
+                                  item.id,
+                                  item.status === 'completed',
+                                )
+                              : undefined
+                          }
+                          className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all ${
+                            item.status === 'completed'
+                              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
+                              : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
+                          } ${
+                            !item.actionable ||
+                            pendingActionId === item.id ||
+                            pendingDismissId === item.attentionItemId
+                              ? 'cursor-not-allowed opacity-70'
+                              : ''
+                          }`}
+                          aria-label={item.toggleLabel ?? 'Meeting follow-up'}
+                          title={item.toggleLabel ?? undefined}
+                        >
+                          {pendingActionId === item.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Check className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                        <div className="min-w-0 space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] ${
+                                item.status === 'completed'
+                                  ? 'bg-emerald-500/10 text-emerald-600'
+                                  : item.status === 'overdue'
+                                    ? 'bg-red-500/10 text-red-500'
+                                    : item.status === 'stale'
+                                      ? 'bg-amber-500/10 text-amber-600'
+                                      : item.status === 'fallback'
+                                        ? 'bg-pro-bg text-pro-text-muted'
+                                        : 'bg-pro-accent/10 text-pro-accent'
+                              }`}
+                            >
+                              {item.status === 'fallback'
+                                ? 'Summary'
+                                : item.status}
+                            </span>
+                            {item.assignee ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                                Owner: {item.assignee}
+                              </span>
+                            ) : null}
+                            {item.dismissalState === 'dismissed' ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+                                Dismissed
+                              </span>
+                            ) : null}
+                            {item.dueLabel ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                                {item.dueLabel}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
+                            {highlightEntities(item.title)}
+                          </p>
+                          {item.context ? (
+                            <p className="text-[12px] font-medium leading-relaxed text-pro-text-muted">
+                              {highlightEntities(item.context)}
+                            </p>
+                          ) : null}
+                          {item.attentionItemId && item.dismissalLabel ? (
+                            <div>
+                              <button
+                                type="button"
+                                disabled={
+                                  pendingDismissId === item.attentionItemId ||
+                                  meetingEntitiesLoading
+                                }
+                                onClick={() =>
+                                  toggleMeetingActionDismissal(
+                                    item.attentionItemId as string,
+                                    item.dismissalState === 'dismissed',
+                                  )
+                                }
+                                className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                                  pendingDismissId === item.attentionItemId
+                                    ? 'cursor-not-allowed text-pro-text-muted/50'
+                                    : item.dismissalState === 'dismissed'
+                                      ? 'text-amber-700 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200'
+                                      : 'text-pro-text-muted/70 hover:text-pro-accent'
+                                }`}
+                              >
+                                {pendingDismissId === item.attentionItemId
+                                  ? 'Updating...'
+                                  : item.dismissalLabel}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ),
+                  )}
                 </div>
               </div>
             </div>

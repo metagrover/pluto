@@ -13,7 +13,7 @@ import {
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { Meeting } from '../../types';
-import { type Drafts, buildDefaultDrafts } from './followUpDraftBuilder';
+import { type Drafts, buildDefaultDrafts } from './followUpDraftContext';
 
 interface FollowUpDraftsProps {
   meeting: Meeting;
@@ -28,8 +28,6 @@ const DRAFT_TYPES = [
   { id: 'internal', title: 'Internal Summary', icon: Send },
   { id: 'slack', title: 'Slack Update', icon: MessageSquare },
 ] as const;
-
-type DraftId = (typeof DRAFT_TYPES)[number]['id'];
 
 const parseSavedDrafts = (value?: string): Drafts | null => {
   if (!value) return null;
@@ -104,9 +102,9 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     try {
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
+        participants,
         actionItems,
         decisions,
-        participants,
         customPrompt: customPrompt.trim() || undefined,
       });
       if (res?.drafts) {

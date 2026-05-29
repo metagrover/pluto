@@ -141,10 +141,14 @@ import type { KnowledgeDoc } from '../../electron/db';
 import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 import {
   buildGlobalWorkingMemorySnapshot,
+  buildProjectWorkingMemorySnapshot,
   persistGlobalWorkingMemorySnapshot,
+  persistProjectWorkingMemorySnapshot,
 } from '../../electron/workingMemory';
 
-const makeKnowledgeDoc = (): KnowledgeDoc => ({
+const makeKnowledgeDoc = (
+  overrides: Partial<KnowledgeDoc> = {},
+): KnowledgeDoc => ({
   id: 'doc-global',
   scope_type: 'global',
   scope_key: 'global',
@@ -156,9 +160,12 @@ const makeKnowledgeDoc = (): KnowledgeDoc => ({
   last_synthesized_at: '2026-05-26T15:00:00.000Z',
   last_source_cursor: null,
   updated_at: '2026-05-26T15:00:00.000Z',
+  ...overrides,
 });
 
-const makeKnowledgeSnapshotDoc = (): KnowledgeV2Document => ({
+const makeKnowledgeSnapshotDoc = (
+  overrides: Partial<KnowledgeV2Document> = {},
+): KnowledgeV2Document => ({
   schema_version: 2,
   scope: {
     type: 'global',
@@ -308,6 +315,7 @@ const makeKnowledgeSnapshotDoc = (): KnowledgeV2Document => ({
     updated_count: 1,
     notable_changes: [],
   },
+  ...overrides,
 });
 
 describe('working memory snapshots', () => {
@@ -356,6 +364,59 @@ describe('working memory snapshots', () => {
     expect(stored?.payload.current_read.headline).toBe(
       'Launch work is blocked on the approval path.',
     );
+  });
+
+  it('builds and persists a project-scoped snapshot for a project knowledge doc', () => {
+    const snapshot = buildProjectWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-project',
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project Atlas',
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'project',
+          title: 'Project Atlas',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    expect(snapshot.scope_type).toBe('project');
+    expect(snapshot.scope_key).toBe('project-1');
+    expect(snapshot.payload.scope.type).toBe('project');
+
+    const saved = persistProjectWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-project',
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project Atlas',
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'project',
+          title: 'Project Atlas',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    const stored = getWorkingMemorySnapshot('project', 'project-1');
+
+    expect(saved.id).toBeTruthy();
+    expect(stored).toMatchObject({
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project Atlas',
+      source_doc_id: 'doc-project',
+    });
+    expect(stored?.payload.scope).toMatchObject({
+      type: 'project',
+      key: 'project-1',
+      title: 'Project Atlas',
+    });
   });
 
   it('does not churn the stored snapshot when regeneration is unchanged', () => {

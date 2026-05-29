@@ -857,6 +857,7 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   async generateFollowUpDrafts(params: {
     meetingTitle: string;
+    participants?: string[];
     actionItems: string[];
     decisions: string[];
     participants?: string[];

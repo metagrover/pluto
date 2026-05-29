@@ -10,6 +10,8 @@ import {
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { WorkingMemorySnapshot } from '../../../electron/db';
+import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
+import { getAttentionAlerts } from '../../api/intelligence';
 import type {
   KnowledgeDoc,
   KnowledgeDocSource,
@@ -111,6 +113,60 @@ const trimText = (value: string, maxLength: number): string => {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength - 3).trim()}...`;
 };
+
+const normalizeMatchText = (value: string): string =>
+  value.trim().toLowerCase();
+
+const citationMatchKey = (citations: KnowledgeCitation[]): string =>
+  citations
+    .map((citation) => {
+      const meetingId = normalizeMatchText(citation.meeting_id);
+      const quote = normalizeMatchText(citation.quote);
+      return meetingId || quote ? `${meetingId}::${quote}` : '';
+    })
+    .filter(Boolean)
+    .sort()
+    .join('|');
+
+const buildAttentionMatchers = (items: NeedsAttentionItem[]) => ({
+  titles: new Set(
+    items.map((item) => normalizeMatchText(item.title)).filter(Boolean),
+  ),
+  citations: new Set(
+    items.map((item) => citationMatchKey(item.citations)).filter(Boolean),
+  ),
+});
+
+const matchesPromotedAttention = (
+  title: string,
+  citations: KnowledgeCitation[],
+  attentionMatchers: ReturnType<typeof buildAttentionMatchers>,
+) => {
+  const citationKey = citationMatchKey(citations);
+  if (citationKey) {
+    return attentionMatchers.citations.has(citationKey);
+  }
+
+  return attentionMatchers.titles.has(normalizeMatchText(title));
+};
+
+const filterDuplicateKnowledgeStatements = (
+  items: KnowledgeStatement[],
+  attentionMatchers: ReturnType<typeof buildAttentionMatchers>,
+) =>
+  items.filter(
+    (item) =>
+      !matchesPromotedAttention(item.text, item.citations, attentionMatchers),
+  );
+
+const filterDuplicateV2Items = (
+  items: KnowledgeV2Item[],
+  attentionMatchers: ReturnType<typeof buildAttentionMatchers>,
+) =>
+  items.filter(
+    (item) =>
+      !matchesPromotedAttention(item.title, item.citations, attentionMatchers),
+  );
 
 const labelForSeverity = (severity: NeedsAttentionItem['severity']) => {
   if (severity === 'critical') return 'Needs attention';
@@ -788,18 +844,23 @@ export const MainStage: React.FC<MainStageProps> = ({
   const [retryingDocId, setRetryingDocId] = useState<string | null>(null);
   const [workingMemorySnapshot, setWorkingMemorySnapshot] =
     useState<WorkingMemorySnapshot | null>(null);
+  const [attentionAlerts, setAttentionAlerts] = useState<AttentionItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (!selectedDoc || selectedDoc.scope_type !== 'global') {
+    if (
+      !selectedDoc ||
+      (selectedDoc.scope_type !== 'global' &&
+        selectedDoc.scope_type !== 'project')
+    ) {
       setWorkingMemorySnapshot(null);
       return () => {
         cancelled = true;
       };
     }
 
-    void getWorkingMemorySnapshot('global', selectedDoc.scope_key)
+    void getWorkingMemorySnapshot(selectedDoc.scope_type, selectedDoc.scope_key)
       .then((snapshot) => {
         if (!cancelled) {
           setWorkingMemorySnapshot(snapshot ?? null);
@@ -816,23 +877,63 @@ export const MainStage: React.FC<MainStageProps> = ({
     };
   }, [selectedDoc]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedDoc || selectedDoc.scope_type !== 'global') {
+      setAttentionAlerts([]);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void getAttentionAlerts()
+      .then((items) => {
+        if (!cancelled) {
+          setAttentionAlerts(items.filter((item) => item.status === 'active'));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAttentionAlerts([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDoc]);
+
   const brief = useMemo(
     () => compileKnowledgeBrief(selectedDoc, workingMemorySnapshot),
     [selectedDoc, workingMemorySnapshot],
   );
   const attentionItems = useMemo(
-    () => compileNeedsAttention(selectedDoc, docs, projectCards),
-    [selectedDoc, docs, projectCards],
+    () =>
+      compileNeedsAttention(selectedDoc, docs, projectCards, attentionAlerts),
+    [selectedDoc, docs, projectCards, attentionAlerts],
   );
 
   if (!selectedDoc) return <EmptyState />;
 
-  const priorities =
-    brief.lanes.find((lane) => lane.id === 'priorities')?.items || [];
-  const risks = brief.lanes.find((lane) => lane.id === 'risks')?.items || [];
-  const dependencies =
-    brief.lanes.find((lane) => lane.id === 'dependencies')?.items || [];
-  const allBriefItems = brief.lanes.flatMap((lane) => lane.items);
+  const attentionMatchers = buildAttentionMatchers(attentionItems);
+  const priorities = filterDuplicateKnowledgeStatements(
+    brief.lanes.find((lane) => lane.id === 'priorities')?.items || [],
+    attentionMatchers,
+  );
+  const risks = filterDuplicateKnowledgeStatements(
+    brief.lanes.find((lane) => lane.id === 'risks')?.items || [],
+    attentionMatchers,
+  );
+  const dependencies = filterDuplicateKnowledgeStatements(
+    brief.lanes.find((lane) => lane.id === 'dependencies')?.items || [],
+    attentionMatchers,
+  );
+  const dedupedV2Risks = filterDuplicateV2Items(
+    brief.risksAndUnknowns,
+    attentionMatchers,
+  );
+  const allBriefItems = [...priorities, ...risks, ...dependencies];
   const v2SupportingItems: KnowledgeStatement[] =
     brief.activeStreams.length > 0
       ? brief.activeStreams.slice(0, 4).map((stream) => ({
@@ -916,7 +1017,7 @@ export const MainStage: React.FC<MainStageProps> = ({
         <V2ItemList
           title="Risks and Unknowns"
           description="Blockers, risks, dependencies, and open questions that may affect plans."
-          items={brief.risksAndUnknowns}
+          items={dedupedV2Risks}
           onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
         />
 

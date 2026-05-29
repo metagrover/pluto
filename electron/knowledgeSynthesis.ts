@@ -28,7 +28,10 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
-import { persistGlobalWorkingMemorySnapshot } from './workingMemory';
+import {
+  persistGlobalWorkingMemorySnapshot,
+  persistProjectWorkingMemorySnapshot,
+} from './workingMemory';
 
 const SYNTHESIS_DEBOUNCE_MS = 2500;
 const MAX_SOURCE_MEETINGS = 80;
@@ -1612,6 +1615,12 @@ const synthesizeKnowledgeDocNowInternal = async (
         structured: emptyDoc,
         generatedAt: savedDoc.last_synthesized_at ?? undefined,
       });
+    } else if (savedDoc.scope_type === 'project') {
+      persistProjectWorkingMemorySnapshot({
+        knowledgeDoc: savedDoc,
+        structured: emptyDoc,
+        generatedAt: savedDoc.last_synthesized_at ?? undefined,
+      });
     }
 
     return savedDoc;
@@ -1703,10 +1712,14 @@ const synthesizeKnowledgeDocNowInternal = async (
     });
 
     if (
-      savedDoc.scope_type === 'global' &&
+      (savedDoc.scope_type === 'global' || savedDoc.scope_type === 'project') &&
       isKnowledgeV2Document(correctedStructured)
     ) {
-      persistGlobalWorkingMemorySnapshot({
+      const persistSnapshot =
+        savedDoc.scope_type === 'global'
+          ? persistGlobalWorkingMemorySnapshot
+          : persistProjectWorkingMemorySnapshot;
+      persistSnapshot({
         knowledgeDoc: savedDoc,
         structured: correctedStructured,
         generatedAt: savedDoc.last_synthesized_at ?? undefined,

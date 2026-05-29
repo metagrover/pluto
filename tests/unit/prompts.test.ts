@@ -283,5 +283,19 @@ describe('getFollowUpDraftsPrompt', () => {
     expect(prompt).toContain('- Alex Rivera');
     expect(prompt).toContain('Decisions:');
     expect(prompt).toContain('Action Items:');
+    expect(prompt).toContain(
+      'Use participant names only when they appear in the participant list or action/decision evidence.',
+    );
+  });
+
+  it('falls back to a safe no-participants block when none are available', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'Launch Review',
+      actionItems: [],
+      decisions: [],
+    });
+
+    expect(prompt).toContain('Participants:');
+    expect(prompt).toContain('- None recorded');
   });
 });
