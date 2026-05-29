@@ -50,6 +50,8 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
+import { buildFollowUpDraftContext } from './followUpDraftContext';
+import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
   type MeetingLinkedAttentionItem,
@@ -146,6 +148,7 @@ export const MeetingView = ({
 
   useEffect(() => {
     setSelectedEntity(null);
+    setMeetingEntities([]);
     setEntityMeetings([]);
     setRelatedEntities([]);
     setEntityDetailsError(null);
@@ -247,6 +250,43 @@ export const MeetingView = ({
   }, [selectedMeeting.id]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const fetchMeetingEntities = async () => {
+      try {
+        const entities = await getMeetingEntities(String(selectedMeeting.id));
+        if (cancelled) return;
+        setMeetingEntities(entities);
+      } catch (error) {
+        if (cancelled) return;
+        console.error(
+          'Failed to fetch meeting entities for follow-up drafts:',
+          error,
+        );
+        setMeetingEntities([]);
+      }
+    };
+
+    const handleEntitiesUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ meetingId?: string | number }>)
+        .detail;
+      if (!detail?.meetingId) return;
+      if (String(detail.meetingId) !== String(selectedMeeting.id)) return;
+      void fetchMeetingEntities();
+    };
+
+    void fetchMeetingEntities();
+    window.addEventListener('MEETING_ENTITIES_UPDATED', handleEntitiesUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        'MEETING_ENTITIES_UPDATED',
+        handleEntitiesUpdated,
+      );
+    };
+  }, [selectedMeeting.id]);
+
+  useEffect(() => {
     if (!selectedEntity) {
       setEntityMeetings([]);
       setRelatedEntities([]);
@@ -310,6 +350,16 @@ export const MeetingView = ({
     [];
   const decisions =
     v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const followUpDraftContext = buildFollowUpDraftContext({
+    fallbackActionItems: actionItems,
+    linkedEntities: meetingEntities,
+  });
+  const followUpDraftParticipants = Array.from(
+    new Set([
+      ...followUpDraftContext.participants,
+      ...getMeetingParticipants(selectedMeeting),
+    ]),
+  );
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
     0,
@@ -777,8 +827,9 @@ export const MeetingView = ({
       <div className="mb-12 space-y-6">
         <FollowUpDrafts
           meeting={selectedMeeting}
-          actionItems={actionItems}
+          actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
+          participants={followUpDraftParticipants}
           fetchMeetings={fetchMeetings}
         />
 

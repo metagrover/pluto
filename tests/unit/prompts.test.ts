@@ -270,17 +270,19 @@ describe('knowledge document prompts', () => {
 });
 
 describe('getFollowUpDraftsPrompt', () => {
-  it('includes participant context when it is available', () => {
+  it('includes participant context alongside decisions and action items', () => {
     const prompt = getFollowUpDraftsPrompt({
-      meetingTitle: 'Launch Review',
-      participants: ['Jordan', 'Taylor'],
-      actionItems: ['Jordan will send the recap.'],
-      decisions: ['Ship on Friday.'],
+      meetingTitle: 'API Migration Review',
+      participants: ['Sarah Chen', 'Alex Rivera'],
+      decisions: ['Use REST for the rollout'],
+      actionItems: ['Send rollout email (Owner: Sarah Chen | Due: Friday)'],
     });
 
     expect(prompt).toContain('Participants:');
-    expect(prompt).toContain('- Jordan');
-    expect(prompt).toContain('- Taylor');
+    expect(prompt).toContain('- Sarah Chen');
+    expect(prompt).toContain('- Alex Rivera');
+    expect(prompt).toContain('Decisions:');
+    expect(prompt).toContain('Action Items:');
     expect(prompt).toContain(
       'Use participant names only when they appear in the participant list or action/decision evidence.',
     );
