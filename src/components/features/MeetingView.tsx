@@ -547,7 +547,9 @@ export const MeetingView = ({
 
     setMeetingActionError(null);
     setPendingAttentionId(attentionItemId);
-    const previous = meetingAttentionItems.find((item) => item.id === attentionItemId);
+    const previous = meetingAttentionItems.find(
+      (item) => item.id === attentionItemId,
+    );
     const previousStatus = previous?.status ?? 'active';
 
     setMeetingAttentionItems((prev) =>
@@ -1046,7 +1048,7 @@ export const MeetingView = ({
                             ? 'bg-amber-500/5 border-amber-500/20'
                             : item.attentionStatus === 'snoozed'
                               ? 'bg-sky-500/5 border-sky-500/20'
-                            : 'bg-pro-surface border-pro-border'
+                              : 'bg-pro-surface border-pro-border'
                         }`}
                       >
                         <button
@@ -1068,7 +1070,7 @@ export const MeetingView = ({
                           className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all ${
                             item.status === 'completed'
                               ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
-                            : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
+                              : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
                           } ${
                             !item.actionable ||
                             pendingActionId === item.id ||
@@ -1139,7 +1141,8 @@ export const MeetingView = ({
                                 <button
                                   type="button"
                                   disabled={
-                                    pendingAttentionId === item.attentionItemId ||
+                                    pendingAttentionId ===
+                                      item.attentionItemId ||
                                     meetingEntitiesLoading
                                   }
                                   onClick={() =>
@@ -1167,7 +1170,8 @@ export const MeetingView = ({
                                 <button
                                   type="button"
                                   disabled={
-                                    pendingAttentionId === item.attentionItemId ||
+                                    pendingAttentionId ===
+                                      item.attentionItemId ||
                                     meetingEntitiesLoading
                                   }
                                   onClick={() =>

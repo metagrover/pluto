@@ -133,7 +133,7 @@ export const buildMeetingActionItems = ({
               ? 'Reopen'
               : linkedAttention.status === 'snoozed'
                 ? null
-              : 'Dismiss',
+                : 'Dismiss',
         snoozeLabel:
           linkedAttention == null
             ? null
