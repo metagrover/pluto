@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-26
 
+### Keep weak-synthesis Knowledge Current Read useful
+- **Issue:** [#116](https://github.com/metagrover/pluto/issues/116)
+- **PR:** Pending.
+- **Changed:** Legacy structured Knowledge briefs now keep the best reliable cited statement visible as the Current Read headline even when Pluto does not have enough evidence to mark the view as fully compiled. The compiled threshold stays strict, the generic weak-synthesis fallback still appears for empty or obviously low-quality summaries, and focused tests now cover both the legacy fallback and the existing weak V2 headline path.
+- **Why:** `#58` explicitly calls out the generic "Indexed knowledge needs a stronger synthesis" fallback as bad re-entry behavior when source-backed context already exists. This slice improves the shipped Knowledge surface on current `master` without weakening trust semantics or stacking on the open working-memory scope PRs.
+- **Replaced:** Hiding the best available cited legacy statement behind the generic weak-synthesis headline whenever only one narrow statement survived the compiled-surface threshold.
+- **Notes:** This is intentionally a narrow fallback-quality fix. It does not redesign the Knowledge layout or relax the bar for what Pluto labels as a compiled Current Read.
+
 ### Add durable Meeting View follow-up completion controls
 - **Issue:** [#114](https://github.com/metagrover/pluto/issues/114)
 - **PR:** Pending.

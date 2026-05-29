@@ -396,6 +396,20 @@ const isReliableV2Headline = (headline: string): boolean => {
   );
 };
 
+const isReliableLegacyHeadline = (headline: string): boolean => {
+  const normalized = headline.trim();
+  return (
+    Boolean(normalized) &&
+    normalized !== 'No reliable compiled brief yet.' &&
+    normalized !== 'Indexed knowledge needs a stronger synthesis.' &&
+    !looksLikeRawId(normalized) &&
+    !/^(the team discusses|the meeting opened|the conversation revolves|the user is planning)\b/i.test(
+      normalized,
+    ) &&
+    normalized.length <= 170
+  );
+};
+
 const parseStructuredKnowledgeV2Value = (
   doc: StructuredKnowledgeV2Source | null | undefined,
 ): StructuredKnowledgeV2Doc | null => {
@@ -1016,14 +1030,19 @@ export const compileKnowledgeBrief = (
     if (scoreDelta !== 0) return scoreDelta;
     return a.index - b.index;
   });
+  const weakSynthesisHeadline = headlineCandidates.find((candidate) =>
+    isReliableLegacyHeadline(candidate.item.text),
+  )?.item.text;
 
   return {
     isCompiled: hasCompiledItems,
     headline: hasCompiledItems
       ? headlineCandidates[0]?.item.text || 'No reliable compiled brief yet.'
-      : statementItems.length > 0 || dependencies.length > 0
-        ? 'Indexed knowledge needs a stronger synthesis.'
-        : 'No reliable compiled brief yet.',
+      : weakSynthesisHeadline
+        ? weakSynthesisHeadline
+        : statementItems.length > 0 || dependencies.length > 0
+          ? 'Indexed knowledge needs a stronger synthesis.'
+          : 'No reliable compiled brief yet.',
     lanes,
     coverage,
     activeStreams: [],
