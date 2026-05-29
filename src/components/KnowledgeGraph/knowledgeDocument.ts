@@ -397,6 +397,20 @@ const isReliableV2Headline = (headline: string): boolean => {
   );
 };
 
+const isReliableLegacyHeadline = (headline: string): boolean => {
+  const normalized = headline.trim();
+  return (
+    Boolean(normalized) &&
+    normalized !== 'No reliable compiled brief yet.' &&
+    normalized !== 'Indexed knowledge needs a stronger synthesis.' &&
+    !looksLikeRawId(normalized) &&
+    !/^(the team discusses|the meeting opened|the conversation revolves|the user is planning)\b/i.test(
+      normalized,
+    ) &&
+    normalized.length <= 170
+  );
+};
+
 const parseStructuredKnowledgeV2Value = (
   doc: StructuredKnowledgeV2Source | null | undefined,
 ): StructuredKnowledgeV2Doc | null => {
@@ -556,13 +570,17 @@ export const parseStructuredKnowledgeV2Doc = (
 const toWorkingMemorySnapshotStructuredDoc = (
   snapshot: WorkingMemorySnapshot,
 ): StructuredKnowledgeV2Doc | null => {
-  if (snapshot.scope_type !== 'global' || snapshot.freshness === 'stale') {
+  if (
+    !['global', 'project'].includes(snapshot.scope_type) ||
+    snapshot.freshness === 'stale'
+  ) {
     return null;
   }
 
   const payload = snapshot.payload;
   if (
-    payload?.scope?.type !== 'global' ||
+    !payload?.scope ||
+    !['global', 'project'].includes(payload.scope.type) ||
     payload.current_read == null ||
     !Array.isArray(payload.active_streams) ||
     !Array.isArray(payload.open_loops) ||
@@ -581,7 +599,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
   const syntheticStructuredJson = JSON.stringify({
     schema_version: 2,
     scope: {
-      type: 'global',
+      type: payload.scope.type,
       title: payload.scope.title || snapshot.title,
     },
     current_read: {
@@ -623,7 +641,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
   });
 
   return parseStructuredKnowledgeV2Value({
-    scope_type: 'global',
+    scope_type: payload.scope.type,
     title: payload.scope.title || snapshot.title,
     structured_json: syntheticStructuredJson,
   });
@@ -806,7 +824,8 @@ export const compileKnowledgeBrief = (
   workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): KnowledgeBrief => {
   const snapshotV2 =
-    doc?.scope_type === 'global' &&
+    (doc?.scope_type === 'global' || doc?.scope_type === 'project') &&
+    workingMemorySnapshot?.scope_type === doc.scope_type &&
     workingMemorySnapshot?.scope_key === doc.scope_key &&
     workingMemorySnapshot?.source_doc_id === doc.id
       ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
@@ -1012,14 +1031,19 @@ export const compileKnowledgeBrief = (
     if (scoreDelta !== 0) return scoreDelta;
     return a.index - b.index;
   });
+  const weakSynthesisHeadline = headlineCandidates.find((candidate) =>
+    isReliableLegacyHeadline(candidate.item.text),
+  )?.item.text;
 
   return {
     isCompiled: hasCompiledItems,
     headline: hasCompiledItems
       ? headlineCandidates[0]?.item.text || 'No reliable compiled brief yet.'
-      : statementItems.length > 0 || dependencies.length > 0
-        ? 'Indexed knowledge needs a stronger synthesis.'
-        : 'No reliable compiled brief yet.',
+      : weakSynthesisHeadline
+        ? weakSynthesisHeadline
+        : statementItems.length > 0 || dependencies.length > 0
+          ? 'Indexed knowledge needs a stronger synthesis.'
+          : 'No reliable compiled brief yet.',
     lanes,
     coverage,
     activeStreams: [],
