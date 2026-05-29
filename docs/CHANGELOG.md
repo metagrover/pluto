@@ -28,6 +28,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Treating project Knowledge docs as permanently tied to transient structured JSON even when the working-memory consumer path already existed conceptually in the UI and brief compiler.
 - **Notes:** This slice is intentionally limited to project-scoped Knowledge docs. Dashboard, Ask Pluto, and broader briefing adoption remain follow-up work under `#81` and `#82`.
 
+### Persist dashboard follow-up completion
+- **Issue:** [#109](https://github.com/metagrover/pluto/issues/109)
+- **PR:** Pending.
+- **Changed:** Replaced the dashboard's local-only follow-up completion toggle with a durable `action_item` status update, refreshed the homepage briefing after successful completion writes, and surfaced an inline error when the write fails instead of silently claiming success.
+- **Why:** `#61` requires homepage follow-up surfaces to participate in a real lifecycle. The prior checkbox only mutated React state, so completed items came back after reload and never updated Pluto's underlying action memory.
+- **Replaced:** Treating dashboard completion as a cosmetic per-session toggle detached from the stored action lifecycle.
+- **Notes:** This slice only covers durable completion from the Dashboard. Dismiss/demote flows, Meeting View lifecycle controls, and attention-queue-specific UI remain follow-up work under `#61`.
+
 ### Prefer working-memory snapshots in the Dashboard workspace memory brief
 - **Issue:** [#107](https://github.com/metagrover/pluto/issues/107)
 - **PR:** Pending.

@@ -22,6 +22,7 @@ export interface DashboardHomeState {
   model: DashboardHomeModel;
   loading: boolean;
   error: Error | null;
+  refresh: () => Promise<void>;
 }
 
 interface UseDashboardHomeParams {
@@ -59,22 +60,17 @@ export const useDashboardHome = ({
   isRecording,
   meetings,
 }: UseDashboardHomeParams): DashboardHomeState => {
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const [state, setState] = useState<DashboardHomeState>(() => ({
     model: buildEmptyDashboardHomeModel({ isRecording, meetings }),
     loading: true,
     error: null,
+    refresh: async () => {},
   }));
 
   useEffect(() => {
     let cancelled = false;
-
-    setState((previous) => ({
-      model: previous.model,
-      loading: true,
-      error: null,
-    }));
-
-    const loadDashboardHome = async () => {
+    const refresh = async () => {
       const [
         overdueActions,
         staleActions,
@@ -126,7 +122,19 @@ export const useDashboardHome = ({
         }),
         loading: false,
         error: null,
+        refresh,
       });
+    };
+
+    setState((previous) => ({
+      model: previous.model,
+      loading: true,
+      error: null,
+      refresh,
+    }));
+
+    const loadDashboardHome = async () => {
+      await refresh();
     };
 
     void loadDashboardHome();
@@ -134,7 +142,12 @@ export const useDashboardHome = ({
     return () => {
       cancelled = true;
     };
-  }, [isRecording, meetings]);
+  }, [isRecording, meetings, refreshNonce]);
 
-  return state;
+  return {
+    ...state,
+    refresh: async () => {
+      setRefreshNonce((previous) => previous + 1);
+    },
+  };
 };

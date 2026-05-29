@@ -8,8 +8,9 @@ interface DashboardProps {
   setSelectedMeetingId: (id: string | number | null) => void;
   setActiveTab: (tab: 'hub' | 'people' | 'projects' | 'wiki') => void;
   setAskPlutoVisible: (visible: boolean) => void;
-  completedTasks: Set<string>;
-  handleCompleteTask: (id: string) => void;
+  updatingTaskIds: Set<string>;
+  actionError: string | null;
+  handleCompleteTask: (id: string) => Promise<void>;
 }
 
 const isTabTarget = (
@@ -106,7 +107,8 @@ export const Dashboard = ({
   setSelectedMeetingId,
   setActiveTab,
   setAskPlutoVisible,
-  completedTasks,
+  updatingTaskIds,
+  actionError,
   handleCompleteTask,
 }: DashboardProps) => {
   const runAction = (action: DashboardAction) => {
@@ -239,42 +241,37 @@ export const Dashboard = ({
             {visibleActionItems.length > 0 ? (
               <div className="grid gap-2.5">
                 {visibleActionItems.map((item) => {
-                  const isDone = completedTasks.has(item.id);
+                  const isUpdating = updatingTaskIds.has(item.id);
                   return (
                     <button
                       type="button"
                       key={item.id}
-                      aria-pressed={isDone}
-                      onClick={(e) => {
+                      aria-busy={isUpdating}
+                      disabled={isUpdating}
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        handleCompleteTask(item.id);
+                        await handleCompleteTask(item.id);
                       }}
                       className={`group/item flex w-full items-start gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all ${
-                        isDone
-                          ? 'border-pro-success/20 bg-pro-success/5 opacity-60'
+                        isUpdating
+                          ? 'border-pro-accent/20 bg-pro-accent/5 opacity-80'
                           : 'border-pro-border/60 bg-pro-bg/35 hover:border-pro-accent/30 hover:bg-pro-bg/55'
                       }`}
                     >
                       <div
                         className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded-md border-2 transition-all ${
-                          isDone
-                            ? 'border-pro-success bg-pro-success'
+                          isUpdating
+                            ? 'border-pro-accent bg-pro-accent/10 text-pro-accent'
                             : 'border-pro-border group-hover/item:border-pro-accent'
                         }`}
                       >
-                        {isDone && (
-                          <span className="text-[10px] text-white">✓</span>
-                        )}
+                        {isUpdating ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : null}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-3">
-                          <span
-                            className={`text-[13px] font-bold leading-snug ${
-                              isDone
-                                ? 'text-pro-text-muted line-through'
-                                : 'text-pro-text-main'
-                            }`}
-                          >
+                          <span className="text-[13px] font-bold leading-snug text-pro-text-main">
                             {item.title}
                           </span>
                           <span
@@ -296,6 +293,11 @@ export const Dashboard = ({
                     </button>
                   );
                 })}
+                {actionError ? (
+                  <p className="text-[12px] font-semibold text-red-500">
+                    {actionError}
+                  </p>
+                ) : null}
                 {hiddenActionCount > 0 && (
                   <button
                     type="button"
