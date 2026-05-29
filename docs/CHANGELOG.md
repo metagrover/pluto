@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-26
 
+### Add durable Meeting View follow-up completion controls
+- **Issue:** [#114](https://github.com/metagrover/pluto/issues/114)
+- **PR:** Pending.
+- **Changed:** Meeting View now prefers linked `action_item` entities over plain analysis prose for its follow-up rail, shows each meeting follow-up with lifecycle state, owner, due date, and source context, and lets users mark a follow-up completed or reopen it back to active through the existing durable entity-status path. When no linked action-item entities exist, the existing analysis-text fallback still renders so the surface stays useful.
+- **Why:** `#61` is still the earliest unfinished roadmap outcome under Trusted Attention, and `master` still exposed meeting commitments as passive prose with no durable lifecycle control at the source meeting. This slice closes that specific gap without waiting on the open Dashboard lifecycle PR or broadening scope into draft-generation decisions.
+- **Replaced:** Treating the Meeting View action-items rail as a hover-only visual treatment over summary text instead of a durable follow-up control surface tied to the extracted action-item entities.
+- **Notes:** This slice intentionally stops at complete/reopen controls. Dismiss/demote/snooze flows and broader follow-up draft placement remain follow-up work under `#61`.
+
 ### Persist project-scoped working-memory snapshots for Knowledge docs
 - **Issue:** [#112](https://github.com/metagrover/pluto/issues/112)
 - **PR:** Pending.
