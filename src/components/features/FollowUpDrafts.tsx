@@ -13,6 +13,7 @@ import {
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { Meeting } from '../../types';
+import { getMeetingParticipants } from './followUpDraftParticipants';
 
 interface FollowUpDraftsProps {
   meeting: Meeting;
@@ -77,6 +78,10 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const [isExpanded, setIsExpanded] = useState(true);
 
   const meetingTitle = meeting.title;
+  const participants = useMemo(
+    () => getMeetingParticipants(meeting),
+    [meeting],
+  );
   const actionItemsKey = actionItems.join('\n');
   const decisionsKey = decisions.join('\n');
   const defaultDrafts = useMemo(
@@ -123,6 +128,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     try {
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
+        participants,
         actionItems,
         decisions,
         customPrompt: customPrompt.trim() || undefined,
