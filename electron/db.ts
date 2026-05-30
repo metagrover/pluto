@@ -1741,7 +1741,10 @@ export interface KnowledgeDocWikiLink {
   snippet: string;
 }
 
-export type WorkingMemorySnapshotScopeType = 'global' | 'project';
+export type WorkingMemorySnapshotScopeType =
+  | 'global'
+  | 'project'
+  | 'person_context';
 
 export interface WorkingMemorySnapshotPayload {
   schema_version: 1;

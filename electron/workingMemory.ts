@@ -152,3 +152,35 @@ export const persistProjectWorkingMemorySnapshot = ({
     scopeType: 'project',
     generatedAt,
   });
+
+export const buildPersonContextWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt = new Date().toISOString(),
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): Omit<WorkingMemorySnapshot, 'id' | 'updated_at'> =>
+  buildWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'person_context',
+    generatedAt,
+  });
+
+export const persistPersonContextWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt,
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): WorkingMemorySnapshot =>
+  persistWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'person_context',
+    generatedAt,
+  });

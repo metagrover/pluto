@@ -141,8 +141,10 @@ import type { KnowledgeDoc } from '../../electron/db';
 import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 import {
   buildGlobalWorkingMemorySnapshot,
+  buildPersonContextWorkingMemorySnapshot,
   buildProjectWorkingMemorySnapshot,
   persistGlobalWorkingMemorySnapshot,
+  persistPersonContextWorkingMemorySnapshot,
   persistProjectWorkingMemorySnapshot,
 } from '../../electron/workingMemory';
 
@@ -416,6 +418,59 @@ describe('working memory snapshots', () => {
       type: 'project',
       key: 'project-1',
       title: 'Project Atlas',
+    });
+  });
+
+  it('builds and persists a person-context snapshot for a people knowledge doc', () => {
+    const snapshot = buildPersonContextWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-person',
+        scope_type: 'person_context',
+        scope_key: 'person-1',
+        title: 'Conversations with Alex Rivera',
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'person_context',
+          title: 'Conversations with Alex Rivera',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    expect(snapshot.scope_type).toBe('person_context');
+    expect(snapshot.scope_key).toBe('person-1');
+    expect(snapshot.payload.scope.type).toBe('person_context');
+
+    const saved = persistPersonContextWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-person',
+        scope_type: 'person_context',
+        scope_key: 'person-1',
+        title: 'Conversations with Alex Rivera',
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'person_context',
+          title: 'Conversations with Alex Rivera',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    const stored = getWorkingMemorySnapshot('person_context', 'person-1');
+
+    expect(saved.id).toBeTruthy();
+    expect(stored).toMatchObject({
+      scope_type: 'person_context',
+      scope_key: 'person-1',
+      title: 'Conversations with Alex Rivera',
+      source_doc_id: 'doc-person',
+    });
+    expect(stored?.payload.scope).toMatchObject({
+      type: 'person_context',
+      key: 'person-1',
+      title: 'Conversations with Alex Rivera',
     });
   });
 
