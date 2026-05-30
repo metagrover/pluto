@@ -309,6 +309,9 @@ describe('knowledge document utilities', () => {
     expect(brief.headline).toBe(
       'Knowledge quality is moving from archive browsing to a living brief.',
     );
+    expect(brief.supportingBullets).toEqual([
+      'Knowledge Dashboard: synthesis quality is active.',
+    ]);
     expect(brief.activeStreams[0].title).toBe('Knowledge Dashboard');
     expect(brief.sourceQuality).toMatchObject({
       included_count: 3,
@@ -608,6 +611,10 @@ describe('knowledge document utilities', () => {
     expect(brief.headline).toBe(
       'Snapshot-backed current read is now the durable source.',
     );
+    expect(brief.supportingBullets).toEqual([
+      'The durable snapshot preserves the main thread.',
+      'Fallback still exists for missing snapshots.',
+    ]);
     expect(brief.activeStreams[0].title).toBe('Launch');
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
     expect(brief.coverage).toMatchObject({

@@ -934,6 +934,14 @@ export const MainStage: React.FC<MainStageProps> = ({
     attentionMatchers,
   );
   const allBriefItems = [...priorities, ...risks, ...dependencies];
+  const v2SupportingBullets: KnowledgeStatement[] = brief.supportingBullets.map(
+    (text, index) => ({
+      id: `current-read-bullet-${index}`,
+      text,
+      why_it_matters: brief.trustMessage || '',
+      citations: [],
+    }),
+  );
   const v2SupportingItems: KnowledgeStatement[] =
     brief.activeStreams.length > 0
       ? brief.activeStreams.slice(0, 4).map((stream) => ({
@@ -944,7 +952,9 @@ export const MainStage: React.FC<MainStageProps> = ({
         }))
       : [];
   const supportingItems = (
-    v2SupportingItems.length > 0
+    v2SupportingBullets.length > 0
+      ? v2SupportingBullets
+      : v2SupportingItems.length > 0
       ? v2SupportingItems
       : brief.isCompiled
         ? priorities
