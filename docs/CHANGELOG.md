@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-30
+
+### Rank Active Streams with urgency signals
+- **Issue:** [#149](https://github.com/metagrover/pluto/issues/149)
+- **PR:** Pending.
+- **Changed:** Deterministic Knowledge V2 Active Streams now rank with urgency-aware ordering instead of relying almost entirely on source breadth. Streams with blocker/risk pressure, live follow-ups, dependencies, and decisions can rise above quieter reference streams, and the supporting bullets in Current Read automatically follow that updated order. Focused unit coverage now proves that an urgent stream can outrank a broader but lower-pressure stream.
+- **Why:** `#60` says Active Streams should help users re-enter the right thread, not just the broadest one. On current `master`, a stream with explicit blockers could still be buried behind a larger reference stream because ordering mostly favored `source_count` plus recency.
+- **Replaced:** Treating Active Stream ranking as a rough breadth sort that underweighted operational urgency already present in Pluto's synthesized evidence.
+- **Notes:** This slice stays inside deterministic synthesis and merged Knowledge V2 ordering. It does not add new persisted stream schema or redesign the Knowledge UI.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
