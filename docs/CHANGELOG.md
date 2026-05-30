@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-29
+
+### Expose the durable attention queue to renderer code
+- **Issue:** [#141](https://github.com/metagrover/pluto/issues/141)
+- **PR:** Pending.
+- **Changed:** Added a typed renderer API wrapper for Pluto's existing durable attention queue IPC handlers. Frontend code can now list attention items, filter them by meeting, clear meeting-scoped items, and update lifecycle state through one shared module, with focused unit coverage for the contract.
+- **Why:** `#61` still needs more follow-up surfaces to consume real durable attention state, but the renderer had no dedicated API layer for the queue even though `electron/main.ts` already exposed the IPC handlers. This foundation lets later UI slices reuse the same typed path instead of hard-coding channel strings or rebuilding action heuristics.
+- **Replaced:** Treating durable attention access as an ad hoc IPC concern in future UI work rather than part of Pluto's normal frontend data layer.
+- **Notes:** This slice is intentionally non-UI and avoids overlapping the active Meeting View, Dashboard, and Knowledge PRs.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
