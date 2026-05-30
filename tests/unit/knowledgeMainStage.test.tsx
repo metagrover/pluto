@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
-import { MainStage, resolveCurrentReadHeadline } from '../../src/components/KnowledgeGraph/MainStage';
+import {
+  MainStage,
+  resolveCurrentReadHeadline,
+} from '../../src/components/KnowledgeGraph/MainStage';
 
 const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
   id: 'doc-1',
