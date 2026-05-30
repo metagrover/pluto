@@ -817,7 +817,10 @@ export const repairKnowledgeV2Document = (
 
 const getStreamUrgencyCounts = (
   attentionItems: KnowledgeV2Item[],
-): Map<string, { blockerRisk: number; dependency: number; openQuestion: number }> => {
+): Map<
+  string,
+  { blockerRisk: number; dependency: number; openQuestion: number }
+> => {
   const counts = new Map<
     string,
     { blockerRisk: number; dependency: number; openQuestion: number }
@@ -1161,9 +1164,7 @@ export const mergeKnowledgeV2Documents = (
       added_count: attention.length + patterns.length + rankedStreams.length,
       removed_count: 0,
       updated_count: 0,
-      notable_changes: rankedStreams
-        .slice(0, 3)
-        .map((stream) => stream.title),
+      notable_changes: rankedStreams.slice(0, 3).map((stream) => stream.title),
     },
   };
 };
