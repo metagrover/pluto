@@ -1,5 +1,5 @@
 import * as db from '../db';
-import type { Entity } from '../db';
+import type { BlockedActionItem, Entity } from '../db';
 import type { KnowledgeV2Document, KnowledgeV2Item } from '../knowledgeV2';
 import { scoreAttentionItem } from './attentionScoring';
 import type {
@@ -242,14 +242,97 @@ const buildStaleActionItem = (action: Entity): AttentionItemUpsert => {
   };
 };
 
+const buildBlockedActionItem = (
+  action: BlockedActionItem,
+): AttentionItemUpsert => {
+  const relatedMeetingIds = unique(
+    [
+      action.blocker_meeting_id,
+      ...db.getMeetingsForEntity(action.id).map((meeting) => meeting.meeting_id),
+    ].filter((meetingId): meetingId is string => Boolean(meetingId)),
+  );
+  const scored = scoreAttentionItem({
+    kind: 'blocker',
+    status: 'active',
+    confidence:
+      action.blocker_relationship_state === 'confirmed' ? 0.92 : 0.78,
+    evidence_mode: 'direct',
+    freshness: 'fresh',
+    updated_at: action.blocker_updated_at ?? action.updated_at ?? null,
+    cited_meeting_count: relatedMeetingIds.length || 1,
+    source_count: relatedMeetingIds.length || 1,
+    related_stream_count: 0,
+    is_explicit_commitment: true,
+  });
+
+  const evidence: AttentionEvidenceReference[] = [];
+  if (action.blocker_meeting_id) {
+    evidence.push({
+      meeting_id: action.blocker_meeting_id,
+      quote:
+        action.blocker_evidence_quote ?? `Blocked by ${action.blocker_name}.`,
+      entity_id: action.blocker_entity_id,
+      source_kind: 'blocked_action',
+    });
+  }
+
+  for (const reference of actionEvidence(action, 'blocked_action')) {
+    if (
+      evidence.some(
+        (existing) =>
+          existing.meeting_id === reference.meeting_id &&
+          existing.entity_id === reference.entity_id,
+      )
+    ) {
+      continue;
+    }
+    evidence.push(reference);
+  }
+
+  return {
+    dedupe_key: `${ACTION_PREFIX}blocked:${sanitizeKeyPart(action.id)}`,
+    kind: 'blocker',
+    severity: scored.severity,
+    score: scored.score,
+    status: 'active',
+    title: `Blocked: ${action.name}`,
+    reason: `Blocked by ${action.blocker_name}.`,
+    source: 'action_tracker',
+    score_breakdown: scored.score_breakdown,
+    evidence,
+    related_entity_ids: unique([action.id, action.blocker_entity_id]),
+    related_stream_ids: [],
+    related_meeting_ids: relatedMeetingIds,
+  };
+};
+
+const uniqueBlockedActions = (
+  actions: BlockedActionItem[],
+): BlockedActionItem[] => {
+  const deduped = new Map<string, BlockedActionItem>();
+  for (const action of actions) {
+    if (!deduped.has(action.id)) {
+      deduped.set(action.id, action);
+    }
+  }
+  return Array.from(deduped.values());
+};
+
 export const syncActionTrackerAttentionQueue = (): AttentionItem[] => {
-  const overdue = db.getOverdueActionItems();
+  const blocked = uniqueBlockedActions(db.getBlockedActionItems());
+  const blockedIds = new Set(blocked.map((action) => action.id));
+  const overdue = db
+    .getOverdueActionItems()
+    .filter((action) => !blockedIds.has(action.id));
   const overdueIds = new Set(overdue.map((action) => action.id));
   const stale = db
     .getStaleActionItems(STALE_ACTION_DAYS)
-    .filter((action) => !overdueIds.has(action.id));
+    .filter(
+      (action) => !blockedIds.has(action.id) && !overdueIds.has(action.id),
+    );
 
   const items = [
+    ...blocked.map(buildBlockedActionItem),
     ...overdue.map(buildOverdueActionItem),
     ...stale.map(buildStaleActionItem),
   ];
