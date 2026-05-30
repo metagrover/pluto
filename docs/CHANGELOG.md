@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-29
+
+### Harden Knowledge V2 merges against null structured fields
+- **Issue:** [#111](https://github.com/metagrover/pluto/issues/111)
+- **PR:** Pending.
+- **Changed:** Knowledge V2 merge-time normalization now tolerates nullish structured LLM fields instead of throwing, and evidence dedupe now skips malformed entries that are missing either a meeting id or quote. Focused regression coverage now proves Pluto can merge malformed LLM-shaped chunk documents without crashing Knowledge refresh.
+- **Why:** Pluto's working-memory and Knowledge roadmap slices depend on local resynthesis staying reliable. A single null title or quote from structured LLM output should degrade gracefully instead of crashing the merge path and aborting Knowledge refresh.
+- **Replaced:** Assuming all structured LLM merge fields are valid strings and letting malformed evidence rows participate in dedupe keys even when they could only produce unusable empty identifiers.
+- **Notes:** This is intentionally a narrow runtime hardening fix. It does not redesign Knowledge V2 synthesis or broaden fallback behavior beyond null/malformed merge fields.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
