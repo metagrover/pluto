@@ -848,7 +848,10 @@ export const compileKnowledgeBrief = (
   doc: KnowledgeDoc | null | undefined,
   workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): KnowledgeBrief => {
-  const snapshotV2 = matchesWorkingMemorySnapshotToDoc(doc, workingMemorySnapshot)
+  const snapshotV2 = matchesWorkingMemorySnapshotToDoc(
+    doc,
+    workingMemorySnapshot,
+  )
     ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
     : null;
   if (snapshotV2 && workingMemorySnapshot) {
