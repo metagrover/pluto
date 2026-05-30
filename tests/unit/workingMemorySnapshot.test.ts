@@ -142,8 +142,10 @@ import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 import {
   buildGlobalWorkingMemorySnapshot,
   buildProjectWorkingMemorySnapshot,
+  buildTeamTrackerWorkingMemorySnapshot,
   persistGlobalWorkingMemorySnapshot,
   persistProjectWorkingMemorySnapshot,
+  persistTeamTrackerWorkingMemorySnapshot,
 } from '../../electron/workingMemory';
 
 const makeKnowledgeDoc = (
@@ -416,6 +418,61 @@ describe('working memory snapshots', () => {
       type: 'project',
       key: 'project-1',
       title: 'Project Atlas',
+    });
+  });
+
+  it('builds and persists a team-tracker snapshot for a tracker knowledge doc', () => {
+    const snapshot = buildTeamTrackerWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-team',
+        scope_type: 'team_tracker',
+        scope_key: 'team-1',
+        title: 'Leadership Team',
+        config: JSON.stringify({ member_entity_ids: ['person-1', 'person-2'] }),
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'team_tracker',
+          title: 'Leadership Team',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    expect(snapshot.scope_type).toBe('team_tracker');
+    expect(snapshot.scope_key).toBe('team-1');
+    expect(snapshot.payload.scope.type).toBe('team_tracker');
+
+    const saved = persistTeamTrackerWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-team',
+        scope_type: 'team_tracker',
+        scope_key: 'team-1',
+        title: 'Leadership Team',
+        config: JSON.stringify({ member_entity_ids: ['person-1', 'person-2'] }),
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'team_tracker',
+          title: 'Leadership Team',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    const stored = getWorkingMemorySnapshot('team_tracker', 'team-1');
+
+    expect(saved.id).toBeTruthy();
+    expect(stored).toMatchObject({
+      scope_type: 'team_tracker',
+      scope_key: 'team-1',
+      title: 'Leadership Team',
+      source_doc_id: 'doc-team',
+    });
+    expect(stored?.payload.scope).toMatchObject({
+      type: 'team_tracker',
+      key: 'team-1',
+      title: 'Leadership Team',
     });
   });
 

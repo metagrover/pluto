@@ -31,6 +31,7 @@ import {
 import {
   persistGlobalWorkingMemorySnapshot,
   persistProjectWorkingMemorySnapshot,
+  persistTeamTrackerWorkingMemorySnapshot,
 } from './workingMemory';
 
 const SYNTHESIS_DEBOUNCE_MS = 2500;
@@ -1621,6 +1622,12 @@ const synthesizeKnowledgeDocNowInternal = async (
         structured: emptyDoc,
         generatedAt: savedDoc.last_synthesized_at ?? undefined,
       });
+    } else if (savedDoc.scope_type === 'team_tracker') {
+      persistTeamTrackerWorkingMemorySnapshot({
+        knowledgeDoc: savedDoc,
+        structured: emptyDoc,
+        generatedAt: savedDoc.last_synthesized_at ?? undefined,
+      });
     }
 
     return savedDoc;
@@ -1712,13 +1719,17 @@ const synthesizeKnowledgeDocNowInternal = async (
     });
 
     if (
-      (savedDoc.scope_type === 'global' || savedDoc.scope_type === 'project') &&
+      (savedDoc.scope_type === 'global' ||
+        savedDoc.scope_type === 'project' ||
+        savedDoc.scope_type === 'team_tracker') &&
       isKnowledgeV2Document(correctedStructured)
     ) {
       const persistSnapshot =
         savedDoc.scope_type === 'global'
           ? persistGlobalWorkingMemorySnapshot
-          : persistProjectWorkingMemorySnapshot;
+          : savedDoc.scope_type === 'project'
+            ? persistProjectWorkingMemorySnapshot
+            : persistTeamTrackerWorkingMemorySnapshot;
       persistSnapshot({
         knowledgeDoc: savedDoc,
         structured: correctedStructured,

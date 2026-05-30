@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-30
+
+### Persist team-tracker working-memory snapshots
+- **Issue:** [#145](https://github.com/metagrover/pluto/issues/145)
+- **PR:** Pending.
+- **Changed:** Pluto's working-memory snapshot layer now supports `team_tracker` Knowledge docs in the same way it already supported global and project scopes. Team tracker synthesis now persists durable snapshots for both empty and populated Knowledge V2 documents, and focused unit coverage proves build and persist behavior for the new scope.
+- **Why:** `#80` defines working memory as the durable substrate shared by Knowledge, Ask Pluto, briefings, and attention. Before this slice, team tracker docs could synthesize shared people-group context but could never persist that context into the snapshot store, leaving the scope outside Pluto's durable memory path.
+- **Replaced:** Treating `team_tracker` Knowledge docs as synthesis-only views while the working-memory snapshot contract remained hardcoded to global and project scopes.
+- **Notes:** This slice only extends the snapshot substrate. Team-tracker-specific UI consumption and broader downstream readers remain separate follow-up work under the Phase 2 roadmap.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
