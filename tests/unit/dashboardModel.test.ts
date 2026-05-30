@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { WorkingMemorySnapshot } from '../../electron/db';
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { Entity } from '../../src/api/knowledgeGraph';
@@ -36,6 +37,30 @@ const makeAction = (overrides: Partial<Entity> = {}): Entity => ({
   domain_tag: 'work',
   created_at: '2026-04-25T10:00:00.000Z',
   updated_at: '2026-04-25T10:00:00.000Z',
+  ...overrides,
+});
+
+const makeAttentionItem = (
+  overrides: Partial<AttentionItem> = {},
+): AttentionItem => ({
+  id: 'attention-1',
+  dedupe_key: 'action_tracker:overdue:action-1',
+  kind: 'follow_up',
+  severity: 'watch',
+  score: 0.42,
+  status: 'active',
+  title: 'Review indexing rollout',
+  reason: 'This follow-up still needs attention.',
+  source: 'action_tracker',
+  score_breakdown: null,
+  evidence: [],
+  related_entity_ids: ['action-1'],
+  related_stream_ids: [],
+  related_meeting_ids: [],
+  created_at: '2026-04-25T10:00:00.000Z',
+  updated_at: '2026-04-25T10:00:00.000Z',
+  last_seen_at: '2026-04-25T10:00:00.000Z',
+  resolved_at: null,
   ...overrides,
 });
 
@@ -258,6 +283,60 @@ describe('buildDashboardHomeModel', () => {
       status: 'stale',
       sourceLabel: 'Work',
     });
+  });
+
+  it('suppresses dismissed linked follow-ups from dashboard attention lists', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ name: 'Ship privacy review' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [makeAttentionItem({ status: 'dismissed' })],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('latest_meeting');
+    expect(model.briefingFocus.kind).toBe('latest_meeting');
+    expect(model.actionInsights.state).toBe('empty');
+  });
+
+  it('suppresses snoozed linked follow-ups from dashboard attention lists', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [makeAction({ name: 'Revisit launch blockers' })],
+      activeActions: [],
+      attentionAlerts: [makeAttentionItem({ status: 'snoozed' })],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('latest_meeting');
+    expect(model.briefingFocus.kind).toBe('latest_meeting');
+    expect(model.actionInsights.state).toBe('empty');
+  });
+
+  it('keeps dashboard follow-ups visible when any linked alert is still active', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ name: 'Ship privacy review' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({ id: 'attention-dismissed', status: 'dismissed' }),
+        makeAttentionItem({ id: 'attention-active', status: 'active' }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('overdue_action');
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]?.title).toBe('Ship privacy review');
   });
 
   it('uses the latest meeting as the briefing focus when no actions need attention', () => {
