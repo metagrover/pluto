@@ -248,14 +248,15 @@ const buildBlockedActionItem = (
   const relatedMeetingIds = unique(
     [
       action.blocker_meeting_id,
-      ...db.getMeetingsForEntity(action.id).map((meeting) => meeting.meeting_id),
+      ...db
+        .getMeetingsForEntity(action.id)
+        .map((meeting) => meeting.meeting_id),
     ].filter((meetingId): meetingId is string => Boolean(meetingId)),
   );
   const scored = scoreAttentionItem({
     kind: 'blocker',
     status: 'active',
-    confidence:
-      action.blocker_relationship_state === 'confirmed' ? 0.92 : 0.78,
+    confidence: action.blocker_relationship_state === 'confirmed' ? 0.92 : 0.78,
     evidence_mode: 'direct',
     freshness: 'fresh',
     updated_at: action.blocker_updated_at ?? action.updated_at ?? null,
