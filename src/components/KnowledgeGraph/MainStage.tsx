@@ -955,10 +955,10 @@ export const MainStage: React.FC<MainStageProps> = ({
     v2SupportingBullets.length > 0
       ? v2SupportingBullets
       : v2SupportingItems.length > 0
-      ? v2SupportingItems
-      : brief.isCompiled
-        ? priorities
-        : allBriefItems
+        ? v2SupportingItems
+        : brief.isCompiled
+          ? priorities
+          : allBriefItems
   )
     .filter(
       (item, index, items) =>
