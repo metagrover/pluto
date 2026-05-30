@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-30
+
+### Prefer project working-memory snapshots in Dashboard knowledge cards
+- **Issue:** [#153](https://github.com/metagrover/pluto/issues/153)
+- **PR:** Pending.
+- **Changed:** Dashboard home now loads the available working-memory snapshots and lets project Knowledge cards prefer a matching fresh project snapshot for their Current Read headline and trust metadata, while preserving the existing Knowledge-doc fallback when the snapshot is missing, stale, invalid, or mismatched. Focused dashboard-model tests now cover both the project snapshot preference path and the stale fallback path, while the existing global snapshot behavior stays intact.
+- **Why:** `#81` already proved project snapshots persist and that project Knowledge briefs can consume them, but the Dashboard still only loaded the global snapshot. That left project re-entry cards behind the rest of the working-memory stack even when a fresher durable project summary already existed.
+- **Replaced:** Treating Dashboard project Knowledge cards as direct reads of transient doc JSON even after Pluto had started persisting project-scoped working-memory snapshots on `master`.
+- **Notes:** This slice stays read-only and scoped to Dashboard knowledge cards. Person-context/team-tracker scopes and broader Dashboard redesign remain follow-up work.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
