@@ -769,6 +769,75 @@ describe('knowledge document utilities', () => {
     expect(brief.trustMessage).toBe('Doc fallback stays intact.');
   });
 
+  it('falls back to doc JSON when the working-memory snapshot predates the latest synthesis', () => {
+    const doc = makeDoc({
+      last_synthesized_at: '2026-04-26T10:00:00.000Z',
+      updated_at: '2026-04-26T10:00:00.000Z',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Doc JSON should win after a newer synthesis pass.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Fresh doc synthesis is newer than the snapshot.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.82,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-26T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-26T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(
+      doc,
+      makeWorkingMemorySnapshot({
+        source_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+        generated_at: '2026-04-25T10:00:00.000Z',
+        updated_at: '2026-04-25T10:00:00.000Z',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          source: {
+            knowledge_doc_id: 'doc-1',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+        },
+      }),
+    );
+
+    expect(brief.headline).toBe(
+      'Doc JSON should win after a newer synthesis pass.',
+    );
+    expect(brief.trustMessage).toBe(
+      'Fresh doc synthesis is newer than the snapshot.',
+    );
+  });
+
   it('falls back to doc JSON when the global working-memory snapshot payload is invalid', () => {
     const doc = makeDoc({
       structured_json: JSON.stringify({
