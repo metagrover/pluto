@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { WorkingMemorySnapshot } from '../../electron/db';
+import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import type {
