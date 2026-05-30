@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-27
 
+### Let Knowledge Needs Attention prefer working-memory snapshots
+- **Issue:** [#139](https://github.com/metagrover/pluto/issues/139)
+- **PR:** Pending.
+- **Changed:** The selected Knowledge doc now passes its matching working-memory snapshot into `Needs Attention`, so project docs can render snapshot-backed open loops and dependencies instead of falling straight to project-card heuristics. The global Knowledge lane still gives active durable attention-queue items highest priority, and stale or mismatched snapshots still fall back to the existing doc/project-card behavior. Focused unit coverage now proves both the snapshot-backed project path and stale-snapshot fallback.
+- **Why:** `#81` already let Current Read consume durable working memory, but the `Needs Attention` lane still ignored that same persisted state for project docs. This left project re-entry surfaces showing rough heuristics even when Pluto had already synthesized a fresher scoped snapshot.
+- **Replaced:** Treating project Knowledge `Needs Attention` as a purely heuristic reconstruction from doc JSON and project cards after the selected doc already had a matching durable working-memory snapshot.
+- **Notes:** This slice stays read-only and scoped to the selected Knowledge doc. It does not add project-specific attention queues, new snapshot scopes, or a Knowledge UI redesign.
+
 ### Enrich Meeting follow-up drafts from linked context
 - **Issue:** [#120](https://github.com/metagrover/pluto/issues/120)
 - **PR:** Pending.
