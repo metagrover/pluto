@@ -12,8 +12,8 @@ import {
   getKnowledgeWorkspace,
 } from '../../api/knowledgeWorkspace';
 import {
-  listWorkingMemorySnapshots,
   type WorkingMemorySnapshot,
+  listWorkingMemorySnapshots,
 } from '../../api/workingMemory';
 import type { Meeting } from '../../types';
 import {

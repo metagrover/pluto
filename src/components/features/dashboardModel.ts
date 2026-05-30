@@ -464,7 +464,9 @@ const buildKnowledgeDocuments = (
   const projectCardsByDocId = new Map(
     (workspace?.project_cards ?? []).map((card) => [card.doc_id, card]),
   );
-  const snapshotsByScope = buildWorkingMemorySnapshotMap(workingMemorySnapshots);
+  const snapshotsByScope = buildWorkingMemorySnapshotMap(
+    workingMemorySnapshots,
+  );
   const usableDocs = docs.filter((doc) =>
     isUsableKnowledgeDoc(doc, projectCardsByDocId.get(doc.id)),
   );
