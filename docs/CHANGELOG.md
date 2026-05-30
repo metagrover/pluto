@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-30
+
+### Keep Knowledge Current Read freshness honest
+- **Issue:** [#157](https://github.com/metagrover/pluto/issues/157)
+- **PR:** Pending.
+- **Changed:** Knowledge brief compilation now carries a `freshnessAt` timestamp from the rendered backing state, and the Current Read badge now prefers that timestamp over the selected doc record. Snapshot-backed briefs use the matching snapshot reinforcement time, compiled V2 briefs can use their evidence reinforcement time, and empty or legacy fallback states keep the prior doc timestamp behavior. Focused unit coverage now proves both the model timestamp source and the renderer badge behavior.
+- **Why:** `#81` requires Knowledge to stay honest when it reads from durable working memory instead of isolated synthesis. Before this slice, Pluto could show snapshot-backed or evidence-backed Current Read content while labeling it with the selected doc's newer timestamp, which overstated freshness.
+- **Replaced:** Treating the selected Knowledge doc record as the freshness source even when the visible Current Read was backed by different snapshot or evidence timing.
+- **Notes:** This is intentionally a metadata-only renderer/model fix. It does not redesign Current Read copy, retry flows, or snapshot validation rules.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
