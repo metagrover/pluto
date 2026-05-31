@@ -632,13 +632,12 @@ const toWorkingMemorySnapshotStructuredDoc = (
     patterns: payload.patterns,
     risks_and_unknowns: payload.risks_and_unknowns,
     evidence_index: payload.evidence_index,
-    source_quality_summary:
-      payload.source_quality_summary ?? {
-        included_count: snapshot.source_count,
-        excluded_count: 0,
-        weak_count: 0,
-        records: [],
-      },
+    source_quality_summary: payload.source_quality_summary ?? {
+      included_count: snapshot.source_count,
+      excluded_count: 0,
+      weak_count: 0,
+      records: [],
+    },
   });
 
   return parseStructuredKnowledgeV2Value({
