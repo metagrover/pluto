@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-31
+
+### Add evidence drilldown for Knowledge Current Read bullets
+- **Issue:** [#167](https://github.com/metagrover/pluto/issues/167)
+- **PR:** Pending.
+- **Changed:** Current Read supporting bullets in Knowledge now expose the same `Why?` affordance already used by Needs Attention and Risks/Unknowns. The action reuses the existing evidence sheet and prefers matching `evidence_index` snippets over bare citation fallback when Pluto has richer meeting context.
+- **Why:** `#58` requires important surfaced Knowledge items to explain why Pluto believes them. Before this slice, Current Read could show the headline and supporting bullets but left those claims as the only major Knowledge items without an item-level path back to source evidence.
+- **Replaced:** Treating Current Read bullets as static prose even when Pluto already had a reusable evidence sheet and linked citation data for adjacent Knowledge surfaces.
+- **Notes:** This is intentionally a focused UI/evidence traceability slice. It does not redesign the Current Read layout or change ranking, synthesis, or trust-status semantics.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
