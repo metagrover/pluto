@@ -304,6 +304,7 @@ const CurrentRead = ({
   const statementLabel = `${coverage.statementCount} cited item${
     coverage.statementCount === 1 ? '' : 's'
   }`;
+  const sourceCount = coverage.sourceCount ?? sources.length;
   const evidenceIsThin =
     selectedDoc.status === 'up_to_date' &&
     coverage.statementCount > 0 &&
@@ -326,7 +327,7 @@ const CurrentRead = ({
             <CheckCircle2 className="h-3.5 w-3.5" />
             {sourcesLoading
               ? 'Loading sources'
-              : `${sources.length} source${sources.length === 1 ? '' : 's'}`}
+              : `${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
           </span>
           {coverage.statementCount > 0 && (
             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-pro-text-muted">

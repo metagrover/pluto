@@ -76,6 +76,7 @@ export interface KnowledgeBriefLane {
 }
 
 export interface KnowledgeBriefCoverage {
+  sourceCount: number | null;
   statementCount: number;
   citedMeetingCount: number;
   dependencyCount: number;
@@ -247,6 +248,7 @@ const looksLikeRawId = (value: string): boolean =>
   );
 
 const EMPTY_BRIEF_COVERAGE: KnowledgeBriefCoverage = {
+  sourceCount: null,
   statementCount: 0,
   citedMeetingCount: 0,
   dependencyCount: 0,
@@ -802,6 +804,7 @@ const buildKnowledgeBriefFromV2 = ({
     headline: v2.current_read.headline || 'No reliable compiled brief yet.',
     lanes: emptyLanes,
     coverage: {
+      sourceCount: v2.current_read.source_count,
       statementCount: v2.current_read.cited_item_count,
       citedMeetingCount: v2.current_read.cited_meeting_count,
       dependencyCount: v2.needs_attention.filter((item) =>
@@ -945,6 +948,7 @@ export const compileKnowledgeBrief = (
     ),
   );
   const coverage: KnowledgeBriefCoverage = {
+    sourceCount: null,
     statementCount: statementItems.length,
     citedMeetingCount: citedMeetingIds.size,
     dependencyCount: dependencies.length,

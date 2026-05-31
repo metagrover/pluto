@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-31
+
+### Align Knowledge Current Read source counts with rendered backing state
+- **Issue:** [#159](https://github.com/metagrover/pluto/issues/159)
+- **PR:** Pending.
+- **Changed:** The Knowledge main stage now carries `current_read.source_count` through the compiled brief model and uses that rendered backing count for the Current Read source badge whenever the brief comes from Knowledge V2 or a matching working-memory snapshot. Legacy and empty fallback states still use the currently loaded source list, and focused tests now cover both the rendered-count path and the fallback behavior.
+- **Why:** `#81` is about making Knowledge render from durable working-memory-compatible state instead of whatever transient loader state happens to be present. Before this slice, the Current Read badge could claim `0 sources` or another mismatched number even while Pluto was visibly rendering a snapshot-backed or compiled Current Read with a different evidence count.
+- **Replaced:** Treating the Current Read source badge as a direct reflection of the live renderer `sources` array instead of the evidence count for the read Pluto is actually showing.
+- **Notes:** This keeps the Current Read layout and retry messaging unchanged. Freshness, supporting bullets, and other Current Read metadata slices remain separate follow-up work under `#81`.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
