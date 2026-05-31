@@ -51,6 +51,7 @@ import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
 import { buildFollowUpDraftContext } from './followUpDraftContext';
+import { buildFollowUpDraftDecisions } from './followUpDraftDecisions';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
@@ -348,8 +349,10 @@ export const MeetingView = ({
     }) ||
     v2?.action_items ||
     [];
-  const decisions =
-    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const decisions = buildFollowUpDraftDecisions({
+    v3Decisions: v3?.all_decisions || [],
+    fallbackDecisions: v2?.decisions || [],
+  });
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
