@@ -1761,6 +1761,7 @@ export interface WorkingMemorySnapshotPayload {
     trust_status: TrustStatus;
     trust_message: string;
     source_count: number;
+    cited_item_count: number;
     cited_meeting_count: number;
   };
   active_streams: unknown[];

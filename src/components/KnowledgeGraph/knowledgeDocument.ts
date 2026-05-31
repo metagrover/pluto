@@ -591,11 +591,6 @@ const toWorkingMemorySnapshotStructuredDoc = (
     return null;
   }
 
-  const citedItemCount =
-    payload.open_loops.length +
-    payload.patterns.length +
-    payload.risks_and_unknowns.length;
-
   const syntheticStructuredJson = JSON.stringify({
     schema_version: 2,
     scope: {
@@ -607,7 +602,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
       supporting_bullets: payload.current_read.supporting_bullets,
       freshness: payload.current_read.freshness,
       source_count: payload.current_read.source_count,
-      cited_item_count: citedItemCount,
+      cited_item_count: payload.current_read.cited_item_count,
       cited_meeting_count: payload.current_read.cited_meeting_count,
       trust_message: payload.current_read.trust_message,
       evidence_quality: {

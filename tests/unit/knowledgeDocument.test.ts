@@ -75,6 +75,7 @@ const makeWorkingMemorySnapshot = (
       trust_status: 'grounded',
       trust_message: 'Backed by the persisted global snapshot.',
       source_count: 3,
+      cited_item_count: 4,
       cited_meeting_count: 2,
     },
     active_streams: [
@@ -611,7 +612,7 @@ describe('knowledge document utilities', () => {
     expect(brief.activeStreams[0].title).toBe('Launch');
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
     expect(brief.coverage).toMatchObject({
-      statementCount: 2,
+      statementCount: 4,
       citedMeetingCount: 2,
     });
   });
