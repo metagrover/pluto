@@ -65,6 +65,7 @@ interface WhyItem {
   summary: string;
   reasons: string[];
   citations: KnowledgeCitation[];
+  streamIds?: string[];
   evidenceEntries?: KnowledgeV2EvidenceEntry[];
   evidenceQuality?: {
     mode: 'direct' | 'inferred';
@@ -497,8 +498,10 @@ const NeedsAttention = ({
 
 const ActiveStreams = ({
   streams,
+  onOpenWhy,
 }: {
   streams: KnowledgeV2Stream[];
+  onOpenWhy: (item: WhyItem) => void;
 }) => {
   if (streams.length === 0) return null;
 
@@ -514,21 +517,51 @@ const ActiveStreams = ({
             key={stream.id}
             className="rounded-lg border border-pro-border bg-pro-bg p-4"
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-pro-border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
-                {stream.domain}
-              </span>
-              <span className="text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
-                {stream.source_count} source
-                {stream.source_count === 1 ? '' : 's'}
-              </span>
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-pro-border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                    {stream.domain}
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                    {stream.source_count} source
+                    {stream.source_count === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <h3 className="mt-3 text-base font-black text-pro-text-main">
+                  {stream.title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-pro-text-muted">
+                  {stream.current_read}
+                </p>
+              </div>
+              <WhyButton
+                item={{
+                  id: stream.id,
+                  title: stream.title,
+                  summary: stream.current_read,
+                  reasons: [
+                    stream.status,
+                    `${stream.open_follow_up_count} active follow-up${
+                      stream.open_follow_up_count === 1 ? '' : 's'
+                    }`,
+                    `${stream.decision_count} recorded decision${
+                      stream.decision_count === 1 ? '' : 's'
+                    }`,
+                    `${stream.unresolved_question_count} unresolved question${
+                      stream.unresolved_question_count === 1 ? '' : 's'
+                    }`,
+                  ].filter(Boolean),
+                  citations: [],
+                  streamIds: [stream.id],
+                  evidenceQuality: {
+                    mode: stream.evidence_quality.mode,
+                    confidence: stream.evidence_quality.confidence,
+                  },
+                }}
+                onOpen={onOpenWhy}
+              />
             </div>
-            <h3 className="mt-3 text-base font-black text-pro-text-main">
-              {stream.title}
-            </h3>
-            <p className="mt-2 text-sm leading-6 text-pro-text-muted">
-              {stream.current_read}
-            </p>
             <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-bold text-pro-text-muted">
               <span>{stream.open_follow_up_count} follow-ups</span>
               <span>{stream.decision_count} decisions</span>
@@ -968,8 +1001,10 @@ export const MainStage: React.FC<MainStageProps> = ({
     const citationIds = new Set(
       item.citations.map((citation) => citation.meeting_id).filter(Boolean),
     );
+    const streamIds = new Set(item.streamIds?.filter(Boolean) || []);
     const entries = brief.evidenceIndex.filter(
       (entry) =>
+        entry.stream_ids.some((streamId) => streamIds.has(streamId)) ||
         entry.item_ids.includes(item.id) || citationIds.has(entry.meeting_id),
     );
     return entries.length > 0 ? { ...item, evidenceEntries: entries } : item;
@@ -994,7 +1029,10 @@ export const MainStage: React.FC<MainStageProps> = ({
           onRetrySynthesis={handleRetry}
         />
 
-        <ActiveStreams streams={brief.activeStreams} />
+        <ActiveStreams
+          streams={brief.activeStreams}
+          onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
+        />
 
         <NeedsAttention
           items={attentionItems}

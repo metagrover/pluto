@@ -20,6 +20,93 @@ const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
 });
 
 describe('Knowledge MainStage', () => {
+  it('renders a Why? affordance for Active Streams cards', () => {
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        current_read: {
+          headline: 'Launch planning remains the main operating thread.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Grounded in cited operating reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.84,
+            cited_meeting_count: 1,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'stream-1',
+            title: 'Launch',
+            domain: 'work',
+            status: 'blocked on QA instrumentation',
+            current_read: 'QA and rollout prep remain the main execution path.',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 2,
+            open_follow_up_count: 3,
+            decision_count: 1,
+            unresolved_question_count: 1,
+            pinned: false,
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.81,
+              cited_meeting_count: 1,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [
+          {
+            id: 'evidence-stream-1',
+            meeting_id: 'meeting-1',
+            meeting_title: 'Launch review',
+            captured_at: '2026-04-25T10:00:00.000Z',
+            quote: 'QA instrumentation is still blocking rollout.',
+            stream_ids: ['stream-1'],
+            item_ids: [],
+            mode: 'direct',
+            confidence: 0.81,
+          },
+        ],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('Active Streams');
+    expect(markup).toContain('Launch');
+    expect(markup).toContain('Why?');
+  });
+
   it('does not repeat a promoted risk in both Needs Attention and Risks and Unknowns', () => {
     const duplicatedRisk =
       'Advisor Agent Deployment may miss demo readiness without UAT and API instrumentation.';

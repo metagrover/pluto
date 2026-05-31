@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-31
+
+### Add evidence drilldown for Knowledge Active Streams
+- **Issue:** [#169](https://github.com/metagrover/pluto/issues/169)
+- **PR:** Pending.
+- **Changed:** The Knowledge main stage now gives each Active Streams card a `Why?` affordance that opens the existing evidence sheet with stream-specific reasoning, confidence, and any matching evidence-index snippets. Stream evidence lookup now matches by `stream_ids` before falling back to broader citation-level context, and focused Knowledge render coverage now proves the affordance is present.
+- **Why:** Phase 2's shared working-memory surfaces are only trustworthy if important surfaced items can explain themselves. On current `master`, Active Streams looked important but exposed no item-level path back to evidence, unlike adjacent `Needs Attention` and `Risks and Unknowns` cards.
+- **Replaced:** Treating Active Streams as read-only summary cards with no direct evidence drilldown even when the Knowledge evidence index already linked snippets to those streams.
+- **Notes:** This slice intentionally reuses the existing right-side evidence sheet and does not redesign stream ranking, persistence, or layout.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context
