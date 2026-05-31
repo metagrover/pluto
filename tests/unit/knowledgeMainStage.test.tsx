@@ -197,4 +197,79 @@ describe('Knowledge MainStage', () => {
     expect(markup.split(promotedTitle)).toHaveLength(2);
     expect(markup.split(distinctRisk)).toHaveLength(2);
   });
+
+  it('shows current read evidence quality in the trust panel for V2 briefs', () => {
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        current_read: {
+          headline: 'Launch planning remains the main operating thread.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in cited operating reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.84,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'stream-launch',
+            title: 'Launch',
+            domain: 'work',
+            status: 'active',
+            current_read: 'Launch remains active.',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 2,
+            open_follow_up_count: 1,
+            decision_count: 1,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.84,
+              cited_meeting_count: 2,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('Evidence is direct');
+    expect(markup).toContain('confidence 84%');
+    expect(markup).toContain('fresh evidence');
+  });
 });

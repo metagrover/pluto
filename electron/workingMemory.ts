@@ -43,6 +43,7 @@ const buildWorkingMemorySnapshot = ({
       trust_message: structured.current_read.trust_message,
       source_count: structured.current_read.source_count,
       cited_meeting_count: structured.current_read.cited_meeting_count,
+      evidence_quality: { ...structured.current_read.evidence_quality },
     },
     active_streams: structured.active_streams.map((stream) => ({ ...stream })),
     open_loops: structured.needs_attention.map((item) => ({ ...item })),

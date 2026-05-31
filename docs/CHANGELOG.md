@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-31
+
+### Preserve Current Read evidence quality across snapshot-backed Knowledge views
+- **Issue:** [#165](https://github.com/metagrover/pluto/issues/165)
+- **PR:** Pending.
+- **Changed:** Working-memory snapshots now persist `current_read.evidence_quality`, snapshot-backed Knowledge briefs restore that preserved evidence metadata instead of rebuilding it heuristically, and the Current Read trust panel now shows the rendered evidence mode, confidence, and freshness details. Focused regressions cover snapshot persistence, snapshot-backed brief restoration, the legacy-snapshot fallback path, and the Current Read render output.
+- **Why:** `#81` already makes Knowledge Current Read prefer durable working-memory snapshots, but snapshot-backed briefs were still dropping the compiled evidence-quality details that explain how grounded the rendered read actually is. Surfacing the same evidence metadata in the trust panel keeps snapshot-backed re-entry honest and aligned with the source Knowledge doc.
+- **Replaced:** Reconstructing snapshot-backed Current Read evidence quality from trust-status heuristics and showing only the generic trust label even when Pluto had already compiled more precise evidence metadata.
+- **Notes:** Legacy snapshots that predate this payload field still render through the existing heuristic fallback so previously persisted state remains usable.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context

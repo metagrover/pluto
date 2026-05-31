@@ -1762,6 +1762,14 @@ export interface WorkingMemorySnapshotPayload {
     trust_message: string;
     source_count: number;
     cited_meeting_count: number;
+    evidence_quality: {
+      mode: 'direct' | 'inferred';
+      confidence: number;
+      cited_meeting_count: number;
+      source_count: number;
+      last_reinforced_at: string | null;
+      freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+    };
   };
   active_streams: unknown[];
   open_loops: unknown[];

@@ -25,6 +25,7 @@ import {
   type KnowledgeBriefCoverage,
   type KnowledgeCitation,
   type KnowledgeStatement,
+  type KnowledgeV2EvidenceQuality,
   type KnowledgeV2EvidenceEntry,
   type KnowledgeV2Item,
   type KnowledgeV2SourceQualitySummary,
@@ -260,6 +261,7 @@ const CurrentRead = ({
   headline,
   supportingItems,
   coverage,
+  evidenceQuality,
   trustMessage,
   trustStatus,
   trustDescription,
@@ -274,6 +276,7 @@ const CurrentRead = ({
   headline: string;
   supportingItems: KnowledgeStatement[];
   coverage: KnowledgeBriefCoverage;
+  evidenceQuality: KnowledgeV2EvidenceQuality | null;
   trustMessage: string | null;
   trustStatus: TrustStatus | null;
   trustDescription: string | null;
@@ -417,6 +420,13 @@ const CurrentRead = ({
                 ? ` Included ${sourceQuality.included_count}, excluded ${sourceQuality.excluded_count}, weak ${sourceQuality.weak_count}.`
                 : ''}
             </p>
+            {evidenceQuality && (
+              <p className="mt-2 text-[11px] font-semibold text-pro-text-muted">
+                Evidence is {evidenceQuality.mode}; confidence{' '}
+                {Math.round(evidenceQuality.confidence * 100)}%;{' '}
+                {evidenceQuality.freshness} evidence.
+              </p>
+            )}
           </div>
         )}
 
@@ -985,6 +995,7 @@ export const MainStage: React.FC<MainStageProps> = ({
           headline={brief.headline}
           supportingItems={supportingItems}
           coverage={brief.coverage}
+          evidenceQuality={brief.evidenceQuality}
           trustMessage={brief.trustMessage}
           trustStatus={brief.trustStatus}
           trustDescription={brief.trustDescription}

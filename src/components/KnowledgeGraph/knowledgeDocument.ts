@@ -179,6 +179,7 @@ export interface KnowledgeBrief {
   headline: string;
   lanes: KnowledgeBriefLane[];
   coverage: KnowledgeBriefCoverage;
+  evidenceQuality: KnowledgeV2EvidenceQuality | null;
   activeStreams: KnowledgeV2Stream[];
   patterns: KnowledgeV2Item[];
   risksAndUnknowns: KnowledgeV2Item[];
@@ -610,7 +611,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
       cited_item_count: citedItemCount,
       cited_meeting_count: payload.current_read.cited_meeting_count,
       trust_message: payload.current_read.trust_message,
-      evidence_quality: {
+      evidence_quality: payload.current_read.evidence_quality ?? {
         mode: snapshot.trust_status === 'inferred' ? 'inferred' : 'direct',
         confidence:
           snapshot.trust_status === 'grounded'
@@ -808,6 +809,7 @@ const buildKnowledgeBriefFromV2 = ({
         ['dependency', 'blocker'].includes(item.kind),
       ).length,
     },
+    evidenceQuality: v2.current_read.evidence_quality,
     activeStreams: v2.active_streams,
     patterns: v2.patterns,
     risksAndUnknowns: v2.risks_and_unknowns,
@@ -884,6 +886,7 @@ export const compileKnowledgeBrief = (
       headline: 'No reliable compiled brief yet.',
       lanes: emptyLanes,
       coverage: EMPTY_BRIEF_COVERAGE,
+      evidenceQuality: null,
       activeStreams: [],
       patterns: [],
       risksAndUnknowns: [],
@@ -1046,6 +1049,7 @@ export const compileKnowledgeBrief = (
           : 'No reliable compiled brief yet.',
     lanes,
     coverage,
+    evidenceQuality: null,
     activeStreams: [],
     patterns: [],
     risksAndUnknowns: [],

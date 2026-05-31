@@ -76,6 +76,14 @@ const makeWorkingMemorySnapshot = (
       trust_message: 'Backed by the persisted global snapshot.',
       source_count: 3,
       cited_meeting_count: 2,
+      evidence_quality: {
+        mode: 'direct',
+        confidence: 0.86,
+        cited_meeting_count: 2,
+        source_count: 3,
+        last_reinforced_at: '2026-04-25T10:00:00.000Z',
+        freshness: 'fresh',
+      },
     },
     active_streams: [
       {
@@ -614,6 +622,14 @@ describe('knowledge document utilities', () => {
       statementCount: 2,
       citedMeetingCount: 2,
     });
+    expect(brief.evidenceQuality).toMatchObject({
+      mode: 'direct',
+      confidence: 0.86,
+      cited_meeting_count: 2,
+      source_count: 3,
+      last_reinforced_at: '2026-04-25T10:00:00.000Z',
+      freshness: 'fresh',
+    });
   });
 
   it('prefers a matching project working-memory snapshot for a project knowledge doc', () => {
@@ -826,6 +842,68 @@ describe('knowledge document utilities', () => {
       'Doc fallback should survive invalid snapshot payloads.',
     );
     expect(brief.trustMessage).toBe('Snapshot payload validation failed.');
+  });
+
+  it('keeps rendering legacy snapshots that do not yet preserve current read evidence quality', () => {
+    const brief = compileKnowledgeBrief(
+      makeDoc({
+        structured_json: JSON.stringify({
+          schema_version: 2,
+          scope: { type: 'global', title: 'Global Knowledge' },
+          current_read: {
+            headline: 'Doc fallback should remain available.',
+            supporting_bullets: [],
+            freshness: 'fresh',
+            source_count: 2,
+            cited_item_count: 2,
+            cited_meeting_count: 2,
+            trust_message: 'Doc fallback only.',
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.61,
+              cited_meeting_count: 2,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+          active_streams: [],
+          needs_attention: [],
+          patterns: [],
+          risks_and_unknowns: [],
+          evidence_index: [],
+          source_quality_summary: {
+            included_count: 2,
+            excluded_count: 0,
+            weak_count: 0,
+            records: [],
+          },
+        }),
+      }),
+      makeWorkingMemorySnapshot({
+        trust_status: 'inferred',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          current_read: {
+            ...makeWorkingMemorySnapshot().payload.current_read,
+            trust_status: 'inferred',
+            evidence_quality: undefined as never,
+          },
+        },
+      }),
+    );
+
+    expect(brief.headline).toBe(
+      'Snapshot-backed current read is now the durable source.',
+    );
+    expect(brief.evidenceQuality).toMatchObject({
+      mode: 'inferred',
+      confidence: 0.72,
+      cited_meeting_count: 2,
+      source_count: 3,
+      last_reinforced_at: '2026-04-25T10:00:00.000Z',
+      freshness: 'fresh',
+    });
   });
 
   it('parses structured knowledge chapters and citations', () => {
