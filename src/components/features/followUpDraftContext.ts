@@ -84,7 +84,9 @@ const parseEntityMetadata = (value: string | null): Record<string, unknown> => {
 const formatDecisionItem = (entity: MeetingEntitySummary): string => {
   const metadata = parseEntityMetadata(entity.metadata);
   const metadataRationale =
-    typeof metadata.rationale === 'string' ? normalizeName(metadata.rationale) : '';
+    typeof metadata.rationale === 'string'
+      ? normalizeName(metadata.rationale)
+      : '';
   const contextRationale = normalizeName(entity.context);
   const rationaleCandidates = [metadataRationale, contextRationale].filter(
     Boolean,
