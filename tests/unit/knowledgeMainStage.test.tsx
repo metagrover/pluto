@@ -283,7 +283,8 @@ describe('Knowledge MainStage', () => {
               {
                 id: 'signal-1',
                 text: 'The source list still comes from loaded meetings here.',
-                why_it_matters: 'Legacy docs do not carry Current Read metadata.',
+                why_it_matters:
+                  'Legacy docs do not carry Current Read metadata.',
                 citations: [
                   {
                     meeting_id: 'm1',
@@ -303,7 +304,10 @@ describe('Knowledge MainStage', () => {
         docs={[selectedDoc]}
         selectedDoc={selectedDoc}
         projectCards={[]}
-        sources={[makeSource({ meeting_id: 'meeting-1' }), makeSource({ meeting_id: 'meeting-2' })]}
+        sources={[
+          makeSource({ meeting_id: 'meeting-1' }),
+          makeSource({ meeting_id: 'meeting-2' }),
+        ]}
         sourcesLoading={false}
         onRetrySynthesis={async () => {}}
         onSaveCorrection={async () => {}}
