@@ -209,7 +209,10 @@ export const buildCurrentReadWhyItem = ({
     'Surfaced under Current Read because it supports the compiled headline.',
   ].filter(Boolean),
   citations: item.citations,
-  evidenceEntries: getEvidenceEntriesForCitations(item.citations, evidenceIndex),
+  evidenceEntries: getEvidenceEntriesForCitations(
+    item.citations,
+    evidenceIndex,
+  ),
 });
 
 const labelForSeverity = (severity: NeedsAttentionItem['severity']) => {

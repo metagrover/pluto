@@ -294,7 +294,8 @@ describe('Knowledge MainStage', () => {
       item: {
         id: 'risk-1',
         text: 'Operations launch review is still active.',
-        why_it_matters: 'This is still the clearest evidence behind the headline.',
+        why_it_matters:
+          'This is still the clearest evidence behind the headline.',
         citations: [
           {
             meeting_id: 'm-launch',
