@@ -1005,7 +1005,8 @@ export const MainStage: React.FC<MainStageProps> = ({
     const entries = brief.evidenceIndex.filter(
       (entry) =>
         entry.stream_ids.some((streamId) => streamIds.has(streamId)) ||
-        entry.item_ids.includes(item.id) || citationIds.has(entry.meeting_id),
+        entry.item_ids.includes(item.id) ||
+        citationIds.has(entry.meeting_id),
     );
     return entries.length > 0 ? { ...item, evidenceEntries: entries } : item;
   };
