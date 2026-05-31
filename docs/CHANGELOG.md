@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-31
+
+### Include decision rationale in Meeting follow-up drafts
+- **Issue:** [#171](https://github.com/metagrover/pluto/issues/171)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up draft context now prefers linked `decision` entities when they exist, carrying rationale into the default draft templates and regenerate payload as `Why:` context while preserving the prior plain decision-text fallback when rationale is unavailable.
+- **Why:** `#61` calls for follow-up generation that reflects Pluto's real meeting context. Current `master` still flattened decisions to bare text even when the analysis/entity layer already preserved why the team made that decision, which made recap drafts less actionable at re-entry.
+- **Replaced:** Treating decision context in follow-up drafts as a plain checklist of outcomes with no explanation of the reasoning behind those choices.
+- **Notes:** This slice stays inside Meeting View and the existing draft editor. It does not add sending integrations or redesign the draft surface.
+
 ## 2026-05-27
 
 ### Enrich Meeting follow-up drafts from linked context

@@ -352,6 +352,7 @@ export const MeetingView = ({
     v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
+    fallbackDecisions: decisions,
     linkedEntities: meetingEntities,
   });
   const followUpDraftParticipants = Array.from(
@@ -828,7 +829,7 @@ export const MeetingView = ({
         <FollowUpDrafts
           meeting={selectedMeeting}
           actionItems={followUpDraftContext.actionItems}
-          decisions={decisions}
+          decisions={followUpDraftContext.decisions}
           participants={followUpDraftParticipants}
           fetchMeetings={fetchMeetings}
         />

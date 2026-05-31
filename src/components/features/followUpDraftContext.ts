@@ -7,11 +7,13 @@ type MeetingEntitySummary = Entity & {
 
 interface FollowUpDraftContextInput {
   fallbackActionItems: string[];
+  fallbackDecisions: string[];
   linkedEntities: MeetingEntitySummary[];
 }
 
 export interface FollowUpDraftContext {
   actionItems: string[];
+  decisions: string[];
   participants: string[];
 }
 
@@ -69,8 +71,34 @@ const formatActionItem = (
     : entity.name;
 };
 
+const parseEntityMetadata = (value: string | null): Record<string, unknown> => {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const formatDecisionItem = (entity: MeetingEntitySummary): string => {
+  const metadata = parseEntityMetadata(entity.metadata);
+  const metadataRationale =
+    typeof metadata.rationale === 'string' ? normalizeName(metadata.rationale) : '';
+  const contextRationale = normalizeName(entity.context);
+  const rationaleCandidates = [metadataRationale, contextRationale].filter(
+    Boolean,
+  );
+  const rationale = rationaleCandidates.find(
+    (candidate) => normalizeKey(candidate) !== normalizeKey(entity.name),
+  );
+
+  return rationale ? `${entity.name} (Why: ${rationale})` : entity.name;
+};
+
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
+  fallbackDecisions,
   linkedEntities,
 }: FollowUpDraftContextInput): FollowUpDraftContext => {
   const people = linkedEntities
@@ -92,12 +120,29 @@ export const buildFollowUpDraftContext = ({
   const fallbackOnlyItems = fallbackActionItems.filter(
     (item) => !linkedActionNames.has(normalizeKey(item)),
   );
+  const decisionEntities = linkedEntities
+    .filter((entity) => entity.type === 'decision')
+    .filter((entity) => normalizeName(entity.name))
+    .sort(compareEntities);
+  const linkedDecisionNames = new Set(
+    decisionEntities.map((entity) => normalizeKey(entity.name)),
+  );
+  const fallbackOnlyDecisions = fallbackDecisions.filter(
+    (item) => !linkedDecisionNames.has(normalizeKey(item)),
+  );
 
   return {
     actionItems:
       actionItems.length > 0
         ? [...actionItems, ...fallbackOnlyItems]
         : fallbackActionItems,
+    decisions:
+      decisionEntities.length > 0
+        ? [
+            ...decisionEntities.map((entity) => formatDecisionItem(entity)),
+            ...fallbackOnlyDecisions,
+          ]
+        : fallbackDecisions,
     participants: people.map((entity) => entity.name),
   };
 };

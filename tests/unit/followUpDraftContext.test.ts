@@ -34,6 +34,7 @@ describe('buildFollowUpDraftContext', () => {
   it('prefers linked action-item metadata and resolves participant ids to names', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: ['Plain fallback item'],
+      fallbackDecisions: [],
       linkedEntities: [
         makeEntity({
           id: 'person-2',
@@ -68,6 +69,7 @@ describe('buildFollowUpDraftContext', () => {
   it('falls back to the existing action-item strings when no linked action items exist', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: ['Confirm launch plan'],
+      fallbackDecisions: [],
       linkedEntities: [
         makeEntity({
           id: 'person-1',
@@ -84,6 +86,7 @@ describe('buildFollowUpDraftContext', () => {
   it('keeps raw owner and due values when linked people or ISO dates are unavailable', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [],
+      fallbackDecisions: [],
       linkedEntities: [
         makeEntity({
           id: 'action-1',
@@ -98,19 +101,56 @@ describe('buildFollowUpDraftContext', () => {
     expect(context.actionItems).toEqual([
       'Confirm launch plan (Owner: Platform Team | Due: Friday)',
     ]);
+    expect(context.decisions).toEqual([]);
     expect(context.participants).toEqual([]);
+  });
+
+  it('prefers linked decision rationale and preserves unmatched fallback decisions', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      fallbackDecisions: ['Use REST for the rollout', 'Share roadmap update'],
+      linkedEntities: [
+        makeEntity({
+          id: 'decision-1',
+          type: 'decision',
+          name: 'Use REST for the rollout',
+          context: 'Better type safety and query flexibility',
+          mention_count: 3,
+        }),
+      ],
+    });
+
+    expect(context.decisions).toEqual([
+      'Use REST for the rollout (Why: Better type safety and query flexibility)',
+      'Share roadmap update',
+    ]);
+  });
+
+  it('falls back to plain decision text when no linked rationale exists', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      fallbackDecisions: ['Use REST for the rollout'],
+      linkedEntities: [],
+    });
+
+    expect(context.decisions).toEqual(['Use REST for the rollout']);
   });
 
   it('injects participant context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
-      decisions: ['Use REST for the rollout'],
+      decisions: [
+        'Use REST for the rollout (Why: Better type safety and query flexibility)',
+      ],
       participants: ['Sarah Chen', 'Alex Rivera'],
     });
 
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain(
+      'Use REST for the rollout (Why: Better type safety and query flexibility)',
+    );
   });
 });
