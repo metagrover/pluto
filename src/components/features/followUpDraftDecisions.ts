@@ -34,7 +34,9 @@ export const buildFollowUpDraftDecisions = ({
   }
 
   const v3DecisionKeys = new Set(
-    normalizedV3Decisions.map((decision) => normalizeDecisionKey(decision.text)),
+    normalizedV3Decisions.map((decision) =>
+      normalizeDecisionKey(decision.text),
+    ),
   );
   const fallbackOnlyDecisions = fallbackDecisions.filter(
     (decision) => !v3DecisionKeys.has(normalizeDecisionKey(decision)),
