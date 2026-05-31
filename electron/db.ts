@@ -1768,6 +1768,12 @@ export interface WorkingMemorySnapshotPayload {
   patterns: unknown[];
   risks_and_unknowns: unknown[];
   evidence_index: unknown[];
+  source_quality_summary?: {
+    included_count: number;
+    excluded_count: number;
+    weak_count: number;
+    records: unknown[];
+  };
 }
 
 export interface WorkingMemorySnapshot {
