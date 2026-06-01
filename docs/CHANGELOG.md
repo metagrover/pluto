@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-30
 
+### Keep Knowledge Current Read support aligned with V2 synthesis
+- **Issue:** [#151](https://github.com/metagrover/pluto/issues/151)
+- **PR:** Pending.
+- **Changed:** Knowledge V2 briefs now retain `current_read.supporting_bullets` in the shared brief model, and the Knowledge main stage renders those synthesized bullets ahead of any Active Stream summary fallback. Focused regressions cover both doc-backed and snapshot-backed briefs plus the rendered Current Read support list.
+- **Why:** `#58` calls for a concise, evidence-backed Current Read, but current `master` was discarding already-synthesized support and substituting stream-title summaries instead. That made the page feel more like a stream index even when Pluto had already compiled tighter re-entry context.
+- **Replaced:** Treating Active Stream card summaries as the default Current Read support content for Knowledge V2, even when `current_read.supporting_bullets` were already available in the doc or working-memory snapshot.
+- **Notes:** This is intentionally a narrow Current Read quality slice. It does not change stream ranking, card layout, or fallback behavior for legacy structured Knowledge docs.
 ### Rank Active Streams with urgency signals
 - **Issue:** [#149](https://github.com/metagrover/pluto/issues/149)
 - **PR:** Pending.

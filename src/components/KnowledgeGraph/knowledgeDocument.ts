@@ -177,6 +177,7 @@ type StructuredKnowledgeV2Source = Pick<
 export interface KnowledgeBrief {
   isCompiled: boolean;
   headline: string;
+  supportingBullets: string[];
   lanes: KnowledgeBriefLane[];
   coverage: KnowledgeBriefCoverage;
   activeStreams: KnowledgeV2Stream[];
@@ -825,6 +826,7 @@ const buildKnowledgeBriefFromV2 = ({
   return {
     isCompiled,
     headline: v2.current_read.headline || 'No reliable compiled brief yet.',
+    supportingBullets: v2.current_read.supporting_bullets.filter(Boolean),
     lanes: emptyLanes,
     coverage: {
       statementCount: v2.current_read.cited_item_count,
@@ -906,6 +908,7 @@ export const compileKnowledgeBrief = (
     return {
       isCompiled: false,
       headline: 'No reliable compiled brief yet.',
+      supportingBullets: [],
       lanes: emptyLanes,
       coverage: EMPTY_BRIEF_COVERAGE,
       activeStreams: [],
@@ -1068,6 +1071,7 @@ export const compileKnowledgeBrief = (
         : statementItems.length > 0 || dependencies.length > 0
           ? 'Indexed knowledge needs a stronger synthesis.'
           : 'No reliable compiled brief yet.',
+    supportingBullets: [],
     lanes,
     coverage,
     activeStreams: [],
