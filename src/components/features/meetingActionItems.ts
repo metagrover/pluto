@@ -20,6 +20,8 @@ export type MeetingActionAttentionStatus =
 
 export interface MeetingLinkedAttentionItem {
   id: string;
+  kind?: string;
+  reason?: string;
   status: 'active' | 'dismissed' | 'snoozed';
   related_entity_ids: string[];
 }

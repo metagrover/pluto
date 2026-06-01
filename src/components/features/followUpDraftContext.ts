@@ -87,15 +87,18 @@ const formatLifecycleLabel = (
 const formatActionItem = (
   entity: MeetingEntitySummary,
   peopleById: Map<string, string>,
+  blockerReasonByEntityId: Map<string, string>,
 ): string => {
   const ownerId = normalizeName(entity.assigned_to);
   const ownerName = ownerId ? (peopleById.get(ownerId) ?? ownerId) : '';
   const dueLabel = formatDueLabel(entity.due_date);
+  const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
   const lifecycleLabel = formatLifecycleLabel(entity.status);
   const details = [
     lifecycleLabel ? `Status: ${lifecycleLabel}` : '',
     ownerName ? `Owner: ${ownerName}` : '',
     dueLabel ? `Due: ${dueLabel}` : '',
+    blockedReason ? `Status: ${blockedReason}` : '',
   ].filter(Boolean);
 
   return details.length > 0
@@ -142,6 +145,17 @@ export const buildFollowUpDraftContext = ({
       .flatMap((item) => item.related_entity_ids),
   );
 
+  const blockerReasonByEntityId = new Map<string, string>();
+  for (const item of linkedAttentionItems) {
+    if (item.kind !== 'blocker' || item.status !== 'active') continue;
+    const reason = normalizeName(item.reason).replace(/[.!?]+$/, '');
+    if (!reason) continue;
+    for (const relatedEntityId of item.related_entity_ids) {
+      if (blockerReasonByEntityId.has(relatedEntityId)) continue;
+      blockerReasonByEntityId.set(relatedEntityId, reason);
+    }
+  }
+
   const allLinkedActionEntities = linkedEntities
     .filter((entity) => entity.type === 'action_item')
     .filter((entity) => normalizeName(entity.name));
@@ -153,7 +167,7 @@ export const buildFollowUpDraftContext = ({
     allLinkedActionEntities.map((entity) => normalizeKey(entity.name)),
   );
   const actionItems = actionEntities.map((entity) =>
-    formatActionItem(entity, peopleById),
+    formatActionItem(entity, peopleById, blockerReasonByEntityId),
   );
   const fallbackOnlyItems = fallbackActionItems.filter(
     (item) => !linkedActionNames.has(normalizeKey(item)),
