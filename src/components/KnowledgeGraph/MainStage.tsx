@@ -169,6 +169,53 @@ const filterDuplicateV2Items = (
       !matchesPromotedAttention(item.title, item.citations, attentionMatchers),
   );
 
+const getEvidenceEntriesForCitations = (
+  citations: KnowledgeCitation[],
+  evidenceIndex: KnowledgeV2EvidenceEntry[],
+) => {
+  const citationIds = new Set(
+    citations.map((citation) => citation.meeting_id).filter(Boolean),
+  );
+  const citationKeys = new Set(
+    citations
+      .map((citation) => citationMatchKey([citation]))
+      .filter((key) => key.length > 0),
+  );
+
+  return evidenceIndex.filter((entry) => {
+    if (citationIds.has(entry.meeting_id)) return true;
+    return citationKeys.has(
+      citationMatchKey([
+        {
+          meeting_id: entry.meeting_id,
+          quote: entry.quote,
+        },
+      ]),
+    );
+  });
+};
+
+export const buildCurrentReadWhyItem = ({
+  item,
+  evidenceIndex,
+}: {
+  item: KnowledgeStatement;
+  evidenceIndex: KnowledgeV2EvidenceEntry[];
+}): WhyItem => ({
+  id: item.id,
+  title: item.text,
+  summary: item.why_it_matters,
+  reasons: [
+    item.why_it_matters,
+    'Surfaced under Current Read because it supports the compiled headline.',
+  ].filter(Boolean),
+  citations: item.citations,
+  evidenceEntries: getEvidenceEntriesForCitations(
+    item.citations,
+    evidenceIndex,
+  ),
+});
+
 const labelForSeverity = (severity: NeedsAttentionItem['severity']) => {
   if (severity === 'critical') return 'Needs attention';
   if (severity === 'watch') return 'Watch';
@@ -301,10 +348,12 @@ const CurrentRead = ({
   trustStatus,
   trustDescription,
   sourceQuality,
+  evidenceIndex,
   isCompiled,
   backingSource,
   isRetrying,
   onRetrySynthesis,
+  onOpenWhy,
 }: {
   selectedDoc: KnowledgeDoc;
   sources: KnowledgeDocSource[];
@@ -318,10 +367,12 @@ const CurrentRead = ({
   trustStatus: TrustStatus | null;
   trustDescription: string | null;
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
+  evidenceIndex: KnowledgeV2EvidenceEntry[];
   isCompiled: boolean;
   backingSource: 'snapshot' | 'doc' | 'none';
   isRetrying: boolean;
   onRetrySynthesis: (docId: string) => Promise<void>;
+  onOpenWhy: (item: WhyItem) => void;
 }) => {
   const freshnessDate =
     freshnessAt || selectedDoc.last_synthesized_at || selectedDoc.updated_at;
@@ -473,13 +524,22 @@ const CurrentRead = ({
               </p>
             )}
             {supportingItems.slice(0, 3).map((item) => (
-              <p
+              <div
                 key={item.id}
-                className="flex gap-2 text-sm leading-6 text-pro-text-muted"
+                className="flex items-start justify-between gap-3"
               >
-                <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-pro-accent" />
-                <span>{item.text}</span>
-              </p>
+                <p className="flex gap-2 text-sm leading-6 text-pro-text-muted">
+                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-pro-accent" />
+                  <span>{item.text}</span>
+                </p>
+                <WhyButton
+                  item={buildCurrentReadWhyItem({
+                    item,
+                    evidenceIndex,
+                  })}
+                  onOpen={onOpenWhy}
+                />
+              </div>
             ))}
           </div>
         )}
@@ -1026,13 +1086,10 @@ export const MainStage: React.FC<MainStageProps> = ({
     }
   };
   const enrichWhyItem = (item: WhyItem): WhyItem => {
-    const citationIds = new Set(
-      item.citations.map((citation) => citation.meeting_id).filter(Boolean),
-    );
-    const entries = brief.evidenceIndex.filter(
-      (entry) =>
-        entry.item_ids.includes(item.id) || citationIds.has(entry.meeting_id),
-    );
+    const entries = brief.evidenceIndex.filter((entry) => {
+      if (entry.item_ids.includes(item.id)) return true;
+      return getEvidenceEntriesForCitations(item.citations, [entry]).length > 0;
+    });
     return entries.length > 0 ? { ...item, evidenceEntries: entries } : item;
   };
 
@@ -1052,10 +1109,12 @@ export const MainStage: React.FC<MainStageProps> = ({
           trustStatus={brief.trustStatus}
           trustDescription={brief.trustDescription}
           sourceQuality={brief.sourceQuality}
+          evidenceIndex={brief.evidenceIndex}
           isCompiled={brief.isCompiled}
           backingSource={brief.backingSource}
           isRetrying={retryingDocId === selectedDoc.id}
           onRetrySynthesis={handleRetry}
+          onOpenWhy={(item) => setWhyItem(item)}
         />
 
         <ActiveStreams streams={brief.activeStreams} />

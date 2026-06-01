@@ -7,6 +7,7 @@ import type {
 } from '../../src/api/knowledgeDocs';
 import {
   MainStage,
+  buildCurrentReadWhyItem,
   resolveCurrentReadHeadline,
 } from '../../src/components/KnowledgeGraph/MainStage';
 
@@ -618,5 +619,147 @@ describe('Knowledge MainStage', () => {
     expect(markup).toContain('Evidence is direct');
     expect(markup).toContain('confidence 84%');
     expect(markup).toContain('fresh evidence');
+  });
+
+  it('renders a why action for Current Read supporting bullets', () => {
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        current_read: {
+          headline: 'Launch planning remains the main operating thread.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Grounded in cited operating reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.84,
+            cited_meeting_count: 1,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [
+          {
+            id: 'risk-1',
+            title: 'Operations launch review is still active.',
+            summary: 'The launch plan still depends on operations review.',
+            kind: 'risk',
+            severity: 'watch',
+            why_now: 'The supporting evidence still points at launch review.',
+            stream_ids: ['launch'],
+            citations: [
+              {
+                meeting_id: 'm-launch',
+                quote: 'Operations launch review is still active.',
+              },
+            ],
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.75,
+              cited_meeting_count: 1,
+              source_count: 1,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        evidence_index: [
+          {
+            id: 'evidence-1',
+            meeting_id: 'm-launch',
+            meeting_title: 'Launch Review',
+            captured_at: '2026-04-25T09:30:00.000Z',
+            quote: 'Operations launch review is still active.',
+            stream_ids: ['launch'],
+            item_ids: ['risk-1'],
+            mode: 'direct',
+            confidence: 0.86,
+          },
+        ],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('Operations launch review is still active.');
+    expect(markup).toContain('Why?');
+  });
+
+  it('builds Current Read why items from matching evidence entries before bare citations', () => {
+    const whyItem = buildCurrentReadWhyItem({
+      item: {
+        id: 'risk-1',
+        text: 'Operations launch review is still active.',
+        why_it_matters:
+          'This is still the clearest evidence behind the headline.',
+        citations: [
+          {
+            meeting_id: 'm-launch',
+            quote: 'Operations launch review is still active.',
+          },
+        ],
+      },
+      evidenceIndex: [
+        {
+          id: 'evidence-1',
+          meeting_id: 'm-launch',
+          meeting_title: 'Launch Review',
+          captured_at: '2026-04-25T09:30:00.000Z',
+          quote: 'Operations launch review is still active.',
+          stream_ids: ['launch'],
+          item_ids: ['risk-1'],
+          mode: 'direct',
+          confidence: 0.86,
+        },
+        {
+          id: 'evidence-2',
+          meeting_id: 'm-other',
+          meeting_title: 'Other Review',
+          captured_at: '2026-04-25T08:30:00.000Z',
+          quote: 'Unrelated evidence.',
+          stream_ids: ['other'],
+          item_ids: ['other-item'],
+          mode: 'direct',
+          confidence: 0.42,
+        },
+      ],
+    });
+
+    expect(whyItem.title).toBe('Operations launch review is still active.');
+    expect(whyItem.reasons).toEqual([
+      'This is still the clearest evidence behind the headline.',
+      'Surfaced under Current Read because it supports the compiled headline.',
+    ]);
+    expect(whyItem.evidenceEntries).toEqual([
+      expect.objectContaining({
+        id: 'evidence-1',
+        meeting_id: 'm-launch',
+        quote: 'Operations launch review is still active.',
+      }),
+    ]);
   });
 });
