@@ -53,6 +53,7 @@ describe('buildFollowUpDraftContext', () => {
           id: 'person-1',
           type: 'person',
           name: 'Sarah Chen',
+          metadata: JSON.stringify({ role: 'Engineering Lead' }),
           mention_count: 4,
         }),
       ],
@@ -62,7 +63,10 @@ describe('buildFollowUpDraftContext', () => {
       'Send rollout email (Owner: Sarah Chen | Due: May 30)',
       'Plain fallback item',
     ]);
-    expect(context.participants).toEqual(['Sarah Chen', 'Alex Rivera']);
+    expect(context.participants).toEqual([
+      'Sarah Chen (Engineering Lead)',
+      'Alex Rivera',
+    ]);
   });
 
   it('falls back to the existing action-item strings when no linked action items exist', () => {
@@ -106,11 +110,33 @@ describe('buildFollowUpDraftContext', () => {
       meetingTitle: 'API Migration Review',
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
       decisions: ['Use REST for the rollout'],
-      participants: ['Sarah Chen', 'Alex Rivera'],
+      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
     });
 
-    expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
-    expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
-    expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain(
+      'Participants: Sarah Chen (Engineering Lead), Alex Rivera',
+    );
+    expect(drafts.internal).toContain(
+      'Participants: Sarah Chen (Engineering Lead), Alex Rivera',
+    );
+    expect(drafts.slack).toContain(
+      '*Participants:* Sarah Chen (Engineering Lead), Alex Rivera',
+    );
+  });
+
+  it('falls back to plain participant names when metadata is malformed', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Taylor Brooks',
+          metadata: '{bad-json',
+        }),
+      ],
+    });
+
+    expect(context.participants).toEqual(['Taylor Brooks']);
   });
 });

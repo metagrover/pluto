@@ -1,4 +1,4 @@
-import type { Entity } from '../../api/knowledgeGraph';
+import { parseMetadata, type Entity } from '../../api/knowledgeGraph';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
@@ -69,6 +69,14 @@ const formatActionItem = (
     : entity.name;
 };
 
+const formatParticipant = (entity: MeetingEntitySummary): string => {
+  const metadata = parseMetadata<{ role?: unknown }>(entity);
+  const role =
+    typeof metadata?.role === 'string' ? normalizeName(metadata.role) : '';
+
+  return role ? `${entity.name} (${role})` : entity.name;
+};
+
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
   linkedEntities,
@@ -98,7 +106,7 @@ export const buildFollowUpDraftContext = ({
       actionItems.length > 0
         ? [...actionItems, ...fallbackOnlyItems]
         : fallbackActionItems,
-    participants: people.map((entity) => entity.name),
+    participants: people.map(formatParticipant),
   };
 };
 

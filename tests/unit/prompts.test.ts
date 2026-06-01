@@ -273,13 +273,13 @@ describe('getFollowUpDraftsPrompt', () => {
   it('includes participant context alongside decisions and action items', () => {
     const prompt = getFollowUpDraftsPrompt({
       meetingTitle: 'API Migration Review',
-      participants: ['Sarah Chen', 'Alex Rivera'],
+      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
       decisions: ['Use REST for the rollout'],
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: Friday)'],
     });
 
     expect(prompt).toContain('Participants:');
-    expect(prompt).toContain('- Sarah Chen');
+    expect(prompt).toContain('- Sarah Chen (Engineering Lead)');
     expect(prompt).toContain('- Alex Rivera');
     expect(prompt).toContain('Decisions:');
     expect(prompt).toContain('Action Items:');

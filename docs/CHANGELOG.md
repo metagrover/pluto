@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-01
+
+### Include participant roles in Meeting follow-up drafts
+- **Issue:** [#192](https://github.com/metagrover/pluto/issues/192)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now preserve role/title metadata for linked participants when Pluto already has it, rendering participant lines like `Name (Role)` in both the default draft templates and the regenerate prompt while keeping the existing name-only fallback for missing or malformed metadata. Focused tests now cover role-aware participant serialization plus the malformed-metadata fallback.
+- **Why:** `#61` calls for follow-up drafts to reuse existing meeting context rather than flattening it away. Participant names alone still left recaps less grounded than Pluto's current MID/entity data could support.
+- **Replaced:** Treating participant context in follow-up drafts as a flat attendee-name list even when Pluto had already inferred or stored stable participant roles.
+- **Notes:** This slice is intentionally narrow and keeps using Meeting View's current draft surface. It does not broaden into lifecycle controls, outbound sending, or the open decision/topic/entity context stack.
+
 ## 2026-05-29
 
 ### Surface blocked follow-ups in the durable attention queue
