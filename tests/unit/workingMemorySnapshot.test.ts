@@ -141,9 +141,13 @@ import type { KnowledgeDoc } from '../../electron/db';
 import type { KnowledgeV2Document } from '../../electron/knowledgeV2';
 import {
   buildGlobalWorkingMemorySnapshot,
+  buildPersonContextWorkingMemorySnapshot,
   buildProjectWorkingMemorySnapshot,
+  buildTeamTrackerWorkingMemorySnapshot,
   persistGlobalWorkingMemorySnapshot,
+  persistPersonContextWorkingMemorySnapshot,
   persistProjectWorkingMemorySnapshot,
+  persistTeamTrackerWorkingMemorySnapshot,
 } from '../../electron/workingMemory';
 
 const makeKnowledgeDoc = (
@@ -416,6 +420,114 @@ describe('working memory snapshots', () => {
       type: 'project',
       key: 'project-1',
       title: 'Project Atlas',
+    });
+  });
+
+  it('builds and persists a team-tracker snapshot for a tracker knowledge doc', () => {
+    const snapshot = buildTeamTrackerWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-team',
+        scope_type: 'team_tracker',
+        scope_key: 'team-1',
+        title: 'Leadership Team',
+        config: JSON.stringify({ member_entity_ids: ['person-1', 'person-2'] }),
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'team_tracker',
+          title: 'Leadership Team',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    expect(snapshot.scope_type).toBe('team_tracker');
+    expect(snapshot.scope_key).toBe('team-1');
+    expect(snapshot.payload.scope.type).toBe('team_tracker');
+
+    const saved = persistTeamTrackerWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-team',
+        scope_type: 'team_tracker',
+        scope_key: 'team-1',
+        title: 'Leadership Team',
+        config: JSON.stringify({ member_entity_ids: ['person-1', 'person-2'] }),
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'team_tracker',
+          title: 'Leadership Team',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    const stored = getWorkingMemorySnapshot('team_tracker', 'team-1');
+
+    expect(saved.id).toBeTruthy();
+    expect(stored).toMatchObject({
+      scope_type: 'team_tracker',
+      scope_key: 'team-1',
+      title: 'Leadership Team',
+      source_doc_id: 'doc-team',
+    });
+    expect(stored?.payload.scope).toMatchObject({
+      type: 'team_tracker',
+      key: 'team-1',
+      title: 'Leadership Team',
+    });
+  });
+
+  it('builds and persists a person-context snapshot for a people knowledge doc', () => {
+    const snapshot = buildPersonContextWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-person',
+        scope_type: 'person_context',
+        scope_key: 'person-1',
+        title: 'Conversations with Alex Rivera',
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'person_context',
+          title: 'Conversations with Alex Rivera',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    expect(snapshot.scope_type).toBe('person_context');
+    expect(snapshot.scope_key).toBe('person-1');
+    expect(snapshot.payload.scope.type).toBe('person_context');
+
+    const saved = persistPersonContextWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-person',
+        scope_type: 'person_context',
+        scope_key: 'person-1',
+        title: 'Conversations with Alex Rivera',
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'person_context',
+          title: 'Conversations with Alex Rivera',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    const stored = getWorkingMemorySnapshot('person_context', 'person-1');
+
+    expect(saved.id).toBeTruthy();
+    expect(stored).toMatchObject({
+      scope_type: 'person_context',
+      scope_key: 'person-1',
+      title: 'Conversations with Alex Rivera',
+      source_doc_id: 'doc-person',
+    });
+    expect(stored?.payload.scope).toMatchObject({
+      type: 'person_context',
+      key: 'person-1',
+      title: 'Conversations with Alex Rivera',
     });
   });
 

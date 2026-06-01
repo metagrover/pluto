@@ -232,6 +232,49 @@ describe('knowledge V2 utilities', () => {
     });
   });
 
+  it('ranks urgent active streams ahead of broader but quieter reference streams', () => {
+    const doc = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [
+        makeSource({
+          id: 'reference-1',
+          title: 'Reference Library Review',
+          occurred_at: '2026-04-18T10:00:00.000Z',
+          evidence:
+            'Summary: The reference library taxonomy still supports onboarding.\nKey points: Search labels need cleanup.',
+          entity_names: ['Reference Library'],
+        }),
+        makeSource({
+          id: 'reference-2',
+          title: 'Reference Library Metadata',
+          occurred_at: '2026-04-19T10:00:00.000Z',
+          evidence:
+            'Summary: The reference library needs better metadata consistency.\nKey points: Tags remain uneven across docs.',
+          entity_names: ['Reference Library'],
+        }),
+        makeSource({
+          id: 'reference-3',
+          title: 'Reference Library Cleanup',
+          occurred_at: '2026-04-20T10:00:00.000Z',
+          evidence:
+            'Summary: The reference library cleanup is steady.\nKey points: Search labels will be normalized later.',
+          entity_names: ['Reference Library'],
+        }),
+        makeSource({
+          id: 'urgent-1',
+          title: 'Launch Approval Escalation',
+          occurred_at: '2026-04-21T10:00:00.000Z',
+          evidence:
+            'Summary: Launch readiness is blocked on approval.\nAction items: Confirm executive approval owner.\nDecisions: Hold launch until approval clears.\nAccountability risks: Missing approval still blocks launch readiness.',
+          entity_names: ['Launch Approval'],
+        }),
+      ],
+    );
+
+    expect(doc.active_streams[0]?.title).toBe('Launch Approval');
+    expect(doc.current_read.supporting_bullets[0]).toContain('Launch Approval');
+  });
+
   it('merges V2 chunk documents without losing evidence or stream classifications', () => {
     const first = buildDeterministicKnowledgeV2Document(
       { type: 'global', title: 'Global Knowledge' },
@@ -264,6 +307,33 @@ describe('knowledge V2 utilities', () => {
     expect(
       merged.evidence_index.map((evidence) => evidence.meeting_id),
     ).toEqual(expect.arrayContaining(['m1', 'm2']));
+  });
+
+  it('merges LLM documents with null string fields without crashing', () => {
+    const base = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [makeSource({ id: 'm1', entity_names: ['Knowledge Dashboard'] })],
+    );
+    const malformed = {
+      ...base,
+      needs_attention: [{ ...base.needs_attention[0], title: null }],
+      patterns: [{ ...base.patterns[0], title: null }],
+      risks_and_unknowns: [{ ...base.needs_attention[0], title: null }],
+      evidence_index: [{ ...base.evidence_index[0], quote: null }],
+    } as unknown as typeof base;
+
+    const merged = mergeKnowledgeV2Documents(
+      { type: 'global', title: 'Global Knowledge' },
+      [malformed, base],
+    );
+
+    expect(merged.needs_attention).toHaveLength(base.needs_attention.length);
+    expect(merged.patterns).toHaveLength(base.patterns.length);
+    expect(merged.evidence_index).toHaveLength(base.evidence_index.length);
+    expect(merged.current_read.headline).toEqual(expect.any(String));
+    expect(merged.active_streams.map((stream) => stream.title)).toContain(
+      'Knowledge Dashboard',
+    );
   });
 
   it('applies durable correction overlays to synthesized streams and items', () => {

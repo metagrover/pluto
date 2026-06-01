@@ -157,8 +157,8 @@ export interface KnowledgeV2Correction {
   created_at: string;
 }
 
-const normalizeText = (value: string): string =>
-  value.toLowerCase().replace(/\s+/g, ' ').trim();
+const normalizeText = (value: unknown): string =>
+  value == null ? '' : String(value).toLowerCase().replace(/\s+/g, ' ').trim();
 
 const normalizeId = (value: string): string =>
   normalizeText(value)
@@ -815,6 +815,82 @@ export const repairKnowledgeV2Document = (
   };
 };
 
+const getStreamUrgencyCounts = (
+  attentionItems: KnowledgeV2Item[],
+): Map<
+  string,
+  { blockerRisk: number; dependency: number; openQuestion: number }
+> => {
+  const counts = new Map<
+    string,
+    { blockerRisk: number; dependency: number; openQuestion: number }
+  >();
+
+  for (const item of attentionItems) {
+    for (const streamId of item.stream_ids) {
+      const existing = counts.get(streamId) || {
+        blockerRisk: 0,
+        dependency: 0,
+        openQuestion: 0,
+      };
+      if (item.kind === 'blocker' || item.kind === 'risk') {
+        existing.blockerRisk += 1;
+      } else if (item.kind === 'dependency') {
+        existing.dependency += 1;
+      } else if (item.kind === 'open_question') {
+        existing.openQuestion += 1;
+      }
+      counts.set(streamId, existing);
+    }
+  }
+
+  return counts;
+};
+
+const scoreActiveStreamPriority = (
+  stream: KnowledgeV2Stream,
+  counts: { blockerRisk: number; dependency: number; openQuestion: number },
+): number =>
+  counts.blockerRisk * 10 +
+  stream.open_follow_up_count * 6 +
+  counts.dependency * 4 +
+  counts.openQuestion * 2 +
+  stream.decision_count * 2 +
+  stream.source_count;
+
+const compareActiveStreams = (
+  a: KnowledgeV2Stream,
+  b: KnowledgeV2Stream,
+  urgencyByStream: Map<
+    string,
+    { blockerRisk: number; dependency: number; openQuestion: number }
+  >,
+): number => {
+  const aScore = scoreActiveStreamPriority(
+    a,
+    urgencyByStream.get(a.id) || {
+      blockerRisk: 0,
+      dependency: 0,
+      openQuestion: 0,
+    },
+  );
+  const bScore = scoreActiveStreamPriority(
+    b,
+    urgencyByStream.get(b.id) || {
+      blockerRisk: 0,
+      dependency: 0,
+      openQuestion: 0,
+    },
+  );
+
+  if (bScore !== aScore) return bScore - aScore;
+  if (b.source_count !== a.source_count) return b.source_count - a.source_count;
+  if ((b.last_touched_at || '') !== (a.last_touched_at || '')) {
+    return (b.last_touched_at || '').localeCompare(a.last_touched_at || '');
+  }
+  return a.title.localeCompare(b.title);
+};
+
 export const buildDeterministicKnowledgeV2Document = (
   scope: KnowledgeV2Scope,
   sources: KnowledgeV2SourceMeeting[],
@@ -927,11 +1003,10 @@ export const buildDeterministicKnowledgeV2Document = (
     }
   }
 
-  const activeStreams = Array.from(streams.values()).sort((a, b) => {
-    if (b.source_count !== a.source_count)
-      return b.source_count - a.source_count;
-    return (b.last_touched_at || '').localeCompare(a.last_touched_at || '');
-  });
+  const urgencyByStream = getStreamUrgencyCounts(attention);
+  const activeStreams = Array.from(streams.values()).sort((a, b) =>
+    compareActiveStreams(a, b, urgencyByStream),
+  );
   const citedMeetingIds = new Set(
     evidenceIndex.map((entry) => entry.meeting_id),
   );
@@ -1032,13 +1107,21 @@ export const mergeKnowledgeV2Documents = (
   );
   const evidence = dedupeBy(
     documents.flatMap((doc) => doc.evidence_index),
-    (entry) => `${entry.meeting_id}|${normalizeText(entry.quote)}`,
+    (entry) => {
+      const meetingId = normalizeText(entry.meeting_id);
+      const quote = normalizeText(entry.quote);
+      return meetingId && quote ? `${meetingId}|${quote}` : '';
+    },
   );
   const records = dedupeBy(
     documents.flatMap((doc) => doc.source_quality_summary.records),
     (record) => record.meeting_id,
   );
   const citedMeetingIds = new Set(evidence.map((entry) => entry.meeting_id));
+  const urgencyByStream = getStreamUrgencyCounts(attention);
+  const rankedStreams = [...streams].sort((a, b) =>
+    compareActiveStreams(a, b, urgencyByStream),
+  );
 
   return {
     schema_version: KNOWLEDGE_V2_SCHEMA_VERSION,
@@ -1047,12 +1130,12 @@ export const mergeKnowledgeV2Documents = (
       headline:
         patterns[0]?.title ||
         attention[0]?.title ||
-        streams[0]?.current_read ||
+        rankedStreams[0]?.current_read ||
         'Pluto has source material, but no trustworthy current read yet.',
-      supporting_bullets: streams
+      supporting_bullets: rankedStreams
         .slice(0, 4)
         .map((stream) => `${stream.title}: ${stream.current_read}`),
-      freshness: streams[0]?.evidence_quality.freshness || 'unknown',
+      freshness: rankedStreams[0]?.evidence_quality.freshness || 'unknown',
       source_count: records.filter((record) => record.usable).length,
       cited_item_count: attention.length + patterns.length + risks.length,
       cited_meeting_count: citedMeetingIds.size,
@@ -1064,10 +1147,10 @@ export const mergeKnowledgeV2Documents = (
         mode: citedMeetingIds.size > 1 ? 'inferred' : 'direct',
         citedMeetingIds: Array.from(citedMeetingIds),
         sourceCount: records.filter((record) => record.usable).length,
-        lastReinforcedAt: streams[0]?.last_touched_at || null,
+        lastReinforcedAt: rankedStreams[0]?.last_touched_at || null,
       }),
     },
-    active_streams: streams,
+    active_streams: rankedStreams,
     needs_attention: attention,
     patterns,
     risks_and_unknowns: risks,
@@ -1082,10 +1165,10 @@ export const mergeKnowledgeV2Documents = (
     },
     change_summary: {
       generated_at: new Date().toISOString(),
-      added_count: attention.length + patterns.length + streams.length,
+      added_count: attention.length + patterns.length + rankedStreams.length,
       removed_count: 0,
       updated_count: 0,
-      notable_changes: streams.slice(0, 3).map((stream) => stream.title),
+      notable_changes: rankedStreams.slice(0, 3).map((stream) => stream.title),
     },
   };
 };
