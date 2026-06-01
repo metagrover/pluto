@@ -857,10 +857,14 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   async generateFollowUpDrafts(params: {
     meetingTitle: string;
+    overview?: string[];
     participants?: string[];
     entityContext?: string[];
+    topicSummaries?: string[];
     actionItems: string[];
     decisions: string[];
+    openQuestions?: string[];
+    discussionPoints?: string[];
     customPrompt?: string;
   }): Promise<{ drafts: Array<{ title: string; content: string }> }> {
     const prompt = getFollowUpDraftsPrompt(params);

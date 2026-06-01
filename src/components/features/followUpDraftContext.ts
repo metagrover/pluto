@@ -1,4 +1,5 @@
 import type { Entity } from '../../api/knowledgeGraph';
+import type { AnalysisDocumentV3, TopicSection } from '../../types';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
@@ -10,18 +11,34 @@ interface FollowUpDraftContextInput {
   linkedEntities: MeetingEntitySummary[];
 }
 
+interface FollowUpDraftActionItemInput {
+  text: string;
+  topic?: string;
+  assignee?: string;
+  due?: string;
+}
+
 export interface FollowUpDraftContext {
   actionItems: string[];
   participants: string[];
   entityContext: string[];
 }
 
+interface FollowUpDraftDecisionsInput {
+  fallbackDecisions: string[];
+  analysis?: AnalysisDocumentV3 | null;
+}
+
 export interface DefaultDraftsInput {
   meetingTitle: string;
+  overview: string[];
   actionItems: string[];
   decisions: string[];
-  entityContext: string[];
+  entityContext?: string[];
+  discussionPoints?: string[];
   participants: string[];
+  openQuestions?: string[];
+  topicSummaries?: string[];
 }
 
 export type DraftId = 'client' | 'internal' | 'slack';
@@ -30,8 +47,11 @@ export type Drafts = Partial<Record<DraftId, string>>;
 const normalizeName = (value: string | null | undefined): string =>
   (value || '').trim();
 
+const stripKnownActionItemDetails = (value: string): string =>
+  value.replace(/\s+\((?:Topic|Owner|Due): .*$/i, '').trim();
+
 const normalizeKey = (value: string | null | undefined): string =>
-  normalizeName(value).toLowerCase();
+  stripKnownActionItemDetails(normalizeName(value)).toLowerCase();
 
 const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
   if (b.mention_count !== a.mention_count) {
@@ -70,6 +90,9 @@ const formatActionItem = (
     ? `${entity.name} (${details.join(' | ')})`
     : entity.name;
 };
+
+const formatTopicAwareDecision = (text: string, topicTitle: string): string =>
+  topicTitle ? `${text} (Topic: ${topicTitle})` : text;
 
 const formatEntityContext = (entity: MeetingEntitySummary): string | null => {
   if (entity.type === 'project') {
@@ -129,19 +152,158 @@ export const buildFollowUpDraftContext = ({
   };
 };
 
+export const buildFollowUpDraftOpenQuestions = (
+  topics: Pick<TopicSection, 'title' | 'open_questions'>[] | null | undefined,
+): string[] => {
+  if (!topics?.length) return [];
+
+  const seen = new Set<string>();
+  const questions: string[] = [];
+
+  for (const topic of topics) {
+    const topicTitle = normalizeName(topic.title);
+
+    for (const question of topic.open_questions || []) {
+      const normalizedQuestion = normalizeName(question);
+      if (!normalizedQuestion) continue;
+
+      const line = topicTitle
+        ? `${topicTitle}: ${normalizedQuestion}`
+        : normalizedQuestion;
+      const key = normalizeKey(line);
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+      questions.push(line);
+    }
+  }
+
+  return questions;
+};
+
+export const buildFollowUpDraftDecisions = ({
+  fallbackDecisions,
+  analysis,
+}: FollowUpDraftDecisionsInput): string[] => {
+  if (!analysis) return fallbackDecisions;
+
+  const seen = new Set<string>();
+  const decisions: string[] = [];
+
+  for (const topic of analysis.topics) {
+    const topicTitle = normalizeName(topic.title);
+    for (const decision of topic.decisions) {
+      const text = normalizeName(decision.text);
+      if (!text) continue;
+
+      const key = normalizeKey(text);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      decisions.push(formatTopicAwareDecision(text, topicTitle));
+    }
+  }
+
+  const fallbackOnlyDecisions = fallbackDecisions.filter(
+    (decision) => !seen.has(normalizeKey(decision)),
+  );
+
+  return decisions.length > 0
+    ? [...decisions, ...fallbackOnlyDecisions]
+    : fallbackDecisions;
+};
+
+export const formatFollowUpDraftActionItem = ({
+  text,
+  topic,
+  assignee,
+  due,
+}: FollowUpDraftActionItemInput): string => {
+  const baseText = normalizeName(text);
+  const details = [
+    normalizeName(topic) ? `Topic: ${normalizeName(topic)}` : '',
+    normalizeName(assignee) ? `Owner: ${normalizeName(assignee)}` : '',
+    normalizeName(due) ? `Due: ${normalizeName(due)}` : '',
+  ].filter(Boolean);
+
+  return details.length > 0 ? `${baseText} (${details.join(' | ')})` : baseText;
+};
+
 const toBullets = (items: string[], fallback: string) =>
   items.length ? items.map((item) => `- ${item}`).join('\n') : fallback;
 
+export const buildFollowUpDraftTopicSummaries = (
+  topics: Array<{ title?: string | null; summary?: string | null }>,
+): string[] => {
+  const seen = new Set<string>();
+  const topicSummaries: string[] = [];
+
+  for (const topic of topics) {
+    const title = normalizeName(topic.title);
+    const summary = normalizeName(topic.summary);
+    if (!summary) continue;
+
+    const formatted = title ? `${title}: ${summary}` : summary;
+    const normalized = normalizeKey(formatted);
+    if (seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    topicSummaries.push(formatted);
+  }
+
+  return topicSummaries;
+};
+
+export const buildFollowUpDraftDiscussionPoints = (
+  topics: TopicSection[] | null | undefined,
+): string[] => {
+  if (!topics?.length) return [];
+
+  const seen = new Set<string>();
+  const lines: string[] = [];
+
+  for (const topic of topics) {
+    const topicTitle = normalizeName(topic.title);
+    for (const point of topic.key_points || []) {
+      const pointText = normalizeName(point.text);
+      if (!pointText) continue;
+
+      const line = topicTitle ? `${topicTitle}: ${pointText}` : pointText;
+      const key = normalizeKey(pointText);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(line);
+    }
+  }
+
+  return lines;
+};
+
 export const buildDefaultDrafts = ({
   meetingTitle,
+  overview,
   actionItems,
   decisions,
-  entityContext,
+  entityContext = [],
+  discussionPoints = [],
   participants,
+  openQuestions = [],
+  topicSummaries = [],
 }: DefaultDraftsInput): Drafts => {
+  const overviewLines = overview.map(normalizeName).filter(Boolean);
+  const overviewBlock = overviewLines.length
+    ? `\n\nContext:\n${toBullets(overviewLines, '- None')}`
+    : '';
+  const slackOverviewBlock = overviewLines.length
+    ? `\n\n*Context:*\n${toBullets(overviewLines, '- None')}`
+    : '';
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
   const entityContextBullets = toBullets(entityContext, '- None');
+  const openQuestionBullets = toBullets(openQuestions, '- None');
+  const discussionContext = [...topicSummaries, ...discussionPoints];
+  const discussionBlock = discussionContext.length
+    ? `\n\nDiscussion Context:\n${toBullets(discussionContext, '- None')}`
+    : '';
   const participantLine = participants.length
     ? `\nParticipants: ${participants.join(', ')}`
     : '';
@@ -151,13 +313,22 @@ export const buildDefaultDrafts = ({
   const slackParticipantBlock = participants.length
     ? `\n*Participants:* ${participants.join(', ')}\n`
     : '\n';
+  const openQuestionBlock = openQuestions.length
+    ? `\n\nOpen Questions:\n${openQuestionBullets}`
+    : '';
+  const slackOpenQuestionBlock = openQuestions.length
+    ? `\n\n*Open Questions:*\n${openQuestionBullets}`
+    : '';
+  const slackDiscussionBlock = discussionContext.length
+    ? `\n*Discussion Context:*\n${toBullets(discussionContext, '- None')}\n`
+    : '';
   const slackEntityContextBlock = entityContext.length
     ? `\n*Linked Context:*\n${entityContextBullets}\n`
-    : '\n';
+    : '';
 
   return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${entityContextBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
-    internal: `Team, session on ${meetingTitle}:${participantLine}${entityContextBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
-    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackEntityContextBlock}\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}${entityContextBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}${openQuestionBlock}`,
+    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}${entityContextBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}${openQuestionBlock}`,
+    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}${slackEntityContextBlock}${slackDiscussionBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}${slackOpenQuestionBlock}`,
   };
 };

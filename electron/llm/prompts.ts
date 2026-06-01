@@ -677,20 +677,34 @@ ${transcriptSlice}`;
 
 export const getFollowUpDraftsPrompt = (params: {
   meetingTitle: string;
+  overview?: string[];
   participants?: string[];
   entityContext?: string[];
+  topicSummaries?: string[];
   actionItems: string[];
   decisions: string[];
+  openQuestions?: string[];
+  discussionPoints?: string[];
   customPrompt?: string;
 }): string => {
   const {
     meetingTitle,
+    overview,
     participants,
     entityContext,
+    topicSummaries,
     actionItems,
     decisions,
+    openQuestions,
+    discussionPoints,
     customPrompt,
   } = params;
+  const overviewBullets =
+    overview
+      ?.map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => `- ${item}`)
+      .join('\n') || '- None recorded';
   const participantBullets =
     participants?.length && participants.length > 0
       ? participants.map((participant) => `- ${participant}`).join('\n')
@@ -699,18 +713,36 @@ export const getFollowUpDraftsPrompt = (params: {
     entityContext?.length && entityContext.length > 0
       ? entityContext.map((item) => `- ${item}`).join('\n')
       : '- None recorded';
+  const openQuestionBullets =
+    openQuestions?.length && openQuestions.length > 0
+      ? openQuestions.map((question) => `- ${question}`).join('\n')
+      : '- None recorded';
+  const discussionContext = [
+    ...(topicSummaries || []),
+    ...(discussionPoints || []),
+  ].filter((item) => item.trim());
+  const discussionBullets =
+    discussionContext.length > 0
+      ? discussionContext.map((point) => `- ${point}`).join('\n')
+      : '- None recorded';
 
   return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
 
 Meeting: ${meetingTitle}
+Overview:
+${overviewBullets}
 Participants:
 ${participantBullets}
 Linked Context:
 ${entityContextBullets}
+Discussion Context:
+${discussionBullets}
 Decisions:
 ${decisions.map((d) => `- ${d}`).join('\n') || '- None recorded'}
 Action Items:
 ${actionItems.map((a) => `- ${a}`).join('\n') || '- None recorded'}
+Open Questions:
+${openQuestionBullets}
 
 ${customPrompt ? `Additional Instruction: ${customPrompt}\n` : ''}
 

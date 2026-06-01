@@ -17,10 +17,14 @@ import { type Drafts, buildDefaultDrafts } from './followUpDraftContext';
 
 interface FollowUpDraftsProps {
   meeting: Meeting;
+  overview: string[];
   actionItems: string[];
   decisions: string[];
   entityContext: string[];
+  discussionPoints: string[];
   participants: string[];
+  openQuestions: string[];
+  topicSummaries: string[];
   fetchMeetings: () => void;
 }
 
@@ -43,10 +47,14 @@ const parseSavedDrafts = (value?: string): Drafts | null => {
 
 export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   meeting,
+  overview,
   actionItems,
   decisions,
   entityContext,
+  discussionPoints,
   participants,
+  openQuestions,
+  topicSummaries,
   fetchMeetings,
 }) => {
   const [drafts, setDrafts] = useState<Drafts>({});
@@ -59,16 +67,34 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const meetingTitle = meeting.title;
   const actionItemsKey = actionItems.join('\n');
   const decisionsKey = decisions.join('\n');
+  const topicSummariesKey = topicSummaries.join('\n');
+  const discussionPointsKey = discussionPoints.join('\n');
   const defaultDrafts = useMemo(
     () =>
       buildDefaultDrafts({
         actionItems: actionItemsKey ? actionItemsKey.split('\n') : [],
         decisions: decisionsKey ? decisionsKey.split('\n') : [],
         entityContext,
+        discussionPoints: discussionPointsKey
+          ? discussionPointsKey.split('\n')
+          : [],
         meetingTitle,
+        overview,
         participants,
+        openQuestions,
+        topicSummaries: topicSummariesKey ? topicSummariesKey.split('\n') : [],
       }),
-    [actionItemsKey, decisionsKey, entityContext, meetingTitle, participants],
+    [
+      actionItemsKey,
+      decisionsKey,
+      discussionPointsKey,
+      entityContext,
+      meetingTitle,
+      overview,
+      openQuestions,
+      participants,
+      topicSummariesKey,
+    ],
   );
 
   useEffect(() => {
@@ -105,10 +131,14 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     try {
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
+        overview,
         participants,
         entityContext,
+        topicSummaries,
         actionItems,
         decisions,
+        openQuestions,
+        discussionPoints,
         customPrompt: customPrompt.trim() || undefined,
       });
       if (res?.drafts) {
