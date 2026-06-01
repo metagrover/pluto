@@ -266,6 +266,33 @@ describe('knowledge V2 utilities', () => {
     ).toEqual(expect.arrayContaining(['m1', 'm2']));
   });
 
+  it('merges LLM documents with null string fields without crashing', () => {
+    const base = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [makeSource({ id: 'm1', entity_names: ['Knowledge Dashboard'] })],
+    );
+    const malformed = {
+      ...base,
+      needs_attention: [{ ...base.needs_attention[0], title: null }],
+      patterns: [{ ...base.patterns[0], title: null }],
+      risks_and_unknowns: [{ ...base.needs_attention[0], title: null }],
+      evidence_index: [{ ...base.evidence_index[0], quote: null }],
+    } as unknown as typeof base;
+
+    const merged = mergeKnowledgeV2Documents(
+      { type: 'global', title: 'Global Knowledge' },
+      [malformed, base],
+    );
+
+    expect(merged.needs_attention).toHaveLength(base.needs_attention.length);
+    expect(merged.patterns).toHaveLength(base.patterns.length);
+    expect(merged.evidence_index).toHaveLength(base.evidence_index.length);
+    expect(merged.current_read.headline).toEqual(expect.any(String));
+    expect(merged.active_streams.map((stream) => stream.title)).toContain(
+      'Knowledge Dashboard',
+    );
+  });
+
   it('applies durable correction overlays to synthesized streams and items', () => {
     const base = buildDeterministicKnowledgeV2Document(
       { type: 'global', title: 'Global Knowledge' },

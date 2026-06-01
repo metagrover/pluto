@@ -1,5 +1,5 @@
 import type { Entity } from '../../api/knowledgeGraph';
-import type { TopicSection } from '../../types';
+import type { AnalysisDocumentV3, TopicSection } from '../../types';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
@@ -11,13 +11,26 @@ interface FollowUpDraftContextInput {
   linkedEntities: MeetingEntitySummary[];
 }
 
+interface FollowUpDraftActionItemInput {
+  text: string;
+  topic?: string;
+  assignee?: string;
+  due?: string;
+}
+
 export interface FollowUpDraftContext {
   actionItems: string[];
   participants: string[];
 }
 
+interface FollowUpDraftDecisionsInput {
+  fallbackDecisions: string[];
+  analysis?: AnalysisDocumentV3 | null;
+}
+
 export interface DefaultDraftsInput {
   meetingTitle: string;
+  overview: string[];
   actionItems: string[];
   decisions: string[];
   discussionPoints?: string[];
@@ -30,8 +43,11 @@ export type Drafts = Partial<Record<DraftId, string>>;
 const normalizeName = (value: string | null | undefined): string =>
   (value || '').trim();
 
+const stripKnownActionItemDetails = (value: string): string =>
+  value.replace(/\s+\((?:Topic|Owner|Due): .*$/i, '').trim();
+
 const normalizeKey = (value: string | null | undefined): string =>
-  normalizeName(value).toLowerCase();
+  stripKnownActionItemDetails(normalizeName(value)).toLowerCase();
 
 const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
   if (b.mention_count !== a.mention_count) {
@@ -71,6 +87,9 @@ const formatActionItem = (
     : entity.name;
 };
 
+const formatTopicAwareDecision = (text: string, topicTitle: string): string =>
+  topicTitle ? `${text} (Topic: ${topicTitle})` : text;
+
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
   linkedEntities,
@@ -104,6 +123,53 @@ export const buildFollowUpDraftContext = ({
   };
 };
 
+export const buildFollowUpDraftDecisions = ({
+  fallbackDecisions,
+  analysis,
+}: FollowUpDraftDecisionsInput): string[] => {
+  if (!analysis) return fallbackDecisions;
+
+  const seen = new Set<string>();
+  const decisions: string[] = [];
+
+  for (const topic of analysis.topics) {
+    const topicTitle = normalizeName(topic.title);
+    for (const decision of topic.decisions) {
+      const text = normalizeName(decision.text);
+      if (!text) continue;
+
+      const key = normalizeKey(text);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      decisions.push(formatTopicAwareDecision(text, topicTitle));
+    }
+  }
+
+  const fallbackOnlyDecisions = fallbackDecisions.filter(
+    (decision) => !seen.has(normalizeKey(decision)),
+  );
+
+  return decisions.length > 0
+    ? [...decisions, ...fallbackOnlyDecisions]
+    : fallbackDecisions;
+};
+
+export const formatFollowUpDraftActionItem = ({
+  text,
+  topic,
+  assignee,
+  due,
+}: FollowUpDraftActionItemInput): string => {
+  const baseText = normalizeName(text);
+  const details = [
+    normalizeName(topic) ? `Topic: ${normalizeName(topic)}` : '',
+    normalizeName(assignee) ? `Owner: ${normalizeName(assignee)}` : '',
+    normalizeName(due) ? `Due: ${normalizeName(due)}` : '',
+  ].filter(Boolean);
+
+  return details.length > 0 ? `${baseText} (${details.join(' | ')})` : baseText;
+};
+
 const toBullets = (items: string[], fallback: string) =>
   items.length ? items.map((item) => `- ${item}`).join('\n') : fallback;
 
@@ -134,11 +200,19 @@ export const buildFollowUpDraftDiscussionPoints = (
 
 export const buildDefaultDrafts = ({
   meetingTitle,
+  overview,
   actionItems,
   decisions,
   discussionPoints = [],
   participants,
 }: DefaultDraftsInput): Drafts => {
+  const overviewLines = overview.map(normalizeName).filter(Boolean);
+  const overviewBlock = overviewLines.length
+    ? `\n\nContext:\n${toBullets(overviewLines, '- None')}`
+    : '';
+  const slackOverviewBlock = overviewLines.length
+    ? `\n\n*Context:*\n${toBullets(overviewLines, '- None')}`
+    : '';
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
   const discussionBlock = discussionPoints.length
@@ -155,8 +229,8 @@ export const buildDefaultDrafts = ({
     : '';
 
   return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
-    internal: `Team, session on ${meetingTitle}:${participantLine}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
-    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackDiscussionBlock}\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
+    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
+    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}${slackDiscussionBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
   };
 };

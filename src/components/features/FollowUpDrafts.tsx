@@ -17,6 +17,7 @@ import { type Drafts, buildDefaultDrafts } from './followUpDraftContext';
 
 interface FollowUpDraftsProps {
   meeting: Meeting;
+  overview: string[];
   actionItems: string[];
   decisions: string[];
   discussionPoints: string[];
@@ -43,6 +44,7 @@ const parseSavedDrafts = (value?: string): Drafts | null => {
 
 export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   meeting,
+  overview,
   actionItems,
   decisions,
   discussionPoints,
@@ -69,6 +71,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           ? discussionPointsKey.split('\n')
           : [],
         meetingTitle,
+        overview,
         participants,
       }),
     [
@@ -76,6 +79,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       decisionsKey,
       discussionPointsKey,
       meetingTitle,
+      overview,
       participants,
     ],
   );
@@ -114,6 +118,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     try {
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
+        overview,
         participants,
         actionItems,
         decisions,
