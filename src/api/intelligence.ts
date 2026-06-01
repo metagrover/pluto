@@ -44,7 +44,7 @@ export const getMeetingAlerts = async (
 ): Promise<AttentionItem[]> => {
   return getAttentionItems({
     meetingId,
-    status: ['active', 'dismissed'],
+    status: ['active', 'dismissed', 'snoozed'],
   });
 };
 

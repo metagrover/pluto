@@ -27,8 +27,168 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still needs more follow-up surfaces to consume real durable attention state, but the renderer had no dedicated API layer for the queue even though `electron/main.ts` already exposed the IPC handlers. This foundation lets later UI slices reuse the same typed path instead of hard-coding channel strings or rebuilding action heuristics.
 - **Replaced:** Treating durable attention access as an ad hoc IPC concern in future UI work rather than part of Pluto's normal frontend data layer.
 - **Notes:** This slice is intentionally non-UI and avoids overlapping the active Meeting View, Dashboard, and Knowledge PRs.
+## 2026-05-31
+
+### Include decision owners in Meeting follow-up drafts
+- **Issue:** [#173](https://github.com/metagrover/pluto/issues/173)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now preserve `decided_by` context from `v3.all_decisions` when it exists, formatting recap decision bullets with the decision owner while keeping the existing plain-text fallback for decisions that have no recorded owner. Focused unit coverage now locks the formatting and fallback behavior.
+- **Why:** `#61` still treats follow-up drafts as the first local accountability surface, and the analysis schema already carries who made explicit decisions. Dropping that context made recap drafts less specific even when Pluto had the attribution locally.
+- **Replaced:** Flattening `v3` meeting decisions to bare text before the default drafts and regenerate prompt were built.
+- **Notes:** This slice stays inside the existing Meeting View draft flow. It does not redesign the draft UI or add outbound sending behavior.
+### Include decision rationale in Meeting follow-up drafts
+- **Issue:** [#171](https://github.com/metagrover/pluto/issues/171)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up draft context now prefers linked `decision` entities when they exist, carrying rationale into the default draft templates and regenerate payload as `Why:` context while preserving the prior plain decision-text fallback when rationale is unavailable.
+- **Why:** `#61` calls for follow-up generation that reflects Pluto's real meeting context. Current `master` still flattened decisions to bare text even when the analysis/entity layer already preserved why the team made that decision, which made recap drafts less actionable at re-entry.
+- **Replaced:** Treating decision context in follow-up drafts as a plain checklist of outcomes with no explanation of the reasoning behind those choices.
+- **Notes:** This slice stays inside Meeting View and the existing draft editor. It does not add sending integrations or redesign the draft surface.
+## 2026-06-01
+
+### Include owner role context in meeting follow-up drafts
+- **Issue:** [#202](https://github.com/metagrover/pluto/issues/202)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now reuse linked person role metadata when formatting action-item owner lines, so linked items read as `Owner: Name (Role)` when Pluto already knows that owner's role. Existing due-date formatting and bare-name fallback behavior stay unchanged.
+- **Why:** `#61` calls for follow-up drafts to reuse existing meeting entities instead of flattening durable meeting context away. Before this slice, action-item owner attribution lost useful accountability context even when the linked person entity already carried a role/title.
+- **Replaced:** Treating linked action-item owners as names only in follow-up drafts despite already storing role metadata on the matched person entity.
+- **Notes:** This change is intentionally narrower than participant-role work. It only enriches owner attribution inside action-item lines and does not alter the attendee list or draft surface.
+### Preserve action-item context in Meeting follow-up drafts
+- **Issue:** [#200](https://github.com/metagrover/pluto/issues/200)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now carry linked `action_item` entity `context` alongside the existing owner and due-date metadata when Pluto already has that sentence-level meeting context. Focused draft-context coverage now proves the formatter preserves that existing context without changing items that do not have it.
+- **Why:** `#61` calls for follow-up drafts to reuse the same durable meeting context Pluto already extracted elsewhere. Before this slice, Meeting View cards could explain what a follow-up was about while the draft generator flattened that same action into a bare task line.
+- **Replaced:** Treating linked action items as title-plus-owner-plus-due only, even when the selected meeting already had richer action context attached to the same entity.
+- **Notes:** This stays inside the current Meeting follow-up draft surface. It does not redesign cards, add new lifecycle states, or broaden into sending integrations.
+### Preserve blocked follow-up context in recap drafts
+- **Issue:** [#198](https://github.com/metagrover/pluto/issues/198)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now reuse linked attention-item blocker state when a meeting action is actively blocked, carrying the existing blocker reason into the draft action line alongside owner and due metadata. Focused draft-context coverage now proves blocked follow-ups render with that extra lifecycle context while non-blocked items keep their existing format.
+- **Why:** `#61` treats blocked commitments as meaningfully different from routine next steps. Before this slice, Meeting View already knew when an action was blocked, but generated recap drafts flattened that work back into a normal action item and hid why it could not move.
+- **Replaced:** Treating linked follow-up draft action lines as entity-only strings even when the durable attention queue already carried blocker context for the same commitment.
+- **Notes:** This stays in the Meeting draft formatting path only. It does not redesign Meeting action cards or broaden blocker rendering to other surfaces.
+### Keep overdue and stale follow-up urgency visible in drafts
+- **Issue:** [#196](https://github.com/metagrover/pluto/issues/196)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up draft context now carries concise `Status: Overdue` and `Status: Stale` labels into linked action-item strings while preserving the existing owner and due metadata. Normal active items and fallback plain-text action items keep their previous wording, and focused regression coverage now proves the status-aware formatting.
+- **Why:** `#61` requires Pluto's commitment lifecycle to distinguish ordinary active work from aging follow-ups. Before this slice, draft generation flattened overdue and stale linked items into neutral next steps, which hid urgency in the exact recap text users may send or copy.
+- **Replaced:** Treating all still-active linked follow-ups as equivalent draft bullets even when Meeting View already knew which ones were overdue or stale.
+- **Notes:** This is intentionally limited to draft-context formatting. Completion/dismiss/snooze suppression remains separate work in `#194` / PR `#195`.
+### Keep follow-up drafts aligned with handled lifecycle state
+- **Issue:** [#194](https://github.com/metagrover/pluto/issues/194)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up draft context now excludes linked action items that are already completed or whose durable attention item has been dismissed or snoozed, while still keeping active linked follow-ups enriched with owner and due metadata and preserving fallback draft behavior when lifecycle state is unavailable.
+- **Why:** `#61` requires Pluto's follow-up loop to respect the lifecycle state users already control. Before this slice, follow-up drafts could restate already-handled commitments as fresh next steps, undermining trust in the draft output.
+- **Replaced:** Treating every linked follow-up as an open next-step bullet regardless of its existing lifecycle or suppression state.
+- **Notes:** This stays scoped to the draft-context path and does not change queue lifecycle semantics or redesign Meeting View.
+### Include participant roles in Meeting follow-up drafts
+- **Issue:** [#192](https://github.com/metagrover/pluto/issues/192)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now preserve role/title metadata for linked participants when Pluto already has it, rendering participant lines like `Name (Role)` in both the default draft templates and the regenerate prompt while keeping the existing name-only fallback for missing or malformed metadata. Focused tests now cover role-aware participant serialization plus the malformed-metadata fallback.
+- **Why:** `#61` calls for follow-up drafts to reuse existing meeting context rather than flattening it away. Participant names alone still left recaps less grounded than Pluto's current MID/entity data could support.
+- **Replaced:** Treating participant context in follow-up drafts as a flat attendee-name list even when Pluto had already inferred or stored stable participant roles.
+- **Notes:** This slice is intentionally narrow and keeps using Meeting View's current draft surface. It does not broaden into lifecycle controls, outbound sending, or the open decision/topic/entity context stack.
+### Reuse linked project and topic context in Meeting follow-up drafts
+- **Issue:** [#190](https://github.com/metagrover/pluto/issues/190)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now derive a concise linked-context block from meeting `project` and `topic` entities, pass that context into the default recap templates, and include the same block when regenerating drafts through the LLM prompt. Focused unit coverage now proves both the entity-context formatter and prompt wiring.
+- **Why:** `#61` already required follow-up drafts to reuse existing meeting entities, but current `master` only carried participant names plus flat decisions and action items. That made recaps less grounded in the actual workstream when Pluto had already linked the meeting to concrete projects and topics.
+- **Replaced:** Treating follow-up drafts as participant-and-action summaries only, even when the meeting knowledge graph already carried durable project and topic context for the same conversation.
+- **Notes:** This slice intentionally limits linked context to deduped `project` and `topic` entities so it stays complementary to the existing participant and action-item blocks instead of duplicating them.
+## 2026-05-31
+
+### Add topic context to unresolved follow-up questions
+- **Issue:** [#188](https://github.com/metagrover/pluto/issues/188)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now derive topic-labeled unresolved questions from V3 meeting analysis and carry that context through both the default draft templates and the regenerate prompt. Duplicate or blank question lines are removed so multi-topic meetings keep their open loops readable instead of flattening them into ambiguous bullets.
+- **Why:** `#61` already has adjacent slices for decision, action-item, discussion-point, and summary context, but unresolved questions still lost their discussion thread when Pluto generated follow-up drafts. Topic labels keep recipients oriented on which thread each open loop belongs to without expanding the surface.
+- **Replaced:** Treating unresolved questions as unlabeled flat bullets in follow-up drafts even when the meeting analysis already knew which topic each open loop came from.
+- **Notes:** This slice stays inside Meeting View draft context. It does not add new lifecycle controls, sending integrations, or extra extraction passes.
+## 2026-06-01
+
+### Include topic summaries in meeting follow-up drafts
+- **Issue:** [#186](https://github.com/metagrover/pluto/issues/186)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now carry per-topic V3 summary context through both the default draft templates and the regenerate prompt. Pluto dedupes empty or repeated topic summaries before formatting them into a compact `Discussion Context` block, so the LLM and saved drafts see the same grounded overview of each thread.
+- **Why:** `#61` still calls for follow-up drafts that reuse the meeting context Pluto already extracted. Current `master` had decisions, action items, participants, key points, and open-question slices in flight or landed, but it still dropped the concise per-topic summaries that explain what each thread was actually about.
+- **Replaced:** Treating follow-up drafts as lists of decisions and actions plus adjacent context fragments, without reusing the topic-level summary text already stored in the V3 meeting analysis.
+- **Notes:** This stays inside the existing Meeting View draft surface. It does not redesign the UI or broaden into sending integrations or new follow-up surfaces.
+### Include discussion context in meeting follow-up drafts
+- **Issue:** [#184](https://github.com/metagrover/pluto/issues/184)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now derive topic-labeled discussion points from V3 meeting `key_points`, include that context in the default email/internal/Slack draft templates, and pass the same lines into LLM-based draft regeneration. Focused tests cover both discussion-point formatting and prompt wiring.
+- **Why:** `#61` still requires follow-up generation to reflect the real meeting context Pluto already extracted locally. Before this slice, drafts only saw participants, decisions, and action items, which made recaps miss the supporting discussion threads that explain why the next steps matter.
+- **Replaced:** Treating follow-up drafts as a recap of commitments only, without carrying over the key discussion evidence already present in the meeting analysis.
+- **Notes:** This stays scoped to Meeting View draft context. It does not redesign the panel, alter lifecycle scoring, or add delivery integrations.
+### Add decision topic context to Meeting follow-up drafts
+- **Issue:** [#182](https://github.com/metagrover/pluto/issues/182)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now derive topic-aware decision lines from V3 meeting analysis topics, so default drafts and regenerate prompts can preserve which workstream each decision came from instead of flattening everything to bare text. Focused tests now cover both topic-aware decision formatting and prompt propagation.
+- **Why:** `#61` calls for follow-up generation that uses Pluto's existing meeting context. Current `origin/master` already preserved decisions under topic sections, but draft generation dropped that structure, which made recaps less clear when multiple threads produced separate decisions in the same meeting.
+- **Replaced:** Treating follow-up draft decisions as an unstructured list even when the selected meeting already had topic-linked V3 decision context.
+- **Notes:** This slice stays inside Meeting View follow-up drafts. It does not redesign the draft editor, add sending integrations, or overlap the separate open PRs for decision owner/rationale context.
+## 2026-05-31
+
+### Include meeting overview context in follow-up drafts
+- **Issue:** [#177](https://github.com/metagrover/pluto/issues/177)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now preserve the selected meeting's overview/summary context in both the default templates and the regenerate prompt, while keeping the existing safe fallback when no usable overview exists. Focused tests now cover overview-aware draft formatting and prompt generation.
+- **Why:** `#61` already expects follow-up drafts to reflect real meeting context, but current `master` flattened the draft input down to participants, decisions, and action items even when the analysis already had a usable meeting overview. Adding that overview keeps recaps anchored to the main thread of the conversation instead of reading like an isolated task list.
+- **Replaced:** Treating follow-up drafts as context-light recaps that dropped the selected meeting's own framing once decisions and action items were extracted.
+- **Notes:** This slice stays scoped to Meeting View draft generation. It does not redesign the editor or add sending integrations.
+
+### Preserve action-item topics in Meeting follow-up drafts
+- **Issue:** [#175](https://github.com/metagrover/pluto/issues/175)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now preserve `ActionItemV3.topic` when analysis provides it, carrying that topic label into the default draft templates and the regenerate prompt alongside existing owner and due-date details. The shared draft-context helper also strips those known metadata labels when deduping fallback action items against linked `action_item` entities, so topic-aware fallback bullets do not repeat the same commitment twice.
+- **Why:** `#61` requires follow-up drafts to stay grounded in Pluto's existing meeting context. After participant context and action-item owner/due details landed, current `master` still flattened commitments from different discussion threads into one generic list even though the v3 analysis schema already preserved topic context.
+- **Replaced:** Treating Meeting follow-up draft action items as plain task strings once they left the analysis document, which blurred together commitments from separate topics and risked duplicate bullets when linked entity metadata was also present.
+- **Notes:** This slice stays inside the existing Meeting View draft flow. Decision rationale and decision-owner context remain in the separate open PRs tied to `#171` and `#173`.
+
+## 2026-05-29
+
+### Surface blocked follow-ups in the durable attention queue
+- **Issue:** [#137](https://github.com/metagrover/pluto/issues/137)
+- **PR:** Pending.
+- **Changed:** The action-tracker sync now promotes active `action_item` entities with live `blocked_by` links into durable `blocker` attention items, carries the blocking entity and evidence into the queue payload, and suppresses duplicate stale/overdue follow-up alerts for the same blocked action in that sync pass. Focused attention-sync coverage now proves blocker creation and lifecycle-state preservation.
+- **Why:** `#61` calls for follow-ups, blockers, and risks to stay distinct. Before this slice, Pluto could model a blocked commitment in the entity graph but still only surface it as routine aging follow-up pressure, hiding why the work was stuck.
+- **Replaced:** Treating blocked commitments as only overdue or stale follow-ups in the durable queue even when the graph already had explicit blocker relationships.
+- **Notes:** This is intentionally non-UI groundwork. Dashboard and Meeting View surfaces can render these blocker queue items later without re-deriving blocker semantics from the graph.
+
+### Make dashboard follow-ups honor durable lifecycle state
+- **Issue:** [#135](https://github.com/metagrover/pluto/issues/135)
+- **PR:** Pending.
+- **Changed:** The dashboard home model now loads durable attention alerts alongside overdue, stale, and active action-item entities, then suppresses dashboard follow-up cards when every linked alert for that action has already been snoozed or dismissed. Focused dashboard model tests now cover dismissed suppression, snoozed suppression, and the mixed-state case where at least one linked alert is still active.
+- **Why:** `#61` requires Pluto's homepage follow-up surface to respect the same lifecycle state users already control elsewhere. Before this slice, dismissed or snoozed follow-ups could still reappear as unresolved daily-briefing work because the dashboard read directly from action entities and ignored the durable attention queue.
+- **Replaced:** Treating the dashboard briefing as an entity-only follow-up list that could bypass the user's durable dismiss/snooze decisions.
+- **Notes:** This keeps the scope in the data join/filter path only. It does not redesign the dashboard cards or add new reminder/notification behavior.
+
+### Harden Knowledge V2 merges against null structured fields
+- **Issue:** [#111](https://github.com/metagrover/pluto/issues/111)
+- **PR:** Pending.
+- **Changed:** Knowledge V2 merge-time normalization now tolerates nullish structured LLM fields instead of throwing, and evidence dedupe now skips malformed entries that are missing either a meeting id or quote. Focused regression coverage now proves Pluto can merge malformed LLM-shaped chunk documents without crashing Knowledge refresh.
+- **Why:** Pluto's working-memory and Knowledge roadmap slices depend on local resynthesis staying reliable. A single null title or quote from structured LLM output should degrade gracefully instead of crashing the merge path and aborting Knowledge refresh.
+- **Replaced:** Assuming all structured LLM merge fields are valid strings and letting malformed evidence rows participate in dedupe keys even when they could only produce unusable empty identifiers.
+- **Notes:** This is intentionally a narrow runtime hardening fix. It does not redesign Knowledge V2 synthesis or broaden fallback behavior beyond null/malformed merge fields.
+
+### Let Meeting View snooze extracted follow-ups
+- **Issue:** [#132](https://github.com/metagrover/pluto/issues/132)
+- **PR:** Pending.
+- **Changed:** Meeting View now surfaces the durable `snoozed` attention lifecycle state for linked follow-ups, lets users snooze active follow-ups or reopen snoozed ones back to active, and keeps the existing complete and dismiss controls intact. The linked follow-up mapping test coverage now includes snooze/reopen affordances alongside the prior dismiss/reopen behavior.
+- **Why:** `#61` still requires the commitment lifecycle to support more than complete-or-dismiss semantics. Pluto's backend and sync path already preserved `snoozed`, but current `master` had no source-meeting UI for deferring routine follow-ups without resolving them or treating them as false positives.
+- **Replaced:** Forcing users to choose only between completing a follow-up or dismissing it entirely even when the real intent was to defer it and come back later.
+- **Notes:** This slice stays scoped to Meeting View follow-ups. It does not add reminder scheduling, notifications, or broader follow-up surfaces.
+
+
 
 ## 2026-05-27
+
+### Let Knowledge Needs Attention prefer working-memory snapshots
+- **Issue:** [#139](https://github.com/metagrover/pluto/issues/139)
+- **PR:** Pending.
+- **Changed:** The selected Knowledge doc now passes its matching working-memory snapshot into `Needs Attention`, so project docs can render snapshot-backed open loops and dependencies instead of falling straight to project-card heuristics. The global Knowledge lane still gives active durable attention-queue items highest priority, and stale or mismatched snapshots still fall back to the existing doc/project-card behavior. Focused unit coverage now proves both the snapshot-backed project path and stale-snapshot fallback.
+- **Why:** `#81` already let Current Read consume durable working memory, but the `Needs Attention` lane still ignored that same persisted state for project docs. This left project re-entry surfaces showing rough heuristics even when Pluto had already synthesized a fresher scoped snapshot.
+- **Replaced:** Treating project Knowledge `Needs Attention` as a purely heuristic reconstruction from doc JSON and project cards after the selected doc already had a matching durable working-memory snapshot.
+- **Notes:** This slice stays read-only and scoped to the selected Knowledge doc. It does not add project-specific attention queues, new snapshot scopes, or a Knowledge UI redesign.
 
 ### Enrich Meeting follow-up drafts from linked context
 - **Issue:** [#120](https://github.com/metagrover/pluto/issues/120)

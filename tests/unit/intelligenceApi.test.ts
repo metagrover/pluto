@@ -93,7 +93,7 @@ describe('intelligence API', () => {
     await expect(getMeetingAlerts('meeting-1')).resolves.toEqual(items);
     expect(invoke).toHaveBeenCalledWith('intelligence:alerts', {
       meetingId: 'meeting-1',
-      status: ['active', 'dismissed'],
+      status: ['active', 'dismissed', 'snoozed'],
     });
   });
 
