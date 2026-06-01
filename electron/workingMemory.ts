@@ -42,7 +42,9 @@ const buildWorkingMemorySnapshot = ({
       trust_status: trustStatus,
       trust_message: structured.current_read.trust_message,
       source_count: structured.current_read.source_count,
+      cited_item_count: structured.current_read.cited_item_count,
       cited_meeting_count: structured.current_read.cited_meeting_count,
+      evidence_quality: { ...structured.current_read.evidence_quality },
     },
     active_streams: structured.active_streams.map((stream) => ({ ...stream })),
     open_loops: structured.needs_attention.map((item) => ({ ...item })),
@@ -51,6 +53,14 @@ const buildWorkingMemorySnapshot = ({
       ...item,
     })),
     evidence_index: structured.evidence_index.map((entry) => ({ ...entry })),
+    source_quality_summary: {
+      included_count: structured.source_quality_summary.included_count,
+      excluded_count: structured.source_quality_summary.excluded_count,
+      weak_count: structured.source_quality_summary.weak_count,
+      records: structured.source_quality_summary.records.map((record) => ({
+        ...record,
+      })),
+    },
   };
 
   return {
@@ -150,5 +160,69 @@ export const persistProjectWorkingMemorySnapshot = ({
     knowledgeDoc,
     structured,
     scopeType: 'project',
+    generatedAt,
+  });
+
+export const buildTeamTrackerWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt = new Date().toISOString(),
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): Omit<WorkingMemorySnapshot, 'id' | 'updated_at'> =>
+  buildWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'team_tracker',
+    generatedAt,
+  });
+
+export const persistTeamTrackerWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt,
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): WorkingMemorySnapshot =>
+  persistWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'team_tracker',
+    generatedAt,
+  });
+
+export const buildPersonContextWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt = new Date().toISOString(),
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): Omit<WorkingMemorySnapshot, 'id' | 'updated_at'> =>
+  buildWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'person_context',
+    generatedAt,
+  });
+
+export const persistPersonContextWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt,
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): WorkingMemorySnapshot =>
+  persistWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'person_context',
     generatedAt,
   });

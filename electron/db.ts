@@ -1589,6 +1589,15 @@ export interface Entity {
   updated_at: string;
 }
 
+export interface BlockedActionItem extends Entity {
+  blocker_entity_id: string;
+  blocker_name: string;
+  blocker_meeting_id: string | null;
+  blocker_evidence_quote: string | null;
+  blocker_updated_at: string | null;
+  blocker_relationship_state: RelationshipState;
+}
+
 export interface EntityLink {
   id: string;
   source_entity_id: string;
@@ -1741,7 +1750,11 @@ export interface KnowledgeDocWikiLink {
   snippet: string;
 }
 
-export type WorkingMemorySnapshotScopeType = 'global' | 'project';
+export type WorkingMemorySnapshotScopeType =
+  | 'global'
+  | 'project'
+  | 'person_context'
+  | 'team_tracker';
 
 export interface WorkingMemorySnapshotPayload {
   schema_version: 1;
@@ -1761,13 +1774,28 @@ export interface WorkingMemorySnapshotPayload {
     trust_status: TrustStatus;
     trust_message: string;
     source_count: number;
+    cited_item_count: number;
     cited_meeting_count: number;
+    evidence_quality: {
+      mode: 'direct' | 'inferred';
+      confidence: number;
+      cited_meeting_count: number;
+      source_count: number;
+      last_reinforced_at: string | null;
+      freshness: 'fresh' | 'aging' | 'stale' | 'unknown';
+    };
   };
   active_streams: unknown[];
   open_loops: unknown[];
   patterns: unknown[];
   risks_and_unknowns: unknown[];
   evidence_index: unknown[];
+  source_quality_summary?: {
+    included_count: number;
+    excluded_count: number;
+    weak_count: number;
+    records: unknown[];
+  };
 }
 
 export interface WorkingMemorySnapshot {
@@ -4263,6 +4291,37 @@ export const getOverdueActionItems = (): Entity[] => {
     ORDER BY due_date ASC
   `)
     .all() as Entity[];
+};
+
+/**
+ * Get active action items that are currently blocked by another linked entity.
+ */
+export const getBlockedActionItems = (): BlockedActionItem[] => {
+  return db
+    .prepare(
+      `
+        SELECT
+          e.*,
+          blocker.id AS blocker_entity_id,
+          blocker.name AS blocker_name,
+          l.evidence_meeting_id AS blocker_meeting_id,
+          l.evidence_quote AS blocker_evidence_quote,
+          l.updated_at AS blocker_updated_at,
+          l.state AS blocker_relationship_state
+        FROM entities e
+        JOIN entity_links l
+          ON l.source_entity_id = e.id
+         AND l.relationship = 'blocked_by'
+         AND l.state != 'rejected'
+        JOIN entities blocker
+          ON blocker.id = l.target_entity_id
+        WHERE e.type = 'action_item'
+          AND e.status = 'active'
+          AND COALESCE(blocker.status, 'active') != 'completed'
+        ORDER BY l.updated_at DESC, l.created_at DESC
+      `,
+    )
+    .all() as BlockedActionItem[];
 };
 
 /**
