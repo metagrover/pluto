@@ -153,6 +153,38 @@ export const persistProjectWorkingMemorySnapshot = ({
     generatedAt,
   });
 
+export const buildTeamTrackerWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt = new Date().toISOString(),
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): Omit<WorkingMemorySnapshot, 'id' | 'updated_at'> =>
+  buildWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'team_tracker',
+    generatedAt,
+  });
+
+export const persistTeamTrackerWorkingMemorySnapshot = ({
+  knowledgeDoc,
+  structured,
+  generatedAt,
+}: {
+  knowledgeDoc: KnowledgeDoc;
+  structured: KnowledgeV2Document;
+  generatedAt?: string;
+}): WorkingMemorySnapshot =>
+  persistWorkingMemorySnapshot({
+    knowledgeDoc,
+    structured,
+    scopeType: 'team_tracker',
+    generatedAt,
+  });
+
 export const buildPersonContextWorkingMemorySnapshot = ({
   knowledgeDoc,
   structured,

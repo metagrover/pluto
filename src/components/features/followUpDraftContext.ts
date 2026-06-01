@@ -53,10 +53,7 @@ const normalizeName = (value: string | null | undefined): string =>
 
 const stripKnownActionItemDetails = (value: string): string =>
   value
-    .replace(
-      /\s+\((?:Topic|Owner|Due|Status|Context|Decided by|Why): .*$/i,
-      '',
-    )
+    .replace(/\s+\((?:Topic|Owner|Due|Status|Context|Decided by|Why): .*$/i, '')
     .trim();
 
 const normalizeKey = (value: string | null | undefined): string =>

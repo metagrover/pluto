@@ -1753,7 +1753,8 @@ export interface KnowledgeDocWikiLink {
 export type WorkingMemorySnapshotScopeType =
   | 'global'
   | 'project'
-  | 'person_context';
+  | 'person_context'
+  | 'team_tracker';
 
 export interface WorkingMemorySnapshotPayload {
   schema_version: 1;
