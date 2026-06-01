@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-01
+
+### Include owner role context in meeting follow-up drafts
+- **Issue:** [#202](https://github.com/metagrover/pluto/issues/202)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now reuse linked person role metadata when formatting action-item owner lines, so linked items read as `Owner: Name (Role)` when Pluto already knows that owner's role. Existing due-date formatting and bare-name fallback behavior stay unchanged.
+- **Why:** `#61` calls for follow-up drafts to reuse existing meeting entities instead of flattening durable meeting context away. Before this slice, action-item owner attribution lost useful accountability context even when the linked person entity already carried a role/title.
+- **Replaced:** Treating linked action-item owners as names only in follow-up drafts despite already storing role metadata on the matched person entity.
+- **Notes:** This change is intentionally narrower than participant-role work. It only enriches owner attribution inside action-item lines and does not alter the attendee list or draft surface.
+
 ## 2026-05-29
 
 ### Surface blocked follow-ups in the durable attention queue

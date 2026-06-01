@@ -31,6 +31,25 @@ const normalizeName = (value: string | null | undefined): string =>
 const normalizeKey = (value: string | null | undefined): string =>
   normalizeName(value).toLowerCase();
 
+const parseRoleFromMetadata = (value: string | null | undefined): string => {
+  const normalized = normalizeName(value);
+  if (!normalized) return '';
+
+  try {
+    const parsed = JSON.parse(normalized) as { role?: unknown };
+    return typeof parsed.role === 'string' ? normalizeName(parsed.role) : '';
+  } catch {
+    return '';
+  }
+};
+
+const parseRoleFromContext = (value: string | null | undefined): string => {
+  const normalized = normalizeName(value);
+  if (!normalized) return '';
+  const match = normalized.match(/^Role:\s*(.+)$/i);
+  return match ? normalizeName(match[1]) : '';
+};
+
 const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
   if (b.mention_count !== a.mention_count) {
     return b.mention_count - a.mention_count;
@@ -54,13 +73,17 @@ const formatDueLabel = (value: string | null | undefined): string => {
 
 const formatActionItem = (
   entity: MeetingEntitySummary,
-  peopleById: Map<string, string>,
+  peopleById: Map<string, { name: string; role: string }>,
 ): string => {
   const ownerId = normalizeName(entity.assigned_to);
-  const ownerName = ownerId ? (peopleById.get(ownerId) ?? ownerId) : '';
+  const owner = ownerId ? peopleById.get(ownerId) : null;
+  const ownerName = owner?.name ?? ownerId;
+  const ownerRole = owner?.role ?? '';
   const dueLabel = formatDueLabel(entity.due_date);
   const details = [
-    ownerName ? `Owner: ${ownerName}` : '',
+    ownerName
+      ? `Owner: ${ownerRole ? `${ownerName} (${ownerRole})` : ownerName}`
+      : '',
     dueLabel ? `Due: ${dueLabel}` : '',
   ].filter(Boolean);
 
@@ -77,7 +100,17 @@ export const buildFollowUpDraftContext = ({
     .filter((entity) => entity.type === 'person')
     .filter((entity) => normalizeName(entity.name))
     .sort(compareEntities);
-  const peopleById = new Map(people.map((entity) => [entity.id, entity.name]));
+  const peopleById = new Map(
+    people.map((entity) => [
+      entity.id,
+      {
+        name: entity.name,
+        role:
+          parseRoleFromMetadata(entity.metadata) ||
+          parseRoleFromContext(entity.context),
+      },
+    ]),
+  );
 
   const actionEntities = linkedEntities
     .filter((entity) => entity.type === 'action_item')
