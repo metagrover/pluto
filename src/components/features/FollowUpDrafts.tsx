@@ -20,6 +20,7 @@ interface FollowUpDraftsProps {
   actionItems: string[];
   decisions: string[];
   participants: string[];
+  openQuestions: string[];
   fetchMeetings: () => void;
 }
 
@@ -45,6 +46,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   actionItems,
   decisions,
   participants,
+  openQuestions,
   fetchMeetings,
 }) => {
   const [drafts, setDrafts] = useState<Drafts>({});
@@ -64,8 +66,9 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         decisions: decisionsKey ? decisionsKey.split('\n') : [],
         meetingTitle,
         participants,
+        openQuestions,
       }),
-    [actionItemsKey, decisionsKey, meetingTitle, participants],
+    [actionItemsKey, decisionsKey, meetingTitle, openQuestions, participants],
   );
 
   useEffect(() => {
@@ -105,6 +108,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         participants,
         actionItems,
         decisions,
+        openQuestions,
         customPrompt: customPrompt.trim() || undefined,
       });
       if (res?.drafts) {

@@ -276,6 +276,9 @@ describe('getFollowUpDraftsPrompt', () => {
       participants: ['Sarah Chen', 'Alex Rivera'],
       decisions: ['Use REST for the rollout'],
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: Friday)'],
+      openQuestions: [
+        'API Migration: Should the mobile client move in the same release?',
+      ],
     });
 
     expect(prompt).toContain('Participants:');
@@ -285,6 +288,10 @@ describe('getFollowUpDraftsPrompt', () => {
     expect(prompt).toContain('Action Items:');
     expect(prompt).toContain(
       'Use participant names only when they appear in the participant list or action/decision evidence.',
+    );
+    expect(prompt).toContain('Open Questions:');
+    expect(prompt).toContain(
+      '- API Migration: Should the mobile client move in the same release?',
     );
   });
 
@@ -296,6 +303,8 @@ describe('getFollowUpDraftsPrompt', () => {
     });
 
     expect(prompt).toContain('Participants:');
+    expect(prompt).toContain('- None recorded');
+    expect(prompt).toContain('Open Questions:');
     expect(prompt).toContain('- None recorded');
   });
 });

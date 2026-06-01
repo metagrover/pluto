@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-31
+
+### Add topic context to unresolved follow-up questions
+- **Issue:** [#188](https://github.com/metagrover/pluto/issues/188)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now derive topic-labeled unresolved questions from V3 meeting analysis and carry that context through both the default draft templates and the regenerate prompt. Duplicate or blank question lines are removed so multi-topic meetings keep their open loops readable instead of flattening them into ambiguous bullets.
+- **Why:** `#61` already has adjacent slices for decision, action-item, discussion-point, and summary context, but unresolved questions still lost their discussion thread when Pluto generated follow-up drafts. Topic labels keep recipients oriented on which thread each open loop belongs to without expanding the surface.
+- **Replaced:** Treating unresolved questions as unlabeled flat bullets in follow-up drafts even when the meeting analysis already knew which topic each open loop came from.
+- **Notes:** This slice stays inside Meeting View draft context. It does not add new lifecycle controls, sending integrations, or extra extraction passes.
+
 ## 2026-05-29
 
 ### Let Meeting View snooze extracted follow-ups

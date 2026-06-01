@@ -50,7 +50,10 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
-import { buildFollowUpDraftContext } from './followUpDraftContext';
+import {
+  buildFollowUpDraftContext,
+  buildFollowUpDraftOpenQuestions,
+} from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
@@ -362,6 +365,9 @@ export const MeetingView = ({
       ...followUpDraftContext.participants,
       ...getMeetingParticipants(selectedMeeting),
     ]),
+  );
+  const followUpDraftOpenQuestions = buildFollowUpDraftOpenQuestions(
+    v3?.topics,
   );
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
@@ -836,6 +842,7 @@ export const MeetingView = ({
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
           participants={followUpDraftParticipants}
+          openQuestions={followUpDraftOpenQuestions}
           fetchMeetings={fetchMeetings}
         />
 

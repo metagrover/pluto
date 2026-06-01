@@ -4,6 +4,7 @@ import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   buildDefaultDrafts,
   buildFollowUpDraftContext,
+  buildFollowUpDraftOpenQuestions,
 } from '../../src/components/features/followUpDraftContext';
 
 type MeetingEntitySummary = Entity & {
@@ -107,10 +108,43 @@ describe('buildFollowUpDraftContext', () => {
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
       decisions: ['Use REST for the rollout'],
       participants: ['Sarah Chen', 'Alex Rivera'],
+      openQuestions: [
+        'API Migration: Should the mobile client move in the same release?',
+      ],
     });
 
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain(
+      'Open Questions:\n- API Migration: Should the mobile client move in the same release?',
+    );
+  });
+});
+
+describe('buildFollowUpDraftOpenQuestions', () => {
+  it('formats topic-labeled unresolved questions and removes duplicates or blanks', () => {
+    const questions = buildFollowUpDraftOpenQuestions([
+      {
+        title: 'API Migration',
+        open_questions: [
+          'Should the mobile client move in the same release?',
+          '  ',
+        ],
+      },
+      {
+        title: 'Launch Planning',
+        open_questions: ['Who will own the launch email?'],
+      },
+      {
+        title: 'API Migration',
+        open_questions: ['Should the mobile client move in the same release?'],
+      },
+    ]);
+
+    expect(questions).toEqual([
+      'API Migration: Should the mobile client move in the same release?',
+      'Launch Planning: Who will own the launch email?',
+    ]);
   });
 });
