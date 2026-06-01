@@ -13,12 +13,14 @@ interface FollowUpDraftContextInput {
 export interface FollowUpDraftContext {
   actionItems: string[];
   participants: string[];
+  entityContext: string[];
 }
 
 export interface DefaultDraftsInput {
   meetingTitle: string;
   actionItems: string[];
   decisions: string[];
+  entityContext: string[];
   participants: string[];
 }
 
@@ -69,6 +71,16 @@ const formatActionItem = (
     : entity.name;
 };
 
+const formatEntityContext = (entity: MeetingEntitySummary): string | null => {
+  if (entity.type === 'project') {
+    return `Project: ${entity.name}`;
+  }
+  if (entity.type === 'topic') {
+    return `Topic: ${entity.name}`;
+  }
+  return null;
+};
+
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
   linkedEntities,
@@ -92,6 +104,20 @@ export const buildFollowUpDraftContext = ({
   const fallbackOnlyItems = fallbackActionItems.filter(
     (item) => !linkedActionNames.has(normalizeKey(item)),
   );
+  const entityContext: string[] = [];
+  const entityContextKeys = new Set<string>();
+
+  for (const entity of linkedEntities
+    .filter((candidate) => normalizeName(candidate.name))
+    .sort(compareEntities)) {
+    const formatted = formatEntityContext(entity);
+    if (!formatted) continue;
+
+    const key = normalizeKey(formatted);
+    if (entityContextKeys.has(key)) continue;
+    entityContextKeys.add(key);
+    entityContext.push(formatted);
+  }
 
   return {
     actionItems:
@@ -99,6 +125,7 @@ export const buildFollowUpDraftContext = ({
         ? [...actionItems, ...fallbackOnlyItems]
         : fallbackActionItems,
     participants: people.map((entity) => entity.name),
+    entityContext,
   };
 };
 
@@ -109,20 +136,28 @@ export const buildDefaultDrafts = ({
   meetingTitle,
   actionItems,
   decisions,
+  entityContext,
   participants,
 }: DefaultDraftsInput): Drafts => {
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
+  const entityContextBullets = toBullets(entityContext, '- None');
   const participantLine = participants.length
     ? `\nParticipants: ${participants.join(', ')}`
+    : '';
+  const entityContextBlock = entityContext.length
+    ? `\nLinked Context:\n${entityContextBullets}`
     : '';
   const slackParticipantBlock = participants.length
     ? `\n*Participants:* ${participants.join(', ')}\n`
     : '\n';
+  const slackEntityContextBlock = entityContext.length
+    ? `\n*Linked Context:*\n${entityContextBullets}\n`
+    : '\n';
 
   return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
-    internal: `Team, session on ${meetingTitle}:${participantLine}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
-    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${entityContextBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
+    internal: `Team, session on ${meetingTitle}:${participantLine}${entityContextBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
+    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackEntityContextBlock}\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
   };
 };

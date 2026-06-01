@@ -678,15 +678,26 @@ ${transcriptSlice}`;
 export const getFollowUpDraftsPrompt = (params: {
   meetingTitle: string;
   participants?: string[];
+  entityContext?: string[];
   actionItems: string[];
   decisions: string[];
   customPrompt?: string;
 }): string => {
-  const { meetingTitle, participants, actionItems, decisions, customPrompt } =
-    params;
+  const {
+    meetingTitle,
+    participants,
+    entityContext,
+    actionItems,
+    decisions,
+    customPrompt,
+  } = params;
   const participantBullets =
     participants?.length && participants.length > 0
       ? participants.map((participant) => `- ${participant}`).join('\n')
+      : '- None recorded';
+  const entityContextBullets =
+    entityContext?.length && entityContext.length > 0
+      ? entityContext.map((item) => `- ${item}`).join('\n')
       : '- None recorded';
 
   return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
@@ -694,6 +705,8 @@ export const getFollowUpDraftsPrompt = (params: {
 Meeting: ${meetingTitle}
 Participants:
 ${participantBullets}
+Linked Context:
+${entityContextBullets}
 Decisions:
 ${decisions.map((d) => `- ${d}`).join('\n') || '- None recorded'}
 Action Items:

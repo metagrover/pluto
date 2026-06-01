@@ -19,6 +19,7 @@ interface FollowUpDraftsProps {
   meeting: Meeting;
   actionItems: string[];
   decisions: string[];
+  entityContext: string[];
   participants: string[];
   fetchMeetings: () => void;
 }
@@ -44,6 +45,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   meeting,
   actionItems,
   decisions,
+  entityContext,
   participants,
   fetchMeetings,
 }) => {
@@ -62,10 +64,11 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       buildDefaultDrafts({
         actionItems: actionItemsKey ? actionItemsKey.split('\n') : [],
         decisions: decisionsKey ? decisionsKey.split('\n') : [],
+        entityContext,
         meetingTitle,
         participants,
       }),
-    [actionItemsKey, decisionsKey, meetingTitle, participants],
+    [actionItemsKey, decisionsKey, entityContext, meetingTitle, participants],
   );
 
   useEffect(() => {
@@ -103,6 +106,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
         participants,
+        entityContext,
         actionItems,
         decisions,
         customPrompt: customPrompt.trim() || undefined,

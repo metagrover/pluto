@@ -63,6 +63,7 @@ describe('buildFollowUpDraftContext', () => {
       'Plain fallback item',
     ]);
     expect(context.participants).toEqual(['Sarah Chen', 'Alex Rivera']);
+    expect(context.entityContext).toEqual([]);
   });
 
   it('falls back to the existing action-item strings when no linked action items exist', () => {
@@ -79,6 +80,7 @@ describe('buildFollowUpDraftContext', () => {
 
     expect(context.actionItems).toEqual(['Confirm launch plan']);
     expect(context.participants).toEqual(['Taylor Brooks']);
+    expect(context.entityContext).toEqual([]);
   });
 
   it('keeps raw owner and due values when linked people or ISO dates are unavailable', () => {
@@ -99,18 +101,65 @@ describe('buildFollowUpDraftContext', () => {
       'Confirm launch plan (Owner: Platform Team | Due: Friday)',
     ]);
     expect(context.participants).toEqual([]);
+    expect(context.entityContext).toEqual([]);
   });
 
-  it('injects participant context into default draft templates', () => {
+  it('derives deduped topic and project context lines from linked entities', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: ['Confirm launch plan'],
+      linkedEntities: [
+        makeEntity({
+          id: 'project-1',
+          type: 'project',
+          name: 'Apollo rollout',
+          mention_count: 4,
+        }),
+        makeEntity({
+          id: 'topic-1',
+          type: 'topic',
+          name: 'API migration',
+          mention_count: 3,
+        }),
+        makeEntity({
+          id: 'topic-2',
+          type: 'topic',
+          name: 'api migration',
+          normalized_name: 'api migration',
+          mention_count: 2,
+        }),
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+          mention_count: 5,
+        }),
+      ],
+    });
+
+    expect(context.entityContext).toEqual([
+      'Project: Apollo rollout',
+      'Topic: API migration',
+    ]);
+  });
+
+  it('injects participant and entity context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
       decisions: ['Use REST for the rollout'],
+      entityContext: ['Project: Apollo rollout', 'Topic: API migration'],
       participants: ['Sarah Chen', 'Alex Rivera'],
     });
 
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain('Linked Context:\n- Project: Apollo rollout');
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.internal).toContain(
+      'Linked Context:\n- Project: Apollo rollout',
+    );
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.slack).toContain(
+      '*Linked Context:*\n- Project: Apollo rollout',
+    );
   });
 });

@@ -835,6 +835,7 @@ export const MeetingView = ({
           meeting={selectedMeeting}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
+          entityContext={followUpDraftContext.entityContext}
           participants={followUpDraftParticipants}
           fetchMeetings={fetchMeetings}
         />
