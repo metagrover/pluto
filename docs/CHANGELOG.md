@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-31
 
+### Preserve snapshot-backed Current Read cited-item coverage
+- **Issue:** [#163](https://github.com/metagrover/pluto/issues/163)
+- **PR:** Pending.
+- **Changed:** Working-memory snapshots now persist `current_read.cited_item_count`, and snapshot-backed Knowledge brief compilation restores that exact cited-item coverage instead of reconstructing it from open-loop, pattern, and risk arrays. Focused regressions now cover both snapshot persistence and the snapshot-backed Current Read coverage path.
+- **Why:** `#81` promises that Knowledge can render from durable working-memory state without losing evidence semantics. Before this slice, snapshot-backed Current Read could show the wrong cited-item badge even when the compiled Knowledge doc had already established a different evidence count.
+- **Replaced:** Recomputing snapshot-backed Current Read cited-item coverage from adjacent arrays instead of preserving the compiled `current_read` evidence metadata that produced the visible brief.
+- **Notes:** This is intentionally a narrow metadata-preservation fix. It does not redesign the Knowledge UI or overlap the open freshness, source-count, or source-quality metadata slices.
 ### Preserve source-quality detail in snapshot-backed Knowledge briefs
 - **Issue:** [#161](https://github.com/metagrover/pluto/issues/161)
 - **PR:** Pending.

@@ -339,6 +339,7 @@ describe('working memory snapshots', () => {
     expect(snapshot.payload.open_loops).toEqual(
       makeKnowledgeSnapshotDoc().needs_attention,
     );
+    expect(snapshot.payload.current_read.cited_item_count).toBe(4);
     expect(snapshot.payload.evidence_index[0]).toMatchObject({
       id: 'evidence-1',
       meeting_id: 'meeting-1',
@@ -625,6 +626,7 @@ describe('working memory snapshots', () => {
           trust_status: 'grounded',
           trust_message: 'Backed by direct evidence.',
           source_count: 3,
+          cited_item_count: 4,
           cited_meeting_count: 2,
         },
         active_streams: [],
@@ -636,6 +638,7 @@ describe('working memory snapshots', () => {
     });
 
     expect(saved.payload.current_read.trust_status).toBe('grounded');
+    expect(saved.payload.current_read.cited_item_count).toBe(4);
     expect(
       getWorkingMemorySnapshot('global', 'global')?.payload.source,
     ).toEqual({
