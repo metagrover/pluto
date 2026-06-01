@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-31
 
+### Include decision owners in Meeting follow-up drafts
+- **Issue:** [#173](https://github.com/metagrover/pluto/issues/173)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now preserve `decided_by` context from `v3.all_decisions` when it exists, formatting recap decision bullets with the decision owner while keeping the existing plain-text fallback for decisions that have no recorded owner. Focused unit coverage now locks the formatting and fallback behavior.
+- **Why:** `#61` still treats follow-up drafts as the first local accountability surface, and the analysis schema already carries who made explicit decisions. Dropping that context made recap drafts less specific even when Pluto had the attribution locally.
+- **Replaced:** Flattening `v3` meeting decisions to bare text before the default drafts and regenerate prompt were built.
+- **Notes:** This slice stays inside the existing Meeting View draft flow. It does not redesign the draft UI or add outbound sending behavior.
 ### Include decision rationale in Meeting follow-up drafts
 - **Issue:** [#171](https://github.com/metagrover/pluto/issues/171)
 - **PR:** Pending.

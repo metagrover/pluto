@@ -1,5 +1,5 @@
 import { type Entity, parseMetadata } from '../../api/knowledgeGraph';
-import type { AnalysisDocumentV3, TopicSection } from '../../types';
+import type { AnalysisDocumentV3, DecisionV3, TopicSection } from '../../types';
 import type { MeetingLinkedAttentionItem } from './meetingActionItems';
 
 type MeetingEntitySummary = Entity & {
@@ -52,7 +52,12 @@ const normalizeName = (value: string | null | undefined): string =>
   (value || '').trim();
 
 const stripKnownActionItemDetails = (value: string): string =>
-  value.replace(/\s+\((?:Topic|Owner|Due): .*$/i, '').trim();
+  value
+    .replace(
+      /\s+\((?:Topic|Owner|Due|Status|Context|Decided by|Why): .*$/i,
+      '',
+    )
+    .trim();
 
 const normalizeKey = (value: string | null | undefined): string =>
   stripKnownActionItemDetails(normalizeName(value)).toLowerCase();
@@ -158,8 +163,23 @@ const formatParticipant = (entity: MeetingEntitySummary): string => {
   return role ? `${entity.name} (${role})` : entity.name;
 };
 
-const formatTopicAwareDecision = (text: string, topicTitle: string): string =>
-  topicTitle ? `${text} (Topic: ${topicTitle})` : text;
+const formatDecisionWithDetails = (
+  decision: DecisionV3,
+  topicTitle = '',
+): string => {
+  const text = normalizeName(decision.text);
+  const details = [
+    topicTitle ? `Topic: ${topicTitle}` : '',
+    normalizeName(decision.decided_by)
+      ? `Decided by: ${normalizeName(decision.decided_by)}`
+      : '',
+    normalizeName(decision.rationale)
+      ? `Why: ${normalizeName(decision.rationale)}`
+      : '',
+  ].filter(Boolean);
+
+  return details.length > 0 ? `${text} (${details.join(' | ')})` : text;
+};
 
 const formatEntityContext = (entity: MeetingEntitySummary): string | null => {
   if (entity.type === 'project') {
@@ -316,8 +336,18 @@ export const buildFollowUpDraftDecisions = ({
       const key = normalizeKey(text);
       if (seen.has(key)) continue;
       seen.add(key);
-      decisions.push(formatTopicAwareDecision(text, topicTitle));
+      decisions.push(formatDecisionWithDetails(decision, topicTitle));
     }
+  }
+
+  for (const decision of analysis.all_decisions) {
+    const text = normalizeName(decision.text);
+    if (!text) continue;
+
+    const key = normalizeKey(text);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    decisions.push(formatDecisionWithDetails(decision));
   }
 
   const fallbackOnlyDecisions = fallbackDecisions.filter(

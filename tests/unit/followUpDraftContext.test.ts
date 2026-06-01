@@ -638,6 +638,29 @@ describe('buildFollowUpDraftDecisions', () => {
     ]);
   });
 
+  it('includes decision owners and rationale from v3 analysis when available', () => {
+    const decisions = buildFollowUpDraftDecisions({
+      fallbackDecisions: [
+        'Use REST for the rollout',
+        'Send status update after launch',
+      ],
+      analysis: makeAnalysis({
+        all_decisions: [
+          {
+            text: 'Use REST for the rollout',
+            decided_by: 'Sarah Chen',
+            rationale: 'The mobile clients need predictable cache behavior.',
+          },
+        ],
+      }),
+    });
+
+    expect(decisions).toEqual([
+      'Use REST for the rollout (Decided by: Sarah Chen | Why: The mobile clients need predictable cache behavior.)',
+      'Send status update after launch',
+    ]);
+  });
+
   it('keeps fallback decisions when no topic-linked v3 decision context exists', () => {
     const decisions = buildFollowUpDraftDecisions({
       fallbackDecisions: ['Use REST for the rollout'],
