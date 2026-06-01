@@ -144,6 +144,7 @@ export interface LLMProvider {
     meetingTitle: string;
     overview?: string[];
     participants?: string[];
+    entityContext?: string[];
     topicSummaries?: string[];
     actionItems: string[];
     decisions: string[];

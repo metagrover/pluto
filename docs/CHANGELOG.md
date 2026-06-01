@@ -18,6 +18,15 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-01
+
+### Reuse linked project and topic context in Meeting follow-up drafts
+- **Issue:** [#190](https://github.com/metagrover/pluto/issues/190)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now derive a concise linked-context block from meeting `project` and `topic` entities, pass that context into the default recap templates, and include the same block when regenerating drafts through the LLM prompt. Focused unit coverage now proves both the entity-context formatter and prompt wiring.
+- **Why:** `#61` already required follow-up drafts to reuse existing meeting entities, but current `master` only carried participant names plus flat decisions and action items. That made recaps less grounded in the actual workstream when Pluto had already linked the meeting to concrete projects and topics.
+- **Replaced:** Treating follow-up drafts as participant-and-action summaries only, even when the meeting knowledge graph already carried durable project and topic context for the same conversation.
+- **Notes:** This slice intentionally limits linked context to deduped `project` and `topic` entities so it stays complementary to the existing participant and action-item blocks instead of duplicating them.
 ## 2026-05-31
 
 ### Add topic context to unresolved follow-up questions

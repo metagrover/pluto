@@ -20,6 +20,7 @@ interface FollowUpDraftsProps {
   overview: string[];
   actionItems: string[];
   decisions: string[];
+  entityContext: string[];
   discussionPoints: string[];
   participants: string[];
   openQuestions: string[];
@@ -49,6 +50,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   overview,
   actionItems,
   decisions,
+  entityContext,
   discussionPoints,
   participants,
   openQuestions,
@@ -72,6 +74,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       buildDefaultDrafts({
         actionItems: actionItemsKey ? actionItemsKey.split('\n') : [],
         decisions: decisionsKey ? decisionsKey.split('\n') : [],
+        entityContext,
         discussionPoints: discussionPointsKey
           ? discussionPointsKey.split('\n')
           : [],
@@ -85,6 +88,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       actionItemsKey,
       decisionsKey,
       discussionPointsKey,
+      entityContext,
       meetingTitle,
       overview,
       openQuestions,
@@ -129,6 +133,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         meetingTitle,
         overview,
         participants,
+        entityContext,
         topicSummaries,
         actionItems,
         decisions,

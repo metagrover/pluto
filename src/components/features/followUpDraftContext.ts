@@ -21,6 +21,7 @@ interface FollowUpDraftActionItemInput {
 export interface FollowUpDraftContext {
   actionItems: string[];
   participants: string[];
+  entityContext: string[];
 }
 
 interface FollowUpDraftDecisionsInput {
@@ -33,6 +34,7 @@ export interface DefaultDraftsInput {
   overview: string[];
   actionItems: string[];
   decisions: string[];
+  entityContext?: string[];
   discussionPoints?: string[];
   participants: string[];
   openQuestions?: string[];
@@ -92,6 +94,16 @@ const formatActionItem = (
 const formatTopicAwareDecision = (text: string, topicTitle: string): string =>
   topicTitle ? `${text} (Topic: ${topicTitle})` : text;
 
+const formatEntityContext = (entity: MeetingEntitySummary): string | null => {
+  if (entity.type === 'project') {
+    return `Project: ${entity.name}`;
+  }
+  if (entity.type === 'topic') {
+    return `Topic: ${entity.name}`;
+  }
+  return null;
+};
+
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
   linkedEntities,
@@ -115,6 +127,20 @@ export const buildFollowUpDraftContext = ({
   const fallbackOnlyItems = fallbackActionItems.filter(
     (item) => !linkedActionNames.has(normalizeKey(item)),
   );
+  const entityContext: string[] = [];
+  const entityContextKeys = new Set<string>();
+
+  for (const entity of linkedEntities
+    .filter((candidate) => normalizeName(candidate.name))
+    .sort(compareEntities)) {
+    const formatted = formatEntityContext(entity);
+    if (!formatted) continue;
+
+    const key = normalizeKey(formatted);
+    if (entityContextKeys.has(key)) continue;
+    entityContextKeys.add(key);
+    entityContext.push(formatted);
+  }
 
   return {
     actionItems:
@@ -122,6 +148,7 @@ export const buildFollowUpDraftContext = ({
         ? [...actionItems, ...fallbackOnlyItems]
         : fallbackActionItems,
     participants: people.map((entity) => entity.name),
+    entityContext,
   };
 };
 
@@ -256,6 +283,7 @@ export const buildDefaultDrafts = ({
   overview,
   actionItems,
   decisions,
+  entityContext = [],
   discussionPoints = [],
   participants,
   openQuestions = [],
@@ -270,6 +298,7 @@ export const buildDefaultDrafts = ({
     : '';
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
+  const entityContextBullets = toBullets(entityContext, '- None');
   const openQuestionBullets = toBullets(openQuestions, '- None');
   const discussionContext = [...topicSummaries, ...discussionPoints];
   const discussionBlock = discussionContext.length
@@ -277,6 +306,9 @@ export const buildDefaultDrafts = ({
     : '';
   const participantLine = participants.length
     ? `\nParticipants: ${participants.join(', ')}`
+    : '';
+  const entityContextBlock = entityContext.length
+    ? `\nLinked Context:\n${entityContextBullets}`
     : '';
   const slackParticipantBlock = participants.length
     ? `\n*Participants:* ${participants.join(', ')}\n`
@@ -290,10 +322,13 @@ export const buildDefaultDrafts = ({
   const slackDiscussionBlock = discussionContext.length
     ? `\n*Discussion Context:*\n${toBullets(discussionContext, '- None')}\n`
     : '';
+  const slackEntityContextBlock = entityContext.length
+    ? `\n*Linked Context:*\n${entityContextBullets}\n`
+    : '';
 
   return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}${openQuestionBlock}`,
-    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}${openQuestionBlock}`,
-    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}${slackDiscussionBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}${slackOpenQuestionBlock}`,
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}${entityContextBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}${openQuestionBlock}`,
+    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}${entityContextBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}${openQuestionBlock}`,
+    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}${slackEntityContextBlock}${slackDiscussionBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}${slackOpenQuestionBlock}`,
   };
 };

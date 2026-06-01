@@ -299,6 +299,29 @@ describe('knowledge document prompts', () => {
 });
 
 describe('getFollowUpDraftsPrompt', () => {
+  it('includes linked entity context alongside participants, decisions, and action items', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      participants: ['Sarah Chen', 'Alex Rivera'],
+      entityContext: ['Project: Apollo rollout', 'Topic: API migration'],
+      decisions: ['Use REST for the rollout'],
+      actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
+      customPrompt: 'Keep it concise.',
+    });
+
+    expect(prompt).toContain('Participants:\n- Sarah Chen\n- Alex Rivera');
+    expect(prompt).toContain(
+      'Linked Context:\n- Project: Apollo rollout\n- Topic: API migration',
+    );
+    expect(prompt).toContain('Decisions:\n- Use REST for the rollout');
+    expect(prompt).toContain(
+      'Action Items:\n- Send rollout email (Owner: Sarah Chen | Due: May 30)',
+    );
+    expect(prompt).toContain('Additional Instruction: Keep it concise.');
+  });
+});
+
+describe('getFollowUpDraftsPrompt', () => {
   it('includes participant context alongside decisions and action items', () => {
     const prompt = getFollowUpDraftsPrompt({
       meetingTitle: 'API Migration Review',

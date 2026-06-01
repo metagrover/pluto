@@ -679,6 +679,7 @@ export const getFollowUpDraftsPrompt = (params: {
   meetingTitle: string;
   overview?: string[];
   participants?: string[];
+  entityContext?: string[];
   topicSummaries?: string[];
   actionItems: string[];
   decisions: string[];
@@ -690,6 +691,7 @@ export const getFollowUpDraftsPrompt = (params: {
     meetingTitle,
     overview,
     participants,
+    entityContext,
     topicSummaries,
     actionItems,
     decisions,
@@ -706,6 +708,10 @@ export const getFollowUpDraftsPrompt = (params: {
   const participantBullets =
     participants?.length && participants.length > 0
       ? participants.map((participant) => `- ${participant}`).join('\n')
+      : '- None recorded';
+  const entityContextBullets =
+    entityContext?.length && entityContext.length > 0
+      ? entityContext.map((item) => `- ${item}`).join('\n')
       : '- None recorded';
   const openQuestionBullets =
     openQuestions?.length && openQuestions.length > 0
@@ -727,6 +733,8 @@ Overview:
 ${overviewBullets}
 Participants:
 ${participantBullets}
+Linked Context:
+${entityContextBullets}
 Discussion Context:
 ${discussionBullets}
 Decisions:
