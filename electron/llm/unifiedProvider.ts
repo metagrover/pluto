@@ -861,6 +861,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     participants?: string[];
     actionItems: string[];
     decisions: string[];
+    discussionPoints?: string[];
     customPrompt?: string;
   }): Promise<{ drafts: Array<{ title: string; content: string }> }> {
     const prompt = getFollowUpDraftsPrompt(params);

@@ -145,7 +145,7 @@ export interface LLMProvider {
     participants?: string[];
     actionItems: string[];
     decisions: string[];
-    participants?: string[];
+    discussionPoints?: string[];
     customPrompt?: string;
   }): Promise<{ drafts: Array<{ title: string; content: string }> }>;
 }

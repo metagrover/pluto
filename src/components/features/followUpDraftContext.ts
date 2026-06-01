@@ -1,5 +1,5 @@
 import type { Entity } from '../../api/knowledgeGraph';
-import type { AnalysisDocumentV3 } from '../../types';
+import type { AnalysisDocumentV3, TopicSection } from '../../types';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
@@ -33,6 +33,7 @@ export interface DefaultDraftsInput {
   overview: string[];
   actionItems: string[];
   decisions: string[];
+  discussionPoints?: string[];
   participants: string[];
 }
 
@@ -172,11 +173,37 @@ export const formatFollowUpDraftActionItem = ({
 const toBullets = (items: string[], fallback: string) =>
   items.length ? items.map((item) => `- ${item}`).join('\n') : fallback;
 
+export const buildFollowUpDraftDiscussionPoints = (
+  topics: TopicSection[] | null | undefined,
+): string[] => {
+  if (!topics?.length) return [];
+
+  const seen = new Set<string>();
+  const lines: string[] = [];
+
+  for (const topic of topics) {
+    const topicTitle = normalizeName(topic.title);
+    for (const point of topic.key_points || []) {
+      const pointText = normalizeName(point.text);
+      if (!pointText) continue;
+
+      const line = topicTitle ? `${topicTitle}: ${pointText}` : pointText;
+      const key = normalizeKey(pointText);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      lines.push(line);
+    }
+  }
+
+  return lines;
+};
+
 export const buildDefaultDrafts = ({
   meetingTitle,
   overview,
   actionItems,
   decisions,
+  discussionPoints = [],
   participants,
 }: DefaultDraftsInput): Drafts => {
   const overviewLines = overview.map(normalizeName).filter(Boolean);
@@ -188,16 +215,22 @@ export const buildDefaultDrafts = ({
     : '';
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
+  const discussionBlock = discussionPoints.length
+    ? `\n\nDiscussion Context:\n${toBullets(discussionPoints, '- None')}`
+    : '';
   const participantLine = participants.length
     ? `\nParticipants: ${participants.join(', ')}`
     : '';
   const slackParticipantBlock = participants.length
     ? `\n*Participants:* ${participants.join(', ')}\n`
     : '\n';
+  const slackDiscussionBlock = discussionPoints.length
+    ? `\n*Discussion Context:*\n${toBullets(discussionPoints, '- None')}\n`
+    : '';
 
   return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
-    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
-    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
+    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
+    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}${slackDiscussionBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
   };
 };

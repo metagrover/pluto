@@ -1808,6 +1808,7 @@ app.whenReady().then(async () => {
         participants,
         actionItems,
         decisions,
+        discussionPoints,
         customPrompt,
       },
     ) => {
@@ -1823,6 +1824,7 @@ app.whenReady().then(async () => {
           participants,
           actionItems,
           decisions,
+          discussionPoints,
           customPrompt,
         });
       } catch (error) {

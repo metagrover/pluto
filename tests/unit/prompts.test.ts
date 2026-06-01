@@ -305,11 +305,19 @@ describe('getFollowUpDraftsPrompt', () => {
       participants: ['Sarah Chen', 'Alex Rivera'],
       decisions: ['Use REST for the rollout'],
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: Friday)'],
+      discussionPoints: [
+        'The team needs provenance on each API response.',
+        'The graph schema still needs validation before rollout.',
+      ],
     });
 
     expect(prompt).toContain('Participants:');
     expect(prompt).toContain('- Sarah Chen');
     expect(prompt).toContain('- Alex Rivera');
+    expect(prompt).toContain('Discussion Context:');
+    expect(prompt).toContain(
+      '- The team needs provenance on each API response.',
+    );
     expect(prompt).toContain('Decisions:');
     expect(prompt).toContain('Action Items:');
     expect(prompt).toContain(

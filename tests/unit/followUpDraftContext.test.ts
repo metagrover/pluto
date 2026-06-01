@@ -5,6 +5,7 @@ import {
   buildDefaultDrafts,
   buildFollowUpDraftContext,
   buildFollowUpDraftDecisions,
+  buildFollowUpDraftDiscussionPoints,
   formatFollowUpDraftActionItem,
 } from '../../src/components/features/followUpDraftContext';
 import type { AnalysisDocumentV3 } from '../../src/types';
@@ -154,6 +155,10 @@ describe('buildFollowUpDraftContext', () => {
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
       decisions: ['Use REST for the rollout'],
       overview: ['The team aligned on the rollout shape and timing.'],
+      discussionPoints: [
+        'The team needs provenance on each API response.',
+        'The graph schema still needs validation before rollout.',
+      ],
       participants: ['Sarah Chen', 'Alex Rivera'],
     });
 
@@ -161,14 +166,53 @@ describe('buildFollowUpDraftContext', () => {
       'Context:\n- The team aligned on the rollout shape and timing.',
     );
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain('Discussion Context:');
+    expect(drafts.client).toContain(
+      '- The team needs provenance on each API response.',
+    );
     expect(drafts.internal).toContain(
       'Context:\n- The team aligned on the rollout shape and timing.',
     );
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.internal).toContain('Discussion Context:');
     expect(drafts.slack).toContain(
       '*Context:*\n- The team aligned on the rollout shape and timing.',
     );
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.slack).toContain('*Discussion Context:*');
+  });
+});
+
+describe('buildFollowUpDraftDiscussionPoints', () => {
+  it('formats topic key points with topic labels and removes duplicates', () => {
+    const discussionPoints = buildFollowUpDraftDiscussionPoints([
+      {
+        title: 'API Responses',
+        summary: 'Summary',
+        decisions: [],
+        action_items: [],
+        open_questions: [],
+        key_points: [
+          { text: 'The team needs provenance on each API response.' },
+          { text: 'The graph schema still needs validation before rollout.' },
+        ],
+      },
+      {
+        title: 'Rollout',
+        summary: 'Summary',
+        decisions: [],
+        action_items: [],
+        open_questions: [],
+        key_points: [
+          { text: 'The graph schema still needs validation before rollout.' },
+        ],
+      },
+    ]);
+
+    expect(discussionPoints).toEqual([
+      'API Responses: The team needs provenance on each API response.',
+      'API Responses: The graph schema still needs validation before rollout.',
+    ]);
   });
 
   it('omits overview context when no usable summary lines exist', () => {

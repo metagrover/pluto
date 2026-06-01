@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-01
 
+### Include discussion context in meeting follow-up drafts
+- **Issue:** [#184](https://github.com/metagrover/pluto/issues/184)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now derive topic-labeled discussion points from V3 meeting `key_points`, include that context in the default email/internal/Slack draft templates, and pass the same lines into LLM-based draft regeneration. Focused tests cover both discussion-point formatting and prompt wiring.
+- **Why:** `#61` still requires follow-up generation to reflect the real meeting context Pluto already extracted locally. Before this slice, drafts only saw participants, decisions, and action items, which made recaps miss the supporting discussion threads that explain why the next steps matter.
+- **Replaced:** Treating follow-up drafts as a recap of commitments only, without carrying over the key discussion evidence already present in the meeting analysis.
+- **Notes:** This stays scoped to Meeting View draft context. It does not redesign the panel, alter lifecycle scoring, or add delivery integrations.
 ### Add decision topic context to Meeting follow-up drafts
 - **Issue:** [#182](https://github.com/metagrover/pluto/issues/182)
 - **PR:** Pending.

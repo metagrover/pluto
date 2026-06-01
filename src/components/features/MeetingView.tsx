@@ -53,6 +53,7 @@ import { V3AnalysisViewer } from './V3AnalysisViewer';
 import {
   buildFollowUpDraftContext,
   buildFollowUpDraftDecisions,
+  buildFollowUpDraftDiscussionPoints,
   formatFollowUpDraftActionItem,
 } from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
@@ -364,6 +365,7 @@ export const MeetingView = ({
       v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [],
     analysis: v3,
   });
+  const discussionPoints = buildFollowUpDraftDiscussionPoints(v3?.topics);
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
@@ -847,6 +849,7 @@ export const MeetingView = ({
           overview={followUpDraftOverview}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
+          discussionPoints={discussionPoints}
           participants={followUpDraftParticipants}
           fetchMeetings={fetchMeetings}
         />
