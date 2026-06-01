@@ -619,6 +619,7 @@ describe('knowledge document utilities', () => {
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
     expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
     expect(brief.coverage).toMatchObject({
+      sourceCount: 3,
       statementCount: 2,
       citedMeetingCount: 2,
     });

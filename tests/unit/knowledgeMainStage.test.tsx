@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
+import type {
+  KnowledgeDoc,
+  KnowledgeDocSource,
+} from '../../src/api/knowledgeDocs';
 import {
   MainStage,
   resolveCurrentReadHeadline,
@@ -19,6 +22,20 @@ const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
   last_synthesized_at: '2026-04-25T10:00:00.000Z',
   last_source_cursor: null,
   updated_at: '2026-04-25T10:00:00.000Z',
+  ...overrides,
+});
+
+const makeSource = (
+  overrides: Partial<KnowledgeDocSource>,
+): KnowledgeDocSource => ({
+  doc_id: 'doc-1',
+  meeting_id: 'meeting-1',
+  contributed_at: '2026-04-25T10:00:00.000Z',
+  meeting_title: 'Launch Review',
+  started_at: '2026-04-25T09:00:00.000Z',
+  created_at: '2026-04-25T09:00:00.000Z',
+  mention_count: 1,
+  context: null,
   ...overrides,
 });
 
@@ -424,5 +441,107 @@ describe('Knowledge MainStage', () => {
     expect(markup).toContain(supportingBullet);
     expect(markup).toContain(streamSummary);
     expect(markup).not.toContain(`Launch: ${streamSummary}`);
+  });
+
+  it('shows the rendered Current Read source count instead of the live source list length', () => {
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        current_read: {
+          headline: 'Launch planning remains the main operating thread.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 7,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in cited operating reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.84,
+            cited_meeting_count: 2,
+            source_count: 7,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 7,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('7 sources');
+    expect(markup).not.toContain('0 sources');
+  });
+
+  it('falls back to the loaded source count for legacy Current Read states', () => {
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        chapters: [
+          {
+            chapter_id: 'global',
+            title: 'Workspace',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [],
+            signals: [
+              {
+                id: 'signal-1',
+                text: 'The source list still comes from loaded meetings here.',
+                why_it_matters:
+                  'Legacy docs do not carry Current Read metadata.',
+                citations: [
+                  {
+                    meeting_id: 'm1',
+                    quote: 'The source list still comes from loaded meetings.',
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[
+          makeSource({ meeting_id: 'meeting-1' }),
+          makeSource({ meeting_id: 'meeting-2' }),
+        ]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('2 sources');
   });
 });
