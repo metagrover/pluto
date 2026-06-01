@@ -682,6 +682,7 @@ export const getFollowUpDraftsPrompt = (params: {
   topicSummaries?: string[];
   actionItems: string[];
   decisions: string[];
+  openQuestions?: string[];
   discussionPoints?: string[];
   customPrompt?: string;
 }): string => {
@@ -692,6 +693,7 @@ export const getFollowUpDraftsPrompt = (params: {
     topicSummaries,
     actionItems,
     decisions,
+    openQuestions,
     discussionPoints,
     customPrompt,
   } = params;
@@ -704,6 +706,10 @@ export const getFollowUpDraftsPrompt = (params: {
   const participantBullets =
     participants?.length && participants.length > 0
       ? participants.map((participant) => `- ${participant}`).join('\n')
+      : '- None recorded';
+  const openQuestionBullets =
+    openQuestions?.length && openQuestions.length > 0
+      ? openQuestions.map((question) => `- ${question}`).join('\n')
       : '- None recorded';
   const discussionContext = [
     ...(topicSummaries || []),
@@ -727,6 +733,8 @@ Decisions:
 ${decisions.map((d) => `- ${d}`).join('\n') || '- None recorded'}
 Action Items:
 ${actionItems.map((a) => `- ${a}`).join('\n') || '- None recorded'}
+Open Questions:
+${openQuestionBullets}
 
 ${customPrompt ? `Additional Instruction: ${customPrompt}\n` : ''}
 

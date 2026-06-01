@@ -1809,6 +1809,7 @@ app.whenReady().then(async () => {
         topicSummaries,
         actionItems,
         decisions,
+        openQuestions,
         discussionPoints,
         customPrompt,
       },
@@ -1826,6 +1827,7 @@ app.whenReady().then(async () => {
           topicSummaries,
           actionItems,
           decisions,
+          openQuestions,
           discussionPoints,
           customPrompt,
         });

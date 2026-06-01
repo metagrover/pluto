@@ -54,6 +54,7 @@ import {
   buildFollowUpDraftContext,
   buildFollowUpDraftDecisions,
   buildFollowUpDraftDiscussionPoints,
+  buildFollowUpDraftOpenQuestions,
   buildFollowUpDraftTopicSummaries,
   formatFollowUpDraftActionItem,
 } from './followUpDraftContext';
@@ -379,6 +380,9 @@ export const MeetingView = ({
       ...followUpDraftContext.participants,
       ...getMeetingParticipants(selectedMeeting),
     ]),
+  );
+  const followUpDraftOpenQuestions = buildFollowUpDraftOpenQuestions(
+    v3?.topics,
   );
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
@@ -855,6 +859,7 @@ export const MeetingView = ({
           decisions={decisions}
           discussionPoints={discussionPoints}
           participants={followUpDraftParticipants}
+          openQuestions={followUpDraftOpenQuestions}
           topicSummaries={followUpDraftTopicSummaries}
           fetchMeetings={fetchMeetings}
         />

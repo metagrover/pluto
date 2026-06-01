@@ -22,6 +22,7 @@ interface FollowUpDraftsProps {
   decisions: string[];
   discussionPoints: string[];
   participants: string[];
+  openQuestions: string[];
   topicSummaries: string[];
   fetchMeetings: () => void;
 }
@@ -50,6 +51,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   decisions,
   discussionPoints,
   participants,
+  openQuestions,
   topicSummaries,
   fetchMeetings,
 }) => {
@@ -76,6 +78,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         meetingTitle,
         overview,
         participants,
+        openQuestions,
         topicSummaries: topicSummariesKey ? topicSummariesKey.split('\n') : [],
       }),
     [
@@ -84,6 +87,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       discussionPointsKey,
       meetingTitle,
       overview,
+      openQuestions,
       participants,
       topicSummariesKey,
     ],
@@ -128,6 +132,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         topicSummaries,
         actionItems,
         decisions,
+        openQuestions,
         discussionPoints,
         customPrompt: customPrompt.trim() || undefined,
       });

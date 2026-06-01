@@ -35,7 +35,8 @@ export interface DefaultDraftsInput {
   decisions: string[];
   discussionPoints?: string[];
   participants: string[];
-  topicSummaries: string[];
+  openQuestions?: string[];
+  topicSummaries?: string[];
 }
 
 export type DraftId = 'client' | 'internal' | 'slack';
@@ -122,6 +123,35 @@ export const buildFollowUpDraftContext = ({
         : fallbackActionItems,
     participants: people.map((entity) => entity.name),
   };
+};
+
+export const buildFollowUpDraftOpenQuestions = (
+  topics: Pick<TopicSection, 'title' | 'open_questions'>[] | null | undefined,
+): string[] => {
+  if (!topics?.length) return [];
+
+  const seen = new Set<string>();
+  const questions: string[] = [];
+
+  for (const topic of topics) {
+    const topicTitle = normalizeName(topic.title);
+
+    for (const question of topic.open_questions || []) {
+      const normalizedQuestion = normalizeName(question);
+      if (!normalizedQuestion) continue;
+
+      const line = topicTitle
+        ? `${topicTitle}: ${normalizedQuestion}`
+        : normalizedQuestion;
+      const key = normalizeKey(line);
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+      questions.push(line);
+    }
+  }
+
+  return questions;
 };
 
 export const buildFollowUpDraftDecisions = ({
@@ -228,6 +258,7 @@ export const buildDefaultDrafts = ({
   decisions,
   discussionPoints = [],
   participants,
+  openQuestions = [],
   topicSummaries = [],
 }: DefaultDraftsInput): Drafts => {
   const overviewLines = overview.map(normalizeName).filter(Boolean);
@@ -239,6 +270,7 @@ export const buildDefaultDrafts = ({
     : '';
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
+  const openQuestionBullets = toBullets(openQuestions, '- None');
   const discussionContext = [...topicSummaries, ...discussionPoints];
   const discussionBlock = discussionContext.length
     ? `\n\nDiscussion Context:\n${toBullets(discussionContext, '- None')}`
@@ -249,13 +281,19 @@ export const buildDefaultDrafts = ({
   const slackParticipantBlock = participants.length
     ? `\n*Participants:* ${participants.join(', ')}\n`
     : '\n';
+  const openQuestionBlock = openQuestions.length
+    ? `\n\nOpen Questions:\n${openQuestionBullets}`
+    : '';
+  const slackOpenQuestionBlock = openQuestions.length
+    ? `\n\n*Open Questions:*\n${openQuestionBullets}`
+    : '';
   const slackDiscussionBlock = discussionContext.length
     ? `\n*Discussion Context:*\n${toBullets(discussionContext, '- None')}\n`
     : '';
 
   return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
-    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
-    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}${slackDiscussionBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}${openQuestionBlock}`,
+    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}${discussionBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}${openQuestionBlock}`,
+    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}${slackDiscussionBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}${slackOpenQuestionBlock}`,
   };
 };

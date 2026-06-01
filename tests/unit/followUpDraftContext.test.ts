@@ -6,6 +6,7 @@ import {
   buildFollowUpDraftContext,
   buildFollowUpDraftDecisions,
   buildFollowUpDraftDiscussionPoints,
+  buildFollowUpDraftOpenQuestions,
   buildFollowUpDraftTopicSummaries,
   formatFollowUpDraftActionItem,
 } from '../../src/components/features/followUpDraftContext';
@@ -161,6 +162,9 @@ describe('buildFollowUpDraftContext', () => {
         'The graph schema still needs validation before rollout.',
       ],
       participants: ['Sarah Chen', 'Alex Rivera'],
+      openQuestions: [
+        'API Migration: Should the mobile client move in the same release?',
+      ],
       topicSummaries: ['API Migration: The team aligned on rollout scope.'],
     });
 
@@ -185,9 +189,39 @@ describe('buildFollowUpDraftContext', () => {
       '*Context:*\n- The team aligned on the rollout shape and timing.',
     );
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain(
+      'Open Questions:\n- API Migration: Should the mobile client move in the same release?',
+    );
     expect(drafts.slack).toContain(
       '*Discussion Context:*\n- API Migration: The team aligned on rollout scope.',
     );
+  });
+});
+
+describe('buildFollowUpDraftOpenQuestions', () => {
+  it('formats topic-labeled unresolved questions and removes duplicates or blanks', () => {
+    const questions = buildFollowUpDraftOpenQuestions([
+      {
+        title: 'API Migration',
+        open_questions: [
+          'Should the mobile client move in the same release?',
+          '  ',
+        ],
+      },
+      {
+        title: 'Launch Planning',
+        open_questions: ['Who will own the launch email?'],
+      },
+      {
+        title: 'API Migration',
+        open_questions: ['Should the mobile client move in the same release?'],
+      },
+    ]);
+
+    expect(questions).toEqual([
+      'API Migration: Should the mobile client move in the same release?',
+      'Launch Planning: Who will own the launch email?',
+    ]);
   });
 });
 
