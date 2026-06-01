@@ -345,6 +345,14 @@ describe('working memory snapshots', () => {
       meeting_id: 'meeting-1',
       item_ids: ['item-follow-up'],
     });
+    expect(snapshot.payload.current_read.evidence_quality).toMatchObject({
+      mode: 'direct',
+      confidence: 0.86,
+      cited_meeting_count: 2,
+      source_count: 3,
+      last_reinforced_at: '2026-05-26T14:00:00.000Z',
+      freshness: 'fresh',
+    });
     expect(snapshot.payload.source_quality_summary).toEqual(
       makeKnowledgeSnapshotDoc().source_quality_summary,
     );
