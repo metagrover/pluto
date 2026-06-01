@@ -1,4 +1,5 @@
 import type { Entity } from '../../api/knowledgeGraph';
+import type { MeetingLinkedAttentionItem } from './meetingActionItems';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
@@ -8,6 +9,7 @@ type MeetingEntitySummary = Entity & {
 interface FollowUpDraftContextInput {
   fallbackActionItems: string[];
   linkedEntities: MeetingEntitySummary[];
+  linkedAttentionItems?: MeetingLinkedAttentionItem[];
 }
 
 export interface FollowUpDraftContext {
@@ -55,13 +57,16 @@ const formatDueLabel = (value: string | null | undefined): string => {
 const formatActionItem = (
   entity: MeetingEntitySummary,
   peopleById: Map<string, string>,
+  blockerReasonByEntityId: Map<string, string>,
 ): string => {
   const ownerId = normalizeName(entity.assigned_to);
   const ownerName = ownerId ? (peopleById.get(ownerId) ?? ownerId) : '';
   const dueLabel = formatDueLabel(entity.due_date);
+  const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
   const details = [
     ownerName ? `Owner: ${ownerName}` : '',
     dueLabel ? `Due: ${dueLabel}` : '',
+    blockedReason ? `Status: ${blockedReason}` : '',
   ].filter(Boolean);
 
   return details.length > 0
@@ -72,12 +77,24 @@ const formatActionItem = (
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
   linkedEntities,
+  linkedAttentionItems = [],
 }: FollowUpDraftContextInput): FollowUpDraftContext => {
   const people = linkedEntities
     .filter((entity) => entity.type === 'person')
     .filter((entity) => normalizeName(entity.name))
     .sort(compareEntities);
   const peopleById = new Map(people.map((entity) => [entity.id, entity.name]));
+
+  const blockerReasonByEntityId = new Map<string, string>();
+  for (const item of linkedAttentionItems) {
+    if (item.kind !== 'blocker' || item.status !== 'active') continue;
+    const reason = normalizeName(item.reason).replace(/[.!?]+$/, '');
+    if (!reason) continue;
+    for (const relatedEntityId of item.related_entity_ids) {
+      if (blockerReasonByEntityId.has(relatedEntityId)) continue;
+      blockerReasonByEntityId.set(relatedEntityId, reason);
+    }
+  }
 
   const actionEntities = linkedEntities
     .filter((entity) => entity.type === 'action_item')
@@ -87,7 +104,7 @@ export const buildFollowUpDraftContext = ({
     actionEntities.map((entity) => normalizeKey(entity.name)),
   );
   const actionItems = actionEntities.map((entity) =>
-    formatActionItem(entity, peopleById),
+    formatActionItem(entity, peopleById, blockerReasonByEntityId),
   );
   const fallbackOnlyItems = fallbackActionItems.filter(
     (item) => !linkedActionNames.has(normalizeKey(item)),

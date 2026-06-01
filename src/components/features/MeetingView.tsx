@@ -185,6 +185,8 @@ export const MeetingView = ({
               ? (
                   alertsResult.value as Array<{
                     id?: unknown;
+                    kind?: unknown;
+                    reason?: unknown;
                     status?: unknown;
                     related_entity_ids?: unknown;
                   }>
@@ -194,6 +196,8 @@ export const MeetingView = ({
                       item,
                     ): item is {
                       id: string;
+                      kind?: string;
+                      reason?: string;
                       status: 'active' | 'dismissed' | 'snoozed';
                       related_entity_ids: string[];
                     } =>
@@ -205,6 +209,9 @@ export const MeetingView = ({
                   )
                   .map((item) => ({
                     id: item.id,
+                    kind: typeof item.kind === 'string' ? item.kind : undefined,
+                    reason:
+                      typeof item.reason === 'string' ? item.reason : undefined,
                     status: item.status,
                     related_entity_ids: item.related_entity_ids,
                   }))
@@ -356,6 +363,7 @@ export const MeetingView = ({
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
+    linkedAttentionItems: meetingAttentionItems,
   });
   const followUpDraftParticipants = Array.from(
     new Set([

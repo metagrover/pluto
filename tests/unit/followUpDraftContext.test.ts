@@ -101,6 +101,39 @@ describe('buildFollowUpDraftContext', () => {
     expect(context.participants).toEqual([]);
   });
 
+  it('preserves blocked follow-up context from linked blocker attention items', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+        }),
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Confirm launch plan',
+          assigned_to: 'person-1',
+          due_date: '2026-05-30T00:00:00.000Z',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-1',
+          kind: 'blocker',
+          status: 'active',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-1'],
+        },
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Confirm launch plan (Owner: Sarah Chen | Due: May 30 | Status: Blocked by legal approval)',
+    ]);
+  });
+
   it('injects participant context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',

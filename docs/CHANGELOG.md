@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-01
+
+### Preserve blocked follow-up context in recap drafts
+- **Issue:** [#198](https://github.com/metagrover/pluto/issues/198)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now reuse linked attention-item blocker state when a meeting action is actively blocked, carrying the existing blocker reason into the draft action line alongside owner and due metadata. Focused draft-context coverage now proves blocked follow-ups render with that extra lifecycle context while non-blocked items keep their existing format.
+- **Why:** `#61` treats blocked commitments as meaningfully different from routine next steps. Before this slice, Meeting View already knew when an action was blocked, but generated recap drafts flattened that work back into a normal action item and hid why it could not move.
+- **Replaced:** Treating linked follow-up draft action lines as entity-only strings even when the durable attention queue already carried blocker context for the same commitment.
+- **Notes:** This stays in the Meeting draft formatting path only. It does not redesign Meeting action cards or broaden blocker rendering to other surfaces.
+
 ## 2026-05-29
 
 ### Surface blocked follow-ups in the durable attention queue
