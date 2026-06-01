@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-29
 
+### Make dashboard follow-ups honor durable lifecycle state
+- **Issue:** [#135](https://github.com/metagrover/pluto/issues/135)
+- **PR:** Pending.
+- **Changed:** The dashboard home model now loads durable attention alerts alongside overdue, stale, and active action-item entities, then suppresses dashboard follow-up cards when every linked alert for that action has already been snoozed or dismissed. Focused dashboard model tests now cover dismissed suppression, snoozed suppression, and the mixed-state case where at least one linked alert is still active.
+- **Why:** `#61` requires Pluto's homepage follow-up surface to respect the same lifecycle state users already control elsewhere. Before this slice, dismissed or snoozed follow-ups could still reappear as unresolved daily-briefing work because the dashboard read directly from action entities and ignored the durable attention queue.
+- **Replaced:** Treating the dashboard briefing as an entity-only follow-up list that could bypass the user's durable dismiss/snooze decisions.
+- **Notes:** This keeps the scope in the data join/filter path only. It does not redesign the dashboard cards or add new reminder/notification behavior.
+
 ### Harden Knowledge V2 merges against null structured fields
 - **Issue:** [#111](https://github.com/metagrover/pluto/issues/111)
 - **PR:** Pending.
@@ -35,6 +43,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still requires the commitment lifecycle to support more than complete-or-dismiss semantics. Pluto's backend and sync path already preserved `snoozed`, but current `master` had no source-meeting UI for deferring routine follow-ups without resolving them or treating them as false positives.
 - **Replaced:** Forcing users to choose only between completing a follow-up or dismissing it entirely even when the real intent was to defer it and come back later.
 - **Notes:** This slice stays scoped to Meeting View follow-ups. It does not add reminder scheduling, notifications, or broader follow-up surfaces.
+
 
 ## 2026-05-27
 
