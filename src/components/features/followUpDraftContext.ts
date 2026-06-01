@@ -10,6 +10,13 @@ interface FollowUpDraftContextInput {
   linkedEntities: MeetingEntitySummary[];
 }
 
+interface FollowUpDraftActionItemInput {
+  text: string;
+  topic?: string;
+  assignee?: string;
+  due?: string;
+}
+
 export interface FollowUpDraftContext {
   actionItems: string[];
   participants: string[];
@@ -28,8 +35,11 @@ export type Drafts = Partial<Record<DraftId, string>>;
 const normalizeName = (value: string | null | undefined): string =>
   (value || '').trim();
 
+const stripKnownActionItemDetails = (value: string): string =>
+  value.replace(/\s+\((?:Topic|Owner|Due): .*$/i, '').trim();
+
 const normalizeKey = (value: string | null | undefined): string =>
-  normalizeName(value).toLowerCase();
+  stripKnownActionItemDetails(normalizeName(value)).toLowerCase();
 
 const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
   if (b.mention_count !== a.mention_count) {
@@ -100,6 +110,22 @@ export const buildFollowUpDraftContext = ({
         : fallbackActionItems,
     participants: people.map((entity) => entity.name),
   };
+};
+
+export const formatFollowUpDraftActionItem = ({
+  text,
+  topic,
+  assignee,
+  due,
+}: FollowUpDraftActionItemInput): string => {
+  const baseText = normalizeName(text);
+  const details = [
+    normalizeName(topic) ? `Topic: ${normalizeName(topic)}` : '',
+    normalizeName(assignee) ? `Owner: ${normalizeName(assignee)}` : '',
+    normalizeName(due) ? `Due: ${normalizeName(due)}` : '',
+  ].filter(Boolean);
+
+  return details.length > 0 ? `${baseText} (${details.join(' | ')})` : baseText;
 };
 
 const toBullets = (items: string[], fallback: string) =>
