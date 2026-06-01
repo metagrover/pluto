@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-31
 
+### Include meeting overview context in follow-up drafts
+- **Issue:** [#177](https://github.com/metagrover/pluto/issues/177)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now preserve the selected meeting's overview/summary context in both the default templates and the regenerate prompt, while keeping the existing safe fallback when no usable overview exists. Focused tests now cover overview-aware draft formatting and prompt generation.
+- **Why:** `#61` already expects follow-up drafts to reflect real meeting context, but current `master` flattened the draft input down to participants, decisions, and action items even when the analysis already had a usable meeting overview. Adding that overview keeps recaps anchored to the main thread of the conversation instead of reading like an isolated task list.
+- **Replaced:** Treating follow-up drafts as context-light recaps that dropped the selected meeting's own framing once decisions and action items were extracted.
+- **Notes:** This slice stays scoped to Meeting View draft generation. It does not redesign the editor or add sending integrations.
+
 ### Preserve action-item topics in Meeting follow-up drafts
 - **Issue:** [#175](https://github.com/metagrover/pluto/issues/175)
 - **PR:** Pending.

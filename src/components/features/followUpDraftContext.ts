@@ -24,6 +24,7 @@ export interface FollowUpDraftContext {
 
 export interface DefaultDraftsInput {
   meetingTitle: string;
+  overview: string[];
   actionItems: string[];
   decisions: string[];
   participants: string[];
@@ -133,10 +134,18 @@ const toBullets = (items: string[], fallback: string) =>
 
 export const buildDefaultDrafts = ({
   meetingTitle,
+  overview,
   actionItems,
   decisions,
   participants,
 }: DefaultDraftsInput): Drafts => {
+  const overviewLines = overview.map(normalizeName).filter(Boolean);
+  const overviewBlock = overviewLines.length
+    ? `\n\nContext:\n${toBullets(overviewLines, '- None')}`
+    : '';
+  const slackOverviewBlock = overviewLines.length
+    ? `\n\n*Context:*\n${toBullets(overviewLines, '- None')}`
+    : '';
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
   const participantLine = participants.length
@@ -147,8 +156,8 @@ export const buildDefaultDrafts = ({
     : '\n';
 
   return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
-    internal: `Team, session on ${meetingTitle}:${participantLine}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
-    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${overviewBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
+    internal: `Team, session on ${meetingTitle}:${participantLine}${overviewBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
+    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackOverviewBlock}\n\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
   };
 };

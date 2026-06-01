@@ -341,6 +341,11 @@ export const MeetingView = ({
   const summaryParagraphs = v2?.summary?.length
     ? v2.summary
     : ['No summary was generated for this meeting.'];
+  const followUpDraftOverview = (
+    v3?.overview ? [v3.overview] : v2?.summary || []
+  )
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
   const keyPoints = v2?.key_points || [];
   const actionItems =
     v3?.all_action_items.map((item) => {
@@ -835,6 +840,7 @@ export const MeetingView = ({
       <div className="mb-12 space-y-6">
         <FollowUpDrafts
           meeting={selectedMeeting}
+          overview={followUpDraftOverview}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
           participants={followUpDraftParticipants}

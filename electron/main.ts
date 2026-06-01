@@ -1802,7 +1802,14 @@ app.whenReady().then(async () => {
     'GENERATE_FOLLOW_UPS',
     async (
       _event,
-      { meetingTitle, participants, actionItems, decisions, customPrompt },
+      {
+        meetingTitle,
+        overview,
+        participants,
+        actionItems,
+        decisions,
+        customPrompt,
+      },
     ) => {
       try {
         const settings = await getAllSettings(db);
@@ -1812,6 +1819,7 @@ app.whenReady().then(async () => {
         );
         return await provider.generateFollowUpDrafts({
           meetingTitle,
+          overview,
           participants,
           actionItems,
           decisions,
