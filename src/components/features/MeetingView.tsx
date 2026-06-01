@@ -50,8 +50,11 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
-import { buildFollowUpDraftDecisions } from './followUpDraftContext';
-import { buildFollowUpDraftContext } from './followUpDraftContext';
+import {
+  buildFollowUpDraftContext,
+  buildFollowUpDraftDecisions,
+  formatFollowUpDraftActionItem,
+} from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
@@ -339,16 +342,20 @@ export const MeetingView = ({
   const summaryParagraphs = v2?.summary?.length
     ? v2.summary
     : ['No summary was generated for this meeting.'];
+  const followUpDraftOverview = (
+    v3?.overview ? [v3.overview] : v2?.summary || []
+  )
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
   const keyPoints = v2?.key_points || [];
   const actionItems =
     v3?.all_action_items.map((item) => {
-      const details = [
-        item.assignee ? `Owner: ${item.assignee}` : '',
-        item.due ? `Due: ${item.due}` : '',
-      ]
-        .filter(Boolean)
-        .join(' | ');
-      return details ? `${item.text} (${details})` : item.text;
+      return formatFollowUpDraftActionItem({
+        text: item.text,
+        topic: item.topic,
+        assignee: item.assignee,
+        due: item.due,
+      });
     }) ||
     v2?.action_items ||
     [];
@@ -837,6 +844,7 @@ export const MeetingView = ({
       <div className="mb-12 space-y-6">
         <FollowUpDrafts
           meeting={selectedMeeting}
+          overview={followUpDraftOverview}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
           participants={followUpDraftParticipants}
