@@ -52,6 +52,14 @@ const formatDueLabel = (value: string | null | undefined): string => {
   });
 };
 
+const formatLifecycleLabel = (
+  value: MeetingEntitySummary['status'],
+): string => {
+  if (value === 'overdue') return 'Overdue';
+  if (value === 'stale') return 'Stale';
+  return '';
+};
+
 const formatActionItem = (
   entity: MeetingEntitySummary,
   peopleById: Map<string, string>,
@@ -59,7 +67,9 @@ const formatActionItem = (
   const ownerId = normalizeName(entity.assigned_to);
   const ownerName = ownerId ? (peopleById.get(ownerId) ?? ownerId) : '';
   const dueLabel = formatDueLabel(entity.due_date);
+  const lifecycleLabel = formatLifecycleLabel(entity.status);
   const details = [
+    lifecycleLabel ? `Status: ${lifecycleLabel}` : '',
     ownerName ? `Owner: ${ownerName}` : '',
     dueLabel ? `Due: ${dueLabel}` : '',
   ].filter(Boolean);

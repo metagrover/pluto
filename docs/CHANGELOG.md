@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-01
+
+### Keep overdue and stale follow-up urgency visible in drafts
+- **Issue:** [#196](https://github.com/metagrover/pluto/issues/196)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up draft context now carries concise `Status: Overdue` and `Status: Stale` labels into linked action-item strings while preserving the existing owner and due metadata. Normal active items and fallback plain-text action items keep their previous wording, and focused regression coverage now proves the status-aware formatting.
+- **Why:** `#61` requires Pluto's commitment lifecycle to distinguish ordinary active work from aging follow-ups. Before this slice, draft generation flattened overdue and stale linked items into neutral next steps, which hid urgency in the exact recap text users may send or copy.
+- **Replaced:** Treating all still-active linked follow-ups as equivalent draft bullets even when Meeting View already knew which ones were overdue or stale.
+- **Notes:** This is intentionally limited to draft-context formatting. Completion/dismiss/snooze suppression remains separate work in `#194` / PR `#195`.
+
 ## 2026-05-29
 
 ### Surface blocked follow-ups in the durable attention queue
