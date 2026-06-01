@@ -92,12 +92,14 @@ const formatActionItem = (
   const ownerId = normalizeName(entity.assigned_to);
   const ownerName = ownerId ? (peopleById.get(ownerId) ?? ownerId) : '';
   const dueLabel = formatDueLabel(entity.due_date);
+  const contextLabel = normalizeName(entity.context);
   const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
   const lifecycleLabel = formatLifecycleLabel(entity.status);
   const details = [
     lifecycleLabel ? `Status: ${lifecycleLabel}` : '',
     ownerName ? `Owner: ${ownerName}` : '',
     dueLabel ? `Due: ${dueLabel}` : '',
+    contextLabel ? `Context: ${contextLabel}` : '',
     blockedReason ? `Status: ${blockedReason}` : '',
   ].filter(Boolean);
 

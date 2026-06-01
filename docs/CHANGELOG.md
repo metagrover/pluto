@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-01
 
+### Preserve action-item context in Meeting follow-up drafts
+- **Issue:** [#200](https://github.com/metagrover/pluto/issues/200)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now carry linked `action_item` entity `context` alongside the existing owner and due-date metadata when Pluto already has that sentence-level meeting context. Focused draft-context coverage now proves the formatter preserves that existing context without changing items that do not have it.
+- **Why:** `#61` calls for follow-up drafts to reuse the same durable meeting context Pluto already extracted elsewhere. Before this slice, Meeting View cards could explain what a follow-up was about while the draft generator flattened that same action into a bare task line.
+- **Replaced:** Treating linked action items as title-plus-owner-plus-due only, even when the selected meeting already had richer action context attached to the same entity.
+- **Notes:** This stays inside the current Meeting follow-up draft surface. It does not redesign cards, add new lifecycle states, or broaden into sending integrations.
 ### Preserve blocked follow-up context in recap drafts
 - **Issue:** [#198](https://github.com/metagrover/pluto/issues/198)
 - **PR:** Pending.
