@@ -13,7 +13,10 @@ import {
   type KnowledgeWorkspacePayload,
   getKnowledgeWorkspace,
 } from '../../api/knowledgeWorkspace';
-import { getWorkingMemorySnapshot } from '../../api/workingMemory';
+import {
+  type WorkingMemorySnapshot,
+  listWorkingMemorySnapshots,
+} from '../../api/workingMemory';
 import type { Meeting } from '../../types';
 import {
   type DashboardHomeModel,
@@ -42,7 +45,7 @@ const buildEmptyDashboardHomeModel = (
     activeActions: [],
     attentionAlerts: [],
     workspace: null,
-    workingMemorySnapshot: null,
+    workingMemorySnapshots: [],
     graphStats: null,
   });
 
@@ -80,7 +83,7 @@ export const useDashboardHome = ({
         activeActions,
         attentionAlerts,
         workspace,
-        workingMemorySnapshot,
+        workingMemorySnapshots,
         graphStats,
       ] = await Promise.all([
         loadOptional<Entity[]>('overdue actions', getOverdueActionItems, []),
@@ -104,10 +107,10 @@ export const useDashboardHome = ({
           getKnowledgeWorkspace,
           null,
         ),
-        loadOptional(
-          'working memory snapshot',
-          () => getWorkingMemorySnapshot('global', 'global'),
-          undefined,
+        loadOptional<WorkingMemorySnapshot[]>(
+          'working memory snapshots',
+          listWorkingMemorySnapshots,
+          [],
         ),
         loadOptional<KnowledgeGraphStats | null>(
           'graph stats',
@@ -127,7 +130,7 @@ export const useDashboardHome = ({
           activeActions,
           attentionAlerts,
           workspace,
-          workingMemorySnapshot: workingMemorySnapshot ?? null,
+          workingMemorySnapshots,
           graphStats,
         }),
         loading: false,

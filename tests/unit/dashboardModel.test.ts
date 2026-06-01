@@ -472,6 +472,119 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('prefers a matching project working-memory snapshot for a dashboard project card', () => {
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [
+          makeDoc({
+            id: 'doc-project',
+            scope_type: 'project',
+            scope_key: 'project-1',
+            title: 'Project Atlas',
+            structured_json: JSON.stringify({
+              schema_version: 2,
+              scope: { type: 'project', title: 'Project Atlas' },
+              current_read: {
+                headline: 'Doc JSON keeps the older project summary.',
+                trust_message: 'Grounded in direct meeting evidence.',
+                evidence_quality: {
+                  mode: 'direct',
+                  confidence: 0.9,
+                  cited_meeting_count: 2,
+                  source_count: 3,
+                  last_reinforced_at: '2026-04-27T16:00:00.000Z',
+                  freshness: 'fresh',
+                },
+                source_count: 3,
+                cited_item_count: 2,
+                cited_meeting_count: 2,
+                freshness: 'fresh',
+              },
+              active_streams: [],
+              needs_attention: [],
+              patterns: [],
+              risks_and_unknowns: [],
+              evidence_index: [],
+              source_quality_summary: {
+                included_count: 3,
+                excluded_count: 0,
+                weak_count: 0,
+                records: [],
+              },
+            }),
+          }),
+        ],
+        project_cards: [
+          makeProjectCard({
+            doc_id: 'doc-project',
+            project_id: 'project-1',
+            title: 'Project Atlas',
+          }),
+        ],
+      }),
+      workingMemorySnapshots: [
+        makeWorkingMemorySnapshot({
+          id: 'snapshot-project',
+          scope_type: 'project',
+          scope_key: 'project-1',
+          title: 'Project Atlas',
+          source_doc_id: 'doc-project',
+          source_doc_last_synthesized_at: '2026-04-27T16:00:00.000Z',
+          payload: {
+            ...baseSnapshot.payload,
+            scope: {
+              type: 'project',
+              key: 'project-1',
+              title: 'Project Atlas',
+            },
+            source: {
+              knowledge_doc_id: 'doc-project',
+              knowledge_doc_last_synthesized_at: '2026-04-27T16:00:00.000Z',
+            },
+            current_read: {
+              ...baseSnapshot.payload.current_read,
+              headline:
+                'Working memory keeps the launch blocker visible for Project Atlas.',
+            },
+          },
+        }),
+      ],
+      graphStats: null,
+    });
+
+    expect(model.knowledgeDocuments.state).toBe('populated');
+    expect(model.knowledgeDocuments.cards[0]).toMatchObject({
+      id: 'doc-project',
+      title: 'Project Atlas',
+      description:
+        'Working memory keeps the launch blocker visible for Project Atlas.',
+      countLabel: '1 blocker · 2 dependencies',
+      trustStatus: 'inferred',
+      trustDescription:
+        'Supported by evidence, but synthesized across sources.',
+    });
+    expect(model.briefingFocus).toEqual({
+      kind: 'knowledge_doc',
+      title: 'Recent memory',
+      detail:
+        'Working memory keeps the launch blocker visible for Project Atlas.',
+      action: { label: 'Open knowledge', target: 'wiki' },
+    });
+    expect(model.hero).toMatchObject({
+      kind: 'knowledge_doc',
+      title: 'Project Atlas',
+      detail:
+        'Working memory keeps the launch blocker visible for Project Atlas.',
+      action: { label: 'Knowledge home', target: 'wiki' },
+    });
+  });
+
   it('falls back to knowledge-doc data when the working-memory snapshot is stale', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -543,6 +656,96 @@ describe('buildDashboardHomeModel', () => {
       title: 'Recent memory',
       detail: 'Doc JSON remains the trusted fallback.',
       action: { label: 'Open knowledge', target: 'wiki' },
+    });
+  });
+
+  it('falls back to project doc data when the matching project snapshot is stale', () => {
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [
+          makeDoc({
+            id: 'doc-project',
+            scope_type: 'project',
+            scope_key: 'project-1',
+            title: 'Project Atlas',
+            structured_json: JSON.stringify({
+              schema_version: 2,
+              scope: { type: 'project', title: 'Project Atlas' },
+              current_read: {
+                headline: 'Doc JSON remains the trusted project fallback.',
+                trust_message: 'Grounded in direct meeting evidence.',
+                evidence_quality: {
+                  mode: 'direct',
+                  confidence: 0.9,
+                  cited_meeting_count: 2,
+                  source_count: 3,
+                  last_reinforced_at: '2026-04-27T16:00:00.000Z',
+                  freshness: 'fresh',
+                },
+                source_count: 3,
+                cited_item_count: 2,
+                cited_meeting_count: 2,
+                freshness: 'fresh',
+              },
+              active_streams: [],
+              needs_attention: [],
+              patterns: [],
+              risks_and_unknowns: [],
+              evidence_index: [],
+              source_quality_summary: {
+                included_count: 3,
+                excluded_count: 0,
+                weak_count: 0,
+                records: [],
+              },
+            }),
+          }),
+        ],
+        project_cards: [
+          makeProjectCard({
+            doc_id: 'doc-project',
+            project_id: 'project-1',
+            title: 'Project Atlas',
+          }),
+        ],
+      }),
+      workingMemorySnapshots: [
+        makeWorkingMemorySnapshot({
+          id: 'snapshot-project',
+          scope_type: 'project',
+          scope_key: 'project-1',
+          title: 'Project Atlas',
+          source_doc_id: 'doc-project',
+          freshness: 'stale',
+          payload: {
+            ...baseSnapshot.payload,
+            scope: {
+              type: 'project',
+              key: 'project-1',
+              title: 'Project Atlas',
+            },
+            source: {
+              knowledge_doc_id: 'doc-project',
+              knowledge_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
+            },
+          },
+        }),
+      ],
+      graphStats: null,
+    });
+
+    expect(model.knowledgeDocuments.state).toBe('populated');
+    expect(model.knowledgeDocuments.cards[0]).toMatchObject({
+      description: 'Doc JSON remains the trusted project fallback.',
+      countLabel: '1 blocker · 2 dependencies',
+      trustStatus: 'grounded',
+      trustDescription: 'Backed by direct evidence from cited source material.',
     });
   });
 
