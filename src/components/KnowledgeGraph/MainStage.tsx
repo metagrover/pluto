@@ -910,8 +910,14 @@ export const MainStage: React.FC<MainStageProps> = ({
   );
   const attentionItems = useMemo(
     () =>
-      compileNeedsAttention(selectedDoc, docs, projectCards, attentionAlerts),
-    [selectedDoc, docs, projectCards, attentionAlerts],
+      compileNeedsAttention(
+        selectedDoc,
+        docs,
+        projectCards,
+        attentionAlerts,
+        workingMemorySnapshot,
+      ),
+    [selectedDoc, docs, projectCards, attentionAlerts, workingMemorySnapshot],
   );
 
   if (!selectedDoc) return <EmptyState />;
