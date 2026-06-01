@@ -152,7 +152,9 @@ describe('buildFollowUpDraftContext', () => {
     });
 
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
-    expect(drafts.client).toContain('Linked Context:\n- Project: Apollo rollout');
+    expect(drafts.client).toContain(
+      'Linked Context:\n- Project: Apollo rollout',
+    );
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
     expect(drafts.internal).toContain(
       'Linked Context:\n- Project: Apollo rollout',
