@@ -85,7 +85,7 @@ describe('buildFollowUpDraftContext', () => {
     });
 
     expect(context.actionItems).toEqual([
-      'Send rollout email (Owner: Sarah Chen | Due: May 30)',
+      'Send rollout email (Owner: Sarah Chen (Engineering Lead) | Due: May 30)',
       'Plain fallback item',
     ]);
     expect(context.participants).toEqual([
@@ -93,6 +93,33 @@ describe('buildFollowUpDraftContext', () => {
       'Alex Rivera',
     ]);
     expect(context.entityContext).toEqual([]);
+  });
+
+  it('includes linked owner role context when Pluto already knows it', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Send rollout email',
+          assigned_to: 'person-1',
+          due_date: '2026-05-30T00:00:00.000Z',
+          mention_count: 2,
+        }),
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+          mention_count: 3,
+          metadata: JSON.stringify({ role: 'Head of Product' }),
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Send rollout email (Owner: Sarah Chen (Head of Product) | Due: May 30)',
+    ]);
   });
 
   it('falls back to the existing action-item strings when no linked action items exist', () => {
