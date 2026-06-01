@@ -1802,7 +1802,14 @@ app.whenReady().then(async () => {
     'GENERATE_FOLLOW_UPS',
     async (
       _event,
-      { meetingTitle, participants, actionItems, decisions, customPrompt },
+      {
+        meetingTitle,
+        participants,
+        actionItems,
+        decisions,
+        discussionPoints,
+        customPrompt,
+      },
     ) => {
       try {
         const settings = await getAllSettings(db);
@@ -1815,6 +1822,7 @@ app.whenReady().then(async () => {
           participants,
           actionItems,
           decisions,
+          discussionPoints,
           customPrompt,
         });
       } catch (error) {

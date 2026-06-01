@@ -50,7 +50,10 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
-import { buildFollowUpDraftContext } from './followUpDraftContext';
+import {
+  buildFollowUpDraftContext,
+  buildFollowUpDraftDiscussionPoints,
+} from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
@@ -353,6 +356,7 @@ export const MeetingView = ({
     [];
   const decisions =
     v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const discussionPoints = buildFollowUpDraftDiscussionPoints(v3?.topics);
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
@@ -835,6 +839,7 @@ export const MeetingView = ({
           meeting={selectedMeeting}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
+          discussionPoints={discussionPoints}
           participants={followUpDraftParticipants}
           fetchMeetings={fetchMeetings}
         />

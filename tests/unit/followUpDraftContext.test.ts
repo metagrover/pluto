@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   buildDefaultDrafts,
+  buildFollowUpDraftDiscussionPoints,
   buildFollowUpDraftContext,
 } from '../../src/components/features/followUpDraftContext';
 
@@ -106,11 +107,54 @@ describe('buildFollowUpDraftContext', () => {
       meetingTitle: 'API Migration Review',
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
       decisions: ['Use REST for the rollout'],
+      discussionPoints: [
+        'The team needs provenance on each API response.',
+        'The graph schema still needs validation before rollout.',
+      ],
       participants: ['Sarah Chen', 'Alex Rivera'],
     });
 
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain('Discussion Context:');
+    expect(drafts.client).toContain(
+      '- The team needs provenance on each API response.',
+    );
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.internal).toContain('Discussion Context:');
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.slack).toContain('*Discussion Context:*');
+  });
+});
+
+describe('buildFollowUpDraftDiscussionPoints', () => {
+  it('formats topic key points with topic labels and removes duplicates', () => {
+    const discussionPoints = buildFollowUpDraftDiscussionPoints([
+      {
+        title: 'API Responses',
+        summary: 'Summary',
+        decisions: [],
+        action_items: [],
+        open_questions: [],
+        key_points: [
+          { text: 'The team needs provenance on each API response.' },
+          { text: 'The graph schema still needs validation before rollout.' },
+        ],
+      },
+      {
+        title: 'Rollout',
+        summary: 'Summary',
+        decisions: [],
+        action_items: [],
+        open_questions: [],
+        key_points: [
+          { text: 'The graph schema still needs validation before rollout.' },
+        ],
+      },
+    ]);
+
+    expect(discussionPoints).toEqual([
+      'API Responses: The team needs provenance on each API response.',
+      'API Responses: The graph schema still needs validation before rollout.',
+    ]);
   });
 });
