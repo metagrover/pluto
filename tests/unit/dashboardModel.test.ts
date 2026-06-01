@@ -396,6 +396,8 @@ describe('buildDashboardHomeModel', () => {
             scope_type: 'global',
             scope_key: 'global',
             title: 'Workspace Memory',
+            last_synthesized_at: '2026-04-27T18:00:00.000Z',
+            updated_at: '2026-04-27T18:00:00.000Z',
             structured_json: JSON.stringify({
               schema_version: 2,
               scope: { type: 'global', title: 'Workspace Memory' },
@@ -434,6 +436,8 @@ describe('buildDashboardHomeModel', () => {
           scope_type: 'global',
           scope_key: 'global',
           title: 'Workspace Memory',
+          last_synthesized_at: '2026-04-27T18:00:00.000Z',
+          updated_at: '2026-04-27T18:00:00.000Z',
         }),
         project_cards: [],
       }),
@@ -538,6 +542,93 @@ describe('buildDashboardHomeModel', () => {
       kind: 'knowledge_doc',
       title: 'Recent memory',
       detail: 'Doc JSON remains the trusted fallback.',
+      action: { label: 'Open knowledge', target: 'wiki' },
+    });
+  });
+
+  it('falls back to knowledge-doc data when the working-memory snapshot is older than the doc synthesis', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [
+          makeDoc({
+            id: 'doc-global',
+            scope_type: 'global',
+            scope_key: 'global',
+            title: 'Workspace Memory',
+            last_synthesized_at: '2026-04-28T09:00:00.000Z',
+            updated_at: '2026-04-28T09:00:00.000Z',
+            structured_json: JSON.stringify({
+              schema_version: 2,
+              scope: { type: 'global', title: 'Workspace Memory' },
+              current_read: {
+                headline: 'Doc JSON reflects the newest synthesis pass.',
+                trust_message: 'Grounded in direct meeting evidence.',
+                evidence_quality: {
+                  mode: 'direct',
+                  confidence: 0.9,
+                  cited_meeting_count: 2,
+                  source_count: 3,
+                  last_reinforced_at: '2026-04-28T09:00:00.000Z',
+                  freshness: 'fresh',
+                },
+                source_count: 3,
+                cited_item_count: 2,
+                cited_meeting_count: 2,
+                freshness: 'fresh',
+              },
+              active_streams: [],
+              needs_attention: [],
+              patterns: [],
+              risks_and_unknowns: [],
+              evidence_index: [],
+              source_quality_summary: {
+                included_count: 3,
+                excluded_count: 0,
+                weak_count: 0,
+                records: [],
+              },
+            }),
+          }),
+        ],
+        selected_doc: makeDoc({
+          id: 'doc-global',
+          scope_type: 'global',
+          scope_key: 'global',
+          title: 'Workspace Memory',
+          last_synthesized_at: '2026-04-28T09:00:00.000Z',
+          updated_at: '2026-04-28T09:00:00.000Z',
+        }),
+        project_cards: [],
+      }),
+      workingMemorySnapshot: makeWorkingMemorySnapshot({
+        source_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
+        generated_at: '2026-04-27T18:00:00.000Z',
+        updated_at: '2026-04-27T18:00:00.000Z',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          source: {
+            knowledge_doc_id: 'doc-global',
+            knowledge_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
+          },
+        },
+      }),
+      graphStats: null,
+    });
+
+    expect(model.knowledgeDocuments.cards[0]).toMatchObject({
+      description: 'Doc JSON reflects the newest synthesis pass.',
+      trustStatus: 'grounded',
+      trustDescription: 'Backed by direct evidence from cited source material.',
+    });
+    expect(model.briefingFocus).toEqual({
+      kind: 'knowledge_doc',
+      title: 'Recent memory',
+      detail: 'Doc JSON reflects the newest synthesis pass.',
       action: { label: 'Open knowledge', target: 'wiki' },
     });
   });

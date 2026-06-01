@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-30
 
+### Ignore outdated working-memory snapshots in Knowledge consumers
+- **Issue:** [#147](https://github.com/metagrover/pluto/issues/147)
+- **PR:** Pending.
+- **Changed:** Knowledge brief compilation and the Dashboard workspace-memory card now only consume a working-memory snapshot when it matches the selected Knowledge doc's latest synthesis timestamp. If the doc has been synthesized more recently than the persisted snapshot, Pluto falls back to the newer doc JSON instead of showing older snapshot state. Focused tests now cover both Knowledge and Dashboard outdated-snapshot fallback.
+- **Why:** Pluto's Phase 2 durable-memory consumers already checked scope, doc identity, and freshness, but they did not verify that the snapshot came from the same synthesis pass as the current Knowledge doc. That allowed an older persisted snapshot to mask newer compiled state and undercut the trust contract around freshness.
+- **Replaced:** Treating any non-stale matching snapshot as authoritative even when the selected Knowledge doc had already been regenerated more recently.
+- **Notes:** This slice stays read-only. It does not change snapshot generation or broaden the consumer path beyond the existing global/project snapshot surfaces.
 ### Persist team-tracker working-memory snapshots
 - **Issue:** [#145](https://github.com/metagrover/pluto/issues/145)
 - **PR:** Pending.

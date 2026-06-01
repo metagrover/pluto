@@ -14,6 +14,7 @@ import {
 } from '../../utils/trustStatus';
 import {
   compileKnowledgeBrief,
+  matchesWorkingMemorySnapshotToDoc,
   parseStructuredKnowledgeV2Doc,
 } from '../KnowledgeGraph/knowledgeDocument';
 
@@ -426,10 +427,7 @@ const matchesWorkingMemorySnapshot = (
   workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
 ): workingMemorySnapshot is WorkingMemorySnapshot =>
   doc.scope_type === 'global' &&
-  workingMemorySnapshot?.scope_type === 'global' &&
-  workingMemorySnapshot.freshness !== 'stale' &&
-  workingMemorySnapshot.scope_key === doc.scope_key &&
-  workingMemorySnapshot.source_doc_id === doc.id;
+  matchesWorkingMemorySnapshotToDoc(doc, workingMemorySnapshot);
 
 const getKnowledgeDocCardDetail = (
   doc: KnowledgeDoc,
