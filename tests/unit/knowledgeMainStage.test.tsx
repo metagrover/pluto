@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
-import { MainStage } from '../../src/components/KnowledgeGraph/MainStage';
+import {
+  MainStage,
+  resolveCurrentReadHeadline,
+} from '../../src/components/KnowledgeGraph/MainStage';
 
 const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
   id: 'doc-1',
@@ -20,6 +23,69 @@ const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
 });
 
 describe('Knowledge MainStage', () => {
+  it('keeps a snapshot-backed current read headline visible when synthesis failed', () => {
+    const selectedDoc = makeDoc({
+      status: 'failed',
+      updated_at: '2026-05-30T11:59:00.000Z',
+    });
+
+    expect(
+      resolveCurrentReadHeadline({
+        selectedDoc,
+        headline: 'Durable snapshot headline remains available.',
+        coverage: {
+          statementCount: 3,
+          citedMeetingCount: 2,
+          dependencyCount: 1,
+        },
+        isCompiled: true,
+        backingSource: 'snapshot',
+      }),
+    ).toBe('Durable snapshot headline remains available.');
+  });
+
+  it('keeps a snapshot-backed current read headline visible when synthesis runs long', () => {
+    const selectedDoc = makeDoc({
+      status: 'synthesizing',
+      updated_at: '2026-05-30T11:00:00.000Z',
+    });
+
+    expect(
+      resolveCurrentReadHeadline({
+        selectedDoc,
+        headline: 'Durable snapshot headline remains available.',
+        coverage: {
+          statementCount: 3,
+          citedMeetingCount: 2,
+          dependencyCount: 1,
+        },
+        isCompiled: true,
+        backingSource: 'snapshot',
+      }),
+    ).toBe('Durable snapshot headline remains available.');
+  });
+
+  it('falls back to failure copy when no snapshot-backed current read exists', () => {
+    const selectedDoc = makeDoc({
+      status: 'failed',
+      updated_at: '2026-05-30T11:59:00.000Z',
+    });
+
+    expect(
+      resolveCurrentReadHeadline({
+        selectedDoc,
+        headline: 'Doc-backed headline should not appear here.',
+        coverage: {
+          statementCount: 0,
+          citedMeetingCount: 0,
+          dependencyCount: 0,
+        },
+        isCompiled: false,
+        backingSource: 'none',
+      }),
+    ).toBe('No current read is available because synthesis failed.');
+  });
+
   it('does not repeat a promoted risk in both Needs Attention and Risks and Unknowns', () => {
     const duplicatedRisk =
       'Advisor Agent Deployment may miss demo readiness without UAT and API instrumentation.';

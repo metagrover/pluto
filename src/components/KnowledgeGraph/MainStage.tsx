@@ -188,6 +188,40 @@ const isLongRunningSynthesis = (doc: KnowledgeDoc): boolean => {
   return Date.now() - startedAt > SYNTHESIS_STUCK_AFTER_MS;
 };
 
+export const resolveCurrentReadHeadline = ({
+  selectedDoc,
+  headline,
+  coverage,
+  isCompiled,
+  backingSource,
+}: {
+  selectedDoc: KnowledgeDoc;
+  headline: string;
+  coverage: KnowledgeBriefCoverage;
+  isCompiled: boolean;
+  backingSource: 'snapshot' | 'doc' | 'none';
+}): string => {
+  const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
+  const hasPartialContext = !isCompiled && coverage.statementCount > 0;
+
+  if ((backingSource === 'snapshot' && isCompiled) || isCompiled) {
+    return headline;
+  }
+  if (selectedDoc.status === 'failed') {
+    return 'No current read is available because synthesis failed.';
+  }
+  if (synthesisIsLongRunning) {
+    return 'Synthesis is taking longer than expected.';
+  }
+  if (hasPartialContext) {
+    return headline;
+  }
+  if (selectedDoc.status === 'synthesizing') {
+    return 'Pluto is compiling the current read.';
+  }
+  return 'No current read is available yet.';
+};
+
 const StatusBadge = ({ status }: { status: KnowledgeDocStatus }) => (
   <span
     className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black capitalize ${STATUS_STYLES[status]}`}
@@ -265,6 +299,7 @@ const CurrentRead = ({
   trustDescription,
   sourceQuality,
   isCompiled,
+  backingSource,
   isRetrying,
   onRetrySynthesis,
 }: {
@@ -279,6 +314,7 @@ const CurrentRead = ({
   trustDescription: string | null;
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
   isCompiled: boolean;
+  backingSource: 'snapshot' | 'doc' | 'none';
   isRetrying: boolean;
   onRetrySynthesis: (docId: string) => Promise<void>;
 }) => {
@@ -287,17 +323,13 @@ const CurrentRead = ({
   const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
   const needsRetry = selectedDoc.status === 'failed' || synthesisIsLongRunning;
   const hasPartialContext = !isCompiled && coverage.statementCount > 0;
-  const currentRead = isCompiled
-    ? headline
-    : selectedDoc.status === 'failed'
-      ? 'No current read is available because synthesis failed.'
-      : synthesisIsLongRunning
-        ? 'Synthesis is taking longer than expected.'
-        : hasPartialContext
-          ? headline
-          : selectedDoc.status === 'synthesizing'
-            ? 'Pluto is compiling the current read.'
-            : 'No current read is available yet.';
+  const currentRead = resolveCurrentReadHeadline({
+    selectedDoc,
+    headline,
+    coverage,
+    isCompiled,
+    backingSource,
+  });
   const citedMeetingLabel = `${coverage.citedMeetingCount} cited meeting${
     coverage.citedMeetingCount === 1 ? '' : 's'
   }`;
@@ -1006,6 +1038,7 @@ export const MainStage: React.FC<MainStageProps> = ({
           trustDescription={brief.trustDescription}
           sourceQuality={brief.sourceQuality}
           isCompiled={brief.isCompiled}
+          backingSource={brief.backingSource}
           isRetrying={retryingDocId === selectedDoc.id}
           onRetrySynthesis={handleRetry}
         />

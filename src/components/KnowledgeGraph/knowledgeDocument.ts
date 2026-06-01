@@ -176,6 +176,7 @@ type StructuredKnowledgeV2Source = Pick<
 
 export interface KnowledgeBrief {
   isCompiled: boolean;
+  backingSource: 'snapshot' | 'doc' | 'none';
   headline: string;
   supportingBullets: string[];
   lanes: KnowledgeBriefLane[];
@@ -825,6 +826,7 @@ const buildKnowledgeBriefFromV2 = ({
 
   return {
     isCompiled,
+    backingSource: sourceQuality ? 'doc' : 'snapshot',
     headline: v2.current_read.headline || 'No reliable compiled brief yet.',
     supportingBullets: v2.current_read.supporting_bullets.filter(Boolean),
     lanes: emptyLanes,
@@ -907,6 +909,7 @@ export const compileKnowledgeBrief = (
   if (!structured) {
     return {
       isCompiled: false,
+      backingSource: 'none',
       headline: 'No reliable compiled brief yet.',
       supportingBullets: [],
       lanes: emptyLanes,
@@ -1064,6 +1067,7 @@ export const compileKnowledgeBrief = (
 
   return {
     isCompiled: hasCompiledItems,
+    backingSource: 'doc',
     headline: hasCompiledItems
       ? headlineCandidates[0]?.item.text || 'No reliable compiled brief yet.'
       : weakSynthesisHeadline

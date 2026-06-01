@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-30
 
+### Keep snapshot-backed Knowledge Current Read visible during synthesis failures
+- **Issue:** [#155](https://github.com/metagrover/pluto/issues/155)
+- **PR:** Pending.
+- **Changed:** The Knowledge main stage now keeps a valid snapshot-backed Current Read headline visible when a new synthesis attempt fails or has been running unusually long. Pluto still shows the existing retry/status messaging, and the prior failure fallback copy remains in place when no valid durable snapshot-backed brief exists. Focused tests now cover both degraded-state snapshot visibility and the no-snapshot fallback path.
+- **Why:** `#81` requires Knowledge to stay useful when working memory is available but live synthesis is degraded. Before this slice, Pluto could already compile a durable snapshot-backed brief, then immediately hide that best available context behind generic failure or timeout copy driven only by doc status.
+- **Replaced:** Treating Current Read status copy as more important than the already-persisted durable brief, even when Pluto had a matching compiled snapshot it could show honestly.
+- **Notes:** This is intentionally a renderer-side consumer fix. It does not change snapshot validation rules, retry behavior, or broaden into new working-memory scopes.
 ### Prefer project working-memory snapshots in Dashboard knowledge cards
 - **Issue:** [#153](https://github.com/metagrover/pluto/issues/153)
 - **PR:** Pending.
