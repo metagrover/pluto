@@ -18,6 +18,15 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-30
+
+### Persist person-context working-memory snapshots
+- **Issue:** [#143](https://github.com/metagrover/pluto/issues/143)
+- **PR:** Pending.
+- **Changed:** Expanded the durable working-memory snapshot layer to support `person_context` Knowledge docs in addition to `global` and `project`, added builder/persist helpers for that scope, and wired person-context Knowledge synthesis to refresh those snapshots automatically using the existing snapshot payload contract. Focused unit coverage now proves person-context build, persist, and stable upsert behavior.
+- **Why:** Pluto already auto-refreshes people-focused Knowledge docs when meetings mention active participants, but those docs still could not persist durable memory state because the snapshot layer was hardcoded to only two scopes. Landing one more existing scope advances the Working Memory substrate without reopening Knowledge UI work.
+- **Replaced:** Treating `person_context` docs as transient synthesized views even after global and project docs had a durable working-memory path.
+- **Notes:** This slice is intentionally foundation-only. Person-context snapshot consumption in Knowledge, Ask Pluto, and briefing surfaces remains later work under `#81`, `#62`, and `#82`.
 ## 2026-05-29
 
 ### Expose the durable attention queue to renderer code
