@@ -49,8 +49,8 @@ import {
 } from '../../utils/transcript';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
-import { buildFollowUpDraftTopicSummaries } from './followUpDraftContext';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
+import { buildFollowUpDraftTopicSummaries } from './followUpDraftContext';
 import { buildFollowUpDraftContext } from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
