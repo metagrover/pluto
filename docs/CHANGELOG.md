@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-05-31
+
+### Preserve action-item topics in Meeting follow-up drafts
+- **Issue:** [#175](https://github.com/metagrover/pluto/issues/175)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now preserve `ActionItemV3.topic` when analysis provides it, carrying that topic label into the default draft templates and the regenerate prompt alongside existing owner and due-date details. The shared draft-context helper also strips those known metadata labels when deduping fallback action items against linked `action_item` entities, so topic-aware fallback bullets do not repeat the same commitment twice.
+- **Why:** `#61` requires follow-up drafts to stay grounded in Pluto's existing meeting context. After participant context and action-item owner/due details landed, current `master` still flattened commitments from different discussion threads into one generic list even though the v3 analysis schema already preserved topic context.
+- **Replaced:** Treating Meeting follow-up draft action items as plain task strings once they left the analysis document, which blurred together commitments from separate topics and risked duplicate bullets when linked entity metadata was also present.
+- **Notes:** This slice stays inside the existing Meeting View draft flow. Decision rationale and decision-owner context remain in the separate open PRs tied to `#171` and `#173`.
+
 ## 2026-05-29
 
 ### Let Meeting View snooze extracted follow-ups

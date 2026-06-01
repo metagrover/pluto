@@ -4,6 +4,7 @@ import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   buildDefaultDrafts,
   buildFollowUpDraftContext,
+  formatFollowUpDraftActionItem,
 } from '../../src/components/features/followUpDraftContext';
 
 type MeetingEntitySummary = Entity & {
@@ -101,6 +102,32 @@ describe('buildFollowUpDraftContext', () => {
     expect(context.participants).toEqual([]);
   });
 
+  it('does not duplicate linked action items when fallback labels already include topic metadata', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Send rollout email (Topic: Launch planning | Owner: Sarah Chen | Due: Friday)',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+        }),
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Send rollout email',
+          assigned_to: 'person-1',
+          due_date: 'Friday',
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Send rollout email (Owner: Sarah Chen | Due: Friday)',
+    ]);
+  });
+
   it('injects participant context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',
@@ -112,5 +139,28 @@ describe('buildFollowUpDraftContext', () => {
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+  });
+});
+
+describe('formatFollowUpDraftActionItem', () => {
+  it('includes topic context ahead of owner and due details when present', () => {
+    expect(
+      formatFollowUpDraftActionItem({
+        text: 'Send rollout email',
+        topic: 'Launch planning',
+        assignee: 'Sarah Chen',
+        due: 'Friday',
+      }),
+    ).toBe(
+      'Send rollout email (Topic: Launch planning | Owner: Sarah Chen | Due: Friday)',
+    );
+  });
+
+  it('falls back to the raw text when no topic or metadata is available', () => {
+    expect(
+      formatFollowUpDraftActionItem({
+        text: 'Confirm launch plan',
+      }),
+    ).toBe('Confirm launch plan');
   });
 });
