@@ -50,7 +50,14 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
-import { buildFollowUpDraftContext } from './followUpDraftContext';
+import {
+  buildFollowUpDraftContext,
+  buildFollowUpDraftDecisions,
+  buildFollowUpDraftDiscussionPoints,
+  buildFollowUpDraftOpenQuestions,
+  buildFollowUpDraftTopicSummaries,
+  formatFollowUpDraftActionItem,
+} from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
@@ -115,7 +122,9 @@ export const MeetingView = ({
     null,
   );
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
-  const [pendingDismissId, setPendingDismissId] = useState<string | null>(null);
+  const [pendingAttentionId, setPendingAttentionId] = useState<string | null>(
+    null,
+  );
 
   useLayoutEffect(() => {
     if (!transcriptVisible) {
@@ -156,7 +165,7 @@ export const MeetingView = ({
     setRegenerateNotesError(null);
     setMeetingActionError(null);
     setPendingActionId(null);
-    setPendingDismissId(null);
+    setPendingAttentionId(null);
   }, [selectedMeeting.id]);
 
   useEffect(() => {
@@ -183,6 +192,8 @@ export const MeetingView = ({
               ? (
                   alertsResult.value as Array<{
                     id?: unknown;
+                    kind?: unknown;
+                    reason?: unknown;
                     status?: unknown;
                     related_entity_ids?: unknown;
                   }>
@@ -192,16 +203,22 @@ export const MeetingView = ({
                       item,
                     ): item is {
                       id: string;
-                      status: 'active' | 'dismissed';
+                      kind?: string;
+                      reason?: string;
+                      status: 'active' | 'dismissed' | 'snoozed';
                       related_entity_ids: string[];
                     } =>
                       typeof item.id === 'string' &&
                       (item.status === 'active' ||
-                        item.status === 'dismissed') &&
+                        item.status === 'dismissed' ||
+                        item.status === 'snoozed') &&
                       Array.isArray(item.related_entity_ids),
                   )
                   .map((item) => ({
                     id: item.id,
+                    kind: typeof item.kind === 'string' ? item.kind : undefined,
+                    reason:
+                      typeof item.reason === 'string' ? item.reason : undefined,
                     status: item.status,
                     related_entity_ids: item.related_entity_ids,
                   }))
@@ -335,30 +352,46 @@ export const MeetingView = ({
   const summaryParagraphs = v2?.summary?.length
     ? v2.summary
     : ['No summary was generated for this meeting.'];
+  const followUpDraftOverview = (
+    v3?.overview ? [v3.overview] : v2?.summary || []
+  )
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
   const keyPoints = v2?.key_points || [];
   const actionItems =
     v3?.all_action_items.map((item) => {
-      const details = [
-        item.assignee ? `Owner: ${item.assignee}` : '',
-        item.due ? `Due: ${item.due}` : '',
-      ]
-        .filter(Boolean)
-        .join(' | ');
-      return details ? `${item.text} (${details})` : item.text;
+      return formatFollowUpDraftActionItem({
+        text: item.text,
+        topic: item.topic,
+        assignee: item.assignee,
+        due: item.due,
+      });
     }) ||
     v2?.action_items ||
     [];
-  const decisions =
-    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const decisions = buildFollowUpDraftDecisions({
+    fallbackDecisions:
+      v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [],
+    analysis: v3,
+  });
+  const discussionPoints = buildFollowUpDraftDiscussionPoints(v3?.topics);
+  const followUpDraftTopicSummaries = v3
+    ? buildFollowUpDraftTopicSummaries(v3.topics)
+    : [];
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
+    fallbackDecisions: decisions,
     linkedEntities: meetingEntities,
+    linkedAttentionItems: meetingAttentionItems,
   });
   const followUpDraftParticipants = Array.from(
     new Set([
       ...followUpDraftContext.participants,
       ...getMeetingParticipants(selectedMeeting),
     ]),
+  );
+  const followUpDraftOpenQuestions = buildFollowUpDraftOpenQuestions(
+    v3?.topics,
   );
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
@@ -588,13 +621,16 @@ export const MeetingView = ({
 
   const toggleMeetingActionDismissal = async (
     attentionItemId: string,
-    dismissed: boolean,
+    nextStatus: 'active' | 'dismissed' | 'snoozed',
   ) => {
-    if (pendingDismissId) return;
+    if (pendingAttentionId) return;
 
     setMeetingActionError(null);
-    setPendingDismissId(attentionItemId);
-    const nextStatus = dismissed ? 'active' : 'dismissed';
+    setPendingAttentionId(attentionItemId);
+    const previous = meetingAttentionItems.find(
+      (item) => item.id === attentionItemId,
+    );
+    const previousStatus = previous?.status ?? 'active';
 
     setMeetingAttentionItems((prev) =>
       prev.map((item) =>
@@ -617,13 +653,13 @@ export const MeetingView = ({
           item.id === attentionItemId
             ? {
                 ...item,
-                status: dismissed ? 'dismissed' : 'active',
+                status: previousStatus,
               }
             : item,
         ),
       );
     } finally {
-      setPendingDismissId(null);
+      setPendingAttentionId(null);
     }
   };
 
@@ -827,9 +863,14 @@ export const MeetingView = ({
       <div className="mb-12 space-y-6">
         <FollowUpDrafts
           meeting={selectedMeeting}
+          overview={followUpDraftOverview}
           actionItems={followUpDraftContext.actionItems}
-          decisions={decisions}
+          decisions={followUpDraftContext.decisions}
+          entityContext={followUpDraftContext.entityContext}
+          discussionPoints={discussionPoints}
           participants={followUpDraftParticipants}
+          openQuestions={followUpDraftOpenQuestions}
+          topicSummaries={followUpDraftTopicSummaries}
           fetchMeetings={fetchMeetings}
         />
 
@@ -1089,9 +1130,11 @@ export const MeetingView = ({
                       <div
                         key={item.id}
                         className={`p-6 rounded-2xl border shadow-premium flex gap-4 transition-all card-hover-effect ${
-                          item.dismissalState === 'dismissed'
+                          item.attentionStatus === 'dismissed'
                             ? 'bg-amber-500/5 border-amber-500/20'
-                            : 'bg-pro-surface border-pro-border'
+                            : item.attentionStatus === 'snoozed'
+                              ? 'bg-sky-500/5 border-sky-500/20'
+                              : 'bg-pro-surface border-pro-border'
                         }`}
                       >
                         <button
@@ -1099,7 +1142,7 @@ export const MeetingView = ({
                           disabled={
                             !item.actionable ||
                             pendingActionId === item.id ||
-                            pendingDismissId === item.attentionItemId ||
+                            pendingAttentionId === item.attentionItemId ||
                             meetingEntitiesLoading
                           }
                           onClick={() =>
@@ -1117,7 +1160,7 @@ export const MeetingView = ({
                           } ${
                             !item.actionable ||
                             pendingActionId === item.id ||
-                            pendingDismissId === item.attentionItemId
+                            pendingAttentionId === item.attentionItemId
                               ? 'cursor-not-allowed opacity-70'
                               : ''
                           }`}
@@ -1154,9 +1197,13 @@ export const MeetingView = ({
                                 Owner: {item.assignee}
                               </span>
                             ) : null}
-                            {item.dismissalState === 'dismissed' ? (
+                            {item.attentionStatus === 'dismissed' ? (
                               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
                                 Dismissed
+                              </span>
+                            ) : item.attentionStatus === 'snoozed' ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">
+                                Snoozed
                               </span>
                             ) : null}
                             {item.dueLabel ? (
@@ -1173,32 +1220,67 @@ export const MeetingView = ({
                               {highlightEntities(item.context)}
                             </p>
                           ) : null}
-                          {item.attentionItemId && item.dismissalLabel ? (
-                            <div>
-                              <button
-                                type="button"
-                                disabled={
-                                  pendingDismissId === item.attentionItemId ||
-                                  meetingEntitiesLoading
-                                }
-                                onClick={() =>
-                                  toggleMeetingActionDismissal(
-                                    item.attentionItemId as string,
-                                    item.dismissalState === 'dismissed',
-                                  )
-                                }
-                                className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
-                                  pendingDismissId === item.attentionItemId
-                                    ? 'cursor-not-allowed text-pro-text-muted/50'
-                                    : item.dismissalState === 'dismissed'
-                                      ? 'text-amber-700 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200'
-                                      : 'text-pro-text-muted/70 hover:text-pro-accent'
-                                }`}
-                              >
-                                {pendingDismissId === item.attentionItemId
-                                  ? 'Updating...'
-                                  : item.dismissalLabel}
-                              </button>
+                          {item.attentionItemId &&
+                          (item.dismissLabel || item.snoozeLabel) ? (
+                            <div className="flex flex-wrap gap-3">
+                              {item.dismissLabel ? (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    pendingAttentionId ===
+                                      item.attentionItemId ||
+                                    meetingEntitiesLoading
+                                  }
+                                  onClick={() =>
+                                    toggleMeetingActionDismissal(
+                                      item.attentionItemId as string,
+                                      item.attentionStatus === 'dismissed'
+                                        ? 'active'
+                                        : 'dismissed',
+                                    )
+                                  }
+                                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                                    pendingAttentionId === item.attentionItemId
+                                      ? 'cursor-not-allowed text-pro-text-muted/50'
+                                      : item.attentionStatus === 'dismissed'
+                                        ? 'text-amber-700 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200'
+                                        : 'text-pro-text-muted/70 hover:text-pro-accent'
+                                  }`}
+                                >
+                                  {pendingAttentionId === item.attentionItemId
+                                    ? 'Updating...'
+                                    : item.dismissLabel}
+                                </button>
+                              ) : null}
+                              {item.snoozeLabel ? (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    pendingAttentionId ===
+                                      item.attentionItemId ||
+                                    meetingEntitiesLoading
+                                  }
+                                  onClick={() =>
+                                    toggleMeetingActionDismissal(
+                                      item.attentionItemId as string,
+                                      item.attentionStatus === 'snoozed'
+                                        ? 'active'
+                                        : 'snoozed',
+                                    )
+                                  }
+                                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                                    pendingAttentionId === item.attentionItemId
+                                      ? 'cursor-not-allowed text-pro-text-muted/50'
+                                      : item.attentionStatus === 'snoozed'
+                                        ? 'text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200'
+                                        : 'text-pro-text-muted/70 hover:text-sky-600 dark:hover:text-sky-300'
+                                  }`}
+                                >
+                                  {pendingAttentionId === item.attentionItemId
+                                    ? 'Updating...'
+                                    : item.snoozeLabel}
+                                </button>
+                              ) : null}
                             </div>
                           ) : null}
                         </div>
