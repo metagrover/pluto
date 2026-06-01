@@ -194,6 +194,35 @@ describe('getEntitiesPrompt', () => {
   });
 });
 
+describe('getFollowUpDraftsPrompt', () => {
+  it('includes overview context when provided', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      overview: ['The team aligned on the rollout shape and timing.'],
+      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
+      decisions: ['Use REST for the rollout'],
+      actionItems: ['Send rollout email'],
+    });
+
+    expect(prompt).toContain('Overview:');
+    expect(prompt).toContain(
+      '- The team aligned on the rollout shape and timing.',
+    );
+  });
+
+  it('falls back cleanly when overview context is absent', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      overview: [' ', ''],
+      participants: ['Sarah Chen'],
+      decisions: ['Use REST for the rollout'],
+      actionItems: ['Send rollout email'],
+    });
+
+    expect(prompt).toContain('Overview:\n- None recorded');
+  });
+});
+
 describe('knowledge document prompts', () => {
   it('asks knowledge synthesis for durable dashboard context instead of imperative tasks', () => {
     const prompt = getKnowledgeDocumentPrompt({
@@ -270,21 +299,78 @@ describe('knowledge document prompts', () => {
 });
 
 describe('getFollowUpDraftsPrompt', () => {
+  it('includes linked entity context alongside participants, decisions, and action items', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
+      entityContext: ['Project: Apollo rollout', 'Topic: API migration'],
+      decisions: ['Use REST for the rollout'],
+      actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
+      customPrompt: 'Keep it concise.',
+    });
+
+    expect(prompt).toContain(
+      'Participants:\n- Sarah Chen (Engineering Lead)\n- Alex Rivera',
+    );
+    expect(prompt).toContain(
+      'Linked Context:\n- Project: Apollo rollout\n- Topic: API migration',
+    );
+    expect(prompt).toContain('Decisions:\n- Use REST for the rollout');
+    expect(prompt).toContain(
+      'Action Items:\n- Send rollout email (Owner: Sarah Chen | Due: May 30)',
+    );
+    expect(prompt).toContain('Additional Instruction: Keep it concise.');
+  });
+});
+
+describe('getFollowUpDraftsPrompt', () => {
   it('includes participant context alongside decisions and action items', () => {
     const prompt = getFollowUpDraftsPrompt({
       meetingTitle: 'API Migration Review',
-      participants: ['Sarah Chen', 'Alex Rivera'],
+      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
+      topicSummaries: ['API Migration: The team aligned on rollout scope.'],
       decisions: ['Use REST for the rollout'],
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: Friday)'],
+      openQuestions: [
+        'API Migration: Should the mobile client move in the same release?',
+      ],
+      discussionPoints: [
+        'The team needs provenance on each API response.',
+        'The graph schema still needs validation before rollout.',
+      ],
     });
 
     expect(prompt).toContain('Participants:');
-    expect(prompt).toContain('- Sarah Chen');
+    expect(prompt).toContain('- Sarah Chen (Engineering Lead)');
     expect(prompt).toContain('- Alex Rivera');
+    expect(prompt).toContain('Discussion Context:');
+    expect(prompt).toContain(
+      '- API Migration: The team aligned on rollout scope.',
+    );
+    expect(prompt).toContain(
+      '- The team needs provenance on each API response.',
+    );
     expect(prompt).toContain('Decisions:');
     expect(prompt).toContain('Action Items:');
     expect(prompt).toContain(
       'Use participant names only when they appear in the participant list or action/decision evidence.',
+    );
+    expect(prompt).toContain('Open Questions:');
+    expect(prompt).toContain(
+      '- API Migration: Should the mobile client move in the same release?',
+    );
+  });
+
+  it('passes topic-aware decision lines through without stripping the topic label', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      participants: ['Sarah Chen'],
+      decisions: ['Use REST for the rollout (Topic: API migration)'],
+      actionItems: ['Send rollout email'],
+    });
+
+    expect(prompt).toContain(
+      'Decisions:\n- Use REST for the rollout (Topic: API migration)',
     );
   });
 
@@ -296,6 +382,9 @@ describe('getFollowUpDraftsPrompt', () => {
     });
 
     expect(prompt).toContain('Participants:');
+    expect(prompt).toContain('- None recorded');
+    expect(prompt).toContain('Open Questions:');
+    expect(prompt).toContain('Discussion Context:');
     expect(prompt).toContain('- None recorded');
   });
 });

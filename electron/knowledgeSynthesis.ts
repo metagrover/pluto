@@ -30,7 +30,9 @@ import {
 } from './llm/prompts';
 import {
   persistGlobalWorkingMemorySnapshot,
+  persistPersonContextWorkingMemorySnapshot,
   persistProjectWorkingMemorySnapshot,
+  persistTeamTrackerWorkingMemorySnapshot,
 } from './workingMemory';
 
 const SYNTHESIS_DEBOUNCE_MS = 2500;
@@ -1621,6 +1623,18 @@ const synthesizeKnowledgeDocNowInternal = async (
         structured: emptyDoc,
         generatedAt: savedDoc.last_synthesized_at ?? undefined,
       });
+    } else if (savedDoc.scope_type === 'team_tracker') {
+      persistTeamTrackerWorkingMemorySnapshot({
+        knowledgeDoc: savedDoc,
+        structured: emptyDoc,
+        generatedAt: savedDoc.last_synthesized_at ?? undefined,
+      });
+    } else if (savedDoc.scope_type === 'person_context') {
+      persistPersonContextWorkingMemorySnapshot({
+        knowledgeDoc: savedDoc,
+        structured: emptyDoc,
+        generatedAt: savedDoc.last_synthesized_at ?? undefined,
+      });
     }
 
     return savedDoc;
@@ -1712,13 +1726,20 @@ const synthesizeKnowledgeDocNowInternal = async (
     });
 
     if (
-      (savedDoc.scope_type === 'global' || savedDoc.scope_type === 'project') &&
+      (savedDoc.scope_type === 'global' ||
+        savedDoc.scope_type === 'project' ||
+        savedDoc.scope_type === 'team_tracker' ||
+        savedDoc.scope_type === 'person_context') &&
       isKnowledgeV2Document(correctedStructured)
     ) {
       const persistSnapshot =
         savedDoc.scope_type === 'global'
           ? persistGlobalWorkingMemorySnapshot
-          : persistProjectWorkingMemorySnapshot;
+          : savedDoc.scope_type === 'project'
+            ? persistProjectWorkingMemorySnapshot
+            : savedDoc.scope_type === 'team_tracker'
+              ? persistTeamTrackerWorkingMemorySnapshot
+              : persistPersonContextWorkingMemorySnapshot;
       persistSnapshot({
         knowledgeDoc: savedDoc,
         structured: correctedStructured,

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
+import { getAttentionAlerts } from '../../api/intelligence';
 import {
   type Entity,
   type KnowledgeGraphStats,
@@ -11,7 +13,10 @@ import {
   type KnowledgeWorkspacePayload,
   getKnowledgeWorkspace,
 } from '../../api/knowledgeWorkspace';
-import { getWorkingMemorySnapshot } from '../../api/workingMemory';
+import {
+  type WorkingMemorySnapshot,
+  listWorkingMemorySnapshots,
+} from '../../api/workingMemory';
 import type { Meeting } from '../../types';
 import {
   type DashboardHomeModel,
@@ -38,8 +43,9 @@ const buildEmptyDashboardHomeModel = (
     overdueActions: [],
     staleActions: [],
     activeActions: [],
+    attentionAlerts: [],
     workspace: null,
-    workingMemorySnapshot: null,
+    workingMemorySnapshots: [],
     graphStats: null,
   });
 
@@ -75,8 +81,9 @@ export const useDashboardHome = ({
         overdueActions,
         staleActions,
         activeActions,
+        attentionAlerts,
         workspace,
-        workingMemorySnapshot,
+        workingMemorySnapshots,
         graphStats,
       ] = await Promise.all([
         loadOptional<Entity[]>('overdue actions', getOverdueActionItems, []),
@@ -90,15 +97,20 @@ export const useDashboardHome = ({
           () => getActionItemsByStatus('active'),
           [],
         ),
+        loadOptional<AttentionItem[]>(
+          'attention alerts',
+          getAttentionAlerts,
+          [],
+        ),
         loadOptional<KnowledgeWorkspacePayload | null>(
           'knowledge workspace',
           getKnowledgeWorkspace,
           null,
         ),
-        loadOptional(
-          'working memory snapshot',
-          () => getWorkingMemorySnapshot('global', 'global'),
-          undefined,
+        loadOptional<WorkingMemorySnapshot[]>(
+          'working memory snapshots',
+          listWorkingMemorySnapshots,
+          [],
         ),
         loadOptional<KnowledgeGraphStats | null>(
           'graph stats',
@@ -116,8 +128,9 @@ export const useDashboardHome = ({
           overdueActions,
           staleActions,
           activeActions,
+          attentionAlerts,
           workspace,
-          workingMemorySnapshot: workingMemorySnapshot ?? null,
+          workingMemorySnapshots,
           graphStats,
         }),
         loading: false,

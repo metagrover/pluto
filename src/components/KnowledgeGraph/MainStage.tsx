@@ -26,6 +26,7 @@ import {
   type KnowledgeCitation,
   type KnowledgeStatement,
   type KnowledgeV2EvidenceEntry,
+  type KnowledgeV2EvidenceQuality,
   type KnowledgeV2Item,
   type KnowledgeV2SourceQualitySummary,
   type KnowledgeV2Stream,
@@ -169,6 +170,53 @@ const filterDuplicateV2Items = (
       !matchesPromotedAttention(item.title, item.citations, attentionMatchers),
   );
 
+const getEvidenceEntriesForCitations = (
+  citations: KnowledgeCitation[],
+  evidenceIndex: KnowledgeV2EvidenceEntry[],
+) => {
+  const citationIds = new Set(
+    citations.map((citation) => citation.meeting_id).filter(Boolean),
+  );
+  const citationKeys = new Set(
+    citations
+      .map((citation) => citationMatchKey([citation]))
+      .filter((key) => key.length > 0),
+  );
+
+  return evidenceIndex.filter((entry) => {
+    if (citationIds.has(entry.meeting_id)) return true;
+    return citationKeys.has(
+      citationMatchKey([
+        {
+          meeting_id: entry.meeting_id,
+          quote: entry.quote,
+        },
+      ]),
+    );
+  });
+};
+
+export const buildCurrentReadWhyItem = ({
+  item,
+  evidenceIndex,
+}: {
+  item: KnowledgeStatement;
+  evidenceIndex: KnowledgeV2EvidenceEntry[];
+}): WhyItem => ({
+  id: item.id,
+  title: item.text,
+  summary: item.why_it_matters,
+  reasons: [
+    item.why_it_matters,
+    'Surfaced under Current Read because it supports the compiled headline.',
+  ].filter(Boolean),
+  citations: item.citations,
+  evidenceEntries: getEvidenceEntriesForCitations(
+    item.citations,
+    evidenceIndex,
+  ),
+});
+
 const labelForSeverity = (severity: NeedsAttentionItem['severity']) => {
   if (severity === 'critical') return 'Needs attention';
   if (severity === 'watch') return 'Watch';
@@ -187,6 +235,40 @@ const isLongRunningSynthesis = (doc: KnowledgeDoc): boolean => {
   const startedAt = new Date(doc.updated_at).getTime();
   if (Number.isNaN(startedAt)) return false;
   return Date.now() - startedAt > SYNTHESIS_STUCK_AFTER_MS;
+};
+
+export const resolveCurrentReadHeadline = ({
+  selectedDoc,
+  headline,
+  coverage,
+  isCompiled,
+  backingSource,
+}: {
+  selectedDoc: KnowledgeDoc;
+  headline: string;
+  coverage: KnowledgeBriefCoverage;
+  isCompiled: boolean;
+  backingSource: 'snapshot' | 'doc' | 'none';
+}): string => {
+  const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
+  const hasPartialContext = !isCompiled && coverage.statementCount > 0;
+
+  if ((backingSource === 'snapshot' && isCompiled) || isCompiled) {
+    return headline;
+  }
+  if (selectedDoc.status === 'failed') {
+    return 'No current read is available because synthesis failed.';
+  }
+  if (synthesisIsLongRunning) {
+    return 'Synthesis is taking longer than expected.';
+  }
+  if (hasPartialContext) {
+    return headline;
+  }
+  if (selectedDoc.status === 'synthesizing') {
+    return 'Pluto is compiling the current read.';
+  }
+  return 'No current read is available yet.';
 };
 
 const StatusBadge = ({ status }: { status: KnowledgeDocStatus }) => (
@@ -259,52 +341,59 @@ const CurrentRead = ({
   sources,
   sourcesLoading,
   headline,
+  freshnessAt,
   supportingItems,
   coverage,
+  evidenceQuality,
   trustMessage,
   trustStatus,
   trustDescription,
   sourceQuality,
+  evidenceIndex,
   isCompiled,
+  backingSource,
   isRetrying,
   onRetrySynthesis,
+  onOpenWhy,
 }: {
   selectedDoc: KnowledgeDoc;
   sources: KnowledgeDocSource[];
   sourcesLoading: boolean;
   headline: string;
+  freshnessAt: string | null;
   supportingItems: KnowledgeStatement[];
   coverage: KnowledgeBriefCoverage;
+  evidenceQuality: KnowledgeV2EvidenceQuality | null;
   trustMessage: string | null;
   trustStatus: TrustStatus | null;
   trustDescription: string | null;
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
+  evidenceIndex: KnowledgeV2EvidenceEntry[];
   isCompiled: boolean;
+  backingSource: 'snapshot' | 'doc' | 'none';
   isRetrying: boolean;
   onRetrySynthesis: (docId: string) => Promise<void>;
+  onOpenWhy: (item: WhyItem) => void;
 }) => {
   const freshnessDate =
-    selectedDoc.last_synthesized_at || selectedDoc.updated_at;
+    freshnessAt || selectedDoc.last_synthesized_at || selectedDoc.updated_at;
   const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
   const needsRetry = selectedDoc.status === 'failed' || synthesisIsLongRunning;
   const hasPartialContext = !isCompiled && coverage.statementCount > 0;
-  const currentRead = isCompiled
-    ? headline
-    : selectedDoc.status === 'failed'
-      ? 'No current read is available because synthesis failed.'
-      : synthesisIsLongRunning
-        ? 'Synthesis is taking longer than expected.'
-        : hasPartialContext
-          ? headline
-          : selectedDoc.status === 'synthesizing'
-            ? 'Pluto is compiling the current read.'
-            : 'No current read is available yet.';
+  const currentRead = resolveCurrentReadHeadline({
+    selectedDoc,
+    headline,
+    coverage,
+    isCompiled,
+    backingSource,
+  });
   const citedMeetingLabel = `${coverage.citedMeetingCount} cited meeting${
     coverage.citedMeetingCount === 1 ? '' : 's'
   }`;
   const statementLabel = `${coverage.statementCount} cited item${
     coverage.statementCount === 1 ? '' : 's'
   }`;
+  const sourceCount = coverage.sourceCount ?? sources.length;
   const evidenceIsThin =
     selectedDoc.status === 'up_to_date' &&
     coverage.statementCount > 0 &&
@@ -327,7 +416,7 @@ const CurrentRead = ({
             <CheckCircle2 className="h-3.5 w-3.5" />
             {sourcesLoading
               ? 'Loading sources'
-              : `${sources.length} source${sources.length === 1 ? '' : 's'}`}
+              : `${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
           </span>
           {coverage.statementCount > 0 && (
             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-pro-text-muted">
@@ -418,6 +507,13 @@ const CurrentRead = ({
                 ? ` Included ${sourceQuality.included_count}, excluded ${sourceQuality.excluded_count}, weak ${sourceQuality.weak_count}.`
                 : ''}
             </p>
+            {evidenceQuality && (
+              <p className="mt-2 text-[11px] font-semibold text-pro-text-muted">
+                Evidence is {evidenceQuality.mode}; confidence{' '}
+                {Math.round(evidenceQuality.confidence * 100)}%;{' '}
+                {evidenceQuality.freshness} evidence.
+              </p>
+            )}
           </div>
         )}
 
@@ -429,13 +525,22 @@ const CurrentRead = ({
               </p>
             )}
             {supportingItems.slice(0, 3).map((item) => (
-              <p
+              <div
                 key={item.id}
-                className="flex gap-2 text-sm leading-6 text-pro-text-muted"
+                className="flex items-start justify-between gap-3"
               >
-                <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-pro-accent" />
-                <span>{item.text}</span>
-              </p>
+                <p className="flex gap-2 text-sm leading-6 text-pro-text-muted">
+                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-pro-accent" />
+                  <span>{item.text}</span>
+                </p>
+                <WhyButton
+                  item={buildCurrentReadWhyItem({
+                    item,
+                    evidenceIndex,
+                  })}
+                  onOpen={onOpenWhy}
+                />
+              </div>
             ))}
           </div>
         )}
@@ -943,8 +1048,14 @@ export const MainStage: React.FC<MainStageProps> = ({
   );
   const attentionItems = useMemo(
     () =>
-      compileNeedsAttention(selectedDoc, docs, projectCards, attentionAlerts),
-    [selectedDoc, docs, projectCards, attentionAlerts],
+      compileNeedsAttention(
+        selectedDoc,
+        docs,
+        projectCards,
+        attentionAlerts,
+        workingMemorySnapshot,
+      ),
+    [selectedDoc, docs, projectCards, attentionAlerts, workingMemorySnapshot],
   );
 
   if (!selectedDoc) return <EmptyState />;
@@ -967,6 +1078,14 @@ export const MainStage: React.FC<MainStageProps> = ({
     attentionMatchers,
   );
   const allBriefItems = [...priorities, ...risks, ...dependencies];
+  const v2SupportingBullets: KnowledgeStatement[] = brief.supportingBullets.map(
+    (text, index) => ({
+      id: `current-read-bullet-${index}`,
+      text,
+      why_it_matters: brief.trustMessage || '',
+      citations: [],
+    }),
+  );
   const v2SupportingItems: KnowledgeStatement[] =
     brief.activeStreams.length > 0
       ? brief.activeStreams.slice(0, 4).map((stream) => ({
@@ -977,11 +1096,13 @@ export const MainStage: React.FC<MainStageProps> = ({
         }))
       : [];
   const supportingItems = (
-    v2SupportingItems.length > 0
-      ? v2SupportingItems
-      : brief.isCompiled
-        ? priorities
-        : allBriefItems
+    v2SupportingBullets.length > 0
+      ? v2SupportingBullets
+      : v2SupportingItems.length > 0
+        ? v2SupportingItems
+        : brief.isCompiled
+          ? priorities
+          : allBriefItems
   )
     .filter(
       (item, index, items) =>
@@ -1002,12 +1123,14 @@ export const MainStage: React.FC<MainStageProps> = ({
       item.citations.map((citation) => citation.meeting_id).filter(Boolean),
     );
     const streamIds = new Set(item.streamIds?.filter(Boolean) || []);
-    const entries = brief.evidenceIndex.filter(
-      (entry) =>
-        entry.stream_ids.some((streamId) => streamIds.has(streamId)) ||
-        entry.item_ids.includes(item.id) ||
-        citationIds.has(entry.meeting_id),
-    );
+    const entries = brief.evidenceIndex.filter((entry) => {
+      if (entry.item_ids.includes(item.id)) return true;
+      if (entry.stream_ids.some((streamId) => streamIds.has(streamId))) {
+        return true;
+      }
+      if (citationIds.has(entry.meeting_id)) return true;
+      return getEvidenceEntriesForCitations(item.citations, [entry]).length > 0;
+    });
     return entries.length > 0 ? { ...item, evidenceEntries: entries } : item;
   };
 
@@ -1019,15 +1142,20 @@ export const MainStage: React.FC<MainStageProps> = ({
           sources={sources}
           sourcesLoading={sourcesLoading}
           headline={brief.headline}
+          freshnessAt={brief.freshnessAt}
           supportingItems={supportingItems}
           coverage={brief.coverage}
+          evidenceQuality={brief.evidenceQuality}
           trustMessage={brief.trustMessage}
           trustStatus={brief.trustStatus}
           trustDescription={brief.trustDescription}
           sourceQuality={brief.sourceQuality}
+          evidenceIndex={brief.evidenceIndex}
           isCompiled={brief.isCompiled}
+          backingSource={brief.backingSource}
           isRetrying={retryingDocId === selectedDoc.id}
           onRetrySynthesis={handleRetry}
+          onOpenWhy={(item) => setWhyItem(item)}
         />
 
         <ActiveStreams
