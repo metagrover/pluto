@@ -279,6 +279,49 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('preserves overdue and stale lifecycle context for linked follow-ups only', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Escalate contract edits',
+          status: 'overdue',
+          assigned_to: 'person-1',
+          due_date: '2026-06-02T00:00:00.000Z',
+          mention_count: 4,
+        }),
+        makeEntity({
+          id: 'action-2',
+          type: 'action_item',
+          name: 'Refresh launch brief',
+          status: 'stale',
+          mention_count: 3,
+        }),
+        makeEntity({
+          id: 'action-3',
+          type: 'action_item',
+          name: 'Share rollout notes',
+          status: 'active',
+          mention_count: 2,
+        }),
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+          mention_count: 1,
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Escalate contract edits (Status: Overdue | Owner: Sarah Chen | Due: Jun 2)',
+      'Refresh launch brief (Status: Stale)',
+      'Share rollout notes',
+    ]);
+  });
+
   it('injects participant context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',
