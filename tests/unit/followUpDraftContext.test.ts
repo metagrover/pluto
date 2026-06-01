@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   buildDefaultDrafts,
-  buildFollowUpDraftDecisions,
   buildFollowUpDraftContext,
+  buildFollowUpDraftDecisions,
 } from '../../src/components/features/followUpDraftContext';
 import type { AnalysisDocumentV3 } from '../../src/types';
 
