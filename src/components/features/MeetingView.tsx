@@ -50,7 +50,14 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
-import { buildFollowUpDraftContext } from './followUpDraftContext';
+import {
+  buildFollowUpDraftContext,
+  buildFollowUpDraftDecisions,
+  buildFollowUpDraftDiscussionPoints,
+  buildFollowUpDraftOpenQuestions,
+  buildFollowUpDraftTopicSummaries,
+  formatFollowUpDraftActionItem,
+} from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
@@ -185,6 +192,8 @@ export const MeetingView = ({
               ? (
                   alertsResult.value as Array<{
                     id?: unknown;
+                    kind?: unknown;
+                    reason?: unknown;
                     status?: unknown;
                     related_entity_ids?: unknown;
                   }>
@@ -194,6 +203,8 @@ export const MeetingView = ({
                       item,
                     ): item is {
                       id: string;
+                      kind?: string;
+                      reason?: string;
                       status: 'active' | 'dismissed' | 'snoozed';
                       related_entity_ids: string[];
                     } =>
@@ -205,6 +216,9 @@ export const MeetingView = ({
                   )
                   .map((item) => ({
                     id: item.id,
+                    kind: typeof item.kind === 'string' ? item.kind : undefined,
+                    reason:
+                      typeof item.reason === 'string' ? item.reason : undefined,
                     status: item.status,
                     related_entity_ids: item.related_entity_ids,
                   }))
@@ -338,30 +352,45 @@ export const MeetingView = ({
   const summaryParagraphs = v2?.summary?.length
     ? v2.summary
     : ['No summary was generated for this meeting.'];
+  const followUpDraftOverview = (
+    v3?.overview ? [v3.overview] : v2?.summary || []
+  )
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
   const keyPoints = v2?.key_points || [];
   const actionItems =
     v3?.all_action_items.map((item) => {
-      const details = [
-        item.assignee ? `Owner: ${item.assignee}` : '',
-        item.due ? `Due: ${item.due}` : '',
-      ]
-        .filter(Boolean)
-        .join(' | ');
-      return details ? `${item.text} (${details})` : item.text;
+      return formatFollowUpDraftActionItem({
+        text: item.text,
+        topic: item.topic,
+        assignee: item.assignee,
+        due: item.due,
+      });
     }) ||
     v2?.action_items ||
     [];
-  const decisions =
-    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const decisions = buildFollowUpDraftDecisions({
+    fallbackDecisions:
+      v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [],
+    analysis: v3,
+  });
+  const discussionPoints = buildFollowUpDraftDiscussionPoints(v3?.topics);
+  const followUpDraftTopicSummaries = v3
+    ? buildFollowUpDraftTopicSummaries(v3.topics)
+    : [];
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
+    linkedAttentionItems: meetingAttentionItems,
   });
   const followUpDraftParticipants = Array.from(
     new Set([
       ...followUpDraftContext.participants,
       ...getMeetingParticipants(selectedMeeting),
     ]),
+  );
+  const followUpDraftOpenQuestions = buildFollowUpDraftOpenQuestions(
+    v3?.topics,
   );
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
@@ -833,9 +862,14 @@ export const MeetingView = ({
       <div className="mb-12 space-y-6">
         <FollowUpDrafts
           meeting={selectedMeeting}
+          overview={followUpDraftOverview}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
+          entityContext={followUpDraftContext.entityContext}
+          discussionPoints={discussionPoints}
           participants={followUpDraftParticipants}
+          openQuestions={followUpDraftOpenQuestions}
+          topicSummaries={followUpDraftTopicSummaries}
           fetchMeetings={fetchMeetings}
         />
 
