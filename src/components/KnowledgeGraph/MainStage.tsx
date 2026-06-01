@@ -188,6 +188,40 @@ const isLongRunningSynthesis = (doc: KnowledgeDoc): boolean => {
   return Date.now() - startedAt > SYNTHESIS_STUCK_AFTER_MS;
 };
 
+export const resolveCurrentReadHeadline = ({
+  selectedDoc,
+  headline,
+  coverage,
+  isCompiled,
+  backingSource,
+}: {
+  selectedDoc: KnowledgeDoc;
+  headline: string;
+  coverage: KnowledgeBriefCoverage;
+  isCompiled: boolean;
+  backingSource: 'snapshot' | 'doc' | 'none';
+}): string => {
+  const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
+  const hasPartialContext = !isCompiled && coverage.statementCount > 0;
+
+  if ((backingSource === 'snapshot' && isCompiled) || isCompiled) {
+    return headline;
+  }
+  if (selectedDoc.status === 'failed') {
+    return 'No current read is available because synthesis failed.';
+  }
+  if (synthesisIsLongRunning) {
+    return 'Synthesis is taking longer than expected.';
+  }
+  if (hasPartialContext) {
+    return headline;
+  }
+  if (selectedDoc.status === 'synthesizing') {
+    return 'Pluto is compiling the current read.';
+  }
+  return 'No current read is available yet.';
+};
+
 const StatusBadge = ({ status }: { status: KnowledgeDocStatus }) => (
   <span
     className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black capitalize ${STATUS_STYLES[status]}`}
@@ -258,6 +292,7 @@ const CurrentRead = ({
   sources,
   sourcesLoading,
   headline,
+  freshnessAt,
   supportingItems,
   coverage,
   trustMessage,
@@ -265,6 +300,7 @@ const CurrentRead = ({
   trustDescription,
   sourceQuality,
   isCompiled,
+  backingSource,
   isRetrying,
   onRetrySynthesis,
 }: {
@@ -272,6 +308,7 @@ const CurrentRead = ({
   sources: KnowledgeDocSource[];
   sourcesLoading: boolean;
   headline: string;
+  freshnessAt: string | null;
   supportingItems: KnowledgeStatement[];
   coverage: KnowledgeBriefCoverage;
   trustMessage: string | null;
@@ -279,31 +316,29 @@ const CurrentRead = ({
   trustDescription: string | null;
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
   isCompiled: boolean;
+  backingSource: 'snapshot' | 'doc' | 'none';
   isRetrying: boolean;
   onRetrySynthesis: (docId: string) => Promise<void>;
 }) => {
   const freshnessDate =
-    selectedDoc.last_synthesized_at || selectedDoc.updated_at;
+    freshnessAt || selectedDoc.last_synthesized_at || selectedDoc.updated_at;
   const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
   const needsRetry = selectedDoc.status === 'failed' || synthesisIsLongRunning;
   const hasPartialContext = !isCompiled && coverage.statementCount > 0;
-  const currentRead = isCompiled
-    ? headline
-    : selectedDoc.status === 'failed'
-      ? 'No current read is available because synthesis failed.'
-      : synthesisIsLongRunning
-        ? 'Synthesis is taking longer than expected.'
-        : hasPartialContext
-          ? headline
-          : selectedDoc.status === 'synthesizing'
-            ? 'Pluto is compiling the current read.'
-            : 'No current read is available yet.';
+  const currentRead = resolveCurrentReadHeadline({
+    selectedDoc,
+    headline,
+    coverage,
+    isCompiled,
+    backingSource,
+  });
   const citedMeetingLabel = `${coverage.citedMeetingCount} cited meeting${
     coverage.citedMeetingCount === 1 ? '' : 's'
   }`;
   const statementLabel = `${coverage.statementCount} cited item${
     coverage.statementCount === 1 ? '' : 's'
   }`;
+  const sourceCount = coverage.sourceCount ?? sources.length;
   const evidenceIsThin =
     selectedDoc.status === 'up_to_date' &&
     coverage.statementCount > 0 &&
@@ -326,7 +361,7 @@ const CurrentRead = ({
             <CheckCircle2 className="h-3.5 w-3.5" />
             {sourcesLoading
               ? 'Loading sources'
-              : `${sources.length} source${sources.length === 1 ? '' : 's'}`}
+              : `${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
           </span>
           {coverage.statementCount > 0 && (
             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-pro-text-muted">
@@ -910,8 +945,14 @@ export const MainStage: React.FC<MainStageProps> = ({
   );
   const attentionItems = useMemo(
     () =>
-      compileNeedsAttention(selectedDoc, docs, projectCards, attentionAlerts),
-    [selectedDoc, docs, projectCards, attentionAlerts],
+      compileNeedsAttention(
+        selectedDoc,
+        docs,
+        projectCards,
+        attentionAlerts,
+        workingMemorySnapshot,
+      ),
+    [selectedDoc, docs, projectCards, attentionAlerts, workingMemorySnapshot],
   );
 
   if (!selectedDoc) return <EmptyState />;
@@ -934,6 +975,14 @@ export const MainStage: React.FC<MainStageProps> = ({
     attentionMatchers,
   );
   const allBriefItems = [...priorities, ...risks, ...dependencies];
+  const v2SupportingBullets: KnowledgeStatement[] = brief.supportingBullets.map(
+    (text, index) => ({
+      id: `current-read-bullet-${index}`,
+      text,
+      why_it_matters: brief.trustMessage || '',
+      citations: [],
+    }),
+  );
   const v2SupportingItems: KnowledgeStatement[] =
     brief.activeStreams.length > 0
       ? brief.activeStreams.slice(0, 4).map((stream) => ({
@@ -944,11 +993,13 @@ export const MainStage: React.FC<MainStageProps> = ({
         }))
       : [];
   const supportingItems = (
-    v2SupportingItems.length > 0
-      ? v2SupportingItems
-      : brief.isCompiled
-        ? priorities
-        : allBriefItems
+    v2SupportingBullets.length > 0
+      ? v2SupportingBullets
+      : v2SupportingItems.length > 0
+        ? v2SupportingItems
+        : brief.isCompiled
+          ? priorities
+          : allBriefItems
   )
     .filter(
       (item, index, items) =>
@@ -983,6 +1034,7 @@ export const MainStage: React.FC<MainStageProps> = ({
           sources={sources}
           sourcesLoading={sourcesLoading}
           headline={brief.headline}
+          freshnessAt={brief.freshnessAt}
           supportingItems={supportingItems}
           coverage={brief.coverage}
           trustMessage={brief.trustMessage}
@@ -990,6 +1042,7 @@ export const MainStage: React.FC<MainStageProps> = ({
           trustDescription={brief.trustDescription}
           sourceQuality={brief.sourceQuality}
           isCompiled={brief.isCompiled}
+          backingSource={brief.backingSource}
           isRetrying={retryingDocId === selectedDoc.id}
           onRetrySynthesis={handleRetry}
         />

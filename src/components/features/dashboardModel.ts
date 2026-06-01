@@ -1,4 +1,5 @@
 import type { WorkingMemorySnapshot } from '../../../electron/db';
+import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
 import type { KnowledgeDoc } from '../../api/knowledgeDocs';
 import type { Entity, KnowledgeGraphStats } from '../../api/knowledgeGraph';
 import type {
@@ -13,6 +14,7 @@ import {
 } from '../../utils/trustStatus';
 import {
   compileKnowledgeBrief,
+  matchesWorkingMemorySnapshotToDoc,
   parseStructuredKnowledgeV2Doc,
 } from '../KnowledgeGraph/knowledgeDocument';
 
@@ -131,8 +133,10 @@ export interface DashboardHomeModelInput {
   overdueActions: Entity[];
   staleActions: Entity[];
   activeActions: Entity[];
+  attentionAlerts?: AttentionItem[];
   workspace: KnowledgeWorkspacePayload | null;
   workingMemorySnapshot?: WorkingMemorySnapshot | null;
+  workingMemorySnapshots?: WorkingMemorySnapshot[];
   graphStats: KnowledgeGraphStats | null;
 }
 
@@ -240,6 +244,35 @@ const sortActions = (
     .map((action, index) => ({ action, index }))
     .sort((a, b) => compare(a.action, b.action) || a.index - b.index)
     .map(({ action }) => action);
+
+const DASHBOARD_SUPPRESSED_ALERT_STATUSES = new Set([
+  'dismissed',
+  'snoozed',
+] as const);
+
+const shouldSuppressDashboardAction = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): boolean => {
+  const linkedAlerts = attentionAlerts.filter((item) =>
+    item.related_entity_ids.includes(actionId),
+  );
+
+  return (
+    linkedAlerts.length > 0 &&
+    linkedAlerts.every((item) =>
+      DASHBOARD_SUPPRESSED_ALERT_STATUSES.has(item.status),
+    )
+  );
+};
+
+const filterSuppressedDashboardActions = (
+  actions: Entity[],
+  attentionAlerts: AttentionItem[],
+): Entity[] =>
+  actions.filter(
+    (action) => !shouldSuppressDashboardAction(action.id, attentionAlerts),
+  );
 
 const getMeetingDetail = (meeting: Meeting): string => {
   const analysis = parseJsonObject<MeetingAnalysisOverview>(
@@ -394,11 +427,17 @@ const matchesWorkingMemorySnapshot = (
   doc: KnowledgeDoc,
   workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
 ): workingMemorySnapshot is WorkingMemorySnapshot =>
-  doc.scope_type === 'global' &&
-  workingMemorySnapshot?.scope_type === 'global' &&
-  workingMemorySnapshot.freshness !== 'stale' &&
-  workingMemorySnapshot.scope_key === doc.scope_key &&
-  workingMemorySnapshot.source_doc_id === doc.id;
+  matchesWorkingMemorySnapshotToDoc(doc, workingMemorySnapshot);
+
+const buildWorkingMemorySnapshotMap = (
+  snapshots: WorkingMemorySnapshot[] | null | undefined,
+): Map<string, WorkingMemorySnapshot> =>
+  new Map(
+    (snapshots ?? []).map((snapshot) => [
+      `${snapshot.scope_type}:${snapshot.scope_key}`,
+      snapshot,
+    ]),
+  );
 
 const getKnowledgeDocCardDetail = (
   doc: KnowledgeDoc,
@@ -440,7 +479,7 @@ const getKnowledgeDocCardDetail = (
 
 const buildKnowledgeDocuments = (
   workspace: KnowledgeWorkspacePayload | null,
-  workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
+  workingMemorySnapshots: WorkingMemorySnapshot[] | null | undefined,
 ): DashboardKnowledgeDocuments => {
   const docs = workspace?.docs ?? [];
   if (docs.length === 0) {
@@ -452,6 +491,9 @@ const buildKnowledgeDocuments = (
 
   const projectCardsByDocId = new Map(
     (workspace?.project_cards ?? []).map((card) => [card.doc_id, card]),
+  );
+  const snapshotsByScope = buildWorkingMemorySnapshotMap(
+    workingMemorySnapshots,
   );
   const usableDocs = docs.filter((doc) =>
     isUsableKnowledgeDoc(doc, projectCardsByDocId.get(doc.id)),
@@ -467,7 +509,10 @@ const buildKnowledgeDocuments = (
     .slice(0, 4)
     .map((doc) => {
       const projectCard = projectCardsByDocId.get(doc.id);
-      const detail = getKnowledgeDocCardDetail(doc, workingMemorySnapshot);
+      const detail = getKnowledgeDocCardDetail(
+        doc,
+        snapshotsByScope.get(`${doc.scope_type}:${doc.scope_key}`),
+      );
       return {
         id: doc.id,
         title: doc.title,
@@ -702,20 +747,45 @@ const buildBriefingFocus = (
 export const buildDashboardHomeModel = (
   input: DashboardHomeModelInput,
 ): DashboardHomeModel => {
+  const workingMemorySnapshots =
+    input.workingMemorySnapshots ??
+    (input.workingMemorySnapshot ? [input.workingMemorySnapshot] : []);
+  const attentionAlerts = input.attentionAlerts ?? [];
+  const overdueActions = filterSuppressedDashboardActions(
+    input.overdueActions,
+    attentionAlerts,
+  );
+  const staleActions = filterSuppressedDashboardActions(
+    input.staleActions,
+    attentionAlerts,
+  );
+  const activeActions = filterSuppressedDashboardActions(
+    input.activeActions,
+    attentionAlerts,
+  );
   const latestMeeting = buildLatestMeeting(input.meetings);
   const actionInsights = buildActionInsights(
-    input.overdueActions,
-    input.staleActions,
-    input.activeActions,
+    overdueActions,
+    staleActions,
+    activeActions,
   );
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,
-    input.workingMemorySnapshot,
+    workingMemorySnapshots,
   );
   const spotlight = buildSpotlight(input.workspace);
 
   return {
-    hero: buildHero(input, latestMeeting, knowledgeDocuments),
+    hero: buildHero(
+      {
+        ...input,
+        overdueActions,
+        staleActions,
+        activeActions,
+      },
+      latestMeeting,
+      knowledgeDocuments,
+    ),
     briefingFocus: buildBriefingFocus(
       actionInsights,
       latestMeeting,
