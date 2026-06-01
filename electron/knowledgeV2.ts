@@ -157,8 +157,8 @@ export interface KnowledgeV2Correction {
   created_at: string;
 }
 
-const normalizeText = (value: string): string =>
-  value.toLowerCase().replace(/\s+/g, ' ').trim();
+const normalizeText = (value: unknown): string =>
+  value == null ? '' : String(value).toLowerCase().replace(/\s+/g, ' ').trim();
 
 const normalizeId = (value: string): string =>
   normalizeText(value)
@@ -1107,7 +1107,11 @@ export const mergeKnowledgeV2Documents = (
   );
   const evidence = dedupeBy(
     documents.flatMap((doc) => doc.evidence_index),
-    (entry) => `${entry.meeting_id}|${normalizeText(entry.quote)}`,
+    (entry) => {
+      const meetingId = normalizeText(entry.meeting_id);
+      const quote = normalizeText(entry.quote);
+      return meetingId && quote ? `${meetingId}|${quote}` : '';
+    },
   );
   const records = dedupeBy(
     documents.flatMap((doc) => doc.source_quality_summary.records),
