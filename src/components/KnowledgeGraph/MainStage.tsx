@@ -292,6 +292,7 @@ const CurrentRead = ({
   sources,
   sourcesLoading,
   headline,
+  freshnessAt,
   supportingItems,
   coverage,
   trustMessage,
@@ -307,6 +308,7 @@ const CurrentRead = ({
   sources: KnowledgeDocSource[];
   sourcesLoading: boolean;
   headline: string;
+  freshnessAt: string | null;
   supportingItems: KnowledgeStatement[];
   coverage: KnowledgeBriefCoverage;
   trustMessage: string | null;
@@ -319,7 +321,7 @@ const CurrentRead = ({
   onRetrySynthesis: (docId: string) => Promise<void>;
 }) => {
   const freshnessDate =
-    selectedDoc.last_synthesized_at || selectedDoc.updated_at;
+    freshnessAt || selectedDoc.last_synthesized_at || selectedDoc.updated_at;
   const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
   const needsRetry = selectedDoc.status === 'failed' || synthesisIsLongRunning;
   const hasPartialContext = !isCompiled && coverage.statementCount > 0;
@@ -1031,6 +1033,7 @@ export const MainStage: React.FC<MainStageProps> = ({
           sources={sources}
           sourcesLoading={sourcesLoading}
           headline={brief.headline}
+          freshnessAt={brief.freshnessAt}
           supportingItems={supportingItems}
           coverage={brief.coverage}
           trustMessage={brief.trustMessage}

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import {
@@ -23,6 +23,10 @@ const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
 });
 
 describe('Knowledge MainStage', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('keeps a snapshot-backed current read headline visible when synthesis failed', () => {
     const selectedDoc = makeDoc({
       status: 'failed',
@@ -262,6 +266,85 @@ describe('Knowledge MainStage', () => {
 
     expect(markup.split(promotedTitle)).toHaveLength(2);
     expect(markup.split(distinctRisk)).toHaveLength(2);
+  });
+
+  it('uses rendered backing freshness instead of the selected doc timestamp', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-27T10:00:00.000Z'));
+
+    const selectedDoc = makeDoc({
+      last_synthesized_at: '2026-04-27T10:00:00.000Z',
+      updated_at: '2026-04-27T10:00:00.000Z',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        current_read: {
+          headline: 'Freshness should follow the backing evidence.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in cited operating reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.84,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'stream-1',
+            title: 'Launch',
+            domain: 'work',
+            status: 'active',
+            current_read: 'Launch work remains active.',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 2,
+            open_follow_up_count: 1,
+            decision_count: 1,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.84,
+              cited_meeting_count: 2,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('2d ago');
+    expect(markup).not.toContain('Just now');
   });
 
   it('prefers V2 current-read supporting bullets over stream summaries', () => {

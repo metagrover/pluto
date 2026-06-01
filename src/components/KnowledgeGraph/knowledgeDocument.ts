@@ -178,6 +178,7 @@ export interface KnowledgeBrief {
   isCompiled: boolean;
   backingSource: 'snapshot' | 'doc' | 'none';
   headline: string;
+  freshnessAt: string | null;
   supportingBullets: string[];
   lanes: KnowledgeBriefLane[];
   coverage: KnowledgeBriefCoverage;
@@ -828,6 +829,7 @@ const buildKnowledgeBriefFromV2 = ({
     isCompiled,
     backingSource: sourceQuality ? 'doc' : 'snapshot',
     headline: v2.current_read.headline || 'No reliable compiled brief yet.',
+    freshnessAt: v2.current_read.evidence_quality.last_reinforced_at,
     supportingBullets: v2.current_read.supporting_bullets.filter(Boolean),
     lanes: emptyLanes,
     coverage: {
@@ -911,6 +913,7 @@ export const compileKnowledgeBrief = (
       isCompiled: false,
       backingSource: 'none',
       headline: 'No reliable compiled brief yet.',
+      freshnessAt: doc?.last_synthesized_at || doc?.updated_at || null,
       supportingBullets: [],
       lanes: emptyLanes,
       coverage: EMPTY_BRIEF_COVERAGE,
@@ -1075,6 +1078,7 @@ export const compileKnowledgeBrief = (
         : statementItems.length > 0 || dependencies.length > 0
           ? 'Indexed knowledge needs a stronger synthesis.'
           : 'No reliable compiled brief yet.',
+    freshnessAt: doc?.last_synthesized_at || doc?.updated_at || null,
     supportingBullets: [],
     lanes,
     coverage,

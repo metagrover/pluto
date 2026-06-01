@@ -617,6 +617,7 @@ describe('knowledge document utilities', () => {
     ]);
     expect(brief.activeStreams[0].title).toBe('Launch');
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
+    expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
     expect(brief.coverage).toMatchObject({
       statementCount: 2,
       citedMeetingCount: 2,
@@ -699,6 +700,79 @@ describe('knowledge document utilities', () => {
       'Project snapshot-backed current read should win.',
     );
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
+    expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
+  });
+
+  it('prefers the V2 evidence reinforcement time for Current Read freshness', () => {
+    const doc = makeDoc({
+      last_synthesized_at: '2026-04-27T10:00:00.000Z',
+      updated_at: '2026-04-27T10:00:00.000Z',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Freshness should follow the cited reinforcement time.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in cited operating reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.84,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'stream-1',
+            title: 'Launch',
+            domain: 'work',
+            status: 'active',
+            current_read: 'Launch work remains active.',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 2,
+            open_follow_up_count: 1,
+            decision_count: 1,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.84,
+              cited_meeting_count: 2,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-27T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc);
+
+    expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
   });
 
   it('falls back to doc JSON when the global working-memory snapshot is stale', () => {
