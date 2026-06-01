@@ -50,7 +50,10 @@ import {
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
-import { buildFollowUpDraftContext } from './followUpDraftContext';
+import {
+  buildFollowUpDraftContext,
+  formatFollowUpDraftActionItem,
+} from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
@@ -346,13 +349,12 @@ export const MeetingView = ({
   const keyPoints = v2?.key_points || [];
   const actionItems =
     v3?.all_action_items.map((item) => {
-      const details = [
-        item.assignee ? `Owner: ${item.assignee}` : '',
-        item.due ? `Due: ${item.due}` : '',
-      ]
-        .filter(Boolean)
-        .join(' | ');
-      return details ? `${item.text} (${details})` : item.text;
+      return formatFollowUpDraftActionItem({
+        text: item.text,
+        topic: item.topic,
+        assignee: item.assignee,
+        due: item.due,
+      });
     }) ||
     v2?.action_items ||
     [];
