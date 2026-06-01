@@ -1,4 +1,5 @@
 import type { WorkingMemorySnapshot } from '../../../electron/db';
+import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
 import type { KnowledgeDoc } from '../../api/knowledgeDocs';
 import type { Entity, KnowledgeGraphStats } from '../../api/knowledgeGraph';
 import type {
@@ -132,6 +133,7 @@ export interface DashboardHomeModelInput {
   overdueActions: Entity[];
   staleActions: Entity[];
   activeActions: Entity[];
+  attentionAlerts?: AttentionItem[];
   workspace: KnowledgeWorkspacePayload | null;
   workingMemorySnapshot?: WorkingMemorySnapshot | null;
   graphStats: KnowledgeGraphStats | null;
@@ -241,6 +243,35 @@ const sortActions = (
     .map((action, index) => ({ action, index }))
     .sort((a, b) => compare(a.action, b.action) || a.index - b.index)
     .map(({ action }) => action);
+
+const DASHBOARD_SUPPRESSED_ALERT_STATUSES = new Set([
+  'dismissed',
+  'snoozed',
+] as const);
+
+const shouldSuppressDashboardAction = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): boolean => {
+  const linkedAlerts = attentionAlerts.filter((item) =>
+    item.related_entity_ids.includes(actionId),
+  );
+
+  return (
+    linkedAlerts.length > 0 &&
+    linkedAlerts.every((item) =>
+      DASHBOARD_SUPPRESSED_ALERT_STATUSES.has(item.status),
+    )
+  );
+};
+
+const filterSuppressedDashboardActions = (
+  actions: Entity[],
+  attentionAlerts: AttentionItem[],
+): Entity[] =>
+  actions.filter(
+    (action) => !shouldSuppressDashboardAction(action.id, attentionAlerts),
+  );
 
 const getMeetingDetail = (meeting: Meeting): string => {
   const analysis = parseJsonObject<MeetingAnalysisOverview>(
@@ -700,11 +731,24 @@ const buildBriefingFocus = (
 export const buildDashboardHomeModel = (
   input: DashboardHomeModelInput,
 ): DashboardHomeModel => {
+  const attentionAlerts = input.attentionAlerts ?? [];
+  const overdueActions = filterSuppressedDashboardActions(
+    input.overdueActions,
+    attentionAlerts,
+  );
+  const staleActions = filterSuppressedDashboardActions(
+    input.staleActions,
+    attentionAlerts,
+  );
+  const activeActions = filterSuppressedDashboardActions(
+    input.activeActions,
+    attentionAlerts,
+  );
   const latestMeeting = buildLatestMeeting(input.meetings);
   const actionInsights = buildActionInsights(
-    input.overdueActions,
-    input.staleActions,
-    input.activeActions,
+    overdueActions,
+    staleActions,
+    activeActions,
   );
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,
@@ -713,7 +757,16 @@ export const buildDashboardHomeModel = (
   const spotlight = buildSpotlight(input.workspace);
 
   return {
-    hero: buildHero(input, latestMeeting, knowledgeDocuments),
+    hero: buildHero(
+      {
+        ...input,
+        overdueActions,
+        staleActions,
+        activeActions,
+      },
+      latestMeeting,
+      knowledgeDocuments,
+    ),
     briefingFocus: buildBriefingFocus(
       actionInsights,
       latestMeeting,

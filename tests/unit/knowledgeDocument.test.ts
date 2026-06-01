@@ -1647,6 +1647,166 @@ describe('knowledge document utilities', () => {
     ]);
   });
 
+  it('prefers a matching project working-memory snapshot for project needs attention', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-project',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'project', title: 'Project One' },
+        chapters: [
+          {
+            chapter_id: 'project',
+            title: 'Project One',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Legacy project risk fallback',
+                why_it_matters:
+                  'This should be ignored when a matching snapshot exists.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [
+        makeProjectCard({
+          doc_id: 'doc-project',
+          title: 'Project One',
+          open_blockers: 3,
+        }),
+      ],
+      [],
+      makeWorkingMemorySnapshot({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project One',
+        source_doc_id: 'doc-project',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'project',
+            key: 'project-1',
+            title: 'Project One',
+          },
+          source: {
+            knowledge_doc_id: 'doc-project',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+          open_loops: [
+            {
+              id: 'loop-project',
+              title: 'Confirm launch dependency owner',
+              summary: 'The launch dependency still has no owner.',
+              kind: 'dependency',
+              severity: 'needs_attention',
+              why_now: 'This is still blocking the active project.',
+              stream_ids: ['stream-launch'],
+              citations: [
+                {
+                  meeting_id: 'm-project',
+                  quote: 'The launch dependency still needs an owner.',
+                },
+              ],
+              evidence_quality: {
+                mode: 'direct',
+                confidence: 0.84,
+                cited_meeting_count: 1,
+                source_count: 1,
+                last_reinforced_at: '2026-04-25T10:00:00.000Z',
+                freshness: 'fresh',
+              },
+            },
+          ],
+          patterns: [],
+          risks_and_unknowns: [],
+          evidence_index: [],
+        },
+      }),
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'loop-project',
+        title: 'Confirm launch dependency owner',
+        summary: 'The launch dependency still has no owner.',
+        severity: 'critical',
+        kind: 'dependency',
+        reasons: ['This is still blocking the active project.'],
+        citations: [
+          {
+            meeting_id: 'm-project',
+            quote: 'The launch dependency still needs an owner.',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('falls back to project-card heuristics when the project snapshot is stale', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-project',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      structured_json: null,
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [sourceDoc],
+      [
+        makeProjectCard({
+          doc_id: 'doc-project',
+          title: 'Project One',
+          open_blockers: 2,
+          dependency_count: 1,
+        }),
+      ],
+      [],
+      makeWorkingMemorySnapshot({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project One',
+        source_doc_id: 'doc-project',
+        freshness: 'stale',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'project',
+            key: 'project-1',
+            title: 'Project One',
+          },
+          source: {
+            knowledge_doc_id: 'doc-project',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+        },
+      }),
+    );
+
+    expect(attention).toMatchObject([
+      {
+        title: 'Project One',
+        severity: 'critical',
+        kind: 'project',
+        reasons: ['2 blockers', '1 dependency'],
+      },
+    ]);
+  });
+
   it('classifies extracted follow-ups as watch items instead of critical risks', () => {
     const sourceDoc = makeDoc({
       structured_json: JSON.stringify({
