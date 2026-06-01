@@ -28,7 +28,41 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Treating blocked commitments as only overdue or stale follow-ups in the durable queue even when the graph already had explicit blocker relationships.
 - **Notes:** This is intentionally non-UI groundwork. Dashboard and Meeting View surfaces can render these blocker queue items later without re-deriving blocker semantics from the graph.
 
+### Make dashboard follow-ups honor durable lifecycle state
+- **Issue:** [#135](https://github.com/metagrover/pluto/issues/135)
+- **PR:** Pending.
+- **Changed:** The dashboard home model now loads durable attention alerts alongside overdue, stale, and active action-item entities, then suppresses dashboard follow-up cards when every linked alert for that action has already been snoozed or dismissed. Focused dashboard model tests now cover dismissed suppression, snoozed suppression, and the mixed-state case where at least one linked alert is still active.
+- **Why:** `#61` requires Pluto's homepage follow-up surface to respect the same lifecycle state users already control elsewhere. Before this slice, dismissed or snoozed follow-ups could still reappear as unresolved daily-briefing work because the dashboard read directly from action entities and ignored the durable attention queue.
+- **Replaced:** Treating the dashboard briefing as an entity-only follow-up list that could bypass the user's durable dismiss/snooze decisions.
+- **Notes:** This keeps the scope in the data join/filter path only. It does not redesign the dashboard cards or add new reminder/notification behavior.
+
+### Harden Knowledge V2 merges against null structured fields
+- **Issue:** [#111](https://github.com/metagrover/pluto/issues/111)
+- **PR:** Pending.
+- **Changed:** Knowledge V2 merge-time normalization now tolerates nullish structured LLM fields instead of throwing, and evidence dedupe now skips malformed entries that are missing either a meeting id or quote. Focused regression coverage now proves Pluto can merge malformed LLM-shaped chunk documents without crashing Knowledge refresh.
+- **Why:** Pluto's working-memory and Knowledge roadmap slices depend on local resynthesis staying reliable. A single null title or quote from structured LLM output should degrade gracefully instead of crashing the merge path and aborting Knowledge refresh.
+- **Replaced:** Assuming all structured LLM merge fields are valid strings and letting malformed evidence rows participate in dedupe keys even when they could only produce unusable empty identifiers.
+- **Notes:** This is intentionally a narrow runtime hardening fix. It does not redesign Knowledge V2 synthesis or broaden fallback behavior beyond null/malformed merge fields.
+
+### Let Meeting View snooze extracted follow-ups
+- **Issue:** [#132](https://github.com/metagrover/pluto/issues/132)
+- **PR:** Pending.
+- **Changed:** Meeting View now surfaces the durable `snoozed` attention lifecycle state for linked follow-ups, lets users snooze active follow-ups or reopen snoozed ones back to active, and keeps the existing complete and dismiss controls intact. The linked follow-up mapping test coverage now includes snooze/reopen affordances alongside the prior dismiss/reopen behavior.
+- **Why:** `#61` still requires the commitment lifecycle to support more than complete-or-dismiss semantics. Pluto's backend and sync path already preserved `snoozed`, but current `master` had no source-meeting UI for deferring routine follow-ups without resolving them or treating them as false positives.
+- **Replaced:** Forcing users to choose only between completing a follow-up or dismissing it entirely even when the real intent was to defer it and come back later.
+- **Notes:** This slice stays scoped to Meeting View follow-ups. It does not add reminder scheduling, notifications, or broader follow-up surfaces.
+
+
+
 ## 2026-05-27
+
+### Let Knowledge Needs Attention prefer working-memory snapshots
+- **Issue:** [#139](https://github.com/metagrover/pluto/issues/139)
+- **PR:** Pending.
+- **Changed:** The selected Knowledge doc now passes its matching working-memory snapshot into `Needs Attention`, so project docs can render snapshot-backed open loops and dependencies instead of falling straight to project-card heuristics. The global Knowledge lane still gives active durable attention-queue items highest priority, and stale or mismatched snapshots still fall back to the existing doc/project-card behavior. Focused unit coverage now proves both the snapshot-backed project path and stale-snapshot fallback.
+- **Why:** `#81` already let Current Read consume durable working memory, but the `Needs Attention` lane still ignored that same persisted state for project docs. This left project re-entry surfaces showing rough heuristics even when Pluto had already synthesized a fresher scoped snapshot.
+- **Replaced:** Treating project Knowledge `Needs Attention` as a purely heuristic reconstruction from doc JSON and project cards after the selected doc already had a matching durable working-memory snapshot.
+- **Notes:** This slice stays read-only and scoped to the selected Knowledge doc. It does not add project-specific attention queues, new snapshot scopes, or a Knowledge UI redesign.
 
 ### Enrich Meeting follow-up drafts from linked context
 - **Issue:** [#120](https://github.com/metagrover/pluto/issues/120)

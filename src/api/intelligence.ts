@@ -19,7 +19,7 @@ export const getMeetingAlerts = async (
 ): Promise<AttentionItem[]> => {
   return invoke('intelligence:alerts', {
     meetingId,
-    status: ['active', 'dismissed'],
+    status: ['active', 'dismissed', 'snoozed'],
   });
 };
 
