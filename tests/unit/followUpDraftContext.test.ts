@@ -106,11 +106,35 @@ describe('buildFollowUpDraftContext', () => {
       meetingTitle: 'API Migration Review',
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
       decisions: ['Use REST for the rollout'],
+      overview: ['The team aligned on the rollout shape and timing.'],
       participants: ['Sarah Chen', 'Alex Rivera'],
     });
 
+    expect(drafts.client).toContain(
+      'Context:\n- The team aligned on the rollout shape and timing.',
+    );
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.internal).toContain(
+      'Context:\n- The team aligned on the rollout shape and timing.',
+    );
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.slack).toContain(
+      '*Context:*\n- The team aligned on the rollout shape and timing.',
+    );
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+  });
+
+  it('omits overview context when no usable summary lines exist', () => {
+    const drafts = buildDefaultDrafts({
+      meetingTitle: 'API Migration Review',
+      actionItems: ['Send rollout email'],
+      decisions: ['Use REST for the rollout'],
+      overview: ['   ', ''],
+      participants: ['Sarah Chen'],
+    });
+
+    expect(drafts.client).not.toContain('Context:');
+    expect(drafts.internal).not.toContain('Context:');
+    expect(drafts.slack).not.toContain('*Context:*');
   });
 });

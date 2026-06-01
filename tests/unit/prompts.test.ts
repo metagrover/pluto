@@ -194,6 +194,33 @@ describe('getEntitiesPrompt', () => {
   });
 });
 
+describe('getFollowUpDraftsPrompt', () => {
+  it('includes overview context when provided', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      overview: ['The team aligned on the rollout shape and timing.'],
+      participants: ['Sarah Chen', 'Alex Rivera'],
+      decisions: ['Use REST for the rollout'],
+      actionItems: ['Send rollout email'],
+    });
+
+    expect(prompt).toContain('Overview:');
+    expect(prompt).toContain('- The team aligned on the rollout shape and timing.');
+  });
+
+  it('falls back cleanly when overview context is absent', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      overview: [' ', ''],
+      participants: ['Sarah Chen'],
+      decisions: ['Use REST for the rollout'],
+      actionItems: ['Send rollout email'],
+    });
+
+    expect(prompt).toContain('Overview:\n- None recorded');
+  });
+});
+
 describe('knowledge document prompts', () => {
   it('asks knowledge synthesis for durable dashboard context instead of imperative tasks', () => {
     const prompt = getKnowledgeDocumentPrompt({
