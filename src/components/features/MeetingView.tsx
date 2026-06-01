@@ -49,6 +49,7 @@ import {
 } from '../../utils/transcript';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
+import { buildFollowUpDraftDecisions } from './followUpDraftContext';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
 import { buildFollowUpDraftContext } from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
@@ -351,8 +352,11 @@ export const MeetingView = ({
     }) ||
     v2?.action_items ||
     [];
-  const decisions =
-    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const decisions = buildFollowUpDraftDecisions({
+    fallbackDecisions:
+      v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [],
+    analysis: v3,
+  });
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
