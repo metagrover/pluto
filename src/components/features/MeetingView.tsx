@@ -54,6 +54,7 @@ import {
   buildFollowUpDraftContext,
   buildFollowUpDraftDecisions,
   buildFollowUpDraftDiscussionPoints,
+  buildFollowUpDraftTopicSummaries,
   formatFollowUpDraftActionItem,
 } from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
@@ -366,6 +367,9 @@ export const MeetingView = ({
     analysis: v3,
   });
   const discussionPoints = buildFollowUpDraftDiscussionPoints(v3?.topics);
+  const followUpDraftTopicSummaries = v3
+    ? buildFollowUpDraftTopicSummaries(v3.topics)
+    : [];
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
@@ -851,6 +855,7 @@ export const MeetingView = ({
           decisions={decisions}
           discussionPoints={discussionPoints}
           participants={followUpDraftParticipants}
+          topicSummaries={followUpDraftTopicSummaries}
           fetchMeetings={fetchMeetings}
         />
 

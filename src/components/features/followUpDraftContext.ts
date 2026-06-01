@@ -35,6 +35,7 @@ export interface DefaultDraftsInput {
   decisions: string[];
   discussionPoints?: string[];
   participants: string[];
+  topicSummaries: string[];
 }
 
 export type DraftId = 'client' | 'internal' | 'slack';
@@ -173,6 +174,28 @@ export const formatFollowUpDraftActionItem = ({
 const toBullets = (items: string[], fallback: string) =>
   items.length ? items.map((item) => `- ${item}`).join('\n') : fallback;
 
+export const buildFollowUpDraftTopicSummaries = (
+  topics: Array<{ title?: string | null; summary?: string | null }>,
+): string[] => {
+  const seen = new Set<string>();
+  const topicSummaries: string[] = [];
+
+  for (const topic of topics) {
+    const title = normalizeName(topic.title);
+    const summary = normalizeName(topic.summary);
+    if (!summary) continue;
+
+    const formatted = title ? `${title}: ${summary}` : summary;
+    const normalized = normalizeKey(formatted);
+    if (seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    topicSummaries.push(formatted);
+  }
+
+  return topicSummaries;
+};
+
 export const buildFollowUpDraftDiscussionPoints = (
   topics: TopicSection[] | null | undefined,
 ): string[] => {
@@ -205,6 +228,7 @@ export const buildDefaultDrafts = ({
   decisions,
   discussionPoints = [],
   participants,
+  topicSummaries = [],
 }: DefaultDraftsInput): Drafts => {
   const overviewLines = overview.map(normalizeName).filter(Boolean);
   const overviewBlock = overviewLines.length
@@ -215,8 +239,9 @@ export const buildDefaultDrafts = ({
     : '';
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
-  const discussionBlock = discussionPoints.length
-    ? `\n\nDiscussion Context:\n${toBullets(discussionPoints, '- None')}`
+  const discussionContext = [...topicSummaries, ...discussionPoints];
+  const discussionBlock = discussionContext.length
+    ? `\n\nDiscussion Context:\n${toBullets(discussionContext, '- None')}`
     : '';
   const participantLine = participants.length
     ? `\nParticipants: ${participants.join(', ')}`
@@ -224,8 +249,8 @@ export const buildDefaultDrafts = ({
   const slackParticipantBlock = participants.length
     ? `\n*Participants:* ${participants.join(', ')}\n`
     : '\n';
-  const slackDiscussionBlock = discussionPoints.length
-    ? `\n*Discussion Context:*\n${toBullets(discussionPoints, '- None')}\n`
+  const slackDiscussionBlock = discussionContext.length
+    ? `\n*Discussion Context:*\n${toBullets(discussionContext, '- None')}\n`
     : '';
 
   return {

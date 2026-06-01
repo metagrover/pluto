@@ -6,6 +6,7 @@ import {
   buildFollowUpDraftContext,
   buildFollowUpDraftDecisions,
   buildFollowUpDraftDiscussionPoints,
+  buildFollowUpDraftTopicSummaries,
   formatFollowUpDraftActionItem,
 } from '../../src/components/features/followUpDraftContext';
 import type { AnalysisDocumentV3 } from '../../src/types';
@@ -160,13 +161,16 @@ describe('buildFollowUpDraftContext', () => {
         'The graph schema still needs validation before rollout.',
       ],
       participants: ['Sarah Chen', 'Alex Rivera'],
+      topicSummaries: ['API Migration: The team aligned on rollout scope.'],
     });
 
     expect(drafts.client).toContain(
       'Context:\n- The team aligned on the rollout shape and timing.',
     );
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
-    expect(drafts.client).toContain('Discussion Context:');
+    expect(drafts.client).toContain(
+      'Discussion Context:\n- API Migration: The team aligned on rollout scope.',
+    );
     expect(drafts.client).toContain(
       '- The team needs provenance on each API response.',
     );
@@ -174,12 +178,32 @@ describe('buildFollowUpDraftContext', () => {
       'Context:\n- The team aligned on the rollout shape and timing.',
     );
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
-    expect(drafts.internal).toContain('Discussion Context:');
+    expect(drafts.internal).toContain(
+      'Discussion Context:\n- API Migration: The team aligned on rollout scope.',
+    );
     expect(drafts.slack).toContain(
       '*Context:*\n- The team aligned on the rollout shape and timing.',
     );
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
-    expect(drafts.slack).toContain('*Discussion Context:*');
+    expect(drafts.slack).toContain(
+      '*Discussion Context:*\n- API Migration: The team aligned on rollout scope.',
+    );
+  });
+});
+
+describe('buildFollowUpDraftTopicSummaries', () => {
+  it('formats topic-labeled summaries and removes empty or duplicate items', () => {
+    expect(
+      buildFollowUpDraftTopicSummaries([
+        { title: 'API Migration', summary: 'Align on rollout scope.' },
+        { title: 'Launch Prep', summary: 'Confirm owner handoff.' },
+        { title: 'API Migration', summary: 'Align on rollout scope.' },
+        { title: 'Ignored', summary: '   ' },
+      ]),
+    ).toEqual([
+      'API Migration: Align on rollout scope.',
+      'Launch Prep: Confirm owner handoff.',
+    ]);
   });
 });
 

@@ -859,6 +859,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     meetingTitle: string;
     overview?: string[];
     participants?: string[];
+    topicSummaries?: string[];
     actionItems: string[];
     decisions: string[];
     discussionPoints?: string[];

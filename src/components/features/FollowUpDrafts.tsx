@@ -22,6 +22,7 @@ interface FollowUpDraftsProps {
   decisions: string[];
   discussionPoints: string[];
   participants: string[];
+  topicSummaries: string[];
   fetchMeetings: () => void;
 }
 
@@ -49,6 +50,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   decisions,
   discussionPoints,
   participants,
+  topicSummaries,
   fetchMeetings,
 }) => {
   const [drafts, setDrafts] = useState<Drafts>({});
@@ -61,6 +63,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const meetingTitle = meeting.title;
   const actionItemsKey = actionItems.join('\n');
   const decisionsKey = decisions.join('\n');
+  const topicSummariesKey = topicSummaries.join('\n');
   const discussionPointsKey = discussionPoints.join('\n');
   const defaultDrafts = useMemo(
     () =>
@@ -73,6 +76,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         meetingTitle,
         overview,
         participants,
+        topicSummaries: topicSummariesKey ? topicSummariesKey.split('\n') : [],
       }),
     [
       actionItemsKey,
@@ -81,6 +85,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       meetingTitle,
       overview,
       participants,
+      topicSummariesKey,
     ],
   );
 
@@ -120,6 +125,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         meetingTitle,
         overview,
         participants,
+        topicSummaries,
         actionItems,
         decisions,
         discussionPoints,
