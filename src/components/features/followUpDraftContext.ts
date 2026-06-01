@@ -1,4 +1,4 @@
-import { parseMetadata, type Entity } from '../../api/knowledgeGraph';
+import { type Entity, parseMetadata } from '../../api/knowledgeGraph';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
