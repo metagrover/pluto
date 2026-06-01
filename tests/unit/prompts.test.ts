@@ -205,7 +205,9 @@ describe('getFollowUpDraftsPrompt', () => {
     });
 
     expect(prompt).toContain('Overview:');
-    expect(prompt).toContain('- The team aligned on the rollout shape and timing.');
+    expect(prompt).toContain(
+      '- The team aligned on the rollout shape and timing.',
+    );
   });
 
   it('falls back cleanly when overview context is absent', () => {
