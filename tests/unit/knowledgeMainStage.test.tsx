@@ -263,4 +263,83 @@ describe('Knowledge MainStage', () => {
     expect(markup.split(promotedTitle)).toHaveLength(2);
     expect(markup.split(distinctRisk)).toHaveLength(2);
   });
+
+  it('prefers V2 current-read supporting bullets over stream summaries', () => {
+    const supportingBullet =
+      'Instrument the launch path before broadening Active Stream coverage.';
+    const streamSummary =
+      'Launch stream summary should stay in the stream card, not the Current Read support list.';
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        current_read: {
+          headline: 'Launch work remains the most time-sensitive thread.',
+          supporting_bullets: [supportingBullet],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in cited launch reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.86,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'launch',
+            title: 'Launch',
+            domain: 'work',
+            status: 'active',
+            current_read: streamSummary,
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 2,
+            open_follow_up_count: 1,
+            decision_count: 1,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.84,
+              cited_meeting_count: 2,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain(supportingBullet);
+    expect(markup).toContain(streamSummary);
+    expect(markup).not.toContain(`Launch: ${streamSummary}`);
+  });
 });

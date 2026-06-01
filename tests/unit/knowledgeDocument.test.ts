@@ -309,6 +309,9 @@ describe('knowledge document utilities', () => {
     expect(brief.headline).toBe(
       'Knowledge quality is moving from archive browsing to a living brief.',
     );
+    expect(brief.supportingBullets).toEqual([
+      'Knowledge Dashboard: synthesis quality is active.',
+    ]);
     expect(brief.activeStreams[0].title).toBe('Knowledge Dashboard');
     expect(brief.sourceQuality).toMatchObject({
       included_count: 3,
@@ -608,6 +611,10 @@ describe('knowledge document utilities', () => {
     expect(brief.headline).toBe(
       'Snapshot-backed current read is now the durable source.',
     );
+    expect(brief.supportingBullets).toEqual([
+      'The durable snapshot preserves the main thread.',
+      'Fallback still exists for missing snapshots.',
+    ]);
     expect(brief.activeStreams[0].title).toBe('Launch');
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
     expect(brief.coverage).toMatchObject({
@@ -767,6 +774,75 @@ describe('knowledge document utilities', () => {
     expect(brief.headline).toBe('Fresh doc fallback should remain available.');
     expect(brief.activeStreams[0].title).toBe('Fallback Stream');
     expect(brief.trustMessage).toBe('Doc fallback stays intact.');
+  });
+
+  it('falls back to doc JSON when the working-memory snapshot predates the latest synthesis', () => {
+    const doc = makeDoc({
+      last_synthesized_at: '2026-04-26T10:00:00.000Z',
+      updated_at: '2026-04-26T10:00:00.000Z',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Doc JSON should win after a newer synthesis pass.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Fresh doc synthesis is newer than the snapshot.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.82,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-26T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-26T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(
+      doc,
+      makeWorkingMemorySnapshot({
+        source_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+        generated_at: '2026-04-25T10:00:00.000Z',
+        updated_at: '2026-04-25T10:00:00.000Z',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          source: {
+            knowledge_doc_id: 'doc-1',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+        },
+      }),
+    );
+
+    expect(brief.headline).toBe(
+      'Doc JSON should win after a newer synthesis pass.',
+    );
+    expect(brief.trustMessage).toBe(
+      'Fresh doc synthesis is newer than the snapshot.',
+    );
   });
 
   it('falls back to doc JSON when the global working-memory snapshot payload is invalid', () => {
@@ -1574,6 +1650,166 @@ describe('knowledge document utilities', () => {
         title: 'Project synthesis needs a dependency review.',
         severity: 'critical',
         kind: 'risk',
+      },
+    ]);
+  });
+
+  it('prefers a matching project working-memory snapshot for project needs attention', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-project',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'project', title: 'Project One' },
+        chapters: [
+          {
+            chapter_id: 'project',
+            title: 'Project One',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'r1',
+                text: 'Legacy project risk fallback',
+                why_it_matters:
+                  'This should be ignored when a matching snapshot exists.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [
+        makeProjectCard({
+          doc_id: 'doc-project',
+          title: 'Project One',
+          open_blockers: 3,
+        }),
+      ],
+      [],
+      makeWorkingMemorySnapshot({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project One',
+        source_doc_id: 'doc-project',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'project',
+            key: 'project-1',
+            title: 'Project One',
+          },
+          source: {
+            knowledge_doc_id: 'doc-project',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+          open_loops: [
+            {
+              id: 'loop-project',
+              title: 'Confirm launch dependency owner',
+              summary: 'The launch dependency still has no owner.',
+              kind: 'dependency',
+              severity: 'needs_attention',
+              why_now: 'This is still blocking the active project.',
+              stream_ids: ['stream-launch'],
+              citations: [
+                {
+                  meeting_id: 'm-project',
+                  quote: 'The launch dependency still needs an owner.',
+                },
+              ],
+              evidence_quality: {
+                mode: 'direct',
+                confidence: 0.84,
+                cited_meeting_count: 1,
+                source_count: 1,
+                last_reinforced_at: '2026-04-25T10:00:00.000Z',
+                freshness: 'fresh',
+              },
+            },
+          ],
+          patterns: [],
+          risks_and_unknowns: [],
+          evidence_index: [],
+        },
+      }),
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'loop-project',
+        title: 'Confirm launch dependency owner',
+        summary: 'The launch dependency still has no owner.',
+        severity: 'critical',
+        kind: 'dependency',
+        reasons: ['This is still blocking the active project.'],
+        citations: [
+          {
+            meeting_id: 'm-project',
+            quote: 'The launch dependency still needs an owner.',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('falls back to project-card heuristics when the project snapshot is stale', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-project',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      structured_json: null,
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [sourceDoc],
+      [
+        makeProjectCard({
+          doc_id: 'doc-project',
+          title: 'Project One',
+          open_blockers: 2,
+          dependency_count: 1,
+        }),
+      ],
+      [],
+      makeWorkingMemorySnapshot({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project One',
+        source_doc_id: 'doc-project',
+        freshness: 'stale',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'project',
+            key: 'project-1',
+            title: 'Project One',
+          },
+          source: {
+            knowledge_doc_id: 'doc-project',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+        },
+      }),
+    );
+
+    expect(attention).toMatchObject([
+      {
+        title: 'Project One',
+        severity: 'critical',
+        kind: 'project',
+        reasons: ['2 blockers', '1 dependency'],
       },
     ]);
   });
