@@ -63,6 +63,9 @@ describe('buildMeetingActionItems', () => {
       context: 'Alex committed to send the pricing recap by Friday.',
       actionable: true,
       toggleLabel: 'Mark complete',
+      attentionStatus: null,
+      dismissLabel: null,
+      snoozeLabel: null,
     });
     expect(items[1]).toMatchObject({
       id: 'completed',
@@ -70,6 +73,9 @@ describe('buildMeetingActionItems', () => {
       status: 'completed',
       actionable: true,
       toggleLabel: 'Reopen',
+      attentionStatus: null,
+      dismissLabel: null,
+      snoozeLabel: null,
     });
   });
 
@@ -94,8 +100,9 @@ describe('buildMeetingActionItems', () => {
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
-        dismissalState: null,
-        dismissalLabel: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
       },
       {
         id: 'fallback-2',
@@ -107,13 +114,14 @@ describe('buildMeetingActionItems', () => {
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
-        dismissalState: null,
-        dismissalLabel: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
       },
     ]);
   });
 
-  it('maps linked attention items to dismiss and reopen affordances', () => {
+  it('maps linked attention items to dismiss, snooze, and reopen affordances', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [
         makeMeetingEntity({
@@ -123,6 +131,10 @@ describe('buildMeetingActionItems', () => {
         makeMeetingEntity({
           id: 'dismissed-follow-up',
           name: 'Schedule optional sync',
+        }),
+        makeMeetingEntity({
+          id: 'snoozed-follow-up',
+          name: 'Draft launch FAQ',
         }),
       ],
       linkedAttentionItems: [
@@ -136,6 +148,11 @@ describe('buildMeetingActionItems', () => {
           status: 'dismissed',
           related_entity_ids: ['dismissed-follow-up'],
         },
+        {
+          id: 'attention-snoozed',
+          status: 'snoozed',
+          related_entity_ids: ['snoozed-follow-up'],
+        },
       ],
       fallbackActionItems: [],
     });
@@ -143,14 +160,25 @@ describe('buildMeetingActionItems', () => {
     expect(items[0]).toMatchObject({
       id: 'active-follow-up',
       attentionItemId: 'attention-active',
-      dismissalLabel: 'Dismiss',
-      dismissalState: 'active',
+      attentionStatus: 'active',
+      dismissLabel: 'Dismiss',
+      snoozeLabel: 'Snooze',
     });
     expect(items[1]).toMatchObject({
       id: 'dismissed-follow-up',
       attentionItemId: 'attention-dismissed',
-      dismissalLabel: 'Reopen',
-      dismissalState: 'dismissed',
+      attentionStatus: 'dismissed',
+      dismissLabel: 'Reopen',
+      snoozeLabel: null,
+      actionable: false,
+    });
+    expect(items[2]).toMatchObject({
+      id: 'snoozed-follow-up',
+      attentionItemId: 'attention-snoozed',
+      attentionStatus: 'snoozed',
+      dismissLabel: null,
+      snoozeLabel: 'Reopen',
+      actionable: true,
     });
   });
 });
