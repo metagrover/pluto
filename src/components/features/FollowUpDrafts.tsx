@@ -17,8 +17,10 @@ import { type Drafts, buildDefaultDrafts } from './followUpDraftContext';
 
 interface FollowUpDraftsProps {
   meeting: Meeting;
+  overview: string[];
   actionItems: string[];
   decisions: string[];
+  discussionPoints: string[];
   participants: string[];
   topicSummaries: string[];
   fetchMeetings: () => void;
@@ -43,8 +45,10 @@ const parseSavedDrafts = (value?: string): Drafts | null => {
 
 export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   meeting,
+  overview,
   actionItems,
   decisions,
+  discussionPoints,
   participants,
   topicSummaries,
   fetchMeetings,
@@ -60,19 +64,26 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const actionItemsKey = actionItems.join('\n');
   const decisionsKey = decisions.join('\n');
   const topicSummariesKey = topicSummaries.join('\n');
+  const discussionPointsKey = discussionPoints.join('\n');
   const defaultDrafts = useMemo(
     () =>
       buildDefaultDrafts({
         actionItems: actionItemsKey ? actionItemsKey.split('\n') : [],
         decisions: decisionsKey ? decisionsKey.split('\n') : [],
+        discussionPoints: discussionPointsKey
+          ? discussionPointsKey.split('\n')
+          : [],
         meetingTitle,
+        overview,
         participants,
         topicSummaries: topicSummariesKey ? topicSummariesKey.split('\n') : [],
       }),
     [
       actionItemsKey,
       decisionsKey,
+      discussionPointsKey,
       meetingTitle,
+      overview,
       participants,
       topicSummariesKey,
     ],
@@ -112,10 +123,12 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     try {
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
+        overview,
         participants,
         topicSummaries,
         actionItems,
         decisions,
+        discussionPoints,
         customPrompt: customPrompt.trim() || undefined,
       });
       if (res?.drafts) {

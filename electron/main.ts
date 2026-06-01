@@ -1804,10 +1804,12 @@ app.whenReady().then(async () => {
       _event,
       {
         meetingTitle,
+        overview,
         participants,
         topicSummaries,
         actionItems,
         decisions,
+        discussionPoints,
         customPrompt,
       },
     ) => {
@@ -1819,10 +1821,12 @@ app.whenReady().then(async () => {
         );
         return await provider.generateFollowUpDrafts({
           meetingTitle,
+          overview,
           participants,
           topicSummaries,
           actionItems,
           decisions,
+          discussionPoints,
           customPrompt,
         });
       } catch (error) {

@@ -142,10 +142,12 @@ export interface LLMProvider {
   ): Promise<ExtractedEntities>;
   generateFollowUpDrafts(params: {
     meetingTitle: string;
+    overview?: string[];
     participants?: string[];
     topicSummaries?: string[];
     actionItems: string[];
     decisions: string[];
+    discussionPoints?: string[];
     customPrompt?: string;
   }): Promise<{ drafts: Array<{ title: string; content: string }> }>;
 }

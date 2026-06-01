@@ -677,36 +677,52 @@ ${transcriptSlice}`;
 
 export const getFollowUpDraftsPrompt = (params: {
   meetingTitle: string;
+  overview?: string[];
   participants?: string[];
   topicSummaries?: string[];
   actionItems: string[];
   decisions: string[];
+  discussionPoints?: string[];
   customPrompt?: string;
 }): string => {
   const {
     meetingTitle,
+    overview,
     participants,
     topicSummaries,
     actionItems,
     decisions,
+    discussionPoints,
     customPrompt,
   } = params;
+  const overviewBullets =
+    overview
+      ?.map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => `- ${item}`)
+      .join('\n') || '- None recorded';
   const participantBullets =
     participants?.length && participants.length > 0
       ? participants.map((participant) => `- ${participant}`).join('\n')
       : '- None recorded';
-  const topicSummaryBullets =
-    topicSummaries?.length && topicSummaries.length > 0
-      ? topicSummaries.map((summary) => `- ${summary}`).join('\n')
+  const discussionContext = [
+    ...(topicSummaries || []),
+    ...(discussionPoints || []),
+  ].filter((item) => item.trim());
+  const discussionBullets =
+    discussionContext.length > 0
+      ? discussionContext.map((point) => `- ${point}`).join('\n')
       : '- None recorded';
 
   return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
 
 Meeting: ${meetingTitle}
+Overview:
+${overviewBullets}
 Participants:
 ${participantBullets}
 Discussion Context:
-${topicSummaryBullets}
+${discussionBullets}
 Decisions:
 ${decisions.map((d) => `- ${d}`).join('\n') || '- None recorded'}
 Action Items:
