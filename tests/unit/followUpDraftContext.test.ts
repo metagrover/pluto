@@ -10,6 +10,7 @@ import {
   buildFollowUpDraftTopicSummaries,
   formatFollowUpDraftActionItem,
 } from '../../src/components/features/followUpDraftContext';
+import type { MeetingLinkedAttentionItem } from '../../src/components/features/meetingActionItems';
 import type { AnalysisDocumentV3 } from '../../src/types';
 
 type MeetingEntitySummary = Entity & {
@@ -209,6 +210,72 @@ describe('buildFollowUpDraftContext', () => {
 
     expect(context.actionItems).toEqual([
       'Send rollout email (Owner: Sarah Chen | Due: Friday)',
+    ]);
+  });
+
+  it('omits completed, dismissed, and snoozed follow-ups from draft action items', () => {
+    const linkedAttentionItems: MeetingLinkedAttentionItem[] = [
+      {
+        id: 'attention-dismissed',
+        status: 'dismissed',
+        related_entity_ids: ['action-dismissed'],
+      },
+      {
+        id: 'attention-snoozed',
+        status: 'snoozed',
+        related_entity_ids: ['action-snoozed'],
+      },
+    ];
+
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Ship active task',
+        'Archive old recap',
+        'Silence duplicate reminder',
+        'Revisit next week',
+        'Unlinked fallback item',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+          mention_count: 4,
+        }),
+        makeEntity({
+          id: 'action-active',
+          type: 'action_item',
+          name: 'Ship active task',
+          assigned_to: 'person-1',
+          due_date: '2026-06-02T00:00:00.000Z',
+          mention_count: 5,
+        }),
+        makeEntity({
+          id: 'action-completed',
+          type: 'action_item',
+          name: 'Archive old recap',
+          status: 'completed',
+          mention_count: 3,
+        }),
+        makeEntity({
+          id: 'action-dismissed',
+          type: 'action_item',
+          name: 'Silence duplicate reminder',
+          mention_count: 2,
+        }),
+        makeEntity({
+          id: 'action-snoozed',
+          type: 'action_item',
+          name: 'Revisit next week',
+          mention_count: 1,
+        }),
+      ],
+      linkedAttentionItems,
+    });
+
+    expect(context.actionItems).toEqual([
+      'Ship active task (Owner: Sarah Chen | Due: Jun 2)',
+      'Unlinked fallback item',
     ]);
   });
 
