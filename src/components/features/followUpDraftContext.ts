@@ -1,4 +1,5 @@
 import type { Entity } from '../../api/knowledgeGraph';
+import type { AnalysisDocumentV3 } from '../../types';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
@@ -20,6 +21,11 @@ interface FollowUpDraftActionItemInput {
 export interface FollowUpDraftContext {
   actionItems: string[];
   participants: string[];
+}
+
+interface FollowUpDraftDecisionsInput {
+  fallbackDecisions: string[];
+  analysis?: AnalysisDocumentV3 | null;
 }
 
 export interface DefaultDraftsInput {
@@ -80,6 +86,9 @@ const formatActionItem = (
     : entity.name;
 };
 
+const formatTopicAwareDecision = (text: string, topicTitle: string): string =>
+  topicTitle ? `${text} (Topic: ${topicTitle})` : text;
+
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
   linkedEntities,
@@ -111,6 +120,37 @@ export const buildFollowUpDraftContext = ({
         : fallbackActionItems,
     participants: people.map((entity) => entity.name),
   };
+};
+
+export const buildFollowUpDraftDecisions = ({
+  fallbackDecisions,
+  analysis,
+}: FollowUpDraftDecisionsInput): string[] => {
+  if (!analysis) return fallbackDecisions;
+
+  const seen = new Set<string>();
+  const decisions: string[] = [];
+
+  for (const topic of analysis.topics) {
+    const topicTitle = normalizeName(topic.title);
+    for (const decision of topic.decisions) {
+      const text = normalizeName(decision.text);
+      if (!text) continue;
+
+      const key = normalizeKey(text);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      decisions.push(formatTopicAwareDecision(text, topicTitle));
+    }
+  }
+
+  const fallbackOnlyDecisions = fallbackDecisions.filter(
+    (decision) => !seen.has(normalizeKey(decision)),
+  );
+
+  return decisions.length > 0
+    ? [...decisions, ...fallbackOnlyDecisions]
+    : fallbackDecisions;
 };
 
 export const formatFollowUpDraftActionItem = ({

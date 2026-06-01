@@ -4,8 +4,10 @@ import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   buildDefaultDrafts,
   buildFollowUpDraftContext,
+  buildFollowUpDraftDecisions,
   formatFollowUpDraftActionItem,
 } from '../../src/components/features/followUpDraftContext';
+import type { AnalysisDocumentV3 } from '../../src/types';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
@@ -29,6 +31,24 @@ const makeEntity = (
   updated_at: overrides.updated_at || '2026-05-27T00:00:00.000Z',
   mention_count: overrides.mention_count ?? 1,
   context: overrides.context ?? null,
+});
+
+const makeAnalysis = (
+  overrides: Partial<AnalysisDocumentV3> = {},
+): AnalysisDocumentV3 => ({
+  analysis_schema_version: 3,
+  overview: overrides.overview || 'Overview',
+  topics: overrides.topics || [],
+  all_action_items: overrides.all_action_items || [],
+  all_decisions: overrides.all_decisions || [],
+  meeting_type: overrides.meeting_type || 'general',
+  quality: overrides.quality || {
+    format_pass: true,
+    retry_count: 0,
+    fallback_used: false,
+    issues: [],
+  },
+  generation_metadata: overrides.generation_metadata,
 });
 
 describe('buildFollowUpDraftContext', () => {
@@ -186,5 +206,39 @@ describe('formatFollowUpDraftActionItem', () => {
         text: 'Confirm launch plan',
       }),
     ).toBe('Confirm launch plan');
+  });
+});
+
+describe('buildFollowUpDraftDecisions', () => {
+  it('adds topic labels to topic-linked v3 decisions before falling back', () => {
+    const decisions = buildFollowUpDraftDecisions({
+      fallbackDecisions: ['Use REST for the rollout', 'Confirm launch owner'],
+      analysis: makeAnalysis({
+        topics: [
+          {
+            title: 'API migration',
+            summary: 'Summary',
+            key_points: [],
+            decisions: [{ text: 'Use REST for the rollout' }],
+            action_items: [],
+            open_questions: [],
+          },
+        ],
+      }),
+    });
+
+    expect(decisions).toEqual([
+      'Use REST for the rollout (Topic: API migration)',
+      'Confirm launch owner',
+    ]);
+  });
+
+  it('keeps fallback decisions when no topic-linked v3 decision context exists', () => {
+    const decisions = buildFollowUpDraftDecisions({
+      fallbackDecisions: ['Use REST for the rollout'],
+      analysis: makeAnalysis(),
+    });
+
+    expect(decisions).toEqual(['Use REST for the rollout']);
   });
 });

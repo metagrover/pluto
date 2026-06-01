@@ -52,6 +52,7 @@ import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
 import {
   buildFollowUpDraftContext,
+  buildFollowUpDraftDecisions,
   formatFollowUpDraftActionItem,
 } from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
@@ -358,8 +359,11 @@ export const MeetingView = ({
     }) ||
     v2?.action_items ||
     [];
-  const decisions =
-    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const decisions = buildFollowUpDraftDecisions({
+    fallbackDecisions:
+      v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [],
+    analysis: v3,
+  });
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,

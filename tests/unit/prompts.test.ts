@@ -317,6 +317,19 @@ describe('getFollowUpDraftsPrompt', () => {
     );
   });
 
+  it('passes topic-aware decision lines through without stripping the topic label', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'API Migration Review',
+      participants: ['Sarah Chen'],
+      decisions: ['Use REST for the rollout (Topic: API migration)'],
+      actionItems: ['Send rollout email'],
+    });
+
+    expect(prompt).toContain(
+      'Decisions:\n- Use REST for the rollout (Topic: API migration)',
+    );
+  });
+
   it('falls back to a safe no-participants block when none are available', () => {
     const prompt = getFollowUpDraftsPrompt({
       meetingTitle: 'Launch Review',

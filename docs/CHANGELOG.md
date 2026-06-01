@@ -18,6 +18,15 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-01
+
+### Add decision topic context to Meeting follow-up drafts
+- **Issue:** [#182](https://github.com/metagrover/pluto/issues/182)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now derive topic-aware decision lines from V3 meeting analysis topics, so default drafts and regenerate prompts can preserve which workstream each decision came from instead of flattening everything to bare text. Focused tests now cover both topic-aware decision formatting and prompt propagation.
+- **Why:** `#61` calls for follow-up generation that uses Pluto's existing meeting context. Current `origin/master` already preserved decisions under topic sections, but draft generation dropped that structure, which made recaps less clear when multiple threads produced separate decisions in the same meeting.
+- **Replaced:** Treating follow-up draft decisions as an unstructured list even when the selected meeting already had topic-linked V3 decision context.
+- **Notes:** This slice stays inside Meeting View follow-up drafts. It does not redesign the draft editor, add sending integrations, or overlap the separate open PRs for decision owner/rationale context.
 ## 2026-05-31
 
 ### Include meeting overview context in follow-up drafts
