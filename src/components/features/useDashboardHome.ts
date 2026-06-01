@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import type { AttentionItem } from '../../../electron/intelligence/intelligenceTypes';
+import { getAttentionAlerts } from '../../api/intelligence';
 import {
   type Entity,
   type KnowledgeGraphStats,
@@ -41,6 +43,7 @@ const buildEmptyDashboardHomeModel = (
     overdueActions: [],
     staleActions: [],
     activeActions: [],
+    attentionAlerts: [],
     workspace: null,
     workingMemorySnapshots: [],
     graphStats: null,
@@ -78,6 +81,7 @@ export const useDashboardHome = ({
         overdueActions,
         staleActions,
         activeActions,
+        attentionAlerts,
         workspace,
         workingMemorySnapshots,
         graphStats,
@@ -91,6 +95,11 @@ export const useDashboardHome = ({
         loadOptional<Entity[]>(
           'active actions',
           () => getActionItemsByStatus('active'),
+          [],
+        ),
+        loadOptional<AttentionItem[]>(
+          'attention alerts',
+          getAttentionAlerts,
           [],
         ),
         loadOptional<KnowledgeWorkspacePayload | null>(
@@ -119,6 +128,7 @@ export const useDashboardHome = ({
           overdueActions,
           staleActions,
           activeActions,
+          attentionAlerts,
           workspace,
           workingMemorySnapshots,
           graphStats,

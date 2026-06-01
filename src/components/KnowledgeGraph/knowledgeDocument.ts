@@ -177,6 +177,7 @@ type StructuredKnowledgeV2Source = Pick<
 export interface KnowledgeBrief {
   isCompiled: boolean;
   headline: string;
+  supportingBullets: string[];
   lanes: KnowledgeBriefLane[];
   coverage: KnowledgeBriefCoverage;
   activeStreams: KnowledgeV2Stream[];
@@ -647,6 +648,31 @@ const toWorkingMemorySnapshotStructuredDoc = (
   });
 };
 
+const getWorkingMemorySnapshotSynthesisMarker = (
+  snapshot: WorkingMemorySnapshot,
+): string | null =>
+  snapshot.source_doc_last_synthesized_at ||
+  snapshot.payload?.source?.knowledge_doc_last_synthesized_at ||
+  null;
+
+export const matchesWorkingMemorySnapshotToDoc = (
+  doc: KnowledgeDoc | null | undefined,
+  workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
+): workingMemorySnapshot is WorkingMemorySnapshot => {
+  if (!doc || !workingMemorySnapshot) return false;
+  if (!['global', 'project'].includes(doc.scope_type)) return false;
+  if (workingMemorySnapshot.scope_type !== doc.scope_type) return false;
+  if (workingMemorySnapshot.freshness === 'stale') return false;
+  if (workingMemorySnapshot.scope_key !== doc.scope_key) return false;
+  if (workingMemorySnapshot.source_doc_id !== doc.id) return false;
+
+  if (!doc.last_synthesized_at) return true;
+  return (
+    getWorkingMemorySnapshotSynthesisMarker(workingMemorySnapshot) ===
+    doc.last_synthesized_at
+  );
+};
+
 export const parseStructuredKnowledgeDoc = (
   doc: KnowledgeDoc | null | undefined,
 ): StructuredKnowledgeDoc | null => {
@@ -800,6 +826,7 @@ const buildKnowledgeBriefFromV2 = ({
   return {
     isCompiled,
     headline: v2.current_read.headline || 'No reliable compiled brief yet.',
+    supportingBullets: v2.current_read.supporting_bullets.filter(Boolean),
     lanes: emptyLanes,
     coverage: {
       statementCount: v2.current_read.cited_item_count,
@@ -823,13 +850,12 @@ export const compileKnowledgeBrief = (
   doc: KnowledgeDoc | null | undefined,
   workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): KnowledgeBrief => {
-  const snapshotV2 =
-    (doc?.scope_type === 'global' || doc?.scope_type === 'project') &&
-    workingMemorySnapshot?.scope_type === doc.scope_type &&
-    workingMemorySnapshot?.scope_key === doc.scope_key &&
-    workingMemorySnapshot?.source_doc_id === doc.id
-      ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
-      : null;
+  const snapshotV2 = matchesWorkingMemorySnapshotToDoc(
+    doc,
+    workingMemorySnapshot,
+  )
+    ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
+    : null;
   if (snapshotV2 && workingMemorySnapshot) {
     return buildKnowledgeBriefFromV2({
       v2: snapshotV2,
@@ -882,6 +908,7 @@ export const compileKnowledgeBrief = (
     return {
       isCompiled: false,
       headline: 'No reliable compiled brief yet.',
+      supportingBullets: [],
       lanes: emptyLanes,
       coverage: EMPTY_BRIEF_COVERAGE,
       activeStreams: [],
@@ -1044,6 +1071,7 @@ export const compileKnowledgeBrief = (
         : statementItems.length > 0 || dependencies.length > 0
           ? 'Indexed knowledge needs a stronger synthesis.'
           : 'No reliable compiled brief yet.',
+    supportingBullets: [],
     lanes,
     coverage,
     activeStreams: [],
@@ -1137,6 +1165,7 @@ export const compileNeedsAttention = (
   docs: KnowledgeDoc[],
   projectCards: KnowledgeProjectHealthCard[],
   attentionItems: AttentionItem[] = [],
+  workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): NeedsAttentionItem[] => {
   if (
     doc?.scope_type === 'global' &&
@@ -1158,7 +1187,14 @@ export const compileNeedsAttention = (
       }));
   }
 
-  const v2 = parseStructuredKnowledgeV2Doc(doc);
+  const snapshotV2 =
+    (doc?.scope_type === 'global' || doc?.scope_type === 'project') &&
+    workingMemorySnapshot?.scope_type === doc.scope_type &&
+    workingMemorySnapshot?.scope_key === doc.scope_key &&
+    workingMemorySnapshot?.source_doc_id === doc.id
+      ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
+      : null;
+  const v2 = snapshotV2 ?? parseStructuredKnowledgeV2Doc(doc);
   const structured = v2 ? null : parseStructuredKnowledgeDoc(doc);
   const v2Items: NeedsAttentionItem[] = v2
     ? v2.needs_attention.map((item) => ({
@@ -1214,6 +1250,12 @@ export const compileNeedsAttention = (
       reasons: suggestion.why ? [suggestion.why] : [],
       citations: suggestion.citations,
     })) || [];
+
+  if (snapshotV2 && doc?.scope_type === 'project') {
+    return [...v2Items, ...riskItems, ...dependencyItems].sort(
+      (a, b) => compareAttentionPriority(b) - compareAttentionPriority(a),
+    );
+  }
 
   const projectDocs = docs.filter((doc) => doc.scope_type === 'project');
   const docsById = new Map(projectDocs.map((doc) => [doc.id, doc]));

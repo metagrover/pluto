@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { WorkingMemorySnapshot } from '../../electron/db';
+import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import type {
@@ -36,6 +37,30 @@ const makeAction = (overrides: Partial<Entity> = {}): Entity => ({
   domain_tag: 'work',
   created_at: '2026-04-25T10:00:00.000Z',
   updated_at: '2026-04-25T10:00:00.000Z',
+  ...overrides,
+});
+
+const makeAttentionItem = (
+  overrides: Partial<AttentionItem> = {},
+): AttentionItem => ({
+  id: 'attention-1',
+  dedupe_key: 'action_tracker:overdue:action-1',
+  kind: 'follow_up',
+  severity: 'watch',
+  score: 0.42,
+  status: 'active',
+  title: 'Review indexing rollout',
+  reason: 'This follow-up still needs attention.',
+  source: 'action_tracker',
+  score_breakdown: null,
+  evidence: [],
+  related_entity_ids: ['action-1'],
+  related_stream_ids: [],
+  related_meeting_ids: [],
+  created_at: '2026-04-25T10:00:00.000Z',
+  updated_at: '2026-04-25T10:00:00.000Z',
+  last_seen_at: '2026-04-25T10:00:00.000Z',
+  resolved_at: null,
   ...overrides,
 });
 
@@ -260,6 +285,60 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('suppresses dismissed linked follow-ups from dashboard attention lists', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ name: 'Ship privacy review' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [makeAttentionItem({ status: 'dismissed' })],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('latest_meeting');
+    expect(model.briefingFocus.kind).toBe('latest_meeting');
+    expect(model.actionInsights.state).toBe('empty');
+  });
+
+  it('suppresses snoozed linked follow-ups from dashboard attention lists', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [makeAction({ name: 'Revisit launch blockers' })],
+      activeActions: [],
+      attentionAlerts: [makeAttentionItem({ status: 'snoozed' })],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('latest_meeting');
+    expect(model.briefingFocus.kind).toBe('latest_meeting');
+    expect(model.actionInsights.state).toBe('empty');
+  });
+
+  it('keeps dashboard follow-ups visible when any linked alert is still active', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ name: 'Ship privacy review' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({ id: 'attention-dismissed', status: 'dismissed' }),
+        makeAttentionItem({ id: 'attention-active', status: 'active' }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('overdue_action');
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]?.title).toBe('Ship privacy review');
+  });
+
   it('uses the latest meeting as the briefing focus when no actions need attention', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -317,6 +396,8 @@ describe('buildDashboardHomeModel', () => {
             scope_type: 'global',
             scope_key: 'global',
             title: 'Workspace Memory',
+            last_synthesized_at: '2026-04-27T18:00:00.000Z',
+            updated_at: '2026-04-27T18:00:00.000Z',
             structured_json: JSON.stringify({
               schema_version: 2,
               scope: { type: 'global', title: 'Workspace Memory' },
@@ -355,6 +436,8 @@ describe('buildDashboardHomeModel', () => {
           scope_type: 'global',
           scope_key: 'global',
           title: 'Workspace Memory',
+          last_synthesized_at: '2026-04-27T18:00:00.000Z',
+          updated_at: '2026-04-27T18:00:00.000Z',
         }),
         project_cards: [],
       }),
@@ -452,6 +535,7 @@ describe('buildDashboardHomeModel', () => {
           scope_key: 'project-1',
           title: 'Project Atlas',
           source_doc_id: 'doc-project',
+          source_doc_last_synthesized_at: '2026-04-27T16:00:00.000Z',
           payload: {
             ...baseSnapshot.payload,
             scope: {
@@ -461,7 +545,7 @@ describe('buildDashboardHomeModel', () => {
             },
             source: {
               knowledge_doc_id: 'doc-project',
-              knowledge_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
+              knowledge_doc_last_synthesized_at: '2026-04-27T16:00:00.000Z',
             },
             current_read: {
               ...baseSnapshot.payload.current_read,
@@ -662,6 +746,93 @@ describe('buildDashboardHomeModel', () => {
       countLabel: '1 blocker · 2 dependencies',
       trustStatus: 'grounded',
       trustDescription: 'Backed by direct evidence from cited source material.',
+    });
+  });
+
+  it('falls back to knowledge-doc data when the working-memory snapshot is older than the doc synthesis', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [
+          makeDoc({
+            id: 'doc-global',
+            scope_type: 'global',
+            scope_key: 'global',
+            title: 'Workspace Memory',
+            last_synthesized_at: '2026-04-28T09:00:00.000Z',
+            updated_at: '2026-04-28T09:00:00.000Z',
+            structured_json: JSON.stringify({
+              schema_version: 2,
+              scope: { type: 'global', title: 'Workspace Memory' },
+              current_read: {
+                headline: 'Doc JSON reflects the newest synthesis pass.',
+                trust_message: 'Grounded in direct meeting evidence.',
+                evidence_quality: {
+                  mode: 'direct',
+                  confidence: 0.9,
+                  cited_meeting_count: 2,
+                  source_count: 3,
+                  last_reinforced_at: '2026-04-28T09:00:00.000Z',
+                  freshness: 'fresh',
+                },
+                source_count: 3,
+                cited_item_count: 2,
+                cited_meeting_count: 2,
+                freshness: 'fresh',
+              },
+              active_streams: [],
+              needs_attention: [],
+              patterns: [],
+              risks_and_unknowns: [],
+              evidence_index: [],
+              source_quality_summary: {
+                included_count: 3,
+                excluded_count: 0,
+                weak_count: 0,
+                records: [],
+              },
+            }),
+          }),
+        ],
+        selected_doc: makeDoc({
+          id: 'doc-global',
+          scope_type: 'global',
+          scope_key: 'global',
+          title: 'Workspace Memory',
+          last_synthesized_at: '2026-04-28T09:00:00.000Z',
+          updated_at: '2026-04-28T09:00:00.000Z',
+        }),
+        project_cards: [],
+      }),
+      workingMemorySnapshot: makeWorkingMemorySnapshot({
+        source_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
+        generated_at: '2026-04-27T18:00:00.000Z',
+        updated_at: '2026-04-27T18:00:00.000Z',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          source: {
+            knowledge_doc_id: 'doc-global',
+            knowledge_doc_last_synthesized_at: '2026-04-27T18:00:00.000Z',
+          },
+        },
+      }),
+      graphStats: null,
+    });
+
+    expect(model.knowledgeDocuments.cards[0]).toMatchObject({
+      description: 'Doc JSON reflects the newest synthesis pass.',
+      trustStatus: 'grounded',
+      trustDescription: 'Backed by direct evidence from cited source material.',
+    });
+    expect(model.briefingFocus).toEqual({
+      kind: 'knowledge_doc',
+      title: 'Recent memory',
+      detail: 'Doc JSON reflects the newest synthesis pass.',
+      action: { label: 'Open knowledge', target: 'wiki' },
     });
   });
 
