@@ -101,6 +101,31 @@ describe('buildFollowUpDraftContext', () => {
     expect(context.participants).toEqual([]);
   });
 
+  it('preserves linked action-item context in the draft action lines', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Send pricing recap',
+          assigned_to: 'person-1',
+          due_date: '2026-05-30T00:00:00.000Z',
+          context: 'Alex committed to send the pricing recap by Friday.',
+        }),
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Alex Rivera',
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Send pricing recap (Owner: Alex Rivera | Due: May 30 | Context: Alex committed to send the pricing recap by Friday.)',
+    ]);
+  });
+
   it('injects participant context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',

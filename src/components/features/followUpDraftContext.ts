@@ -59,9 +59,11 @@ const formatActionItem = (
   const ownerId = normalizeName(entity.assigned_to);
   const ownerName = ownerId ? (peopleById.get(ownerId) ?? ownerId) : '';
   const dueLabel = formatDueLabel(entity.due_date);
+  const contextLabel = normalizeName(entity.context);
   const details = [
     ownerName ? `Owner: ${ownerName}` : '',
     dueLabel ? `Due: ${dueLabel}` : '',
+    contextLabel ? `Context: ${contextLabel}` : '',
   ].filter(Boolean);
 
   return details.length > 0
