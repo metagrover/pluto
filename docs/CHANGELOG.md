@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-29
 
+### Surface blocked follow-ups in the durable attention queue
+- **Issue:** [#137](https://github.com/metagrover/pluto/issues/137)
+- **PR:** Pending.
+- **Changed:** The action-tracker sync now promotes active `action_item` entities with live `blocked_by` links into durable `blocker` attention items, carries the blocking entity and evidence into the queue payload, and suppresses duplicate stale/overdue follow-up alerts for the same blocked action in that sync pass. Focused attention-sync coverage now proves blocker creation and lifecycle-state preservation.
+- **Why:** `#61` calls for follow-ups, blockers, and risks to stay distinct. Before this slice, Pluto could model a blocked commitment in the entity graph but still only surface it as routine aging follow-up pressure, hiding why the work was stuck.
+- **Replaced:** Treating blocked commitments as only overdue or stale follow-ups in the durable queue even when the graph already had explicit blocker relationships.
+- **Notes:** This is intentionally non-UI groundwork. Dashboard and Meeting View surfaces can render these blocker queue items later without re-deriving blocker semantics from the graph.
+
 ### Make dashboard follow-ups honor durable lifecycle state
 - **Issue:** [#135](https://github.com/metagrover/pluto/issues/135)
 - **PR:** Pending.
@@ -43,6 +51,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still requires the commitment lifecycle to support more than complete-or-dismiss semantics. Pluto's backend and sync path already preserved `snoozed`, but current `master` had no source-meeting UI for deferring routine follow-ups without resolving them or treating them as false positives.
 - **Replaced:** Forcing users to choose only between completing a follow-up or dismissing it entirely even when the real intent was to defer it and come back later.
 - **Notes:** This slice stays scoped to Meeting View follow-ups. It does not add reminder scheduling, notifications, or broader follow-up surfaces.
+
 
 
 ## 2026-05-27
