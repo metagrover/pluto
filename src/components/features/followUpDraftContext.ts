@@ -9,6 +9,7 @@ type MeetingEntitySummary = Entity & {
 
 interface FollowUpDraftContextInput {
   fallbackActionItems: string[];
+  fallbackDecisions?: string[];
   linkedEntities: MeetingEntitySummary[];
   linkedAttentionItems?: MeetingLinkedAttentionItem[];
 }
@@ -22,6 +23,7 @@ interface FollowUpDraftActionItemInput {
 
 export interface FollowUpDraftContext {
   actionItems: string[];
+  decisions: string[];
   participants: string[];
   entityContext: string[];
 }
@@ -131,6 +133,23 @@ const formatActionItem = (
     : entity.name;
 };
 
+const formatDecisionItem = (entity: MeetingEntitySummary): string => {
+  const metadata = parseMetadata<{ rationale?: unknown }>(entity);
+  const metadataRationale =
+    typeof metadata?.rationale === 'string'
+      ? normalizeName(metadata.rationale)
+      : '';
+  const contextRationale = normalizeName(entity.context);
+  const rationaleCandidates = [metadataRationale, contextRationale].filter(
+    Boolean,
+  );
+  const rationale = rationaleCandidates.find(
+    (candidate) => normalizeKey(candidate) !== normalizeKey(entity.name),
+  );
+
+  return rationale ? `${entity.name} (Why: ${rationale})` : entity.name;
+};
+
 const formatParticipant = (entity: MeetingEntitySummary): string => {
   const metadata = parseMetadata<{ role?: unknown }>(entity);
   const role =
@@ -154,6 +173,7 @@ const formatEntityContext = (entity: MeetingEntitySummary): string | null => {
 
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
+  fallbackDecisions = [],
   linkedEntities,
   linkedAttentionItems = [],
 }: FollowUpDraftContextInput): FollowUpDraftContext => {
@@ -207,6 +227,16 @@ export const buildFollowUpDraftContext = ({
   const fallbackOnlyItems = fallbackActionItems.filter(
     (item) => !linkedActionNames.has(normalizeKey(item)),
   );
+  const decisionEntities = linkedEntities
+    .filter((entity) => entity.type === 'decision')
+    .filter((entity) => normalizeName(entity.name))
+    .sort(compareEntities);
+  const linkedDecisionNames = new Set(
+    decisionEntities.map((entity) => normalizeKey(entity.name)),
+  );
+  const fallbackOnlyDecisions = fallbackDecisions.filter(
+    (item) => !linkedDecisionNames.has(normalizeKey(item)),
+  );
   const entityContext: string[] = [];
   const entityContextKeys = new Set<string>();
 
@@ -227,6 +257,13 @@ export const buildFollowUpDraftContext = ({
       actionItems.length > 0
         ? [...actionItems, ...fallbackOnlyItems]
         : fallbackActionItems,
+    decisions:
+      decisionEntities.length > 0
+        ? [
+            ...decisionEntities.map((entity) => formatDecisionItem(entity)),
+            ...fallbackOnlyDecisions,
+          ]
+        : fallbackDecisions,
     participants: people.map(formatParticipant),
     entityContext,
   };

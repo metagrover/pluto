@@ -407,6 +407,37 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('prefers linked decision rationale and preserves unmatched fallback decisions', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      fallbackDecisions: ['Use REST for the rollout', 'Share roadmap update'],
+      linkedEntities: [
+        makeEntity({
+          id: 'decision-1',
+          type: 'decision',
+          name: 'Use REST for the rollout',
+          context: 'Better type safety and query flexibility',
+          mention_count: 3,
+        }),
+      ],
+    });
+
+    expect(context.decisions).toEqual([
+      'Use REST for the rollout (Why: Better type safety and query flexibility)',
+      'Share roadmap update',
+    ]);
+  });
+
+  it('falls back to plain decision text when no linked rationale exists', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      fallbackDecisions: ['Use REST for the rollout'],
+      linkedEntities: [],
+    });
+
+    expect(context.decisions).toEqual(['Use REST for the rollout']);
+  });
+
   it('injects participant context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',

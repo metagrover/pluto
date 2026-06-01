@@ -380,6 +380,7 @@ export const MeetingView = ({
     : [];
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
+    fallbackDecisions: decisions,
     linkedEntities: meetingEntities,
     linkedAttentionItems: meetingAttentionItems,
   });
@@ -864,7 +865,7 @@ export const MeetingView = ({
           meeting={selectedMeeting}
           overview={followUpDraftOverview}
           actionItems={followUpDraftContext.actionItems}
-          decisions={decisions}
+          decisions={followUpDraftContext.decisions}
           entityContext={followUpDraftContext.entityContext}
           discussionPoints={discussionPoints}
           participants={followUpDraftParticipants}
