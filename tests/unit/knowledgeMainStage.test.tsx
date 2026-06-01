@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
-import { MainStage } from '../../src/components/KnowledgeGraph/MainStage';
+import {
+  MainStage,
+  resolveCurrentReadHeadline,
+} from '../../src/components/KnowledgeGraph/MainStage';
 
 const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
   id: 'doc-1',
@@ -22,6 +25,69 @@ const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
 describe('Knowledge MainStage', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('keeps a snapshot-backed current read headline visible when synthesis failed', () => {
+    const selectedDoc = makeDoc({
+      status: 'failed',
+      updated_at: '2026-05-30T11:59:00.000Z',
+    });
+
+    expect(
+      resolveCurrentReadHeadline({
+        selectedDoc,
+        headline: 'Durable snapshot headline remains available.',
+        coverage: {
+          statementCount: 3,
+          citedMeetingCount: 2,
+          dependencyCount: 1,
+        },
+        isCompiled: true,
+        backingSource: 'snapshot',
+      }),
+    ).toBe('Durable snapshot headline remains available.');
+  });
+
+  it('keeps a snapshot-backed current read headline visible when synthesis runs long', () => {
+    const selectedDoc = makeDoc({
+      status: 'synthesizing',
+      updated_at: '2026-05-30T11:00:00.000Z',
+    });
+
+    expect(
+      resolveCurrentReadHeadline({
+        selectedDoc,
+        headline: 'Durable snapshot headline remains available.',
+        coverage: {
+          statementCount: 3,
+          citedMeetingCount: 2,
+          dependencyCount: 1,
+        },
+        isCompiled: true,
+        backingSource: 'snapshot',
+      }),
+    ).toBe('Durable snapshot headline remains available.');
+  });
+
+  it('falls back to failure copy when no snapshot-backed current read exists', () => {
+    const selectedDoc = makeDoc({
+      status: 'failed',
+      updated_at: '2026-05-30T11:59:00.000Z',
+    });
+
+    expect(
+      resolveCurrentReadHeadline({
+        selectedDoc,
+        headline: 'Doc-backed headline should not appear here.',
+        coverage: {
+          statementCount: 0,
+          citedMeetingCount: 0,
+          dependencyCount: 0,
+        },
+        isCompiled: false,
+        backingSource: 'none',
+      }),
+    ).toBe('No current read is available because synthesis failed.');
   });
 
   it('does not repeat a promoted risk in both Needs Attention and Risks and Unknowns', () => {
@@ -279,5 +345,84 @@ describe('Knowledge MainStage', () => {
 
     expect(markup).toContain('2d ago');
     expect(markup).not.toContain('Just now');
+  });
+
+  it('prefers V2 current-read supporting bullets over stream summaries', () => {
+    const supportingBullet =
+      'Instrument the launch path before broadening Active Stream coverage.';
+    const streamSummary =
+      'Launch stream summary should stay in the stream card, not the Current Read support list.';
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        current_read: {
+          headline: 'Launch work remains the most time-sensitive thread.',
+          supporting_bullets: [supportingBullet],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in cited launch reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.86,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'launch',
+            title: 'Launch',
+            domain: 'work',
+            status: 'active',
+            current_read: streamSummary,
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 2,
+            open_follow_up_count: 1,
+            decision_count: 1,
+            unresolved_question_count: 0,
+            pinned: false,
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.84,
+              cited_meeting_count: 2,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain(supportingBullet);
+    expect(markup).toContain(streamSummary);
+    expect(markup).not.toContain(`Launch: ${streamSummary}`);
   });
 });

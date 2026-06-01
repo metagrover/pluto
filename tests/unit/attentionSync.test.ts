@@ -2,12 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const dbState = vi.hoisted(() => ({
   items: [] as Array<Record<string, unknown>>,
+  blockedActions: [] as Array<Record<string, unknown>>,
   overdueActions: [] as Array<Record<string, unknown>>,
   staleActions: [] as Array<Record<string, unknown>>,
   meetingsByEntity: new Map<string, Array<{ meeting_id: string }>>(),
 }));
 
 vi.mock('../../electron/db', () => ({
+  getBlockedActionItems: vi.fn(() => dbState.blockedActions),
   getOverdueActionItems: vi.fn(() => dbState.overdueActions),
   getStaleActionItems: vi.fn(() => dbState.staleActions),
   getMeetingsForEntity: vi.fn(
@@ -168,6 +170,7 @@ const makeKnowledgeDoc = (): KnowledgeV2Document => ({
 describe('attention sync', () => {
   beforeEach(() => {
     dbState.items = [];
+    dbState.blockedActions = [];
     dbState.overdueActions = [];
     dbState.staleActions = [];
     dbState.meetingsByEntity = new Map();
@@ -277,6 +280,71 @@ describe('attention sync', () => {
     ).toBe('resolved');
   });
 
+  it('syncs blocked actions as blocker items and suppresses duplicate routine follow-up alerts', () => {
+    dbState.blockedActions = [
+      {
+        id: 'action-blocked',
+        name: 'Ship launch checklist',
+        due_date: '2026-05-09T00:00:00.000Z',
+        updated_at: '2026-05-08T00:00:00.000Z',
+        blocker_entity_id: 'topic-legal-review',
+        blocker_name: 'Legal review',
+        blocker_meeting_id: 'meeting-9',
+        blocker_evidence_quote: 'We cannot ship until legal signs off.',
+        blocker_updated_at: '2026-05-10T00:00:00.000Z',
+        blocker_relationship_state: 'confirmed',
+      },
+    ];
+    dbState.overdueActions = [
+      {
+        id: 'action-blocked',
+        name: 'Ship launch checklist',
+        due_date: '2026-05-09T00:00:00.000Z',
+        updated_at: '2026-05-08T00:00:00.000Z',
+      },
+    ];
+    dbState.staleActions = [
+      {
+        id: 'action-blocked',
+        name: 'Ship launch checklist',
+        due_date: '2026-05-09T00:00:00.000Z',
+        updated_at: '2026-05-08T00:00:00.000Z',
+      },
+    ];
+    dbState.meetingsByEntity.set('action-blocked', [
+      { meeting_id: 'meeting-1' },
+      { meeting_id: 'meeting-9' },
+    ]);
+
+    syncActionTrackerAttentionQueue();
+
+    const blockedItem = dbState.items.find(
+      (item) => item.dedupe_key === 'action_tracker:blocked:action-blocked',
+    );
+
+    expect(blockedItem).toMatchObject({
+      kind: 'blocker',
+      status: 'active',
+      title: 'Blocked: Ship launch checklist',
+      reason: 'Blocked by Legal review.',
+      source: 'action_tracker',
+      related_entity_ids: ['action-blocked', 'topic-legal-review'],
+    });
+    expect(blockedItem?.evidence).toContainEqual({
+      meeting_id: 'meeting-9',
+      quote: 'We cannot ship until legal signs off.',
+      entity_id: 'topic-legal-review',
+      source_kind: 'blocked_action',
+    });
+    expect(
+      dbState.items.some(
+        (item) =>
+          item.dedupe_key === 'action_tracker:overdue:action-blocked' ||
+          item.dedupe_key === 'action_tracker:stale:action-blocked',
+      ),
+    ).toBe(false);
+  });
+
   it('preserves manual lifecycle states when the same action signal syncs again', () => {
     dbState.items.push({
       id: 'attention-action-dismissed',
@@ -350,5 +418,53 @@ describe('attention sync', () => {
         (item) => item.dedupe_key === 'action_tracker:stale:action-stale',
       )?.status,
     ).toBe('pinned');
+  });
+
+  it('preserves manual lifecycle state when the same blocked action syncs again', () => {
+    dbState.items.push({
+      id: 'attention-action-blocked-dismissed',
+      dedupe_key: 'action_tracker:blocked:action-blocked',
+      kind: 'blocker',
+      severity: 'critical',
+      score: 0.81,
+      status: 'dismissed',
+      title: 'Blocked: Ship launch checklist',
+      reason: 'Blocked by Legal review.',
+      source: 'action_tracker',
+      evidence: [],
+      related_entity_ids: ['action-blocked', 'topic-legal-review'],
+      related_stream_ids: [],
+      related_meeting_ids: ['meeting-9'],
+      created_at: '2026-05-10T00:00:00.000Z',
+      updated_at: '2026-05-10T00:00:00.000Z',
+      last_seen_at: '2026-05-10T00:00:00.000Z',
+      resolved_at: '2026-05-10T00:00:00.000Z',
+    });
+
+    dbState.blockedActions = [
+      {
+        id: 'action-blocked',
+        name: 'Ship launch checklist',
+        due_date: null,
+        updated_at: '2026-05-08T00:00:00.000Z',
+        blocker_entity_id: 'topic-legal-review',
+        blocker_name: 'Legal review',
+        blocker_meeting_id: 'meeting-9',
+        blocker_evidence_quote: 'We cannot ship until legal signs off.',
+        blocker_updated_at: '2026-05-10T00:00:00.000Z',
+        blocker_relationship_state: 'confirmed',
+      },
+    ];
+    dbState.meetingsByEntity.set('action-blocked', [
+      { meeting_id: 'meeting-9' },
+    ]);
+
+    syncActionTrackerAttentionQueue();
+
+    expect(
+      dbState.items.find(
+        (item) => item.dedupe_key === 'action_tracker:blocked:action-blocked',
+      )?.status,
+    ).toBe('dismissed');
   });
 });
