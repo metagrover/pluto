@@ -356,6 +356,7 @@ export const MeetingView = ({
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
+    linkedAttentionItems: meetingAttentionItems,
   });
   const followUpDraftParticipants = Array.from(
     new Set([

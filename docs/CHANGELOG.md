@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-01
+
+### Keep follow-up drafts aligned with handled lifecycle state
+- **Issue:** [#194](https://github.com/metagrover/pluto/issues/194)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up draft context now excludes linked action items that are already completed or whose durable attention item has been dismissed or snoozed, while still keeping active linked follow-ups enriched with owner and due metadata and preserving fallback draft behavior when lifecycle state is unavailable.
+- **Why:** `#61` requires Pluto's follow-up loop to respect the lifecycle state users already control. Before this slice, follow-up drafts could restate already-handled commitments as fresh next steps, undermining trust in the draft output.
+- **Replaced:** Treating every linked follow-up as an open next-step bullet regardless of its existing lifecycle or suppression state.
+- **Notes:** This stays scoped to the draft-context path and does not change queue lifecycle semantics or redesign Meeting View.
+
 ## 2026-05-29
 
 ### Surface blocked follow-ups in the durable attention queue

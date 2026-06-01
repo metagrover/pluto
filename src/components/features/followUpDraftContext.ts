@@ -1,4 +1,5 @@
 import type { Entity } from '../../api/knowledgeGraph';
+import type { MeetingLinkedAttentionItem } from './meetingActionItems';
 
 type MeetingEntitySummary = Entity & {
   mention_count: number;
@@ -8,6 +9,7 @@ type MeetingEntitySummary = Entity & {
 interface FollowUpDraftContextInput {
   fallbackActionItems: string[];
   linkedEntities: MeetingEntitySummary[];
+  linkedAttentionItems?: MeetingLinkedAttentionItem[];
 }
 
 export interface FollowUpDraftContext {
@@ -72,19 +74,30 @@ const formatActionItem = (
 export const buildFollowUpDraftContext = ({
   fallbackActionItems,
   linkedEntities,
+  linkedAttentionItems = [],
 }: FollowUpDraftContextInput): FollowUpDraftContext => {
   const people = linkedEntities
     .filter((entity) => entity.type === 'person')
     .filter((entity) => normalizeName(entity.name))
     .sort(compareEntities);
   const peopleById = new Map(people.map((entity) => [entity.id, entity.name]));
+  const suppressedEntityIds = new Set(
+    linkedAttentionItems
+      .filter(
+        (item) => item.status === 'dismissed' || item.status === 'snoozed',
+      )
+      .flatMap((item) => item.related_entity_ids),
+  );
 
-  const actionEntities = linkedEntities
+  const allLinkedActionEntities = linkedEntities
     .filter((entity) => entity.type === 'action_item')
-    .filter((entity) => normalizeName(entity.name))
+    .filter((entity) => normalizeName(entity.name));
+  const actionEntities = allLinkedActionEntities
+    .filter((entity) => entity.status !== 'completed')
+    .filter((entity) => !suppressedEntityIds.has(entity.id))
     .sort(compareEntities);
   const linkedActionNames = new Set(
-    actionEntities.map((entity) => normalizeKey(entity.name)),
+    allLinkedActionEntities.map((entity) => normalizeKey(entity.name)),
   );
   const actionItems = actionEntities.map((entity) =>
     formatActionItem(entity, peopleById),
