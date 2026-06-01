@@ -680,13 +680,24 @@ export const getFollowUpDraftsPrompt = (params: {
   participants?: string[];
   actionItems: string[];
   decisions: string[];
+  openQuestions?: string[];
   customPrompt?: string;
 }): string => {
-  const { meetingTitle, participants, actionItems, decisions, customPrompt } =
-    params;
+  const {
+    meetingTitle,
+    participants,
+    actionItems,
+    decisions,
+    openQuestions,
+    customPrompt,
+  } = params;
   const participantBullets =
     participants?.length && participants.length > 0
       ? participants.map((participant) => `- ${participant}`).join('\n')
+      : '- None recorded';
+  const openQuestionBullets =
+    openQuestions?.length && openQuestions.length > 0
+      ? openQuestions.map((question) => `- ${question}`).join('\n')
       : '- None recorded';
 
   return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
@@ -696,6 +707,8 @@ Participants:
 ${participantBullets}
 Decisions:
 ${decisions.map((d) => `- ${d}`).join('\n') || '- None recorded'}
+Open Questions:
+${openQuestionBullets}
 Action Items:
 ${actionItems.map((a) => `- ${a}`).join('\n') || '- None recorded'}
 

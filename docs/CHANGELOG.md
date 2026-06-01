@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-29
 
+### Include unresolved questions in meeting follow-up drafts
+- **Issue:** [#180](https://github.com/metagrover/pluto/issues/180)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now carry unresolved question context forward when the selected meeting's V3 analysis includes topic-level open questions. Default draft templates render an `Open Questions` block only when those questions exist, and regenerate prompts receive the same context so rewritten drafts keep the unanswered threads visible.
+- **Why:** `#61` is still the earliest unfinished roadmap outcome under `#65`, and Pluto already preserves unresolved questions in the meeting analysis schema. Before this slice, follow-up drafts only reused decisions, participants, and action items, which made recap drafts weaker at capturing what still needed an answer before commitments could move.
+- **Replaced:** Dropping unresolved-question context on the floor between meeting analysis and follow-up draft generation even when Pluto had already extracted those open threads.
+- **Notes:** This slice stays scoped to Meeting View draft context. It does not redesign the draft surface or change lifecycle/blocker scoring.
+
 ### Let Meeting View snooze extracted follow-ups
 - **Issue:** [#132](https://github.com/metagrover/pluto/issues/132)
 - **PR:** Pending.

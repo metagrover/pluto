@@ -34,6 +34,7 @@ describe('buildFollowUpDraftContext', () => {
   it('prefers linked action-item metadata and resolves participant ids to names', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: ['Plain fallback item'],
+      fallbackOpenQuestions: [],
       linkedEntities: [
         makeEntity({
           id: 'person-2',
@@ -68,6 +69,7 @@ describe('buildFollowUpDraftContext', () => {
   it('falls back to the existing action-item strings when no linked action items exist', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: ['Confirm launch plan'],
+      fallbackOpenQuestions: [],
       linkedEntities: [
         makeEntity({
           id: 'person-1',
@@ -84,6 +86,7 @@ describe('buildFollowUpDraftContext', () => {
   it('keeps raw owner and due values when linked people or ISO dates are unavailable', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [],
+      fallbackOpenQuestions: [],
       linkedEntities: [
         makeEntity({
           id: 'action-1',
@@ -101,16 +104,39 @@ describe('buildFollowUpDraftContext', () => {
     expect(context.participants).toEqual([]);
   });
 
+  it('dedupes unresolved questions and carries them into the draft context', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      fallbackOpenQuestions: [
+        'Who owns the migration rollback?',
+        'Who owns the migration rollback?',
+        '  Should we stage the launch by cohort?  ',
+        '',
+      ],
+      linkedEntities: [],
+    });
+
+    expect(context.openQuestions).toEqual([
+      'Who owns the migration rollback?',
+      'Should we stage the launch by cohort?',
+    ]);
+  });
+
   it('injects participant context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
       decisions: ['Use REST for the rollout'],
+      openQuestions: ['Who owns the migration rollback?'],
       participants: ['Sarah Chen', 'Alex Rivera'],
     });
 
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain('Open Questions:');
+    expect(drafts.client).toContain('- Who owns the migration rollback?');
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.internal).toContain('Open Questions:');
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.slack).toContain('Open Questions:');
   });
 });

@@ -353,8 +353,17 @@ export const MeetingView = ({
     [];
   const decisions =
     v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const openQuestions = Array.from(
+    new Set(
+      v3?.topics
+        .flatMap((topic) => topic.open_questions)
+        .map((question) => question.trim())
+        .filter(Boolean) || [],
+    ),
+  );
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
+    fallbackOpenQuestions: openQuestions,
     linkedEntities: meetingEntities,
   });
   const followUpDraftParticipants = Array.from(
@@ -835,6 +844,7 @@ export const MeetingView = ({
           meeting={selectedMeeting}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
+          openQuestions={followUpDraftContext.openQuestions}
           participants={followUpDraftParticipants}
           fetchMeetings={fetchMeetings}
         />
