@@ -1,4 +1,4 @@
-import type { Entity } from '../../api/knowledgeGraph';
+import { type Entity, parseMetadata } from '../../api/knowledgeGraph';
 import type { AnalysisDocumentV3, TopicSection } from '../../types';
 
 type MeetingEntitySummary = Entity & {
@@ -91,6 +91,14 @@ const formatActionItem = (
     : entity.name;
 };
 
+const formatParticipant = (entity: MeetingEntitySummary): string => {
+  const metadata = parseMetadata<{ role?: unknown }>(entity);
+  const role =
+    typeof metadata?.role === 'string' ? normalizeName(metadata.role) : '';
+
+  return role ? `${entity.name} (${role})` : entity.name;
+};
+
 const formatTopicAwareDecision = (text: string, topicTitle: string): string =>
   topicTitle ? `${text} (Topic: ${topicTitle})` : text;
 
@@ -147,7 +155,7 @@ export const buildFollowUpDraftContext = ({
       actionItems.length > 0
         ? [...actionItems, ...fallbackOnlyItems]
         : fallbackActionItems,
-    participants: people.map((entity) => entity.name),
+    participants: people.map(formatParticipant),
     entityContext,
   };
 };

@@ -77,6 +77,7 @@ describe('buildFollowUpDraftContext', () => {
           id: 'person-1',
           type: 'person',
           name: 'Sarah Chen',
+          metadata: JSON.stringify({ role: 'Engineering Lead' }),
           mention_count: 4,
         }),
       ],
@@ -86,7 +87,10 @@ describe('buildFollowUpDraftContext', () => {
       'Send rollout email (Owner: Sarah Chen | Due: May 30)',
       'Plain fallback item',
     ]);
-    expect(context.participants).toEqual(['Sarah Chen', 'Alex Rivera']);
+    expect(context.participants).toEqual([
+      'Sarah Chen (Engineering Lead)',
+      'Alex Rivera',
+    ]);
     expect(context.entityContext).toEqual([]);
   });
 
@@ -126,6 +130,22 @@ describe('buildFollowUpDraftContext', () => {
     ]);
     expect(context.participants).toEqual([]);
     expect(context.entityContext).toEqual([]);
+  });
+
+  it('falls back to plain participant names when metadata is malformed', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Taylor Brooks',
+          metadata: '{bad-json',
+        }),
+      ],
+    });
+
+    expect(context.participants).toEqual(['Taylor Brooks']);
   });
 
   it('derives deduped topic and project context lines from linked entities', () => {
@@ -203,7 +223,7 @@ describe('buildFollowUpDraftContext', () => {
         'The team needs provenance on each API response.',
         'The graph schema still needs validation before rollout.',
       ],
-      participants: ['Sarah Chen', 'Alex Rivera'],
+      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
       openQuestions: [
         'API Migration: Should the mobile client move in the same release?',
       ],
@@ -213,7 +233,9 @@ describe('buildFollowUpDraftContext', () => {
     expect(drafts.client).toContain(
       'Context:\n- The team aligned on the rollout shape and timing.',
     );
-    expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain(
+      'Participants: Sarah Chen (Engineering Lead), Alex Rivera',
+    );
     expect(drafts.client).toContain(
       'Linked Context:\n- Project: Apollo rollout',
     );
@@ -226,7 +248,9 @@ describe('buildFollowUpDraftContext', () => {
     expect(drafts.internal).toContain(
       'Context:\n- The team aligned on the rollout shape and timing.',
     );
-    expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.internal).toContain(
+      'Participants: Sarah Chen (Engineering Lead), Alex Rivera',
+    );
     expect(drafts.internal).toContain(
       'Linked Context:\n- Project: Apollo rollout',
     );
@@ -236,7 +260,9 @@ describe('buildFollowUpDraftContext', () => {
     expect(drafts.slack).toContain(
       '*Context:*\n- The team aligned on the rollout shape and timing.',
     );
-    expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.slack).toContain(
+      '*Participants:* Sarah Chen (Engineering Lead), Alex Rivera',
+    );
     expect(drafts.slack).toContain(
       '*Linked Context:*\n- Project: Apollo rollout',
     );
