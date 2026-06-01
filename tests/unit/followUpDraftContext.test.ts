@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   buildDefaultDrafts,
-  buildFollowUpDraftDiscussionPoints,
   buildFollowUpDraftContext,
+  buildFollowUpDraftDiscussionPoints,
 } from '../../src/components/features/followUpDraftContext';
 
 type MeetingEntitySummary = Entity & {
