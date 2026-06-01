@@ -52,7 +52,11 @@ import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
 import {
   buildFollowUpDraftContext,
+  buildFollowUpDraftDecisions,
+  buildFollowUpDraftDiscussionPoints,
   buildFollowUpDraftOpenQuestions,
+  buildFollowUpDraftTopicSummaries,
+  formatFollowUpDraftActionItem,
 } from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
@@ -341,21 +345,32 @@ export const MeetingView = ({
   const summaryParagraphs = v2?.summary?.length
     ? v2.summary
     : ['No summary was generated for this meeting.'];
+  const followUpDraftOverview = (
+    v3?.overview ? [v3.overview] : v2?.summary || []
+  )
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
   const keyPoints = v2?.key_points || [];
   const actionItems =
     v3?.all_action_items.map((item) => {
-      const details = [
-        item.assignee ? `Owner: ${item.assignee}` : '',
-        item.due ? `Due: ${item.due}` : '',
-      ]
-        .filter(Boolean)
-        .join(' | ');
-      return details ? `${item.text} (${details})` : item.text;
+      return formatFollowUpDraftActionItem({
+        text: item.text,
+        topic: item.topic,
+        assignee: item.assignee,
+        due: item.due,
+      });
     }) ||
     v2?.action_items ||
     [];
-  const decisions =
-    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
+  const decisions = buildFollowUpDraftDecisions({
+    fallbackDecisions:
+      v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [],
+    analysis: v3,
+  });
+  const discussionPoints = buildFollowUpDraftDiscussionPoints(v3?.topics);
+  const followUpDraftTopicSummaries = v3
+    ? buildFollowUpDraftTopicSummaries(v3.topics)
+    : [];
   const followUpDraftContext = buildFollowUpDraftContext({
     fallbackActionItems: actionItems,
     linkedEntities: meetingEntities,
@@ -839,10 +854,13 @@ export const MeetingView = ({
       <div className="mb-12 space-y-6">
         <FollowUpDrafts
           meeting={selectedMeeting}
+          overview={followUpDraftOverview}
           actionItems={followUpDraftContext.actionItems}
           decisions={decisions}
+          discussionPoints={discussionPoints}
           participants={followUpDraftParticipants}
           openQuestions={followUpDraftOpenQuestions}
+          topicSummaries={followUpDraftTopicSummaries}
           fetchMeetings={fetchMeetings}
         />
 
