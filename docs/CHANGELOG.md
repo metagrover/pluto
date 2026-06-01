@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-01
+
+### Include topic summaries in meeting follow-up drafts
+- **Issue:** [#186](https://github.com/metagrover/pluto/issues/186)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up drafts now carry per-topic V3 summary context through both the default draft templates and the regenerate prompt. Pluto dedupes empty or repeated topic summaries before formatting them into a compact `Discussion Context` block, so the LLM and saved drafts see the same grounded overview of each thread.
+- **Why:** `#61` still calls for follow-up drafts that reuse the meeting context Pluto already extracted. Current `master` had decisions, action items, participants, key points, and open-question slices in flight or landed, but it still dropped the concise per-topic summaries that explain what each thread was actually about.
+- **Replaced:** Treating follow-up drafts as lists of decisions and actions plus adjacent context fragments, without reusing the topic-level summary text already stored in the V3 meeting analysis.
+- **Notes:** This stays inside the existing Meeting View draft surface. It does not redesign the UI or broaden into sending integrations or new follow-up surfaces.
+
 ## 2026-05-29
 
 ### Let Meeting View snooze extracted follow-ups

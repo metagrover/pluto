@@ -20,6 +20,7 @@ interface FollowUpDraftsProps {
   actionItems: string[];
   decisions: string[];
   participants: string[];
+  topicSummaries: string[];
   fetchMeetings: () => void;
 }
 
@@ -45,6 +46,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   actionItems,
   decisions,
   participants,
+  topicSummaries,
   fetchMeetings,
 }) => {
   const [drafts, setDrafts] = useState<Drafts>({});
@@ -57,6 +59,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const meetingTitle = meeting.title;
   const actionItemsKey = actionItems.join('\n');
   const decisionsKey = decisions.join('\n');
+  const topicSummariesKey = topicSummaries.join('\n');
   const defaultDrafts = useMemo(
     () =>
       buildDefaultDrafts({
@@ -64,8 +67,15 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         decisions: decisionsKey ? decisionsKey.split('\n') : [],
         meetingTitle,
         participants,
+        topicSummaries: topicSummariesKey ? topicSummariesKey.split('\n') : [],
       }),
-    [actionItemsKey, decisionsKey, meetingTitle, participants],
+    [
+      actionItemsKey,
+      decisionsKey,
+      meetingTitle,
+      participants,
+      topicSummariesKey,
+    ],
   );
 
   useEffect(() => {
@@ -103,6 +113,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       const res = await window.ipcRenderer.invoke('GENERATE_FOLLOW_UPS', {
         meetingTitle,
         participants,
+        topicSummaries,
         actionItems,
         decisions,
         customPrompt: customPrompt.trim() || undefined,

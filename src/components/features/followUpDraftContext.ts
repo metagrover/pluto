@@ -20,6 +20,7 @@ export interface DefaultDraftsInput {
   actionItems: string[];
   decisions: string[];
   participants: string[];
+  topicSummaries: string[];
 }
 
 export type DraftId = 'client' | 'internal' | 'slack';
@@ -105,24 +106,53 @@ export const buildFollowUpDraftContext = ({
 const toBullets = (items: string[], fallback: string) =>
   items.length ? items.map((item) => `- ${item}`).join('\n') : fallback;
 
+export const buildFollowUpDraftTopicSummaries = (
+  topics: Array<{ title?: string | null; summary?: string | null }>,
+): string[] => {
+  const seen = new Set<string>();
+  const topicSummaries: string[] = [];
+
+  for (const topic of topics) {
+    const title = normalizeName(topic.title);
+    const summary = normalizeName(topic.summary);
+    if (!summary) continue;
+
+    const formatted = title ? `${title}: ${summary}` : summary;
+    const normalized = normalizeKey(formatted);
+    if (seen.has(normalized)) continue;
+
+    seen.add(normalized);
+    topicSummaries.push(formatted);
+  }
+
+  return topicSummaries;
+};
+
 export const buildDefaultDrafts = ({
   meetingTitle,
   actionItems,
   decisions,
   participants,
+  topicSummaries,
 }: DefaultDraftsInput): Drafts => {
   const actions = toBullets(actionItems, '- None');
   const decisionBullets = toBullets(decisions, '- None');
   const participantLine = participants.length
     ? `\nParticipants: ${participants.join(', ')}`
     : '';
+  const discussionContextBlock = topicSummaries.length
+    ? `\n\nDiscussion Context:\n${toBullets(topicSummaries, '- None')}`
+    : '';
   const slackParticipantBlock = participants.length
     ? `\n*Participants:* ${participants.join(', ')}\n`
     : '\n';
+  const slackDiscussionContextBlock = topicSummaries.length
+    ? `\n*Discussion Context:*\n${toBullets(topicSummaries, '- None')}\n`
+    : '\n';
 
   return {
-    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
-    internal: `Team, session on ${meetingTitle}:${participantLine}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
-    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
+    client: `Subject: Recap: ${meetingTitle}\n\nHi Team,\n\nMeeting: ${meetingTitle}${participantLine}${discussionContextBlock}\n\nDecisions:\n${decisionBullets}\n\nNext Steps:\n${actions}`,
+    internal: `Team, session on ${meetingTitle}:${participantLine}${discussionContextBlock}\n\nDecisions:\n${decisionBullets}\n\nActions:\n${actions}`,
+    slack: `*Recap: ${meetingTitle}*\n${slackParticipantBlock}${slackDiscussionContextBlock}\n*Decisions:*\n${decisionBullets}\n\n*Action Items:*\n${actions}`,
   };
 };

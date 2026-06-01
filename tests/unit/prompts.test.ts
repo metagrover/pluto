@@ -274,6 +274,7 @@ describe('getFollowUpDraftsPrompt', () => {
     const prompt = getFollowUpDraftsPrompt({
       meetingTitle: 'API Migration Review',
       participants: ['Sarah Chen', 'Alex Rivera'],
+      topicSummaries: ['API Migration: The team aligned on rollout scope.'],
       decisions: ['Use REST for the rollout'],
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: Friday)'],
     });
@@ -281,6 +282,10 @@ describe('getFollowUpDraftsPrompt', () => {
     expect(prompt).toContain('Participants:');
     expect(prompt).toContain('- Sarah Chen');
     expect(prompt).toContain('- Alex Rivera');
+    expect(prompt).toContain('Discussion Context:');
+    expect(prompt).toContain(
+      '- API Migration: The team aligned on rollout scope.',
+    );
     expect(prompt).toContain('Decisions:');
     expect(prompt).toContain('Action Items:');
     expect(prompt).toContain(
@@ -296,6 +301,8 @@ describe('getFollowUpDraftsPrompt', () => {
     });
 
     expect(prompt).toContain('Participants:');
+    expect(prompt).toContain('- None recorded');
+    expect(prompt).toContain('Discussion Context:');
     expect(prompt).toContain('- None recorded');
   });
 });

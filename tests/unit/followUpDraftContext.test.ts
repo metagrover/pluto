@@ -4,6 +4,7 @@ import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   buildDefaultDrafts,
   buildFollowUpDraftContext,
+  buildFollowUpDraftTopicSummaries,
 } from '../../src/components/features/followUpDraftContext';
 
 type MeetingEntitySummary = Entity & {
@@ -107,10 +108,36 @@ describe('buildFollowUpDraftContext', () => {
       actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
       decisions: ['Use REST for the rollout'],
       participants: ['Sarah Chen', 'Alex Rivera'],
+      topicSummaries: ['API Migration: The team aligned on rollout scope.'],
     });
 
     expect(drafts.client).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.client).toContain(
+      'Discussion Context:\n- API Migration: The team aligned on rollout scope.',
+    );
     expect(drafts.internal).toContain('Participants: Sarah Chen, Alex Rivera');
+    expect(drafts.internal).toContain(
+      'Discussion Context:\n- API Migration: The team aligned on rollout scope.',
+    );
     expect(drafts.slack).toContain('*Participants:* Sarah Chen, Alex Rivera');
+    expect(drafts.slack).toContain(
+      '*Discussion Context:*\n- API Migration: The team aligned on rollout scope.',
+    );
+  });
+});
+
+describe('buildFollowUpDraftTopicSummaries', () => {
+  it('formats topic-labeled summaries and removes empty or duplicate items', () => {
+    expect(
+      buildFollowUpDraftTopicSummaries([
+        { title: 'API Migration', summary: 'Align on rollout scope.' },
+        { title: 'Launch Prep', summary: 'Confirm owner handoff.' },
+        { title: 'API Migration', summary: 'Align on rollout scope.' },
+        { title: 'Ignored', summary: '   ' },
+      ]),
+    ).toEqual([
+      'API Migration: Align on rollout scope.',
+      'Launch Prep: Confirm owner handoff.',
+    ]);
   });
 });
