@@ -51,6 +51,14 @@ const buildWorkingMemorySnapshot = ({
       ...item,
     })),
     evidence_index: structured.evidence_index.map((entry) => ({ ...entry })),
+    source_quality_summary: {
+      included_count: structured.source_quality_summary.included_count,
+      excluded_count: structured.source_quality_summary.excluded_count,
+      weak_count: structured.source_quality_summary.weak_count,
+      records: structured.source_quality_summary.records.map((record) => ({
+        ...record,
+      })),
+    },
   };
 
   return {

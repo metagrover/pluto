@@ -344,6 +344,9 @@ describe('working memory snapshots', () => {
       meeting_id: 'meeting-1',
       item_ids: ['item-follow-up'],
     });
+    expect(snapshot.payload.source_quality_summary).toEqual(
+      makeKnowledgeSnapshotDoc().source_quality_summary,
+    );
   });
 
   it('persists a global snapshot and reads it back by scope', () => {

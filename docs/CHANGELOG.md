@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-05-31
 
+### Preserve source-quality detail in snapshot-backed Knowledge briefs
+- **Issue:** [#161](https://github.com/metagrover/pluto/issues/161)
+- **PR:** Pending.
+- **Changed:** Working-memory snapshots now preserve `source_quality_summary` from compiled Knowledge V2 documents, and snapshot-backed Knowledge brief compilation now surfaces that preserved included/excluded/weak-source detail back into the Current Read trust panel instead of dropping it. Focused unit coverage now proves both snapshot persistence and snapshot-backed brief rendering of the summary.
+- **Why:** `#81` and `#80` require generated Knowledge surfaces to read from durable working memory without losing the trust context that made the original synthesis honest. Before this slice, Pluto could correctly prefer a persisted snapshot for Current Read while silently stripping the source-quality summary users need to judge coverage.
+- **Replaced:** Treating snapshot-backed Knowledge views as a thinner trust surface than the compiled Knowledge V2 document they were derived from.
+- **Notes:** This slice keeps the existing UI and snapshot selection rules intact. It only restores preserved source-quality detail when a valid snapshot already exists.
 ### Align Knowledge Current Read source counts with rendered backing state
 - **Issue:** [#159](https://github.com/metagrover/pluto/issues/159)
 - **PR:** Pending.

@@ -606,7 +606,19 @@ describe('knowledge document utilities', () => {
       }),
     });
 
-    const brief = compileKnowledgeBrief(doc, makeWorkingMemorySnapshot());
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      payload: {
+        ...baseSnapshot.payload,
+        source_quality_summary: {
+          included_count: 3,
+          excluded_count: 1,
+          weak_count: 1,
+          records: [],
+        },
+      } as WorkingMemorySnapshot['payload'],
+    });
 
     expect(brief.headline).toBe(
       'Snapshot-backed current read is now the durable source.',
@@ -617,6 +629,11 @@ describe('knowledge document utilities', () => {
     ]);
     expect(brief.activeStreams[0].title).toBe('Launch');
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
+    expect(brief.sourceQuality).toMatchObject({
+      included_count: 3,
+      excluded_count: 1,
+      weak_count: 1,
+    });
     expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
     expect(brief.coverage).toMatchObject({
       sourceCount: 3,

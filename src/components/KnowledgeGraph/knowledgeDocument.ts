@@ -637,7 +637,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
     patterns: payload.patterns,
     risks_and_unknowns: payload.risks_and_unknowns,
     evidence_index: payload.evidence_index,
-    source_quality_summary: {
+    source_quality_summary: payload.source_quality_summary ?? {
       included_count: snapshot.source_count,
       excluded_count: 0,
       weak_count: 0,
@@ -867,7 +867,7 @@ export const compileKnowledgeBrief = (
     return buildKnowledgeBriefFromV2({
       v2: snapshotV2,
       trustStatus: workingMemorySnapshot.trust_status,
-      sourceQuality: null,
+      sourceQuality: snapshotV2.source_quality_summary,
     });
   }
 
