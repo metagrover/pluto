@@ -270,7 +270,9 @@ export const buildFollowUpDraftContext = ({
     .filter((entity) => normalizeName(entity.name));
   const fallbackDetailsByActionKey = new Map(
     fallbackActionItems
-      .map((item) => [normalizeKey(item), getFallbackActionDetails(item)] as const)
+      .map(
+        (item) => [normalizeKey(item), getFallbackActionDetails(item)] as const,
+      )
       .filter(([, details]) => Object.values(details).some(Boolean)),
   );
   const actionEntities = allLinkedActionEntities
