@@ -240,6 +240,26 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('preserves fallback owner and due detail when linked action items are sparser', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Send rollout email (Topic: Launch planning | Owner: Sarah Chen | Due: Friday)',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Send rollout email',
+          context: 'Needs final approval before send.',
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Send rollout email (Topic: Launch planning | Owner: Sarah Chen | Due: Friday | Context: Needs final approval before send.)',
+    ]);
+  });
+
   it('omits completed, dismissed, and snoozed follow-ups from draft action items', () => {
     const linkedAttentionItems: MeetingLinkedAttentionItem[] = [
       {
