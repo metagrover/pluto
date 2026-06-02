@@ -21,6 +21,12 @@ interface FollowUpDraftActionItemInput {
   due?: string;
 }
 
+interface FallbackActionDetails {
+  topic: string;
+  owner: string;
+  due: string;
+}
+
 export interface FollowUpDraftContext {
   actionItems: string[];
   decisions: string[];
@@ -128,35 +134,51 @@ const formatLifecycleLabel = (
   return '';
 };
 
-const getFallbackActionTopic = (value: string): string => {
+const getFallbackActionDetails = (value: string): FallbackActionDetails => {
   const detailsMatch = value.match(/\((.+)\)\s*$/);
-  if (!detailsMatch) return '';
+  if (!detailsMatch) return { topic: '', owner: '', due: '' };
+
+  const fallbackDetails: FallbackActionDetails = {
+    topic: '',
+    owner: '',
+    due: '',
+  };
 
   for (const detail of detailsMatch[1].split('|')) {
     const normalized = normalizeName(detail);
-    if (!normalized.toLowerCase().startsWith('topic:')) continue;
-    return normalizeName(normalized.slice('topic:'.length));
+    const lower = normalized.toLowerCase();
+    if (lower.startsWith('topic:')) {
+      fallbackDetails.topic = normalizeName(normalized.slice('topic:'.length));
+      continue;
+    }
+    if (lower.startsWith('owner:')) {
+      fallbackDetails.owner = normalizeName(normalized.slice('owner:'.length));
+      continue;
+    }
+    if (lower.startsWith('due:')) {
+      fallbackDetails.due = normalizeName(normalized.slice('due:'.length));
+    }
   }
 
-  return '';
+  return fallbackDetails;
 };
 
 const formatActionItem = (
   entity: MeetingEntitySummary,
   peopleById: Map<string, { name: string; role: string }>,
   blockerReasonByEntityId: Map<string, string>,
-  fallbackTopic = '',
+  fallbackDetails: FallbackActionDetails,
 ): string => {
   const ownerId = normalizeName(entity.assigned_to);
   const owner = ownerId ? peopleById.get(ownerId) : null;
-  const ownerName = owner?.name ?? ownerId;
+  const ownerName = owner?.name || fallbackDetails.owner || ownerId;
   const ownerRole = owner?.role ?? '';
-  const dueLabel = formatDueLabel(entity.due_date);
+  const dueLabel = formatDueLabel(entity.due_date) || fallbackDetails.due;
   const contextLabel = normalizeName(entity.context);
   const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
   const lifecycleLabel = formatLifecycleLabel(entity.status);
   const details = [
-    fallbackTopic ? `Topic: ${fallbackTopic}` : '',
+    fallbackDetails.topic ? `Topic: ${fallbackDetails.topic}` : '',
     lifecycleLabel ? `Status: ${lifecycleLabel}` : '',
     ownerName
       ? `Owner: ${ownerRole ? `${ownerName} (${ownerRole})` : ownerName}`
@@ -292,12 +314,12 @@ export const buildFollowUpDraftContext = ({
   const allLinkedActionEntities = linkedEntities
     .filter((entity) => entity.type === 'action_item')
     .filter((entity) => normalizeName(entity.name));
-  const fallbackTopicByActionKey = new Map(
+  const fallbackDetailsByActionKey = new Map(
     fallbackActionItems
       .map(
-        (item) => [normalizeKey(item), getFallbackActionTopic(item)] as const,
+        (item) => [normalizeKey(item), getFallbackActionDetails(item)] as const,
       )
-      .filter(([, topic]) => Boolean(topic)),
+      .filter(([, details]) => Object.values(details).some(Boolean)),
   );
   const actionEntities = allLinkedActionEntities
     .filter((entity) => entity.status !== 'completed')
@@ -311,7 +333,11 @@ export const buildFollowUpDraftContext = ({
       entity,
       peopleById,
       blockerReasonByEntityId,
-      fallbackTopicByActionKey.get(normalizeKey(entity.name)) ?? '',
+      fallbackDetailsByActionKey.get(normalizeKey(entity.name)) ?? {
+        topic: '',
+        owner: '',
+        due: '',
+      },
     ),
   );
   const fallbackOnlyItems = fallbackActionItems.filter(

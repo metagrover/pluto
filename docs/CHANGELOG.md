@@ -28,6 +28,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Treating linked decision entities as a reason to overwrite richer V3 draft lines instead of using them as the canonical dedupe key while preserving the best available detail.
 - **Notes:** This change stays inside the shared follow-up draft formatter, so both default drafts and regenerated drafts inherit the same richer decision output without a Meeting View redesign.
 
+### Preserve linked action-item owner and due detail in follow-up drafts
+- **Issue:** [#211](https://github.com/metagrover/pluto/issues/211)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now preserve fallback `Owner: ...` and `Due: ...` detail when the same action item is also linked through meeting entities whose graph metadata is thinner, while still preferring linked lifecycle state, blocker context, role-aware owner formatting, and per-meeting context whenever Pluto has richer linked data. Focused regression coverage now proves the shared draft-context merge keeps those fallback accountability details instead of dropping them.
+- **Why:** `#61` requires follow-up drafts to reuse the meeting accountability context Pluto already knows. Before this slice, linked-entity dedupe could silently strip owner and due detail that had already been derived from V3 analysis, making the same follow-up read less actionable once linked context was present.
+- **Replaced:** Letting linked action-entity dedupe collapse owner/due-aware fallback draft lines down to topic-plus-context output when the linked entity lacked equivalent metadata.
+- **Notes:** This stays inside the shared follow-up draft context helper, so both default drafts and regenerate prompts keep the same richer action-line behavior.
+
 ### Preserve linked action-item topic detail in follow-up drafts
 - **Issue:** [#209](https://github.com/metagrover/pluto/issues/209)
 - **PR:** Pending.
