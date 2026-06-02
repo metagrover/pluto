@@ -212,7 +212,8 @@ const formatActionItem = (
   const fallbackOwner = parseOwnerLabel(fallbackDetails.owner);
   const ownerName = owner?.name || fallbackOwner.name || ownerId;
   const ownerMatchesFallback =
-    !owner?.name || normalizeKey(owner.name) === normalizeKey(fallbackOwner.name);
+    !owner?.name ||
+    normalizeKey(owner.name) === normalizeKey(fallbackOwner.name);
   const ownerRole =
     owner?.role || (ownerMatchesFallback ? fallbackOwner.role : '');
   const dueLabel = formatDueLabel(entity.due_date) || fallbackDetails.due;
