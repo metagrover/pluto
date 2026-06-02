@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-02
+
+### Unblock pre-commit audit by remediating vulnerable Vitest
+- **Issue:** [#205](https://github.com/metagrover/pluto/issues/205)
+- **PR:** Pending.
+- **Changed:** Pluto now resolves Vitest to the patched `4.1.x` line instead of `4.0.18`, and the lockfile refresh removes the repo's current critical `pnpm audit --audit-level high` failure on advisory `GHSA-5xrq-8626-4rwp`.
+- **Why:** The pre-commit audit hook had become a delivery blocker for ordinary code issues like `#204`, because any code commit hit the existing critical Vitest advisory before it could ship.
+- **Replaced:** Accepting a known critical audit failure in the shared commit path while treating it as unrelated dependency noise.
+- **Notes:** This is intentionally the smallest safe dependency remediation. The existing moderate/low audit findings remain below the current hook threshold and were left untouched in this slice.
+
 ## 2026-05-31
 
 ### Add evidence drilldown for Knowledge Active Streams
