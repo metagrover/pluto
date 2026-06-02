@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-02
 
+### Preserve linked action-item owner role detail in follow-up drafts
+- **Issue:** [#216](https://github.com/metagrover/pluto/issues/216)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now preserve richer fallback `Owner: ... (...)` role detail when the same action item is also linked through meeting entities whose person metadata is thinner, while still preferring linked owner-role metadata when Pluto has something more specific. Focused regression coverage now proves the shared draft-context merge keeps that owner-role accountability detail instead of collapsing to a bare name.
+- **Why:** `#61` is only trustworthy if the shared draft path keeps the best accountability context Pluto already knows. Before this slice, a linked person entity with just `Sarah Chen` could silently overwrite a richer fallback line like `Owner: Sarah Chen (Head of Product)`, making the same follow-up read less specific once linked context was present.
+- **Replaced:** Letting linked action-entity dedupe treat any linked owner name as authoritative even when the fallback draft line already carried a richer owner role label for the same person.
+- **Notes:** This remains inside the shared follow-up draft context helper, so both default drafts and regenerate prompts inherit the same owner-role preservation behavior without a Meeting View redesign.
+
 ### Preserve rich linked decision detail in follow-up drafts
 - **Issue:** [#204](https://github.com/metagrover/pluto/issues/204)
 - **PR:** Pending.

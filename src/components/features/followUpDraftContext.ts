@@ -29,6 +29,11 @@ interface FallbackActionDetails {
   context: string;
 }
 
+interface OwnerLabel {
+  name: string;
+  role: string;
+}
+
 export interface FollowUpDraftContext {
   actionItems: string[];
   decisions: string[];
@@ -105,6 +110,21 @@ const parseRoleFromContext = (value: string | null | undefined): string => {
   if (!normalized) return '';
   const match = normalized.match(/^Role:\s*(.+)$/i);
   return match ? normalizeName(match[1]) : '';
+};
+
+const parseOwnerLabel = (value: string): OwnerLabel => {
+  const normalized = normalizeName(value);
+  if (!normalized) return { name: '', role: '' };
+
+  const match = normalized.match(/^(.*?)\s+\((.+)\)$/);
+  if (!match) {
+    return { name: normalized, role: '' };
+  }
+
+  return {
+    name: normalizeName(match[1]),
+    role: normalizeName(match[2]),
+  };
 };
 
 const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
@@ -189,8 +209,12 @@ const formatActionItem = (
 ): string => {
   const ownerId = normalizeName(entity.assigned_to);
   const owner = ownerId ? peopleById.get(ownerId) : null;
-  const ownerName = owner?.name || fallbackDetails.owner || ownerId;
-  const ownerRole = owner?.role ?? '';
+  const fallbackOwner = parseOwnerLabel(fallbackDetails.owner);
+  const ownerName = owner?.name || fallbackOwner.name || ownerId;
+  const ownerMatchesFallback =
+    !owner?.name || normalizeKey(owner.name) === normalizeKey(fallbackOwner.name);
+  const ownerRole =
+    owner?.role || (ownerMatchesFallback ? fallbackOwner.role : '');
   const dueLabel = formatDueLabel(entity.due_date) || fallbackDetails.due;
   const contextLabel = normalizeName(entity.context) || fallbackDetails.context;
   const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
