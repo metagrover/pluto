@@ -128,10 +128,24 @@ const formatLifecycleLabel = (
   return '';
 };
 
+const getFallbackActionTopic = (value: string): string => {
+  const detailsMatch = value.match(/\((.+)\)\s*$/);
+  if (!detailsMatch) return '';
+
+  for (const detail of detailsMatch[1].split('|')) {
+    const normalized = normalizeName(detail);
+    if (!normalized.toLowerCase().startsWith('topic:')) continue;
+    return normalizeName(normalized.slice('topic:'.length));
+  }
+
+  return '';
+};
+
 const formatActionItem = (
   entity: MeetingEntitySummary,
   peopleById: Map<string, { name: string; role: string }>,
   blockerReasonByEntityId: Map<string, string>,
+  fallbackTopic = '',
 ): string => {
   const ownerId = normalizeName(entity.assigned_to);
   const owner = ownerId ? peopleById.get(ownerId) : null;
@@ -142,6 +156,7 @@ const formatActionItem = (
   const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
   const lifecycleLabel = formatLifecycleLabel(entity.status);
   const details = [
+    fallbackTopic ? `Topic: ${fallbackTopic}` : '',
     lifecycleLabel ? `Status: ${lifecycleLabel}` : '',
     ownerName
       ? `Owner: ${ownerRole ? `${ownerName} (${ownerRole})` : ownerName}`
@@ -277,6 +292,13 @@ export const buildFollowUpDraftContext = ({
   const allLinkedActionEntities = linkedEntities
     .filter((entity) => entity.type === 'action_item')
     .filter((entity) => normalizeName(entity.name));
+  const fallbackTopicByActionKey = new Map(
+    fallbackActionItems
+      .map(
+        (item) => [normalizeKey(item), getFallbackActionTopic(item)] as const,
+      )
+      .filter(([, topic]) => Boolean(topic)),
+  );
   const actionEntities = allLinkedActionEntities
     .filter((entity) => entity.status !== 'completed')
     .filter((entity) => !suppressedEntityIds.has(entity.id))
@@ -285,7 +307,12 @@ export const buildFollowUpDraftContext = ({
     allLinkedActionEntities.map((entity) => normalizeKey(entity.name)),
   );
   const actionItems = actionEntities.map((entity) =>
-    formatActionItem(entity, peopleById, blockerReasonByEntityId),
+    formatActionItem(
+      entity,
+      peopleById,
+      blockerReasonByEntityId,
+      fallbackTopicByActionKey.get(normalizeKey(entity.name)) ?? '',
+    ),
   );
   const fallbackOnlyItems = fallbackActionItems.filter(
     (item) => !linkedActionNames.has(normalizeKey(item)),

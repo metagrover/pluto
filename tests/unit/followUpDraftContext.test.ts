@@ -214,7 +214,7 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
-  it('does not duplicate linked action items when fallback labels already include topic metadata', () => {
+  it('preserves fallback topic detail when linked action items add owner and due metadata', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [
         'Send rollout email (Topic: Launch planning | Owner: Sarah Chen | Due: Friday)',
@@ -236,7 +236,7 @@ describe('buildFollowUpDraftContext', () => {
     });
 
     expect(context.actionItems).toEqual([
-      'Send rollout email (Owner: Sarah Chen | Due: Friday)',
+      'Send rollout email (Topic: Launch planning | Owner: Sarah Chen | Due: Friday)',
     ]);
   });
 
