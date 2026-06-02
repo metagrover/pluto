@@ -137,7 +137,9 @@ const getFallbackActionDetails = (value: string): FallbackActionDetails => {
       continue;
     }
     if (lower.startsWith('status:')) {
-      fallbackDetails.status = normalizeName(normalized.slice('status:'.length));
+      fallbackDetails.status = normalizeName(
+        normalized.slice('status:'.length),
+      );
       continue;
     }
     if (lower.startsWith('owner:')) {
