@@ -59,6 +59,27 @@ const stripKnownActionItemDetails = (value: string): string =>
 const normalizeKey = (value: string | null | undefined): string =>
   stripKnownActionItemDetails(normalizeName(value)).toLowerCase();
 
+const splitFormattedDetails = (
+  value: string,
+): { baseText: string; details: string[] } => {
+  const normalized = normalizeName(value);
+  const match = normalized.match(/^(.*?)(?: \((.+)\))?$/);
+  if (!match) {
+    return { baseText: normalized, details: [] };
+  }
+
+  const [, baseText, detailText] = match;
+  return {
+    baseText: normalizeName(baseText),
+    details: detailText
+      ? detailText
+          .split(' | ')
+          .map((detail) => normalizeName(detail))
+          .filter(Boolean)
+      : [],
+  };
+};
+
 const parseRoleFromMetadata = (value: string | null | undefined): string => {
   const normalized = normalizeName(value);
   if (!normalized) return '';
@@ -150,6 +171,31 @@ const formatDecisionItem = (entity: MeetingEntitySummary): string => {
   );
 
   return rationale ? `${entity.name} (Why: ${rationale})` : entity.name;
+};
+
+const mergeDecisionItem = (
+  entity: MeetingEntitySummary,
+  fallbackDecision?: string,
+): string => {
+  if (!fallbackDecision) return formatDecisionItem(entity);
+
+  const { details } = splitFormattedDetails(fallbackDecision);
+  const detailKeys = new Set(details.map((detail) => normalizeKey(detail)));
+  const formattedEntityDecision = formatDecisionItem(entity);
+  const { details: entityDetails } = splitFormattedDetails(
+    formattedEntityDecision,
+  );
+
+  for (const detail of entityDetails) {
+    const key = normalizeKey(detail);
+    if (detailKeys.has(key)) continue;
+    detailKeys.add(key);
+    details.push(detail);
+  }
+
+  return details.length > 0
+    ? `${entity.name} (${details.join(' | ')})`
+    : entity.name;
 };
 
 const formatParticipant = (entity: MeetingEntitySummary): string => {
@@ -248,6 +294,9 @@ export const buildFollowUpDraftContext = ({
     .filter((entity) => entity.type === 'decision')
     .filter((entity) => normalizeName(entity.name))
     .sort(compareEntities);
+  const fallbackDecisionByKey = new Map(
+    fallbackDecisions.map((decision) => [normalizeKey(decision), decision]),
+  );
   const linkedDecisionNames = new Set(
     decisionEntities.map((entity) => normalizeKey(entity.name)),
   );
@@ -277,7 +326,12 @@ export const buildFollowUpDraftContext = ({
     decisions:
       decisionEntities.length > 0
         ? [
-            ...decisionEntities.map((entity) => formatDecisionItem(entity)),
+            ...decisionEntities.map((entity) =>
+              mergeDecisionItem(
+                entity,
+                fallbackDecisionByKey.get(normalizeKey(entity.name)),
+              ),
+            ),
             ...fallbackOnlyDecisions,
           ]
         : fallbackDecisions,
