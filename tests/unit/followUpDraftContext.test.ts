@@ -458,6 +458,29 @@ describe('buildFollowUpDraftContext', () => {
     expect(context.decisions).toEqual(['Use REST for the rollout']);
   });
 
+  it('preserves richer fallback decision details when linked decisions match the same item', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      fallbackDecisions: [
+        'Use REST for the rollout (Topic: API migration | Decided by: Sarah Chen | Why: Better type safety and query flexibility)',
+        'Share roadmap update',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'decision-1',
+          type: 'decision',
+          name: 'Use REST for the rollout',
+          context: 'Better type safety and query flexibility',
+        }),
+      ],
+    });
+
+    expect(context.decisions).toEqual([
+      'Use REST for the rollout (Topic: API migration | Decided by: Sarah Chen | Why: Better type safety and query flexibility)',
+      'Share roadmap update',
+    ]);
+  });
+
   it('injects participant context into default draft templates', () => {
     const drafts = buildDefaultDrafts({
       meetingTitle: 'API Migration Review',
