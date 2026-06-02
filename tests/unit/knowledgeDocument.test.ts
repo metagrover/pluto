@@ -819,7 +819,9 @@ describe('knowledge document utilities', () => {
       },
     });
 
-    expect(brief.headline).toBe('Person snapshot-backed current read should win.');
+    expect(brief.headline).toBe(
+      'Person snapshot-backed current read should win.',
+    );
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
     expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
   });
@@ -899,7 +901,9 @@ describe('knowledge document utilities', () => {
       },
     });
 
-    expect(brief.headline).toBe('Team snapshot-backed current read should win.');
+    expect(brief.headline).toBe(
+      'Team snapshot-backed current read should win.',
+    );
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
     expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
   });

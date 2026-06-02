@@ -988,7 +988,10 @@ export const MainStage: React.FC<MainStageProps> = ({
   useEffect(() => {
     let cancelled = false;
 
-    if (!selectedDoc || !supportsWorkingMemorySnapshotScope(selectedDoc.scope_type)) {
+    if (
+      !selectedDoc ||
+      !supportsWorkingMemorySnapshotScope(selectedDoc.scope_type)
+    ) {
       setWorkingMemorySnapshot(null);
       return () => {
         cancelled = true;
