@@ -11,6 +11,7 @@ import {
   groupKnowledgeDocs,
   knowledgeDocsNeedPolling,
   parseStructuredKnowledgeDoc,
+  supportsWorkingMemorySnapshotScope,
 } from '../../src/components/KnowledgeGraph/knowledgeDocument';
 
 const makeDoc = (overrides: Partial<KnowledgeDoc>): KnowledgeDoc => ({
@@ -734,6 +735,171 @@ describe('knowledge document utilities', () => {
     expect(brief.headline).toBe(
       'Project snapshot-backed current read should win.',
     );
+    expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
+    expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
+  });
+
+  it('treats person and team knowledge docs as snapshot-eligible scopes', () => {
+    expect(supportsWorkingMemorySnapshotScope('person_context')).toBe(true);
+    expect(supportsWorkingMemorySnapshotScope('team_tracker')).toBe(true);
+  });
+
+  it('prefers a matching person-context working-memory snapshot for a people knowledge doc', () => {
+    const doc = makeDoc({
+      id: 'doc-person',
+      scope_type: 'person_context',
+      scope_key: 'person-1',
+      title: 'Conversations with Alex Rivera',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: {
+          type: 'person_context',
+          title: 'Conversations with Alex Rivera',
+        },
+        current_read: {
+          headline: 'Doc JSON fallback should not win for people docs.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc fallback only.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.5,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      scope_type: 'person_context',
+      scope_key: 'person-1',
+      title: 'Conversations with Alex Rivera',
+      source_doc_id: 'doc-person',
+      payload: {
+        ...baseSnapshot.payload,
+        scope: {
+          type: 'person_context',
+          key: 'person-1',
+          title: 'Conversations with Alex Rivera',
+        },
+        source: {
+          knowledge_doc_id: 'doc-person',
+          knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+        },
+        current_read: {
+          ...baseSnapshot.payload.current_read,
+          headline: 'Person snapshot-backed current read should win.',
+        },
+      },
+    });
+
+    expect(brief.headline).toBe('Person snapshot-backed current read should win.');
+    expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
+    expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
+  });
+
+  it('prefers a matching team-tracker working-memory snapshot for a team knowledge doc', () => {
+    const doc = makeDoc({
+      id: 'doc-team',
+      scope_type: 'team_tracker',
+      scope_key: 'team-1',
+      title: 'Leadership Team',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: {
+          type: 'team_tracker',
+          title: 'Leadership Team',
+        },
+        current_read: {
+          headline: 'Doc JSON fallback should not win for team docs.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc fallback only.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.5,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      scope_type: 'team_tracker',
+      scope_key: 'team-1',
+      title: 'Leadership Team',
+      source_doc_id: 'doc-team',
+      payload: {
+        ...baseSnapshot.payload,
+        scope: {
+          type: 'team_tracker',
+          key: 'team-1',
+          title: 'Leadership Team',
+        },
+        source: {
+          knowledge_doc_id: 'doc-team',
+          knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+        },
+        current_read: {
+          ...baseSnapshot.payload.current_read,
+          headline: 'Team snapshot-backed current read should win.',
+        },
+      },
+    });
+
+    expect(brief.headline).toBe('Team snapshot-backed current read should win.');
     expect(brief.trustMessage).toBe('Backed by the persisted global snapshot.');
     expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
   });

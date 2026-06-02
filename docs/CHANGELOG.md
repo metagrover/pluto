@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-02
 
+### Let People and Team Knowledge docs consume durable snapshots
+- **Issue:** [#217](https://github.com/metagrover/pluto/issues/217)
+- **PR:** Pending.
+- **Changed:** Knowledge now treats `person_context` and `team_tracker` docs as snapshot-backed consumers just like global and project docs. The shared snapshot eligibility and conversion path now accepts those scopes, the main Knowledge stage loads their matching durable snapshots, and focused regression coverage proves People and Team docs prefer matching snapshot-backed Current Read output over transient doc JSON.
+- **Why:** `#81` is still an active Phase 2 Working Memory umbrella under `#65`, and the persistence slices for people/team snapshots were incomplete until the Knowledge consumer path could actually read them. Before this fix, Pluto could persist fresher durable memory for People and Team docs but still render older transient synthesis output because both the fetch gate and snapshot adapter rejected those scopes.
+- **Replaced:** Treating working-memory snapshots as a global/project-only Knowledge feature even after Pluto started persisting equivalent durable state for person-context and team-tracker docs.
+- **Notes:** Existing fallback behavior for stale, missing, invalid, or older-than-synthesis snapshots stays unchanged; this only widens the eligible Knowledge scopes to the durable snapshot types already supported by persistence.
+
 ### Preserve rich linked decision detail in follow-up drafts
 - **Issue:** [#204](https://github.com/metagrover/pluto/issues/204)
 - **PR:** Pending.
