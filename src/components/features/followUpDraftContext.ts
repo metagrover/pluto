@@ -248,7 +248,9 @@ export const buildFollowUpDraftContext = ({
     .filter((entity) => normalizeName(entity.name));
   const fallbackTopicByActionKey = new Map(
     fallbackActionItems
-      .map((item) => [normalizeKey(item), getFallbackActionTopic(item)] as const)
+      .map(
+        (item) => [normalizeKey(item), getFallbackActionTopic(item)] as const,
+      )
       .filter(([, topic]) => Boolean(topic)),
   );
   const actionEntities = allLinkedActionEntities
