@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-02
 
+### Preserve fallback follow-up card metadata in Meeting View
+- **Issue:** [#215](https://github.com/metagrover/pluto/issues/215)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up cards now parse fallback analysis detail into structured card metadata when linked `action_item` entities are missing. Fallback cards keep the base action text in the title, surface owner and due values through the existing badge row, reuse context as supporting copy, and preserve non-lifecycle fallback status text as a dedicated status label instead of burying everything inside one long summary string. Focused regression coverage now proves the fallback-card parser.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and the Meeting View follow-up surface should stay readable even when the entity graph is incomplete. Before this slice, Pluto already had fallback follow-up detail from meeting analysis, but the card path discarded it and rendered a generic `Summary` pill with inline metadata noise.
+- **Replaced:** Treating fallback follow-up items as opaque strings instead of structured Meeting View cards whenever linked action entities were unavailable.
+- **Notes:** This stays inside the existing Meeting View action-card path and reuses the current UI affordances rather than redesigning the surface.
+
 ### Preserve rich linked decision detail in follow-up drafts
 - **Issue:** [#204](https://github.com/metagrover/pluto/issues/204)
 - **PR:** Pending.

@@ -92,10 +92,11 @@ describe('buildMeetingActionItems', () => {
     expect(items).toEqual([
       {
         id: 'fallback-0',
-        title: 'Send pricing recap (Owner: Alex | Due: Friday)',
+        title: 'Send pricing recap',
         status: 'fallback',
-        assignee: null,
-        dueLabel: null,
+        statusLabel: null,
+        assignee: 'Alex',
+        dueLabel: 'Due Friday',
         context: null,
         actionable: false,
         toggleLabel: null,
@@ -108,6 +109,7 @@ describe('buildMeetingActionItems', () => {
         id: 'fallback-2',
         title: 'Confirm reseller terms',
         status: 'fallback',
+        statusLabel: null,
         assignee: null,
         dueLabel: null,
         context: null,
@@ -117,6 +119,49 @@ describe('buildMeetingActionItems', () => {
         attentionStatus: null,
         dismissLabel: null,
         snoozeLabel: null,
+      },
+    ]);
+  });
+
+  it('parses fallback owner, due, status, and context metadata into structured cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [makeMeetingEntity({ id: 'topic-1', type: 'topic' })],
+      fallbackActionItems: [
+        'Send pricing recap (Status: Overdue | Owner: Alex | Due: Friday | Context: Waiting on pricing sign-off.)',
+        'Confirm reseller terms (Status: Needs legal review)',
+      ],
+    });
+
+    expect(items).toEqual([
+      {
+        id: 'fallback-0',
+        title: 'Send pricing recap',
+        status: 'overdue',
+        assignee: 'Alex',
+        dueLabel: 'Due Friday',
+        context: 'Waiting on pricing sign-off.',
+        actionable: false,
+        toggleLabel: null,
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+        statusLabel: null,
+      },
+      {
+        id: 'fallback-1',
+        title: 'Confirm reseller terms',
+        status: 'fallback',
+        assignee: null,
+        dueLabel: null,
+        context: null,
+        actionable: false,
+        toggleLabel: null,
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+        statusLabel: 'Needs legal review',
       },
     ]);
   });
