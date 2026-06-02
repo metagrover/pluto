@@ -35,6 +35,7 @@ import {
   compileNeedsAttention,
   formatDocStatus,
   formatRelativeKnowledgeTime,
+  supportsWorkingMemorySnapshotScope,
 } from './knowledgeDocument';
 
 interface MainStageProps {
@@ -987,11 +988,7 @@ export const MainStage: React.FC<MainStageProps> = ({
   useEffect(() => {
     let cancelled = false;
 
-    if (
-      !selectedDoc ||
-      (selectedDoc.scope_type !== 'global' &&
-        selectedDoc.scope_type !== 'project')
-    ) {
+    if (!selectedDoc || !supportsWorkingMemorySnapshotScope(selectedDoc.scope_type)) {
       setWorkingMemorySnapshot(null);
       return () => {
         cancelled = true;
