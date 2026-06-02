@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-02
 
+### Preserve rich linked decision detail in follow-up drafts
+- **Issue:** [#204](https://github.com/metagrover/pluto/issues/204)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now keep the richer V3 decision detail Pluto already generated when a linked decision entity matches the same item. Topic labels, decision-owner attribution, and rationale survive the linked-entity dedupe path instead of collapsing back to a bare or rationale-only decision line, and focused follow-up draft tests now cover that merge behavior.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and the shared draft path is only trustworthy if it preserves accountability context Pluto already knows. Before this slice, the linked-decision pass could silently drop `Topic:` and `Decided by:` detail even though the earlier formatter had already derived it.
+- **Replaced:** Treating linked decision entities as a reason to overwrite richer V3 draft lines instead of using them as the canonical dedupe key while preserving the best available detail.
+- **Notes:** This change stays inside the shared follow-up draft formatter, so both default drafts and regenerated drafts inherit the same richer decision output without a Meeting View redesign.
+
 ### Preserve linked action-item topic detail in follow-up drafts
 - **Issue:** [#209](https://github.com/metagrover/pluto/issues/209)
 - **PR:** Pending.
