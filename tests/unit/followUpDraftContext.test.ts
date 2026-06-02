@@ -260,6 +260,32 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('preserves fallback owner role detail when linked people are sparser', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Send rollout email (Owner: Sarah Chen (Head of Product) | Due: Friday)',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+        }),
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Send rollout email',
+          assigned_to: 'person-1',
+          due_date: 'Friday',
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Send rollout email (Owner: Sarah Chen (Head of Product) | Due: Friday)',
+    ]);
+  });
+
   it('preserves fallback status and context detail when linked action items are sparser', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [
