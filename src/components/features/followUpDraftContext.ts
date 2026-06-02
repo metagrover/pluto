@@ -23,8 +23,10 @@ interface FollowUpDraftActionItemInput {
 
 interface FallbackActionDetails {
   topic: string;
+  status: string;
   owner: string;
   due: string;
+  context: string;
 }
 
 export interface FollowUpDraftContext {
@@ -115,12 +117,16 @@ const formatLifecycleLabel = (
 
 const getFallbackActionDetails = (value: string): FallbackActionDetails => {
   const detailsMatch = value.match(/\((.+)\)\s*$/);
-  if (!detailsMatch) return { topic: '', owner: '', due: '' };
+  if (!detailsMatch) {
+    return { topic: '', status: '', owner: '', due: '', context: '' };
+  }
 
   const fallbackDetails: FallbackActionDetails = {
     topic: '',
+    status: '',
     owner: '',
     due: '',
+    context: '',
   };
 
   for (const detail of detailsMatch[1].split('|')) {
@@ -130,12 +136,22 @@ const getFallbackActionDetails = (value: string): FallbackActionDetails => {
       fallbackDetails.topic = normalizeName(normalized.slice('topic:'.length));
       continue;
     }
+    if (lower.startsWith('status:')) {
+      fallbackDetails.status = normalizeName(normalized.slice('status:'.length));
+      continue;
+    }
     if (lower.startsWith('owner:')) {
       fallbackDetails.owner = normalizeName(normalized.slice('owner:'.length));
       continue;
     }
     if (lower.startsWith('due:')) {
       fallbackDetails.due = normalizeName(normalized.slice('due:'.length));
+      continue;
+    }
+    if (lower.startsWith('context:')) {
+      fallbackDetails.context = normalizeName(
+        normalized.slice('context:'.length),
+      );
     }
   }
 
@@ -153,9 +169,11 @@ const formatActionItem = (
   const ownerName = owner?.name || fallbackDetails.owner || ownerId;
   const ownerRole = owner?.role ?? '';
   const dueLabel = formatDueLabel(entity.due_date) || fallbackDetails.due;
-  const contextLabel = normalizeName(entity.context);
+  const contextLabel = normalizeName(entity.context) || fallbackDetails.context;
   const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
-  const lifecycleLabel = formatLifecycleLabel(entity.status);
+  const lifecycleLabel =
+    formatLifecycleLabel(entity.status) ||
+    (blockedReason ? '' : fallbackDetails.status);
   const details = [
     fallbackDetails.topic ? `Topic: ${fallbackDetails.topic}` : '',
     lifecycleLabel ? `Status: ${lifecycleLabel}` : '',
@@ -289,8 +307,10 @@ export const buildFollowUpDraftContext = ({
       blockerReasonByEntityId,
       fallbackDetailsByActionKey.get(normalizeKey(entity.name)) ?? {
         topic: '',
+        status: '',
         owner: '',
         due: '',
+        context: '',
       },
     ),
   );

@@ -260,6 +260,25 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('preserves fallback status and context detail when linked action items are sparser', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Send rollout email (Topic: Launch planning | Status: Overdue | Context: Waiting on pricing sign-off.)',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Send rollout email',
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Send rollout email (Topic: Launch planning | Status: Overdue | Context: Waiting on pricing sign-off.)',
+    ]);
+  });
+
   it('omits completed, dismissed, and snoozed follow-ups from draft action items', () => {
     const linkedAttentionItems: MeetingLinkedAttentionItem[] = [
       {

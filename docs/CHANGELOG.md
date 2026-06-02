@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-02
 
+### Preserve linked action-item status and context detail in follow-up drafts
+- **Issue:** [#213](https://github.com/metagrover/pluto/issues/213)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now preserve fallback `Status: ...` and `Context: ...` detail when the same action item is also linked through meeting entities whose graph metadata is thinner, while still preferring linked overdue/stale lifecycle, blocker reasons, owner formatting, due dates, and explicit meeting context when Pluto has richer linked data. Focused regression coverage now proves the shared draft-context merge keeps those fallback detail labels instead of collapsing to topic-only output.
+- **Why:** `#61` requires follow-up drafts to reuse the accountability nuance Pluto already knows. Before this slice, the stacked draft-context path could still strip lifecycle and context detail that had already been derived from meeting analysis, making linked follow-ups read less actionable or less urgent than the source analysis intended.
+- **Replaced:** Letting linked action-entity dedupe flatten status/context-aware fallback draft lines down to whichever thinner metadata happened to exist on the linked entity.
+- **Notes:** This remains inside the shared follow-up draft context helper, so both default drafts and regenerate prompts keep the same richer action-line behavior.
+
 ### Preserve linked action-item owner and due detail in follow-up drafts
 - **Issue:** [#211](https://github.com/metagrover/pluto/issues/211)
 - **PR:** Pending.
