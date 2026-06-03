@@ -240,6 +240,13 @@ const GROUP_ORDER: KnowledgeDocScopeType[] = [
   'team_tracker',
 ];
 
+const SNAPSHOT_ELIGIBLE_SCOPE_TYPES: KnowledgeDocScopeType[] = [
+  'global',
+  'project',
+  'person_context',
+  'team_tracker',
+];
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
@@ -577,7 +584,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
   snapshot: WorkingMemorySnapshot,
 ): StructuredKnowledgeV2Doc | null => {
   if (
-    !['global', 'project'].includes(snapshot.scope_type) ||
+    !SNAPSHOT_ELIGIBLE_SCOPE_TYPES.includes(snapshot.scope_type) ||
     snapshot.freshness === 'stale'
   ) {
     return null;
@@ -586,7 +593,7 @@ const toWorkingMemorySnapshotStructuredDoc = (
   const payload = snapshot.payload;
   if (
     !payload?.scope ||
-    !['global', 'project'].includes(payload.scope.type) ||
+    !SNAPSHOT_ELIGIBLE_SCOPE_TYPES.includes(payload.scope.type) ||
     payload.current_read == null ||
     !Array.isArray(payload.active_streams) ||
     !Array.isArray(payload.open_loops) ||
@@ -660,7 +667,7 @@ export const matchesWorkingMemorySnapshotToDoc = (
   workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
 ): workingMemorySnapshot is WorkingMemorySnapshot => {
   if (!doc || !workingMemorySnapshot) return false;
-  if (!['global', 'project'].includes(doc.scope_type)) return false;
+  if (!SNAPSHOT_ELIGIBLE_SCOPE_TYPES.includes(doc.scope_type)) return false;
   if (workingMemorySnapshot.scope_type !== doc.scope_type) return false;
   if (workingMemorySnapshot.freshness === 'stale') return false;
   if (workingMemorySnapshot.scope_key !== doc.scope_key) return false;
@@ -1199,7 +1206,8 @@ export const compileNeedsAttention = (
   }
 
   const snapshotV2 =
-    (doc?.scope_type === 'global' || doc?.scope_type === 'project') &&
+    doc != null &&
+    SNAPSHOT_ELIGIBLE_SCOPE_TYPES.includes(doc.scope_type) &&
     workingMemorySnapshot?.scope_type === doc.scope_type &&
     workingMemorySnapshot?.scope_key === doc.scope_key &&
     workingMemorySnapshot?.source_doc_id === doc.id
@@ -1262,7 +1270,7 @@ export const compileNeedsAttention = (
       citations: suggestion.citations,
     })) || [];
 
-  if (snapshotV2 && doc?.scope_type === 'project') {
+  if (snapshotV2 && doc?.scope_type !== 'global') {
     return [...v2Items, ...riskItems, ...dependencyItems].sort(
       (a, b) => compareAttentionPriority(b) - compareAttentionPriority(a),
     );

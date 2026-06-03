@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-02
 
+### Let People and Team Knowledge Needs Attention prefer snapshots
+- **Issue:** [#223](https://github.com/metagrover/pluto/issues/223)
+- **PR:** Pending.
+- **Changed:** `compileNeedsAttention(...)` now accepts matching `person_context` and `team_tracker` working-memory snapshots alongside the existing global/project scopes, so People and Team Knowledge docs can render durable snapshot-backed open loops instead of falling back to older doc JSON risk heuristics. Focused regression coverage now proves the snapshot-backed `Needs Attention` path for both scopes.
+- **Why:** `#81` is about making Knowledge V2 consume durable working-memory state consistently. Before this slice, even after matching People/Team snapshots existed, Pluto still hard-blocked `Needs Attention` for those scopes to the fallback doc path and could hide fresher open-loop state.
+- **Replaced:** Treating snapshot-backed `Needs Attention` as a global/project-only capability even though the same durable payload already exists for person and team scopes.
+- **Notes:** This change stays inside the Knowledge consumer path and preserves the existing fallback behavior for stale, missing, invalid, or mismatched snapshots.
+
 ### Preserve rich linked decision detail in follow-up drafts
 - **Issue:** [#204](https://github.com/metagrover/pluto/issues/204)
 - **PR:** Pending.
