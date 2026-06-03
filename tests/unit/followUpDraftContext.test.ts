@@ -731,4 +731,21 @@ describe('buildFollowUpDraftDecisions', () => {
 
     expect(decisions).toEqual(['Use REST for the rollout']);
   });
+
+  it('preserves richer fallback decision detail when v3 decision data is thinner', () => {
+    const decisions = buildFollowUpDraftDecisions({
+      fallbackDecisions: [
+        'Use REST for the rollout (Topic: API migration | Decided by: Sarah Chen | Why: Better type safety and query flexibility)',
+        'Share roadmap update',
+      ],
+      analysis: makeAnalysis({
+        all_decisions: [{ text: 'Use REST for the rollout' }],
+      }),
+    });
+
+    expect(decisions).toEqual([
+      'Use REST for the rollout (Topic: API migration | Decided by: Sarah Chen | Why: Better type safety and query flexibility)',
+      'Share roadmap update',
+    ]);
+  });
 });

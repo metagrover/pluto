@@ -88,6 +88,77 @@ const splitFormattedDetails = (
   };
 };
 
+interface DecisionDetailParts {
+  topic: string;
+  decidedBy: string;
+  why: string;
+  extra: string[];
+}
+
+const getDecisionDetailLabel = (value: string): string => {
+  const match = value.match(/^([^:]+):/);
+  return match ? normalizeKey(match[1]) : '';
+};
+
+const parseDecisionDetailParts = (value?: string): DecisionDetailParts => {
+  const parts: DecisionDetailParts = {
+    topic: '',
+    decidedBy: '',
+    why: '',
+    extra: [],
+  };
+  if (!value) return parts;
+
+  const { details } = splitFormattedDetails(value);
+  for (const detail of details) {
+    const label = getDecisionDetailLabel(detail);
+    if (label === 'topic') {
+      parts.topic = detail;
+      continue;
+    }
+    if (label === 'decided by') {
+      parts.decidedBy = detail;
+      continue;
+    }
+    if (label === 'why') {
+      parts.why = detail;
+      continue;
+    }
+    parts.extra.push(detail);
+  }
+
+  return parts;
+};
+
+const mergeDecisionDetails = (
+  formattedDecision: string,
+  fallbackDecision?: string,
+): string => {
+  if (!fallbackDecision) return formattedDecision;
+
+  const baseText = splitFormattedDetails(formattedDecision).baseText;
+  const primary = parseDecisionDetailParts(formattedDecision);
+  const fallback = parseDecisionDetailParts(fallbackDecision);
+  const extras: string[] = [];
+  const extraKeys = new Set<string>();
+
+  for (const detail of [...fallback.extra, ...primary.extra]) {
+    const key = normalizeKey(detail);
+    if (!key || extraKeys.has(key)) continue;
+    extraKeys.add(key);
+    extras.push(detail);
+  }
+
+  const details = [
+    primary.topic || fallback.topic,
+    primary.decidedBy || fallback.decidedBy,
+    primary.why || fallback.why,
+    ...extras,
+  ].filter(Boolean);
+
+  return details.length > 0 ? `${baseText} (${details.join(' | ')})` : baseText;
+};
+
 const parseRoleFromMetadata = (value: string | null | undefined): string => {
   const normalized = normalizeName(value);
   if (!normalized) return '';
@@ -462,7 +533,14 @@ export const buildFollowUpDraftDecisions = ({
       const key = normalizeKey(text);
       if (seen.has(key)) continue;
       seen.add(key);
-      decisions.push(formatDecisionWithDetails(decision, topicTitle));
+      decisions.push(
+        mergeDecisionDetails(
+          formatDecisionWithDetails(decision, topicTitle),
+          fallbackDecisions.find(
+            (fallbackDecision) => normalizeKey(fallbackDecision) === key,
+          ),
+        ),
+      );
     }
   }
 
@@ -473,7 +551,14 @@ export const buildFollowUpDraftDecisions = ({
     const key = normalizeKey(text);
     if (seen.has(key)) continue;
     seen.add(key);
-    decisions.push(formatDecisionWithDetails(decision));
+    decisions.push(
+      mergeDecisionDetails(
+        formatDecisionWithDetails(decision),
+        fallbackDecisions.find(
+          (fallbackDecision) => normalizeKey(fallbackDecision) === key,
+        ),
+      ),
+    );
   }
 
   const fallbackOnlyDecisions = fallbackDecisions.filter(
