@@ -30,6 +30,7 @@ export interface MeetingActionItemCard {
   id: string;
   title: string;
   status: MeetingActionItemStatus;
+  statusLabel: string | null;
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
@@ -45,6 +46,15 @@ interface BuildMeetingActionItemsParams {
   meetingEntities: MeetingActionEntity[];
   linkedAttentionItems?: MeetingLinkedAttentionItem[];
   fallbackActionItems: string[];
+}
+
+interface ParsedFallbackActionItem {
+  title: string;
+  status: MeetingActionItemStatus;
+  statusLabel: string | null;
+  assignee: string | null;
+  dueLabel: string | null;
+  context: string | null;
 }
 
 const ACTION_STATUS_ORDER: Record<
@@ -67,6 +77,85 @@ const formatDueLabel = (dueDate: string | null): string | null => {
       day: 'numeric',
     })
     .replace(/^/, 'Due ');
+};
+
+const normalizeValue = (value: string | null | undefined): string =>
+  (value || '').trim();
+
+const parseFallbackStatus = (
+  value: string,
+): Pick<ParsedFallbackActionItem, 'status' | 'statusLabel'> => {
+  const normalized = normalizeValue(value);
+  const lowered = normalized.toLowerCase();
+  if (lowered === 'overdue') {
+    return { status: 'overdue', statusLabel: null };
+  }
+  if (lowered === 'stale') {
+    return { status: 'stale', statusLabel: null };
+  }
+  if (lowered === 'completed') {
+    return { status: 'completed', statusLabel: null };
+  }
+  if (lowered === 'active' || !normalized) {
+    return { status: 'fallback', statusLabel: null };
+  }
+  return { status: 'fallback', statusLabel: normalized };
+};
+
+const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
+  const trimmed = normalizeValue(value);
+  const match = trimmed.match(/^(.*?)(?: \((.+)\))?$/);
+  if (!match) {
+    return {
+      title: trimmed,
+      status: 'fallback',
+      statusLabel: null,
+      assignee: null,
+      dueLabel: null,
+      context: null,
+    };
+  }
+
+  const [, rawTitle, rawDetailText] = match;
+  const parsed: ParsedFallbackActionItem = {
+    title: normalizeValue(rawTitle),
+    status: 'fallback',
+    statusLabel: null,
+    assignee: null,
+    dueLabel: null,
+    context: null,
+  };
+
+  if (!rawDetailText) {
+    return parsed;
+  }
+
+  for (const detail of rawDetailText.split('|')) {
+    const normalized = normalizeValue(detail);
+    const lowered = normalized.toLowerCase();
+    if (lowered.startsWith('owner:')) {
+      parsed.assignee = normalizeValue(normalized.slice('owner:'.length));
+      continue;
+    }
+    if (lowered.startsWith('due:')) {
+      const dueValue = normalizeValue(normalized.slice('due:'.length));
+      parsed.dueLabel = dueValue ? `Due ${dueValue}` : null;
+      continue;
+    }
+    if (lowered.startsWith('context:')) {
+      parsed.context = normalizeValue(normalized.slice('context:'.length));
+      continue;
+    }
+    if (lowered.startsWith('status:')) {
+      const statusValue = parseFallbackStatus(
+        normalizeValue(normalized.slice('status:'.length)),
+      );
+      parsed.status = statusValue.status;
+      parsed.statusLabel = statusValue.statusLabel;
+    }
+  }
+
+  return parsed;
 };
 
 const sortMeetingActionEntities = (
@@ -121,6 +210,7 @@ export const buildMeetingActionItems = ({
         id: entity.id,
         title: entity.name,
         status,
+        statusLabel: null,
         assignee: entity.assigned_to,
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,
@@ -152,19 +242,23 @@ export const buildMeetingActionItems = ({
   }
 
   return fallbackActionItems
-    .map((item, index) => ({
-      id: `fallback-${index}`,
-      title: item.trim(),
-      status: 'fallback' as const,
-      assignee: null,
-      dueLabel: null,
-      context: null,
-      actionable: false,
-      toggleLabel: null,
-      attentionItemId: null,
-      attentionStatus: null,
-      dismissLabel: null,
-      snoozeLabel: null,
-    }))
+    .map((item, index) => {
+      const parsed = parseFallbackActionItem(item);
+      return {
+        id: `fallback-${index}`,
+        title: parsed.title,
+        status: parsed.status,
+        statusLabel: parsed.statusLabel,
+        assignee: parsed.assignee,
+        dueLabel: parsed.dueLabel,
+        context: parsed.context,
+        actionable: false,
+        toggleLabel: null,
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+      } satisfies MeetingActionItemCard;
+    })
     .filter((item) => item.title.length > 0);
 };
