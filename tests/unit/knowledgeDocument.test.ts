@@ -2103,6 +2103,114 @@ describe('knowledge document utilities', () => {
     ]);
   });
 
+  it.each([
+    ['person_context', 'person-1', 'Alex Rivera', 'm-person', 'Prepare renewal notes'],
+    ['team_tracker', 'team-1', 'Revenue Team', 'm-team', 'Escalate launch blocker'],
+  ] as const)(
+    'prefers a matching %s working-memory snapshot for needs attention',
+    (scopeType, scopeKey, title, meetingId, loopTitle) => {
+      const sourceDoc = makeDoc({
+        id: `doc-${scopeKey}`,
+        scope_type: scopeType,
+        scope_key: scopeKey,
+        title,
+        structured_json: JSON.stringify({
+          schema_version: 1,
+          scope: { type: scopeType, title },
+          chapters: [
+            {
+              chapter_id: scopeType,
+              title,
+              decisions: [],
+              topic_evolution: [],
+              open_risks: [
+                {
+                  id: 'risk-fallback',
+                  text: 'Legacy fallback risk',
+                  why_it_matters:
+                    'This should be ignored when a matching snapshot exists.',
+                  citations: [],
+                },
+              ],
+              signals: [],
+            },
+          ],
+          dependency_suggestions: [],
+        }),
+      });
+
+      const attention = compileNeedsAttention(
+        sourceDoc,
+        [],
+        [],
+        [],
+        makeWorkingMemorySnapshot({
+          scope_type: scopeType,
+          scope_key: scopeKey,
+          title,
+          source_doc_id: `doc-${scopeKey}`,
+          payload: {
+            ...makeWorkingMemorySnapshot().payload,
+            scope: {
+              type: scopeType,
+              key: scopeKey,
+              title,
+            },
+            source: {
+              knowledge_doc_id: `doc-${scopeKey}`,
+              knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+            },
+            open_loops: [
+              {
+                id: `loop-${scopeKey}`,
+                title: loopTitle,
+                summary: 'The durable snapshot still has an unresolved blocker.',
+                kind: 'follow_up',
+                severity: 'watch',
+                why_now: 'This is still active in the latest snapshot.',
+                stream_ids: ['stream-1'],
+                citations: [
+                  {
+                    meeting_id: meetingId,
+                    quote: 'The unresolved blocker is still active.',
+                  },
+                ],
+                evidence_quality: {
+                  mode: 'direct',
+                  confidence: 0.72,
+                  cited_meeting_count: 1,
+                  source_count: 1,
+                  last_reinforced_at: '2026-04-25T10:00:00.000Z',
+                  freshness: 'fresh',
+                },
+              },
+            ],
+            patterns: [],
+            risks_and_unknowns: [],
+            evidence_index: [],
+          },
+        }),
+      );
+
+      expect(attention).toEqual([
+        {
+          id: `loop-${scopeKey}`,
+          title: loopTitle,
+          summary: 'The durable snapshot still has an unresolved blocker.',
+          severity: 'watch',
+          kind: 'follow_up',
+          reasons: ['This is still active in the latest snapshot.'],
+          citations: [
+            {
+              meeting_id: meetingId,
+              quote: 'The unresolved blocker is still active.',
+            },
+          ],
+        },
+      ]);
+    },
+  );
+
   it('falls back to project-card heuristics when the project snapshot is stale', () => {
     const sourceDoc = makeDoc({
       id: 'doc-project',
