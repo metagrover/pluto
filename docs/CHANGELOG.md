@@ -36,6 +36,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Letting linked action-entity dedupe treat any linked owner name as authoritative even when the fallback draft line already carried a richer owner role label for the same person.
 - **Notes:** This remains inside the shared follow-up draft context helper, so both default drafts and regenerate prompts inherit the same owner-role preservation behavior without a Meeting View redesign.
 
+### Preserve fallback decision detail in follow-up drafts
+- **Issue:** [#221](https://github.com/metagrover/pluto/issues/221)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now preserve richer fallback decision detail when the matching V3 decision record is thinner. Existing `Topic:`, `Decided by:`, and `Why:` detail from the fallback draft path now survives the V3 decision merge instead of collapsing back to bare decision text, and focused follow-up draft tests cover that regression.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and the shared follow-up draft path is only trustworthy if it keeps the most specific decision context Pluto already knows. Before this slice, V3 decision dedupe could silently throw away accountability and rationale detail that had already been derived earlier in the formatter.
+- **Replaced:** Treating any matching V3 decision text as authoritative enough to overwrite richer fallback decision context even when the V3 record added less metadata.
+- **Notes:** This stays inside the shared follow-up draft formatter, so both default drafts and regenerated drafts inherit the same richer decision lines without a Meeting View redesign.
+
 ### Preserve rich linked decision detail in follow-up drafts
 - **Issue:** [#204](https://github.com/metagrover/pluto/issues/204)
 - **PR:** Pending.
