@@ -1934,8 +1934,20 @@ describe('knowledge document utilities', () => {
   });
 
   it.each([
-    ['person_context', 'person-1', 'Alex Rivera', 'm-person', 'Prepare renewal notes'],
-    ['team_tracker', 'team-1', 'Revenue Team', 'm-team', 'Escalate launch blocker'],
+    [
+      'person_context',
+      'person-1',
+      'Alex Rivera',
+      'm-person',
+      'Prepare renewal notes',
+    ],
+    [
+      'team_tracker',
+      'team-1',
+      'Revenue Team',
+      'm-team',
+      'Escalate launch blocker',
+    ],
   ] as const)(
     'prefers a matching %s working-memory snapshot for needs attention',
     (scopeType, scopeKey, title, meetingId, loopTitle) => {
@@ -1994,7 +2006,8 @@ describe('knowledge document utilities', () => {
               {
                 id: `loop-${scopeKey}`,
                 title: loopTitle,
-                summary: 'The durable snapshot still has an unresolved blocker.',
+                summary:
+                  'The durable snapshot still has an unresolved blocker.',
                 kind: 'follow_up',
                 severity: 'watch',
                 why_now: 'This is still active in the latest snapshot.',
