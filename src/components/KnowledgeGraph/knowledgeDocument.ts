@@ -1211,7 +1211,7 @@ export const compileNeedsAttention = (
 
   const snapshotV2 =
     doc != null &&
-    SNAPSHOT_ELIGIBLE_SCOPE_TYPES.includes(doc.scope_type) &&
+    WORKING_MEMORY_SNAPSHOT_SCOPE_TYPES.includes(doc.scope_type) &&
     workingMemorySnapshot?.scope_type === doc.scope_type &&
     workingMemorySnapshot?.scope_key === doc.scope_key &&
     workingMemorySnapshot?.source_doc_id === doc.id
