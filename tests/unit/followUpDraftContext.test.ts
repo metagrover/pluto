@@ -749,6 +749,27 @@ describe('buildFollowUpDraftDecisions', () => {
     ]);
   });
 
+  it('preserves fallback decision owner role detail when linked v3 owner data is thinner', () => {
+    const decisions = buildFollowUpDraftDecisions({
+      fallbackDecisions: [
+        'Use REST for the rollout (Decided by: Sarah Chen (Head of Product) | Why: Better type safety and query flexibility)',
+      ],
+      analysis: makeAnalysis({
+        all_decisions: [
+          {
+            text: 'Use REST for the rollout',
+            decided_by: 'Sarah Chen',
+            rationale: 'Better type safety and query flexibility',
+          },
+        ],
+      }),
+    });
+
+    expect(decisions).toEqual([
+      'Use REST for the rollout (Decided by: Sarah Chen (Head of Product) | Why: Better type safety and query flexibility)',
+    ]);
+  });
+
   it('keeps fallback decisions when no topic-linked v3 decision context exists', () => {
     const decisions = buildFollowUpDraftDecisions({
       fallbackDecisions: ['Use REST for the rollout'],
