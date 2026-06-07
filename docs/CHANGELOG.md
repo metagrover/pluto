@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-06
+
+### Preserve sparse linked action-card metadata in Meeting View
+- **Issue:** [#225](https://github.com/metagrover/pluto/issues/225)
+- **PR:** Pending.
+- **Changed:** Meeting View action cards now merge fallback analysis metadata back into matching linked `action_item` cards when the linked entity is thinner. Linked cards preserve fallback owner, due, context, and custom status text instead of dropping those fields as soon as any matching linked action entity exists, and focused unit coverage now proves the merge behavior.
+- **Why:** `#61` is still Pluto's earliest unfinished Phase 1 roadmap outcome under `#65`, and the commitment surface should keep the best accountability detail Pluto already knows. Before this slice, the card builder treated any linked action entity as authoritative enough to discard richer fallback analysis text, which made follow-up cards less actionable precisely when partial graph linking existed.
+- **Replaced:** Returning raw linked action cards without reusing matching fallback metadata unless linked action entities were missing entirely.
+- **Notes:** This stays inside the existing Meeting View action-card builder and keeps linked lifecycle state authoritative unless the fallback carries a richer overdue/stale/completed lifecycle.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
