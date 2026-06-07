@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-02
 
+### Preserve fallback decision owner-role detail in follow-up drafts
+- **Issue:** [#227](https://github.com/metagrover/pluto/issues/227)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now preserve richer fallback `Decided by: ... (...)` role detail when the same decision is also represented by a thinner linked V3 decision owner, while still preferring linked decision-owner data when Pluto has something more specific. Focused regression coverage now proves the shared draft merge keeps that role-aware accountability detail instead of collapsing it to a bare name.
+- **Why:** `#61` is only trustworthy if the shared draft path keeps the best decision accountability context Pluto already knows. Before this slice, a linked V3 decision with just `Sarah Chen` could silently overwrite a richer fallback line like `Decided by: Sarah Chen (Head of Product)`, making the same decision read less specific once linked context was present.
+- **Replaced:** Treating any linked `decided_by` value as authoritative even when the fallback decision line already carried richer role detail for the same person.
+- **Notes:** This stays inside the shared follow-up draft formatter, so both default drafts and regenerated drafts inherit the same owner-role preservation behavior without a Meeting View redesign.
+
 ### Preserve fallback follow-up card metadata in Meeting View
 - **Issue:** [#215](https://github.com/metagrover/pluto/issues/215)
 - **PR:** Pending.

@@ -156,7 +156,7 @@ const mergeDecisionDetails = (
 
   const details = [
     primary.topic || fallback.topic,
-    primary.decidedBy || fallback.decidedBy,
+    mergeDecisionOwnerDetail(primary.decidedBy, fallback.decidedBy),
     primary.why || fallback.why,
     ...extras,
   ].filter(Boolean);
@@ -183,6 +183,12 @@ const parseRoleFromContext = (value: string | null | undefined): string => {
   return match ? normalizeName(match[1]) : '';
 };
 
+const getDetailValue = (value: string): string => {
+  const separatorIndex = value.indexOf(':');
+  if (separatorIndex === -1) return normalizeName(value);
+  return normalizeName(value.slice(separatorIndex + 1));
+};
+
 const parseOwnerLabel = (value: string): OwnerLabel => {
   const normalized = normalizeName(value);
   if (!normalized) return { name: '', role: '' };
@@ -196,6 +202,29 @@ const parseOwnerLabel = (value: string): OwnerLabel => {
     name: normalizeName(match[1]),
     role: normalizeName(match[2]),
   };
+};
+
+const mergeDecisionOwnerDetail = (
+  primaryDetail: string,
+  fallbackDetail: string,
+): string => {
+  if (!primaryDetail) return fallbackDetail;
+  if (!fallbackDetail) return primaryDetail;
+
+  const primaryOwner = parseOwnerLabel(getDetailValue(primaryDetail));
+  const fallbackOwner = parseOwnerLabel(getDetailValue(fallbackDetail));
+
+  if (
+    primaryOwner.name &&
+    fallbackOwner.name &&
+    primaryOwner.name === fallbackOwner.name &&
+    !primaryOwner.role &&
+    fallbackOwner.role
+  ) {
+    return `Decided by: ${fallbackOwner.name} (${fallbackOwner.role})`;
+  }
+
+  return primaryDetail;
 };
 
 const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
