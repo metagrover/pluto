@@ -226,4 +226,39 @@ describe('buildMeetingActionItems', () => {
       actionable: true,
     });
   });
+
+  it('preserves fallback metadata when linked action entities are sparser', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'action-1',
+          name: 'Send pricing recap',
+          assigned_to: null,
+          due_date: null,
+          context: 'Waiting on legal sign-off.',
+        }),
+      ],
+      fallbackActionItems: [
+        'Send pricing recap (Status: Needs legal review | Owner: Alex | Due: Friday)',
+      ],
+    });
+
+    expect(items).toEqual([
+      {
+        id: 'action-1',
+        title: 'Send pricing recap',
+        status: 'active',
+        statusLabel: 'Needs legal review',
+        assignee: 'Alex',
+        dueLabel: 'Due Friday',
+        context: 'Waiting on legal sign-off.',
+        actionable: true,
+        toggleLabel: 'Mark complete',
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+      },
+    ]);
+  });
 });

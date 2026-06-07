@@ -57,6 +57,14 @@ interface ParsedFallbackActionItem {
   context: string | null;
 }
 
+type LinkedMeetingActionItemCard = Omit<
+  MeetingActionItemCard,
+  'status' | 'statusLabel'
+> & {
+  status: Exclude<MeetingActionItemStatus, 'fallback'>;
+  statusLabel: string | null;
+};
+
 const ACTION_STATUS_ORDER: Record<
   Exclude<MeetingActionItemStatus, 'fallback'>,
   number
@@ -81,6 +89,9 @@ const formatDueLabel = (dueDate: string | null): string | null => {
 
 const normalizeValue = (value: string | null | undefined): string =>
   (value || '').trim();
+
+const normalizeActionKey = (value: string | null | undefined): string =>
+  normalizeValue(value).toLowerCase();
 
 const parseFallbackStatus = (
   value: string,
@@ -177,11 +188,43 @@ const sortMeetingActionEntities = (
   );
 };
 
+const mergeLinkedAndFallbackActionItem = (
+  linked: LinkedMeetingActionItemCard,
+  fallback?: ParsedFallbackActionItem,
+): MeetingActionItemCard => {
+  if (!fallback) {
+    return linked;
+  }
+
+  const shouldUseFallbackLifecycle =
+    linked.status === 'active' &&
+    (fallback.status === 'overdue' ||
+      fallback.status === 'stale' ||
+      fallback.status === 'completed');
+
+  return {
+    ...linked,
+    status: shouldUseFallbackLifecycle ? fallback.status : linked.status,
+    statusLabel: linked.statusLabel ?? fallback.statusLabel,
+    assignee: linked.assignee ?? fallback.assignee,
+    dueLabel: linked.dueLabel ?? fallback.dueLabel,
+    context: linked.context ?? fallback.context,
+  };
+};
+
 export const buildMeetingActionItems = ({
   meetingEntities,
   linkedAttentionItems = [],
   fallbackActionItems,
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
+  const fallbackByTitle = new Map<string, ParsedFallbackActionItem>();
+  for (const item of fallbackActionItems) {
+    const parsed = parseFallbackActionItem(item);
+    const key = normalizeActionKey(parsed.title);
+    if (!key || fallbackByTitle.has(key)) continue;
+    fallbackByTitle.set(key, parsed);
+  }
+
   const attentionByEntityId = new Map<
     string,
     Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
@@ -206,35 +249,38 @@ export const buildMeetingActionItems = ({
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);
-      return {
-        id: entity.id,
-        title: entity.name,
-        status,
-        statusLabel: null,
-        assignee: entity.assigned_to,
-        dueLabel: formatDueLabel(entity.due_date),
-        context: entity.context,
-        actionable: linkedAttention?.status !== 'dismissed',
-        toggleLabel: status === 'completed' ? 'Reopen' : 'Mark complete',
-        attentionItemId: linkedAttention?.id ?? null,
-        attentionStatus: linkedAttention?.status ?? null,
-        dismissLabel:
-          linkedAttention == null
-            ? null
-            : linkedAttention.status === 'dismissed'
-              ? 'Reopen'
-              : linkedAttention.status === 'snoozed'
-                ? null
-                : 'Dismiss',
-        snoozeLabel:
-          linkedAttention == null
-            ? null
-            : linkedAttention.status === 'dismissed'
+      return mergeLinkedAndFallbackActionItem(
+        {
+          id: entity.id,
+          title: entity.name,
+          status,
+          statusLabel: null,
+          assignee: entity.assigned_to,
+          dueLabel: formatDueLabel(entity.due_date),
+          context: entity.context,
+          actionable: linkedAttention?.status !== 'dismissed',
+          toggleLabel: status === 'completed' ? 'Reopen' : 'Mark complete',
+          attentionItemId: linkedAttention?.id ?? null,
+          attentionStatus: linkedAttention?.status ?? null,
+          dismissLabel:
+            linkedAttention == null
               ? null
-              : linkedAttention.status === 'snoozed'
+              : linkedAttention.status === 'dismissed'
                 ? 'Reopen'
-                : 'Snooze',
-      } satisfies MeetingActionItemCard;
+                : linkedAttention.status === 'snoozed'
+                  ? null
+                  : 'Dismiss',
+          snoozeLabel:
+            linkedAttention == null
+              ? null
+              : linkedAttention.status === 'dismissed'
+                ? null
+                : linkedAttention.status === 'snoozed'
+                  ? 'Reopen'
+                  : 'Snooze',
+        },
+        fallbackByTitle.get(normalizeActionKey(entity.name)),
+      );
     });
 
   if (linkedActionItems.length > 0) {
