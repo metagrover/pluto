@@ -20,6 +20,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-08
 
+<<<<<<< HEAD
 ### Preserve unmatched fallback action cards in Meeting View
 - **Issue:** [#229](https://github.com/metagrover/pluto/issues/229)
 - **PR:** Pending.
@@ -37,6 +38,15 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` is still Pluto's earliest unfinished Phase 1 roadmap outcome under `#65`, and the commitment surface should keep the best accountability detail Pluto already knows. Before this slice, the card builder treated any linked action entity as authoritative enough to discard richer fallback analysis text, which made follow-up cards less actionable precisely when partial graph linking existed.
 - **Replaced:** Returning raw linked action cards without reusing matching fallback metadata unless linked action entities were missing entirely.
 - **Notes:** This stays inside the existing Meeting View action-card builder and keeps linked lifecycle state authoritative unless the fallback carries a richer overdue/stale/completed lifecycle.
+=======
+### Preserve fallback topic context in Meeting View action cards
+- **Issue:** [#237](https://github.com/metagrover/pluto/issues/237)
+- **PR:** Pending.
+- **Changed:** Meeting View fallback follow-up cards now preserve `Topic: ...` metadata from analysis-backed action lines instead of dropping it during card parsing. The action-card model exposes a dedicated topic label, the existing badge row renders it alongside the current owner/status/due metadata, and focused regression coverage now proves fallback topic context survives the parser.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and the Meeting View follow-up surface should keep the source context Pluto already knows. Before this slice, fallback cards could keep owner/due/status/context detail but still lose the topic that explained why the follow-up mattered.
+- **Replaced:** Treating fallback `Topic:` metadata as disposable text instead of first-class Meeting View action-card context.
+- **Notes:** This stays inside the existing fallback action-card parser and renderer; it does not redesign Meeting View or broaden lifecycle controls.
+>>>>>>> f0fbddb3 (Preserve fallback topic context in meeting cards)
 
 ## 2026-06-02
 

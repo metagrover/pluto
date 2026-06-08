@@ -31,6 +31,7 @@ export interface MeetingActionItemCard {
   title: string;
   status: MeetingActionItemStatus;
   statusLabel: string | null;
+  topicLabel: string | null;
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
@@ -52,6 +53,7 @@ interface ParsedFallbackActionItem {
   title: string;
   status: MeetingActionItemStatus;
   statusLabel: string | null;
+  topicLabel: string | null;
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
@@ -121,6 +123,7 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
       title: trimmed,
       status: 'fallback',
       statusLabel: null,
+      topicLabel: null,
       assignee: null,
       dueLabel: null,
       context: null,
@@ -132,6 +135,7 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
     title: normalizeValue(rawTitle),
     status: 'fallback',
     statusLabel: null,
+    topicLabel: null,
     assignee: null,
     dueLabel: null,
     context: null,
@@ -144,6 +148,10 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
   for (const detail of rawDetailText.split('|')) {
     const normalized = normalizeValue(detail);
     const lowered = normalized.toLowerCase();
+    if (lowered.startsWith('topic:')) {
+      parsed.topicLabel = normalizeValue(normalized.slice('topic:'.length));
+      continue;
+    }
     if (lowered.startsWith('owner:')) {
       parsed.assignee = normalizeValue(normalized.slice('owner:'.length));
       continue;
@@ -206,6 +214,7 @@ const mergeLinkedAndFallbackActionItem = (
     ...linked,
     status: shouldUseFallbackLifecycle ? fallback.status : linked.status,
     statusLabel: linked.statusLabel ?? fallback.statusLabel,
+    topicLabel: linked.topicLabel ?? fallback.topicLabel,
     assignee: linked.assignee ?? fallback.assignee,
     dueLabel: linked.dueLabel ?? fallback.dueLabel,
     context: linked.context ?? fallback.context,
@@ -255,6 +264,7 @@ export const buildMeetingActionItems = ({
           title: entity.name,
           status,
           statusLabel: null,
+          topicLabel: null,
           assignee: entity.assigned_to,
           dueLabel: formatDueLabel(entity.due_date),
           context: entity.context,
@@ -301,6 +311,7 @@ export const buildMeetingActionItems = ({
       title: parsed.title,
       status: parsed.status,
       statusLabel: parsed.statusLabel,
+      topicLabel: parsed.topicLabel,
       assignee: parsed.assignee,
       dueLabel: parsed.dueLabel,
       context: parsed.context,
