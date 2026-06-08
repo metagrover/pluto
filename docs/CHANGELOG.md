@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Keep stale working-memory snapshots usable as explicit Knowledge fallback
+- **Issue:** [#235](https://github.com/metagrover/pluto/issues/235)
+- **PR:** Pending.
+- **Changed:** Knowledge brief compilation now allows a matching working-memory snapshot with `freshness: stale` to remain usable when the live Knowledge doc surface is unavailable, instead of dropping the durable memory state entirely. Focused regression coverage now proves failed docs can still render the stale snapshot headline and trust state, while the existing stale-snapshot guard for fresh usable doc JSON remains intact.
+- **Why:** `#80` requires weak or stale evidence states to stay explicit and useful. Before this slice, the shared Knowledge consumer path rejected stale snapshots unconditionally, which could leave Pluto showing no current read even when it still had durable but aging memory state.
+- **Replaced:** Treating stale working-memory snapshots as unusable in every consumer case, even when the alternative was an empty or failed Knowledge surface.
+- **Notes:** This stays narrowly scoped to the Knowledge brief fallback path. Fresh or newer doc JSON still wins when available, and the separate snapshot-source labeling fix remains in flight on PR `#234`.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View

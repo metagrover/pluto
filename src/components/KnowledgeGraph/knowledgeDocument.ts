@@ -582,11 +582,15 @@ export const parseStructuredKnowledgeV2Doc = (
 
 const toWorkingMemorySnapshotStructuredDoc = (
   snapshot: WorkingMemorySnapshot,
+  options?: {
+    allowStale?: boolean;
+  },
 ): StructuredKnowledgeV2Doc | null => {
-  if (
-    !supportsWorkingMemorySnapshotScope(snapshot.scope_type) ||
-    snapshot.freshness === 'stale'
-  ) {
+  const allowStale = options?.allowStale ?? false;
+  if (!supportsWorkingMemorySnapshotScope(snapshot.scope_type)) {
+    return null;
+  }
+  if (snapshot.freshness === 'stale' && !allowStale) {
     return null;
   }
 
@@ -665,11 +669,17 @@ const getWorkingMemorySnapshotSynthesisMarker = (
 export const matchesWorkingMemorySnapshotToDoc = (
   doc: KnowledgeDoc | null | undefined,
   workingMemorySnapshot: WorkingMemorySnapshot | null | undefined,
+  options?: {
+    allowStale?: boolean;
+  },
 ): workingMemorySnapshot is WorkingMemorySnapshot => {
+  const allowStale = options?.allowStale ?? false;
   if (!doc || !workingMemorySnapshot) return false;
   if (!supportsWorkingMemorySnapshotScope(doc.scope_type)) return false;
   if (workingMemorySnapshot.scope_type !== doc.scope_type) return false;
-  if (workingMemorySnapshot.freshness === 'stale') return false;
+  if (workingMemorySnapshot.freshness === 'stale' && !allowStale) {
+    return false;
+  }
   if (workingMemorySnapshot.scope_key !== doc.scope_key) return false;
   if (workingMemorySnapshot.source_doc_id !== doc.id) return false;
 
@@ -861,16 +871,37 @@ const buildKnowledgeBriefFromV2 = ({
   };
 };
 
+const shouldAllowStaleSnapshotFallback = (
+  doc: KnowledgeDoc | null | undefined,
+): boolean => {
+  if (!doc) return false;
+  if (doc.status === 'failed' || doc.status === 'synthesizing') {
+    return true;
+  }
+  return !doc.structured_json && !doc.rendered_content;
+};
+
 export const compileKnowledgeBrief = (
   doc: KnowledgeDoc | null | undefined,
   workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): KnowledgeBrief => {
-  const snapshotV2 = matchesWorkingMemorySnapshotToDoc(
+  const matchesFreshSnapshot = matchesWorkingMemorySnapshotToDoc(
     doc,
     workingMemorySnapshot,
-  )
-    ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
-    : null;
+  );
+  const matchesStaleFallbackSnapshot =
+    !matchesFreshSnapshot &&
+    shouldAllowStaleSnapshotFallback(doc) &&
+    matchesWorkingMemorySnapshotToDoc(doc, workingMemorySnapshot, {
+      allowStale: true,
+    });
+  const snapshotV2 =
+    workingMemorySnapshot &&
+    (matchesFreshSnapshot || matchesStaleFallbackSnapshot)
+      ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot, {
+          allowStale: matchesStaleFallbackSnapshot,
+        })
+      : null;
   if (snapshotV2 && workingMemorySnapshot) {
     return buildKnowledgeBriefFromV2({
       v2: snapshotV2,

@@ -1055,6 +1055,44 @@ describe('knowledge document utilities', () => {
     expect(brief.trustMessage).toBe('Doc fallback stays intact.');
   });
 
+  it('keeps a matching stale working-memory snapshot as explicit fallback when the doc failed', () => {
+    const doc = makeDoc({
+      status: 'failed',
+      structured_json: null,
+      rendered_content: null,
+    });
+
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      freshness: 'stale',
+      trust_status: 'stale',
+      payload: {
+        ...baseSnapshot.payload,
+        current_read: {
+          ...baseSnapshot.payload.current_read,
+          freshness: 'stale',
+          trust_status: 'stale',
+          headline: 'Stale but durable snapshot fallback remains visible.',
+          trust_message: 'This fallback is aging and should be refreshed.',
+          evidence_quality: {
+            ...baseSnapshot.payload.current_read.evidence_quality,
+            freshness: 'stale',
+          },
+        },
+      },
+    });
+
+    expect(brief.headline).toBe(
+      'Stale but durable snapshot fallback remains visible.',
+    );
+    expect(brief.trustStatus).toBe('stale');
+    expect(brief.trustDescription).toBe(
+      'The evidence has aged and should be refreshed before relying on it.',
+    );
+    expect(brief.isCompiled).toBe(true);
+  });
+
   it('falls back to doc JSON when the working-memory snapshot predates the latest synthesis', () => {
     const doc = makeDoc({
       last_synthesized_at: '2026-04-26T10:00:00.000Z',
