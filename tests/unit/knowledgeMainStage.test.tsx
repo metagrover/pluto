@@ -342,7 +342,9 @@ describe('Knowledge MainStage', () => {
     );
 
     expect(markup).toContain('Recent changes: +2 / -1 / ~3.');
-    expect(markup).toContain('Notable changes: Launch brief owner, Approval path.');
+    expect(markup).toContain(
+      'Notable changes: Launch brief owner, Approval path.',
+    );
   });
 
   it('uses rendered backing freshness instead of the selected doc timestamp', () => {
