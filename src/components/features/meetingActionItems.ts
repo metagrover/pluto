@@ -237,28 +237,38 @@ export const buildMeetingActionItems = ({
       } satisfies MeetingActionItemCard;
     });
 
-  if (linkedActionItems.length > 0) {
-    return linkedActionItems;
-  }
-
-  return fallbackActionItems
+  const linkedActionKeys = new Set(
+    linkedActionItems.map((item) => normalizeValue(item.title).toLowerCase()),
+  );
+  const fallbackOnlyItems = fallbackActionItems
     .map((item, index) => {
       const parsed = parseFallbackActionItem(item);
-      return {
-        id: `fallback-${index}`,
-        title: parsed.title,
-        status: parsed.status,
-        statusLabel: parsed.statusLabel,
-        assignee: parsed.assignee,
-        dueLabel: parsed.dueLabel,
-        context: parsed.context,
-        actionable: false,
-        toggleLabel: null,
-        attentionItemId: null,
-        attentionStatus: null,
-        dismissLabel: null,
-        snoozeLabel: null,
-      } satisfies MeetingActionItemCard;
+      return { parsed, index };
     })
-    .filter((item) => item.title.length > 0);
+    .filter(({ parsed }) => parsed.title.length > 0)
+    .filter(
+      ({ parsed }) =>
+        !linkedActionKeys.has(normalizeValue(parsed.title).toLowerCase()),
+    )
+    .map(({ parsed, index }) => ({
+      id: `fallback-${index}`,
+      title: parsed.title,
+      status: parsed.status,
+      statusLabel: parsed.statusLabel,
+      assignee: parsed.assignee,
+      dueLabel: parsed.dueLabel,
+      context: parsed.context,
+      actionable: false,
+      toggleLabel: null,
+      attentionItemId: null,
+      attentionStatus: null,
+      dismissLabel: null,
+      snoozeLabel: null,
+    }));
+
+  if (linkedActionItems.length > 0) {
+    return [...linkedActionItems, ...fallbackOnlyItems];
+  }
+
+  return fallbackOnlyItems;
 };

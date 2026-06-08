@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Preserve unmatched fallback action cards in Meeting View
+- **Issue:** [#229](https://github.com/metagrover/pluto/issues/229)
+- **PR:** Pending.
+- **Changed:** Meeting View now keeps unmatched fallback follow-up lines visible even when some linked `action_item` entities already exist. Linked cards still stay authoritative for lifecycle and attention controls, while fallback-only cards continue to surface parsed owner, due, status, and context metadata after the linked list. Focused regression coverage now proves unmatched fallback items are preserved without duplicating matched linked cards.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and the Meeting View follow-up surface is incomplete if linked graph coverage hides remaining actionable follow-up context from the same meeting analysis. Before this slice, `buildMeetingActionItems(...)` returned only linked cards whenever any linked action existed, so unmatched fallback follow-ups silently disappeared.
+- **Replaced:** Treating the presence of any linked action-item entity as a reason to discard every fallback action line instead of merging in fallback-only cards that Pluto still needs to show.
+- **Notes:** This stays inside the existing Meeting View action-card builder and preserves current sorting plus linked attention affordances.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View

@@ -50,7 +50,7 @@ describe('buildMeetingActionItems', () => {
           status: null,
         }),
       ],
-      fallbackActionItems: ['Fallback should not be used'],
+      fallbackActionItems: ['Send pricing recap'],
     });
 
     expect(items).toHaveLength(2);
@@ -225,5 +225,53 @@ describe('buildMeetingActionItems', () => {
       snoozeLabel: 'Reopen',
       actionable: true,
     });
+  });
+
+  it('preserves unmatched fallback cards alongside linked action items', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'linked-1',
+          name: 'Send pricing recap',
+        }),
+      ],
+      fallbackActionItems: [
+        'Send pricing recap (Owner: Alex | Due: Friday)',
+        'Confirm reseller terms (Status: Needs legal review | Context: Waiting on contract redlines.)',
+      ],
+    });
+
+    expect(items).toEqual([
+      {
+        id: 'linked-1',
+        title: 'Send pricing recap',
+        status: 'active',
+        statusLabel: null,
+        assignee: 'Alex',
+        dueLabel: 'Due May 30',
+        context: 'Alex committed to send the pricing recap by Friday.',
+        actionable: true,
+        toggleLabel: 'Mark complete',
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+      },
+      {
+        id: 'fallback-1',
+        title: 'Confirm reseller terms',
+        status: 'fallback',
+        statusLabel: 'Needs legal review',
+        assignee: null,
+        dueLabel: null,
+        context: 'Waiting on contract redlines.',
+        actionable: false,
+        toggleLabel: null,
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+      },
+    ]);
   });
 });
