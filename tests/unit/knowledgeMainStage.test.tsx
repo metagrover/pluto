@@ -286,6 +286,65 @@ describe('Knowledge MainStage', () => {
     expect(markup.split(distinctRisk)).toHaveLength(2);
   });
 
+  it('surfaces recent-change summaries in the current read trust panel', () => {
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Workspace Intelligence' },
+        current_read: {
+          headline: 'Launch planning remains the main operating thread.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 2,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in cited operating reviews.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.84,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 2,
+          removed_count: 1,
+          updated_count: 3,
+          notable_changes: ['Launch brief owner', 'Approval path'],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[makeSource({}), makeSource({ meeting_id: 'meeting-2' })]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('Recent changes: +2 / -1 / ~3.');
+    expect(markup).toContain('Notable changes: Launch brief owner, Approval path.');
+  });
+
   it('uses rendered backing freshness instead of the selected doc timestamp', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-27T10:00:00.000Z'));

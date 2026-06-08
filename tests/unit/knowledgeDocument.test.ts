@@ -327,6 +327,12 @@ describe('knowledge document utilities', () => {
       included_count: 3,
       excluded_count: 1,
     });
+    expect(brief.recentChanges).toMatchObject({
+      addedCount: 2,
+      removedCount: 0,
+      updatedCount: 0,
+      notableChanges: ['Knowledge Dashboard'],
+    });
     expect(brief.trustStatus).toBe('inferred');
     expect(brief.trustDescription).toBe(
       'Supported by evidence, but synthesized across sources.',
@@ -440,6 +446,76 @@ describe('knowledge document utilities', () => {
       'Hyper-Persona Leads',
       'Impact of AI on Software Engineering Process',
     ]);
+  });
+
+  it('prefers snapshot-backed recent-change summaries when available', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Doc-backed headline should be superseded by the snapshot.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 2,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc-backed trust.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.8,
+            cited_meeting_count: 1,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const brief = compileKnowledgeBrief(doc, {
+      ...makeWorkingMemorySnapshot(),
+      payload: {
+        ...makeWorkingMemorySnapshot().payload,
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 1,
+          removed_count: 2,
+          updated_count: 3,
+          notable_changes: ['Snapshot-backed launch follow-up'],
+        },
+      } as typeof makeWorkingMemorySnapshot extends () => infer T
+        ? T extends { payload: infer P }
+          ? P
+          : never
+        : never,
+    });
+
+    expect(brief.backingSource).toBe('snapshot');
+    expect(brief.recentChanges).toMatchObject({
+      addedCount: 1,
+      removedCount: 2,
+      updatedCount: 3,
+      notableChanges: ['Snapshot-backed launch follow-up'],
+    });
   });
 
   it('derives stale trust state for stale V2 docs', () => {

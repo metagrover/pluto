@@ -350,6 +350,7 @@ const CurrentRead = ({
   trustStatus,
   trustDescription,
   sourceQuality,
+  recentChanges,
   evidenceIndex,
   isCompiled,
   backingSource,
@@ -369,6 +370,12 @@ const CurrentRead = ({
   trustStatus: TrustStatus | null;
   trustDescription: string | null;
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
+  recentChanges: {
+    addedCount: number;
+    removedCount: number;
+    updatedCount: number;
+    notableChanges: string[];
+  } | null;
   evidenceIndex: KnowledgeV2EvidenceEntry[];
   isCompiled: boolean;
   backingSource: 'snapshot' | 'doc' | 'none';
@@ -515,6 +522,17 @@ const CurrentRead = ({
                 {evidenceQuality.freshness} evidence.
               </p>
             )}
+            {recentChanges &&
+              (recentChanges.addedCount > 0 ||
+                recentChanges.removedCount > 0 ||
+                recentChanges.updatedCount > 0) && (
+                <p className="mt-2 text-[11px] font-semibold text-pro-text-muted">
+                  {`Recent changes: +${recentChanges.addedCount} / -${recentChanges.removedCount} / ~${recentChanges.updatedCount}.`}
+                  {recentChanges.notableChanges.length > 0
+                    ? ` Notable changes: ${recentChanges.notableChanges.join(', ')}.`
+                    : ''}
+                </p>
+              )}
           </div>
         )}
 
@@ -1150,6 +1168,7 @@ export const MainStage: React.FC<MainStageProps> = ({
           trustStatus={brief.trustStatus}
           trustDescription={brief.trustDescription}
           sourceQuality={brief.sourceQuality}
+          recentChanges={brief.recentChanges}
           evidenceIndex={brief.evidenceIndex}
           isCompiled={brief.isCompiled}
           backingSource={brief.backingSource}

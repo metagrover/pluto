@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Surface recent-change summaries in compiled Knowledge briefs
+- **Issue:** [#233](https://github.com/metagrover/pluto/issues/233)
+- **PR:** Pending.
+- **Changed:** Pluto's shared Knowledge V2 consumer path now preserves `change_summary` instead of dropping it. Compiled Knowledge briefs carry recent-change counts and notable changes, snapshot-backed briefs prefer the durable snapshot summary when it exists, and the Current Read trust panel now surfaces that recent-change context alongside source-quality and evidence status. Focused regression coverage proves both parsing and rendering paths.
+- **Why:** `#80` remains Pluto's next unowned Phase 2 foundation under `#65`, and working memory is only useful if consumers can see the recent changes the synthesis layer already computed. Before this slice, `KnowledgeV2Document.change_summary` existed in source docs but disappeared before any compiled Knowledge surface could use it.
+- **Replaced:** Treating recent-change state as synthesis-only metadata that was silently discarded by the shared compiled-brief path.
+- **Notes:** This stays within the existing Knowledge brief/trust surface and does not redesign the broader Knowledge workspace.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View

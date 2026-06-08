@@ -144,6 +144,14 @@ export interface KnowledgeV2SourceQualitySummary {
   }>;
 }
 
+export interface KnowledgeV2ChangeSummary {
+  generated_at: string;
+  added_count: number;
+  removed_count: number;
+  updated_count: number;
+  notable_changes: string[];
+}
+
 export interface StructuredKnowledgeV2Doc {
   schema_version: 2;
   scope: {
@@ -166,6 +174,7 @@ export interface StructuredKnowledgeV2Doc {
   risks_and_unknowns: KnowledgeV2Item[];
   evidence_index: KnowledgeV2EvidenceEntry[];
   source_quality_summary: KnowledgeV2SourceQualitySummary;
+  change_summary: KnowledgeV2ChangeSummary | null;
 }
 
 type StructuredKnowledgeV2Source = Pick<
@@ -189,6 +198,13 @@ export interface KnowledgeBrief {
   risksAndUnknowns: KnowledgeV2Item[];
   evidenceIndex: KnowledgeV2EvidenceEntry[];
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
+  recentChanges: {
+    generatedAt: string | null;
+    addedCount: number;
+    removedCount: number;
+    updatedCount: number;
+    notableChanges: string[];
+  } | null;
   trustMessage: string | null;
   trustStatus: TrustStatus | null;
   trustDescription: string | null;
@@ -316,6 +332,26 @@ const parseV2Quality = (value: unknown): KnowledgeV2EvidenceQuality => {
   };
 };
 
+const parseV2ChangeSummary = (
+  value: unknown,
+): KnowledgeV2ChangeSummary | null => {
+  if (!isObject(value)) return null;
+  return {
+    generated_at: asString(value.generated_at),
+    added_count: typeof value.added_count === 'number' ? value.added_count : 0,
+    removed_count:
+      typeof value.removed_count === 'number' ? value.removed_count : 0,
+    updated_count:
+      typeof value.updated_count === 'number' ? value.updated_count : 0,
+    notable_changes: Array.isArray(value.notable_changes)
+      ? value.notable_changes.filter(
+          (item): item is string =>
+            typeof item === 'string' && item.trim().length > 0,
+        )
+      : [],
+  };
+};
+
 const parseV2Items = (value: unknown): KnowledgeV2Item[] => {
   if (!Array.isArray(value)) return [];
   return value.filter(isObject).map((item, index) => ({
@@ -437,6 +473,7 @@ const parseStructuredKnowledgeV2Value = (
     const sourceQuality = isObject(parsed.source_quality_summary)
       ? parsed.source_quality_summary
       : {};
+    const changeSummary = parseV2ChangeSummary(parsed.change_summary);
     const activeStreams = (
       Array.isArray(parsed.active_streams)
         ? parsed.active_streams.filter(isObject).map((stream, index) => ({
@@ -570,6 +607,7 @@ const parseStructuredKnowledgeV2Value = (
             }))
           : [],
       },
+      change_summary: changeSummary,
     };
   } catch {
     return null;
@@ -646,6 +684,8 @@ const toWorkingMemorySnapshotStructuredDoc = (
       weak_count: 0,
       records: [],
     },
+    change_summary:
+      (payload as { change_summary?: unknown }).change_summary ?? null,
   });
 
   return parseStructuredKnowledgeV2Value({
@@ -793,10 +833,12 @@ const buildKnowledgeBriefFromV2 = ({
   v2,
   trustStatus,
   sourceQuality,
+  backingSource,
 }: {
   v2: StructuredKnowledgeV2Doc;
   trustStatus: TrustStatus;
   sourceQuality: KnowledgeV2SourceQualitySummary | null;
+  backingSource: 'snapshot' | 'doc';
 }): KnowledgeBrief => {
   const hasCompiledSurface =
     v2.active_streams.length > 0 ||
@@ -836,7 +878,7 @@ const buildKnowledgeBriefFromV2 = ({
 
   return {
     isCompiled,
-    backingSource: sourceQuality ? 'doc' : 'snapshot',
+    backingSource,
     headline: v2.current_read.headline || 'No reliable compiled brief yet.',
     freshnessAt: v2.current_read.evidence_quality.last_reinforced_at,
     supportingBullets: v2.current_read.supporting_bullets.filter(Boolean),
@@ -855,6 +897,15 @@ const buildKnowledgeBriefFromV2 = ({
     risksAndUnknowns: v2.risks_and_unknowns,
     evidenceIndex: v2.evidence_index,
     sourceQuality,
+    recentChanges: v2.change_summary
+      ? {
+          generatedAt: v2.change_summary.generated_at || null,
+          addedCount: v2.change_summary.added_count,
+          removedCount: v2.change_summary.removed_count,
+          updatedCount: v2.change_summary.updated_count,
+          notableChanges: [...v2.change_summary.notable_changes],
+        }
+      : null,
     trustMessage: v2.current_read.trust_message,
     trustStatus,
     trustDescription: getTrustStatusMeta(trustStatus).description,
@@ -876,6 +927,7 @@ export const compileKnowledgeBrief = (
       v2: snapshotV2,
       trustStatus: workingMemorySnapshot.trust_status,
       sourceQuality: snapshotV2.source_quality_summary,
+      backingSource: 'snapshot',
     });
   }
 
@@ -916,6 +968,7 @@ export const compileKnowledgeBrief = (
         evidenceQuality: v2.current_read.evidence_quality,
       }),
       sourceQuality: v2.source_quality_summary,
+      backingSource: 'doc',
     });
   }
 
@@ -934,6 +987,7 @@ export const compileKnowledgeBrief = (
       risksAndUnknowns: [],
       evidenceIndex: [],
       sourceQuality: null,
+      recentChanges: null,
       trustMessage: null,
       trustStatus: null,
       trustDescription: null,
@@ -1101,6 +1155,7 @@ export const compileKnowledgeBrief = (
     risksAndUnknowns: [],
     evidenceIndex: [],
     sourceQuality: null,
+    recentChanges: null,
     trustMessage: null,
     trustStatus: null,
     trustDescription: null,
