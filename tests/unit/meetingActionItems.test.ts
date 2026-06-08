@@ -95,6 +95,7 @@ describe('buildMeetingActionItems', () => {
         title: 'Send pricing recap',
         status: 'fallback',
         statusLabel: null,
+        topicLabel: null,
         assignee: 'Alex',
         dueLabel: 'Due Friday',
         context: null,
@@ -110,6 +111,7 @@ describe('buildMeetingActionItems', () => {
         title: 'Confirm reseller terms',
         status: 'fallback',
         statusLabel: null,
+        topicLabel: null,
         assignee: null,
         dueLabel: null,
         context: null,
@@ -137,6 +139,7 @@ describe('buildMeetingActionItems', () => {
         id: 'fallback-0',
         title: 'Send pricing recap',
         status: 'overdue',
+        topicLabel: null,
         assignee: 'Alex',
         dueLabel: 'Due Friday',
         context: 'Waiting on pricing sign-off.',
@@ -152,6 +155,7 @@ describe('buildMeetingActionItems', () => {
         id: 'fallback-1',
         title: 'Confirm reseller terms',
         status: 'fallback',
+        topicLabel: null,
         assignee: null,
         dueLabel: null,
         context: null,
@@ -162,6 +166,34 @@ describe('buildMeetingActionItems', () => {
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: 'Needs legal review',
+      },
+    ]);
+  });
+
+  it('preserves fallback topic metadata on summary cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [makeMeetingEntity({ id: 'topic-1', type: 'topic' })],
+      fallbackActionItems: [
+        'Send pricing recap (Topic: Pricing rollout | Owner: Alex | Due: Friday)',
+      ],
+    });
+
+    expect(items).toEqual([
+      {
+        id: 'fallback-0',
+        title: 'Send pricing recap',
+        status: 'fallback',
+        statusLabel: null,
+        topicLabel: 'Pricing rollout',
+        assignee: 'Alex',
+        dueLabel: 'Due Friday',
+        context: null,
+        actionable: false,
+        toggleLabel: null,
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
       },
     ]);
   });

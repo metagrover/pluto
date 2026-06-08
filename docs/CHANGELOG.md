@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Preserve fallback topic context in Meeting View action cards
+- **Issue:** [#237](https://github.com/metagrover/pluto/issues/237)
+- **PR:** Pending.
+- **Changed:** Meeting View fallback follow-up cards now preserve `Topic: ...` metadata from analysis-backed action lines instead of dropping it during card parsing. The action-card model exposes a dedicated topic label, the existing badge row renders it alongside the current owner/status/due metadata, and focused regression coverage now proves fallback topic context survives the parser.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and the Meeting View follow-up surface should keep the source context Pluto already knows. Before this slice, fallback cards could keep owner/due/status/context detail but still lose the topic that explained why the follow-up mattered.
+- **Replaced:** Treating fallback `Topic:` metadata as disposable text instead of first-class Meeting View action-card context.
+- **Notes:** This stays inside the existing fallback action-card parser and renderer; it does not redesign Meeting View or broaden lifecycle controls.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
