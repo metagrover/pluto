@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Preserve Knowledge change summaries in working-memory snapshots
+- **Issue:** [#231](https://github.com/metagrover/pluto/issues/231)
+- **PR:** Pending.
+- **Changed:** Working-memory snapshots now persist `KnowledgeV2Document.change_summary` alongside current read, streams, evidence, and source quality. The shared Knowledge V2 parser and snapshot-to-V2 reconstruction path also keep recent-change counts and notable change labels instead of silently dropping them, and focused regression coverage now proves both persistence and consumer parsing.
+- **Why:** `#80` defines working-memory snapshots as Pluto's durable operational state, including recent changes. Before this slice, recent-change state existed in the source Knowledge V2 document but disappeared as soon as Pluto persisted and re-read a snapshot, leaving the durable memory layer incomplete.
+- **Replaced:** Treating working-memory snapshots as if current read and evidence were enough durable state even when the source Knowledge document also tracked recent changes that downstream snapshot-backed consumers may need.
+- **Notes:** This keeps the fix scoped to the snapshot schema and conversion path; it does not redesign Knowledge surfaces or add new recent-change UI in this PR.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
