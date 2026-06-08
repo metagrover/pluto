@@ -11,6 +11,7 @@ import {
   groupKnowledgeDocs,
   knowledgeDocsNeedPolling,
   parseStructuredKnowledgeDoc,
+  parseStructuredKnowledgeV2Doc,
   supportsWorkingMemorySnapshotScope,
 } from '../../src/components/KnowledgeGraph/knowledgeDocument';
 
@@ -174,6 +175,13 @@ const makeWorkingMemorySnapshot = (
         confidence: 0.91,
       },
     ],
+    change_summary: {
+      generated_at: '2026-04-25T10:00:00.000Z',
+      added_count: 2,
+      removed_count: 0,
+      updated_count: 1,
+      notable_changes: ['Launch', 'Assign launch owner'],
+    },
   },
   generated_at: '2026-04-25T10:00:00.000Z',
   updated_at: '2026-04-25T10:00:00.000Z',
@@ -335,6 +343,60 @@ describe('knowledge document utilities', () => {
       title: 'API instrumentation approval is still pending.',
       severity: 'critical',
       kind: 'dependency',
+    });
+  });
+
+  it('preserves V2 change summaries for snapshot-backed consumers', () => {
+    const parsed = parseStructuredKnowledgeV2Doc(
+      makeDoc({
+        structured_json: JSON.stringify({
+          schema_version: 2,
+          scope: { type: 'global', title: 'Global Knowledge' },
+          current_read: {
+            headline: 'Global current read',
+            supporting_bullets: [],
+            freshness: 'fresh',
+            source_count: 2,
+            cited_item_count: 1,
+            cited_meeting_count: 1,
+            trust_message: 'Backed by evidence.',
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.88,
+              cited_meeting_count: 1,
+              source_count: 2,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+          active_streams: [],
+          needs_attention: [],
+          patterns: [],
+          risks_and_unknowns: [],
+          evidence_index: [],
+          source_quality_summary: {
+            included_count: 2,
+            excluded_count: 0,
+            weak_count: 0,
+            records: [],
+          },
+          change_summary: {
+            generated_at: '2026-04-25T10:00:00.000Z',
+            added_count: 2,
+            removed_count: 1,
+            updated_count: 3,
+            notable_changes: ['Launch', 'Approval path'],
+          },
+        }),
+      }),
+    );
+
+    expect(parsed?.change_summary).toEqual({
+      generated_at: '2026-04-25T10:00:00.000Z',
+      added_count: 2,
+      removed_count: 1,
+      updated_count: 3,
+      notable_changes: ['Launch', 'Approval path'],
     });
   });
 

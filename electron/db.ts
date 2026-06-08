@@ -1796,6 +1796,13 @@ export interface WorkingMemorySnapshotPayload {
     weak_count: number;
     records: unknown[];
   };
+  change_summary?: {
+    generated_at: string | null;
+    added_count: number;
+    removed_count: number;
+    updated_count: number;
+    notable_changes: string[];
+  };
 }
 
 export interface WorkingMemorySnapshot {

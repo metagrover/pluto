@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-08
 
+### Preserve snapshot change summaries
+- **Issue:** [#231](https://github.com/metagrover/pluto/issues/231)
+- **PR:** Pending.
+- **Changed:** Working-memory snapshots now preserve the Knowledge V2 document's structured `change_summary` metadata (added, removed, and updated counts, plus notable changes list) when converting documents to snapshots and back. Focused unit tests now cover both snapshot-payload and document-parser changes.
+- **Why:** `#80` defines working-memory snapshots as Pluto's durable operational state, including recent changes. Before this slice, recent-change state existed in the source Knowledge V2 document but disappeared as soon as Pluto persisted and re-read a snapshot, leaving the durable memory layer incomplete.
+- **Replaced:** Treating working-memory snapshots as if current read and evidence were enough durable state even when the source Knowledge document also tracked recent changes that downstream snapshot-backed consumers may need.
+- **Notes:** This keeps the fix scoped to the snapshot schema and conversion path; it does not redesign Knowledge surfaces or add new recent-change UI in this PR.
+
 ### Prioritize overdue and stale Meeting View follow-ups
 - **Issue:** [#265](https://github.com/metagrover/pluto/issues/265)
 - **PR:** Pending.

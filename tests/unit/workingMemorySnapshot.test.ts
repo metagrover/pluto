@@ -353,6 +353,9 @@ describe('working memory snapshots', () => {
       last_reinforced_at: '2026-05-26T14:00:00.000Z',
       freshness: 'fresh',
     });
+    expect(snapshot.payload.change_summary).toEqual(
+      makeKnowledgeSnapshotDoc().change_summary,
+    );
     expect(snapshot.payload.source_quality_summary).toEqual(
       makeKnowledgeSnapshotDoc().source_quality_summary,
     );
@@ -379,6 +382,9 @@ describe('working memory snapshots', () => {
     });
     expect(stored?.payload.current_read.headline).toBe(
       'Launch work is blocked on the approval path.',
+    );
+    expect(stored?.payload.change_summary).toEqual(
+      makeKnowledgeSnapshotDoc().change_summary,
     );
   });
 

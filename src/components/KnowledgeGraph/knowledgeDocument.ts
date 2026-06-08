@@ -166,6 +166,13 @@ export interface StructuredKnowledgeV2Doc {
   risks_and_unknowns: KnowledgeV2Item[];
   evidence_index: KnowledgeV2EvidenceEntry[];
   source_quality_summary: KnowledgeV2SourceQualitySummary;
+  change_summary: {
+    generated_at: string | null;
+    added_count: number;
+    removed_count: number;
+    updated_count: number;
+    notable_changes: string[];
+  };
 }
 
 type StructuredKnowledgeV2Source = Pick<
@@ -437,6 +444,9 @@ const parseStructuredKnowledgeV2Value = (
     const sourceQuality = isObject(parsed.source_quality_summary)
       ? parsed.source_quality_summary
       : {};
+    const changeSummary = isObject(parsed.change_summary)
+      ? parsed.change_summary
+      : {};
     const activeStreams = (
       Array.isArray(parsed.active_streams)
         ? parsed.active_streams.filter(isObject).map((stream, index) => ({
@@ -570,6 +580,26 @@ const parseStructuredKnowledgeV2Value = (
             }))
           : [],
       },
+      change_summary: {
+        generated_at: asString(changeSummary.generated_at) || null,
+        added_count:
+          typeof changeSummary.added_count === 'number'
+            ? changeSummary.added_count
+            : 0,
+        removed_count:
+          typeof changeSummary.removed_count === 'number'
+            ? changeSummary.removed_count
+            : 0,
+        updated_count:
+          typeof changeSummary.updated_count === 'number'
+            ? changeSummary.updated_count
+            : 0,
+        notable_changes: Array.isArray(changeSummary.notable_changes)
+          ? changeSummary.notable_changes.filter(
+              (item): item is string => typeof item === 'string',
+            )
+          : [],
+      },
     };
   } catch {
     return null;
@@ -645,6 +675,13 @@ const toWorkingMemorySnapshotStructuredDoc = (
       excluded_count: 0,
       weak_count: 0,
       records: [],
+    },
+    change_summary: payload.change_summary ?? {
+      generated_at: snapshot.generated_at,
+      added_count: 0,
+      removed_count: 0,
+      updated_count: 0,
+      notable_changes: [],
     },
   });
 

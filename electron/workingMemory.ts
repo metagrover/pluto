@@ -61,6 +61,13 @@ const buildWorkingMemorySnapshot = ({
         ...record,
       })),
     },
+    change_summary: {
+      generated_at: structured.change_summary.generated_at,
+      added_count: structured.change_summary.added_count,
+      removed_count: structured.change_summary.removed_count,
+      updated_count: structured.change_summary.updated_count,
+      notable_changes: [...structured.change_summary.notable_changes],
+    },
   };
 
   return {
