@@ -1209,14 +1209,12 @@ export const compileNeedsAttention = (
       }));
   }
 
-  const snapshotV2 =
-    doc != null &&
-    WORKING_MEMORY_SNAPSHOT_SCOPE_TYPES.includes(doc.scope_type) &&
-    workingMemorySnapshot?.scope_type === doc.scope_type &&
-    workingMemorySnapshot?.scope_key === doc.scope_key &&
-    workingMemorySnapshot?.source_doc_id === doc.id
-      ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
-      : null;
+  const snapshotV2 = matchesWorkingMemorySnapshotToDoc(
+    doc,
+    workingMemorySnapshot,
+  )
+    ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
+    : null;
   const v2 = snapshotV2 ?? parseStructuredKnowledgeV2Doc(doc);
   const structured = v2 ? null : parseStructuredKnowledgeDoc(doc);
   const v2Items: NeedsAttentionItem[] = v2

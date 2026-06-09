@@ -2276,6 +2276,110 @@ describe('knowledge document utilities', () => {
     ]);
   });
 
+  it('falls back to fresher project doc data when the matching snapshot predates the latest synthesis', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-project',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      last_synthesized_at: '2026-04-26T10:00:00.000Z',
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'project', title: 'Project One' },
+        chapters: [
+          {
+            chapter_id: 'project',
+            title: 'Project One',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'risk-fresh-doc',
+                text: 'Fresh project synthesis says launch coordination is unresolved.',
+                why_it_matters:
+                  'The latest project synthesis is newer than the stored snapshot.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [],
+      makeWorkingMemorySnapshot({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project One',
+        source_doc_id: 'doc-project',
+        source_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'project',
+            key: 'project-1',
+            title: 'Project One',
+          },
+          source: {
+            knowledge_doc_id: 'doc-project',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+          open_loops: [
+            {
+              id: 'loop-project',
+              title: 'Stale snapshot follow-up',
+              summary: 'This should be ignored because the doc is newer.',
+              kind: 'follow_up',
+              severity: 'watch',
+              why_now:
+                'The snapshot is older than the latest project synthesis.',
+              stream_ids: ['stream-launch'],
+              citations: [
+                {
+                  meeting_id: 'm-project',
+                  quote: 'This snapshot item is now stale.',
+                },
+              ],
+              evidence_quality: {
+                mode: 'direct',
+                confidence: 0.84,
+                cited_meeting_count: 1,
+                source_count: 1,
+                last_reinforced_at: '2026-04-25T10:00:00.000Z',
+                freshness: 'fresh',
+              },
+            },
+          ],
+          patterns: [],
+          risks_and_unknowns: [],
+          evidence_index: [],
+        },
+      }),
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'risk-risk-fresh-doc',
+        title:
+          'Fresh project synthesis says launch coordination is unresolved.',
+        summary:
+          'The latest project synthesis is newer than the stored snapshot.',
+        severity: 'critical',
+        kind: 'risk',
+        reasons: [
+          'The latest project synthesis is newer than the stored snapshot.',
+        ],
+        citations: [],
+      },
+    ]);
+  });
+
   it('classifies extracted follow-ups as watch items instead of critical risks', () => {
     const sourceDoc = makeDoc({
       structured_json: JSON.stringify({

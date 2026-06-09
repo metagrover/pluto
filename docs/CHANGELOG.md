@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-09
+
+### Ignore outdated snapshots in Knowledge Needs Attention
+- **Issue:** [#268](https://github.com/metagrover/pluto/issues/268)
+- **PR:** Pending.
+- **Changed:** `compileNeedsAttention(...)` now refuses a matching working-memory snapshot when the source Knowledge doc has been synthesized more recently, aligning the Needs Attention consumer path with the existing snapshot-validity checks already used by the compiled brief path. Focused regression coverage now proves project-scope Needs Attention falls back to fresher doc JSON instead of rendering stale snapshot-backed follow-ups.
+- **Why:** `#81` requires working-memory-backed Knowledge to degrade honestly when snapshot state is stale or outdated. Before this slice, Pluto could keep showing snapshot-backed blockers or follow-ups with undue confidence even after fresher Knowledge synthesis was already available.
+- **Replaced:** Treating scope/doc-id matches as sufficient for Needs Attention snapshot preference even when the snapshot predates the latest doc synthesis.
+- **Notes:** This stays inside the shared Knowledge consumer path and preserves the existing fallback behavior for genuinely stale snapshots and non-snapshot project-card heuristics.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
