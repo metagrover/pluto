@@ -908,6 +908,90 @@ describe('knowledge document utilities', () => {
     expect(brief.freshnessAt).toBe('2026-04-25T10:00:00.000Z');
   });
 
+  it('degrades snapshot-backed trust when the rendered evidence freshness is aging', () => {
+    const brief = compileKnowledgeBrief(
+      makeDoc({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        id: 'doc-project',
+        title: 'Project Atlas',
+      }),
+      makeWorkingMemorySnapshot({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project Atlas',
+        source_doc_id: 'doc-project',
+        trust_status: 'grounded',
+        freshness: 'aging',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'project',
+            key: 'project-1',
+            title: 'Project Atlas',
+          },
+          source: {
+            knowledge_doc_id: 'doc-project',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+          current_read: {
+            ...makeWorkingMemorySnapshot().payload.current_read,
+            freshness: 'aging',
+            evidence_quality: {
+              ...makeWorkingMemorySnapshot().payload.current_read
+                .evidence_quality,
+              freshness: 'aging',
+            },
+          },
+        },
+      }),
+    );
+
+    expect(brief.trustStatus).toBe('inferred');
+  });
+
+  it('degrades snapshot-backed trust when the rendered evidence freshness is unknown', () => {
+    const brief = compileKnowledgeBrief(
+      makeDoc({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        id: 'doc-project',
+        title: 'Project Atlas',
+      }),
+      makeWorkingMemorySnapshot({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project Atlas',
+        source_doc_id: 'doc-project',
+        trust_status: 'grounded',
+        freshness: 'unknown',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'project',
+            key: 'project-1',
+            title: 'Project Atlas',
+          },
+          source: {
+            knowledge_doc_id: 'doc-project',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+          current_read: {
+            ...makeWorkingMemorySnapshot().payload.current_read,
+            freshness: 'unknown',
+            evidence_quality: {
+              ...makeWorkingMemorySnapshot().payload.current_read
+                .evidence_quality,
+              freshness: 'unknown',
+            },
+          },
+        },
+      }),
+    );
+
+    expect(brief.trustStatus).toBe('weak_evidence');
+  });
+
   it('prefers the V2 evidence reinforcement time for Current Read freshness', () => {
     const doc = makeDoc({
       last_synthesized_at: '2026-04-27T10:00:00.000Z',
