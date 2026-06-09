@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Preserve blocker classification in Knowledge Needs Attention
+- **Issue:** [#251](https://github.com/metagrover/pluto/issues/251)
+- **PR:** Pending.
+- **Changed:** The shared Knowledge consumer path now keeps `blocker` as a first-class `Needs Attention` kind for doc-backed, queue-backed, and working-memory-snapshot-backed items instead of collapsing it into the generic dependency label. Focused regression coverage now proves both the compiled model and the rendered Knowledge surface preserve blocker labels.
+- **Why:** `#81` is about making Knowledge read from durable working-memory-backed state without losing the semantics Pluto already knows. Before this slice, Knowledge V2 and snapshot payloads could correctly classify an item as a blocker, but the last-mile consumer path blurred that stronger signal into a plain dependency card.
+- **Replaced:** Treating blocker-backed Knowledge items as indistinguishable from routine dependencies once they reached the shared `compileNeedsAttention(...)` model.
+- **Notes:** This stays inside the existing Knowledge page structure and does not change attention scoring, snapshot schema, or broader UI layout.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View

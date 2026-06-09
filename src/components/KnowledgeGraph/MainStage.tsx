@@ -226,6 +226,7 @@ const labelForSeverity = (severity: NeedsAttentionItem['severity']) => {
 
 const labelForAttentionKind = (kind: NeedsAttentionItem['kind']) => {
   if (kind === 'follow_up') return 'Follow-up';
+  if (kind === 'blocker') return 'Blocker';
   return kind;
 };
 
