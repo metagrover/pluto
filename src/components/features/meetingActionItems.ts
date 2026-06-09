@@ -97,9 +97,7 @@ const ATTENTION_KIND_LABELS: Record<string, string> = {
   source_quality: 'Source quality',
 };
 
-const formatAttentionKindLabel = (
-  kind: string | undefined,
-): string | null => {
+const formatAttentionKindLabel = (kind: string | undefined): string | null => {
   const normalized = normalizeValue(kind);
   if (!normalized) return null;
   return ATTENTION_KIND_LABELS[normalized] ?? null;
