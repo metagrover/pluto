@@ -898,6 +898,28 @@ const buildKnowledgeBriefFromV2 = ({
   };
 };
 
+const deriveSnapshotBackedKnowledgeTrustStatus = (
+  evidenceQuality: KnowledgeV2EvidenceQuality | null,
+): TrustStatus => {
+  if (evidenceQuality?.freshness === 'unknown') {
+    return 'weak_evidence';
+  }
+
+  const baseTrustStatus = deriveKnowledgeTrustStatus({
+    docStatus: 'up_to_date',
+    evidenceQuality,
+  });
+
+  if (
+    evidenceQuality?.freshness === 'aging' &&
+    baseTrustStatus === 'grounded'
+  ) {
+    return 'inferred';
+  }
+
+  return baseTrustStatus;
+};
+
 export const compileKnowledgeBrief = (
   doc: KnowledgeDoc | null | undefined,
   workingMemorySnapshot?: WorkingMemorySnapshot | null,
@@ -911,7 +933,9 @@ export const compileKnowledgeBrief = (
   if (snapshotV2 && workingMemorySnapshot) {
     return buildKnowledgeBriefFromV2({
       v2: snapshotV2,
-      trustStatus: workingMemorySnapshot.trust_status,
+      trustStatus: deriveSnapshotBackedKnowledgeTrustStatus(
+        snapshotV2.current_read.evidence_quality,
+      ),
       sourceQuality: snapshotV2.source_quality_summary,
     });
   }

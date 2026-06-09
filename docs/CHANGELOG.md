@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-08
 
+### Align snapshot-backed Knowledge trust with rendered freshness
+- **Issue:** [#249](https://github.com/metagrover/pluto/issues/249)
+- **PR:** Pending.
+- **Changed:** Snapshot-backed Knowledge briefs now derive their trust label from the rendered Current Read evidence freshness instead of passing through the stored snapshot trust flag unchanged. Aging snapshot evidence degrades from `Grounded` to `Inferred`, unknown snapshot freshness degrades to `Weak evidence`, and focused regression coverage now proves both cases in `compileKnowledgeBrief(...)`.
+- **Why:** `#81` requires working-memory-backed Knowledge to degrade honestly when durable state becomes weaker or less fresh. Before this slice, a snapshot-backed brief could keep showing a fully grounded trust badge even when the rendered evidence was no longer fresh enough to support that claim.
+- **Replaced:** Treating the persisted snapshot trust flag as authoritative for snapshot-backed Current Read trust labels even after the rendered evidence freshness had degraded.
+- **Notes:** This stays inside the snapshot-backed Knowledge consumer path. It does not redesign the Knowledge UI or change the shared doc-backed trust-status utility.
+
 ### Preserve snapshot change summaries
 - **Issue:** [#231](https://github.com/metagrover/pluto/issues/231)
 - **PR:** Pending.
