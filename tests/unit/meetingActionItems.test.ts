@@ -101,6 +101,7 @@ describe('buildMeetingActionItems', () => {
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
+        attentionKindLabel: null,
         attentionStatus: null,
         dismissLabel: null,
         snoozeLabel: null,
@@ -116,6 +117,7 @@ describe('buildMeetingActionItems', () => {
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
+        attentionKindLabel: null,
         attentionStatus: null,
         dismissLabel: null,
         snoozeLabel: null,
@@ -143,6 +145,7 @@ describe('buildMeetingActionItems', () => {
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
+        attentionKindLabel: null,
         attentionStatus: null,
         dismissLabel: null,
         snoozeLabel: null,
@@ -158,6 +161,7 @@ describe('buildMeetingActionItems', () => {
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
+        attentionKindLabel: null,
         attentionStatus: null,
         dismissLabel: null,
         snoozeLabel: null,
@@ -185,16 +189,19 @@ describe('buildMeetingActionItems', () => {
       linkedAttentionItems: [
         {
           id: 'attention-active',
+          kind: 'follow_up',
           status: 'active',
           related_entity_ids: ['active-follow-up'],
         },
         {
           id: 'attention-dismissed',
+          kind: 'blocker',
           status: 'dismissed',
           related_entity_ids: ['dismissed-follow-up'],
         },
         {
           id: 'attention-snoozed',
+          kind: 'stale_context',
           status: 'snoozed',
           related_entity_ids: ['snoozed-follow-up'],
         },
@@ -205,6 +212,7 @@ describe('buildMeetingActionItems', () => {
     expect(items[0]).toMatchObject({
       id: 'active-follow-up',
       attentionItemId: 'attention-active',
+      attentionKindLabel: 'Follow-up',
       attentionStatus: 'active',
       dismissLabel: 'Dismiss',
       snoozeLabel: 'Snooze',
@@ -212,6 +220,7 @@ describe('buildMeetingActionItems', () => {
     expect(items[1]).toMatchObject({
       id: 'dismissed-follow-up',
       attentionItemId: 'attention-dismissed',
+      attentionKindLabel: 'Blocker',
       attentionStatus: 'dismissed',
       dismissLabel: 'Reopen',
       snoozeLabel: null,
@@ -220,6 +229,7 @@ describe('buildMeetingActionItems', () => {
     expect(items[2]).toMatchObject({
       id: 'snoozed-follow-up',
       attentionItemId: 'attention-snoozed',
+      attentionKindLabel: 'Stale context',
       attentionStatus: 'snoozed',
       dismissLabel: null,
       snoozeLabel: 'Reopen',

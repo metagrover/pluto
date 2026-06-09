@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-09
+
+### Surface linked attention classification on Meeting View follow-up cards
+- **Issue:** [#250](https://github.com/metagrover/pluto/issues/250)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up cards now surface the linked attention classification Pluto already knows, so cards can show concise labels like `Follow-up`, `Blocker`, and `Stale context` alongside the existing lifecycle, owner, due, and dismissal metadata. Focused regression coverage now proves the linked action-card builder carries that label through the shared card model.
+- **Why:** `#61` requires Pluto to distinguish routine follow-ups from blockers and other escalations. Before this slice, linked attention items already carried `kind`, but Meeting View hid that classification and made routine work and blocked work look too similar at a glance.
+- **Replaced:** Treating linked Meeting View follow-up cards as lifecycle-only rows even when the linked attention item had a stronger follow-up classification Pluto could already explain.
+- **Notes:** This intentionally reuses the existing Meeting View metadata row and does not change alert generation, scoring, or card layout.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View

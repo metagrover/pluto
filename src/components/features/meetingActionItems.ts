@@ -31,6 +31,7 @@ export interface MeetingActionItemCard {
   title: string;
   status: MeetingActionItemStatus;
   statusLabel: string | null;
+  attentionKindLabel: string | null;
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
@@ -81,6 +82,28 @@ const formatDueLabel = (dueDate: string | null): string | null => {
 
 const normalizeValue = (value: string | null | undefined): string =>
   (value || '').trim();
+
+const ATTENTION_KIND_LABELS: Record<string, string> = {
+  follow_up: 'Follow-up',
+  blocker: 'Blocker',
+  risk: 'Risk',
+  dependency: 'Dependency',
+  open_question: 'Open question',
+  stale_context: 'Stale context',
+  repeated_pattern: 'Pattern',
+  decision_conflict: 'Decision conflict',
+  duplicate_commitment: 'Duplicate commitment',
+  reference_context: 'Reference context',
+  source_quality: 'Source quality',
+};
+
+const formatAttentionKindLabel = (
+  kind: string | undefined,
+): string | null => {
+  const normalized = normalizeValue(kind);
+  if (!normalized) return null;
+  return ATTENTION_KIND_LABELS[normalized] ?? null;
+};
 
 const parseFallbackStatus = (
   value: string,
@@ -184,7 +207,7 @@ export const buildMeetingActionItems = ({
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
   const attentionByEntityId = new Map<
     string,
-    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
+    Pick<MeetingLinkedAttentionItem, 'id' | 'kind' | 'status'>
   >();
 
   for (const item of linkedAttentionItems) {
@@ -192,6 +215,7 @@ export const buildMeetingActionItems = ({
       if (attentionByEntityId.has(relatedEntityId)) continue;
       attentionByEntityId.set(relatedEntityId, {
         id: item.id,
+        kind: item.kind,
         status: item.status,
       });
     }
@@ -211,6 +235,7 @@ export const buildMeetingActionItems = ({
         title: entity.name,
         status,
         statusLabel: null,
+        attentionKindLabel: formatAttentionKindLabel(linkedAttention?.kind),
         assignee: entity.assigned_to,
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,
@@ -249,6 +274,7 @@ export const buildMeetingActionItems = ({
         title: parsed.title,
         status: parsed.status,
         statusLabel: parsed.statusLabel,
+        attentionKindLabel: null,
         assignee: parsed.assignee,
         dueLabel: parsed.dueLabel,
         context: parsed.context,

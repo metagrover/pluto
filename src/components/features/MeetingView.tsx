@@ -1202,6 +1202,11 @@ export const MeetingView = ({
                                 Status: {item.statusLabel}
                               </span>
                             ) : null}
+                            {item.attentionKindLabel ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                                {item.attentionKindLabel}
+                              </span>
+                            ) : null}
                             {item.attentionStatus === 'dismissed' ? (
                               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
                                 Dismissed
