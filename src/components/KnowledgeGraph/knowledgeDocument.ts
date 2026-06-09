@@ -205,6 +205,7 @@ export type AttentionSeverity = 'critical' | 'watch' | 'steady';
 
 export type NeedsAttentionKind =
   | 'risk'
+  | 'blocker'
   | 'project'
   | 'dependency'
   | 'follow_up';
@@ -1224,9 +1225,10 @@ const attentionSortScore = (item: NeedsAttentionItem): number => {
   const escalationBonus = ESCALATION_CUE_PATTERN.test(item.title) ? 0 : 1;
   const kindRank: Record<NeedsAttentionKind, number> = {
     risk: 0,
-    dependency: 1,
-    project: 2,
-    follow_up: 3,
+    blocker: 1,
+    dependency: 2,
+    project: 3,
+    follow_up: 4,
   };
   return (
     severityRank[item.severity] * 10 + escalationBonus + kindRank[item.kind]
@@ -1237,7 +1239,10 @@ const mapAttentionKind = (kind: AttentionItem['kind']): NeedsAttentionKind => {
   if (kind === 'follow_up' || kind === 'duplicate_commitment') {
     return 'follow_up';
   }
-  if (kind === 'blocker' || kind === 'dependency') {
+  if (kind === 'blocker') {
+    return 'blocker';
+  }
+  if (kind === 'dependency') {
     return 'dependency';
   }
   return 'risk';
@@ -1296,9 +1301,11 @@ export const compileNeedsAttention = (
             ? 'follow_up'
             : item.kind === 'risk'
               ? 'risk'
-              : item.kind === 'blocker' || item.kind === 'dependency'
-                ? 'dependency'
-                : 'project',
+              : item.kind === 'blocker'
+                ? 'blocker'
+                : item.kind === 'dependency'
+                  ? 'dependency'
+                  : 'project',
         reasons: [item.why_now || item.summary].filter(Boolean),
         citations: item.citations,
       }))

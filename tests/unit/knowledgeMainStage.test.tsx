@@ -709,6 +709,83 @@ describe('Knowledge MainStage', () => {
     expect(markup).toContain('Why?');
   });
 
+  it('renders blocker-backed Needs Attention items with the blocker label', () => {
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'project', title: 'Launch Project' },
+        current_read: {
+          headline: 'Launch readiness still hinges on legal approval.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Grounded in the latest launch review.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.88,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [
+          {
+            id: 'blocker-1',
+            title: 'Legal approval still blocks the launch path.',
+            summary: 'Launch cannot proceed until legal signs off.',
+            kind: 'blocker',
+            severity: 'needs_attention',
+            why_now:
+              'The latest project review still treats this as a blocker.',
+            stream_ids: ['launch'],
+            citations: [
+              {
+                meeting_id: 'm-launch',
+                quote: 'Legal approval still blocks the launch path.',
+              },
+            ],
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.88,
+              cited_meeting_count: 1,
+              source_count: 1,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('Blocker');
+    expect(markup).not.toContain('dependency');
+  });
+
   it('builds Current Read why items from matching evidence entries before bare citations', () => {
     const whyItem = buildCurrentReadWhyItem({
       item: {

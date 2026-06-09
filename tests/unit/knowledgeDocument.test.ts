@@ -342,7 +342,7 @@ describe('knowledge document utilities', () => {
     expect(attention[0]).toMatchObject({
       title: 'API instrumentation approval is still pending.',
       severity: 'critical',
-      kind: 'dependency',
+      kind: 'blocker',
     });
   });
 
@@ -2111,7 +2111,7 @@ describe('knowledge document utilities', () => {
         title: 'API instrumentation approval is still pending.',
         summary: 'Approval still blocks the active launch stream.',
         severity: 'critical',
-        kind: 'dependency',
+        kind: 'blocker',
         reasons: ['Approval still blocks the active launch stream.'],
         citations: [
           {
@@ -2131,6 +2131,87 @@ describe('knowledge document utilities', () => {
           {
             meeting_id: 'm-launch',
             quote: 'We still need to assign a launch owner.',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('preserves blocker classification from a matching working-memory snapshot', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-project',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      structured_json: null,
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [],
+      makeWorkingMemorySnapshot({
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project One',
+        source_doc_id: 'doc-project',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'project',
+            key: 'project-1',
+            title: 'Project One',
+          },
+          source: {
+            knowledge_doc_id: 'doc-project',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+          open_loops: [
+            {
+              id: 'loop-blocker',
+              title: 'Legal approval is still blocking launch',
+              summary:
+                'The durable snapshot still shows an unresolved blocker.',
+              kind: 'blocker',
+              severity: 'needs_attention',
+              why_now: 'Launch cannot proceed until legal approval lands.',
+              stream_ids: ['stream-launch'],
+              citations: [
+                {
+                  meeting_id: 'm-legal',
+                  quote: 'Legal approval is still blocking the launch path.',
+                },
+              ],
+              evidence_quality: {
+                mode: 'direct',
+                confidence: 0.91,
+                cited_meeting_count: 1,
+                source_count: 1,
+                last_reinforced_at: '2026-04-25T10:00:00.000Z',
+                freshness: 'fresh',
+              },
+            },
+          ],
+          patterns: [],
+          risks_and_unknowns: [],
+          evidence_index: [],
+        },
+      }),
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'loop-blocker',
+        title: 'Legal approval is still blocking launch',
+        summary: 'The durable snapshot still shows an unresolved blocker.',
+        severity: 'critical',
+        kind: 'blocker',
+        reasons: ['Launch cannot proceed until legal approval lands.'],
+        citations: [
+          {
+            meeting_id: 'm-legal',
+            quote: 'Legal approval is still blocking the launch path.',
           },
         ],
       },
