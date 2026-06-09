@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-08
 
+### Preserve linked action-card topic detail in Meeting View
+- **Issue:** [#246](https://github.com/metagrover/pluto/issues/246)
+- **PR:** Pending.
+- **Changed:** Linked Meeting View follow-up cards now preserve fallback `Topic: ...` detail when the matching `action_item` entity is otherwise too sparse to carry equivalent topic context. The existing metadata row renders that topic label without changing linked owner, due date, lifecycle, blocker, or fallback-only behavior, and focused regression coverage now proves the shared card builder keeps the topic detail for linked cards.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and trusted follow-up cards should not become less informative than Pluto's own analysis fallback just because a linked entity exists. Before this slice, the linked-card path flattened topic-aware fallback lines back to owner/due/context-only output.
+- **Replaced:** Letting linked Meeting View action cards discard fallback `Topic:` detail even when Pluto had already generated that context for the same follow-up.
+- **Notes:** This stays inside the existing Meeting View action-card model and metadata row, so it remains a focused trust/context fix rather than a surface redesign.
+
 ### Resolve linked Meeting View action owners to participant names
 - **Issue:** [#241](https://github.com/metagrover/pluto/issues/241)
 - **PR:** Pending.

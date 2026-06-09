@@ -472,4 +472,41 @@ describe('buildMeetingActionItems', () => {
       assignee: 'person-404',
     });
   });
+
+  it('preserves fallback topic detail on matching linked action cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'action-1',
+          name: 'Send pricing recap',
+          assigned_to: 'Alex',
+          due_date: '2026-05-30T15:00:00.000Z',
+        }),
+      ],
+      fallbackActionItems: [
+        'Send pricing recap (Topic: Pricing strategy | Owner: Alex | Due: Friday)',
+      ],
+    });
+
+    expect(items).toEqual([
+      {
+        id: 'action-1',
+        title: 'Send pricing recap',
+        topicLabel: 'Pricing strategy',
+        status: 'active',
+        statusLabel: null,
+        assignee: 'Alex',
+        dueLabel: 'Due May 30',
+        context: 'Alex committed to send the pricing recap by Friday.',
+        isBlocked: false,
+        blockerReason: null,
+        actionable: true,
+        toggleLabel: 'Mark complete',
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+      },
+    ]);
+  });
 });

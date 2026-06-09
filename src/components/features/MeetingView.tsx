@@ -1192,6 +1192,11 @@ export const MeetingView = ({
                                 ? 'Summary'
                                 : item.status}
                             </span>
+                            {item.topicLabel ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                                Topic: {item.topicLabel}
+                              </span>
+                            ) : null}
                             {item.assignee ? (
                               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
                                 Owner: {item.assignee}
