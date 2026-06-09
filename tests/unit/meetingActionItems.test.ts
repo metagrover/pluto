@@ -139,6 +139,8 @@ describe('buildMeetingActionItems', () => {
         assignee: 'Alex',
         dueLabel: 'Due Friday',
         context: null,
+        isBlocked: false,
+        blockerReason: null,
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
@@ -154,6 +156,8 @@ describe('buildMeetingActionItems', () => {
         assignee: null,
         dueLabel: null,
         context: null,
+        isBlocked: false,
+        blockerReason: null,
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
@@ -181,6 +185,8 @@ describe('buildMeetingActionItems', () => {
         assignee: 'Alex',
         dueLabel: 'Due Friday',
         context: 'Waiting on pricing sign-off.',
+        isBlocked: false,
+        blockerReason: null,
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
@@ -196,6 +202,8 @@ describe('buildMeetingActionItems', () => {
         assignee: null,
         dueLabel: null,
         context: null,
+        isBlocked: false,
+        blockerReason: null,
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
@@ -266,5 +274,40 @@ describe('buildMeetingActionItems', () => {
       snoozeLabel: 'Reopen',
       actionable: true,
     });
+  });
+
+  it('preserves blocker attention context for linked action cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'blocked-follow-up',
+          name: 'Confirm launch plan',
+          context: 'The team is waiting on legal before launch can proceed.',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-blocked',
+          kind: 'blocker',
+          reason: 'Legal approval is still blocking launch readiness.',
+          status: 'active',
+          related_entity_ids: ['blocked-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'blocked-follow-up',
+        attentionItemId: 'attention-blocked',
+        attentionStatus: 'active',
+        actionable: true,
+        dismissLabel: 'Dismiss',
+        snoozeLabel: 'Snooze',
+        isBlocked: true,
+        blockerReason: 'Legal approval is still blocking launch readiness.',
+      }),
+    ]);
   });
 });
