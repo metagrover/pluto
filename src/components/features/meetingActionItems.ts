@@ -182,6 +182,14 @@ export const buildMeetingActionItems = ({
   linkedAttentionItems = [],
   fallbackActionItems,
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
+  const peopleById = new Map(
+    meetingEntities
+      .filter(
+        (entity): entity is MeetingActionEntity =>
+          entity.type === 'person' && entity.name.trim().length > 0,
+      )
+      .map((entity) => [entity.id, entity.name] as const),
+  );
   const attentionByEntityId = new Map<
     string,
     Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
@@ -211,7 +219,9 @@ export const buildMeetingActionItems = ({
         title: entity.name,
         status,
         statusLabel: null,
-        assignee: entity.assigned_to,
+        assignee: entity.assigned_to
+          ? peopleById.get(entity.assigned_to) ?? entity.assigned_to
+          : null,
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,
         actionable: linkedAttention?.status !== 'dismissed',
