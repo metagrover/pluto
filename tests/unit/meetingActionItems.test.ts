@@ -226,4 +226,37 @@ describe('buildMeetingActionItems', () => {
       actionable: true,
     });
   });
+
+  it('prioritizes blocker-backed linked follow-ups ahead of routine active work', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'routine-follow-up',
+          name: 'Share launch notes',
+          mention_count: 4,
+          created_at: '2026-05-27T18:00:00.000Z',
+        }),
+        makeMeetingEntity({
+          id: 'blocked-follow-up',
+          name: 'Finalize launch approval',
+          mention_count: 1,
+          created_at: '2026-05-26T18:00:00.000Z',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-blocker',
+          kind: 'blocker',
+          status: 'active',
+          related_entity_ids: ['blocked-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items.map((item) => item.id)).toEqual([
+      'blocked-follow-up',
+      'routine-follow-up',
+    ]);
+  });
 });

@@ -161,6 +161,10 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
 const sortMeetingActionEntities = (
   left: MeetingActionEntity,
   right: MeetingActionEntity,
+  attentionByEntityId?: Map<
+    string,
+    Pick<MeetingLinkedAttentionItem, 'id' | 'kind' | 'status'>
+  >,
 ): number => {
   const leftStatus = left.status ?? 'active';
   const rightStatus = right.status ?? 'active';
@@ -169,6 +173,17 @@ const sortMeetingActionEntities = (
   const rightRank =
     ACTION_STATUS_ORDER[rightStatus] ?? ACTION_STATUS_ORDER.active;
   if (leftRank !== rightRank) return leftRank - rightRank;
+  if (leftRank === ACTION_STATUS_ORDER.active && attentionByEntityId) {
+    const leftIsBlocker =
+      attentionByEntityId.get(left.id)?.status === 'active' &&
+      attentionByEntityId.get(left.id)?.kind === 'blocker';
+    const rightIsBlocker =
+      attentionByEntityId.get(right.id)?.status === 'active' &&
+      attentionByEntityId.get(right.id)?.kind === 'blocker';
+    if (leftIsBlocker !== rightIsBlocker) {
+      return leftIsBlocker ? -1 : 1;
+    }
+  }
   if (left.mention_count !== right.mention_count) {
     return right.mention_count - left.mention_count;
   }
@@ -184,7 +199,7 @@ export const buildMeetingActionItems = ({
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
   const attentionByEntityId = new Map<
     string,
-    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
+    Pick<MeetingLinkedAttentionItem, 'id' | 'kind' | 'status'>
   >();
 
   for (const item of linkedAttentionItems) {
@@ -192,6 +207,7 @@ export const buildMeetingActionItems = ({
       if (attentionByEntityId.has(relatedEntityId)) continue;
       attentionByEntityId.set(relatedEntityId, {
         id: item.id,
+        kind: item.kind,
         status: item.status,
       });
     }
@@ -202,7 +218,9 @@ export const buildMeetingActionItems = ({
       (entity): entity is MeetingActionEntity =>
         entity.type === 'action_item' && entity.name.trim().length > 0,
     )
-    .sort(sortMeetingActionEntities)
+    .sort((left, right) =>
+      sortMeetingActionEntities(left, right, attentionByEntityId),
+    )
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);
