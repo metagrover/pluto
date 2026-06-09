@@ -224,7 +224,9 @@ export const buildMeetingActionItems = ({
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);
-      const fallbackMatch = fallbackByTitle.get(normalizeActionKey(entity.name));
+      const fallbackMatch = fallbackByTitle.get(
+        normalizeActionKey(entity.name),
+      );
       return {
         id: entity.id,
         title: entity.name,
