@@ -102,6 +102,8 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        attentionKind: null,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -117,6 +119,8 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        attentionKind: null,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -144,6 +148,8 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        attentionKind: null,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: null,
@@ -159,6 +165,8 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        attentionKind: null,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: 'Needs legal review',
@@ -225,5 +233,37 @@ describe('buildMeetingActionItems', () => {
       snoozeLabel: 'Reopen',
       actionable: true,
     });
+  });
+
+  it('preserves linked blocker attention context on Meeting View action cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'blocked-follow-up',
+          name: 'Finalize vendor contract',
+          context: 'Waiting on legal approval before sending.',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-blocker',
+          kind: 'blocker',
+          reason: 'Legal approval is still pending from procurement.',
+          status: 'active',
+          related_entity_ids: ['blocked-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items).toMatchObject([
+      {
+        id: 'blocked-follow-up',
+        attentionItemId: 'attention-blocker',
+        attentionStatus: 'active',
+        attentionKind: 'blocker',
+        blockerReason: 'Legal approval is still pending from procurement.',
+      },
+    ]);
   });
 });

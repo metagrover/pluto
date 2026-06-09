@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Surface blocker context on Meeting View action cards
+- **Issue:** [#239](https://github.com/metagrover/pluto/issues/239)
+- **PR:** Pending.
+- **Changed:** Meeting View action cards now preserve linked attention blocker metadata through the shared card-builder path. When an action item is backed by an active blocker attention item, the card keeps the blocker classification, shows a `Blocked` badge, and renders the blocker reason inline while leaving existing completion, dismiss, and snooze controls unchanged. Focused regression coverage now proves blocker context survives the linked-card model.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and blocked follow-ups should stay distinct from ordinary active work on Meeting View. Before this slice, Pluto already fetched linked blocker `kind` and `reason` from the durable attention queue, but the card builder dropped both values so blocked work looked like any other action item.
+- **Replaced:** Treating linked attention metadata as lifecycle-status-only on Meeting View cards even when Pluto already knew the follow-up was blocked and why.
+- **Notes:** This stays inside the existing Meeting View action-card path and does not change attention sync semantics or expand into new notification/draft surfaces.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View

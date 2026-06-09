@@ -38,6 +38,8 @@ export interface MeetingActionItemCard {
   toggleLabel: 'Mark complete' | 'Reopen' | null;
   attentionItemId: string | null;
   attentionStatus: MeetingActionAttentionStatus;
+  attentionKind: string | null;
+  blockerReason: string | null;
   dismissLabel: 'Dismiss' | 'Reopen' | null;
   snoozeLabel: 'Snooze' | 'Reopen' | null;
 }
@@ -184,7 +186,7 @@ export const buildMeetingActionItems = ({
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
   const attentionByEntityId = new Map<
     string,
-    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
+    Pick<MeetingLinkedAttentionItem, 'id' | 'status' | 'kind' | 'reason'>
   >();
 
   for (const item of linkedAttentionItems) {
@@ -193,6 +195,8 @@ export const buildMeetingActionItems = ({
       attentionByEntityId.set(relatedEntityId, {
         id: item.id,
         status: item.status,
+        kind: item.kind,
+        reason: item.reason,
       });
     }
   }
@@ -218,6 +222,12 @@ export const buildMeetingActionItems = ({
         toggleLabel: status === 'completed' ? 'Reopen' : 'Mark complete',
         attentionItemId: linkedAttention?.id ?? null,
         attentionStatus: linkedAttention?.status ?? null,
+        attentionKind: linkedAttention?.kind ?? null,
+        blockerReason:
+          linkedAttention?.kind === 'blocker' &&
+          linkedAttention.status === 'active'
+            ? (linkedAttention.reason ?? null)
+            : null,
         dismissLabel:
           linkedAttention == null
             ? null
@@ -256,6 +266,8 @@ export const buildMeetingActionItems = ({
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        attentionKind: null,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
       } satisfies MeetingActionItemCard;
