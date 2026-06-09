@@ -873,7 +873,10 @@ const deriveSnapshotBackedKnowledgeTrustStatus = (
     evidenceQuality,
   });
 
-  if (evidenceQuality?.freshness === 'aging' && baseTrustStatus === 'grounded') {
+  if (
+    evidenceQuality?.freshness === 'aging' &&
+    baseTrustStatus === 'grounded'
+  ) {
     return 'inferred';
   }
 
