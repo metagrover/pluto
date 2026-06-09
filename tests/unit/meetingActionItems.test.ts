@@ -95,6 +95,7 @@ describe('buildMeetingActionItems', () => {
         title: 'Send pricing recap',
         status: 'fallback',
         statusLabel: null,
+        topicLabel: null,
         assignee: 'Alex',
         dueLabel: 'Due Friday',
         context: null,
@@ -110,6 +111,7 @@ describe('buildMeetingActionItems', () => {
         title: 'Confirm reseller terms',
         status: 'fallback',
         statusLabel: null,
+        topicLabel: null,
         assignee: null,
         dueLabel: null,
         context: null,
@@ -137,6 +139,7 @@ describe('buildMeetingActionItems', () => {
         id: 'fallback-0',
         title: 'Send pricing recap',
         status: 'overdue',
+        topicLabel: null,
         assignee: 'Alex',
         dueLabel: 'Due Friday',
         context: 'Waiting on pricing sign-off.',
@@ -152,6 +155,7 @@ describe('buildMeetingActionItems', () => {
         id: 'fallback-1',
         title: 'Confirm reseller terms',
         status: 'fallback',
+        topicLabel: null,
         assignee: null,
         dueLabel: null,
         context: null,
@@ -225,5 +229,41 @@ describe('buildMeetingActionItems', () => {
       snoozeLabel: 'Reopen',
       actionable: true,
     });
+  });
+
+  it('preserves fallback topic context on linked action-item cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'action-1',
+          name: 'Send pricing recap',
+          assigned_to: null,
+          due_date: null,
+          context: null,
+        }),
+      ],
+      fallbackActionItems: [
+        'Send pricing recap (Topic: Launch planning | Owner: Alex | Due: Friday)',
+      ],
+    });
+
+    expect(items).toEqual([
+      {
+        id: 'action-1',
+        title: 'Send pricing recap',
+        status: 'active',
+        statusLabel: null,
+        topicLabel: 'Launch planning',
+        assignee: null,
+        dueLabel: null,
+        context: null,
+        actionable: true,
+        toggleLabel: 'Mark complete',
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+      },
+    ]);
   });
 });

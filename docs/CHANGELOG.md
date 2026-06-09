@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-09
+
+### Preserve linked Meeting View action-card topic context
+- **Issue:** [#247](https://github.com/metagrover/pluto/issues/247)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up cards now preserve fallback `Topic: ...` detail when the same action is also linked through a meeting `action_item` entity. The shared action-card builder reads matching fallback topic metadata by title, carries it through the linked card model, and the existing Meeting View metadata row renders that topic label without changing the broader surface. Focused regression coverage now proves linked cards keep that topic context.
+- **Why:** `#61` remains Pluto's earliest unfinished roadmap outcome under `#65`, and linked follow-up cards should not become less specific than the fallback analysis Pluto already produced. Before this slice, a linked entity could make the Meeting View card drop the only structured clue about which discussion thread the commitment belonged to.
+- **Replaced:** Treating linked Meeting View action cards as authoritative enough to discard richer fallback topic context whenever Pluto had both representations of the same follow-up.
+- **Notes:** This stays scoped to linked action-card topic enrichment only. Fallback-only card topic rendering and unrelated blocker/owner slices remain separate focused issues/PRs.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View

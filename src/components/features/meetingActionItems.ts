@@ -31,6 +31,7 @@ export interface MeetingActionItemCard {
   title: string;
   status: MeetingActionItemStatus;
   statusLabel: string | null;
+  topicLabel: string | null;
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
@@ -52,6 +53,7 @@ interface ParsedFallbackActionItem {
   title: string;
   status: MeetingActionItemStatus;
   statusLabel: string | null;
+  topicLabel: string | null;
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
@@ -110,6 +112,7 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
       title: trimmed,
       status: 'fallback',
       statusLabel: null,
+      topicLabel: null,
       assignee: null,
       dueLabel: null,
       context: null,
@@ -135,6 +138,10 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
     const lowered = normalized.toLowerCase();
     if (lowered.startsWith('owner:')) {
       parsed.assignee = normalizeValue(normalized.slice('owner:'.length));
+      continue;
+    }
+    if (lowered.startsWith('topic:')) {
+      parsed.topicLabel = normalizeValue(normalized.slice('topic:'.length));
       continue;
     }
     if (lowered.startsWith('due:')) {
@@ -177,6 +184,9 @@ const sortMeetingActionEntities = (
   );
 };
 
+const normalizeActionKey = (value: string): string =>
+  normalizeValue(value).toLowerCase();
+
 export const buildMeetingActionItems = ({
   meetingEntities,
   linkedAttentionItems = [],
@@ -197,6 +207,14 @@ export const buildMeetingActionItems = ({
     }
   }
 
+  const fallbackByTitle = new Map<string, ParsedFallbackActionItem>();
+  for (const item of fallbackActionItems) {
+    const parsed = parseFallbackActionItem(item);
+    const key = normalizeActionKey(parsed.title);
+    if (!key || fallbackByTitle.has(key)) continue;
+    fallbackByTitle.set(key, parsed);
+  }
+
   const linkedActionItems = meetingEntities
     .filter(
       (entity): entity is MeetingActionEntity =>
@@ -206,11 +224,13 @@ export const buildMeetingActionItems = ({
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);
+      const fallbackMatch = fallbackByTitle.get(normalizeActionKey(entity.name));
       return {
         id: entity.id,
         title: entity.name,
         status,
         statusLabel: null,
+        topicLabel: fallbackMatch?.topicLabel ?? null,
         assignee: entity.assigned_to,
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,
@@ -249,6 +269,7 @@ export const buildMeetingActionItems = ({
         title: parsed.title,
         status: parsed.status,
         statusLabel: parsed.statusLabel,
+        topicLabel: null,
         assignee: parsed.assignee,
         dueLabel: parsed.dueLabel,
         context: parsed.context,
