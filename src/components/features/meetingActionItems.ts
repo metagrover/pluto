@@ -230,7 +230,7 @@ export const buildMeetingActionItems = ({
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,
         isBlocked,
-        blockerReason: isBlocked ? linkedAttention?.reason ?? null : null,
+        blockerReason: isBlocked ? (linkedAttention?.reason ?? null) : null,
         actionable: linkedAttention?.status !== 'dismissed',
         toggleLabel: status === 'completed' ? 'Reopen' : 'Mark complete',
         attentionItemId: linkedAttention?.id ?? null,
