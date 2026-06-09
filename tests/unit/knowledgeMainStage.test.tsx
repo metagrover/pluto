@@ -739,7 +739,8 @@ describe('Knowledge MainStage', () => {
             summary: 'Launch cannot proceed until legal signs off.',
             kind: 'blocker',
             severity: 'needs_attention',
-            why_now: 'The latest project review still treats this as a blocker.',
+            why_now:
+              'The latest project review still treats this as a blocker.',
             stream_ids: ['launch'],
             citations: [
               {

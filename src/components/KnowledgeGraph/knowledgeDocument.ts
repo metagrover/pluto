@@ -1243,8 +1243,8 @@ export const compileNeedsAttention = (
               : item.kind === 'blocker'
                 ? 'blocker'
                 : item.kind === 'dependency'
-                ? 'dependency'
-                : 'project',
+                  ? 'dependency'
+                  : 'project',
         reasons: [item.why_now || item.summary].filter(Boolean),
         citations: item.citations,
       }))

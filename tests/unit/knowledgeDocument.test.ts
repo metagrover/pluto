@@ -1983,7 +1983,8 @@ describe('knowledge document utilities', () => {
             {
               id: 'loop-blocker',
               title: 'Legal approval is still blocking launch',
-              summary: 'The durable snapshot still shows an unresolved blocker.',
+              summary:
+                'The durable snapshot still shows an unresolved blocker.',
               kind: 'blocker',
               severity: 'needs_attention',
               why_now: 'Launch cannot proceed until legal approval lands.',
