@@ -609,4 +609,39 @@ describe('buildMeetingActionItems', () => {
       'dismissed-follow-up',
     ]);
   });
+
+  it('prioritizes overdue and stale linked follow-ups ahead of routine active work', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'active-follow-up',
+          name: 'Send routine notes',
+          status: 'active',
+          mention_count: 4,
+          created_at: '2026-05-28T18:00:00.000Z',
+        }),
+        makeMeetingEntity({
+          id: 'stale-follow-up',
+          name: 'Revisit old pricing blocker',
+          status: 'stale',
+          mention_count: 1,
+          created_at: '2026-05-26T18:00:00.000Z',
+        }),
+        makeMeetingEntity({
+          id: 'overdue-follow-up',
+          name: 'Send overdue contract redlines',
+          status: 'overdue',
+          mention_count: 1,
+          created_at: '2026-05-25T18:00:00.000Z',
+        }),
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items.map((item) => item.id)).toEqual([
+      'overdue-follow-up',
+      'stale-follow-up',
+      'active-follow-up',
+    ]);
+  });
 });

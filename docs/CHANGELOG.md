@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-08
 
+### Prioritize overdue and stale Meeting View follow-ups
+- **Issue:** [#265](https://github.com/metagrover/pluto/issues/265)
+- **PR:** Pending.
+- **Changed:** Meeting View's shared linked action-card sorter now ranks `overdue` and `stale` follow-ups ahead of routine `active` work while keeping completed items demoted and preserving the existing mention-count and recency tie-breakers inside each lifecycle bucket. Focused regression coverage now proves overdue and stale commitments stay ahead of routine active cards on current `master`.
+- **Why:** `#61` remains the earliest unfinished roadmap outcome under `#65`, and Pluto's trusted-attention promise weakens when routine active commitments can bury follow-ups the app already considers overdue or aging.
+- **Replaced:** Treating routine active linked follow-ups as higher priority than `overdue` and `stale` commitments in the shared Meeting View sorter.
+- **Notes:** This is intentionally limited to lifecycle ordering in `meetingActionItems.ts`; it does not redesign Meeting View or overlap the separate blocker/classification slices already open in the PR queue.
+
 ### Surface linked attention classification on Meeting View follow-up cards
 - **Issue:** [#250](https://github.com/metagrover/pluto/issues/250)
 - **PR:** Pending.

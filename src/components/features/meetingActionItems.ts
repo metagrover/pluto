@@ -74,9 +74,9 @@ const ACTION_STATUS_ORDER: Record<
   Exclude<MeetingActionItemStatus, 'fallback'>,
   number
 > = {
-  active: 0,
-  overdue: 1,
-  stale: 2,
+  overdue: 0,
+  stale: 1,
+  active: 2,
   completed: 3,
 };
 
