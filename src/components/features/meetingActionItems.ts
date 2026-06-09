@@ -42,6 +42,13 @@ export interface MeetingActionItemCard {
   snoozeLabel: 'Snooze' | 'Reopen' | null;
 }
 
+interface LinkedAttentionCardState {
+  id: string;
+  kind?: string;
+  reason?: string;
+  status: MeetingLinkedAttentionItem['status'];
+}
+
 interface BuildMeetingActionItemsParams {
   meetingEntities: MeetingActionEntity[];
   linkedAttentionItems?: MeetingLinkedAttentionItem[];
@@ -182,16 +189,15 @@ export const buildMeetingActionItems = ({
   linkedAttentionItems = [],
   fallbackActionItems,
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
-  const attentionByEntityId = new Map<
-    string,
-    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
-  >();
+  const attentionByEntityId = new Map<string, LinkedAttentionCardState>();
 
   for (const item of linkedAttentionItems) {
     for (const relatedEntityId of item.related_entity_ids) {
       if (attentionByEntityId.has(relatedEntityId)) continue;
       attentionByEntityId.set(relatedEntityId, {
         id: item.id,
+        kind: item.kind,
+        reason: item.reason,
         status: item.status,
       });
     }
@@ -206,11 +212,16 @@ export const buildMeetingActionItems = ({
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);
+      const blockerStatusLabel =
+        linkedAttention?.kind === 'blocker' &&
+        linkedAttention.status === 'active'
+          ? normalizeValue(linkedAttention.reason).replace(/[.!?]+$/, '')
+          : '';
       return {
         id: entity.id,
         title: entity.name,
         status,
-        statusLabel: null,
+        statusLabel: blockerStatusLabel || null,
         assignee: entity.assigned_to,
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,

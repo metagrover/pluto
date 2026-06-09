@@ -226,4 +226,36 @@ describe('buildMeetingActionItems', () => {
       actionable: true,
     });
   });
+
+  it('surfaces active blocker reasons through the linked action-card status label', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'blocked-follow-up',
+          name: 'Confirm launch plan',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-blocked',
+          kind: 'blocker',
+          status: 'active',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['blocked-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'blocked-follow-up',
+        attentionItemId: 'attention-blocked',
+        attentionStatus: 'active',
+        statusLabel: 'Blocked by legal approval',
+        dismissLabel: 'Dismiss',
+        snoozeLabel: 'Snooze',
+      }),
+    ]);
+  });
 });

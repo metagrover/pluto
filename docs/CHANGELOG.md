@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Surface blocker reasons on Meeting View follow-up cards
+- **Issue:** [#240](https://github.com/metagrover/pluto/issues/240)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up cards now preserve blocker `reason` from linked active attention items in the shared card model, so the existing status metadata row can show `Blocked by ...` context instead of treating those commitments like ordinary active tasks. Focused regression coverage now proves blocker-backed cards keep that status label.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and follow-up surfaces should distinguish routine commitments from true blockers using the lifecycle context Pluto already persists. Before this slice, blocker attention existed in sync and draft context, but the Meeting View card path discarded it before rendering.
+- **Replaced:** Treating blocker-backed Meeting View follow-ups as generic active cards with no visible blocker reason.
+- **Notes:** This stays inside the existing Meeting View card model and status row rather than redesigning the follow-up surface.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
