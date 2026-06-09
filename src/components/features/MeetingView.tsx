@@ -1202,6 +1202,11 @@ export const MeetingView = ({
                                 Status: {item.statusLabel}
                               </span>
                             ) : null}
+                            {item.isBlocked ? (
+                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-red-600">
+                                Blocked
+                              </span>
+                            ) : null}
                             {item.attentionStatus === 'dismissed' ? (
                               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
                                 Dismissed
@@ -1223,6 +1228,11 @@ export const MeetingView = ({
                           {item.context ? (
                             <p className="text-[12px] font-medium leading-relaxed text-pro-text-muted">
                               {highlightEntities(item.context)}
+                            </p>
+                          ) : null}
+                          {item.blockerReason ? (
+                            <p className="text-[12px] font-semibold leading-relaxed text-red-600">
+                              Blocked: {highlightEntities(item.blockerReason)}
                             </p>
                           ) : null}
                           {item.attentionItemId &&

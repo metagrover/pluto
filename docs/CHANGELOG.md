@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-08
+
+### Surface blocker context on Meeting View action cards
+- **Issue:** [#239](https://github.com/metagrover/pluto/issues/239)
+- **PR:** Pending.
+- **Changed:** Meeting View action cards now preserve linked blocker attention context through the shared `buildMeetingActionItems(...)` path and resolve linked `assigned_to` person ids back to meeting participant names on that same card builder seam. Linked follow-ups render a `Blocked` marker when the linked attention item is a blocker, show the blocker reason as supporting copy on the existing card surface, and keep accountable owner names instead of leaking raw entity ids. Focused regression coverage proves both the owner-resolution seam and blocker-context seam.
+- **Why:** `#61` remains Pluto's earliest unfinished roadmap outcome under `#65`, and the commitment surface should explain what is blocked and by what instead of flattening blocker-backed follow-ups into ordinary action cards. During the RED run, the same shared card path also exposed an adjacent owner-label regression where linked cards could show raw `person-*` ids instead of the known meeting person name, so this slice repaired both accountability gaps together.
+- **Replaced:** Treating blocker-backed follow-ups as ordinary action cards with no blocker explanation, and treating linked `assigned_to` person ids as presentation-ready owner labels even when the matching meeting person entity is already loaded.
+- **Notes:** This stays inside the existing Meeting View action-card model and renderer; it does not change lifecycle persistence, attention sync semantics, or follow-up draft behavior.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
