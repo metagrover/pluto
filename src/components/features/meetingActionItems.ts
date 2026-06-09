@@ -67,6 +67,15 @@ const ACTION_STATUS_ORDER: Record<
   completed: 3,
 };
 
+const ATTENTION_STATUS_ORDER: Record<
+  NonNullable<MeetingActionAttentionStatus>,
+  number
+> = {
+  active: 0,
+  snoozed: 1,
+  dismissed: 2,
+};
+
 const formatDueLabel = (dueDate: string | null): string | null => {
   if (!dueDate) return null;
   const parsed = new Date(dueDate);
@@ -161,6 +170,10 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
 const sortMeetingActionEntities = (
   left: MeetingActionEntity,
   right: MeetingActionEntity,
+  attentionByEntityId: Map<
+    string,
+    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
+  >,
 ): number => {
   const leftStatus = left.status ?? 'active';
   const rightStatus = right.status ?? 'active';
@@ -169,6 +182,17 @@ const sortMeetingActionEntities = (
   const rightRank =
     ACTION_STATUS_ORDER[rightStatus] ?? ACTION_STATUS_ORDER.active;
   if (leftRank !== rightRank) return leftRank - rightRank;
+  const leftAttentionStatus = attentionByEntityId.get(left.id)?.status ?? 'active';
+  const rightAttentionStatus =
+    attentionByEntityId.get(right.id)?.status ?? 'active';
+  const leftAttentionRank =
+    ATTENTION_STATUS_ORDER[leftAttentionStatus] ?? ATTENTION_STATUS_ORDER.active;
+  const rightAttentionRank =
+    ATTENTION_STATUS_ORDER[rightAttentionStatus] ??
+    ATTENTION_STATUS_ORDER.active;
+  if (leftAttentionRank !== rightAttentionRank) {
+    return leftAttentionRank - rightAttentionRank;
+  }
   if (left.mention_count !== right.mention_count) {
     return right.mention_count - left.mention_count;
   }
@@ -202,7 +226,9 @@ export const buildMeetingActionItems = ({
       (entity): entity is MeetingActionEntity =>
         entity.type === 'action_item' && entity.name.trim().length > 0,
     )
-    .sort(sortMeetingActionEntities)
+    .sort((left, right) =>
+      sortMeetingActionEntities(left, right, attentionByEntityId),
+    )
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);

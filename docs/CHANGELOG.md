@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-09
+
+### Deprioritize dismissed and snoozed Meeting View follow-ups
+- **Issue:** [#263](https://github.com/metagrover/pluto/issues/263)
+- **PR:** Pending.
+- **Changed:** Meeting View's shared linked action-card sorter now demotes snoozed and dismissed attention-backed follow-ups behind active work while preserving the existing active/overdue/stale/completed lifecycle ordering and reopen controls. Focused regression coverage now proves higher-mention snoozed or dismissed cards no longer outrank unresolved commitments on the same surface.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and trusted attention depends on the surface ordering matching the durable lifecycle state Pluto already persists. Before this slice, dismissed or snoozed follow-ups could still float to the top purely on mention count, making deferred or cleared work read like the highest-priority commitment.
+- **Replaced:** Treating attention-backed Meeting View cards as equivalent to active work for sorting purposes even after the user or attention queue had already marked them snoozed or dismissed.
+- **Notes:** This intentionally changes ordering only. The existing reopen affordances and persistence behavior stay intact, and the slice does not redesign Meeting View card copy or hide non-active follow-ups.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
