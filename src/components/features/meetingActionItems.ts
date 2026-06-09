@@ -29,6 +29,7 @@ export interface MeetingLinkedAttentionItem {
 export interface MeetingActionItemCard {
   id: string;
   title: string;
+  topicLabel?: string | null;
   status: MeetingActionItemStatus;
   statusLabel: string | null;
   assignee: string | null;
@@ -50,6 +51,7 @@ interface BuildMeetingActionItemsParams {
 
 interface ParsedFallbackActionItem {
   title: string;
+  topicLabel: string | null;
   status: MeetingActionItemStatus;
   statusLabel: string | null;
   assignee: string | null;
@@ -82,6 +84,9 @@ const formatDueLabel = (dueDate: string | null): string | null => {
 const normalizeValue = (value: string | null | undefined): string =>
   (value || '').trim();
 
+const normalizeActionTitle = (value: string): string =>
+  normalizeValue(value).replace(/\s+/g, ' ').toLowerCase();
+
 const parseFallbackStatus = (
   value: string,
 ): Pick<ParsedFallbackActionItem, 'status' | 'statusLabel'> => {
@@ -108,6 +113,7 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
   if (!match) {
     return {
       title: trimmed,
+      topicLabel: null,
       status: 'fallback',
       statusLabel: null,
       assignee: null,
@@ -119,6 +125,7 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
   const [, rawTitle, rawDetailText] = match;
   const parsed: ParsedFallbackActionItem = {
     title: normalizeValue(rawTitle),
+    topicLabel: null,
     status: 'fallback',
     statusLabel: null,
     assignee: null,
@@ -133,6 +140,10 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
   for (const detail of rawDetailText.split('|')) {
     const normalized = normalizeValue(detail);
     const lowered = normalized.toLowerCase();
+    if (lowered.startsWith('topic:')) {
+      parsed.topicLabel = normalizeValue(normalized.slice('topic:'.length));
+      continue;
+    }
     if (lowered.startsWith('owner:')) {
       parsed.assignee = normalizeValue(normalized.slice('owner:'.length));
       continue;
@@ -186,6 +197,7 @@ export const buildMeetingActionItems = ({
     string,
     Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
   >();
+  const fallbackByTitle = new Map<string, ParsedFallbackActionItem>();
 
   for (const item of linkedAttentionItems) {
     for (const relatedEntityId of item.related_entity_ids) {
@@ -197,6 +209,13 @@ export const buildMeetingActionItems = ({
     }
   }
 
+  for (const item of fallbackActionItems) {
+    const parsed = parseFallbackActionItem(item);
+    const key = normalizeActionTitle(parsed.title);
+    if (!key || fallbackByTitle.has(key)) continue;
+    fallbackByTitle.set(key, parsed);
+  }
+
   const linkedActionItems = meetingEntities
     .filter(
       (entity): entity is MeetingActionEntity =>
@@ -206,9 +225,13 @@ export const buildMeetingActionItems = ({
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);
+      const fallbackDetails = fallbackByTitle.get(
+        normalizeActionTitle(entity.name),
+      );
       return {
         id: entity.id,
         title: entity.name,
+        topicLabel: fallbackDetails?.topicLabel ?? null,
         status,
         statusLabel: null,
         assignee: entity.assigned_to,
