@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-08
 
+### Resolve linked Meeting View action owners to participant names
+- **Issue:** [#241](https://github.com/metagrover/pluto/issues/241)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up cards now resolve linked `action_item.assigned_to` person ids through the meeting's existing person entities before rendering owner labels. If Pluto cannot resolve the id to a linked participant, the card keeps the existing raw owner string instead of hiding the value or crashing. Focused regression coverage now proves both the resolved-owner and unresolved-owner paths.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and the Meeting View follow-up surface should preserve accountable names that Pluto already knows. Before this slice, linked action cards could show raw ids like `person-1`, making the same follow-up card less trustworthy than the adjacent draft path.
+- **Replaced:** Passing linked action owners through verbatim on Meeting View cards even when the same meeting already had the participant entity needed to render a real owner name.
+- **Notes:** This stays inside the shared Meeting View action-card builder and intentionally does not change lifecycle controls, alert sync semantics, or the surrounding card layout.
+
 ### Surface blocker context on Meeting View action cards
 - **Issue:** [#239](https://github.com/metagrover/pluto/issues/239)
 - **PR:** Pending.

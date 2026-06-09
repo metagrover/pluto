@@ -434,4 +434,42 @@ describe('buildMeetingActionItems', () => {
       }),
     ]);
   });
+
+  it('resolves linked action owners from meeting people entities and falls back to raw owner strings when missing', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'person-owned-follow-up',
+          name: 'Send rollout email',
+          assigned_to: 'person-1',
+        }),
+        makeMeetingEntity({
+          id: 'raw-owned-follow-up',
+          name: 'Confirm reseller terms',
+          assigned_to: 'person-404',
+        }),
+        makeMeetingEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+          normalized_name: 'sarah chen',
+          status: null,
+          due_date: null,
+          assigned_to: null,
+          mention_count: 3,
+          context: 'Role: Head of Product',
+        }),
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items[0]).toMatchObject({
+      id: 'person-owned-follow-up',
+      assignee: 'Sarah Chen',
+    });
+    expect(items[1]).toMatchObject({
+      id: 'raw-owned-follow-up',
+      assignee: 'person-404',
+    });
+  });
 });
