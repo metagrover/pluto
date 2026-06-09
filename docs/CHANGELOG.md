@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-09
+
+### Ignore outdated snapshots in Knowledge Needs Attention
+- **Issue:** [#268](https://github.com/metagrover/pluto/issues/268)
+- **PR:** Pending.
+- **Changed:** `compileNeedsAttention(...)` now refuses a matching working-memory snapshot when the source Knowledge doc has been synthesized more recently, aligning the Needs Attention consumer path with the existing snapshot-validity checks already used by the compiled brief path. Focused regression coverage now proves project-scope Needs Attention falls back to fresher doc JSON instead of rendering stale snapshot-backed follow-ups.
+- **Why:** `#81` requires working-memory-backed Knowledge to degrade honestly when snapshot state is stale or outdated. Before this slice, Pluto could keep showing snapshot-backed blockers or follow-ups with undue confidence even after fresher Knowledge synthesis was already available.
+- **Replaced:** Treating scope/doc-id matches as sufficient for Needs Attention snapshot preference even when the snapshot predates the latest doc synthesis.
+- **Notes:** This stays inside the shared Knowledge consumer path and preserves the existing fallback behavior for genuinely stale snapshots and non-snapshot project-card heuristics.
+
 ## 2026-06-08
 
 ### Align snapshot-backed Knowledge trust with rendered freshness
@@ -47,25 +57,33 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 ### Surface linked attention classification on Meeting View follow-up cards
 - **Issue:** [#250](https://github.com/metagrover/pluto/issues/250)
 - **PR:** Pending.
-- **Changed:** Meeting View follow-up cards now surface the linked attention classification Pluto already knows, so cards can show concise labels like `Follow-up`, `Blocker`, and `Stale context` alongside the existing lifecycle, owner, due, and dismissal metadata. Focused regression coverage now proves the linked action-card builder carries that label through the shared card model.
-- **Why:** `#61` requires Pluto to distinguish routine follow-ups from blockers and other escalations. Before this slice, linked attention items already carried `kind`, but Meeting View hid that classification and made routine work and blocked work look too similar at a glance.
-- **Replaced:** Treating linked Meeting View follow-up cards as lifecycle-only rows even when the linked attention item had a stronger follow-up classification Pluto could already explain.
-- **Notes:** This intentionally reuses the existing Meeting View metadata row and does not change alert generation, scoring, or card layout.
+- **Changed:** Meeting View follow-up cards now render a dedicated attention kind badge (e.g. `Blocker`, `Risk`, `Dependency`, `Open question`, `Stale context`, `Follow-up`) derived from the linked attention item instead of rendering a generic `Summary` or `Action Item` title badge. Focused regression coverage now proves the attention kind badge mapping survives the shared card builder.
+- **Why:** `#61` remains the earliest unfinished roadmap outcome under `#65`, and follow-up cards are less actionable when Pluto hides attention classification details it already knows.
+- **Replaced:** Showing a generic `Action Item` status badge on Meeting View cards even when Pluto had a more specific attention classification on the linked attention item.
+- **Notes:** This stays inside the existing Meeting View action-card model and metadata badges; it does not redesign the card layout or modify the completion/snooze/dismiss affordances.
 
-### Prioritize blocked Meeting View follow-up cards
+### Deprioritize dismissed and snoozed Meeting View follow-up cards
+- **Issue:** [#263](https://github.com/metagrover/pluto/issues/263)
+- **PR:** Pending.
+- **Changed:** Meeting View's shared action-card sorter now demotes snoozed and dismissed follow-ups behind active commitments. Routine active commitments and stale follow-ups stay prioritized, snoozed follow-ups rank next (with their toggle action disabled but snooze-reopen allowed), and dismissed follow-ups rank last (with their toggle disabled and dismiss-reopen allowed). Focused regression coverage now proves the relative order of active, snoozed, and dismissed follow-ups.
+- **Why:** `#61` requires Meeting View to focus attention on active commitments first. Before this slice, a dismissed or snoozed follow-up could stay sorted at the top of the meeting card list due to high mention counts or recency, burying active follow-ups that actually needed attention.
+- **Replaced:** Sorting dismissed and snoozed follow-up cards using only their base entity creation time and mention counts instead of first demoting them behind active work.
+- **Notes:** This stays inside the shared action-card builder and sorter. The dismiss and snooze toggle labels (`Reopen`, `Snooze`, `Dismiss`) are unchanged.
+
+### Prioritize active blocker cards on Meeting View
 - **Issue:** [#248](https://github.com/metagrover/pluto/issues/248)
 - **PR:** Pending.
-- **Changed:** Meeting View now uses the linked attention `kind` it already fetches to sort blocker-backed active follow-up cards ahead of routine active cards in the shared action-card builder. Focused regression coverage proves an active blocker rises above a higher-mention routine follow-up without changing the surrounding card controls or fallback behavior.
-- **Why:** `#61` remains Pluto's earliest unfinished roadmap outcome under `#65`, and the Meeting View surface should reflect Pluto's blocker classification in the same place where users review commitments. Before this slice, blocked work could stay buried below routine active cards even when the attention model already knew it was the highest-friction follow-up.
-- **Replaced:** Sorting blocker-backed active Meeting View cards exactly like routine active work based only on lifecycle status, mention count, and recency.
-- **Notes:** This change stays inside the shared Meeting View action-card sorting path; blocker badges, reason text, and lifecycle persistence remain in the adjacent focused PRs.
+- **Changed:** Meeting View's shared linked action-card sorter now ranks active blocker-backed follow-ups ahead of all other active commitments, regardless of mention counts or creation recency. Focused regression coverage now proves active blockers sort first on `master`.
+- **Why:** `#61` is about highlighting the most critical commitments. An active blocker follow-up should never be buried behind routine active work just because the routine work has a higher mention count or was mentioned more recently.
+- **Replaced:** Letting mention counts and creation time sort routine active commitments ahead of active blockers in the shared Meeting View sorter.
+- **Notes:** This stays inside the shared action-card sorter in `meetingActionItems.ts` and does not change individual card layout or lifecycle state.
 
-### Preserve linked action-card topic detail in Meeting View
+### Preserve linked Meeting View action topics
 - **Issue:** [#246](https://github.com/metagrover/pluto/issues/246)
 - **PR:** Pending.
-- **Changed:** Linked Meeting View follow-up cards now preserve fallback `Topic: ...` detail when the matching `action_item` entity is otherwise too sparse to carry equivalent topic context. The existing metadata row renders that topic label without changing linked owner, due date, lifecycle, blocker, or fallback-only behavior, and focused regression coverage now proves the shared card builder keeps the topic detail for linked cards.
-- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and trusted follow-up cards should not become less informative than Pluto's own analysis fallback just because a linked entity exists. Before this slice, the linked-card path flattened topic-aware fallback lines back to owner/due/context-only output.
-- **Replaced:** Letting linked Meeting View action cards discard fallback `Topic:` detail even when Pluto had already generated that context for the same follow-up.
+- **Changed:** Meeting View follow-up cards now preserve linked `action_item.topic_id` context by mapping it to a human-readable topic label using the meeting's existing topic entities. If a topic match exists, the card badge row renders it as `topicLabel` instead of dropping it, and focused regression coverage now proves the topic resolution path.
+- **Why:** `#61` requires follow-up cards to preserve the structured context Pluto already knows. Before this slice, the card builder parsed and rendered fallback topic context but silently dropped linked topic context as soon as a linked action entity was matched.
+- **Replaced:** Treating linked action-item topic associations as disposable metadata instead of resolving them to human-readable topic labels on Meeting View cards.
 - **Notes:** This stays inside the existing Meeting View action-card model and metadata row, so it remains a focused trust/context fix rather than a surface redesign.
 
 ### Resolve linked Meeting View action owners to participant names
@@ -83,6 +101,22 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` remains Pluto's earliest unfinished roadmap outcome under `#65`, and the commitment surface should explain what is blocked and by what instead of flattening blocker-backed follow-ups into ordinary action cards. Before this slice, Meeting View already fetched linked blocker `kind` and `reason` metadata, but the shared card builder dropped it before the renderer could use it.
 - **Replaced:** Treating blocker-backed follow-ups as ordinary action cards with no blocker explanation even when Pluto already had durable blocker metadata on the linked attention item.
 - **Notes:** This stays inside the existing Meeting View action-card model and renderer; it does not change lifecycle persistence, attention sync semantics, or follow-up draft behavior.
+
+### Surface blocker classification in Knowledge
+- **Issue:** [#251](https://github.com/metagrover/pluto/issues/251)
+- **PR:** Pending.
+- **Changed:** Knowledge Needs Attention compilation now maps linked attention item kind `blocker` to a dedicated `Blocker` category in the output items instead of placing them under the generic `Follow-up` category. Focused unit tests now verify blocker classification is preserved.
+- **Why:** `#81` requires working-memory attention loops to present clear taxonomy to users so that critical blockers are highlighted.
+- **Replaced:** Grouping blocker-backed attention items with generic follow-up items in compiled Needs Attention output.
+- **Notes:** This change is scoped to the compiled Needs Attention adapter path and does not change database schema or main knowledge brief structure.
+
+### Align snapshot-backed Knowledge trust freshness
+- **Issue:** [#249](https://github.com/metagrover/pluto/issues/249)
+- **PR:** Pending.
+- **Changed:** Snapshot-backed Knowledge briefs now derive their trust label from the rendered Current Read evidence freshness instead of passing through the stored snapshot trust flag unchanged. Aging snapshot evidence degrades from `Grounded` to `Inferred`, unknown snapshot freshness degrades to `Weak evidence`, and focused regression coverage now proves both cases in `compileKnowledgeBrief(...)`.
+- **Why:** `#81` requires working-memory-backed Knowledge to degrade honestly when durable state becomes weaker or less fresh. Before this slice, a snapshot-backed brief could keep showing a fully grounded trust badge even when the rendered evidence was no longer fresh enough to support that claim.
+- **Replaced:** Treating the persisted snapshot trust flag as authoritative for snapshot-backed Current Read trust labels even after the rendered evidence freshness had degraded.
+- **Notes:** This stays inside the snapshot-backed Knowledge consumer path. It does not redesign the Knowledge UI or change the shared doc-backed trust-status utility.
 
 ### Preserve fallback topic context in Meeting View action cards
 - **Issue:** [#237](https://github.com/metagrover/pluto/issues/237)
