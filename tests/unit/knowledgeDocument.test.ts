@@ -660,6 +660,132 @@ describe('knowledge document utilities', () => {
     });
   });
 
+  it('degrades snapshot-backed trust when rendered evidence freshness is aging', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Transient doc JSON should not win when a snapshot exists.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc fallback only.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.5,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      freshness: 'aging',
+      payload: {
+        ...baseSnapshot.payload,
+        current_read: {
+          ...baseSnapshot.payload.current_read,
+          freshness: 'aging',
+          evidence_quality: {
+            ...baseSnapshot.payload.current_read.evidence_quality,
+            freshness: 'aging',
+          },
+        },
+      } as WorkingMemorySnapshot['payload'],
+    });
+
+    expect(brief.trustStatus).toBe('inferred');
+  });
+
+  it('degrades snapshot-backed trust to weak evidence when rendered freshness is unknown', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Transient doc JSON should not win when a snapshot exists.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc fallback only.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.5,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      freshness: 'unknown',
+      payload: {
+        ...baseSnapshot.payload,
+        current_read: {
+          ...baseSnapshot.payload.current_read,
+          freshness: 'unknown',
+          evidence_quality: {
+            ...baseSnapshot.payload.current_read.evidence_quality,
+            freshness: 'unknown',
+          },
+        },
+      } as WorkingMemorySnapshot['payload'],
+    });
+
+    expect(brief.trustStatus).toBe('weak_evidence');
+  });
+
   it('prefers a matching project working-memory snapshot for a project knowledge doc', () => {
     const doc = makeDoc({
       id: 'doc-project',
