@@ -79,6 +79,47 @@ describe('buildMeetingActionItems', () => {
     });
   });
 
+  it('resolves linked action-item owner ids through meeting people when available', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Alex Rivera',
+          normalized_name: 'alex rivera',
+          status: null,
+          due_date: null,
+          assigned_to: null,
+          mention_count: 4,
+          context: null,
+        }),
+        makeMeetingEntity({
+          id: 'action-owner-id',
+          name: 'Send pricing recap',
+          assigned_to: 'person-1',
+        }),
+        makeMeetingEntity({
+          id: 'action-owner-raw',
+          name: 'Confirm reseller terms',
+          assigned_to: 'Platform Team',
+          mention_count: 1,
+        }),
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'action-owner-id',
+        assignee: 'Alex Rivera',
+      }),
+      expect.objectContaining({
+        id: 'action-owner-raw',
+        assignee: 'Platform Team',
+      }),
+    ]);
+  });
+
   it('falls back to analysis text when no linked action-item entities exist', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [makeMeetingEntity({ id: 'topic-1', type: 'topic' })],
@@ -103,6 +144,8 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        isBlocked: false,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -119,6 +162,8 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        isBlocked: false,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -147,6 +192,8 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        isBlocked: false,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: null,
@@ -163,6 +210,8 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        isBlocked: false,
+        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: 'Needs legal review',
@@ -281,9 +330,12 @@ describe('buildMeetingActionItems', () => {
         title: 'Send pricing recap',
         status: 'active',
         statusLabel: 'Needs legal review',
+        topicLabel: null,
         assignee: 'Alex',
         dueLabel: 'Due Friday',
         context: 'Waiting on legal sign-off.',
+        isBlocked: false,
+        blockerReason: null,
         actionable: true,
         toggleLabel: 'Mark complete',
         attentionItemId: null,
@@ -314,9 +366,12 @@ describe('buildMeetingActionItems', () => {
         title: 'Send pricing recap',
         status: 'active',
         statusLabel: null,
+        topicLabel: null,
         assignee: 'Alex',
         dueLabel: 'Due May 30',
         context: 'Alex committed to send the pricing recap by Friday.',
+        isBlocked: false,
+        blockerReason: null,
         actionable: true,
         toggleLabel: 'Mark complete',
         attentionItemId: null,
@@ -329,9 +384,12 @@ describe('buildMeetingActionItems', () => {
         title: 'Confirm reseller terms',
         status: 'fallback',
         statusLabel: 'Needs legal review',
+        topicLabel: null,
         assignee: null,
         dueLabel: null,
         context: 'Waiting on contract redlines.',
+        isBlocked: false,
+        blockerReason: null,
         actionable: false,
         toggleLabel: null,
         attentionItemId: null,
@@ -339,6 +397,41 @@ describe('buildMeetingActionItems', () => {
         dismissLabel: null,
         snoozeLabel: null,
       },
+    ]);
+  });
+
+  it('preserves blocker attention context for linked action cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'blocked-follow-up',
+          name: 'Confirm launch plan',
+          context: 'The team is waiting on legal before launch can proceed.',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-blocked',
+          kind: 'blocker',
+          reason: 'Legal approval is still blocking launch readiness.',
+          status: 'active',
+          related_entity_ids: ['blocked-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'blocked-follow-up',
+        attentionItemId: 'attention-blocked',
+        attentionStatus: 'active',
+        actionable: true,
+        dismissLabel: 'Dismiss',
+        snoozeLabel: 'Snooze',
+        isBlocked: true,
+        blockerReason: 'Legal approval is still blocking launch readiness.',
+      }),
     ]);
   });
 });

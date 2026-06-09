@@ -35,6 +35,8 @@ export interface MeetingActionItemCard {
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
+  isBlocked: boolean;
+  blockerReason: string | null;
   actionable: boolean;
   toggleLabel: 'Mark complete' | 'Reopen' | null;
   attentionItemId: string | null;
@@ -226,6 +228,14 @@ export const buildMeetingActionItems = ({
   linkedAttentionItems = [],
   fallbackActionItems,
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
+  const peopleById = new Map(
+    meetingEntities
+      .filter(
+        (entity): entity is MeetingActionEntity =>
+          entity.type === 'person' && entity.name.trim().length > 0,
+      )
+      .map((entity) => [entity.id, entity.name] as const),
+  );
   const fallbackByTitle = new Map<string, ParsedFallbackActionItem>();
   for (const item of fallbackActionItems) {
     const parsed = parseFallbackActionItem(item);
@@ -236,7 +246,7 @@ export const buildMeetingActionItems = ({
 
   const attentionByEntityId = new Map<
     string,
-    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
+    Pick<MeetingLinkedAttentionItem, 'id' | 'status' | 'kind' | 'reason'>
   >();
 
   for (const item of linkedAttentionItems) {
@@ -245,6 +255,8 @@ export const buildMeetingActionItems = ({
       attentionByEntityId.set(relatedEntityId, {
         id: item.id,
         status: item.status,
+        kind: item.kind,
+        reason: item.reason,
       });
     }
   }
@@ -258,6 +270,7 @@ export const buildMeetingActionItems = ({
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);
+      const isBlocked = linkedAttention?.kind === 'blocker';
       return mergeLinkedAndFallbackActionItem(
         {
           id: entity.id,
@@ -265,9 +278,13 @@ export const buildMeetingActionItems = ({
           status,
           statusLabel: null,
           topicLabel: null,
-          assignee: entity.assigned_to,
+          assignee: entity.assigned_to
+            ? (peopleById.get(entity.assigned_to) ?? entity.assigned_to)
+            : null,
           dueLabel: formatDueLabel(entity.due_date),
           context: entity.context,
+          isBlocked,
+          blockerReason: isBlocked ? (linkedAttention?.reason ?? null) : null,
           actionable: linkedAttention?.status !== 'dismissed',
           toggleLabel: status === 'completed' ? 'Reopen' : 'Mark complete',
           attentionItemId: linkedAttention?.id ?? null,
@@ -315,6 +332,8 @@ export const buildMeetingActionItems = ({
       assignee: parsed.assignee,
       dueLabel: parsed.dueLabel,
       context: parsed.context,
+      isBlocked: false,
+      blockerReason: null,
       actionable: false,
       toggleLabel: null,
       attentionItemId: null,
