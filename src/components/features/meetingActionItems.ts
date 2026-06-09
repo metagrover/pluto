@@ -161,9 +161,26 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
 const sortMeetingActionEntities = (
   left: MeetingActionEntity,
   right: MeetingActionEntity,
+  attentionByEntityId: Map<
+    string,
+    Pick<MeetingLinkedAttentionItem, 'id' | 'kind' | 'status'>
+  >,
 ): number => {
   const leftStatus = left.status ?? 'active';
   const rightStatus = right.status ?? 'active';
+  const leftIsActiveBlocker =
+    leftStatus === 'active' &&
+    attentionByEntityId.get(left.id)?.kind === 'blocker' &&
+    attentionByEntityId.get(left.id)?.status === 'active';
+  const rightIsActiveBlocker =
+    rightStatus === 'active' &&
+    attentionByEntityId.get(right.id)?.kind === 'blocker' &&
+    attentionByEntityId.get(right.id)?.status === 'active';
+
+  if (leftIsActiveBlocker !== rightIsActiveBlocker) {
+    return leftIsActiveBlocker ? -1 : 1;
+  }
+
   const leftRank =
     ACTION_STATUS_ORDER[leftStatus] ?? ACTION_STATUS_ORDER.active;
   const rightRank =
@@ -184,7 +201,7 @@ export const buildMeetingActionItems = ({
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
   const attentionByEntityId = new Map<
     string,
-    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
+    Pick<MeetingLinkedAttentionItem, 'id' | 'kind' | 'status'>
   >();
 
   for (const item of linkedAttentionItems) {
@@ -192,6 +209,7 @@ export const buildMeetingActionItems = ({
       if (attentionByEntityId.has(relatedEntityId)) continue;
       attentionByEntityId.set(relatedEntityId, {
         id: item.id,
+        kind: item.kind,
         status: item.status,
       });
     }
@@ -202,7 +220,9 @@ export const buildMeetingActionItems = ({
       (entity): entity is MeetingActionEntity =>
         entity.type === 'action_item' && entity.name.trim().length > 0,
     )
-    .sort(sortMeetingActionEntities)
+    .sort((left, right) =>
+      sortMeetingActionEntities(left, right, attentionByEntityId),
+    )
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);

@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-09
+
+### Prioritize blocked Meeting View follow-up cards
+- **Issue:** [#248](https://github.com/metagrover/pluto/issues/248)
+- **PR:** Pending.
+- **Changed:** Meeting View now uses the linked attention `kind` it already fetches to sort blocker-backed active follow-up cards ahead of routine active cards in the shared action-card builder. Focused regression coverage proves an active blocker rises above a higher-mention routine follow-up without changing the surrounding card controls or fallback behavior.
+- **Why:** `#61` remains Pluto's earliest unfinished roadmap outcome under `#65`, and the Meeting View surface should reflect Pluto's blocker classification in the same place where users review commitments. Before this slice, blocked work could stay buried below routine active cards even when the attention model already knew it was the highest-friction follow-up.
+- **Replaced:** Sorting blocker-backed active Meeting View cards exactly like routine active work based only on lifecycle status, mention count, and recency.
+- **Notes:** This change stays inside the shared Meeting View action-card sorting path; blocker badges, reason text, and lifecycle persistence remain in the adjacent focused PRs.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
