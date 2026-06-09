@@ -560,4 +560,53 @@ describe('buildMeetingActionItems', () => {
       'stale-follow-up',
     ]);
   });
+
+  it('deprioritizes dismissed and snoozed linked follow-ups behind active work', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'dismissed-follow-up',
+          name: 'Archive stale task',
+          mention_count: 5,
+          created_at: '2026-05-28T18:00:00.000Z',
+        }),
+        makeMeetingEntity({
+          id: 'snoozed-follow-up',
+          name: 'Revisit partner sync',
+          mention_count: 4,
+          created_at: '2026-05-27T18:00:00.000Z',
+        }),
+        makeMeetingEntity({
+          id: 'active-follow-up',
+          name: 'Send updated launch plan',
+          mention_count: 1,
+          created_at: '2026-05-26T18:00:00.000Z',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-dismissed',
+          status: 'dismissed',
+          related_entity_ids: ['dismissed-follow-up'],
+        },
+        {
+          id: 'attention-snoozed',
+          status: 'snoozed',
+          related_entity_ids: ['snoozed-follow-up'],
+        },
+        {
+          id: 'attention-active',
+          status: 'active',
+          related_entity_ids: ['active-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items.map((item) => item.id)).toEqual([
+      'active-follow-up',
+      'snoozed-follow-up',
+      'dismissed-follow-up',
+    ]);
+  });
 });
