@@ -1207,9 +1207,9 @@ export const MeetingView = ({
                                 Status: {item.statusLabel}
                               </span>
                             ) : null}
-                            {item.topicLabel ? (
+                            {item.attentionKindLabel ? (
                               <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
-                                Topic: {item.topicLabel}
+                                {item.attentionKindLabel}
                               </span>
                             ) : null}
                             {item.isBlocked ? (

@@ -32,6 +32,7 @@ export interface MeetingActionItemCard {
   status: MeetingActionItemStatus;
   statusLabel: string | null;
   topicLabel: string | null;
+  attentionKindLabel: string | null;
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
@@ -89,6 +90,26 @@ const formatDueLabel = (dueDate: string | null): string | null => {
       day: 'numeric',
     })
     .replace(/^/, 'Due ');
+};
+
+const ATTENTION_KIND_LABELS: Record<string, string> = {
+  follow_up: 'Follow-up',
+  blocker: 'Blocker',
+  risk: 'Risk',
+  dependency: 'Dependency',
+  open_question: 'Open question',
+  stale_context: 'Stale context',
+  repeated_pattern: 'Pattern',
+  decision_conflict: 'Decision conflict',
+  duplicate_commitment: 'Duplicate commitment',
+  reference_context: 'Reference context',
+  source_quality: 'Source quality',
+};
+
+const formatAttentionKindLabel = (kind: string | undefined): string | null => {
+  const normalized = (kind || '').trim();
+  if (!normalized) return null;
+  return ATTENTION_KIND_LABELS[normalized] ?? null;
 };
 
 const normalizeValue = (value: string | null | undefined): string =>
@@ -278,6 +299,7 @@ export const buildMeetingActionItems = ({
           status,
           statusLabel: null,
           topicLabel: null,
+          attentionKindLabel: formatAttentionKindLabel(linkedAttention?.kind),
           assignee: entity.assigned_to
             ? (peopleById.get(entity.assigned_to) ?? entity.assigned_to)
             : null,
@@ -329,6 +351,7 @@ export const buildMeetingActionItems = ({
       status: parsed.status,
       statusLabel: parsed.statusLabel,
       topicLabel: parsed.topicLabel,
+      attentionKindLabel: null,
       assignee: parsed.assignee,
       dueLabel: parsed.dueLabel,
       context: parsed.context,
