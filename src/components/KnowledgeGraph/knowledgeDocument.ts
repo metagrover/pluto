@@ -874,7 +874,10 @@ export const compileKnowledgeBrief = (
   if (snapshotV2 && workingMemorySnapshot) {
     return buildKnowledgeBriefFromV2({
       v2: snapshotV2,
-      trustStatus: workingMemorySnapshot.trust_status,
+      trustStatus: deriveKnowledgeTrustStatus({
+        docStatus: 'up_to_date',
+        evidenceQuality: snapshotV2.current_read.evidence_quality,
+      }),
       sourceQuality: snapshotV2.source_quality_summary,
     });
   }

@@ -660,6 +660,78 @@ describe('knowledge document utilities', () => {
     });
   });
 
+  it('derives snapshot-backed trust state from the rendered evidence quality', () => {
+    const doc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'global', title: 'Global Knowledge' },
+        current_read: {
+          headline: 'Doc JSON fallback should not win when snapshot matches.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Doc fallback only.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.9,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality_summary: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+        change_summary: {
+          generated_at: '2026-04-25T10:00:00.000Z',
+          added_count: 0,
+          removed_count: 0,
+          updated_count: 0,
+          notable_changes: [],
+        },
+      }),
+    });
+
+    const baseSnapshot = makeWorkingMemorySnapshot();
+    const brief = compileKnowledgeBrief(doc, {
+      ...baseSnapshot,
+      trust_status: 'grounded',
+      payload: {
+        ...baseSnapshot.payload,
+        current_read: {
+          ...baseSnapshot.payload.current_read,
+          headline:
+            'Snapshot-backed current read should still degrade honestly.',
+          evidence_quality: {
+            ...baseSnapshot.payload.current_read.evidence_quality,
+            mode: 'inferred',
+            confidence: 0.84,
+            freshness: 'unknown',
+          },
+        },
+      },
+    });
+
+    expect(brief.headline).toBe(
+      'Snapshot-backed current read should still degrade honestly.',
+    );
+    expect(brief.trustStatus).toBe('inferred');
+    expect(brief.trustDescription).toBe(
+      'Supported by evidence, but synthesized across sources.',
+    );
+  });
+
   it('prefers a matching project working-memory snapshot for a project knowledge doc', () => {
     const doc = makeDoc({
       id: 'doc-project',

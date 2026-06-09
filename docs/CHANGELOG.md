@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-09
+
+### Align snapshot-backed Knowledge trust with rendered evidence
+- **Issue:** [#249](https://github.com/metagrover/pluto/issues/249)
+- **PR:** Pending.
+- **Changed:** Snapshot-backed Knowledge briefs now derive their trust badge from the rendered Current Read evidence quality instead of copying the stored snapshot trust flag directly. Focused regression coverage now proves a snapshot-backed brief can degrade to inferred trust when the rendered evidence is synthesized or freshness metadata is weaker than the stored snapshot flag suggests.
+- **Why:** `#81` requires working-memory-backed Knowledge to degrade honestly when evidence is weaker, older, or less direct. Before this slice, Pluto could render a snapshot-backed Current Read as fully grounded even when the same rendered evidence would have been labeled inferred on the doc-backed path.
+- **Replaced:** Treating `workingMemorySnapshot.trust_status` as authoritative for Knowledge UI trust labels even when the rendered Current Read evidence metadata said otherwise.
+- **Notes:** This is a narrow consumer-path fix only. Snapshot matching, stale-snapshot fallback, and the existing Knowledge UI surface stay unchanged.
+
 ## 2026-06-02
 
 ### Preserve fallback follow-up card metadata in Meeting View
