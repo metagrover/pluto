@@ -95,6 +95,7 @@ describe('buildMeetingActionItems', () => {
         title: 'Send pricing recap',
         status: 'fallback',
         statusLabel: null,
+        topicLabel: null,
         assignee: 'Alex',
         dueLabel: 'Due Friday',
         context: null,
@@ -110,6 +111,7 @@ describe('buildMeetingActionItems', () => {
         title: 'Confirm reseller terms',
         status: 'fallback',
         statusLabel: null,
+        topicLabel: null,
         assignee: null,
         dueLabel: null,
         context: null,
@@ -147,6 +149,7 @@ describe('buildMeetingActionItems', () => {
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: null,
+        topicLabel: null,
       },
       {
         id: 'fallback-1',
@@ -162,8 +165,34 @@ describe('buildMeetingActionItems', () => {
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: 'Needs legal review',
+        topicLabel: null,
       },
     ]);
+  });
+
+  it('preserves fallback topic detail on matching linked action cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          assigned_to: null,
+          due_date: null,
+          context: null,
+        }),
+      ],
+      fallbackActionItems: [
+        'Send pricing recap (Topic: Launch prep | Owner: Alex | Due: Friday)',
+      ],
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: 'action-1',
+      title: 'Send pricing recap',
+      topicLabel: 'Topic: Launch prep',
+      assignee: null,
+      dueLabel: null,
+      context: null,
+    });
   });
 
   it('maps linked attention items to dismiss, snooze, and reopen affordances', () => {
