@@ -143,8 +143,6 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
-        isBlocked: false,
-        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -160,8 +158,6 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
-        isBlocked: false,
-        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -189,8 +185,6 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
-        isBlocked: false,
-        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: null,
@@ -206,8 +200,6 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
-        isBlocked: false,
-        blockerReason: null,
         dismissLabel: null,
         snoozeLabel: null,
         statusLabel: 'Needs legal review',
@@ -275,5 +267,4 @@ describe('buildMeetingActionItems', () => {
       actionable: true,
     });
   });
-
 });
