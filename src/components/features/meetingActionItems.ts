@@ -177,6 +177,10 @@ const sortMeetingActionEntities = (
   );
 };
 
+const isActiveBlocker = (
+  item: Pick<MeetingLinkedAttentionItem, 'kind' | 'status'> | undefined,
+): boolean => item?.kind === 'blocker' && item.status === 'active';
+
 export const buildMeetingActionItems = ({
   meetingEntities,
   linkedAttentionItems = [],
@@ -184,7 +188,7 @@ export const buildMeetingActionItems = ({
 }: BuildMeetingActionItemsParams): MeetingActionItemCard[] => {
   const attentionByEntityId = new Map<
     string,
-    Pick<MeetingLinkedAttentionItem, 'id' | 'status'>
+    Pick<MeetingLinkedAttentionItem, 'id' | 'kind' | 'status'>
   >();
 
   for (const item of linkedAttentionItems) {
@@ -192,6 +196,7 @@ export const buildMeetingActionItems = ({
       if (attentionByEntityId.has(relatedEntityId)) continue;
       attentionByEntityId.set(relatedEntityId, {
         id: item.id,
+        kind: item.kind,
         status: item.status,
       });
     }
@@ -202,7 +207,14 @@ export const buildMeetingActionItems = ({
       (entity): entity is MeetingActionEntity =>
         entity.type === 'action_item' && entity.name.trim().length > 0,
     )
-    .sort(sortMeetingActionEntities)
+    .sort((left, right) => {
+      const leftIsBlocker = isActiveBlocker(attentionByEntityId.get(left.id));
+      const rightIsBlocker = isActiveBlocker(attentionByEntityId.get(right.id));
+      if (leftIsBlocker !== rightIsBlocker) {
+        return leftIsBlocker ? -1 : 1;
+      }
+      return sortMeetingActionEntities(left, right);
+    })
     .map((entity) => {
       const status = entity.status ?? 'active';
       const linkedAttention = attentionByEntityId.get(entity.id);

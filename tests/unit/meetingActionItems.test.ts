@@ -226,4 +226,37 @@ describe('buildMeetingActionItems', () => {
       actionable: true,
     });
   });
+
+  it('prioritizes blocker-backed active follow-ups ahead of routine active cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'routine-active',
+          name: 'Share regular status note',
+          mention_count: 5,
+          created_at: '2026-05-27T18:00:00.000Z',
+        }),
+        makeMeetingEntity({
+          id: 'blocked-active',
+          name: 'Unblock legal sign-off',
+          mention_count: 1,
+          created_at: '2026-05-25T18:00:00.000Z',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-blocker',
+          kind: 'blocker',
+          status: 'active',
+          related_entity_ids: ['blocked-active'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items.map((item) => item.id)).toEqual([
+      'blocked-active',
+      'routine-active',
+    ]);
+  });
 });
