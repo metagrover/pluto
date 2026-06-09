@@ -182,11 +182,13 @@ const sortMeetingActionEntities = (
   const rightRank =
     ACTION_STATUS_ORDER[rightStatus] ?? ACTION_STATUS_ORDER.active;
   if (leftRank !== rightRank) return leftRank - rightRank;
-  const leftAttentionStatus = attentionByEntityId.get(left.id)?.status ?? 'active';
+  const leftAttentionStatus =
+    attentionByEntityId.get(left.id)?.status ?? 'active';
   const rightAttentionStatus =
     attentionByEntityId.get(right.id)?.status ?? 'active';
   const leftAttentionRank =
-    ATTENTION_STATUS_ORDER[leftAttentionStatus] ?? ATTENTION_STATUS_ORDER.active;
+    ATTENTION_STATUS_ORDER[leftAttentionStatus] ??
+    ATTENTION_STATUS_ORDER.active;
   const rightAttentionRank =
     ATTENTION_STATUS_ORDER[rightAttentionStatus] ??
     ATTENTION_STATUS_ORDER.active;
