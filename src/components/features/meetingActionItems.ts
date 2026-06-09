@@ -220,7 +220,7 @@ export const buildMeetingActionItems = ({
         status,
         statusLabel: null,
         assignee: entity.assigned_to
-          ? peopleById.get(entity.assigned_to) ?? entity.assigned_to
+          ? (peopleById.get(entity.assigned_to) ?? entity.assigned_to)
           : null,
         dueLabel: formatDueLabel(entity.due_date),
         context: entity.context,
