@@ -247,6 +247,9 @@ describe('buildMeetingActionItems', () => {
         attentionStatus: null,
         dismissLabel: null,
         snoozeLabel: null,
+        isBlocked: false,
+        blockerReason: null,
+        attentionKindLabel: null,
       },
     ]);
   });
@@ -299,15 +302,6 @@ describe('buildMeetingActionItems', () => {
       snoozeLabel: 'Snooze',
     });
     expect(items[1]).toMatchObject({
-      id: 'dismissed-follow-up',
-      attentionItemId: 'attention-dismissed',
-      attentionKindLabel: 'Blocker',
-      attentionStatus: 'dismissed',
-      dismissLabel: 'Reopen',
-      snoozeLabel: null,
-      actionable: false,
-    });
-    expect(items[2]).toMatchObject({
       id: 'snoozed-follow-up',
       attentionItemId: 'attention-snoozed',
       attentionKindLabel: 'Stale context',
@@ -315,6 +309,15 @@ describe('buildMeetingActionItems', () => {
       dismissLabel: null,
       snoozeLabel: 'Reopen',
       actionable: true,
+    });
+    expect(items[2]).toMatchObject({
+      id: 'dismissed-follow-up',
+      attentionItemId: 'attention-dismissed',
+      attentionKindLabel: 'Blocker',
+      attentionStatus: 'dismissed',
+      dismissLabel: 'Reopen',
+      snoozeLabel: null,
+      actionable: false,
     });
   });
 
@@ -350,6 +353,7 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: 'Mark complete',
         attentionItemId: null,
         attentionStatus: null,
+        attentionKindLabel: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -386,6 +390,7 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: 'Mark complete',
         attentionItemId: null,
         attentionStatus: null,
+        attentionKindLabel: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -404,6 +409,7 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: null,
         attentionItemId: null,
         attentionStatus: null,
+        attentionKindLabel: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -514,6 +520,7 @@ describe('buildMeetingActionItems', () => {
         toggleLabel: 'Mark complete',
         attentionItemId: null,
         attentionStatus: null,
+        attentionKindLabel: null,
         dismissLabel: null,
         snoozeLabel: null,
       },
@@ -556,8 +563,8 @@ describe('buildMeetingActionItems', () => {
 
     expect(items.map((item) => item.id)).toEqual([
       'blocked-active',
-      'routine-active',
       'stale-follow-up',
+      'routine-active',
     ]);
   });
 
