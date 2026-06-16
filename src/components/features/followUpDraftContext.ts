@@ -234,6 +234,18 @@ const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
   return a.name.localeCompare(b.name);
 };
 
+const getDraftActionPriority = (
+  entity: MeetingEntitySummary,
+  blockerReason: string,
+  fallbackDetails: FallbackActionDetails,
+): number => {
+  const fallbackStatus = normalizeName(fallbackDetails.status).toLowerCase();
+  if (blockerReason || fallbackStatus.startsWith('blocked')) return 0;
+  if (entity.status === 'overdue' || fallbackStatus === 'overdue') return 1;
+  if (entity.status === 'stale' || fallbackStatus === 'stale') return 2;
+  return 3;
+};
+
 const formatDueLabel = (value: string | null | undefined): string => {
   const normalized = normalizeName(value);
   if (!normalized) return '';
@@ -469,7 +481,38 @@ export const buildFollowUpDraftContext = ({
   const actionEntities = allLinkedActionEntities
     .filter((entity) => entity.status !== 'completed')
     .filter((entity) => !suppressedEntityIds.has(entity.id))
-    .sort(compareEntities);
+    .sort((left, right) => {
+      const leftFallback =
+        fallbackDetailsByActionKey.get(normalizeKey(left.name)) ?? {
+          topic: '',
+          status: '',
+          owner: '',
+          due: '',
+          context: '',
+        };
+      const rightFallback =
+        fallbackDetailsByActionKey.get(normalizeKey(right.name)) ?? {
+          topic: '',
+          status: '',
+          owner: '',
+          due: '',
+          context: '',
+        };
+      const leftPriority = getDraftActionPriority(
+        left,
+        blockerReasonByEntityId.get(left.id) ?? '',
+        leftFallback,
+      );
+      const rightPriority = getDraftActionPriority(
+        right,
+        blockerReasonByEntityId.get(right.id) ?? '',
+        rightFallback,
+      );
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority;
+      }
+      return compareEntities(left, right);
+    });
   const linkedActionNames = new Set(
     allLinkedActionEntities.map((entity) => normalizeKey(entity.name)),
   );
