@@ -20,13 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-16
 
-### Preserve richer owner-role detail on linked Meeting View cards
-- **Issue:** [#275](https://github.com/metagrover/pluto/issues/275)
+### Avoid false richer-owner merges on linked Meeting View cards
+- **Issue:** [#276](https://github.com/metagrover/pluto/issues/276)
 - **PR:** Pending.
-- **Changed:** Matching linked Meeting View action cards now keep a richer fallback owner label when the linked owner label is just a thinner subset of it, such as preserving `Sarah Chen (Head of Product)` instead of collapsing back to `Sarah Chen`. Focused regression coverage now proves the shared merge path preserves richer fallback owner-role accountability detail while keeping linked due dates and existing owner resolution behavior intact.
-- **Why:** `#61` depends on follow-up cards preserving the best accountability context Pluto already knows. Before this slice, Meeting View could become less trustworthy than the shared draft path because linked action cards still overwrote richer fallback owner-role text with a thinner linked name.
-- **Replaced:** Preferring any linked owner label over richer fallback owner-role text during the shared Meeting View action-card merge.
-- **Notes:** This stays inside `meetingActionItems.ts` and does not redesign Meeting View or change follow-up draft formatting.
+- **Changed:** Matching linked Meeting View action cards now preserve richer fallback owner-role text only when the normalized linked and fallback owner names actually match. Focused regression coverage now proves both the valid richer-label path and the false-positive guard, so `Sarah Chen` can still expand to `Sarah Chen (Head of Product)` while a linked owner like `Alex` no longer gets silently rewritten to a different person such as `Alex Rivera`.
+- **Why:** `#61` depends on follow-up cards preserving trustworthy accountability context. Before this slice, the shared Meeting View merge path reused a generic substring-based richer-label helper, so a longer fallback owner string could overwrite a shorter linked owner label even when Pluto had no evidence they referred to the same person.
+- **Replaced:** Treating any longer fallback owner label that contained the linked owner text as automatically richer and therefore authoritative.
+- **Notes:** This stays inside `meetingActionItems.ts`, keeps existing linked owner resolution behavior, and does not redesign Meeting View or change follow-up draft formatting.
 
 ### Preserve fallback-completed Meeting View affordances
 - **Issue:** [#273](https://github.com/metagrover/pluto/issues/273)
