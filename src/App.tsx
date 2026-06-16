@@ -11,6 +11,7 @@ import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
 // Layout
 import { Sidebar } from './components/layout/Sidebar';
 
+import { updateAlertStatus } from './api/intelligence';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
@@ -22,7 +23,6 @@ import {
   persistDashboardAttentionStatus,
 } from './components/features/dashboardActionCompletion';
 import { useDashboardHome } from './components/features/useDashboardHome';
-import { updateAlertStatus } from './api/intelligence';
 
 import { updateEntityStatus } from './api/knowledgeGraph';
 // Knowledge Graph

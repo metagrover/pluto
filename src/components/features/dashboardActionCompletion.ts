@@ -1,5 +1,5 @@
-import type { EntityStatus } from '../../api/knowledgeGraph';
 import type { AttentionItemStatus } from '../../../electron/intelligence/intelligenceTypes';
+import type { EntityStatus } from '../../api/knowledgeGraph';
 
 export const DASHBOARD_ACTION_COMPLETION_ERROR =
   'Could not update follow-up status. Try again.';
