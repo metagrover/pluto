@@ -67,6 +67,10 @@ export interface DashboardActionInsightItem {
   dueLabel: string;
   status: 'overdue' | 'stale' | 'active';
   sourceLabel: string;
+  attentionItemId: string | null;
+  attentionStatus: AttentionItem['status'] | null;
+  dismissLabel: 'Dismiss' | 'Reopen' | null;
+  snoozeLabel: 'Snooze' | 'Reopen' | null;
 }
 
 export type DashboardActionInsights =
@@ -274,6 +278,22 @@ const filterSuppressedDashboardActions = (
     (action) => !shouldSuppressDashboardAction(action.id, attentionAlerts),
   );
 
+const getLinkedDashboardAttention = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): AttentionItem | null => {
+  const linkedAlerts = attentionAlerts.filter((item) =>
+    item.related_entity_ids.includes(actionId),
+  );
+  if (linkedAlerts.length === 0) {
+    return null;
+  }
+
+  return (
+    linkedAlerts.find((item) => item.status === 'active') ?? linkedAlerts[0]
+  );
+};
+
 const getMeetingDetail = (meeting: Meeting): string => {
   const analysis = parseJsonObject<MeetingAnalysisOverview>(
     meeting.analysis_json,
@@ -313,28 +333,60 @@ const buildLatestMeeting = (meetings: Meeting[]): DashboardLatestMeeting => {
 const actionToInsightItem = (
   action: Entity,
   status: DashboardActionInsightItem['status'],
+  linkedAttention: AttentionItem | null,
 ): DashboardActionInsightItem => ({
   id: action.id,
   title: action.name,
   dueLabel: formatDueLabel(action.due_date),
   status,
   sourceLabel: titleCase(action.domain_tag || 'workspace'),
+  attentionItemId: linkedAttention?.id ?? null,
+  attentionStatus: linkedAttention?.status ?? null,
+  dismissLabel:
+    linkedAttention == null
+      ? null
+      : linkedAttention.status === 'dismissed'
+        ? 'Reopen'
+        : linkedAttention.status === 'snoozed'
+          ? null
+          : 'Dismiss',
+  snoozeLabel:
+    linkedAttention == null
+      ? null
+      : linkedAttention.status === 'dismissed'
+        ? null
+        : linkedAttention.status === 'snoozed'
+          ? 'Reopen'
+          : 'Snooze',
 });
 
 const buildActionInsights = (
   overdueActions: Entity[],
   staleActions: Entity[],
   activeActions: Entity[],
+  attentionAlerts: AttentionItem[],
 ): DashboardActionInsights => {
   const prioritizedItems = [
     ...sortActions(overdueActions, compareActionsByDueDate).map((action) =>
-      actionToInsightItem(action, 'overdue'),
+      actionToInsightItem(
+        action,
+        'overdue',
+        getLinkedDashboardAttention(action.id, attentionAlerts),
+      ),
     ),
     ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) =>
-      actionToInsightItem(action, 'stale'),
+      actionToInsightItem(
+        action,
+        'stale',
+        getLinkedDashboardAttention(action.id, attentionAlerts),
+      ),
     ),
     ...sortActions(activeActions, compareActionsByDueDate).map((action) =>
-      actionToInsightItem(action, 'active'),
+      actionToInsightItem(
+        action,
+        'active',
+        getLinkedDashboardAttention(action.id, attentionAlerts),
+      ),
     ),
   ];
   const seenIds = new Set<string>();
@@ -768,6 +820,7 @@ export const buildDashboardHomeModel = (
     overdueActions,
     staleActions,
     activeActions,
+    attentionAlerts,
   );
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,

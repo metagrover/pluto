@@ -336,7 +336,13 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('overdue_action');
     expect(model.actionInsights.state).toBe('populated');
-    expect(model.actionInsights.items[0]?.title).toBe('Ship privacy review');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      title: 'Ship privacy review',
+      attentionItemId: 'attention-active',
+      attentionStatus: 'active',
+      dismissLabel: 'Dismiss',
+      snoozeLabel: 'Snooze',
+    });
   });
 
   it('uses the latest meeting as the briefing focus when no actions need attention', () => {
