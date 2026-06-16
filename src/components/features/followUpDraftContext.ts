@@ -482,22 +482,24 @@ export const buildFollowUpDraftContext = ({
     .filter((entity) => entity.status !== 'completed')
     .filter((entity) => !suppressedEntityIds.has(entity.id))
     .sort((left, right) => {
-      const leftFallback =
-        fallbackDetailsByActionKey.get(normalizeKey(left.name)) ?? {
-          topic: '',
-          status: '',
-          owner: '',
-          due: '',
-          context: '',
-        };
-      const rightFallback =
-        fallbackDetailsByActionKey.get(normalizeKey(right.name)) ?? {
-          topic: '',
-          status: '',
-          owner: '',
-          due: '',
-          context: '',
-        };
+      const leftFallback = fallbackDetailsByActionKey.get(
+        normalizeKey(left.name),
+      ) ?? {
+        topic: '',
+        status: '',
+        owner: '',
+        due: '',
+        context: '',
+      };
+      const rightFallback = fallbackDetailsByActionKey.get(
+        normalizeKey(right.name),
+      ) ?? {
+        topic: '',
+        status: '',
+        owner: '',
+        due: '',
+        context: '',
+      };
       const leftPriority = getDraftActionPriority(
         left,
         blockerReasonByEntityId.get(left.id) ?? '',
