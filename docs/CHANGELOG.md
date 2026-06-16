@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-06-16
+
+### Clear the high-severity pre-commit audit blocker
+- **Issue:** [#270](https://github.com/metagrover/pluto/issues/270)
+- **PR:** Pending.
+- **Changed:** Bumped Pluto's direct `vite` dependency to the patched `7.3.5` line and tightened `pnpm.overrides` so the vulnerable transitive `esbuild`, `tmp`, and `form-data` packages now resolve to patched versions in the shared lockfile. `pnpm audit --audit-level high` is back below the hook threshold on fresh `master`.
+- **Why:** Pluto's required pre-commit audit hook had become a repo-wide landing blocker again, which prevented ordinary code issues like `#267` from committing even after their code and tests were already green.
+- **Replaced:** Treating the repo's failing high-severity audit gate as unrelated dependency noise while routine Builder work stayed blocked behind it.
+- **Notes:** This is intentionally the smallest safe dependency remediation. The remaining low and moderate advisories stay below the current hook threshold and are left for later cleanup.
+
 ## 2026-06-09
 
 ### Ignore outdated snapshots in Knowledge Needs Attention
