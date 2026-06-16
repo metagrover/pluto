@@ -278,7 +278,9 @@ const mergeLinkedAndFallbackActionItem = (
     (fallback.status === 'overdue' ||
       fallback.status === 'stale' ||
       fallback.status === 'completed');
-  const mergedStatus = shouldUseFallbackLifecycle ? fallback.status : linked.status;
+  const mergedStatus = shouldUseFallbackLifecycle
+    ? fallback.status
+    : linked.status;
 
   return {
     ...linked,
