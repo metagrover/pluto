@@ -187,7 +187,11 @@ const parseFallbackStatus = (
   value: string,
 ): Pick<
   ParsedFallbackActionItem,
-  'status' | 'statusLabel' | 'attentionKindLabel' | 'isBlocked' | 'blockerReason'
+  | 'status'
+  | 'statusLabel'
+  | 'attentionKindLabel'
+  | 'isBlocked'
+  | 'blockerReason'
 > => {
   const normalized = normalizeValue(value);
   const lowered = normalized.toLowerCase();
