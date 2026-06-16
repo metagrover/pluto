@@ -595,6 +595,40 @@ describe('buildMeetingActionItems', () => {
     ]);
   });
 
+  it('preserves richer fallback owner-role detail on matching linked action cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'action-1',
+          name: 'Send pricing recap',
+          assigned_to: 'person-1',
+        }),
+        makeMeetingEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+          normalized_name: 'sarah chen',
+          status: null,
+          due_date: null,
+          assigned_to: null,
+          mention_count: 3,
+          context: 'Role: Head of Product',
+        }),
+      ],
+      fallbackActionItems: [
+        'Send pricing recap (Owner: Sarah Chen (Head of Product) | Due: Friday)',
+      ],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'action-1',
+        assignee: 'Sarah Chen (Head of Product)',
+        dueLabel: 'Due May 30',
+      }),
+    ]);
+  });
+
   it('prioritizes blocker-backed active follow-ups ahead of routine active cards', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [
