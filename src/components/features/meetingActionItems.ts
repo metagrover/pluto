@@ -146,9 +146,7 @@ const preferRicherLabel = (
 
   if (
     normalizedFallback.length > normalizedPrimary.length &&
-    normalizedFallback
-      .toLowerCase()
-      .includes(normalizedPrimary.toLowerCase())
+    normalizedFallback.toLowerCase().includes(normalizedPrimary.toLowerCase())
   ) {
     return normalizedFallback;
   }
