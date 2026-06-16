@@ -132,6 +132,30 @@ const normalizeValue = (value: string | null | undefined): string =>
 const normalizeActionKey = (value: string | null | undefined): string =>
   normalizeValue(value).toLowerCase();
 
+const preferRicherLabel = (
+  primary: string | null,
+  fallback: string | null,
+): string | null => {
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+
+  const normalizedPrimary = normalizeValue(primary);
+  const normalizedFallback = normalizeValue(fallback);
+  if (!normalizedPrimary) return normalizedFallback || null;
+  if (!normalizedFallback) return normalizedPrimary;
+
+  if (
+    normalizedFallback.length > normalizedPrimary.length &&
+    normalizedFallback
+      .toLowerCase()
+      .includes(normalizedPrimary.toLowerCase())
+  ) {
+    return normalizedFallback;
+  }
+
+  return normalizedPrimary;
+};
+
 const parseFallbackStatus = (
   value: string,
 ): Pick<ParsedFallbackActionItem, 'status' | 'statusLabel'> => {
@@ -287,7 +311,7 @@ const mergeLinkedAndFallbackActionItem = (
     status: mergedStatus,
     statusLabel: linked.statusLabel ?? fallback.statusLabel,
     topicLabel: linked.topicLabel ?? fallback.topicLabel,
-    assignee: linked.assignee ?? fallback.assignee,
+    assignee: preferRicherLabel(linked.assignee, fallback.assignee),
     dueLabel: linked.dueLabel ?? fallback.dueLabel,
     context: linked.context ?? fallback.context,
     toggleLabel: mergedStatus === 'completed' ? 'Reopen' : 'Mark complete',
