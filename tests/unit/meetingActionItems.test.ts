@@ -629,6 +629,31 @@ describe('buildMeetingActionItems', () => {
     ]);
   });
 
+  it('keeps the linked owner label when a longer fallback owner string refers to a different person', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'action-1',
+          name: 'Send pricing recap',
+          assigned_to: 'Alex',
+          due_date: null,
+          context: null,
+        }),
+      ],
+      fallbackActionItems: [
+        'Send pricing recap (Owner: Alex Rivera (Head of Product) | Due: Friday)',
+      ],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'action-1',
+        assignee: 'Alex',
+        dueLabel: 'Due Friday',
+      }),
+    ]);
+  });
+
   it('prioritizes blocker-backed active follow-ups ahead of routine active cards', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [

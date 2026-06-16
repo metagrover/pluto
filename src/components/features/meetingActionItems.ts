@@ -132,7 +132,26 @@ const normalizeValue = (value: string | null | undefined): string =>
 const normalizeActionKey = (value: string | null | undefined): string =>
   normalizeValue(value).toLowerCase();
 
-const preferRicherLabel = (
+const parseOwnerLabel = (
+  value: string | null | undefined,
+): { name: string; role: string } => {
+  const normalized = normalizeValue(value);
+  if (!normalized) {
+    return { name: '', role: '' };
+  }
+
+  const match = normalized.match(/^(.*?)\s+\((.+)\)$/);
+  if (!match) {
+    return { name: normalized, role: '' };
+  }
+
+  return {
+    name: normalizeValue(match[1]),
+    role: normalizeValue(match[2]),
+  };
+};
+
+const preferRicherOwnerLabel = (
   primary: string | null,
   fallback: string | null,
 ): string | null => {
@@ -144,9 +163,16 @@ const preferRicherLabel = (
   if (!normalizedPrimary) return normalizedFallback || null;
   if (!normalizedFallback) return normalizedPrimary;
 
+  const primaryOwner = parseOwnerLabel(normalizedPrimary);
+  const fallbackOwner = parseOwnerLabel(normalizedFallback);
+
   if (
+    primaryOwner.name &&
+    fallbackOwner.name &&
+    normalizeActionKey(primaryOwner.name) ===
+      normalizeActionKey(fallbackOwner.name) &&
     normalizedFallback.length > normalizedPrimary.length &&
-    normalizedFallback.toLowerCase().includes(normalizedPrimary.toLowerCase())
+    (!primaryOwner.role || fallbackOwner.role)
   ) {
     return normalizedFallback;
   }
@@ -309,7 +335,7 @@ const mergeLinkedAndFallbackActionItem = (
     status: mergedStatus,
     statusLabel: linked.statusLabel ?? fallback.statusLabel,
     topicLabel: linked.topicLabel ?? fallback.topicLabel,
-    assignee: preferRicherLabel(linked.assignee, fallback.assignee),
+    assignee: preferRicherOwnerLabel(linked.assignee, fallback.assignee),
     dueLabel: linked.dueLabel ?? fallback.dueLabel,
     context: linked.context ?? fallback.context,
     toggleLabel: mergedStatus === 'completed' ? 'Reopen' : 'Mark complete',
