@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-16
 
+### Preserve fallback-completed Meeting View affordances
+- **Issue:** [#273](https://github.com/metagrover/pluto/issues/273)
+- **PR:** Pending.
+- **Changed:** Linked Meeting View action cards now recompute their completion toggle after merging fallback lifecycle state, so a card upgraded to `completed` by fallback analysis text renders the matching `Reopen` affordance instead of keeping the active `Mark complete` label. Focused regression coverage now proves the shared merge path keeps status and affordance in sync.
+- **Why:** `#61` depends on the commitment surface staying internally consistent. Before this slice, a sparse linked action could render as completed while still advertising the active completion action, which made Pluto's lifecycle state feel contradictory.
+- **Replaced:** Deriving the toggle affordance only from the pre-merge linked entity status even when fallback analysis had already promoted the card to a completed lifecycle.
+- **Notes:** This stays inside `meetingActionItems.ts` and preserves the existing overdue/stale merge behavior plus current Meeting View controls.
+
 ### Prioritize overdue and stale fallback Meeting View follow-ups
 - **Issue:** [#267](https://github.com/metagrover/pluto/issues/267)
 - **PR:** Pending.

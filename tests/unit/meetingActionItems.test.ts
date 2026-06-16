@@ -360,6 +360,43 @@ describe('buildMeetingActionItems', () => {
     ]);
   });
 
+  it('uses the completed affordance when fallback lifecycle upgrades a linked card to completed', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'action-completed-by-fallback',
+          name: 'Send pricing recap',
+          status: 'active',
+        }),
+      ],
+      fallbackActionItems: [
+        'Send pricing recap (Status: Completed | Owner: Alex | Due: Friday)',
+      ],
+    });
+
+    expect(items).toEqual([
+      {
+        id: 'action-completed-by-fallback',
+        title: 'Send pricing recap',
+        status: 'completed',
+        statusLabel: null,
+        topicLabel: null,
+        assignee: 'Alex',
+        dueLabel: 'Due May 30',
+        context: 'Alex committed to send the pricing recap by Friday.',
+        isBlocked: false,
+        blockerReason: null,
+        actionable: true,
+        toggleLabel: 'Reopen',
+        attentionItemId: null,
+        attentionStatus: null,
+        attentionKindLabel: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+      },
+    ]);
+  });
+
   it('preserves unmatched fallback cards alongside linked action items', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [

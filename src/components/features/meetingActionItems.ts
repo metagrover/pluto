@@ -278,15 +278,19 @@ const mergeLinkedAndFallbackActionItem = (
     (fallback.status === 'overdue' ||
       fallback.status === 'stale' ||
       fallback.status === 'completed');
+  const mergedStatus = shouldUseFallbackLifecycle
+    ? fallback.status
+    : linked.status;
 
   return {
     ...linked,
-    status: shouldUseFallbackLifecycle ? fallback.status : linked.status,
+    status: mergedStatus,
     statusLabel: linked.statusLabel ?? fallback.statusLabel,
     topicLabel: linked.topicLabel ?? fallback.topicLabel,
     assignee: linked.assignee ?? fallback.assignee,
     dueLabel: linked.dueLabel ?? fallback.dueLabel,
     context: linked.context ?? fallback.context,
+    toggleLabel: mergedStatus === 'completed' ? 'Reopen' : 'Mark complete',
   };
 };
 
