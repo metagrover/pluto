@@ -89,6 +89,11 @@ const ATTENTION_STATUS_ORDER: Record<
   dismissed: 2,
 };
 
+const getMeetingActionItemRank = (status: MeetingActionItemStatus): number => {
+  if (status === 'fallback') return 4;
+  return ACTION_STATUS_ORDER[status];
+};
+
 const formatDueLabel = (dueDate: string | null): string | null => {
   if (!dueDate) return null;
   const parsed = new Date(dueDate);
@@ -408,9 +413,29 @@ export const buildMeetingActionItems = ({
       snoozeLabel: null,
     }));
 
-  if (linkedActionItems.length > 0) {
-    return [...linkedActionItems, ...fallbackOnlyItems];
-  }
+  return [...linkedActionItems, ...fallbackOnlyItems]
+    .map((item, originalIndex) => ({ item, originalIndex }))
+    .sort((left, right) => {
+      const leftIsActiveBlocker =
+        left.item.status === 'active' &&
+        left.item.isBlocked &&
+        left.item.attentionStatus === 'active';
+      const rightIsActiveBlocker =
+        right.item.status === 'active' &&
+        right.item.isBlocked &&
+        right.item.attentionStatus === 'active';
 
-  return fallbackOnlyItems;
+      if (leftIsActiveBlocker !== rightIsActiveBlocker) {
+        return leftIsActiveBlocker ? -1 : 1;
+      }
+
+      const leftRank = getMeetingActionItemRank(left.item.status);
+      const rightRank = getMeetingActionItemRank(right.item.status);
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+
+      return left.originalIndex - right.originalIndex;
+    })
+    .map(({ item }) => item);
 };

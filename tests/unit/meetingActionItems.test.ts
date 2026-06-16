@@ -416,6 +416,37 @@ describe('buildMeetingActionItems', () => {
     ]);
   });
 
+  it('prioritizes overdue and stale fallback cards ahead of routine active linked work', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'linked-active',
+          name: 'Send pricing recap',
+          mention_count: 5,
+          created_at: '2026-05-26T18:00:00.000Z',
+        }),
+        makeMeetingEntity({
+          id: 'linked-completed',
+          name: 'Archive prior draft',
+          status: 'completed',
+          mention_count: 1,
+          created_at: '2026-05-24T18:00:00.000Z',
+        }),
+      ],
+      fallbackActionItems: [
+        'Confirm reseller terms (Status: Overdue | Context: Waiting on contract redlines.)',
+        'Review onboarding notes (Status: Stale | Context: The notes have not been revisited since the kickoff.)',
+      ],
+    });
+
+    expect(items.map((item) => [item.title, item.status])).toEqual([
+      ['Confirm reseller terms', 'overdue'],
+      ['Review onboarding notes', 'stale'],
+      ['Send pricing recap', 'active'],
+      ['Archive prior draft', 'completed'],
+    ]);
+  });
+
   it('preserves blocker attention context for linked action cards', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [

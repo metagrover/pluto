@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-16
 
+### Prioritize overdue and stale fallback Meeting View follow-ups
+- **Issue:** [#267](https://github.com/metagrover/pluto/issues/267)
+- **PR:** Pending.
+- **Changed:** Meeting View's shared action-card builder now reorders merged linked and fallback follow-up cards once after merge, so fallback-only cards marked `overdue`, `stale`, or `completed` participate in the same lifecycle urgency pass instead of always appending after linked work. Focused regression coverage now proves overdue and stale fallback cards surface ahead of routine active linked work while existing linked-card blocker priority and intra-bucket ordering stay intact.
+- **Why:** `#61` requires Pluto to surface the highest-value follow-ups with lifecycle context even before every follow-up has a linked `action_item` entity. Before this slice, Pluto could already parse `Status: Overdue` and `Status: Stale` from fallback analysis text, but it still buried those cards beneath routine active linked work.
+- **Replaced:** Appending all unmatched fallback follow-up cards after the linked-card list regardless of lifecycle urgency.
+- **Notes:** This intentionally stays inside `meetingActionItems.ts` and does not redesign Meeting View or broaden lifecycle persistence behavior.
+
 ### Clear the high-severity pre-commit audit blocker
 - **Issue:** [#270](https://github.com/metagrover/pluto/issues/270)
 - **PR:** Pending.
