@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-06
+
+### Remediate the undici audit gate blocker
+- **Issue:** [#287](https://github.com/metagrover/pluto/issues/287)
+- **PR:** Pending.
+- **Changed:** Bumped Pluto's direct `undici` dependency to the patched `6.27.x` line so fresh installs resolve past the `GHSA-vxpw-j846-p89q` fragment-count denial-of-service advisory and `pnpm audit --audit-level high` returns below the pre-commit hook threshold again.
+- **Why:** Pluto's required pre-commit audit hook had become a repo-wide landing blocker again, preventing ordinary code issues from committing even after their code and tests were green.
+- **Replaced:** Treating the failing high-severity `undici` audit result as unrelated dependency noise while routine Builder work stayed blocked behind it.
+- **Notes:** This intentionally keeps the remediation scoped to the direct dependency and lockfile. Remaining low and moderate advisories stay below the current hook threshold.
+
 ## 2026-06-16
 
 ### Avoid false richer-owner merges on linked Meeting View cards
