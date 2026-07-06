@@ -286,9 +286,21 @@ export const Dashboard = ({
                             {item.status}
                           </span>
                         </div>
-                        <p className="mt-1 text-[11px] font-semibold text-pro-text-muted/70">
-                          {item.dueLabel} · {item.sourceLabel}
-                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          {item.attentionLabel ? (
+                            <span className="rounded-full bg-pro-urgent/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-pro-urgent">
+                              {item.attentionLabel}
+                            </span>
+                          ) : null}
+                          <p className="text-[11px] font-semibold text-pro-text-muted/70">
+                            {item.dueLabel} · {item.sourceLabel}
+                          </p>
+                        </div>
+                        {item.attentionReason ? (
+                          <p className="mt-1 text-[11px] font-semibold text-pro-urgent/80">
+                            {item.attentionReason}
+                          </p>
+                        ) : null}
                       </div>
                     </button>
                   );

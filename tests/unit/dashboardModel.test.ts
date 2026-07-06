@@ -339,6 +339,39 @@ describe('buildDashboardHomeModel', () => {
     expect(model.actionInsights.items[0]?.title).toBe('Ship privacy review');
   });
 
+  it('surfaces blocker label and reason on dashboard follow-ups when linked attention already provides that context', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-blocked',
+      attentionLabel: 'Blocker',
+      attentionReason: 'Blocked by legal approval.',
+    });
+  });
+
   it('uses the latest meeting as the briefing focus when no actions need attention', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

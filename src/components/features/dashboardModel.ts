@@ -67,6 +67,8 @@ export interface DashboardActionInsightItem {
   dueLabel: string;
   status: 'overdue' | 'stale' | 'active';
   sourceLabel: string;
+  attentionLabel: string | null;
+  attentionReason: string | null;
 }
 
 export type DashboardActionInsights =
@@ -266,6 +268,31 @@ const shouldSuppressDashboardAction = (
   );
 };
 
+const getDashboardActionAttentionContext = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): Pick<DashboardActionInsightItem, 'attentionLabel' | 'attentionReason'> => {
+  const blockerAlert = attentionAlerts.find(
+    (item) =>
+      item.status === 'active' &&
+      item.kind === 'blocker' &&
+      item.related_entity_ids.includes(actionId),
+  );
+
+  if (!blockerAlert) {
+    return {
+      attentionLabel: null,
+      attentionReason: null,
+    };
+  }
+
+  const normalizedReason = blockerAlert.reason?.trim() || null;
+  return {
+    attentionLabel: 'Blocker',
+    attentionReason: normalizedReason,
+  };
+};
+
 const filterSuppressedDashboardActions = (
   actions: Entity[],
   attentionAlerts: AttentionItem[],
@@ -313,28 +340,31 @@ const buildLatestMeeting = (meetings: Meeting[]): DashboardLatestMeeting => {
 const actionToInsightItem = (
   action: Entity,
   status: DashboardActionInsightItem['status'],
+  attentionAlerts: AttentionItem[],
 ): DashboardActionInsightItem => ({
   id: action.id,
   title: action.name,
   dueLabel: formatDueLabel(action.due_date),
   status,
   sourceLabel: titleCase(action.domain_tag || 'workspace'),
+  ...getDashboardActionAttentionContext(action.id, attentionAlerts),
 });
 
 const buildActionInsights = (
   overdueActions: Entity[],
   staleActions: Entity[],
   activeActions: Entity[],
+  attentionAlerts: AttentionItem[],
 ): DashboardActionInsights => {
   const prioritizedItems = [
     ...sortActions(overdueActions, compareActionsByDueDate).map((action) =>
-      actionToInsightItem(action, 'overdue'),
+      actionToInsightItem(action, 'overdue', attentionAlerts),
     ),
     ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) =>
-      actionToInsightItem(action, 'stale'),
+      actionToInsightItem(action, 'stale', attentionAlerts),
     ),
     ...sortActions(activeActions, compareActionsByDueDate).map((action) =>
-      actionToInsightItem(action, 'active'),
+      actionToInsightItem(action, 'active', attentionAlerts),
     ),
   ];
   const seenIds = new Set<string>();
@@ -768,6 +798,7 @@ export const buildDashboardHomeModel = (
     overdueActions,
     staleActions,
     activeActions,
+    attentionAlerts,
   );
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,
