@@ -256,6 +256,16 @@ const formatLifecycleLabel = (
   return '';
 };
 
+const getFallbackLifecyclePriority = (value: string): number => {
+  const status = getFallbackActionDetails(value).status.toLowerCase();
+
+  if (status.startsWith('blocked')) return 0;
+  if (status === 'overdue') return 1;
+  if (status === 'stale') return 2;
+
+  return 3;
+};
+
 const getFallbackActionDetails = (value: string): FallbackActionDetails => {
   const detailsMatch = value.match(/\((.+)\)\s*$/);
   if (!detailsMatch) {
@@ -490,6 +500,15 @@ export const buildFollowUpDraftContext = ({
   const fallbackOnlyItems = fallbackActionItems.filter(
     (item) => !linkedActionNames.has(normalizeKey(item)),
   );
+  const prioritizedFallbackOnlyItems = fallbackOnlyItems
+    .filter((item) => getFallbackLifecyclePriority(item) < 3)
+    .sort(
+      (a, b) =>
+        getFallbackLifecyclePriority(a) - getFallbackLifecyclePriority(b),
+    );
+  const routineFallbackOnlyItems = fallbackOnlyItems.filter(
+    (item) => getFallbackLifecyclePriority(item) === 3,
+  );
   const decisionEntities = linkedEntities
     .filter((entity) => entity.type === 'decision')
     .filter((entity) => normalizeName(entity.name))
@@ -521,7 +540,11 @@ export const buildFollowUpDraftContext = ({
   return {
     actionItems:
       actionItems.length > 0
-        ? [...actionItems, ...fallbackOnlyItems]
+        ? [
+            ...prioritizedFallbackOnlyItems,
+            ...actionItems,
+            ...routineFallbackOnlyItems,
+          ]
         : fallbackActionItems,
     decisions:
       decisionEntities.length > 0

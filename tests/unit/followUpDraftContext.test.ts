@@ -442,8 +442,40 @@ describe('buildFollowUpDraftContext', () => {
       ],
     });
 
-    expect(context.actionItems).toEqual([
+  expect(context.actionItems).toEqual([
       'Confirm launch plan (Owner: Sarah Chen | Due: May 30 | Status: Blocked by legal approval)',
+    ]);
+  });
+
+  it('prioritizes fallback-only blocked and aging follow-ups ahead of routine linked work', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Wait for legal sign-off (Status: Blocked on legal review)',
+        'Escalate contract edits (Status: Overdue)',
+        'Refresh launch brief (Status: Stale)',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Share routine recap',
+          mention_count: 5,
+        }),
+        makeEntity({
+          id: 'action-2',
+          type: 'action_item',
+          name: 'Confirm attendee list',
+          mention_count: 4,
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Wait for legal sign-off (Status: Blocked on legal review)',
+      'Escalate contract edits (Status: Overdue)',
+      'Refresh launch brief (Status: Stale)',
+      'Share routine recap',
+      'Confirm attendee list',
     ]);
   });
 
