@@ -1,15 +1,15 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Dashboard } from '../../src/components/features/Dashboard';
-import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
 import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
+import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import type {
   KnowledgeProjectHealthCard,
   KnowledgeWorkspacePayload,
 } from '../../src/api/knowledgeWorkspace';
-import type { KnowledgeDoc } from '../../src/api/knowledgeDocs';
+import { Dashboard } from '../../src/components/features/Dashboard';
+import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
 import type { Meeting } from '../../src/types';
 
 const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
