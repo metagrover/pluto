@@ -442,7 +442,7 @@ describe('buildFollowUpDraftContext', () => {
       ],
     });
 
-  expect(context.actionItems).toEqual([
+    expect(context.actionItems).toEqual([
       'Confirm launch plan (Owner: Sarah Chen | Due: May 30 | Status: Blocked by legal approval)',
     ]);
   });
