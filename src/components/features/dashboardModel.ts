@@ -750,9 +750,8 @@ const buildHero = (
     };
   }
 
-  const overdueAction = sortActions(
-    input.overdueActions,
-    (a, b) => compareOverdueDashboardActions(a, b, input.attentionAlerts ?? []),
+  const overdueAction = sortActions(input.overdueActions, (a, b) =>
+    compareOverdueDashboardActions(a, b, input.attentionAlerts ?? []),
   )[0];
   if (overdueAction) {
     return {
