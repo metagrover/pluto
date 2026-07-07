@@ -285,6 +285,74 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('uses the most urgent overdue action in the hero detail', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'overdue-later',
+          name: 'Later overdue task',
+          due_date: '2026-04-29T12:00:00.000Z',
+          updated_at: '2026-04-29T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'overdue-sooner',
+          name: 'Sooner overdue task',
+          due_date: '2026-04-20T12:00:00.000Z',
+          updated_at: '2026-04-21T18:00:00.000Z',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('overdue_action');
+    expect(model.hero.detail).toContain('Sooner overdue task');
+    expect(model.hero.detail).not.toContain('Later overdue task');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'overdue-sooner',
+      title: 'Sooner overdue task',
+      status: 'overdue',
+    });
+  });
+
+  it('uses the stalest action in the hero detail when there are no overdue actions', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [
+        makeAction({
+          id: 'stale-newer',
+          name: 'Newer stale task',
+          due_date: null,
+          updated_at: '2026-04-28T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'stale-older',
+          name: 'Older stale task',
+          due_date: null,
+          updated_at: '2026-04-10T18:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('stale_action');
+    expect(model.hero.detail).toContain('Older stale task');
+    expect(model.hero.detail).not.toContain('Newer stale task');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'stale-older',
+      title: 'Older stale task',
+      status: 'stale',
+    });
+  });
+
   it('suppresses dismissed linked follow-ups from dashboard attention lists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

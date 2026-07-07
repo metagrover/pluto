@@ -637,7 +637,10 @@ const buildHero = (
     };
   }
 
-  const overdueAction = input.overdueActions[0];
+  const overdueAction = sortActions(
+    input.overdueActions,
+    compareActionsByDueDate,
+  )[0];
   if (overdueAction) {
     return {
       kind: 'overdue_action',
@@ -653,7 +656,10 @@ const buildHero = (
     };
   }
 
-  const staleAction = input.staleActions[0];
+  const staleAction = sortActions(
+    input.staleActions,
+    compareActionsByOldestUpdate,
+  )[0];
   if (staleAction) {
     return {
       kind: 'stale_action',
