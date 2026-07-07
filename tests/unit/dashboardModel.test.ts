@@ -336,7 +336,13 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('overdue_action');
     expect(model.actionInsights.state).toBe('populated');
-    expect(model.actionInsights.items[0]?.title).toBe('Ship privacy review');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      title: 'Ship privacy review',
+      attentionItemId: 'attention-active',
+      attentionStatus: 'active',
+      dismissLabel: 'Dismiss',
+      snoozeLabel: 'Snooze',
+    });
   });
 
   it('uses the latest meeting as the briefing focus when no actions need attention', () => {
@@ -970,6 +976,42 @@ describe('buildDashboardHomeModel', () => {
       'stale-older',
       'stale-newer',
       'active-sooner',
+    ]);
+  });
+
+  it('prioritizes blocker-backed active follow-ups ahead of routine active work', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'routine-active',
+          name: 'Routine active follow-up',
+          due_date: '2026-04-20T12:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-active',
+          name: 'Blocked active follow-up',
+          due_date: '2026-04-29T12:00:00.000Z',
+        }),
+      ],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-active',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-active'],
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items.map((item) => item.id)).toEqual([
+      'blocked-active',
+      'routine-active',
     ]);
   });
 
