@@ -476,7 +476,8 @@ describe('buildFollowUpDraftContext', () => {
           id: 'attention-2',
           kind: 'blocker',
           status: 'active',
-          reason: 'Blocked by legal approval while finance waits on the updated contract redlines.',
+          reason:
+            'Blocked by legal approval while finance waits on the updated contract redlines.',
           related_entity_ids: ['action-1'],
         },
       ],
