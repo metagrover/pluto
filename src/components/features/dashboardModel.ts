@@ -304,6 +304,19 @@ const hasActiveLinkedBlocker = (
       item.related_entity_ids.includes(actionId),
   );
 
+const compareOverdueDashboardActions = (
+  a: Entity,
+  b: Entity,
+  attentionAlerts: AttentionItem[],
+): number => {
+  const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
+  const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
+  if (aBlocked !== bBlocked) {
+    return aBlocked ? -1 : 1;
+  }
+  return compareActionsByDueDate(a, b);
+};
+
 const filterSuppressedDashboardActions = (
   actions: Entity[],
   attentionAlerts: AttentionItem[],
@@ -440,14 +453,9 @@ const buildActionInsights = (
   attentionAlerts: AttentionItem[],
 ): DashboardActionInsights => {
   const prioritizedItems = [
-    ...sortActions(overdueActions, (a, b) => {
-      const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
-      const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
-      if (aBlocked !== bBlocked) {
-        return aBlocked ? -1 : 1;
-      }
-      return compareActionsByDueDate(a, b);
-    }).map((action) => {
+    ...sortActions(overdueActions, (a, b) =>
+      compareOverdueDashboardActions(a, b, attentionAlerts),
+    ).map((action) => {
       const contextLabel = getDashboardActionContextLabel(
         action.id,
         attentionAlerts,
@@ -742,9 +750,8 @@ const buildHero = (
     };
   }
 
-  const overdueAction = sortActions(
-    input.overdueActions,
-    compareActionsByDueDate,
+  const overdueAction = sortActions(input.overdueActions, (a, b) =>
+    compareOverdueDashboardActions(a, b, input.attentionAlerts ?? []),
   )[0];
   if (overdueAction) {
     return {

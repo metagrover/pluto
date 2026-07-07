@@ -319,6 +319,47 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('prioritizes blocker-backed overdue follow-ups in the hero detail', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'routine-overdue',
+          name: 'Routine overdue follow-up',
+          due_date: '2026-04-20T12:00:00.000Z',
+          updated_at: '2026-04-20T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-overdue',
+          name: 'Blocked overdue follow-up',
+          due_date: '2026-04-29T12:00:00.000Z',
+          updated_at: '2026-04-29T18:00:00.000Z',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-overdue',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-overdue'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('overdue_action');
+    expect(model.hero.detail).toContain('Blocked overdue follow-up');
+    expect(model.hero.detail).not.toContain('Routine overdue follow-up');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'blocked-overdue',
+      title: 'Blocked overdue follow-up',
+      status: 'overdue',
+    });
+  });
+
   it('uses the stalest action in the hero detail when there are no overdue actions', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
