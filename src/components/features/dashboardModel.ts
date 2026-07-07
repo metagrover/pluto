@@ -266,6 +266,17 @@ const shouldSuppressDashboardAction = (
   );
 };
 
+const hasActiveLinkedBlocker = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): boolean =>
+  attentionAlerts.some(
+    (item) =>
+      item.status === 'active' &&
+      item.kind === 'blocker' &&
+      item.related_entity_ids.includes(actionId),
+  );
+
 const filterSuppressedDashboardActions = (
   actions: Entity[],
   attentionAlerts: AttentionItem[],
@@ -325,11 +336,17 @@ const buildActionInsights = (
   overdueActions: Entity[],
   staleActions: Entity[],
   activeActions: Entity[],
+  attentionAlerts: AttentionItem[],
 ): DashboardActionInsights => {
   const prioritizedItems = [
-    ...sortActions(overdueActions, compareActionsByDueDate).map((action) =>
-      actionToInsightItem(action, 'overdue'),
-    ),
+    ...sortActions(overdueActions, (a, b) => {
+      const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
+      const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
+      if (aBlocked !== bBlocked) {
+        return aBlocked ? -1 : 1;
+      }
+      return compareActionsByDueDate(a, b);
+    }).map((action) => actionToInsightItem(action, 'overdue')),
     ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) =>
       actionToInsightItem(action, 'stale'),
     ),
@@ -768,6 +785,7 @@ export const buildDashboardHomeModel = (
     overdueActions,
     staleActions,
     activeActions,
+    attentionAlerts,
   );
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,

@@ -973,6 +973,42 @@ describe('buildDashboardHomeModel', () => {
     ]);
   });
 
+  it('prioritizes blocker-backed overdue follow-ups ahead of routine overdue work', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [
+        makeAction({
+          id: 'routine-overdue',
+          name: 'Routine overdue follow-up',
+          due_date: '2026-04-20T12:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-overdue',
+          name: 'Blocked overdue follow-up',
+          due_date: '2026-04-29T12:00:00.000Z',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-overdue',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-overdue'],
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items.map((item) => item.id)).toEqual([
+      'blocked-overdue',
+      'routine-overdue',
+    ]);
+  });
+
   it('does not create a spotlight for projects without health signals', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
