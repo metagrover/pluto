@@ -257,12 +257,14 @@ const DASHBOARD_SUPPRESSED_ALERT_STATUSES = new Set([
   'dismissed',
   'snoozed',
 ] as const);
-const DASHBOARD_ATTENTION_STATUS_ORDER: Record<AttentionItem['status'], number> =
-  {
-    active: 0,
-    snoozed: 1,
-    dismissed: 2,
-  };
+const DASHBOARD_ATTENTION_STATUS_ORDER: Record<
+  AttentionItem['status'],
+  number
+> = {
+  active: 0,
+  snoozed: 1,
+  dismissed: 2,
+};
 
 const shouldSuppressDashboardAction = (
   actionId: string,
