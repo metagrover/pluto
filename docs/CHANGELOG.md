@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-06
 
+### Prioritize blocker-backed homepage follow-ups
+- **Issue:** [#294](https://github.com/metagrover/pluto/issues/294)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up ranking now checks for active linked `blocker` attention before due date inside the overdue bucket, so blocker-backed commitments surface ahead of routine overdue work while existing intra-bucket due-date ordering, stale ordering, and dedupe behavior stay intact. Focused regression coverage now proves the homepage keeps the blocked overdue item first even when its due date is later.
+- **Why:** `#61` depends on Pluto surfacing the highest-value follow-ups on the homepage, not just the oldest calendar debt. Before this slice, the dashboard already knew when a follow-up was blocker-backed, but it still sorted overdue items only by due date and could bury the blocker under routine overdue work.
+- **Replaced:** Treating all overdue homepage follow-ups as equally urgent once they entered the overdue bucket, regardless of linked blocker classification.
+- **Notes:** This intentionally stays inside `dashboardModel.ts` and does not redesign the dashboard cards or broaden lifecycle controls.
 ### Preserve source meeting context on dashboard follow-up cards
 - **Issue:** [#292](https://github.com/metagrover/pluto/issues/292)
 - **PR:** Pending.

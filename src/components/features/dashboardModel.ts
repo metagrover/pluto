@@ -293,7 +293,6 @@ const getDashboardActionAttentionContext = (
     attentionReason: normalizedReason,
   };
 };
-
 const hasActiveLinkedBlocker = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -441,7 +440,14 @@ const buildActionInsights = (
   attentionAlerts: AttentionItem[],
 ): DashboardActionInsights => {
   const prioritizedItems = [
-    ...sortActions(overdueActions, compareActionsByDueDate).map((action) => {
+    ...sortActions(overdueActions, (a, b) => {
+      const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
+      const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
+      if (aBlocked !== bBlocked) {
+        return aBlocked ? -1 : 1;
+      }
+      return compareActionsByDueDate(a, b);
+    }).map((action) => {
       const contextLabel = getDashboardActionContextLabel(
         action.id,
         attentionAlerts,
