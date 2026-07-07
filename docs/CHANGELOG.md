@@ -27,6 +27,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` depends on Pluto distinguishing blocked, overdue, and stale commitments with trustworthy source-aware context. Before this slice, the draft surface hid overdue or stale state whenever blocker attention was also present, which made the generated follow-up copy less honest than the underlying commitment model.
 - **Replaced:** Treating blocker reason text as a reason to suppress aging lifecycle labels on follow-up draft action lines.
 - **Notes:** This stays scoped to `followUpDraftContext.ts` and its unit tests. It does not change draft templates, dashboard ranking, or Meeting View controls.
+### Surface routine active follow-ups in the homepage hero
+- **Issue:** [#308](https://github.com/metagrover/pluto/issues/308)
+- **PR:** Pending.
+- **Changed:** The homepage hero now keeps the highest-priority routine active follow-up visible when nothing is overdue, stale, or blocker-backed, reusing the same due-date-aware active ordering already used by the dashboard action-insights list. Focused regression coverage now proves Pluto no longer falls through to unrelated meeting or knowledge copy while open routine commitments remain.
+- **Why:** `#61` still depends on homepage follow-up surfaces showing the highest-value commitments consistently. Before this slice, blocker-backed active follow-ups could surface in the hero, but routine active work still disappeared behind latest-meeting or knowledge fallback copy once no item crossed the overdue, stale, or blocker thresholds.
+- **Replaced:** Treating the homepage hero as if routine active follow-ups were lower priority than latest-meeting or knowledge fallback content.
+- **Notes:** This intentionally stays scoped to the homepage hero. Briefing-focus behavior remains in the separate routine-active slice tracked by PR `#307`.
 
 ### Surface blocker-backed active follow-ups in homepage briefing focus
 - **Issue:** [#304](https://github.com/metagrover/pluto/issues/304)
