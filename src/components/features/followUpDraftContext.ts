@@ -234,6 +234,16 @@ const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
   return a.name.localeCompare(b.name);
 };
 
+const preferRicherBlockerReason = (
+  currentReason: string | undefined,
+  nextReason: string,
+): string => {
+  const normalizedCurrent = normalizeName(currentReason);
+  return nextReason.length > normalizedCurrent.length
+    ? nextReason
+    : normalizedCurrent;
+};
+
 const getDraftActionPriority = (
   entity: MeetingEntitySummary,
   blockerReason: string,
@@ -473,8 +483,13 @@ export const buildFollowUpDraftContext = ({
     const reason = normalizeName(item.reason).replace(/[.!?]+$/, '');
     if (!reason) continue;
     for (const relatedEntityId of item.related_entity_ids) {
-      if (blockerReasonByEntityId.has(relatedEntityId)) continue;
-      blockerReasonByEntityId.set(relatedEntityId, reason);
+      blockerReasonByEntityId.set(
+        relatedEntityId,
+        preferRicherBlockerReason(
+          blockerReasonByEntityId.get(relatedEntityId),
+          reason,
+        ),
+      );
     }
   }
 

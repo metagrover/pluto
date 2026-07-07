@@ -447,6 +447,46 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('prefers the richest blocker reason when duplicate active blockers link to one follow-up', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+        }),
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Confirm launch plan',
+          assigned_to: 'person-1',
+          due_date: '2026-05-30T00:00:00.000Z',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-1',
+          kind: 'blocker',
+          status: 'active',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-1'],
+        },
+        {
+          id: 'attention-2',
+          kind: 'blocker',
+          status: 'active',
+          reason: 'Blocked by legal approval while finance waits on the updated contract redlines.',
+          related_entity_ids: ['action-1'],
+        },
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Confirm launch plan (Owner: Sarah Chen | Due: May 30 | Status: Blocked by legal approval while finance waits on the updated contract redlines)',
+    ]);
+  });
+
   it('prioritizes blocked and aging draft follow-ups ahead of routine active work', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [],
