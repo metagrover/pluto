@@ -75,6 +75,7 @@ const getHeroLabel = (
     case 'recording':
       return 'Live capture';
     case 'overdue_action':
+    case 'active_action':
       return 'Needs attention';
     case 'stale_action':
       return 'Watch';

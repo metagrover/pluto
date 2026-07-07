@@ -35,6 +35,7 @@ export type DashboardHeroKind =
   | 'recording'
   | 'overdue_action'
   | 'stale_action'
+  | 'active_action'
   | 'latest_meeting'
   | 'knowledge_doc'
   | 'default';
@@ -771,6 +772,33 @@ const buildHero = (
       title: pluralize(input.staleActions.length, 'stale item'),
       detail: `${staleAction.name} has gone quiet.`,
       severity: 'watch',
+      action: { label: 'Open projects', target: 'projects' },
+    };
+  }
+
+  const prioritizedActiveAction = sortActions(input.activeActions, (a, b) => {
+    const aBlocked = hasActiveLinkedBlocker(a.id, input.attentionAlerts ?? []);
+    const bBlocked = hasActiveLinkedBlocker(b.id, input.attentionAlerts ?? []);
+    if (aBlocked !== bBlocked) {
+      return aBlocked ? -1 : 1;
+    }
+    return compareActionsByDueDate(a, b);
+  })[0];
+  if (
+    prioritizedActiveAction &&
+    hasActiveLinkedBlocker(
+      prioritizedActiveAction.id,
+      input.attentionAlerts ?? [],
+    )
+  ) {
+    const blockedActiveCount = input.activeActions.filter((action) =>
+      hasActiveLinkedBlocker(action.id, input.attentionAlerts ?? []),
+    ).length;
+    return {
+      kind: 'active_action',
+      title: pluralize(blockedActiveCount, 'blocked item'),
+      detail: `${prioritizedActiveAction.name} needs attention`,
+      severity: 'urgent',
       action: { label: 'Open projects', target: 'projects' },
     };
   }
