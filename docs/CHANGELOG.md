@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-06
 
+### Keep blocker-backed overdue follow-ups in the homepage hero
+- **Issue:** [#300](https://github.com/metagrover/pluto/issues/300)
+- **PR:** Pending.
+- **Changed:** The dashboard hero now reuses the same blocker-aware overdue ordering already used by the action-insights list before choosing which overdue follow-up to headline. Focused regression coverage now proves a blocker-backed overdue commitment stays in the hero even when a routine overdue item has the earlier due date.
+- **Why:** `#61` depends on Pluto surfacing the highest-value homepage follow-up with trustworthy urgency. Before this slice, the dashboard list could correctly rank a blocker first while the hero still headlined a routine overdue item from plain due-date order, making the homepage contradict itself.
+- **Replaced:** Choosing the homepage overdue hero detail from due-date ordering alone after blocker priority had already been introduced lower in the same dashboard model.
+- **Notes:** This stays inside `dashboardModel.ts`, keeps the existing hero copy and stale/meeting/doc fallback behavior, and intentionally avoids any dashboard redesign.
+
 ### Prioritize blocker-backed homepage follow-ups
 - **Issue:** [#294](https://github.com/metagrover/pluto/issues/294)
 - **PR:** Pending.
