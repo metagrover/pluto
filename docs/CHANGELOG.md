@@ -28,6 +28,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Reading the first raw overdue or stale action from the loader result when composing the homepage hero detail.
 - **Notes:** This stays inside the existing dashboard model, keeps the current hero copy and action targets, and intentionally avoids reopening the separate blocker/context dashboard PR stack.
 
+### Prioritize blocker-backed active dashboard follow-ups
+- **Issue:** [#296](https://github.com/metagrover/pluto/issues/296)
+- **PR:** Pending.
+- **Changed:** Dashboard action insights now lift active follow-ups with linked active `blocker` attention ahead of routine active work while preserving the existing due-date tie-breaks inside that blocker bucket. Focused regression coverage now proves the homepage sorter no longer lets a routine active card outrank a true dependency just because the blocker lacks an overdue lifecycle state.
+- **Why:** `#61` still requires Pluto's homepage to classify and prioritize blocker-backed commitments differently from routine follow-ups. Before this slice, blocked commitments usually stayed in the `active` entity bucket, so the dashboard sorter treated them like ordinary open work even when the durable attention queue already classified them as blockers.
+- **Replaced:** Sorting all active dashboard follow-ups strictly by due date without any blocker-aware priority.
+- **Notes:** This stays inside `dashboardModel.ts`, intentionally avoids reopening the in-flight dashboard copy/context PRs, and does not change overdue or stale ordering behavior.
+
 ### Prioritize fallback-only urgent draft follow-ups
 - **Issue:** [#286](https://github.com/metagrover/pluto/issues/286)
 - **PR:** Pending.
