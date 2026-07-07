@@ -135,6 +135,9 @@ const normalizeValue = (value: string | null | undefined): string =>
 const normalizeActionKey = (value: string | null | undefined): string =>
   normalizeValue(value).toLowerCase();
 
+const normalizeReason = (value: string | null | undefined): string =>
+  normalizeValue(value).replace(/[.!?]+$/, '');
+
 const parseOwnerLabel = (
   value: string | null | undefined,
 ): { name: string; role: string } => {
@@ -181,6 +184,23 @@ const preferRicherOwnerLabel = (
   }
 
   return normalizedPrimary;
+};
+
+const shouldPreferDuplicateActiveBlocker = (
+  current: Pick<MeetingLinkedAttentionItem, 'status' | 'kind' | 'reason'>,
+  candidate: Pick<MeetingLinkedAttentionItem, 'status' | 'kind' | 'reason'>,
+): boolean => {
+  if (
+    current.kind !== 'blocker' ||
+    current.status !== 'active' ||
+    candidate.kind !== 'blocker' ||
+    candidate.status !== 'active'
+  ) {
+    return false;
+  }
+
+  return normalizeReason(candidate.reason).length >
+    normalizeReason(current.reason).length;
 };
 
 const parseFallbackStatus = (
@@ -435,13 +455,20 @@ export const buildMeetingActionItems = ({
 
   for (const item of linkedAttentionItems) {
     for (const relatedEntityId of item.related_entity_ids) {
-      if (attentionByEntityId.has(relatedEntityId)) continue;
-      attentionByEntityId.set(relatedEntityId, {
+      const nextAttention = {
         id: item.id,
         status: item.status,
         kind: item.kind,
         reason: item.reason,
-      });
+      };
+      const currentAttention = attentionByEntityId.get(relatedEntityId);
+      if (
+        currentAttention &&
+        !shouldPreferDuplicateActiveBlocker(currentAttention, nextAttention)
+      ) {
+        continue;
+      }
+      attentionByEntityId.set(relatedEntityId, nextAttention);
     }
   }
 

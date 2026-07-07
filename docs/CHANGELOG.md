@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Preserve richer duplicate blocker reasons in Meeting View
+- **Issue:** [#322](https://github.com/metagrover/pluto/issues/322)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up cards now keep the richest linked active blocker reason when duplicate blocker attention rows point at the same action. Focused regression coverage proves Pluto no longer keeps a thinner blocker explanation just because it appeared first.
+- **Why:** `#61` depends on follow-up surfaces explaining why a commitment is blocked. Before this slice, Meeting View could already show blocker state, but duplicate active blocker rows could still hide the most useful reason Pluto had for that blockage.
+- **Replaced:** Treating the first active blocker row as authoritative even when a later duplicate blocker carries better context for the same follow-up.
+- **Notes:** This intentionally stays narrower than the separate in-flight active-priority slice. It only upgrades duplicate active blocker reason selection on Meeting View cards.
+
 ### Surface routine active follow-ups in the homepage hero
 - **Issue:** [#308](https://github.com/metagrover/pluto/issues/308)
 - **PR:** Pending.
