@@ -342,8 +342,7 @@ const formatActionItem = (
   const contextLabel = normalizeName(entity.context) || fallbackDetails.context;
   const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
   const fallbackLifecycleLabel =
-    blockedReason &&
-    fallbackDetails.status.toLowerCase().startsWith('blocked')
+    blockedReason && fallbackDetails.status.toLowerCase().startsWith('blocked')
       ? ''
       : fallbackDetails.status;
   const lifecycleLabel =
