@@ -269,7 +269,9 @@ const shouldPreferLinkedAttention = (
     return candidateIsBlocker;
   }
 
-  return !normalizeName(current.reason) && Boolean(normalizeName(candidate.reason));
+  return (
+    !normalizeName(current.reason) && Boolean(normalizeName(candidate.reason))
+  );
 };
 
 const getDraftActionPriority = (
@@ -497,7 +499,10 @@ export const buildFollowUpDraftContext = ({
       },
     ]),
   );
-  const preferredAttentionByEntityId = new Map<string, PreferredLinkedAttention>();
+  const preferredAttentionByEntityId = new Map<
+    string,
+    PreferredLinkedAttention
+  >();
 
   for (const item of linkedAttentionItems) {
     for (const relatedEntityId of item.related_entity_ids) {
@@ -506,7 +511,8 @@ export const buildFollowUpDraftContext = ({
         kind: item.kind,
         reason: item.reason,
       };
-      const currentAttention = preferredAttentionByEntityId.get(relatedEntityId);
+      const currentAttention =
+        preferredAttentionByEntityId.get(relatedEntityId);
       if (
         currentAttention &&
         !shouldPreferLinkedAttention(currentAttention, nextAttention)
@@ -519,7 +525,9 @@ export const buildFollowUpDraftContext = ({
 
   const suppressedEntityIds = new Set(
     Array.from(preferredAttentionByEntityId.entries())
-      .filter(([, item]) => item.status === 'dismissed' || item.status === 'snoozed')
+      .filter(
+        ([, item]) => item.status === 'dismissed' || item.status === 'snoozed',
+      )
       .map(([entityId]) => entityId),
   );
 
