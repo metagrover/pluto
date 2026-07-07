@@ -519,6 +519,49 @@ describe('buildMeetingActionItems', () => {
     ]);
   });
 
+  it('preserves fallback blocker context and prioritizes blocked fallback cards', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'routine-active',
+          name: 'Send pricing recap',
+          mention_count: 5,
+          created_at: '2026-05-26T18:00:00.000Z',
+        }),
+      ],
+      fallbackActionItems: [
+        'Confirm reseller terms (Status: Blocked on legal review | Context: Waiting on contract redlines.)',
+      ],
+    });
+
+    expect(items).toEqual([
+      {
+        id: 'fallback-0',
+        title: 'Confirm reseller terms',
+        status: 'active',
+        statusLabel: null,
+        topicLabel: null,
+        attentionKindLabel: 'Blocker',
+        assignee: null,
+        dueLabel: null,
+        context: 'Waiting on contract redlines.',
+        isBlocked: true,
+        blockerReason: 'legal review',
+        actionable: false,
+        toggleLabel: null,
+        attentionItemId: null,
+        attentionStatus: null,
+        dismissLabel: null,
+        snoozeLabel: null,
+      },
+      expect.objectContaining({
+        id: 'routine-active',
+        status: 'active',
+        isBlocked: false,
+      }),
+    ]);
+  });
+
   it('resolves linked action owners from meeting people entities and falls back to raw owner strings when missing', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [
