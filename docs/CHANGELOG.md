@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-06
 
+### Prioritize the most urgent dashboard hero follow-up
+- **Issue:** [#298](https://github.com/metagrover/pluto/issues/298)
+- **PR:** Pending.
+- **Changed:** The homepage hero now reuses the same overdue due-date ordering and stale recency ordering as the dashboard action-insights list before choosing which follow-up to call out. Focused regression coverage now proves the hero surfaces the most urgent overdue or stalest action instead of whichever loader row arrived first.
+- **Why:** `#61` still depends on the homepage briefing earning trust as Pluto's attention surface. Before this slice, the hero could headline a less urgent follow-up than the ordered list directly beneath it, which made the dashboard contradict itself at the exact moment it was supposed to show the highest-priority commitment.
+- **Replaced:** Reading the first raw overdue or stale action from the loader result when composing the homepage hero detail.
+- **Notes:** This stays inside the existing dashboard model, keeps the current hero copy and action targets, and intentionally avoids reopening the separate blocker/context dashboard PR stack.
+
 ### Prioritize blocker-backed active dashboard follow-ups
 - **Issue:** [#296](https://github.com/metagrover/pluto/issues/296)
 - **PR:** Pending.
