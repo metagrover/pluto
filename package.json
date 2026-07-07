@@ -47,7 +47,7 @@
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "undici": "^6.24.0",
+    "undici": "^6.27.0",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
