@@ -287,7 +287,7 @@ export const Dashboard = ({
                           </span>
                         </div>
                         <p className="mt-1 text-[11px] font-semibold text-pro-text-muted/70">
-                          {item.dueLabel} · {item.sourceLabel}
+                          {item.dueLabel} · {item.contextLabel ?? item.sourceLabel}
                         </p>
                       </div>
                     </button>
