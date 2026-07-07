@@ -30,6 +30,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-16
 
+### Add Dashboard dismiss and snooze follow-up controls
+- **Issue:** [#280](https://github.com/metagrover/pluto/issues/280)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up cards now carry linked durable attention metadata into the homepage model and expose direct `Dismiss` and `Snooze` controls alongside the existing completion action. The dashboard persistence helper now supports attention-item lifecycle updates and refreshes the briefing after successful writes, while focused regression coverage proves both the model mapping and the new lifecycle persistence path.
+- **Why:** `#61` explicitly calls out homepage follow-up surfaces, but current `master` only let users complete follow-ups from the Dashboard. False positives or low-priority items could still demand a trip into Meeting View just to dismiss or defer them, even though the homepage already respected those durable states once set elsewhere.
+- **Replaced:** Treating the Dashboard as a completion-only follow-up surface that could read durable dismiss/snooze state without letting the user perform those actions in place.
+- **Notes:** This stays scoped to existing Dashboard follow-up cards and the current attention lifecycle API. It does not add reminder scheduling, notifications, or broader dashboard redesign work.
+
 ### Avoid false richer-owner merges on linked Meeting View cards
 - **Issue:** [#276](https://github.com/metagrover/pluto/issues/276)
 - **PR:** Pending.
