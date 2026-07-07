@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Prefer blocker attention on duplicate dashboard follow-ups
+- **Issue:** [#314](https://github.com/metagrover/pluto/issues/314)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up cards now resolve one preferred linked attention item per action instead of keeping the first linked active row they see. Active blocker attention outranks routine active follow-up attention for the same commitment, so homepage cards keep blocker label, blocker reason, and blocker-aware ordering when duplicate active attention rows exist.
+- **Why:** `#61` still depends on Pluto classifying blocker-backed commitments differently from routine follow-ups on every active surface. Before this slice, the dashboard could flatten a blocked commitment into an ordinary follow-up simply because a weaker active linked row happened to be returned first.
+- **Replaced:** Selecting dashboard linked attention from first-active-row wins, even when Pluto already persisted a stronger blocker classification for the same action.
+- **Notes:** This stays scoped to dashboard linked-attention selection and existing ranking/copy behavior. It intentionally does not add new controls or reopen the separate Meeting View and draft mixed-status PRs.
+
 ### Surface blocker-backed active follow-ups in homepage briefing focus
 - **Issue:** [#304](https://github.com/metagrover/pluto/issues/304)
 - **PR:** Pending.
