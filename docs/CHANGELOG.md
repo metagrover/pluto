@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-06
 
+### Prioritize fallback-only urgent draft follow-ups
+- **Issue:** [#286](https://github.com/metagrover/pluto/issues/286)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now lift fallback-only action lines marked `Blocked`, `Overdue`, or `Stale` ahead of routine linked work whenever Pluto still lacks a matching linked `action_item` entity. Focused regression coverage now proves the shared draft-context builder keeps those urgent fallback lines visible at the top of the generated next steps list without changing their existing formatting.
+- **Why:** `#61` depends on follow-up drafts reflecting the same urgency Pluto already extracted from meeting analysis, even before every commitment is linked into graph state. Before this slice, the draft builder preserved fallback lifecycle labels but still appended every unmatched fallback line after routine linked work, which buried the highest-friction follow-ups.
+- **Replaced:** Appending all unmatched fallback draft action lines after the linked action-item list regardless of blocked, overdue, or stale lifecycle detail.
+- **Notes:** This stays inside `followUpDraftContext.ts`, intentionally avoids reopening the linked-item draft ordering slice already tracked separately, and does not change Meeting View ordering or durable attention persistence.
+
 ### Remediate the undici audit gate blocker
 - **Issue:** [#287](https://github.com/metagrover/pluto/issues/287)
 - **PR:** Pending.
