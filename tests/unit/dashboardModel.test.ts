@@ -285,6 +285,74 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('uses the most urgent overdue action in the hero detail', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'overdue-later',
+          name: 'Later overdue task',
+          due_date: '2026-04-29T12:00:00.000Z',
+          updated_at: '2026-04-29T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'overdue-sooner',
+          name: 'Sooner overdue task',
+          due_date: '2026-04-20T12:00:00.000Z',
+          updated_at: '2026-04-21T18:00:00.000Z',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('overdue_action');
+    expect(model.hero.detail).toContain('Sooner overdue task');
+    expect(model.hero.detail).not.toContain('Later overdue task');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'overdue-sooner',
+      title: 'Sooner overdue task',
+      status: 'overdue',
+    });
+  });
+
+  it('uses the stalest action in the hero detail when there are no overdue actions', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [
+        makeAction({
+          id: 'stale-newer',
+          name: 'Newer stale task',
+          due_date: null,
+          updated_at: '2026-04-28T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'stale-older',
+          name: 'Older stale task',
+          due_date: null,
+          updated_at: '2026-04-10T18:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('stale_action');
+    expect(model.hero.detail).toContain('Older stale task');
+    expect(model.hero.detail).not.toContain('Newer stale task');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'stale-older',
+      title: 'Older stale task',
+      status: 'stale',
+    });
+  });
+
   it('suppresses dismissed linked follow-ups from dashboard attention lists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -336,7 +404,108 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('overdue_action');
     expect(model.actionInsights.state).toBe('populated');
-    expect(model.actionInsights.items[0]?.title).toBe('Ship privacy review');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      title: 'Ship privacy review',
+      attentionItemId: 'attention-active',
+      attentionStatus: 'active',
+      dismissLabel: 'Dismiss',
+      snoozeLabel: 'Snooze',
+    });
+  });
+
+  it('surfaces blocker label and reason on dashboard follow-ups when linked attention already provides that context', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-blocked',
+      attentionLabel: 'Blocker',
+      attentionReason: 'Blocked by legal approval.',
+    });
+  });
+
+  it('prefers the newest linked meeting title for dashboard follow-up context', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          id: 'meeting-older',
+          title: 'Architecture Review',
+          started_at: '2026-04-26T17:30:00.000Z',
+          created_at: '2026-04-26T18:00:00.000Z',
+        }),
+        makeMeeting({
+          id: 'meeting-newer',
+          title: 'Launch Review',
+          started_at: '2026-04-28T17:30:00.000Z',
+          created_at: '2026-04-28T18:00:00.000Z',
+        }),
+      ],
+      overdueActions: [makeAction({ name: 'Ship privacy review' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          related_meeting_ids: ['meeting-older', 'meeting-newer'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-1',
+      title: 'Ship privacy review',
+      sourceLabel: 'Work',
+      contextLabel: 'Launch Review',
+    });
+  });
+
+  it('keeps the domain source label when linked meeting titles are unavailable', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ name: 'Ship privacy review' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          related_meeting_ids: ['meeting-missing'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-1',
+      sourceLabel: 'Work',
+      contextLabel: null,
+    });
   });
 
   it('uses the latest meeting as the briefing focus when no actions need attention', () => {
@@ -1009,6 +1178,100 @@ describe('buildDashboardHomeModel', () => {
     ]);
   });
 
+  it('surfaces blocker label and reason on dashboard follow-ups when linked attention already provides that context', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-blocked',
+      attentionLabel: 'Blocker',
+      attentionReason: 'Blocked by legal approval.',
+    });
+  });
+
+  it('prefers the newest linked meeting title as dashboard follow-up context when available', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          id: 'meeting-older',
+          title: 'Architecture Review',
+          started_at: '2026-04-26T17:30:00.000Z',
+          created_at: '2026-04-26T18:00:00.000Z',
+        }),
+        makeMeeting({
+          id: 'meeting-newer',
+          title: 'Launch Review',
+          started_at: '2026-04-28T17:30:00.000Z',
+          created_at: '2026-04-28T18:00:00.000Z',
+        }),
+      ],
+      overdueActions: [makeAction({ name: 'Ship privacy review' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          related_meeting_ids: ['meeting-older', 'meeting-newer'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-1',
+      title: 'Ship privacy review',
+      sourceLabel: 'Work',
+      contextLabel: 'Launch Review',
+    });
+  });
+
+  it('keeps the domain source label when linked meeting titles are unavailable', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ name: 'Ship privacy review' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          related_meeting_ids: ['meeting-missing'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-1',
+      sourceLabel: 'Work',
+      contextLabel: null,
+    });
+  });
   it('does not create a spotlight for projects without health signals', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

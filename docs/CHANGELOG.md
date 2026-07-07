@@ -27,7 +27,36 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` depends on Pluto surfacing the highest-value follow-ups on the homepage, not just the oldest calendar debt. Before this slice, the dashboard already knew when a follow-up was blocker-backed, but it still sorted overdue items only by due date and could bury the blocker under routine overdue work.
 - **Replaced:** Treating all overdue homepage follow-ups as equally urgent once they entered the overdue bucket, regardless of linked blocker classification.
 - **Notes:** This intentionally stays inside `dashboardModel.ts` and does not redesign the dashboard cards or broaden lifecycle controls.
+### Preserve source meeting context on dashboard follow-up cards
+- **Issue:** [#292](https://github.com/metagrover/pluto/issues/292)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up cards now prefer the newest loaded meeting title from active linked attention items when Pluto already has related meeting ids for that action, and they fall back to the existing domain label only when no matching meeting title is available. Focused regression coverage now proves both the model resolution path and the rendered dashboard row copy.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and homepage follow-up cards are less trustworthy when Pluto already knows which meeting created the commitment but still shows only a generic source label like `Work`.
+- **Replaced:** Treating the dashboard follow-up metadata row as domain-only copy even when linked attention context already pointed to a concrete source meeting.
+- **Notes:** This stays inside the existing dashboard follow-up model and renderer, keeps current dismiss/snooze suppression and completion behavior intact, and intentionally does not overlap the separate blocker-context slice on `#290`.
+### Prioritize the most urgent dashboard hero follow-up
+- **Issue:** [#298](https://github.com/metagrover/pluto/issues/298)
+- **PR:** Pending.
+- **Changed:** The homepage hero now reuses the same overdue due-date ordering and stale recency ordering as the dashboard action-insights list before choosing which follow-up to call out. Focused regression coverage now proves the hero surfaces the most urgent overdue or stalest action instead of whichever loader row arrived first.
+- **Why:** `#61` still depends on the homepage briefing earning trust as Pluto's attention surface. Before this slice, the hero could headline a less urgent follow-up than the ordered list directly beneath it, which made the dashboard contradict itself at the exact moment it was supposed to show the highest-priority commitment.
+- **Replaced:** Reading the first raw overdue or stale action from the loader result when composing the homepage hero detail.
+- **Notes:** This stays inside the existing dashboard model, keeps the current hero copy and action targets, and intentionally avoids reopening the separate blocker/context dashboard PR stack.
 
+### Prioritize blocker-backed active dashboard follow-ups
+- **Issue:** [#296](https://github.com/metagrover/pluto/issues/296)
+- **PR:** Pending.
+- **Changed:** Dashboard action insights now lift active follow-ups with linked active `blocker` attention ahead of routine active work while preserving the existing due-date tie-breaks inside that blocker bucket. Focused regression coverage now proves the homepage sorter no longer lets a routine active card outrank a true dependency just because the blocker lacks an overdue lifecycle state.
+- **Why:** `#61` still requires Pluto's homepage to classify and prioritize blocker-backed commitments differently from routine follow-ups. Before this slice, blocked commitments usually stayed in the `active` entity bucket, so the dashboard sorter treated them like ordinary open work even when the durable attention queue already classified them as blockers.
+- **Replaced:** Sorting all active dashboard follow-ups strictly by due date without any blocker-aware priority.
+- **Notes:** This stays inside `dashboardModel.ts`, intentionally avoids reopening the in-flight dashboard copy/context PRs, and does not change overdue or stale ordering behavior.
+
+### Prioritize fallback-only urgent draft follow-ups
+- **Issue:** [#286](https://github.com/metagrover/pluto/issues/286)
+- **PR:** Pending.
+- **Changed:** Meeting follow-up drafts now lift fallback-only action lines marked `Blocked`, `Overdue`, or `Stale` ahead of routine linked work whenever Pluto still lacks a matching linked `action_item` entity. Focused regression coverage now proves the shared draft-context builder keeps those urgent fallback lines visible at the top of the generated next steps list without changing their existing formatting.
+- **Why:** `#61` depends on follow-up drafts reflecting the same urgency Pluto already extracted from meeting analysis, even before every commitment is linked into graph state. Before this slice, the draft builder preserved fallback lifecycle labels but still appended every unmatched fallback line after routine linked work, which buried the highest-friction follow-ups.
+- **Replaced:** Appending all unmatched fallback draft action lines after the linked action-item list regardless of blocked, overdue, or stale lifecycle detail.
+- **Notes:** This stays inside `followUpDraftContext.ts`, intentionally avoids reopening the linked-item draft ordering slice already tracked separately, and does not change Meeting View ordering or durable attention persistence.
 ### Remediate the undici audit gate blocker
 - **Issue:** [#287](https://github.com/metagrover/pluto/issues/287)
 - **PR:** Pending.
@@ -36,7 +65,39 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Treating the failing high-severity `undici` audit result as unrelated dependency noise while routine Builder work stayed blocked behind it.
 - **Notes:** This intentionally keeps the remediation scoped to the direct dependency and lockfile. Remaining low and moderate advisories stay below the current hook threshold.
 
+### Surface blocker context on dashboard follow-up cards
+- **Issue:** [#290](https://github.com/metagrover/pluto/issues/290)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up insight items now carry linked active blocker classification and reason text from the durable attention queue, and the homepage renders that context directly on the existing follow-up cards with focused model and server-rendered UI regression coverage.
+- **Why:** `#61` depends on Pluto surfacing trustworthy follow-up context on homepage and meeting surfaces. Before this slice, blocker-backed dashboard work still rendered like a generic action row, so the highest-friction commitments lost their why-now context unless the user opened Meeting View first.
+- **Replaced:** Treating every dashboard follow-up card as the same generic title/due/source summary even when Pluto already knew the item was blocked and had a concrete blocker reason.
+- **Notes:** This stays scoped to dashboard modeling and rendering. It preserves existing dismissed/snoozed suppression and completion behavior, and it does not broaden into new lifecycle controls or notification work.
+
 ## 2026-06-16
+
+### Prioritize blocked and aging follow-ups in generated drafts
+- **Issue:** [#284](https://github.com/metagrover/pluto/issues/284)
+- **PR:** Pending.
+- **Changed:** The shared follow-up draft context builder now ranks blocker-backed, overdue, and stale action items ahead of routine active work before formatting the draft lines. Focused regression coverage now proves the generated follow-up action list starts with the highest-friction commitments while preserving existing owner, due-date, lifecycle, and blocker-context copy.
+- **Why:** `#61` depends on Pluto surfacing the highest-value commitments consistently across follow-up surfaces, not just Meeting View. Before this slice, the draft builder already rendered blocker and aging labels correctly, but it still sorted action items only by mention count and name, which could bury urgent follow-ups beneath routine active tasks in the generated draft.
+- **Replaced:** Treating follow-up draft action ordering as a pure mention-count/name ranking even when Pluto already knew some linked commitments were blocked, overdue, or stale.
+- **Notes:** This stays scoped to `followUpDraftContext.ts` and does not redesign draft copy, change Meeting View ordering, or modify durable attention persistence.
+
+### Preserve fallback blocker context on Meeting View cards
+- **Issue:** [#282](https://github.com/metagrover/pluto/issues/282)
+- **PR:** Pending.
+- **Changed:** Meeting View's shared action-card parser now treats fallback `Status: Blocked ...` analysis text as blocker-backed active work instead of generic fallback metadata. Blocked fallback cards preserve a dedicated blocker badge and reason on the existing card model, and the shared sorter now keeps those cards ahead of routine active follow-ups even when no linked durable attention item exists yet. Focused regression coverage now proves the fallback-only blocker path.
+- **Why:** `#61` depends on Pluto surfacing blocked commitments honestly even before every follow-up has a linked attention item. Before this slice, fallback-only blocker lines could read like ordinary follow-ups, which weakened the trusted-attention signal on Meeting View.
+- **Replaced:** Treating fallback blocker text as opaque status copy that stayed behind routine active work unless a linked blocker attention item also existed.
+- **Notes:** This stays inside `meetingActionItems.ts`, preserves the existing linked blocker behavior, and does not add new lifecycle controls or redesign Meeting View.
+
+### Add Dashboard dismiss and snooze follow-up controls
+- **Issue:** [#280](https://github.com/metagrover/pluto/issues/280)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up cards now carry linked durable attention metadata into the homepage model and expose direct `Dismiss` and `Snooze` controls alongside the existing completion action. The dashboard persistence helper now supports attention-item lifecycle updates and refreshes the briefing after successful writes, while focused regression coverage proves both the model mapping and the new lifecycle persistence path.
+- **Why:** `#61` explicitly calls out homepage follow-up surfaces, but current `master` only let users complete follow-ups from the Dashboard. False positives or low-priority items could still demand a trip into Meeting View just to dismiss or defer them, even though the homepage already respected those durable states once set elsewhere.
+- **Replaced:** Treating the Dashboard as a completion-only follow-up surface that could read durable dismiss/snooze state without letting the user perform those actions in place.
+- **Notes:** This stays scoped to existing Dashboard follow-up cards and the current attention lifecycle API. It does not add reminder scheduling, notifications, or broader dashboard redesign work.
 
 ### Avoid false richer-owner merges on linked Meeting View cards
 - **Issue:** [#276](https://github.com/metagrover/pluto/issues/276)
