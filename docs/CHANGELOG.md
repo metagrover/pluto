@@ -54,6 +54,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-06-16
 
+### Prioritize blocked and aging follow-ups in generated drafts
+- **Issue:** [#284](https://github.com/metagrover/pluto/issues/284)
+- **PR:** Pending.
+- **Changed:** The shared follow-up draft context builder now ranks blocker-backed, overdue, and stale action items ahead of routine active work before formatting the draft lines. Focused regression coverage now proves the generated follow-up action list starts with the highest-friction commitments while preserving existing owner, due-date, lifecycle, and blocker-context copy.
+- **Why:** `#61` depends on Pluto surfacing the highest-value commitments consistently across follow-up surfaces, not just Meeting View. Before this slice, the draft builder already rendered blocker and aging labels correctly, but it still sorted action items only by mention count and name, which could bury urgent follow-ups beneath routine active tasks in the generated draft.
+- **Replaced:** Treating follow-up draft action ordering as a pure mention-count/name ranking even when Pluto already knew some linked commitments were blocked, overdue, or stale.
+- **Notes:** This stays scoped to `followUpDraftContext.ts` and does not redesign draft copy, change Meeting View ordering, or modify durable attention persistence.
+
 ### Preserve fallback blocker context on Meeting View cards
 - **Issue:** [#282](https://github.com/metagrover/pluto/issues/282)
 - **PR:** Pending.
