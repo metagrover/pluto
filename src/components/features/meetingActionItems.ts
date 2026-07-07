@@ -57,9 +57,12 @@ interface ParsedFallbackActionItem {
   status: MeetingActionItemStatus;
   statusLabel: string | null;
   topicLabel: string | null;
+  attentionKindLabel: string | null;
   assignee: string | null;
   dueLabel: string | null;
   context: string | null;
+  isBlocked: boolean;
+  blockerReason: string | null;
 }
 
 type LinkedMeetingActionItemCard = Omit<
@@ -182,22 +185,71 @@ const preferRicherOwnerLabel = (
 
 const parseFallbackStatus = (
   value: string,
-): Pick<ParsedFallbackActionItem, 'status' | 'statusLabel'> => {
+): Pick<
+  ParsedFallbackActionItem,
+  | 'status'
+  | 'statusLabel'
+  | 'attentionKindLabel'
+  | 'isBlocked'
+  | 'blockerReason'
+> => {
   const normalized = normalizeValue(value);
   const lowered = normalized.toLowerCase();
   if (lowered === 'overdue') {
-    return { status: 'overdue', statusLabel: null };
+    return {
+      status: 'overdue',
+      statusLabel: null,
+      attentionKindLabel: null,
+      isBlocked: false,
+      blockerReason: null,
+    };
   }
   if (lowered === 'stale') {
-    return { status: 'stale', statusLabel: null };
+    return {
+      status: 'stale',
+      statusLabel: null,
+      attentionKindLabel: null,
+      isBlocked: false,
+      blockerReason: null,
+    };
   }
   if (lowered === 'completed') {
-    return { status: 'completed', statusLabel: null };
+    return {
+      status: 'completed',
+      statusLabel: null,
+      attentionKindLabel: null,
+      isBlocked: false,
+      blockerReason: null,
+    };
+  }
+  const blockedMatch = normalized.match(
+    /^blocked(?:\s+(?:on|by|due to|because of))?[:\-\s]*(.*)$/i,
+  );
+  if (blockedMatch) {
+    return {
+      status: 'active',
+      statusLabel: null,
+      attentionKindLabel: 'Blocker',
+      isBlocked: true,
+      blockerReason: normalizeValue(blockedMatch[1]) || null,
+    };
   }
   if (lowered === 'active' || !normalized) {
-    return { status: 'fallback', statusLabel: null };
+    return {
+      status: 'fallback',
+      statusLabel: null,
+      attentionKindLabel: null,
+      isBlocked: false,
+      blockerReason: null,
+    };
   }
-  return { status: 'fallback', statusLabel: normalized };
+  return {
+    status: 'fallback',
+    statusLabel: normalized,
+    attentionKindLabel: null,
+    isBlocked: false,
+    blockerReason: null,
+  };
 };
 
 const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
@@ -209,9 +261,12 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
       status: 'fallback',
       statusLabel: null,
       topicLabel: null,
+      attentionKindLabel: null,
       assignee: null,
       dueLabel: null,
       context: null,
+      isBlocked: false,
+      blockerReason: null,
     };
   }
 
@@ -221,9 +276,12 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
     status: 'fallback',
     statusLabel: null,
     topicLabel: null,
+    attentionKindLabel: null,
     assignee: null,
     dueLabel: null,
     context: null,
+    isBlocked: false,
+    blockerReason: null,
   };
 
   if (!rawDetailText) {
@@ -256,6 +314,9 @@ const parseFallbackActionItem = (value: string): ParsedFallbackActionItem => {
       );
       parsed.status = statusValue.status;
       parsed.statusLabel = statusValue.statusLabel;
+      parsed.attentionKindLabel = statusValue.attentionKindLabel;
+      parsed.isBlocked = statusValue.isBlocked;
+      parsed.blockerReason = statusValue.blockerReason;
     }
   }
 
@@ -335,9 +396,13 @@ const mergeLinkedAndFallbackActionItem = (
     status: mergedStatus,
     statusLabel: linked.statusLabel ?? fallback.statusLabel,
     topicLabel: linked.topicLabel ?? fallback.topicLabel,
+    attentionKindLabel:
+      linked.attentionKindLabel ?? fallback.attentionKindLabel,
     assignee: preferRicherOwnerLabel(linked.assignee, fallback.assignee),
     dueLabel: linked.dueLabel ?? fallback.dueLabel,
     context: linked.context ?? fallback.context,
+    isBlocked: linked.isBlocked || fallback.isBlocked,
+    blockerReason: linked.blockerReason ?? fallback.blockerReason,
     toggleLabel: mergedStatus === 'completed' ? 'Reopen' : 'Mark complete',
   };
 };
@@ -451,12 +516,12 @@ export const buildMeetingActionItems = ({
       status: parsed.status,
       statusLabel: parsed.statusLabel,
       topicLabel: parsed.topicLabel,
-      attentionKindLabel: null,
+      attentionKindLabel: parsed.attentionKindLabel,
       assignee: parsed.assignee,
       dueLabel: parsed.dueLabel,
       context: parsed.context,
-      isBlocked: false,
-      blockerReason: null,
+      isBlocked: parsed.isBlocked,
+      blockerReason: parsed.blockerReason,
       actionable: false,
       toggleLabel: null,
       attentionItemId: null,
@@ -471,11 +536,13 @@ export const buildMeetingActionItems = ({
       const leftIsActiveBlocker =
         left.item.status === 'active' &&
         left.item.isBlocked &&
-        left.item.attentionStatus === 'active';
+        left.item.attentionStatus !== 'dismissed' &&
+        left.item.attentionStatus !== 'snoozed';
       const rightIsActiveBlocker =
         right.item.status === 'active' &&
         right.item.isBlocked &&
-        right.item.attentionStatus === 'active';
+        right.item.attentionStatus !== 'dismissed' &&
+        right.item.attentionStatus !== 'snoozed';
 
       if (leftIsActiveBlocker !== rightIsActiveBlocker) {
         return leftIsActiveBlocker ? -1 : 1;
