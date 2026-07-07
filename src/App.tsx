@@ -11,6 +11,7 @@ import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
 // Layout
 import { Sidebar } from './components/layout/Sidebar';
 
+import { updateAlertStatus } from './api/intelligence';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
@@ -19,6 +20,7 @@ import { ZenMode } from './components/features/ZenMode';
 import {
   DASHBOARD_ACTION_COMPLETION_ERROR,
   persistDashboardActionCompletion,
+  persistDashboardAttentionStatus,
 } from './components/features/dashboardActionCompletion';
 import { useDashboardHome } from './components/features/useDashboardHome';
 
@@ -168,6 +170,32 @@ function App() {
       setUpdatingDashboardTaskIds((prev) => {
         const next = new Set(prev);
         next.delete(taskId);
+        return next;
+      });
+    }
+  };
+
+  const handleUpdateDashboardAttentionStatus = async (
+    attentionItemId: string,
+    nextStatus: 'active' | 'dismissed' | 'snoozed',
+  ) => {
+    if (updatingDashboardTaskIds.has(attentionItemId)) return;
+
+    setDashboardActionError(null);
+    setUpdatingDashboardTaskIds((prev) => new Set(prev).add(attentionItemId));
+
+    try {
+      await persistDashboardAttentionStatus(attentionItemId, nextStatus, {
+        updateAttentionStatus: updateAlertStatus,
+        refreshDashboard: dashboardHome.refresh,
+      });
+    } catch (error) {
+      console.error('Failed to update dashboard follow-up lifecycle', error);
+      setDashboardActionError(DASHBOARD_ACTION_COMPLETION_ERROR);
+    } finally {
+      setUpdatingDashboardTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(attentionItemId);
         return next;
       });
     }
@@ -762,6 +790,9 @@ function App() {
                 updatingTaskIds={updatingDashboardTaskIds}
                 actionError={dashboardActionError}
                 handleCompleteTask={handleCompleteTask}
+                handleUpdateAttentionStatus={
+                  handleUpdateDashboardAttentionStatus
+                }
               />
             ) : activeTab === 'people' ? (
               <div className="max-w-4xl mx-auto w-full space-y-12 animate-in pb-20">

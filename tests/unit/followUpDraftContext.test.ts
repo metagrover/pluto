@@ -504,6 +504,38 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('prioritizes fallback-only blocked and aging follow-ups ahead of routine linked work', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Wait for legal sign-off (Status: Blocked on legal review)',
+        'Escalate contract edits (Status: Overdue)',
+        'Refresh launch brief (Status: Stale)',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Share routine recap',
+          mention_count: 5,
+        }),
+        makeEntity({
+          id: 'action-2',
+          type: 'action_item',
+          name: 'Confirm attendee list',
+          mention_count: 4,
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Wait for legal sign-off (Status: Blocked on legal review)',
+      'Escalate contract edits (Status: Overdue)',
+      'Refresh launch brief (Status: Stale)',
+      'Share routine recap',
+      'Confirm attendee list',
+    ]);
+  });
+
   it('preserves linked action-item context in the draft action lines', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [],
