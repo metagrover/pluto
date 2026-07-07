@@ -979,6 +979,42 @@ describe('buildDashboardHomeModel', () => {
     ]);
   });
 
+  it('prioritizes blocker-backed active follow-ups ahead of routine active work', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'routine-active',
+          name: 'Routine active follow-up',
+          due_date: '2026-04-20T12:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-active',
+          name: 'Blocked active follow-up',
+          due_date: '2026-04-29T12:00:00.000Z',
+        }),
+      ],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-active',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-active'],
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items.map((item) => item.id)).toEqual([
+      'blocked-active',
+      'routine-active',
+    ]);
+  });
+
   it('does not create a spotlight for projects without health signals', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
