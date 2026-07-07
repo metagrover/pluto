@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-07
+
+### Surface blocker-backed active follow-ups in the homepage hero
+- **Issue:** [#302](https://github.com/metagrover/pluto/issues/302)
+- **PR:** Pending.
+- **Changed:** The homepage hero now surfaces the highest-priority blocker-backed active follow-up when nothing is overdue or stale, reusing the existing blocker-aware active ordering from the dashboard action-insights list. Focused regression coverage now proves Pluto no longer falls through to a latest-meeting headline while a linked blocked commitment remains the most urgent active follow-up.
+- **Why:** `#61` still depends on homepage surfaces showing the highest-value follow-ups with trust status. Before this slice, dashboard action insights already knew which active commitment was blocked, but the hero ignored active follow-ups entirely and could headline an unrelated meeting or document instead.
+- **Replaced:** Treating the homepage hero as overdue/stale-only follow-up copy even when the dashboard already had a blocker-backed active commitment ranked at the top of its action list.
+- **Notes:** This stays scoped to `dashboardModel.ts` plus the existing dashboard hero label mapping. It does not redesign dashboard copy, broaden routine active follow-ups into the hero, or change overdue/stale fallback behavior.
+
 ## 2026-07-06
 
 ### Keep blocker-backed overdue follow-ups in the homepage hero

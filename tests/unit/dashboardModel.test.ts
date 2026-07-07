@@ -394,6 +394,50 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('surfaces the highest-priority blocker-backed active follow-up in the hero when nothing is overdue or stale', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'routine-active',
+          name: 'Routine active follow-up',
+          due_date: '2026-05-01T12:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-active',
+          name: 'Blocked active follow-up',
+          due_date: '2026-05-02T12:00:00.000Z',
+        }),
+      ],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-active',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-active'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('active_action');
+    expect(model.hero.title).toBe('1 blocked item');
+    expect(model.hero.severity).toBe('urgent');
+    expect(model.hero.detail).toContain('Blocked active follow-up');
+    expect(model.hero.action).toEqual({
+      label: 'Open projects',
+      target: 'projects',
+    });
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items.map((item) => item.id)).toEqual([
+      'blocked-active',
+      'routine-active',
+    ]);
+  });
+
   it('suppresses dismissed linked follow-ups from dashboard attention lists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
