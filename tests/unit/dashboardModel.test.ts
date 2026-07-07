@@ -438,6 +438,43 @@ describe('buildDashboardHomeModel', () => {
     ]);
   });
 
+  it('surfaces the highest-priority routine active follow-up in the briefing focus when nothing else is urgent', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'routine-active-later',
+          name: 'Later active follow-up',
+          due_date: '2026-05-03T12:00:00.000Z',
+          updated_at: '2026-05-03T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'routine-active-sooner',
+          name: 'Sooner active follow-up',
+          due_date: '2026-05-01T12:00:00.000Z',
+          updated_at: '2026-05-01T18:00:00.000Z',
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: '2 active items',
+      action: { label: 'Review actions', target: 'projects' },
+    });
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'routine-active-sooner',
+      title: 'Sooner active follow-up',
+      status: 'active',
+    });
+  });
+
   it('suppresses dismissed linked follow-ups from dashboard attention lists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
