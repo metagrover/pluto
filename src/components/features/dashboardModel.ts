@@ -67,6 +67,8 @@ export interface DashboardActionInsightItem {
   dueLabel: string;
   status: 'overdue' | 'stale' | 'active';
   sourceLabel: string;
+  attentionLabel: string | null;
+  attentionReason: string | null;
   attentionItemId: string | null;
   attentionStatus: AttentionItem['status'] | null;
   dismissLabel: 'Dismiss' | 'Reopen' | null;
@@ -270,6 +272,27 @@ const shouldSuppressDashboardAction = (
   );
 };
 
+const getDashboardActionAttentionContext = (
+  linkedAttention: AttentionItem | null,
+): Pick<DashboardActionInsightItem, 'attentionLabel' | 'attentionReason'> => {
+  if (
+    linkedAttention == null ||
+    linkedAttention.status !== 'active' ||
+    linkedAttention.kind !== 'blocker'
+  ) {
+    return {
+      attentionLabel: null,
+      attentionReason: null,
+    };
+  }
+
+  const normalizedReason = linkedAttention.reason?.trim() || null;
+  return {
+    attentionLabel: 'Blocker',
+    attentionReason: normalizedReason,
+  };
+};
+
 const hasActiveLinkedBlocker = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -351,6 +374,7 @@ const actionToInsightItem = (
   dueLabel: formatDueLabel(action.due_date),
   status,
   sourceLabel: titleCase(action.domain_tag || 'workspace'),
+  ...getDashboardActionAttentionContext(linkedAttention),
   attentionItemId: linkedAttention?.id ?? null,
   attentionStatus: linkedAttention?.status ?? null,
   dismissLabel:

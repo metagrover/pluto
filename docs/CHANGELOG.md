@@ -43,7 +43,6 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` depends on follow-up drafts reflecting the same urgency Pluto already extracted from meeting analysis, even before every commitment is linked into graph state. Before this slice, the draft builder preserved fallback lifecycle labels but still appended every unmatched fallback line after routine linked work, which buried the highest-friction follow-ups.
 - **Replaced:** Appending all unmatched fallback draft action lines after the linked action-item list regardless of blocked, overdue, or stale lifecycle detail.
 - **Notes:** This stays inside `followUpDraftContext.ts`, intentionally avoids reopening the linked-item draft ordering slice already tracked separately, and does not change Meeting View ordering or durable attention persistence.
-
 ### Remediate the undici audit gate blocker
 - **Issue:** [#287](https://github.com/metagrover/pluto/issues/287)
 - **PR:** Pending.
@@ -51,6 +50,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** Pluto's required pre-commit audit hook had become a repo-wide landing blocker again, preventing ordinary code issues from committing even after their code and tests were green.
 - **Replaced:** Treating the failing high-severity `undici` audit result as unrelated dependency noise while routine Builder work stayed blocked behind it.
 - **Notes:** This intentionally keeps the remediation scoped to the direct dependency and lockfile. Remaining low and moderate advisories stay below the current hook threshold.
+
+### Surface blocker context on dashboard follow-up cards
+- **Issue:** [#290](https://github.com/metagrover/pluto/issues/290)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up insight items now carry linked active blocker classification and reason text from the durable attention queue, and the homepage renders that context directly on the existing follow-up cards with focused model and server-rendered UI regression coverage.
+- **Why:** `#61` depends on Pluto surfacing trustworthy follow-up context on homepage and meeting surfaces. Before this slice, blocker-backed dashboard work still rendered like a generic action row, so the highest-friction commitments lost their why-now context unless the user opened Meeting View first.
+- **Replaced:** Treating every dashboard follow-up card as the same generic title/due/source summary even when Pluto already knew the item was blocked and had a concrete blocker reason.
+- **Notes:** This stays scoped to dashboard modeling and rendering. It preserves existing dismissed/snoozed suppression and completion behavior, and it does not broaden into new lifecycle controls or notification work.
 
 ## 2026-06-16
 
