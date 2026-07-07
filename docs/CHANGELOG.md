@@ -27,6 +27,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still depends on Pluto surfacing the highest-value follow-ups consistently across meeting surfaces. Before this slice, a stale dismissed or snoozed duplicate could hide a live commitment from follow-up drafts even while Meeting View and the durable attention queue still considered that action active.
 - **Replaced:** Suppressing draft action items whenever any linked attention row for the same entity was dismissed or snoozed, regardless of whether another linked attention row was still active.
 - **Notes:** This stays scoped to `followUpDraftContext.ts` and the shared draft-context tests. It intentionally avoids new draft UX, lifecycle controls, or overlap with the separate Meeting View card fix in `#310`.
+### Surface routine active follow-ups in the homepage hero
+- **Issue:** [#308](https://github.com/metagrover/pluto/issues/308)
+- **PR:** Pending.
+- **Changed:** The homepage hero now keeps the highest-priority routine active follow-up visible when nothing is overdue, stale, or blocker-backed, reusing the same due-date-aware active ordering already used by the dashboard action-insights list. Focused regression coverage now proves Pluto no longer falls through to unrelated meeting or knowledge copy while open routine commitments remain.
+- **Why:** `#61` still depends on homepage follow-up surfaces showing the highest-value commitments consistently. Before this slice, blocker-backed active follow-ups could surface in the hero, but routine active work still disappeared behind latest-meeting or knowledge fallback copy once no item crossed the overdue, stale, or blocker thresholds.
+- **Replaced:** Treating the homepage hero as if routine active follow-ups were lower priority than latest-meeting or knowledge fallback content.
+- **Notes:** This intentionally stays scoped to the homepage hero. Briefing-focus behavior remains in the separate routine-active slice tracked by PR `#307`.
 
 ### Surface blocker-backed active follow-ups in homepage briefing focus
 - **Issue:** [#304](https://github.com/metagrover/pluto/issues/304)
