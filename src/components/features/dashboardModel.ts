@@ -845,6 +845,16 @@ const buildHero = (
     };
   }
 
+  if (prioritizedActiveAction) {
+    return {
+      kind: 'active_action',
+      title: pluralize(input.activeActions.length, 'active follow-up'),
+      detail: `${prioritizedActiveAction.name} needs attention`,
+      severity: 'watch',
+      action: { label: 'Open projects', target: 'projects' },
+    };
+  }
+
   if (latestMeeting.state === 'populated') {
     return {
       kind: 'latest_meeting',

@@ -193,7 +193,7 @@ describe('buildDashboardHomeModel', () => {
       graphStats: null,
     });
 
-    expect(model.hero.action?.target).toBe('meeting');
+    expect(model.hero.action?.target).toBe('projects');
     expect(model.quickActions.map((action) => action.target)).toEqual([
       'ask',
       'meeting',
@@ -475,7 +475,7 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
-  it('keeps routine active follow-ups from displacing the latest-meeting briefing focus', () => {
+  it('surfaces the highest-priority routine active follow-up in the hero when nothing is overdue, stale, or blocker-backed', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -483,8 +483,13 @@ describe('buildDashboardHomeModel', () => {
       staleActions: [],
       activeActions: [
         makeAction({
-          id: 'routine-active',
-          name: 'Routine active follow-up',
+          id: 'later-routine-active',
+          name: 'Later routine active follow-up',
+          due_date: '2026-05-02T12:00:00.000Z',
+        }),
+        makeAction({
+          id: 'sooner-routine-active',
+          name: 'Sooner routine active follow-up',
           due_date: '2026-05-01T12:00:00.000Z',
         }),
       ],
@@ -492,15 +497,14 @@ describe('buildDashboardHomeModel', () => {
       graphStats: null,
     });
 
-    expect(model.briefingFocus).toEqual({
-      kind: 'latest_meeting',
-      title: 'Latest meeting',
-      detail: 'Indexing rollout is close, with launch risk around review.',
-      action: {
-        label: 'Open brief',
-        target: 'meeting',
-        meetingId: 'meeting-1',
-      },
+    expect(model.hero.kind).toBe('active_action');
+    expect(model.hero.title).toBe('2 active follow-ups');
+    expect(model.hero.severity).toBe('watch');
+    expect(model.hero.detail).toContain('Sooner routine active follow-up');
+    expect(model.hero.detail).not.toContain('Later routine active follow-up');
+    expect(model.hero.action).toEqual({
+      label: 'Open projects',
+      target: 'projects',
     });
   });
 
