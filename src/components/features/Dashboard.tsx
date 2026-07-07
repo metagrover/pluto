@@ -1,3 +1,5 @@
+import { Loader2 } from 'lucide-react';
+
 import { getTrustStatusMeta } from '../../utils/trustStatus';
 import type { DashboardAction, DashboardHomeModel } from './dashboardModel';
 
@@ -11,6 +13,10 @@ interface DashboardProps {
   updatingTaskIds: Set<string>;
   actionError: string | null;
   handleCompleteTask: (id: string) => Promise<void>;
+  handleUpdateAttentionStatus: (
+    attentionItemId: string,
+    nextStatus: 'active' | 'dismissed' | 'snoozed',
+  ) => Promise<void>;
 }
 
 const isTabTarget = (
@@ -110,6 +116,7 @@ export const Dashboard = ({
   updatingTaskIds,
   actionError,
   handleCompleteTask,
+  handleUpdateAttentionStatus,
 }: DashboardProps) => {
   const runAction = (action: DashboardAction) => {
     if (action.target === 'ask') {
@@ -241,17 +248,14 @@ export const Dashboard = ({
             {visibleActionItems.length > 0 ? (
               <div className="grid gap-2.5">
                 {visibleActionItems.map((item) => {
-                  const isUpdating = updatingTaskIds.has(item.id);
+                  const isUpdating =
+                    updatingTaskIds.has(item.id) ||
+                    (item.attentionItemId != null &&
+                      updatingTaskIds.has(item.attentionItemId));
                   return (
-                    <button
-                      type="button"
+                    <div
                       key={item.id}
                       aria-busy={isUpdating}
-                      disabled={isUpdating}
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await handleCompleteTask(item.id);
-                      }}
                       className={`group/item flex w-full items-start gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all ${
                         isUpdating
                           ? 'border-pro-accent/20 bg-pro-accent/5 opacity-80'
@@ -286,12 +290,72 @@ export const Dashboard = ({
                             {item.status}
                           </span>
                         </div>
-                        <p className="mt-1 text-[11px] font-semibold text-pro-text-muted/70">
-                          {item.dueLabel} ·{' '}
-                          {item.contextLabel ?? item.sourceLabel}
-                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          {item.attentionLabel ? (
+                            <span className="rounded-full bg-pro-urgent/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-pro-urgent">
+                              {item.attentionLabel}
+                            </span>
+                          ) : null}
+                          <p className="text-[11px] font-semibold text-pro-text-muted/70">
+                            {item.dueLabel} ·{' '}
+                            {item.contextLabel ?? item.sourceLabel}
+                          </p>
+                        </div>
+                        {item.attentionReason ? (
+                          <p className="mt-1 text-[11px] font-semibold text-pro-urgent/80">
+                            {item.attentionReason}
+                          </p>
+                        ) : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            disabled={isUpdating}
+                            onClick={async () => {
+                              await handleCompleteTask(item.id);
+                            }}
+                            className="h-8 rounded-lg border border-pro-accent/25 bg-pro-accent/8 px-3 text-[10px] font-black uppercase tracking-[0.14em] text-pro-accent transition-all hover:border-pro-accent/40 hover:bg-pro-accent/14 disabled:cursor-wait disabled:opacity-60"
+                          >
+                            {item.status === 'active'
+                              ? 'Mark complete'
+                              : 'Reopen'}
+                          </button>
+                          {item.attentionItemId && item.dismissLabel ? (
+                            <button
+                              type="button"
+                              disabled={isUpdating}
+                              onClick={async () => {
+                                await handleUpdateAttentionStatus(
+                                  item.attentionItemId!,
+                                  item.dismissLabel === 'Reopen'
+                                    ? 'active'
+                                    : 'dismissed',
+                                );
+                              }}
+                              className="h-8 rounded-lg border border-pro-border bg-pro-surface/70 px-3 text-[10px] font-black uppercase tracking-[0.14em] text-pro-text-main transition-all hover:border-pro-accent/30 hover:text-pro-accent disabled:cursor-wait disabled:opacity-60"
+                            >
+                              {item.dismissLabel}
+                            </button>
+                          ) : null}
+                          {item.attentionItemId && item.snoozeLabel ? (
+                            <button
+                              type="button"
+                              disabled={isUpdating}
+                              onClick={async () => {
+                                await handleUpdateAttentionStatus(
+                                  item.attentionItemId!,
+                                  item.snoozeLabel === 'Reopen'
+                                    ? 'active'
+                                    : 'snoozed',
+                                );
+                              }}
+                              className="h-8 rounded-lg border border-pro-border bg-pro-surface/70 px-3 text-[10px] font-black uppercase tracking-[0.14em] text-pro-text-main transition-all hover:border-pro-warning/30 hover:text-pro-warning disabled:cursor-wait disabled:opacity-60"
+                            >
+                              {item.snoozeLabel}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
                 {actionError ? (

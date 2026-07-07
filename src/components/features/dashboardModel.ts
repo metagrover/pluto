@@ -68,6 +68,12 @@ export interface DashboardActionInsightItem {
   status: 'overdue' | 'stale' | 'active';
   sourceLabel: string;
   contextLabel: string | null;
+  attentionLabel: string | null;
+  attentionReason: string | null;
+  attentionItemId: string | null;
+  attentionStatus: AttentionItem['status'] | null;
+  dismissLabel: 'Dismiss' | 'Reopen' | null;
+  snoozeLabel: 'Snooze' | 'Reopen' | null;
 }
 
 export type DashboardActionInsights =
@@ -267,6 +273,38 @@ const shouldSuppressDashboardAction = (
   );
 };
 
+const getDashboardActionAttentionContext = (
+  linkedAttention: AttentionItem | null,
+): Pick<DashboardActionInsightItem, 'attentionLabel' | 'attentionReason'> => {
+  if (
+    linkedAttention == null ||
+    linkedAttention.status !== 'active' ||
+    linkedAttention.kind !== 'blocker'
+  ) {
+    return {
+      attentionLabel: null,
+      attentionReason: null,
+    };
+  }
+
+  const normalizedReason = linkedAttention.reason?.trim() || null;
+  return {
+    attentionLabel: 'Blocker',
+    attentionReason: normalizedReason,
+  };
+};
+
+const hasActiveLinkedBlocker = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): boolean =>
+  attentionAlerts.some(
+    (item) =>
+      item.status === 'active' &&
+      item.kind === 'blocker' &&
+      item.related_entity_ids.includes(actionId),
+  );
+
 const filterSuppressedDashboardActions = (
   actions: Entity[],
   attentionAlerts: AttentionItem[],
@@ -274,6 +312,22 @@ const filterSuppressedDashboardActions = (
   actions.filter(
     (action) => !shouldSuppressDashboardAction(action.id, attentionAlerts),
   );
+
+const getLinkedDashboardAttention = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): AttentionItem | null => {
+  const linkedAlerts = attentionAlerts.filter((item) =>
+    item.related_entity_ids.includes(actionId),
+  );
+  if (linkedAlerts.length === 0) {
+    return null;
+  }
+
+  return (
+    linkedAlerts.find((item) => item.status === 'active') ?? linkedAlerts[0]
+  );
+};
 
 const getMeetingDetail = (meeting: Meeting): string => {
   const analysis = parseJsonObject<MeetingAnalysisOverview>(
@@ -315,6 +369,7 @@ const actionToInsightItem = (
   action: Entity,
   status: DashboardActionInsightItem['status'],
   contextLabel: string | null,
+  linkedAttention: AttentionItem | null,
 ): DashboardActionInsightItem => ({
   id: action.id,
   title: action.name,
@@ -322,6 +377,25 @@ const actionToInsightItem = (
   status,
   sourceLabel: titleCase(action.domain_tag || 'workspace'),
   contextLabel,
+  ...getDashboardActionAttentionContext(linkedAttention),
+  attentionItemId: linkedAttention?.id ?? null,
+  attentionStatus: linkedAttention?.status ?? null,
+  dismissLabel:
+    linkedAttention == null
+      ? null
+      : linkedAttention.status === 'dismissed'
+        ? 'Reopen'
+        : linkedAttention.status === 'snoozed'
+          ? null
+          : 'Dismiss',
+  snoozeLabel:
+    linkedAttention == null
+      ? null
+      : linkedAttention.status === 'dismissed'
+        ? null
+        : linkedAttention.status === 'snoozed'
+          ? 'Reopen'
+          : 'Snooze',
 });
 
 const getDashboardActionContextLabel = (
@@ -373,7 +447,12 @@ const buildActionInsights = (
         attentionAlerts,
         meetings,
       );
-      return actionToInsightItem(action, 'overdue', contextLabel);
+      return actionToInsightItem(
+        action,
+        'overdue',
+        contextLabel,
+        getLinkedDashboardAttention(action.id, attentionAlerts),
+      );
     }),
     ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) => {
       const contextLabel = getDashboardActionContextLabel(
@@ -381,15 +460,32 @@ const buildActionInsights = (
         attentionAlerts,
         meetings,
       );
-      return actionToInsightItem(action, 'stale', contextLabel);
+      return actionToInsightItem(
+        action,
+        'stale',
+        contextLabel,
+        getLinkedDashboardAttention(action.id, attentionAlerts),
+      );
     }),
-    ...sortActions(activeActions, compareActionsByDueDate).map((action) => {
+    ...sortActions(activeActions, (a, b) => {
+      const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
+      const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
+      if (aBlocked !== bBlocked) {
+        return aBlocked ? -1 : 1;
+      }
+      return compareActionsByDueDate(a, b);
+    }).map((action) => {
       const contextLabel = getDashboardActionContextLabel(
         action.id,
         attentionAlerts,
         meetings,
       );
-      return actionToInsightItem(action, 'active', contextLabel);
+      return actionToInsightItem(
+        action,
+        'active',
+        contextLabel,
+        getLinkedDashboardAttention(action.id, attentionAlerts),
+      );
     }),
   ];
   const seenIds = new Set<string>();
@@ -640,7 +736,10 @@ const buildHero = (
     };
   }
 
-  const overdueAction = input.overdueActions[0];
+  const overdueAction = sortActions(
+    input.overdueActions,
+    compareActionsByDueDate,
+  )[0];
   if (overdueAction) {
     return {
       kind: 'overdue_action',
@@ -656,7 +755,10 @@ const buildHero = (
     };
   }
 
-  const staleAction = input.staleActions[0];
+  const staleAction = sortActions(
+    input.staleActions,
+    compareActionsByOldestUpdate,
+  )[0];
   if (staleAction) {
     return {
       kind: 'stale_action',

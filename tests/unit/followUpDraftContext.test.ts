@@ -447,6 +447,95 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('prioritizes blocked and aging draft follow-ups ahead of routine active work', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+        }),
+        makeEntity({
+          id: 'action-active',
+          type: 'action_item',
+          name: 'Send routine notes',
+          mention_count: 8,
+        }),
+        makeEntity({
+          id: 'action-blocked',
+          type: 'action_item',
+          name: 'Confirm launch plan',
+          assigned_to: 'person-1',
+          due_date: '2026-05-30T00:00:00.000Z',
+          mention_count: 1,
+        }),
+        makeEntity({
+          id: 'action-overdue',
+          type: 'action_item',
+          name: 'Escalate contract edits',
+          status: 'overdue',
+          mention_count: 3,
+        }),
+        makeEntity({
+          id: 'action-stale',
+          type: 'action_item',
+          name: 'Refresh launch brief',
+          status: 'stale',
+          mention_count: 5,
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-1',
+          kind: 'blocker',
+          status: 'active',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+        },
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Confirm launch plan (Owner: Sarah Chen | Due: May 30 | Status: Blocked by legal approval)',
+      'Escalate contract edits (Status: Overdue)',
+      'Refresh launch brief (Status: Stale)',
+      'Send routine notes',
+    ]);
+  });
+
+  it('prioritizes fallback-only blocked and aging follow-ups ahead of routine linked work', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Wait for legal sign-off (Status: Blocked on legal review)',
+        'Escalate contract edits (Status: Overdue)',
+        'Refresh launch brief (Status: Stale)',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Share routine recap',
+          mention_count: 5,
+        }),
+        makeEntity({
+          id: 'action-2',
+          type: 'action_item',
+          name: 'Confirm attendee list',
+          mention_count: 4,
+        }),
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Wait for legal sign-off (Status: Blocked on legal review)',
+      'Escalate contract edits (Status: Overdue)',
+      'Refresh launch brief (Status: Stale)',
+      'Share routine recap',
+      'Confirm attendee list',
+    ]);
+  });
+
   it('preserves linked action-item context in the draft action lines', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [],
