@@ -438,6 +438,72 @@ describe('buildDashboardHomeModel', () => {
     ]);
   });
 
+  it('surfaces blocker-backed active follow-ups in briefing focus when nothing is overdue or stale', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'routine-active',
+          name: 'Routine active follow-up',
+          due_date: '2026-05-01T12:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-active',
+          name: 'Blocked active follow-up',
+          due_date: '2026-05-02T12:00:00.000Z',
+        }),
+      ],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-active',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-active'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: '1 blocked item',
+      action: { label: 'Review actions', target: 'projects' },
+    });
+  });
+
+  it('keeps routine active follow-ups from displacing the latest-meeting briefing focus', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'routine-active',
+          name: 'Routine active follow-up',
+          due_date: '2026-05-01T12:00:00.000Z',
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'latest_meeting',
+      title: 'Latest meeting',
+      detail: 'Indexing rollout is close, with launch risk around review.',
+      action: {
+        label: 'Open brief',
+        target: 'meeting',
+        meetingId: 'meeting-1',
+      },
+    });
+  });
+
   it('suppresses dismissed linked follow-ups from dashboard attention lists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
