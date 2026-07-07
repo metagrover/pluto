@@ -67,6 +67,7 @@ export interface DashboardActionInsightItem {
   dueLabel: string;
   status: 'overdue' | 'stale' | 'active';
   sourceLabel: string;
+  contextLabel: string | null;
   attentionLabel: string | null;
   attentionReason: string | null;
   attentionItemId: string | null;
@@ -367,6 +368,7 @@ const buildLatestMeeting = (meetings: Meeting[]): DashboardLatestMeeting => {
 const actionToInsightItem = (
   action: Entity,
   status: DashboardActionInsightItem['status'],
+  contextLabel: string | null,
   linkedAttention: AttentionItem | null,
 ): DashboardActionInsightItem => ({
   id: action.id,
@@ -374,6 +376,7 @@ const actionToInsightItem = (
   dueLabel: formatDueLabel(action.due_date),
   status,
   sourceLabel: titleCase(action.domain_tag || 'workspace'),
+  contextLabel,
   ...getDashboardActionAttentionContext(linkedAttention),
   attentionItemId: linkedAttention?.id ?? null,
   attentionStatus: linkedAttention?.status ?? null,
@@ -395,27 +398,75 @@ const actionToInsightItem = (
           : 'Snooze',
 });
 
+const getDashboardActionContextLabel = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+  meetings: Meeting[],
+): string | null => {
+  const relatedMeetingIds = Array.from(
+    new Set(
+      attentionAlerts
+        .filter(
+          (item) =>
+            item.status === 'active' &&
+            item.related_entity_ids.includes(actionId),
+        )
+        .flatMap((item) => item.related_meeting_ids),
+    ),
+  );
+
+  if (relatedMeetingIds.length === 0) {
+    return null;
+  }
+
+  const meetingsById = new Map(
+    meetings.map((meeting) => [meeting.id, meeting]),
+  );
+  const latestRelatedMeeting = sortByNewestTimestamp(
+    relatedMeetingIds
+      .map((meetingId) => meetingsById.get(meetingId))
+      .filter((meeting): meeting is Meeting => Boolean(meeting)),
+    getMeetingTimestamp,
+  )[0];
+  const title = latestRelatedMeeting?.title?.trim();
+
+  return title || null;
+};
+
 const buildActionInsights = (
+  meetings: Meeting[],
   overdueActions: Entity[],
   staleActions: Entity[],
   activeActions: Entity[],
   attentionAlerts: AttentionItem[],
 ): DashboardActionInsights => {
   const prioritizedItems = [
-    ...sortActions(overdueActions, compareActionsByDueDate).map((action) =>
-      actionToInsightItem(
+    ...sortActions(overdueActions, compareActionsByDueDate).map((action) => {
+      const contextLabel = getDashboardActionContextLabel(
+        action.id,
+        attentionAlerts,
+        meetings,
+      );
+      return actionToInsightItem(
         action,
         'overdue',
+        contextLabel,
         getLinkedDashboardAttention(action.id, attentionAlerts),
-      ),
-    ),
-    ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) =>
-      actionToInsightItem(
+      );
+    }),
+    ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) => {
+      const contextLabel = getDashboardActionContextLabel(
+        action.id,
+        attentionAlerts,
+        meetings,
+      );
+      return actionToInsightItem(
         action,
         'stale',
+        contextLabel,
         getLinkedDashboardAttention(action.id, attentionAlerts),
-      ),
-    ),
+      );
+    }),
     ...sortActions(activeActions, (a, b) => {
       const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
       const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
@@ -423,13 +474,19 @@ const buildActionInsights = (
         return aBlocked ? -1 : 1;
       }
       return compareActionsByDueDate(a, b);
-    }).map((action) =>
-      actionToInsightItem(
+    }).map((action) => {
+      const contextLabel = getDashboardActionContextLabel(
+        action.id,
+        attentionAlerts,
+        meetings,
+      );
+      return actionToInsightItem(
         action,
         'active',
+        contextLabel,
         getLinkedDashboardAttention(action.id, attentionAlerts),
-      ),
-    ),
+      );
+    }),
   ];
   const seenIds = new Set<string>();
   const items = prioritizedItems
@@ -865,6 +922,7 @@ export const buildDashboardHomeModel = (
   );
   const latestMeeting = buildLatestMeeting(input.meetings);
   const actionInsights = buildActionInsights(
+    input.meetings,
     overdueActions,
     staleActions,
     activeActions,

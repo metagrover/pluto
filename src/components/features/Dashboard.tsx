@@ -297,7 +297,8 @@ export const Dashboard = ({
                             </span>
                           ) : null}
                           <p className="text-[11px] font-semibold text-pro-text-muted/70">
-                            {item.dueLabel} · {item.sourceLabel}
+                            {item.dueLabel} ·{' '}
+                            {item.contextLabel ?? item.sourceLabel}
                           </p>
                         </div>
                         {item.attentionReason ? (

@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-06
 
+### Preserve source meeting context on dashboard follow-up cards
+- **Issue:** [#292](https://github.com/metagrover/pluto/issues/292)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up cards now prefer the newest loaded meeting title from active linked attention items when Pluto already has related meeting ids for that action, and they fall back to the existing domain label only when no matching meeting title is available. Focused regression coverage now proves both the model resolution path and the rendered dashboard row copy.
+- **Why:** `#61` is still Pluto's earliest unfinished roadmap outcome under `#65`, and homepage follow-up cards are less trustworthy when Pluto already knows which meeting created the commitment but still shows only a generic source label like `Work`.
+- **Replaced:** Treating the dashboard follow-up metadata row as domain-only copy even when linked attention context already pointed to a concrete source meeting.
+- **Notes:** This stays inside the existing dashboard follow-up model and renderer, keeps current dismiss/snooze suppression and completion behavior intact, and intentionally does not overlap the separate blocker-context slice on `#290`.
 ### Prioritize the most urgent dashboard hero follow-up
 - **Issue:** [#298](https://github.com/metagrover/pluto/issues/298)
 - **PR:** Pending.

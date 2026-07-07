@@ -14,13 +14,13 @@ import type { Meeting } from '../../src/types';
 
 const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
   id: 'meeting-1',
-  title: 'Architecture Review',
+  title: 'Launch Review',
   created_at: '2026-04-27T18:00:00.000Z',
   started_at: '2026-04-27T17:30:00.000Z',
-  enhanced_notes: 'We reviewed indexing rollout risks.',
+  enhanced_notes: 'We reviewed launch readiness and approvals.',
   analysis_json: JSON.stringify({
     analysis_schema_version: 3,
-    overview: 'Indexing rollout is close, with launch risk around review.',
+    overview: 'Launch readiness now depends on privacy review.',
   }),
   ...overrides,
 });
@@ -28,8 +28,8 @@ const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
 const makeAction = (overrides: Partial<Entity> = {}): Entity => ({
   id: 'action-1',
   type: 'action_item',
-  name: 'Review indexing rollout',
-  normalized_name: 'review indexing rollout',
+  name: 'Ship privacy review',
+  normalized_name: 'ship privacy review',
   status: 'active',
   due_date: '2026-04-26T12:00:00.000Z',
   assigned_to: null,
@@ -50,14 +50,14 @@ const makeAttentionItem = (
   severity: 'watch',
   score: 0.42,
   status: 'active',
-  title: 'Review indexing rollout',
+  title: 'Ship privacy review',
   reason: 'This follow-up still needs attention.',
   source: 'action_tracker',
   score_breakdown: null,
   evidence: [],
   related_entity_ids: ['action-1'],
   related_stream_ids: [],
-  related_meeting_ids: [],
+  related_meeting_ids: ['meeting-1'],
   created_at: '2026-04-25T10:00:00.000Z',
   updated_at: '2026-04-25T10:00:00.000Z',
   last_seen_at: '2026-04-25T10:00:00.000Z',
@@ -156,6 +156,7 @@ describe('Dashboard', () => {
           title: 'Finalize launch checklist',
           reason: 'Blocked by legal approval.',
           related_entity_ids: ['action-blocked'],
+          related_meeting_ids: [],
         }),
       ],
       workspace: makeWorkspace(),
@@ -178,5 +179,36 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('Blocker');
     expect(markup).toContain('Blocked by legal approval.');
+  });
+
+  it('renders linked meeting context on follow-up cards when available', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction()],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [makeAttentionItem()],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Ship privacy review');
+    expect(markup).toContain('Due Apr 26 · Launch Review');
+    expect(markup).not.toContain('Due Apr 26 · Work');
   });
 });
