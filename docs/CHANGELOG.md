@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Prefer active linked attention on Meeting View follow-up cards
+- **Issue:** [#310](https://github.com/metagrover/pluto/issues/310)
+- **PR:** Pending.
+- **Changed:** Meeting View's shared follow-up card builder now prefers the highest-priority linked attention item for each action instead of keeping the first alert it sees. Active alerts outrank snoozed and dismissed ones, blocker context still wins inside the same lifecycle tier, and focused regression coverage now proves a live blocker-backed follow-up no longer renders as dismissed just because an older handled alert appeared first.
+- **Why:** `#61` still depends on Meeting View reflecting Pluto's durable follow-up lifecycle honestly. Before this slice, mixed-status linked alerts could make a live follow-up show reopen affordances or lose blocker context even while the durable attention queue still had active attention on that same action.
+- **Replaced:** First-write-wins linked attention selection in `buildMeetingActionItems(...)`, which could let older dismissed or snoozed alerts override the active state.
+- **Notes:** This stays inside the shared Meeting View action-card builder and does not change durable attention persistence, sync semantics, or the existing lifecycle controls.
+
 ### Surface blocker-backed active follow-ups in homepage briefing focus
 - **Issue:** [#304](https://github.com/metagrover/pluto/issues/304)
 - **PR:** Pending.
