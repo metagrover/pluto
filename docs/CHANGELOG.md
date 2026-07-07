@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Surface blocker-backed active follow-ups in homepage briefing focus
+- **Issue:** [#304](https://github.com/metagrover/pluto/issues/304)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus panel now surfaces blocker-backed active follow-ups when nothing is overdue or stale, reusing the same blocker-aware active ordering already shipped for the dashboard action-insights list and hero. Focused regression coverage now proves Pluto no longer pairs a blocked commitment in the hero with an unrelated meeting or knowledge headline in the adjacent briefing panel.
+- **Why:** `#61` still depends on homepage follow-up surfaces showing the highest-value commitments consistently. Before this slice, the hero and list could both rank a blocked active follow-up first while briefing focus still fell through to latest-meeting or knowledge fallback copy, which made the homepage contradict itself.
+- **Replaced:** Treating homepage briefing focus as overdue/stale-only attention copy even after blocker-backed active follow-ups were promoted elsewhere on the dashboard.
+- **Notes:** This stays scoped to `dashboardModel.ts` and existing briefing-focus copy. It intentionally does not promote routine active work into briefing focus or redesign the dashboard surface.
+
 ### Surface blocker-backed active follow-ups in the homepage hero
 - **Issue:** [#302](https://github.com/metagrover/pluto/issues/302)
 - **PR:** Pending.

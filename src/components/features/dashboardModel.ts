@@ -318,6 +318,19 @@ const compareOverdueDashboardActions = (
   return compareActionsByDueDate(a, b);
 };
 
+const compareActiveDashboardActions = (
+  a: Entity,
+  b: Entity,
+  attentionAlerts: AttentionItem[],
+): number => {
+  const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
+  const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
+  if (aBlocked !== bBlocked) {
+    return aBlocked ? -1 : 1;
+  }
+  return compareActionsByDueDate(a, b);
+};
+
 const filterSuppressedDashboardActions = (
   actions: Entity[],
   attentionAlerts: AttentionItem[],
@@ -783,14 +796,9 @@ const buildHero = (
     };
   }
 
-  const prioritizedActiveAction = sortActions(input.activeActions, (a, b) => {
-    const aBlocked = hasActiveLinkedBlocker(a.id, input.attentionAlerts ?? []);
-    const bBlocked = hasActiveLinkedBlocker(b.id, input.attentionAlerts ?? []);
-    if (aBlocked !== bBlocked) {
-      return aBlocked ? -1 : 1;
-    }
-    return compareActionsByDueDate(a, b);
-  })[0];
+  const prioritizedActiveAction = sortActions(input.activeActions, (a, b) =>
+    compareActiveDashboardActions(a, b, input.attentionAlerts ?? []),
+  )[0];
   if (
     prioritizedActiveAction &&
     hasActiveLinkedBlocker(
@@ -890,6 +898,8 @@ const buildBriefingFocus = (
   actionInsights: DashboardActionInsights,
   latestMeeting: DashboardLatestMeeting,
   knowledgeDocuments: DashboardKnowledgeDocuments,
+  activeActions: Entity[],
+  attentionAlerts: AttentionItem[],
 ): DashboardBriefingFocus => {
   if (
     actionInsights.state === 'populated' &&
@@ -906,6 +916,24 @@ const buildBriefingFocus = (
           ? pluralize(actionInsights.staleCount, 'stale item')
           : '',
       ]),
+      action: { label: 'Review actions', target: 'projects' },
+    };
+  }
+
+  const prioritizedActiveAction = sortActions(activeActions, (a, b) =>
+    compareActiveDashboardActions(a, b, attentionAlerts),
+  )[0];
+  if (
+    prioritizedActiveAction &&
+    hasActiveLinkedBlocker(prioritizedActiveAction.id, attentionAlerts)
+  ) {
+    const blockedActiveCount = activeActions.filter((action) =>
+      hasActiveLinkedBlocker(action.id, attentionAlerts),
+    ).length;
+    return {
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: pluralize(blockedActiveCount, 'blocked item'),
       action: { label: 'Review actions', target: 'projects' },
     };
   }
@@ -990,6 +1018,8 @@ export const buildDashboardHomeModel = (
       actionInsights,
       latestMeeting,
       knowledgeDocuments,
+      activeActions,
+      attentionAlerts,
     ),
     latestMeeting,
     actionInsights,
