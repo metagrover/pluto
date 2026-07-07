@@ -341,9 +341,13 @@ const formatActionItem = (
   const dueLabel = formatDueLabel(entity.due_date) || fallbackDetails.due;
   const contextLabel = normalizeName(entity.context) || fallbackDetails.context;
   const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
+  const fallbackLifecycleLabel =
+    blockedReason &&
+    fallbackDetails.status.toLowerCase().startsWith('blocked')
+      ? ''
+      : fallbackDetails.status;
   const lifecycleLabel =
-    formatLifecycleLabel(entity.status) ||
-    (blockedReason ? '' : fallbackDetails.status);
+    formatLifecycleLabel(entity.status) || fallbackLifecycleLabel;
   const details = [
     fallbackDetails.topic ? `Topic: ${fallbackDetails.topic}` : '',
     lifecycleLabel ? `Status: ${lifecycleLabel}` : '',

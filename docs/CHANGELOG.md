@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Keep aging lifecycle visible in blocker-backed follow-up drafts
+- **Issue:** [#318](https://github.com/metagrover/pluto/issues/318)
+- **PR:** Pending.
+- **Changed:** Follow-up draft action lines now preserve overdue or stale lifecycle detail even when the same action is also linked to an active blocker. Focused regression coverage proves Pluto keeps both the blocker reason and the aging state in the generated draft context instead of dropping the lifecycle label.
+- **Why:** `#61` depends on Pluto distinguishing blocked, overdue, and stale commitments with trustworthy source-aware context. Before this slice, the draft surface hid overdue or stale state whenever blocker attention was also present, which made the generated follow-up copy less honest than the underlying commitment model.
+- **Replaced:** Treating blocker reason text as a reason to suppress aging lifecycle labels on follow-up draft action lines.
+- **Notes:** This stays scoped to `followUpDraftContext.ts` and its unit tests. It does not change draft templates, dashboard ranking, or Meeting View controls.
+
 ### Surface blocker-backed active follow-ups in homepage briefing focus
 - **Issue:** [#304](https://github.com/metagrover/pluto/issues/304)
 - **PR:** Pending.
