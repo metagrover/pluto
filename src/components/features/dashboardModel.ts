@@ -334,7 +334,8 @@ const getDashboardActionContextLabel = (
       attentionAlerts
         .filter(
           (item) =>
-            item.status === 'active' && item.related_entity_ids.includes(actionId),
+            item.status === 'active' &&
+            item.related_entity_ids.includes(actionId),
         )
         .flatMap((item) => item.related_meeting_ids),
     ),
@@ -344,7 +345,9 @@ const getDashboardActionContextLabel = (
     return null;
   }
 
-  const meetingsById = new Map(meetings.map((meeting) => [meeting.id, meeting]));
+  const meetingsById = new Map(
+    meetings.map((meeting) => [meeting.id, meeting]),
+  );
   const latestRelatedMeeting = sortByNewestTimestamp(
     relatedMeetingIds
       .map((meetingId) => meetingsById.get(meetingId))

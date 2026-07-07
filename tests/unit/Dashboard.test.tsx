@@ -1,10 +1,10 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
+import type { Entity } from '../../src/api/knowledgeGraph';
 import { Dashboard } from '../../src/components/features/Dashboard';
 import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
-import type { Entity } from '../../src/api/knowledgeGraph';
-import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { Meeting } from '../../src/types';
 
 const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
