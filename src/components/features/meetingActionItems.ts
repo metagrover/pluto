@@ -199,8 +199,10 @@ const shouldPreferDuplicateActiveBlocker = (
     return false;
   }
 
-  return normalizeReason(candidate.reason).length >
-    normalizeReason(current.reason).length;
+  return (
+    normalizeReason(candidate.reason).length >
+    normalizeReason(current.reason).length
+  );
 };
 
 const parseFallbackStatus = (
