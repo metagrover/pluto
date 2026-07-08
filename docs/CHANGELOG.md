@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-08
+
+### Surface blocker state in the dashboard project spotlight label
+- **Issue:** [#340](https://github.com/metagrover/pluto/issues/340)
+- **PR:** Pending.
+- **Changed:** The dashboard project spotlight now labels blocker-backed project cards explicitly as `Blocked project`, and the dashboard renderer now uses the model-provided spotlight label instead of a hardcoded generic `Project signal` heading. Focused regression coverage now proves both the model decision and the rendered spotlight copy.
+- **Why:** `#61` still depends on Pluto surfacing trustworthy follow-up and blocker context across homepage surfaces. Before this slice, the spotlight could show blocker counts in its detail line while still presenting the same generic label as routine project context, which weakened the trust signal Pluto already had.
+- **Replaced:** Treating blocked project spotlight states as the same generic dashboard label used for non-blocked project context.
+- **Notes:** This stays scoped to spotlight label/state copy and intentionally avoids the in-flight homepage hero and briefing blocker-copy PR stack.
+
 ## 2026-07-07
 
 ### Surface routine active follow-ups in the homepage hero

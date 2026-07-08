@@ -467,7 +467,7 @@ export const Dashboard = ({
                 className="mt-auto rounded-2xl border border-pro-border/70 bg-pro-bg/45 p-4 text-left transition-all hover:border-pro-accent/30 hover:bg-pro-bg/65"
               >
                 <p className="text-[11px] font-black tracking-[0.14em] text-pro-text-muted/55">
-                  Project signal
+                  {model.spotlight.subtitle}
                 </p>
                 <div className="mt-2 flex items-start justify-between gap-3">
                   <div>

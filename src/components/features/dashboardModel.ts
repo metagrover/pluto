@@ -742,7 +742,7 @@ const buildSpotlight = (
 
   return {
     title: card.title,
-    subtitle: 'Project spotlight',
+    subtitle: card.open_blockers > 0 ? 'Blocked project' : 'Project spotlight',
     detail: tags.length > 0 ? tags.join(' | ') : 'No blockers surfaced',
     tags,
     target: 'projects',
