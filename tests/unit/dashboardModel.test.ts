@@ -247,6 +247,7 @@ describe('buildDashboardHomeModel', () => {
     expect(model.spotlight).toMatchObject({
       title: 'Indexing Rollout',
       subtitle: 'Project spotlight',
+      badgeLabel: 'Blocked',
       detail: expect.stringContaining('1 blocker'),
       tags: ['1 blocker', '2 dependencies', '3 recent changes'],
       target: 'projects',
@@ -282,6 +283,34 @@ describe('buildDashboardHomeModel', () => {
     expect(model.actionInsights.items[0]).toMatchObject({
       status: 'stale',
       sourceLabel: 'Work',
+    });
+  });
+
+  it('keeps the generic project spotlight badge when no blockers are open', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        project_cards: [
+          makeProjectCard({
+            open_blockers: 0,
+            dependency_count: 1,
+            recent_changes: 1,
+          }),
+        ],
+      }),
+      graphStats: null,
+    });
+
+    expect(model.spotlight).toMatchObject({
+      title: 'Indexing Rollout',
+      subtitle: 'Project spotlight',
+      badgeLabel: 'Projects',
+      detail: expect.stringContaining('1 dependency'),
+      target: 'projects',
     });
   });
 

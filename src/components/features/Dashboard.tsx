@@ -479,7 +479,7 @@ export const Dashboard = ({
                     </p>
                   </div>
                   <span className="rounded-full bg-pro-accent/10 px-2.5 py-1 text-[10px] font-black text-pro-accent">
-                    Projects
+                    {model.spotlight.badgeLabel}
                   </span>
                 </div>
               </button>

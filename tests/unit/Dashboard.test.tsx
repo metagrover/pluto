@@ -211,4 +211,33 @@ describe('Dashboard', () => {
     expect(markup).toContain('Due Apr 26 · Launch Review');
     expect(markup).not.toContain('Due Apr 26 · Work');
   });
+
+  it('renders a blocker-specific spotlight badge when the spotlight project is blocked', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Blocked');
+    expect(markup).not.toContain('>Projects<');
+  });
 });
