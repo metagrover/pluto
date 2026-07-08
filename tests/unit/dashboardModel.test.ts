@@ -471,7 +471,7 @@ describe('buildDashboardHomeModel', () => {
       kind: 'attention',
       title: 'Needs attention',
       detail: '1 blocked item',
-      action: { label: 'Review actions', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     });
   });
 

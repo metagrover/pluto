@@ -944,7 +944,7 @@ const buildBriefingFocus = (
       kind: 'attention',
       title: 'Needs attention',
       detail: pluralize(blockedActiveCount, 'blocked item'),
-      action: { label: 'Review actions', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     };
   }
 

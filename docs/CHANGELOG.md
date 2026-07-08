@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Surface blocker state in homepage briefing action labels
+- **Issue:** [#336](https://github.com/metagrover/pluto/issues/336)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus panel now switches its CTA to `Review blockers` when the prioritized follow-up is blocker-backed, while overdue/stale summaries and non-blocker attention paths keep the existing `Review actions` label. Focused regression coverage now proves the blocker-specific CTA without changing the surrounding dashboard layout or action target.
+- **Why:** `#61` still depends on homepage follow-up surfaces reflecting Pluto's durable blocker classification consistently. Before this slice, open work on the briefing heading and detail could say the focus was blocked while the CTA still used the same generic action copy as routine attention states, which softened the urgency of the panel.
+- **Replaced:** Treating the homepage briefing CTA as generic review copy even when the selected follow-up is explicitly blocked.
+- **Notes:** This stays scoped to blocker-backed briefing CTA text. The adjacent blocker-specific heading and richer blocker-detail slices remain tracked in PRs `#335` and `#333`.
+
 ### Surface routine active follow-ups in the homepage hero
 - **Issue:** [#308](https://github.com/metagrover/pluto/issues/308)
 - **PR:** Pending.
