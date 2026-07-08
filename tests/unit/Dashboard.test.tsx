@@ -211,4 +211,43 @@ describe('Dashboard', () => {
     expect(markup).toContain('Due Apr 26 · Launch Review');
     expect(markup).not.toContain('Due Apr 26 · Work');
   });
+
+  it('renders a blocker-specific spotlight quick action when projects are surfaced by blockers', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [],
+        project_cards: [
+          makeProjectCard({
+            open_blockers: 2,
+            dependency_count: 0,
+            recent_changes: 0,
+            staleness_days: 0,
+          }),
+        ],
+      }),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Review blockers');
+    expect(markup).not.toContain('Open projects');
+  });
 });

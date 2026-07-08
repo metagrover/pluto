@@ -119,6 +119,7 @@ export interface DashboardSpotlight {
   subtitle: string;
   detail: string;
   tags: string[];
+  hasBlockers: boolean;
   target: DashboardTarget;
 }
 
@@ -745,6 +746,7 @@ const buildSpotlight = (
     subtitle: 'Project spotlight',
     detail: tags.length > 0 ? tags.join(' | ') : 'No blockers surfaced',
     tags,
+    hasBlockers: card.open_blockers > 0,
     target: 'projects',
   };
 };
@@ -891,7 +893,13 @@ const buildQuickActions = (
   }
 
   if (actionInsights.state === 'populated' || spotlight) {
-    actions.push({ label: 'Open projects', target: 'projects' });
+    actions.push({
+      label:
+        actionInsights.state === 'empty' && spotlight?.hasBlockers
+          ? 'Review blockers'
+          : 'Open projects',
+      target: 'projects',
+    });
   }
 
   if (knowledgeDocuments.state === 'populated') {

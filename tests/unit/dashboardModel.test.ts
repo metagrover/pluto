@@ -1454,6 +1454,38 @@ describe('buildDashboardHomeModel', () => {
     ]);
   });
 
+  it('uses a blocker-specific quick action label when spotlight is blocked', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [],
+        project_cards: [
+          makeProjectCard({
+            open_blockers: 2,
+            dependency_count: 0,
+            recent_changes: 0,
+            staleness_days: 0,
+          }),
+        ],
+      }),
+      graphStats: null,
+    });
+
+    expect(model.spotlight).toMatchObject({
+      title: 'Indexing Rollout',
+      detail: '2 blockers',
+      target: 'projects',
+    });
+    expect(model.quickActions).toEqual([
+      { label: 'Ask Pluto', target: 'ask' },
+      { label: 'Review blockers', target: 'projects' },
+    ]);
+  });
+
   it('maps real knowledge docs and matching project health into document cards', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
