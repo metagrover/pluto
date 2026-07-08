@@ -778,7 +778,7 @@ const buildHero = (
           : '',
       ]),
       severity: 'urgent',
-      action: { label: 'Review blockers', target: 'projects' },
+      action: { label: 'Open projects', target: 'projects' },
     };
   }
 

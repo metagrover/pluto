@@ -217,7 +217,10 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.title).toBe('1 overdue item');
     expect(model.hero.severity).toBe('urgent');
     expect(model.hero.detail).toContain('Ship privacy review');
-    expect(model.hero.action?.target).toBe('projects');
+    expect(model.hero.action).toEqual({
+      label: 'Open projects',
+      target: 'projects',
+    });
     expect(model.briefingFocus).toMatchObject({
       kind: 'attention',
       title: 'Needs attention',
