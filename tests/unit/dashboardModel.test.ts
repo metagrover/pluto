@@ -469,7 +469,7 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.briefingFocus).toEqual({
       kind: 'attention',
-      title: 'Needs attention',
+      title: 'Blocked follow-up',
       detail: '1 blocked item',
       action: { label: 'Review actions', target: 'projects' },
     });
