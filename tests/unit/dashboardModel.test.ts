@@ -1366,6 +1366,47 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('prefers the richer blocker reason when duplicate active blockers point at one dashboard follow-up', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-thin',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: '',
+          related_entity_ids: ['action-blocked'],
+        }),
+        makeAttentionItem({
+          id: 'attention-blocked-rich',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: 'Blocked by legal approval and pending security sign-off.',
+          related_entity_ids: ['action-blocked'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-blocked',
+      attentionLabel: 'Blocker',
+      attentionReason:
+        'Blocked by legal approval and pending security sign-off.',
+    });
+  });
+
   it('prefers the newest linked meeting title as dashboard follow-up context when available', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

@@ -294,6 +294,53 @@ const getDashboardActionAttentionContext = (
     attentionReason: normalizedReason,
   };
 };
+
+const DASHBOARD_ATTENTION_STATUS_PRIORITY: Record<
+  AttentionItem['status'],
+  number
+> = {
+  active: 0,
+  snoozed: 1,
+  dismissed: 2,
+};
+
+const getDashboardAttentionPriority = (item: AttentionItem) => ({
+  statusRank: DASHBOARD_ATTENTION_STATUS_PRIORITY[item.status] ?? 99,
+  blockerRank: item.kind === 'blocker' ? 0 : 1,
+  reasonRank:
+    item.kind === 'blocker' && item.status === 'active'
+      ? -(item.reason?.trim().length ?? 0)
+      : 0,
+});
+
+const preferDashboardAttention = (
+  current: AttentionItem | null,
+  candidate: AttentionItem,
+): AttentionItem => {
+  if (current == null) return candidate;
+
+  const currentPriority = getDashboardAttentionPriority(current);
+  const candidatePriority = getDashboardAttentionPriority(candidate);
+
+  if (candidatePriority.statusRank !== currentPriority.statusRank) {
+    return candidatePriority.statusRank < currentPriority.statusRank
+      ? candidate
+      : current;
+  }
+  if (candidatePriority.blockerRank !== currentPriority.blockerRank) {
+    return candidatePriority.blockerRank < currentPriority.blockerRank
+      ? candidate
+      : current;
+  }
+  if (candidatePriority.reasonRank !== currentPriority.reasonRank) {
+    return candidatePriority.reasonRank < currentPriority.reasonRank
+      ? candidate
+      : current;
+  }
+
+  return current;
+};
+
 const hasActiveLinkedBlocker = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -343,15 +390,12 @@ const getLinkedDashboardAttention = (
   actionId: string,
   attentionAlerts: AttentionItem[],
 ): AttentionItem | null => {
-  const linkedAlerts = attentionAlerts.filter((item) =>
-    item.related_entity_ids.includes(actionId),
-  );
-  if (linkedAlerts.length === 0) {
-    return null;
-  }
-
-  return (
-    linkedAlerts.find((item) => item.status === 'active') ?? linkedAlerts[0]
+  return attentionAlerts.reduce<AttentionItem | null>(
+    (selected, item) =>
+      item.related_entity_ids.includes(actionId)
+        ? preferDashboardAttention(selected, item)
+        : selected,
+    null,
   );
 };
 

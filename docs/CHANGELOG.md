@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Preserve richer blocker reasons on dashboard follow-up cards
+- **Issue:** [#325](https://github.com/metagrover/pluto/issues/325)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up cards now prefer the richest linked active blocker reason when duplicate blocker alerts point at the same action, while keeping the existing blocker label and active-status priority intact. Focused regression coverage now proves a thinner or empty blocker row can no longer hide the fuller blocker explanation Pluto already has.
+- **Why:** `#61` still depends on homepage follow-up surfaces surfacing trustworthy context, not just the right ranking. Before this slice, dashboard follow-up cards already showed blocker labels and reasons, but duplicate active blocker alerts still kept the first reason they saw and could drop the more useful explanation.
+- **Replaced:** Treating the first active blocker alert as authoritative for dashboard follow-up reason text even when another linked active blocker carried richer context for the same commitment.
+- **Notes:** This stays inside `dashboardModel.ts` and existing dashboard follow-up tests. It intentionally avoids reopening the in-flight Meeting View and follow-up draft blocker-reason slices tracked separately.
+
 ### Surface routine active follow-ups in the homepage hero
 - **Issue:** [#308](https://github.com/metagrover/pluto/issues/308)
 - **PR:** Pending.
