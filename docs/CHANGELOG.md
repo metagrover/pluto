@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-08
+
+### Surface blocker state in homepage hero action label
+- **Issue:** [#338](https://github.com/metagrover/pluto/issues/338)
+- **PR:** Pending.
+- **Changed:** The homepage hero now uses a blocker-specific `Review blockers` CTA when the prioritized active follow-up is blocker-backed, while overdue, stale, and routine-active hero states keep the existing `Open projects` action. Focused regression coverage now proves the blocker-backed hero no longer shares the same generic CTA as non-blocker states.
+- **Why:** `#61` still depends on homepage follow-up surfaces explaining why Pluto surfaced a commitment. Before this slice, the hero could already say a follow-up was a blocked item and show blocker-aware detail, but its CTA still read like generic project navigation, which weakened the trust signal Pluto already had.
+- **Replaced:** Treating blocker-backed homepage hero actions as if they should use the same generic `Open projects` CTA as routine, stale, and overdue follow-up states.
+- **Notes:** This stays scoped to `dashboardModel.ts` hero action-label copy and its focused regression test. It intentionally does not redesign dashboard layout or overlap the adjacent blocker-detail and briefing-copy PR stack.
+
 ## 2026-07-07
 
 ### Surface routine active follow-ups in the homepage hero

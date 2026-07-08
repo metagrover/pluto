@@ -814,7 +814,7 @@ const buildHero = (
       title: pluralize(blockedActiveCount, 'blocked item'),
       detail: `${prioritizedActiveAction.name} needs attention`,
       severity: 'urgent',
-      action: { label: 'Open projects', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     };
   }
 

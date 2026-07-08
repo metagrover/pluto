@@ -428,7 +428,7 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.severity).toBe('urgent');
     expect(model.hero.detail).toContain('Blocked active follow-up');
     expect(model.hero.action).toEqual({
-      label: 'Open projects',
+      label: 'Review blockers',
       target: 'projects',
     });
     expect(model.actionInsights.state).toBe('populated');
