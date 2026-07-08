@@ -299,7 +299,10 @@ const getDashboardHeroActionDetail = (
   action: Entity,
   attentionAlerts: AttentionItem[],
 ): string => {
-  const linkedAttention = getLinkedDashboardAttention(action.id, attentionAlerts);
+  const linkedAttention = getLinkedDashboardAttention(
+    action.id,
+    attentionAlerts,
+  );
   const blockerReason =
     linkedAttention?.status === 'active' && linkedAttention.kind === 'blocker'
       ? linkedAttention.reason?.trim() || null
@@ -785,7 +788,10 @@ const buildHero = (
       kind: 'overdue_action',
       title: pluralize(input.overdueActions.length, 'overdue item'),
       detail: joinCountLabels([
-        getDashboardHeroActionDetail(overdueAction, input.attentionAlerts ?? []),
+        getDashboardHeroActionDetail(
+          overdueAction,
+          input.attentionAlerts ?? [],
+        ),
         input.staleActions.length > 0
           ? pluralize(input.staleActions.length, 'stale item')
           : '',
