@@ -66,28 +66,6 @@ const getHeroTone = (
   return 'text-pro-accent border-pro-accent/20 bg-pro-accent/5';
 };
 
-const getHeroLabel = (
-  kind: DashboardHomeModel['hero']['kind'],
-  loading: boolean,
-) => {
-  if (loading) return 'Syncing';
-  switch (kind) {
-    case 'recording':
-      return 'Live capture';
-    case 'overdue_action':
-    case 'active_action':
-      return 'Needs attention';
-    case 'stale_action':
-      return 'Watch';
-    case 'latest_meeting':
-      return 'Latest meeting';
-    case 'knowledge_doc':
-      return 'Recent memory';
-    case 'default':
-      return 'Ready';
-  }
-};
-
 const getBriefingTone = (kind: DashboardHomeModel['briefingFocus']['kind']) => {
   if (kind === 'attention') {
     return 'border-pro-accent/30 bg-pro-surface dark:border-pro-border dark:bg-pro-surface/55';
@@ -180,7 +158,7 @@ export const Dashboard = ({
                     loading,
                   )}`}
                 >
-                  {getHeroLabel(model.hero.kind, loading)}
+                  {loading ? 'Syncing' : model.hero.label}
                 </span>
               </div>
               <h1 className="max-w-3xl text-[29px] font-black leading-tight tracking-[-0.03em] text-pro-text-main">

@@ -137,6 +137,49 @@ const makeWorkspace = (
 });
 
 describe('Dashboard', () => {
+  it('renders a blocker-specific homepage hero badge for blocker-backed follow-ups', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked',
+          kind: 'blocker',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+          related_meeting_ids: [],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('>Blocked<');
+    expect(markup).toContain('1 overdue item');
+  });
+
   it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

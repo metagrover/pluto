@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-08
+
+### Surface blocker state in the homepage hero badge
+- **Issue:** [#342](https://github.com/metagrover/pluto/issues/342)
+- **PR:** Pending.
+- **Changed:** The homepage hero now carries an explicit model-backed badge label, and blocker-linked follow-ups render `Blocked` instead of the generic attention label while routine overdue, stale, active, meeting, and memory states keep their prior labels. Focused model and server-rendered dashboard regressions now prove both the blocker-specific badge and the generic fallback paths.
+- **Why:** `#61` still depends on the homepage earning trust as Pluto's highest-priority follow-up surface. Before this slice, linked blocker attention could already change hero ranking and detail copy, but the badge still stayed generic, which hid the exact blocker state in the most prominent dashboard affordance.
+- **Replaced:** Deriving the homepage hero badge solely from coarse hero kind labels even when linked active blocker attention already made the stronger status explicit.
+- **Notes:** This stays scoped to the homepage hero label treatment and intentionally does not broaden into briefing-copy or spotlight-copy changes already tracked in separate PRs.
+
 ## 2026-07-07
 
 ### Surface routine active follow-ups in the homepage hero
