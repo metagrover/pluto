@@ -305,6 +305,21 @@ const hasActiveLinkedBlocker = (
       item.related_entity_ids.includes(actionId),
   );
 
+const getActiveLinkedBlockerReason = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): string | null => {
+  const reason = attentionAlerts.find(
+    (item) =>
+      item.status === 'active' &&
+      item.kind === 'blocker' &&
+      item.related_entity_ids.includes(actionId) &&
+      item.reason?.trim(),
+  )?.reason;
+
+  return reason?.trim() || null;
+};
+
 const compareOverdueDashboardActions = (
   a: Entity,
   b: Entity,
@@ -940,10 +955,14 @@ const buildBriefingFocus = (
     const blockedActiveCount = activeActions.filter((action) =>
       hasActiveLinkedBlocker(action.id, attentionAlerts),
     ).length;
+    const blockerReason = getActiveLinkedBlockerReason(
+      prioritizedActiveAction.id,
+      attentionAlerts,
+    );
     return {
       kind: 'attention',
       title: 'Needs attention',
-      detail: pluralize(blockedActiveCount, 'blocked item'),
+      detail: blockerReason ?? pluralize(blockedActiveCount, 'blocked item'),
       action: { label: 'Review actions', target: 'projects' },
     };
   }

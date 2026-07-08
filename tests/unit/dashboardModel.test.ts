@@ -460,6 +460,40 @@ describe('buildDashboardHomeModel', () => {
         makeAttentionItem({
           id: 'attention-blocked-active',
           kind: 'blocker',
+          reason: 'Waiting on security approval from Legal.',
+          related_entity_ids: ['blocked-active'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: 'Waiting on security approval from Legal.',
+      action: { label: 'Review actions', target: 'projects' },
+    });
+  });
+
+  it('falls back to blocked-item count in briefing focus when a blocker-backed follow-up has no richer reason', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'blocked-active',
+          name: 'Blocked active follow-up',
+          due_date: '2026-05-02T12:00:00.000Z',
+        }),
+      ],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-active',
+          kind: 'blocker',
+          reason: '   ',
           related_entity_ids: ['blocked-active'],
         }),
       ],
