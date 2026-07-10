@@ -92,6 +92,39 @@ const ATTENTION_STATUS_ORDER: Record<
   dismissed: 2,
 };
 
+const isPreferredLinkedAttention = (
+  candidate: Pick<
+    MeetingLinkedAttentionItem,
+    'id' | 'status' | 'kind' | 'reason'
+  >,
+  current: Pick<
+    MeetingLinkedAttentionItem,
+    'id' | 'status' | 'kind' | 'reason'
+  >,
+): boolean => {
+  const candidateRank =
+    ATTENTION_STATUS_ORDER[candidate.status] ?? ATTENTION_STATUS_ORDER.active;
+  const currentRank =
+    ATTENTION_STATUS_ORDER[current.status] ?? ATTENTION_STATUS_ORDER.active;
+  if (candidateRank !== currentRank) {
+    return candidateRank < currentRank;
+  }
+
+  const candidateIsBlocker = candidate.kind === 'blocker';
+  const currentIsBlocker = current.kind === 'blocker';
+  if (candidateIsBlocker !== currentIsBlocker) {
+    return candidateIsBlocker;
+  }
+
+  const candidateReasonLength = normalizeValue(candidate.reason).length;
+  const currentReasonLength = normalizeValue(current.reason).length;
+  if (candidateReasonLength !== currentReasonLength) {
+    return candidateReasonLength > currentReasonLength;
+  }
+
+  return false;
+};
+
 const getMeetingActionItemRank = (status: MeetingActionItemStatus): number => {
   if (status === 'fallback') return 4;
   return ACTION_STATUS_ORDER[status];
@@ -134,9 +167,6 @@ const normalizeValue = (value: string | null | undefined): string =>
 
 const normalizeActionKey = (value: string | null | undefined): string =>
   normalizeValue(value).toLowerCase();
-
-const normalizeReason = (value: string | null | undefined): string =>
-  normalizeValue(value).replace(/[.!?]+$/, '');
 
 const parseOwnerLabel = (
   value: string | null | undefined,
@@ -184,25 +214,6 @@ const preferRicherOwnerLabel = (
   }
 
   return normalizedPrimary;
-};
-
-const shouldPreferDuplicateActiveBlocker = (
-  current: Pick<MeetingLinkedAttentionItem, 'status' | 'kind' | 'reason'>,
-  candidate: Pick<MeetingLinkedAttentionItem, 'status' | 'kind' | 'reason'>,
-): boolean => {
-  if (
-    current.kind !== 'blocker' ||
-    current.status !== 'active' ||
-    candidate.kind !== 'blocker' ||
-    candidate.status !== 'active'
-  ) {
-    return false;
-  }
-
-  return (
-    normalizeReason(candidate.reason).length >
-    normalizeReason(current.reason).length
-  );
 };
 
 const parseFallbackStatus = (
@@ -466,7 +477,7 @@ export const buildMeetingActionItems = ({
       const currentAttention = attentionByEntityId.get(relatedEntityId);
       if (
         currentAttention &&
-        !shouldPreferDuplicateActiveBlocker(currentAttention, nextAttention)
+        !isPreferredLinkedAttention(nextAttention, currentAttention)
       ) {
         continue;
       }
