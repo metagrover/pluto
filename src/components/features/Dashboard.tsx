@@ -316,9 +316,7 @@ export const Dashboard = ({
                             }}
                             className="h-8 rounded-lg border border-pro-accent/25 bg-pro-accent/8 px-3 text-[10px] font-black uppercase tracking-[0.14em] text-pro-accent transition-all hover:border-pro-accent/40 hover:bg-pro-accent/14 disabled:cursor-wait disabled:opacity-60"
                           >
-                            {item.status === 'active'
-                              ? 'Mark complete'
-                              : 'Reopen'}
+                            Mark complete
                           </button>
                           {item.attentionItemId && item.dismissLabel ? (
                             <button

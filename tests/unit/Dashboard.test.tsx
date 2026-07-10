@@ -137,6 +137,47 @@ const makeWorkspace = (
 });
 
 describe('Dashboard', () => {
+  it('keeps completion-oriented action labels for overdue and stale follow-up cards', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-overdue',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [
+        makeAction({
+          id: 'action-stale',
+          name: 'Follow up with legal',
+          due_date: null,
+          updated_at: '2026-04-10T10:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup.match(/Mark complete/g) ?? []).toHaveLength(2);
+    expect(markup).not.toContain('Reopen');
+  });
+
   it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
