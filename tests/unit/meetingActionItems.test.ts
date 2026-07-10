@@ -779,6 +779,56 @@ describe('buildMeetingActionItems', () => {
     ]);
   });
 
+  it('prefers blocker attention over routine active duplicates for the same follow-up', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'shared-follow-up',
+          name: 'Unblock legal review',
+          mention_count: 1,
+          created_at: '2026-05-25T18:00:00.000Z',
+        }),
+        makeMeetingEntity({
+          id: 'routine-active',
+          name: 'Send routine recap',
+          mention_count: 5,
+          created_at: '2026-05-26T18:00:00.000Z',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-shared-follow-up',
+          kind: 'follow_up',
+          status: 'active',
+          related_entity_ids: ['shared-follow-up'],
+        },
+        {
+          id: 'attention-shared-blocker',
+          kind: 'blocker',
+          status: 'active',
+          reason: 'Waiting on legal approval.',
+          related_entity_ids: ['shared-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items.map((item) => item.id)).toEqual([
+      'shared-follow-up',
+      'routine-active',
+    ]);
+    expect(items[0]).toMatchObject({
+      id: 'shared-follow-up',
+      attentionItemId: 'attention-shared-blocker',
+      attentionKindLabel: 'Blocker',
+      attentionStatus: 'active',
+      isBlocked: true,
+      blockerReason: 'Waiting on legal approval.',
+      dismissLabel: 'Dismiss',
+      snoozeLabel: 'Snooze',
+    });
+  });
+
   it('deprioritizes dismissed and snoozed linked follow-ups behind active work', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [

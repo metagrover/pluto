@@ -30,6 +30,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Prefer blocker-backed linked attention on Meeting View follow-up cards
+- **Issue:** [#316](https://github.com/metagrover/pluto/issues/316)
+- **PR:** Pending.
+- **Changed:** Meeting View now prefers the highest-priority linked attention item for each follow-up card, so an active `blocker` row wins over a routine active `follow_up` row for the same commitment. Focused regression coverage now proves the card keeps blocker label, blocker reason, blocker-aware ordering, and active dismiss/snooze affordances when duplicate active attention rows exist.
+- **Why:** `#61` still depends on Pluto classifying blocker-backed commitments differently from routine follow-ups across every active surface. Before this slice, Meeting View could bury a blocked commitment behind routine active work and strip away blocker context just because the less important linked row happened to be iterated first.
+- **Replaced:** Keeping the first linked attention row per action on Meeting View cards, even when Pluto already had a stronger active blocker state for that same commitment.
+- **Notes:** This stays inside `meetingActionItems.ts`, keeps scope on linked-attention selection and ordering, and intentionally avoids new Meeting View controls or broader lifecycle redesign.
 ### Prefer blocker attention on duplicate dashboard follow-ups
 - **Issue:** [#314](https://github.com/metagrover/pluto/issues/314)
 - **PR:** Pending.
