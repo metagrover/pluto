@@ -365,6 +365,12 @@ const compareDashboardAttentionPriority = (
     return leftIsActiveBlocker ? -1 : 1;
   }
 
+  if (leftIsActiveBlocker && rightIsActiveBlocker) {
+    const reasonLengthDifference =
+      (right.reason?.trim().length ?? 0) - (left.reason?.trim().length ?? 0);
+    if (reasonLengthDifference !== 0) return reasonLengthDifference;
+  }
+
   return toTimestamp(right.updated_at) - toTimestamp(left.updated_at);
 };
 
