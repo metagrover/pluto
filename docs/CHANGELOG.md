@@ -30,6 +30,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Keep active follow-ups in generated draft context
+- **Issue:** [#312](https://github.com/metagrover/pluto/issues/312)
+- **PR:** Pending.
+- **Changed:** The shared follow-up draft context builder now resolves one preferred linked attention state per action item before it suppresses dismissed or snoozed work. When duplicate linked attention rows disagree on state, an active row now keeps the action in generated follow-up drafts and preserves any active blocker reason instead of falling back to stale summary text.
+- **Why:** `#61` still depends on Pluto surfacing the highest-value follow-ups consistently across meeting surfaces. Before this slice, a stale dismissed or snoozed duplicate could hide a live commitment from follow-up drafts even while Meeting View and the durable attention queue still considered that action active.
+- **Replaced:** Suppressing draft action items whenever any linked attention row for the same entity was dismissed or snoozed, regardless of whether another linked attention row was still active.
+- **Notes:** This stays scoped to `followUpDraftContext.ts` and the shared draft-context tests. It intentionally avoids new draft UX, lifecycle controls, or overlap with the separate Meeting View card fix in `#310`.
+
 ### Prefer active linked attention on Meeting View follow-up cards
 - **Issue:** [#310](https://github.com/metagrover/pluto/issues/310)
 - **PR:** Pending.
@@ -37,6 +45,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still depends on Meeting View reflecting Pluto's durable follow-up lifecycle honestly. Before this slice, mixed-status linked alerts could make a live follow-up show reopen affordances or lose blocker context even while the durable attention queue still had active attention on that same action.
 - **Replaced:** First-write-wins linked attention selection in `buildMeetingActionItems(...)`, which could let older dismissed or snoozed alerts override the active state.
 - **Notes:** This stays inside the shared Meeting View action-card builder and does not change durable attention persistence, sync semantics, or the existing lifecycle controls.
+
 ### Surface routine active follow-ups in the homepage hero
 - **Issue:** [#308](https://github.com/metagrover/pluto/issues/308)
 - **PR:** Pending.
