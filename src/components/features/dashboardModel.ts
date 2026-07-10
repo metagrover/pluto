@@ -257,6 +257,14 @@ const DASHBOARD_SUPPRESSED_ALERT_STATUSES = new Set([
   'dismissed',
   'snoozed',
 ] as const);
+const DASHBOARD_ATTENTION_STATUS_ORDER: Record<
+  AttentionItem['status'],
+  number
+> = {
+  active: 0,
+  snoozed: 1,
+  dismissed: 2,
+};
 
 const shouldSuppressDashboardAction = (
   actionId: string,
@@ -339,6 +347,27 @@ const filterSuppressedDashboardActions = (
     (action) => !shouldSuppressDashboardAction(action.id, attentionAlerts),
   );
 
+const compareDashboardAttentionPriority = (
+  left: AttentionItem,
+  right: AttentionItem,
+): number => {
+  const leftStatusRank = DASHBOARD_ATTENTION_STATUS_ORDER[left.status];
+  const rightStatusRank = DASHBOARD_ATTENTION_STATUS_ORDER[right.status];
+  if (leftStatusRank !== rightStatusRank) {
+    return leftStatusRank - rightStatusRank;
+  }
+
+  const leftIsActiveBlocker =
+    left.status === 'active' && left.kind === 'blocker';
+  const rightIsActiveBlocker =
+    right.status === 'active' && right.kind === 'blocker';
+  if (leftIsActiveBlocker !== rightIsActiveBlocker) {
+    return leftIsActiveBlocker ? -1 : 1;
+  }
+
+  return toTimestamp(right.updated_at) - toTimestamp(left.updated_at);
+};
+
 const getLinkedDashboardAttention = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -350,9 +379,7 @@ const getLinkedDashboardAttention = (
     return null;
   }
 
-  return (
-    linkedAlerts.find((item) => item.status === 'active') ?? linkedAlerts[0]
-  );
+  return [...linkedAlerts].sort(compareDashboardAttentionPriority)[0] ?? null;
 };
 
 const getMeetingDetail = (meeting: Meeting): string => {
