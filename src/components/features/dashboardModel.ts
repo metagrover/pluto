@@ -425,10 +425,17 @@ const actionToInsightItem = (
 });
 
 const getDashboardActionContextLabel = (
+  linkedAttention: AttentionItem | null,
   actionId: string,
   attentionAlerts: AttentionItem[],
   meetings: Meeting[],
 ): string | null => {
+  const blockerReason =
+    getDashboardActionAttentionContext(linkedAttention).attentionReason;
+  if (blockerReason) {
+    return blockerReason;
+  }
+
   const relatedMeetingIds = Array.from(
     new Set(
       attentionAlerts
@@ -470,7 +477,12 @@ const buildActionInsights = (
     ...sortActions(overdueActions, (a, b) =>
       compareOverdueDashboardActions(a, b, attentionAlerts),
     ).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -479,11 +491,16 @@ const buildActionInsights = (
         action,
         'overdue',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
     ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -492,7 +509,7 @@ const buildActionInsights = (
         action,
         'stale',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
     ...sortActions(activeActions, (a, b) => {
@@ -503,7 +520,12 @@ const buildActionInsights = (
       }
       return compareActionsByDueDate(a, b);
     }).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -512,7 +534,7 @@ const buildActionInsights = (
         action,
         'active',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
   ];
