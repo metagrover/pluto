@@ -425,10 +425,17 @@ const actionToInsightItem = (
 });
 
 const getDashboardActionContextLabel = (
+  linkedAttention: AttentionItem | null,
   actionId: string,
   attentionAlerts: AttentionItem[],
   meetings: Meeting[],
 ): string | null => {
+  const blockerReason =
+    getDashboardActionAttentionContext(linkedAttention).attentionReason;
+  if (blockerReason) {
+    return blockerReason;
+  }
+
   const relatedMeetingIds = Array.from(
     new Set(
       attentionAlerts
@@ -470,7 +477,12 @@ const buildActionInsights = (
     ...sortActions(overdueActions, (a, b) =>
       compareOverdueDashboardActions(a, b, attentionAlerts),
     ).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -479,11 +491,16 @@ const buildActionInsights = (
         action,
         'overdue',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
     ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -492,7 +509,7 @@ const buildActionInsights = (
         action,
         'stale',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
     ...sortActions(activeActions, (a, b) => {
@@ -503,7 +520,12 @@ const buildActionInsights = (
       }
       return compareActionsByDueDate(a, b);
     }).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -512,7 +534,7 @@ const buildActionInsights = (
         action,
         'active',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
   ];
@@ -905,6 +927,7 @@ const joinCountLabels = (labels: string[]): string =>
   labels.filter(Boolean).join(' · ');
 
 const buildBriefingFocus = (
+  hero: DashboardHero,
   actionInsights: DashboardActionInsights,
   latestMeeting: DashboardLatestMeeting,
   knowledgeDocuments: DashboardKnowledgeDocuments,
@@ -944,6 +967,20 @@ const buildBriefingFocus = (
       kind: 'attention',
       title: 'Needs attention',
       detail: pluralize(blockedActiveCount, 'blocked item'),
+      action: { label: 'Review actions', target: 'projects' },
+    };
+  }
+
+  if (
+    actionInsights.state === 'populated' &&
+    actionInsights.activeCount > 0 &&
+    hero.kind === 'active_action' &&
+    hero.severity === 'watch'
+  ) {
+    return {
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: pluralize(actionInsights.activeCount, 'active item'),
       action: { label: 'Review actions', target: 'projects' },
     };
   }
@@ -1012,19 +1049,21 @@ export const buildDashboardHomeModel = (
     workingMemorySnapshots,
   );
   const spotlight = buildSpotlight(input.workspace);
+  const hero = buildHero(
+    {
+      ...input,
+      overdueActions,
+      staleActions,
+      activeActions,
+    },
+    latestMeeting,
+    knowledgeDocuments,
+  );
 
   return {
-    hero: buildHero(
-      {
-        ...input,
-        overdueActions,
-        staleActions,
-        activeActions,
-      },
-      latestMeeting,
-      knowledgeDocuments,
-    ),
+    hero,
     briefingFocus: buildBriefingFocus(
+      hero,
       actionInsights,
       latestMeeting,
       knowledgeDocuments,
