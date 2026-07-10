@@ -1,7 +1,11 @@
 import { Loader2 } from 'lucide-react';
 
 import { getTrustStatusMeta } from '../../utils/trustStatus';
-import type { DashboardAction, DashboardHomeModel } from './dashboardModel';
+import type {
+  DashboardAction,
+  DashboardActionInsightItem,
+  DashboardHomeModel,
+} from './dashboardModel';
 
 interface DashboardProps {
   model: DashboardHomeModel;
@@ -106,6 +110,25 @@ const isSameAction = (left: DashboardAction, right: DashboardAction): boolean =>
   (left.target !== 'meeting' ||
     right.target !== 'meeting' ||
     left.meetingId === right.meetingId);
+
+const getActionInsightStatusLabel = (
+  item: DashboardActionInsightItem,
+): string => item.attentionLabel ?? item.status;
+
+const getActionInsightStatusTone = (
+  item: DashboardActionInsightItem,
+): string => {
+  if (item.attentionLabel === 'Blocker') {
+    return 'bg-pro-urgent/10 text-pro-urgent';
+  }
+  if (item.status === 'overdue') {
+    return 'bg-pro-urgent/10 text-pro-urgent';
+  }
+  if (item.status === 'stale') {
+    return 'bg-pro-warning/10 text-pro-warning';
+  }
+  return 'bg-pro-accent/10 text-pro-accent';
+};
 
 export const Dashboard = ({
   model,
@@ -280,19 +303,17 @@ export const Dashboard = ({
                             {item.title}
                           </span>
                           <span
-                            className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${
-                              item.status === 'overdue'
-                                ? 'bg-pro-urgent/10 text-pro-urgent'
-                                : item.status === 'stale'
-                                  ? 'bg-pro-warning/10 text-pro-warning'
-                                  : 'bg-pro-accent/10 text-pro-accent'
-                            }`}
+                            className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${getActionInsightStatusTone(
+                              item,
+                            )}`}
                           >
-                            {item.status}
+                            {getActionInsightStatusLabel(item)}
                           </span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
-                          {item.attentionLabel ? (
+                          {item.attentionLabel &&
+                          item.attentionLabel !==
+                            getActionInsightStatusLabel(item) ? (
                             <span className="rounded-full bg-pro-urgent/10 px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-pro-urgent">
                               {item.attentionLabel}
                             </span>
