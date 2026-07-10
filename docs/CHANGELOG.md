@@ -30,6 +30,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Surface blocker state in homepage briefing heading
+- **Issue:** [#334](https://github.com/metagrover/pluto/issues/334)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus heading now switches to `Blocked follow-up` or `Blocked follow-ups` when the selected focus is a blocker-backed active commitment, while overdue/stale summary states keep the existing generic `Needs attention` title. Focused regression coverage proves the blocked-heading path without changing adjacent briefing behavior.
+- **Why:** `#61` still depends on homepage follow-up surfaces classifying blockers differently from routine attention. Before this slice, Pluto could correctly select blocked work into briefing focus but still headline it with the same generic title as ordinary attention, which hid part of the trust signal it already knew.
+- **Replaced:** Treating blocker-backed briefing focus as generic attention copy even after blocker-aware selection logic had already promoted that work.
+- **Notes:** This stays scoped to `buildBriefingFocus(...)` title copy. Richer blocker detail remains isolated in the separate issue tracked by PR `#333`.
 ### Surface blocker reason in homepage briefing focus
 - **Issue:** [#332](https://github.com/metagrover/pluto/issues/332)
 - **PR:** Pending.

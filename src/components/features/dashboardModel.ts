@@ -1039,7 +1039,8 @@ const buildBriefingFocus = (
     );
     return {
       kind: 'attention',
-      title: 'Needs attention',
+      title:
+        blockedActiveCount === 1 ? 'Blocked follow-up' : 'Blocked follow-ups',
       detail: blockerReason ?? pluralize(blockedActiveCount, 'blocked item'),
       action: { label: 'Review actions', target: 'projects' },
     };
