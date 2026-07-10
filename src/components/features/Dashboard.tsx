@@ -281,9 +281,11 @@ export const Dashboard = ({
                           </p>
                         </div>
                         {item.attentionReason ? (
-                          <p className="mt-1 text-[11px] font-semibold text-pro-urgent/80">
-                            {item.attentionReason}
-                          </p>
+                          item.attentionReason !== item.contextLabel ? (
+                            <p className="mt-1 text-[11px] font-semibold text-pro-urgent/80">
+                              {item.attentionReason}
+                            </p>
+                          ) : null
                         ) : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
@@ -445,7 +447,7 @@ export const Dashboard = ({
                 className="mt-auto rounded-2xl border border-pro-border/70 bg-pro-bg/45 p-4 text-left transition-all hover:border-pro-accent/30 hover:bg-pro-bg/65"
               >
                 <p className="text-[11px] font-black tracking-[0.14em] text-pro-text-muted/55">
-                  Project signal
+                  {model.spotlight.subtitle}
                 </p>
                 <div className="mt-2 flex items-start justify-between gap-3">
                   <div>

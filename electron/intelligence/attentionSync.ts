@@ -245,6 +245,9 @@ const buildStaleActionItem = (action: Entity): AttentionItemUpsert => {
 const buildBlockedActionItem = (
   action: BlockedActionItem,
 ): AttentionItemUpsert => {
+  const blockerReason = action.blocker_evidence_quote?.trim()
+    ? action.blocker_evidence_quote.trim()
+    : `Blocked by ${action.blocker_name}.`;
   const relatedMeetingIds = unique(
     [
       action.blocker_meeting_id,
@@ -270,8 +273,7 @@ const buildBlockedActionItem = (
   if (action.blocker_meeting_id) {
     evidence.push({
       meeting_id: action.blocker_meeting_id,
-      quote:
-        action.blocker_evidence_quote ?? `Blocked by ${action.blocker_name}.`,
+      quote: blockerReason,
       entity_id: action.blocker_entity_id,
       source_kind: 'blocked_action',
     });
@@ -297,7 +299,7 @@ const buildBlockedActionItem = (
     score: scored.score,
     status: 'active',
     title: `Blocked: ${action.name}`,
-    reason: `Blocked by ${action.blocker_name}.`,
+    reason: blockerReason,
     source: 'action_tracker',
     score_breakdown: scored.score_breakdown,
     evidence,
