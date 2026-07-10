@@ -30,6 +30,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Surface blocker reason in homepage briefing focus
+- **Issue:** [#332](https://github.com/metagrover/pluto/issues/332)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus panel now reuses the linked active blocker reason when a blocker-backed follow-up is the highest-priority active item, while keeping the existing blocked-item count as a fallback when Pluto has no richer blocker copy. Focused regression coverage now proves both the blocker-reason path and the generic fallback path.
+- **Why:** `#61` still depends on homepage follow-up surfaces showing the same trustworthy context Pluto already extracted. Before this slice, the homepage hero could already surface blocker-backed detail while the adjacent briefing panel still collapsed that same commitment to generic `1 blocked item` copy.
+- **Replaced:** Treating blocker-backed homepage briefing detail as count-only summary text even when linked active attention already carried a specific blocker reason.
+- **Notes:** This stays scoped to briefing-focus copy in `dashboardModel.ts`. It intentionally does not reopen routine-active briefing behavior in PR `#307` or the separate duplicate blocker-reason slices.
 ### Surface blocker reason in the homepage hero
 - **Issue:** [#330](https://github.com/metagrover/pluto/issues/330)
 - **PR:** Pending.
