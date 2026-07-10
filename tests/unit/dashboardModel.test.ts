@@ -343,6 +343,7 @@ describe('buildDashboardHomeModel', () => {
         makeAttentionItem({
           id: 'attention-blocked-overdue',
           kind: 'blocker',
+          reason: 'Legal approval is still blocking the overdue launch review.',
           related_entity_ids: ['blocked-overdue'],
         }),
       ],
@@ -351,7 +352,9 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.hero.kind).toBe('overdue_action');
-    expect(model.hero.detail).toContain('Blocked overdue follow-up');
+    expect(model.hero.detail).toBe(
+      'Legal approval is still blocking the overdue launch review.',
+    );
     expect(model.hero.detail).not.toContain('Routine overdue follow-up');
     expect(model.actionInsights.items[0]).toMatchObject({
       id: 'blocked-overdue',
@@ -416,6 +419,7 @@ describe('buildDashboardHomeModel', () => {
         makeAttentionItem({
           id: 'attention-blocked-active',
           kind: 'blocker',
+          reason: 'Awaiting procurement approval before kickoff can proceed.',
           related_entity_ids: ['blocked-active'],
         }),
       ],
@@ -426,7 +430,9 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.kind).toBe('active_action');
     expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.severity).toBe('urgent');
-    expect(model.hero.detail).toContain('Blocked active follow-up');
+    expect(model.hero.detail).toBe(
+      'Awaiting procurement approval before kickoff can proceed.',
+    );
     expect(model.hero.action).toEqual({
       label: 'Open projects',
       target: 'projects',

@@ -30,6 +30,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Surface blocker reason in the homepage hero
+- **Issue:** [#330](https://github.com/metagrover/pluto/issues/330)
+- **PR:** Pending.
+- **Changed:** The homepage hero now reuses the linked active blocker reason when a blocker-backed overdue or active follow-up is the top commitment, while keeping the existing generic `needs attention` copy as the fallback when Pluto has no richer blocker reason. Focused regression coverage now proves the hero preserves blocker evidence instead of dropping back to generic follow-up text.
+- **Why:** `#61` still depends on homepage follow-up surfaces staying as trustworthy as Pluto's durable attention data. Before this slice, the dashboard could rank the right blocked commitment first but still headline it with thin generic copy, even when the linked attention item already contained the real blocker reason.
+- **Replaced:** Treating the homepage hero detail as action-name-only copy for blocker-backed follow-ups after blocker context was already available lower in the dashboard model.
+- **Notes:** This intentionally stays scoped to homepage hero detail. Dashboard cards, Meeting View, follow-up drafts, sync copy, and briefing-focus behavior remain in their own focused slices and PRs.
 ### Preserve richer blocker reasons in synced follow-up attention
 - **Issue:** [#328](https://github.com/metagrover/pluto/issues/328)
 - **PR:** Pending.

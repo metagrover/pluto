@@ -302,6 +302,22 @@ const getDashboardActionAttentionContext = (
     attentionReason: normalizedReason,
   };
 };
+
+const getDashboardHeroActionDetail = (
+  action: Entity,
+  attentionAlerts: AttentionItem[],
+): string => {
+  const linkedAttention = getLinkedDashboardAttention(
+    action.id,
+    attentionAlerts,
+  );
+  const blockerReason =
+    linkedAttention?.status === 'active' && linkedAttention.kind === 'blocker'
+      ? linkedAttention.reason?.trim() || null
+      : null;
+  return blockerReason || `${action.name} needs attention`;
+};
+
 const hasActiveLinkedBlocker = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -827,7 +843,10 @@ const buildHero = (
       kind: 'overdue_action',
       title: pluralize(input.overdueActions.length, 'overdue item'),
       detail: joinCountLabels([
-        `${overdueAction.name} needs attention`,
+        getDashboardHeroActionDetail(
+          overdueAction,
+          input.attentionAlerts ?? [],
+        ),
         input.staleActions.length > 0
           ? pluralize(input.staleActions.length, 'stale item')
           : '',
@@ -867,7 +886,10 @@ const buildHero = (
     return {
       kind: 'active_action',
       title: pluralize(blockedActiveCount, 'blocked item'),
-      detail: `${prioritizedActiveAction.name} needs attention`,
+      detail: getDashboardHeroActionDetail(
+        prioritizedActiveAction,
+        input.attentionAlerts ?? [],
+      ),
       severity: 'urgent',
       action: { label: 'Open projects', target: 'projects' },
     };
