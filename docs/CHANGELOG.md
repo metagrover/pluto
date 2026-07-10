@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-08
 
+### Surface blocker state in the project spotlight badge
+- **Issue:** [#344](https://github.com/metagrover/pluto/issues/344)
+- **PR:** Pending.
+- **Changed:** The homepage project spotlight now exposes a dedicated `badgeLabel` from the dashboard model so blocked spotlight cards render `Blocked` while non-blocked spotlight states keep the generic `Projects` pill. Focused regression coverage now proves both the model output and server-rendered dashboard markup.
+- **Why:** `#61` still depends on Pluto making blocker-backed follow-ups and project state explicit on homepage surfaces. Before this slice, the spotlight could already carry blocker-specific priority and detail, but the rendered badge stayed generic and hid that trust signal at a glance.
+- **Replaced:** Hardcoding the spotlight badge to `Projects` even when the selected spotlight card already represented blocked project work.
+- **Notes:** This intentionally stays scoped to the spotlight badge. Adjacent spotlight subtitle and hero/briefing blocker-copy slices remain tracked in their separate PRs.
 ### Surface blocker state in the homepage hero badge
 - **Issue:** [#342](https://github.com/metagrover/pluto/issues/342)
 - **PR:** Pending.

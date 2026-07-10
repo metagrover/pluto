@@ -118,6 +118,7 @@ export type DashboardKnowledgeDocuments =
 export interface DashboardSpotlight {
   title: string;
   subtitle: string;
+  badgeLabel: string;
   detail: string;
   tags: string[];
   target: DashboardTarget;
@@ -853,6 +854,7 @@ const buildSpotlight = (
   return {
     title: card.title,
     subtitle: card.open_blockers > 0 ? 'Blocked project' : 'Project spotlight',
+    badgeLabel: card.open_blockers > 0 ? 'Blocked' : 'Projects',
     detail: tags.length > 0 ? tags.join(' | ') : 'No blockers surfaced',
     tags,
     target: 'projects',
