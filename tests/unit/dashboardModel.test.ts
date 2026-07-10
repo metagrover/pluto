@@ -598,6 +598,8 @@ describe('buildDashboardHomeModel', () => {
       id: 'action-blocked',
       attentionLabel: 'Blocker',
       attentionReason: 'Blocked by legal approval.',
+      dismissLabel: 'Dismiss blocker',
+      snoozeLabel: 'Snooze blocker',
     });
   });
 

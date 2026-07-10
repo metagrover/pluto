@@ -179,6 +179,8 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('Blocker');
     expect(markup).toContain('Blocked by legal approval.');
+    expect(markup).toContain('Dismiss blocker');
+    expect(markup).toContain('Snooze blocker');
   });
 
   it('renders linked meeting context on follow-up cards when available', () => {
