@@ -27,8 +27,117 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still depends on Pluto surfacing trustworthy follow-up and blocker context across homepage surfaces. Before this slice, the spotlight could show blocker counts in its detail line while still presenting the same generic label as routine project context, which weakened the trust signal Pluto already had.
 - **Replaced:** Treating blocked project spotlight states as the same generic dashboard label used for non-blocked project context.
 - **Notes:** This stays scoped to spotlight label/state copy and intentionally avoids the in-flight homepage hero and briefing blocker-copy PR stack.
+### Surface blocker state in homepage hero action label
+- **Issue:** [#338](https://github.com/metagrover/pluto/issues/338)
+- **PR:** Pending.
+- **Changed:** The homepage hero now uses a blocker-specific `Review blockers` CTA when the prioritized active follow-up is blocker-backed, while overdue, stale, and routine-active hero states keep the existing `Open projects` action. Focused regression coverage now proves the blocker-backed hero no longer shares the same generic CTA as non-blocker states.
+- **Why:** `#61` still depends on homepage follow-up surfaces explaining why Pluto surfaced a commitment. Before this slice, the hero could already say a follow-up was a blocked item and show blocker-aware detail, but its CTA still read like generic project navigation, which weakened the trust signal Pluto already had.
+- **Replaced:** Treating blocker-backed homepage hero actions as if they should use the same generic `Open projects` CTA as routine, stale, and overdue follow-up states.
+- **Notes:** This stays scoped to `dashboardModel.ts` hero action-label copy and its focused regression test. It intentionally does not redesign dashboard layout or overlap the adjacent blocker-detail and briefing-copy PR stack.
+## 2026-07-10
+
+### Surface blocker reasons in dashboard action-insight detail
+- **Issue:** [#350](https://github.com/metagrover/pluto/issues/350)
+- **PR:** Pending.
+- **Changed:** Blocker-backed homepage action-insight cards now promote the linked blocker reason into the card's primary metadata line, keeping due-date context when Pluto has it and falling back to the existing meeting or domain detail when no richer blocker reason exists. Focused model and server-render regression coverage now prove blocker-backed cards stop defaulting to generic `Due ... · Work` copy.
+- **Why:** `#61` still depends on Pluto surfacing trustworthy follow-up context directly on homepage attention surfaces. Before this slice, the dashboard could already classify a follow-up as a blocker and even render the reason separately, but the main detail line still looked like routine metadata and buried the most useful why-now context.
+- **Replaced:** Treating the dashboard action-insight detail row as generic due/source copy even when linked active blocker attention already carried a richer reason.
+- **Notes:** This stays scoped to action-insight detail treatment. It preserves the current status chip, dismissal/snooze controls, and meeting-context fallback for routine follow-ups.
 
 ## 2026-07-07
+
+### Surface blocker state in homepage briefing action labels
+- **Issue:** [#336](https://github.com/metagrover/pluto/issues/336)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus panel now switches its CTA to `Review blockers` when the prioritized follow-up is blocker-backed, while overdue/stale summaries and non-blocker attention paths keep the existing `Review actions` label. Focused regression coverage now proves the blocker-specific CTA without changing the surrounding dashboard layout or action target.
+- **Why:** `#61` still depends on homepage follow-up surfaces reflecting Pluto's durable blocker classification consistently. Before this slice, open work on the briefing heading and detail could say the focus was blocked while the CTA still used the same generic action copy as routine attention states, which softened the urgency of the panel.
+- **Replaced:** Treating the homepage briefing CTA as generic review copy even when the selected follow-up is explicitly blocked.
+- **Notes:** This stays scoped to blocker-backed briefing CTA text. The adjacent blocker-specific heading and richer blocker-detail slices remain tracked in PRs `#335` and `#333`.
+### Surface blocker state in homepage briefing heading
+- **Issue:** [#334](https://github.com/metagrover/pluto/issues/334)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus heading now switches to `Blocked follow-up` or `Blocked follow-ups` when the selected focus is a blocker-backed active commitment, while overdue/stale summary states keep the existing generic `Needs attention` title. Focused regression coverage proves the blocked-heading path without changing adjacent briefing behavior.
+- **Why:** `#61` still depends on homepage follow-up surfaces classifying blockers differently from routine attention. Before this slice, Pluto could correctly select blocked work into briefing focus but still headline it with the same generic title as ordinary attention, which hid part of the trust signal it already knew.
+- **Replaced:** Treating blocker-backed briefing focus as generic attention copy even after blocker-aware selection logic had already promoted that work.
+- **Notes:** This stays scoped to `buildBriefingFocus(...)` title copy. Richer blocker detail remains isolated in the separate issue tracked by PR `#333`.
+### Surface blocker reason in homepage briefing focus
+- **Issue:** [#332](https://github.com/metagrover/pluto/issues/332)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus panel now reuses the linked active blocker reason when a blocker-backed follow-up is the highest-priority active item, while keeping the existing blocked-item count as a fallback when Pluto has no richer blocker copy. Focused regression coverage now proves both the blocker-reason path and the generic fallback path.
+- **Why:** `#61` still depends on homepage follow-up surfaces showing the same trustworthy context Pluto already extracted. Before this slice, the homepage hero could already surface blocker-backed detail while the adjacent briefing panel still collapsed that same commitment to generic `1 blocked item` copy.
+- **Replaced:** Treating blocker-backed homepage briefing detail as count-only summary text even when linked active attention already carried a specific blocker reason.
+- **Notes:** This stays scoped to briefing-focus copy in `dashboardModel.ts`. It intentionally does not reopen routine-active briefing behavior in PR `#307` or the separate duplicate blocker-reason slices.
+### Surface blocker reason in the homepage hero
+- **Issue:** [#330](https://github.com/metagrover/pluto/issues/330)
+- **PR:** Pending.
+- **Changed:** The homepage hero now reuses the linked active blocker reason when a blocker-backed overdue or active follow-up is the top commitment, while keeping the existing generic `needs attention` copy as the fallback when Pluto has no richer blocker reason. Focused regression coverage now proves the hero preserves blocker evidence instead of dropping back to generic follow-up text.
+- **Why:** `#61` still depends on homepage follow-up surfaces staying as trustworthy as Pluto's durable attention data. Before this slice, the dashboard could rank the right blocked commitment first but still headline it with thin generic copy, even when the linked attention item already contained the real blocker reason.
+- **Replaced:** Treating the homepage hero detail as action-name-only copy for blocker-backed follow-ups after blocker context was already available lower in the dashboard model.
+- **Notes:** This intentionally stays scoped to homepage hero detail. Dashboard cards, Meeting View, follow-up drafts, sync copy, and briefing-focus behavior remain in their own focused slices and PRs.
+### Preserve richer blocker reasons in synced follow-up attention
+- **Issue:** [#328](https://github.com/metagrover/pluto/issues/328)
+- **PR:** Pending.
+- **Changed:** Blocked action attention sync now promotes the richer blocker evidence quote into the synced attention item's primary reason when that quote is available, while keeping the existing `Blocked by <name>.` fallback when Pluto has no better blocker wording. Focused regression coverage now proves both the richer-reason path and the generic fallback path.
+- **Why:** `#61` depends on Pluto carrying trustworthy blocker context through the full follow-up loop. Before this slice, the sync layer already stored the richer blocker quote in evidence but still flattened the visible reason down to a generic label, which made downstream surfaces lose context Pluto already had.
+- **Replaced:** Treating blocked-action attention reasons as generic labels even when the sync payload already contained a more specific blocker explanation.
+- **Notes:** This stays inside `attentionSync.ts`, keeps existing blocker scoring and dedupe behavior intact, and complements the in-flight surface-level blocker-reason PRs by improving the shared upstream attention item they consume.
+### Preserve richer blocker reasons on dashboard follow-up cards
+- **Issue:** [#325](https://github.com/metagrover/pluto/issues/325)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up cards now prefer the richest linked active blocker reason when duplicate blocker alerts point at the same action, while keeping the existing blocker label and active-status priority intact. Focused regression coverage now proves a thinner or empty blocker row can no longer hide the fuller blocker explanation Pluto already has.
+- **Why:** `#61` still depends on homepage follow-up surfaces surfacing trustworthy context, not just the right ranking. Before this slice, dashboard follow-up cards already showed blocker labels and reasons, but duplicate active blocker alerts still kept the first reason they saw and could drop the more useful explanation.
+- **Replaced:** Treating the first active blocker alert as authoritative for dashboard follow-up reason text even when another linked active blocker carried richer context for the same commitment.
+- **Notes:** This stays inside `dashboardModel.ts` and existing dashboard follow-up tests. It intentionally avoids reopening the in-flight Meeting View and follow-up draft blocker-reason slices tracked separately.
+### Preserve richer duplicate blocker reasons in Meeting View
+- **Issue:** [#322](https://github.com/metagrover/pluto/issues/322)
+- **PR:** Pending.
+- **Changed:** Meeting View follow-up cards now keep the richest linked active blocker reason when duplicate blocker attention rows point at the same action. Focused regression coverage proves Pluto no longer keeps a thinner blocker explanation just because it appeared first.
+- **Why:** `#61` depends on follow-up surfaces explaining why a commitment is blocked. Before this slice, Meeting View could already show blocker state, but duplicate active blocker rows could still hide the most useful reason Pluto had for that blockage.
+- **Replaced:** Treating the first active blocker row as authoritative even when a later duplicate blocker carries better context for the same follow-up.
+- **Notes:** This intentionally stays narrower than the separate in-flight active-priority slice. It only upgrades duplicate active blocker reason selection on Meeting View cards.
+### Prefer richer blocker reasons in follow-up drafts
+- **Issue:** [#320](https://github.com/metagrover/pluto/issues/320)
+- **PR:** Pending.
+- **Changed:** Follow-up draft action lines now keep the richest existing blocker reason when duplicate active blocker attention rows point at the same commitment. Focused regression coverage proves Pluto no longer settles for the first shorter blocker note when durable attention already has more specific blocker context for that same action.
+- **Why:** `#61` still depends on follow-up drafts reflecting the trust and lifecycle state Pluto already knows. Before this slice, duplicate active blocker rows could leave the generated draft with thinner blocker rationale than the durable attention queue already carried, which made the draft less accountable than the underlying attention data.
+- **Replaced:** Keeping the first active blocker reason encountered for a draft action even when a later linked blocker already provided richer context for the same commitment.
+- **Notes:** This stays scoped to `followUpDraftContext.ts`, does not reopen the mixed-status selection work on `#312`, and does not overlap the blocker-plus-aging formatting work tracked separately on `#318`.
+### Keep aging lifecycle visible in blocker-backed follow-up drafts
+- **Issue:** [#318](https://github.com/metagrover/pluto/issues/318)
+- **PR:** Pending.
+- **Changed:** Follow-up draft action lines now preserve overdue or stale lifecycle detail even when the same action is also linked to an active blocker. Focused regression coverage proves Pluto keeps both the blocker reason and the aging state in the generated draft context instead of dropping the lifecycle label.
+- **Why:** `#61` depends on Pluto distinguishing blocked, overdue, and stale commitments with trustworthy source-aware context. Before this slice, the draft surface hid overdue or stale state whenever blocker attention was also present, which made the generated follow-up copy less honest than the underlying commitment model.
+- **Replaced:** Treating blocker reason text as a reason to suppress aging lifecycle labels on follow-up draft action lines.
+- **Notes:** This stays scoped to `followUpDraftContext.ts` and its unit tests. It does not change draft templates, dashboard ranking, or Meeting View controls.
+### Prefer blocker-backed linked attention on Meeting View follow-up cards
+- **Issue:** [#316](https://github.com/metagrover/pluto/issues/316)
+- **PR:** Pending.
+- **Changed:** Meeting View now prefers the highest-priority linked attention item for each follow-up card, so an active `blocker` row wins over a routine active `follow_up` row for the same commitment. Focused regression coverage now proves the card keeps blocker label, blocker reason, blocker-aware ordering, and active dismiss/snooze affordances when duplicate active attention rows exist.
+- **Why:** `#61` still depends on Pluto classifying blocker-backed commitments differently from routine follow-ups across every active surface. Before this slice, Meeting View could bury a blocked commitment behind routine active work and strip away blocker context just because the less important linked row happened to be iterated first.
+- **Replaced:** Keeping the first linked attention row per action on Meeting View cards, even when Pluto already had a stronger active blocker state for that same commitment.
+- **Notes:** This stays inside `meetingActionItems.ts`, keeps scope on linked-attention selection and ordering, and intentionally avoids new Meeting View controls or broader lifecycle redesign.
+### Prefer blocker attention on duplicate dashboard follow-ups
+- **Issue:** [#314](https://github.com/metagrover/pluto/issues/314)
+- **PR:** Pending.
+- **Changed:** Dashboard follow-up cards now resolve one preferred linked attention item per action instead of keeping the first linked active row they see. Active blocker attention outranks routine active follow-up attention for the same commitment, so homepage cards keep blocker label, blocker reason, and blocker-aware ordering when duplicate active attention rows exist.
+- **Why:** `#61` still depends on Pluto classifying blocker-backed commitments differently from routine follow-ups on every active surface. Before this slice, the dashboard could flatten a blocked commitment into an ordinary follow-up simply because a weaker active linked row happened to be returned first.
+- **Replaced:** Selecting dashboard linked attention from first-active-row wins, even when Pluto already persisted a stronger blocker classification for the same action.
+- **Notes:** This stays scoped to dashboard linked-attention selection and existing ranking/copy behavior. It intentionally does not add new controls or reopen the separate Meeting View and draft mixed-status PRs.
+### Keep active follow-ups in generated draft context
+- **Issue:** [#312](https://github.com/metagrover/pluto/issues/312)
+- **PR:** Pending.
+- **Changed:** The shared follow-up draft context builder now resolves one preferred linked attention state per action item before it suppresses dismissed or snoozed work. When duplicate linked attention rows disagree on state, an active row now keeps the action in generated follow-up drafts and preserves any active blocker reason instead of falling back to stale summary text.
+- **Why:** `#61` still depends on Pluto surfacing the highest-value follow-ups consistently across meeting surfaces. Before this slice, a stale dismissed or snoozed duplicate could hide a live commitment from follow-up drafts even while Meeting View and the durable attention queue still considered that action active.
+- **Replaced:** Suppressing draft action items whenever any linked attention row for the same entity was dismissed or snoozed, regardless of whether another linked attention row was still active.
+- **Notes:** This stays scoped to `followUpDraftContext.ts` and the shared draft-context tests. It intentionally avoids new draft UX, lifecycle controls, or overlap with the separate Meeting View card fix in `#310`.
+
+### Prefer active linked attention on Meeting View follow-up cards
+- **Issue:** [#310](https://github.com/metagrover/pluto/issues/310)
+- **PR:** Pending.
+- **Changed:** Meeting View's shared follow-up card builder now prefers the highest-priority linked attention item for each action instead of keeping the first alert it sees. Active alerts outrank snoozed and dismissed ones, blocker context still wins inside the same lifecycle tier, and focused regression coverage now proves a live blocker-backed follow-up no longer renders as dismissed just because an older handled alert appeared first.
+- **Why:** `#61` still depends on Meeting View reflecting Pluto's durable follow-up lifecycle honestly. Before this slice, mixed-status linked alerts could make a live follow-up show reopen affordances or lose blocker context even while the durable attention queue still had active attention on that same action.
+- **Replaced:** First-write-wins linked attention selection in `buildMeetingActionItems(...)`, which could let older dismissed or snoozed alerts override the active state.
+- **Notes:** This stays inside the shared Meeting View action-card builder and does not change durable attention persistence, sync semantics, or the existing lifecycle controls.
 
 ### Surface routine active follow-ups in the homepage hero
 - **Issue:** [#308](https://github.com/metagrover/pluto/issues/308)
@@ -45,6 +154,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still depends on homepage follow-up surfaces showing the highest-value commitments consistently. Before this slice, the hero and list could both rank a blocked active follow-up first while briefing focus still fell through to latest-meeting or knowledge fallback copy, which made the homepage contradict itself.
 - **Replaced:** Treating homepage briefing focus as overdue/stale-only attention copy even after blocker-backed active follow-ups were promoted elsewhere on the dashboard.
 - **Notes:** This stays scoped to `dashboardModel.ts` and existing briefing-focus copy. It intentionally does not promote routine active work into briefing focus or redesign the dashboard surface.
+
+### Surface routine active follow-ups in the homepage briefing
+- **Issue:** [#306](https://github.com/metagrover/pluto/issues/306)
+- **PR:** Pending.
+- **Changed:** The homepage briefing focus now stays on follow-up attention when Pluto still has routine active commitments but nothing is overdue, stale, or blocker-backed. Focused regression coverage now proves the dashboard keeps the due-soon active follow-up visible in the briefing panel instead of falling through to latest-meeting or knowledge fallback copy.
+- **Why:** `#61` still depends on homepage surfaces showing the highest-value follow-ups with trustworthy priority. Even after routine active work started surfacing in the hero, the adjacent briefing panel still dropped that same work and promoted unrelated fallback context.
+- **Replaced:** Treating the homepage briefing focus as follow-up attention only for overdue or stale work, with routine active commitments falling straight to meeting or knowledge fallback.
+- **Notes:** This stays scoped to briefing-focus selection on top of the shipped hero behavior. It deliberately avoids reopening the blocker-backed active path already covered by `#304` / PR `#305`, and does not redesign dashboard controls.
 
 ### Surface blocker-backed active follow-ups in the homepage hero
 - **Issue:** [#302](https://github.com/metagrover/pluto/issues/302)

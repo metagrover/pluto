@@ -303,9 +303,11 @@ export const Dashboard = ({
                           </p>
                         </div>
                         {item.attentionReason ? (
-                          <p className="mt-1 text-[11px] font-semibold text-pro-urgent/80">
-                            {item.attentionReason}
-                          </p>
+                          item.attentionReason !== item.contextLabel ? (
+                            <p className="mt-1 text-[11px] font-semibold text-pro-urgent/80">
+                              {item.attentionReason}
+                            </p>
+                          ) : null
                         ) : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button

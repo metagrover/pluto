@@ -326,7 +326,7 @@ describe('attention sync', () => {
       kind: 'blocker',
       status: 'active',
       title: 'Blocked: Ship launch checklist',
-      reason: 'Blocked by Legal review.',
+      reason: 'We cannot ship until legal signs off.',
       source: 'action_tracker',
       related_entity_ids: ['action-blocked', 'topic-legal-review'],
     });
@@ -343,6 +343,39 @@ describe('attention sync', () => {
           item.dedupe_key === 'action_tracker:stale:action-blocked',
       ),
     ).toBe(false);
+  });
+
+  it('falls back to the generic blocker reason when no richer blocker quote exists', () => {
+    dbState.blockedActions = [
+      {
+        id: 'action-blocked-generic',
+        name: 'Finalize compliance review',
+        due_date: null,
+        updated_at: '2026-05-08T00:00:00.000Z',
+        blocker_entity_id: 'topic-compliance',
+        blocker_name: 'Compliance review',
+        blocker_meeting_id: 'meeting-11',
+        blocker_evidence_quote: null,
+        blocker_updated_at: '2026-05-10T00:00:00.000Z',
+        blocker_relationship_state: 'confirmed',
+      },
+    ];
+    dbState.meetingsByEntity.set('action-blocked-generic', [
+      { meeting_id: 'meeting-11' },
+    ]);
+
+    syncActionTrackerAttentionQueue();
+
+    expect(
+      dbState.items.find(
+        (item) =>
+          item.dedupe_key === 'action_tracker:blocked:action-blocked-generic',
+      ),
+    ).toMatchObject({
+      kind: 'blocker',
+      reason: 'Blocked by Compliance review.',
+      related_entity_ids: ['action-blocked-generic', 'topic-compliance'],
+    });
   });
 
   it('preserves manual lifecycle states when the same action signal syncs again', () => {

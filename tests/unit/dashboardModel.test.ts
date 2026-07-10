@@ -217,7 +217,10 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.title).toBe('1 overdue item');
     expect(model.hero.severity).toBe('urgent');
     expect(model.hero.detail).toContain('Ship privacy review');
-    expect(model.hero.action?.target).toBe('projects');
+    expect(model.hero.action).toEqual({
+      label: 'Open projects',
+      target: 'projects',
+    });
     expect(model.briefingFocus).toMatchObject({
       kind: 'attention',
       title: 'Needs attention',
@@ -343,6 +346,7 @@ describe('buildDashboardHomeModel', () => {
         makeAttentionItem({
           id: 'attention-blocked-overdue',
           kind: 'blocker',
+          reason: 'Legal approval is still blocking the overdue launch review.',
           related_entity_ids: ['blocked-overdue'],
         }),
       ],
@@ -351,7 +355,9 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.hero.kind).toBe('overdue_action');
-    expect(model.hero.detail).toContain('Blocked overdue follow-up');
+    expect(model.hero.detail).toBe(
+      'Legal approval is still blocking the overdue launch review.',
+    );
     expect(model.hero.detail).not.toContain('Routine overdue follow-up');
     expect(model.actionInsights.items[0]).toMatchObject({
       id: 'blocked-overdue',
@@ -416,6 +422,7 @@ describe('buildDashboardHomeModel', () => {
         makeAttentionItem({
           id: 'attention-blocked-active',
           kind: 'blocker',
+          reason: 'Awaiting procurement approval before kickoff can proceed.',
           related_entity_ids: ['blocked-active'],
         }),
       ],
@@ -426,9 +433,11 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.kind).toBe('active_action');
     expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.severity).toBe('urgent');
-    expect(model.hero.detail).toContain('Blocked active follow-up');
+    expect(model.hero.detail).toBe(
+      'Awaiting procurement approval before kickoff can proceed.',
+    );
     expect(model.hero.action).toEqual({
-      label: 'Open projects',
+      label: 'Review blockers',
       target: 'projects',
     });
     expect(model.actionInsights.state).toBe('populated');
@@ -460,6 +469,7 @@ describe('buildDashboardHomeModel', () => {
         makeAttentionItem({
           id: 'attention-blocked-active',
           kind: 'blocker',
+          reason: 'Waiting on security approval from Legal.',
           related_entity_ids: ['blocked-active'],
         }),
       ],
@@ -469,9 +479,81 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.briefingFocus).toEqual({
       kind: 'attention',
-      title: 'Needs attention',
+      title: 'Blocked follow-up',
+      detail: 'Waiting on security approval from Legal.',
+      action: { label: 'Review blockers', target: 'projects' },
+    });
+  });
+
+  it('falls back to blocked-item count in briefing focus when a blocker-backed follow-up has no richer reason', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'blocked-active',
+          name: 'Blocked active follow-up',
+          due_date: '2026-05-02T12:00:00.000Z',
+        }),
+      ],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-active',
+          kind: 'blocker',
+          reason: '   ',
+          related_entity_ids: ['blocked-active'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Blocked follow-up',
       detail: '1 blocked item',
+      action: { label: 'Review blockers', target: 'projects' },
+    });
+  });
+
+  it('surfaces routine active follow-ups in briefing focus when nothing else is urgent', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'routine-active-later',
+          name: 'Later active follow-up',
+          due_date: '2026-05-03T12:00:00.000Z',
+          updated_at: '2026-05-03T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'routine-active-sooner',
+          name: 'Sooner active follow-up',
+          due_date: '2026-05-01T12:00:00.000Z',
+          updated_at: '2026-05-01T18:00:00.000Z',
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('active_action');
+    expect(model.hero.detail).toContain('Sooner active follow-up');
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: '2 active items',
       action: { label: 'Review actions', target: 'projects' },
+    });
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'routine-active-sooner',
+      title: 'Sooner active follow-up',
+      status: 'active',
     });
   });
 
@@ -596,8 +678,60 @@ describe('buildDashboardHomeModel', () => {
     expect(model.actionInsights.state).toBe('populated');
     expect(model.actionInsights.items[0]).toMatchObject({
       id: 'action-blocked',
+      dueLabel: 'Due Apr 26',
+      contextLabel: 'Blocked by legal approval.',
       attentionLabel: 'Blocker',
       attentionReason: 'Blocked by legal approval.',
+    });
+  });
+
+  it('prefers active blocker attention over routine active duplicates for the same dashboard follow-up', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'action-shared',
+          name: 'Finalize launch checklist',
+          due_date: null,
+        }),
+        makeAction({
+          id: 'action-routine',
+          name: 'Share recap notes',
+          due_date: '2026-05-01T12:00:00.000Z',
+        }),
+      ],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-shared-follow-up',
+          kind: 'follow_up',
+          title: 'Finalize launch checklist',
+          reason: 'This follow-up still needs attention.',
+          related_entity_ids: ['action-shared'],
+        }),
+        makeAttentionItem({
+          id: 'attention-shared-blocker',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-shared'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-shared',
+      attentionItemId: 'attention-shared-blocker',
+      attentionLabel: 'Blocker',
+      attentionReason: 'Blocked by legal approval.',
+    });
+    expect(model.actionInsights.items[1]).toMatchObject({
+      id: 'action-routine',
     });
   });
 
@@ -1363,6 +1497,47 @@ describe('buildDashboardHomeModel', () => {
       id: 'action-blocked',
       attentionLabel: 'Blocker',
       attentionReason: 'Blocked by legal approval.',
+    });
+  });
+
+  it('prefers the richer blocker reason when duplicate active blockers point at one dashboard follow-up', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-thin',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: '',
+          related_entity_ids: ['action-blocked'],
+        }),
+        makeAttentionItem({
+          id: 'attention-blocked-rich',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: 'Blocked by legal approval and pending security sign-off.',
+          related_entity_ids: ['action-blocked'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      id: 'action-blocked',
+      attentionLabel: 'Blocker',
+      attentionReason:
+        'Blocked by legal approval and pending security sign-off.',
     });
   });
 
