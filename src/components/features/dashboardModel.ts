@@ -927,6 +927,7 @@ const joinCountLabels = (labels: string[]): string =>
   labels.filter(Boolean).join(' · ');
 
 const buildBriefingFocus = (
+  hero: DashboardHero,
   actionInsights: DashboardActionInsights,
   latestMeeting: DashboardLatestMeeting,
   knowledgeDocuments: DashboardKnowledgeDocuments,
@@ -966,6 +967,20 @@ const buildBriefingFocus = (
       kind: 'attention',
       title: 'Needs attention',
       detail: pluralize(blockedActiveCount, 'blocked item'),
+      action: { label: 'Review actions', target: 'projects' },
+    };
+  }
+
+  if (
+    actionInsights.state === 'populated' &&
+    actionInsights.activeCount > 0 &&
+    hero.kind === 'active_action' &&
+    hero.severity === 'watch'
+  ) {
+    return {
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: pluralize(actionInsights.activeCount, 'active item'),
       action: { label: 'Review actions', target: 'projects' },
     };
   }
@@ -1034,19 +1049,21 @@ export const buildDashboardHomeModel = (
     workingMemorySnapshots,
   );
   const spotlight = buildSpotlight(input.workspace);
+  const hero = buildHero(
+    {
+      ...input,
+      overdueActions,
+      staleActions,
+      activeActions,
+    },
+    latestMeeting,
+    knowledgeDocuments,
+  );
 
   return {
-    hero: buildHero(
-      {
-        ...input,
-        overdueActions,
-        staleActions,
-        activeActions,
-      },
-      latestMeeting,
-      knowledgeDocuments,
-    ),
+    hero,
     briefingFocus: buildBriefingFocus(
+      hero,
       actionInsights,
       latestMeeting,
       knowledgeDocuments,

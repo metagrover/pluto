@@ -46,6 +46,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** Treating homepage briefing focus as overdue/stale-only attention copy even after blocker-backed active follow-ups were promoted elsewhere on the dashboard.
 - **Notes:** This stays scoped to `dashboardModel.ts` and existing briefing-focus copy. It intentionally does not promote routine active work into briefing focus or redesign the dashboard surface.
 
+### Surface routine active follow-ups in the homepage briefing
+- **Issue:** [#306](https://github.com/metagrover/pluto/issues/306)
+- **PR:** Pending.
+- **Changed:** The homepage briefing focus now stays on follow-up attention when Pluto still has routine active commitments but nothing is overdue, stale, or blocker-backed. Focused regression coverage now proves the dashboard keeps the due-soon active follow-up visible in the briefing panel instead of falling through to latest-meeting or knowledge fallback copy.
+- **Why:** `#61` still depends on homepage surfaces showing the highest-value follow-ups with trustworthy priority. Even after routine active work started surfacing in the hero, the adjacent briefing panel still dropped that same work and promoted unrelated fallback context.
+- **Replaced:** Treating the homepage briefing focus as follow-up attention only for overdue or stale work, with routine active commitments falling straight to meeting or knowledge fallback.
+- **Notes:** This stays scoped to briefing-focus selection on top of the shipped hero behavior. It deliberately avoids reopening the blocker-backed active path already covered by `#304` / PR `#305`, and does not redesign dashboard controls.
+
 ### Surface blocker-backed active follow-ups in the homepage hero
 - **Issue:** [#302](https://github.com/metagrover/pluto/issues/302)
 - **PR:** Pending.
