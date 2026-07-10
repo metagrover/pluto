@@ -430,8 +430,8 @@ const getDashboardActionContextLabel = (
   attentionAlerts: AttentionItem[],
   meetings: Meeting[],
 ): string | null => {
-  const blockerReason = getDashboardActionAttentionContext(linkedAttention)
-    .attentionReason;
+  const blockerReason =
+    getDashboardActionAttentionContext(linkedAttention).attentionReason;
   if (blockerReason) {
     return blockerReason;
   }
@@ -487,7 +487,12 @@ const buildActionInsights = (
         attentionAlerts,
         meetings,
       );
-      return actionToInsightItem(action, 'overdue', contextLabel, linkedAttention);
+      return actionToInsightItem(
+        action,
+        'overdue',
+        contextLabel,
+        linkedAttention,
+      );
     }),
     ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) => {
       const linkedAttention = getLinkedDashboardAttention(
@@ -500,7 +505,12 @@ const buildActionInsights = (
         attentionAlerts,
         meetings,
       );
-      return actionToInsightItem(action, 'stale', contextLabel, linkedAttention);
+      return actionToInsightItem(
+        action,
+        'stale',
+        contextLabel,
+        linkedAttention,
+      );
     }),
     ...sortActions(activeActions, (a, b) => {
       const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
@@ -520,7 +530,12 @@ const buildActionInsights = (
         attentionAlerts,
         meetings,
       );
-      return actionToInsightItem(action, 'active', contextLabel, linkedAttention);
+      return actionToInsightItem(
+        action,
+        'active',
+        contextLabel,
+        linkedAttention,
+      );
     }),
   ];
   const seenIds = new Set<string>();
