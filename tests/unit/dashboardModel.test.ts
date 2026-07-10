@@ -478,7 +478,7 @@ describe('buildDashboardHomeModel', () => {
       kind: 'attention',
       title: 'Blocked follow-up',
       detail: 'Waiting on security approval from Legal.',
-      action: { label: 'Review actions', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     });
   });
 
@@ -511,7 +511,7 @@ describe('buildDashboardHomeModel', () => {
       kind: 'attention',
       title: 'Blocked follow-up',
       detail: '1 blocked item',
-      action: { label: 'Review actions', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     });
   });
 

@@ -1019,7 +1019,7 @@ const buildBriefingFocus = (
           ? pluralize(actionInsights.staleCount, 'stale item')
           : '',
       ]),
-      action: { label: 'Review actions', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     };
   }
 
