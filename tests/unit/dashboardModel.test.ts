@@ -249,7 +249,7 @@ describe('buildDashboardHomeModel', () => {
     });
     expect(model.spotlight).toMatchObject({
       title: 'Indexing Rollout',
-      subtitle: 'Project spotlight',
+      subtitle: 'Blocked project',
       detail: expect.stringContaining('1 blocker'),
       tags: ['1 blocker', '2 dependencies', '3 recent changes'],
       target: 'projects',
@@ -1627,6 +1627,33 @@ describe('buildDashboardHomeModel', () => {
       { label: 'Ask Pluto', target: 'ask' },
       { label: 'Knowledge home', target: 'wiki' },
     ]);
+  });
+
+  it('keeps the generic spotlight label when the selected project has no blockers', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        project_cards: [
+          makeProjectCard({
+            open_blockers: 0,
+            dependency_count: 2,
+            recent_changes: 1,
+            staleness_days: 0,
+          }),
+        ],
+      }),
+      graphStats: null,
+    });
+
+    expect(model.spotlight).toMatchObject({
+      title: 'Indexing Rollout',
+      subtitle: 'Project spotlight',
+      target: 'projects',
+    });
   });
 
   it('maps real knowledge docs and matching project health into document cards', () => {

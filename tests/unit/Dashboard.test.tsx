@@ -137,6 +137,35 @@ const makeWorkspace = (
 });
 
 describe('Dashboard', () => {
+  it('renders the spotlight subtitle from the dashboard model', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={() => {}}
+        setActiveTab={() => {}}
+        setAskPlutoVisible={() => {}}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('Blocked project');
+    expect(markup).not.toContain('Project signal');
+  });
+
   it('renders blocker reasons in the primary follow-up detail line when linked attention carries them', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
