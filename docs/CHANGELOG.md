@@ -30,6 +30,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Preserve richer blocker reasons in synced follow-up attention
+- **Issue:** [#328](https://github.com/metagrover/pluto/issues/328)
+- **PR:** Pending.
+- **Changed:** Blocked action attention sync now promotes the richer blocker evidence quote into the synced attention item's primary reason when that quote is available, while keeping the existing `Blocked by <name>.` fallback when Pluto has no better blocker wording. Focused regression coverage now proves both the richer-reason path and the generic fallback path.
+- **Why:** `#61` depends on Pluto carrying trustworthy blocker context through the full follow-up loop. Before this slice, the sync layer already stored the richer blocker quote in evidence but still flattened the visible reason down to a generic label, which made downstream surfaces lose context Pluto already had.
+- **Replaced:** Treating blocked-action attention reasons as generic labels even when the sync payload already contained a more specific blocker explanation.
+- **Notes:** This stays inside `attentionSync.ts`, keeps existing blocker scoring and dedupe behavior intact, and complements the in-flight surface-level blocker-reason PRs by improving the shared upstream attention item they consume.
 ### Preserve richer blocker reasons on dashboard follow-up cards
 - **Issue:** [#325](https://github.com/metagrover/pluto/issues/325)
 - **PR:** Pending.
