@@ -137,7 +137,7 @@ const makeWorkspace = (
 });
 
 describe('Dashboard', () => {
-  it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
+  it('renders blocker reasons in the primary follow-up detail line when linked attention carries them', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -178,7 +178,8 @@ describe('Dashboard', () => {
     );
 
     expect(markup).toContain('Blocker');
-    expect(markup).toContain('Blocked by legal approval.');
+    expect(markup).toContain('Due Apr 26 · Blocked by legal approval.');
+    expect(markup).not.toContain('Due Apr 26 · Work');
   });
 
   it('renders linked meeting context on follow-up cards when available', () => {
