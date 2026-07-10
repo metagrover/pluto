@@ -30,6 +30,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Prefer richer blocker reasons in follow-up drafts
+- **Issue:** [#320](https://github.com/metagrover/pluto/issues/320)
+- **PR:** Pending.
+- **Changed:** Follow-up draft action lines now keep the richest existing blocker reason when duplicate active blocker attention rows point at the same commitment. Focused regression coverage proves Pluto no longer settles for the first shorter blocker note when durable attention already has more specific blocker context for that same action.
+- **Why:** `#61` still depends on follow-up drafts reflecting the trust and lifecycle state Pluto already knows. Before this slice, duplicate active blocker rows could leave the generated draft with thinner blocker rationale than the durable attention queue already carried, which made the draft less accountable than the underlying attention data.
+- **Replaced:** Keeping the first active blocker reason encountered for a draft action even when a later linked blocker already provided richer context for the same commitment.
+- **Notes:** This stays scoped to `followUpDraftContext.ts`, does not reopen the mixed-status selection work on `#312`, and does not overlap the blocker-plus-aging formatting work tracked separately on `#318`.
 ### Keep aging lifecycle visible in blocker-backed follow-up drafts
 - **Issue:** [#318](https://github.com/metagrover/pluto/issues/318)
 - **PR:** Pending.

@@ -524,6 +524,23 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('prefers the richest blocker reason when duplicate active blockers link to one follow-up', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [],
+      linkedEntities: [
+        makeEntity({ id: 'action-1', type: 'action_item', name: 'Confirm launch plan' }),
+      ],
+      linkedAttentionItems: [
+        { id: 'attention-1', kind: 'blocker', status: 'active', reason: 'Blocked by legal approval.', related_entity_ids: ['action-1'] },
+        { id: 'attention-2', kind: 'blocker', status: 'active', reason: 'Blocked by legal approval while finance waits on updated contract redlines.', related_entity_ids: ['action-1'] },
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Confirm launch plan (Status: Blocked by legal approval while finance waits on updated contract redlines)',
+    ]);
+  });
+
   it('prioritizes blocked and aging draft follow-ups ahead of routine active work', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [],

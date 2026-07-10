@@ -269,9 +269,9 @@ const shouldPreferLinkedAttention = (
     return candidateIsBlocker;
   }
 
-  return (
-    !normalizeName(current.reason) && Boolean(normalizeName(candidate.reason))
-  );
+  const currentReason = normalizeName(current.reason);
+  const candidateReason = normalizeName(candidate.reason);
+  return candidateReason.length > currentReason.length;
 };
 
 const getDraftActionPriority = (
