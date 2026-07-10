@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-10
+
+### Surface blocker reasons in dashboard action-insight detail
+- **Issue:** [#350](https://github.com/metagrover/pluto/issues/350)
+- **PR:** Pending.
+- **Changed:** Blocker-backed homepage action-insight cards now promote the linked blocker reason into the card's primary metadata line, keeping due-date context when Pluto has it and falling back to the existing meeting or domain detail when no richer blocker reason exists. Focused model and server-render regression coverage now prove blocker-backed cards stop defaulting to generic `Due ... · Work` copy.
+- **Why:** `#61` still depends on Pluto surfacing trustworthy follow-up context directly on homepage attention surfaces. Before this slice, the dashboard could already classify a follow-up as a blocker and even render the reason separately, but the main detail line still looked like routine metadata and buried the most useful why-now context.
+- **Replaced:** Treating the dashboard action-insight detail row as generic due/source copy even when linked active blocker attention already carried a richer reason.
+- **Notes:** This stays scoped to action-insight detail treatment. It preserves the current status chip, dismissal/snooze controls, and meeting-context fallback for routine follow-ups.
+
 ## 2026-07-07
 
 ### Surface routine active follow-ups in the homepage hero

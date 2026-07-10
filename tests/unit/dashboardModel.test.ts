@@ -596,6 +596,8 @@ describe('buildDashboardHomeModel', () => {
     expect(model.actionInsights.state).toBe('populated');
     expect(model.actionInsights.items[0]).toMatchObject({
       id: 'action-blocked',
+      dueLabel: 'Due Apr 26',
+      contextLabel: 'Blocked by legal approval.',
       attentionLabel: 'Blocker',
       attentionReason: 'Blocked by legal approval.',
     });
