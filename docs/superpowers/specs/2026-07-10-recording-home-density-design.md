@@ -221,7 +221,7 @@ This design spans two user-facing outcomes and must be implemented as separate, 
 1. **Recording foundation under #357:** density primitives needed by the recording workspace, persistent capture bar, transcript surface, meeting rail, and recording-state accessibility.
 2. **Homepage application under #59:** compact briefing header, work-queue rows, supporting side column, and recent-memory list using the proven density primitives.
 
-Do not combine recording behavior changes, new data pipelines, or a full application-shell redesign into either visual slice. If implementation reveals that pause, health telemetry, quick-action persistence, or finish semantics do not exist, create or update a separate outcome issue before adding that behavior.
+Do not combine transcription algorithm changes, new persistence pipelines, or a full application-shell redesign into either visual slice. The recording slice may expose existing incremental transcript segments and capture-health signals through a renderer-facing UI contract because those signals are prerequisites for the approved experience. If implementation reveals that pause, quick-action persistence, or different finish semantics do not exist, create or update a separate outcome issue before adding that behavior.
 
 ## Validation plan
 
