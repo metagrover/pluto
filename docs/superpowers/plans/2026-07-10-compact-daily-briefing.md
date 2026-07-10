@@ -192,4 +192,3 @@ Update the changelog with why the homepage is more useful, add the fewer-contain
 git add src/App.tsx src/components/features/Dashboard.tsx docs/CHANGELOG.md docs/decisions.md
 git commit -m "feat: make the daily briefing more information dense"
 ```
-

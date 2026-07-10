@@ -291,4 +291,3 @@ Update the changelog with the user outcome, record transcript-as-primary hierarc
 git add src/App.tsx src/components/features/ZenMode.tsx src/index.css docs/CHANGELOG.md docs/decisions.md
 git commit -m "feat: make recording a quiet command center"
 ```
-
