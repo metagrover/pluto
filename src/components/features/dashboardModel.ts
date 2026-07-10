@@ -906,7 +906,7 @@ const buildHero = (
         input.attentionAlerts ?? [],
       ),
       severity: 'urgent',
-      action: { label: 'Open projects', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     };
   }
 
@@ -1019,7 +1019,7 @@ const buildBriefingFocus = (
           ? pluralize(actionInsights.staleCount, 'stale item')
           : '',
       ]),
-      action: { label: 'Review blockers', target: 'projects' },
+      action: { label: 'Review actions', target: 'projects' },
     };
   }
 
@@ -1042,7 +1042,7 @@ const buildBriefingFocus = (
       title:
         blockedActiveCount === 1 ? 'Blocked follow-up' : 'Blocked follow-ups',
       detail: blockerReason ?? pluralize(blockedActiveCount, 'blocked item'),
-      action: { label: 'Review actions', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     };
   }
 
