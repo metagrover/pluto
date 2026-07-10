@@ -92,14 +92,37 @@ const ATTENTION_STATUS_ORDER: Record<
   dismissed: 2,
 };
 
-const getMeetingAttentionPriority = (
-  item: Pick<MeetingLinkedAttentionItem, 'status' | 'kind'>,
-): number => {
-  const statusRank =
-    ATTENTION_STATUS_ORDER[item.status] ?? ATTENTION_STATUS_ORDER.active;
-  const blockerRank =
-    item.status === 'active' && item.kind === 'blocker' ? 0 : 1;
-  return statusRank * 10 + blockerRank;
+const isPreferredLinkedAttention = (
+  candidate: Pick<
+    MeetingLinkedAttentionItem,
+    'id' | 'status' | 'kind' | 'reason'
+  >,
+  current: Pick<
+    MeetingLinkedAttentionItem,
+    'id' | 'status' | 'kind' | 'reason'
+  >,
+): boolean => {
+  const candidateRank =
+    ATTENTION_STATUS_ORDER[candidate.status] ?? ATTENTION_STATUS_ORDER.active;
+  const currentRank =
+    ATTENTION_STATUS_ORDER[current.status] ?? ATTENTION_STATUS_ORDER.active;
+  if (candidateRank !== currentRank) {
+    return candidateRank < currentRank;
+  }
+
+  const candidateIsBlocker = candidate.kind === 'blocker';
+  const currentIsBlocker = current.kind === 'blocker';
+  if (candidateIsBlocker !== currentIsBlocker) {
+    return candidateIsBlocker;
+  }
+
+  const candidateHasReason = normalizeValue(candidate.reason).length > 0;
+  const currentHasReason = normalizeValue(current.reason).length > 0;
+  if (candidateHasReason !== currentHasReason) {
+    return candidateHasReason;
+  }
+
+  return false;
 };
 
 const getMeetingActionItemRank = (status: MeetingActionItemStatus): number => {
@@ -451,11 +474,10 @@ export const buildMeetingActionItems = ({
         kind: item.kind,
         reason: item.reason,
       };
-      const existingAttention = attentionByEntityId.get(relatedEntityId);
+      const currentAttention = attentionByEntityId.get(relatedEntityId);
       if (
-        existingAttention &&
-        getMeetingAttentionPriority(existingAttention) <=
-          getMeetingAttentionPriority(nextAttention)
+        currentAttention &&
+        !isPreferredLinkedAttention(nextAttention, currentAttention)
       ) {
         continue;
       }

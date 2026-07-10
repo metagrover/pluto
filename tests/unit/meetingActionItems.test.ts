@@ -321,6 +321,47 @@ describe('buildMeetingActionItems', () => {
     });
   });
 
+  it('prefers an active linked attention item over dismissed duplicates for the same follow-up', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'mixed-status-follow-up',
+          name: 'Send partner recap',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-dismissed',
+          kind: 'follow_up',
+          status: 'dismissed',
+          related_entity_ids: ['mixed-status-follow-up'],
+        },
+        {
+          id: 'attention-active-blocker',
+          kind: 'blocker',
+          reason: 'Waiting on legal approval.',
+          status: 'active',
+          related_entity_ids: ['mixed-status-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'mixed-status-follow-up',
+        attentionItemId: 'attention-active-blocker',
+        attentionKindLabel: 'Blocker',
+        attentionStatus: 'active',
+        actionable: true,
+        dismissLabel: 'Dismiss',
+        snoozeLabel: 'Snooze',
+        isBlocked: true,
+        blockerReason: 'Waiting on legal approval.',
+      }),
+    ]);
+  });
+
   it('preserves fallback metadata when linked action entities are sparser', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [

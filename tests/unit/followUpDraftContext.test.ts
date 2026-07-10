@@ -371,6 +371,48 @@ describe('buildFollowUpDraftContext', () => {
     ]);
   });
 
+  it('keeps draft action items when duplicate linked attention still has an active row', () => {
+    const context = buildFollowUpDraftContext({
+      fallbackActionItems: [
+        'Confirm launch plan (Owner: Sarah Chen | Due: Friday)',
+      ],
+      linkedEntities: [
+        makeEntity({
+          id: 'person-1',
+          type: 'person',
+          name: 'Sarah Chen',
+          mention_count: 4,
+        }),
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Confirm launch plan',
+          assigned_to: 'person-1',
+          due_date: '2026-06-05T00:00:00.000Z',
+          mention_count: 5,
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-dismissed',
+          status: 'dismissed',
+          related_entity_ids: ['action-1'],
+        },
+        {
+          id: 'attention-active',
+          kind: 'blocker',
+          status: 'active',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-1'],
+        },
+      ],
+    });
+
+    expect(context.actionItems).toEqual([
+      'Confirm launch plan (Owner: Sarah Chen | Due: Jun 5 | Status: Blocked by legal approval)',
+    ]);
+  });
+
   it('preserves overdue and stale lifecycle context for linked follow-ups only', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [],
