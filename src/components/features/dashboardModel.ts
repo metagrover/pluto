@@ -331,6 +331,19 @@ const compareActiveDashboardActions = (
   return compareActionsByDueDate(a, b);
 };
 
+const compareStaleDashboardActions = (
+  a: Entity,
+  b: Entity,
+  attentionAlerts: AttentionItem[],
+): number => {
+  const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
+  const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
+  if (aBlocked !== bBlocked) {
+    return aBlocked ? -1 : 1;
+  }
+  return compareActionsByOldestUpdate(a, b);
+};
+
 const filterSuppressedDashboardActions = (
   actions: Entity[],
   attentionAlerts: AttentionItem[],
@@ -482,7 +495,9 @@ const buildActionInsights = (
         getLinkedDashboardAttention(action.id, attentionAlerts),
       );
     }),
-    ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) => {
+    ...sortActions(staleActions, (a, b) =>
+      compareStaleDashboardActions(a, b, attentionAlerts),
+    ).map((action) => {
       const contextLabel = getDashboardActionContextLabel(
         action.id,
         attentionAlerts,
