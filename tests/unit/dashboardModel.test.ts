@@ -356,7 +356,9 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('overdue_action');
     expect(model.hero.label).toBe('Blocked');
-    expect(model.hero.detail).toContain('Blocked overdue follow-up');
+    expect(model.hero.detail).toContain(
+      'Legal approval is still blocking the overdue launch review.',
+    );
     expect(model.hero.detail).not.toContain('Routine overdue follow-up');
     expect(model.actionInsights.items[0]).toMatchObject({
       id: 'blocked-overdue',
