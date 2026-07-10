@@ -367,7 +367,7 @@ const compareDashboardAttentionPriority = (
 
   if (leftIsActiveBlocker && rightIsActiveBlocker) {
     const reasonLengthDifference =
-      normalizeText(right.reason).length - normalizeText(left.reason).length;
+      (right.reason?.trim().length ?? 0) - (left.reason?.trim().length ?? 0);
     if (reasonLengthDifference !== 0) return reasonLengthDifference;
   }
 
