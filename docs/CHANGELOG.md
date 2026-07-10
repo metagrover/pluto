@@ -20,29 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-08
 
-### Surface blocker state in the dashboard project spotlight label
-- **Issue:** [#340](https://github.com/metagrover/pluto/issues/340)
+### Surface blocker state in the homepage hero badge
+- **Issue:** [#342](https://github.com/metagrover/pluto/issues/342)
 - **PR:** Pending.
-- **Changed:** The dashboard project spotlight now labels blocker-backed project cards explicitly as `Blocked project`, and the dashboard renderer now uses the model-provided spotlight label instead of a hardcoded generic `Project signal` heading. Focused regression coverage now proves both the model decision and the rendered spotlight copy.
-- **Why:** `#61` still depends on Pluto surfacing trustworthy follow-up and blocker context across homepage surfaces. Before this slice, the spotlight could show blocker counts in its detail line while still presenting the same generic label as routine project context, which weakened the trust signal Pluto already had.
-- **Replaced:** Treating blocked project spotlight states as the same generic dashboard label used for non-blocked project context.
-- **Notes:** This stays scoped to spotlight label/state copy and intentionally avoids the in-flight homepage hero and briefing blocker-copy PR stack.
-### Surface blocker state in homepage hero action label
-- **Issue:** [#338](https://github.com/metagrover/pluto/issues/338)
-- **PR:** Pending.
-- **Changed:** The homepage hero now uses a blocker-specific `Review blockers` CTA when the prioritized active follow-up is blocker-backed, while overdue, stale, and routine-active hero states keep the existing `Open projects` action. Focused regression coverage now proves the blocker-backed hero no longer shares the same generic CTA as non-blocker states.
-- **Why:** `#61` still depends on homepage follow-up surfaces explaining why Pluto surfaced a commitment. Before this slice, the hero could already say a follow-up was a blocked item and show blocker-aware detail, but its CTA still read like generic project navigation, which weakened the trust signal Pluto already had.
-- **Replaced:** Treating blocker-backed homepage hero actions as if they should use the same generic `Open projects` CTA as routine, stale, and overdue follow-up states.
-- **Notes:** This stays scoped to `dashboardModel.ts` hero action-label copy and its focused regression test. It intentionally does not redesign dashboard layout or overlap the adjacent blocker-detail and briefing-copy PR stack.
-## 2026-07-10
-
-### Surface blocker reasons in dashboard action-insight detail
-- **Issue:** [#350](https://github.com/metagrover/pluto/issues/350)
-- **PR:** Pending.
-- **Changed:** Blocker-backed homepage action-insight cards now promote the linked blocker reason into the card's primary metadata line, keeping due-date context when Pluto has it and falling back to the existing meeting or domain detail when no richer blocker reason exists. Focused model and server-render regression coverage now prove blocker-backed cards stop defaulting to generic `Due ... · Work` copy.
-- **Why:** `#61` still depends on Pluto surfacing trustworthy follow-up context directly on homepage attention surfaces. Before this slice, the dashboard could already classify a follow-up as a blocker and even render the reason separately, but the main detail line still looked like routine metadata and buried the most useful why-now context.
-- **Replaced:** Treating the dashboard action-insight detail row as generic due/source copy even when linked active blocker attention already carried a richer reason.
-- **Notes:** This stays scoped to action-insight detail treatment. It preserves the current status chip, dismissal/snooze controls, and meeting-context fallback for routine follow-ups.
+- **Changed:** The homepage hero now carries an explicit model-backed badge label, and blocker-linked follow-ups render `Blocked` instead of the generic attention label while routine overdue, stale, active, meeting, and memory states keep their prior labels. Focused model and server-rendered dashboard regressions now prove both the blocker-specific badge and the generic fallback paths.
+- **Why:** `#61` still depends on the homepage earning trust as Pluto's highest-priority follow-up surface. Before this slice, linked blocker attention could already change hero ranking and detail copy, but the badge still stayed generic, which hid the exact blocker state in the most prominent dashboard affordance.
+- **Replaced:** Deriving the homepage hero badge solely from coarse hero kind labels even when linked active blocker attention already made the stronger status explicit.
+- **Notes:** This stays scoped to the homepage hero label treatment and intentionally does not broaden into briefing-copy or spotlight-copy changes already tracked in separate PRs.
 
 ## 2026-07-07
 

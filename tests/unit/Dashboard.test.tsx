@@ -137,36 +137,50 @@ const makeWorkspace = (
 });
 
 describe('Dashboard', () => {
-  it('renders the spotlight subtitle from the dashboard model', () => {
+  it('renders a blocker-specific homepage hero badge for blocker-backed follow-ups', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
-      meetings: [],
-      overdueActions: [],
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
       staleActions: [],
       activeActions: [],
-      attentionAlerts: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked',
+          kind: 'blocker',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+          related_meeting_ids: [],
+        }),
+      ],
       workspace: makeWorkspace(),
       graphStats: null,
     });
+
     const markup = renderToStaticMarkup(
       <Dashboard
         model={model}
         loading={false}
         isRecording={false}
-        setSelectedMeetingId={() => {}}
-        setActiveTab={() => {}}
-        setAskPlutoVisible={() => {}}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
         updatingTaskIds={new Set()}
         actionError={null}
-        handleCompleteTask={async () => {}}
+        handleCompleteTask={vi.fn(async () => {})}
       />,
     );
 
-    expect(markup).toContain('Blocked project');
-    expect(markup).not.toContain('Project signal');
+    expect(markup).toContain('>Blocked<');
+    expect(markup).toContain('1 overdue item');
   });
 
-  it('renders blocker reasons in the primary follow-up detail line when linked attention carries them', () => {
+  it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],

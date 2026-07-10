@@ -42,6 +42,7 @@ export type DashboardHeroKind =
 
 export interface DashboardHero {
   kind: DashboardHeroKind;
+  label: string;
   title: string;
   detail: string;
   severity: 'live' | 'urgent' | 'watch' | 'calm';
@@ -417,6 +418,29 @@ const getLinkedDashboardAttention = (
   }
 
   return [...linkedAlerts].sort(compareDashboardAttentionPriority)[0] ?? null;
+};
+
+const getHeroLabel = (
+  kind: DashboardHeroKind,
+  options: { hasLinkedBlocker?: boolean } = {},
+): string => {
+  if (options.hasLinkedBlocker) return 'Blocked';
+
+  switch (kind) {
+    case 'recording':
+      return 'Live capture';
+    case 'overdue_action':
+    case 'active_action':
+      return 'Needs attention';
+    case 'stale_action':
+      return 'Watch';
+    case 'latest_meeting':
+      return 'Latest meeting';
+    case 'knowledge_doc':
+      return 'Recent memory';
+    case 'default':
+      return 'Ready';
+  }
 };
 
 const getMeetingDetail = (meeting: Meeting): string => {
@@ -843,6 +867,7 @@ const buildHero = (
   if (input.isRecording) {
     return {
       kind: 'recording',
+      label: getHeroLabel('recording'),
       title: 'Recording in progress',
       detail: 'Pluto is listening and will synthesize this conversation next.',
       severity: 'live',
@@ -854,8 +879,13 @@ const buildHero = (
     compareOverdueDashboardActions(a, b, input.attentionAlerts ?? []),
   )[0];
   if (overdueAction) {
+    const hasLinkedBlocker = hasActiveLinkedBlocker(
+      overdueAction.id,
+      input.attentionAlerts ?? [],
+    );
     return {
       kind: 'overdue_action',
+      label: getHeroLabel('overdue_action', { hasLinkedBlocker }),
       title: pluralize(input.overdueActions.length, 'overdue item'),
       detail: joinCountLabels([
         getDashboardHeroActionDetail(
@@ -876,8 +906,13 @@ const buildHero = (
     compareActionsByOldestUpdate,
   )[0];
   if (staleAction) {
+    const hasLinkedBlocker = hasActiveLinkedBlocker(
+      staleAction.id,
+      input.attentionAlerts ?? [],
+    );
     return {
       kind: 'stale_action',
+      label: getHeroLabel('stale_action', { hasLinkedBlocker }),
       title: pluralize(input.staleActions.length, 'stale item'),
       detail: `${staleAction.name} has gone quiet.`,
       severity: 'watch',
@@ -900,6 +935,7 @@ const buildHero = (
     ).length;
     return {
       kind: 'active_action',
+      label: getHeroLabel('active_action', { hasLinkedBlocker: true }),
       title: pluralize(blockedActiveCount, 'blocked item'),
       detail: getDashboardHeroActionDetail(
         prioritizedActiveAction,
@@ -913,6 +949,7 @@ const buildHero = (
   if (prioritizedActiveAction) {
     return {
       kind: 'active_action',
+      label: getHeroLabel('active_action'),
       title: pluralize(input.activeActions.length, 'active follow-up'),
       detail: `${prioritizedActiveAction.name} needs attention`,
       severity: 'watch',
@@ -923,6 +960,7 @@ const buildHero = (
   if (latestMeeting.state === 'populated') {
     return {
       kind: 'latest_meeting',
+      label: getHeroLabel('latest_meeting'),
       title: latestMeeting.title,
       detail: latestMeeting.detail,
       severity: 'calm',
@@ -938,6 +976,7 @@ const buildHero = (
   if (doc) {
     return {
       kind: 'knowledge_doc',
+      label: getHeroLabel('knowledge_doc'),
       title: doc.title,
       detail: doc.description,
       severity: 'calm',
@@ -947,6 +986,7 @@ const buildHero = (
 
   return {
     kind: 'default',
+    label: getHeroLabel('default'),
     title: 'Start with a conversation',
     detail:
       'Record a meeting to build memory, or ask Pluto to help recover context from what is already here.',

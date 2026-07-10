@@ -355,7 +355,8 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.hero.kind).toBe('overdue_action');
-    expect(model.hero.detail).toBe(
+    expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.detail).toContain(
       'Legal approval is still blocking the overdue launch review.',
     );
     expect(model.hero.detail).not.toContain('Routine overdue follow-up');
@@ -391,6 +392,7 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.hero.kind).toBe('stale_action');
+    expect(model.hero.label).toBe('Watch');
     expect(model.hero.detail).toContain('Older stale task');
     expect(model.hero.detail).not.toContain('Newer stale task');
     expect(model.actionInsights.items[0]).toMatchObject({
@@ -431,6 +433,7 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.hero.kind).toBe('active_action');
+    expect(model.hero.label).toBe('Blocked');
     expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.severity).toBe('urgent');
     expect(model.hero.detail).toBe(
