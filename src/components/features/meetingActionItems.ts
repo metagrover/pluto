@@ -116,10 +116,10 @@ const isPreferredLinkedAttention = (
     return candidateIsBlocker;
   }
 
-  const candidateHasReason = normalizeValue(candidate.reason).length > 0;
-  const currentHasReason = normalizeValue(current.reason).length > 0;
-  if (candidateHasReason !== currentHasReason) {
-    return candidateHasReason;
+  const candidateReasonLength = normalizeValue(candidate.reason).length;
+  const currentReasonLength = normalizeValue(current.reason).length;
+  if (candidateReasonLength !== currentReasonLength) {
+    return candidateReasonLength > currentReasonLength;
   }
 
   return false;

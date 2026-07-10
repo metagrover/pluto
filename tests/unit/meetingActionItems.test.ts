@@ -560,6 +560,44 @@ describe('buildMeetingActionItems', () => {
     ]);
   });
 
+  it('prefers the richer blocker reason when duplicate active blockers target one follow-up', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'blocked-follow-up',
+          name: 'Confirm launch plan',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-blocked-thin',
+          kind: 'blocker',
+          reason: 'Legal approval.',
+          status: 'active',
+          related_entity_ids: ['blocked-follow-up'],
+        },
+        {
+          id: 'attention-blocked-rich',
+          kind: 'blocker',
+          reason: 'Legal approval is still blocking launch readiness.',
+          status: 'active',
+          related_entity_ids: ['blocked-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'blocked-follow-up',
+        attentionItemId: 'attention-blocked-rich',
+        attentionStatus: 'active',
+        isBlocked: true,
+        blockerReason: 'Legal approval is still blocking launch readiness.',
+      }),
+    ]);
+  });
+
   it('preserves fallback blocker context and prioritizes blocked fallback cards', () => {
     const items = buildMeetingActionItems({
       meetingEntities: [
