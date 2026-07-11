@@ -289,6 +289,43 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('prefers blocker-backed stale follow-ups in the homepage hero', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [
+        makeAction({
+          id: 'routine-stale',
+          name: 'Routine stale follow-up',
+          due_date: null,
+          updated_at: '2026-04-10T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-stale',
+          name: 'Blocked stale follow-up',
+          due_date: null,
+          updated_at: '2026-04-20T18:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-stale',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-stale'],
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('stale_action');
+    expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.detail).toContain('Blocked stale follow-up');
+    expect(model.hero.detail).not.toContain('Routine stale follow-up');
+  });
+
   it('keeps the generic project spotlight badge when no blockers are open', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

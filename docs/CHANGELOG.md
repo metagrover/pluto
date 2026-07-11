@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-10
+
+### Prefer blocker-backed stale homepage heroes
+- **Issue:** [#362](https://github.com/metagrover/pluto/issues/362)
+- **PR:** Pending.
+- **Changed:** The homepage hero now prefers blocker-backed stale follow-ups before routine stale work while preserving the existing oldest-update ordering inside each stale bucket. Focused dashboard model regression coverage now proves a blocker-backed stale follow-up can headline the page even when a routine stale item is older.
+- **Why:** `#61` still depends on Pluto ranking commitments by trusted attention rather than raw recency alone. Before this slice, the dashboard could correctly identify blocked stale work elsewhere but still headline an older routine stale follow-up in the homepage hero, which weakened the highest-visibility trust signal.
+- **Replaced:** Treating stale homepage hero selection as age-only ordering even when linked blocker attention already marks one stale follow-up as more important.
+- **Notes:** This intentionally stays scoped to homepage hero prioritization and does not reopen the separate stale action-insight ordering PR tracked under `#355`.
+
 ## 2026-07-08
 
 ### Surface blocker-backed spotlight quick actions on the homepage

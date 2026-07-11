@@ -373,6 +373,19 @@ const compareActiveDashboardActions = (
   return compareActionsByDueDate(a, b);
 };
 
+const compareStaleDashboardActions = (
+  a: Entity,
+  b: Entity,
+  attentionAlerts: AttentionItem[],
+): number => {
+  const aBlocked = hasActiveLinkedBlocker(a.id, attentionAlerts);
+  const bBlocked = hasActiveLinkedBlocker(b.id, attentionAlerts);
+  if (aBlocked !== bBlocked) {
+    return aBlocked ? -1 : 1;
+  }
+  return compareActionsByOldestUpdate(a, b);
+};
+
 const filterSuppressedDashboardActions = (
   actions: Entity[],
   attentionAlerts: AttentionItem[],
@@ -907,7 +920,7 @@ const buildHero = (
 
   const staleAction = sortActions(
     input.staleActions,
-    compareActionsByOldestUpdate,
+    (a, b) => compareStaleDashboardActions(a, b, input.attentionAlerts ?? []),
   )[0];
   if (staleAction) {
     const hasLinkedBlocker = hasActiveLinkedBlocker(
