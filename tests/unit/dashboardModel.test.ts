@@ -1926,7 +1926,11 @@ describe('buildDashboardHomeModel', () => {
       workspace: makeWorkspace({
         docs: [],
         project_cards: [
-          makeProjectCard({ open_blockers: 2, dependency_count: 0, recent_changes: 0 }),
+          makeProjectCard({
+            open_blockers: 2,
+            dependency_count: 0,
+            recent_changes: 0,
+          }),
         ],
       }),
       graphStats: null,

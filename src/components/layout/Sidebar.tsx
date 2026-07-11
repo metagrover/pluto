@@ -49,7 +49,9 @@ export const Sidebar = ({
           className="flex min-h-11 w-full items-center justify-between rounded-xl bg-pro-accent px-4 text-[#1A2340] shadow-sm transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent dark:bg-white dark:text-[#161A23] dark:hover:bg-white/90"
         >
           <span className="flex items-center gap-2 text-[12px] font-black">
-            <span aria-hidden="true" className="text-[13px]">●</span>
+            <span aria-hidden="true" className="text-[13px]">
+              ●
+            </span>
             Start recording
           </span>
           <kbd className="font-sans text-[9px] font-bold opacity-45">⌘ N</kbd>
