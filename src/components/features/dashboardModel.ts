@@ -42,6 +42,7 @@ export type DashboardHeroKind =
 
 export interface DashboardHero {
   kind: DashboardHeroKind;
+  label: string;
   title: string;
   detail: string;
   severity: 'live' | 'urgent' | 'watch' | 'calm';
@@ -73,8 +74,8 @@ export interface DashboardActionInsightItem {
   attentionReason: string | null;
   attentionItemId: string | null;
   attentionStatus: AttentionItem['status'] | null;
-  dismissLabel: 'Dismiss' | 'Reopen' | null;
-  snoozeLabel: 'Snooze' | 'Reopen' | null;
+  dismissLabel: 'Dismiss' | 'Dismiss blocker' | 'Reopen' | null;
+  snoozeLabel: 'Snooze' | 'Snooze blocker' | 'Reopen' | null;
 }
 
 export type DashboardActionInsights =
@@ -117,8 +118,10 @@ export type DashboardKnowledgeDocuments =
 export interface DashboardSpotlight {
   title: string;
   subtitle: string;
+  badgeLabel: string;
   detail: string;
   tags: string[];
+  hasBlockers: boolean;
   target: DashboardTarget;
 }
 
@@ -257,6 +260,14 @@ const DASHBOARD_SUPPRESSED_ALERT_STATUSES = new Set([
   'dismissed',
   'snoozed',
 ] as const);
+const DASHBOARD_ATTENTION_STATUS_ORDER: Record<
+  AttentionItem['status'],
+  number
+> = {
+  active: 0,
+  snoozed: 1,
+  dismissed: 2,
+};
 
 const shouldSuppressDashboardAction = (
   actionId: string,
@@ -294,6 +305,22 @@ const getDashboardActionAttentionContext = (
     attentionReason: normalizedReason,
   };
 };
+
+const getDashboardHeroActionDetail = (
+  action: Entity,
+  attentionAlerts: AttentionItem[],
+): string => {
+  const linkedAttention = getLinkedDashboardAttention(
+    action.id,
+    attentionAlerts,
+  );
+  const blockerReason =
+    linkedAttention?.status === 'active' && linkedAttention.kind === 'blocker'
+      ? linkedAttention.reason?.trim() || null
+      : null;
+  return blockerReason || `${action.name} needs attention`;
+};
+
 const hasActiveLinkedBlocker = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -304,6 +331,21 @@ const hasActiveLinkedBlocker = (
       item.kind === 'blocker' &&
       item.related_entity_ids.includes(actionId),
   );
+
+const getActiveLinkedBlockerReason = (
+  actionId: string,
+  attentionAlerts: AttentionItem[],
+): string | null => {
+  const reason = attentionAlerts.find(
+    (item) =>
+      item.status === 'active' &&
+      item.kind === 'blocker' &&
+      item.related_entity_ids.includes(actionId) &&
+      item.reason?.trim(),
+  )?.reason;
+
+  return reason?.trim() || null;
+};
 
 const compareOverdueDashboardActions = (
   a: Entity,
@@ -352,6 +394,33 @@ const filterSuppressedDashboardActions = (
     (action) => !shouldSuppressDashboardAction(action.id, attentionAlerts),
   );
 
+const compareDashboardAttentionPriority = (
+  left: AttentionItem,
+  right: AttentionItem,
+): number => {
+  const leftStatusRank = DASHBOARD_ATTENTION_STATUS_ORDER[left.status];
+  const rightStatusRank = DASHBOARD_ATTENTION_STATUS_ORDER[right.status];
+  if (leftStatusRank !== rightStatusRank) {
+    return leftStatusRank - rightStatusRank;
+  }
+
+  const leftIsActiveBlocker =
+    left.status === 'active' && left.kind === 'blocker';
+  const rightIsActiveBlocker =
+    right.status === 'active' && right.kind === 'blocker';
+  if (leftIsActiveBlocker !== rightIsActiveBlocker) {
+    return leftIsActiveBlocker ? -1 : 1;
+  }
+
+  if (leftIsActiveBlocker && rightIsActiveBlocker) {
+    const reasonLengthDifference =
+      (right.reason?.trim().length ?? 0) - (left.reason?.trim().length ?? 0);
+    if (reasonLengthDifference !== 0) return reasonLengthDifference;
+  }
+
+  return toTimestamp(right.updated_at) - toTimestamp(left.updated_at);
+};
+
 const getLinkedDashboardAttention = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -363,9 +432,30 @@ const getLinkedDashboardAttention = (
     return null;
   }
 
-  return (
-    linkedAlerts.find((item) => item.status === 'active') ?? linkedAlerts[0]
-  );
+  return [...linkedAlerts].sort(compareDashboardAttentionPriority)[0] ?? null;
+};
+
+const getHeroLabel = (
+  kind: DashboardHeroKind,
+  options: { hasLinkedBlocker?: boolean } = {},
+): string => {
+  if (options.hasLinkedBlocker) return 'Blocked';
+
+  switch (kind) {
+    case 'recording':
+      return 'Live capture';
+    case 'overdue_action':
+    case 'active_action':
+      return 'Needs attention';
+    case 'stale_action':
+      return 'Watch';
+    case 'latest_meeting':
+      return 'Latest meeting';
+    case 'knowledge_doc':
+      return 'Recent memory';
+    case 'default':
+      return 'Ready';
+  }
 };
 
 const getMeetingDetail = (meeting: Meeting): string => {
@@ -426,7 +516,9 @@ const actionToInsightItem = (
         ? 'Reopen'
         : linkedAttention.status === 'snoozed'
           ? null
-          : 'Dismiss',
+          : linkedAttention.kind === 'blocker'
+            ? 'Dismiss blocker'
+            : 'Dismiss',
   snoozeLabel:
     linkedAttention == null
       ? null
@@ -434,14 +526,23 @@ const actionToInsightItem = (
         ? null
         : linkedAttention.status === 'snoozed'
           ? 'Reopen'
-          : 'Snooze',
+          : linkedAttention.kind === 'blocker'
+            ? 'Snooze blocker'
+            : 'Snooze',
 });
 
 const getDashboardActionContextLabel = (
+  linkedAttention: AttentionItem | null,
   actionId: string,
   attentionAlerts: AttentionItem[],
   meetings: Meeting[],
 ): string | null => {
+  const blockerReason =
+    getDashboardActionAttentionContext(linkedAttention).attentionReason;
+  if (blockerReason) {
+    return blockerReason;
+  }
+
   const relatedMeetingIds = Array.from(
     new Set(
       attentionAlerts
@@ -483,7 +584,12 @@ const buildActionInsights = (
     ...sortActions(overdueActions, (a, b) =>
       compareOverdueDashboardActions(a, b, attentionAlerts),
     ).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -492,13 +598,18 @@ const buildActionInsights = (
         action,
         'overdue',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
     ...sortActions(staleActions, (a, b) =>
       compareStaleDashboardActions(a, b, attentionAlerts),
     ).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -507,7 +618,7 @@ const buildActionInsights = (
         action,
         'stale',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
     ...sortActions(activeActions, (a, b) => {
@@ -518,7 +629,12 @@ const buildActionInsights = (
       }
       return compareActionsByDueDate(a, b);
     }).map((action) => {
+      const linkedAttention = getLinkedDashboardAttention(
+        action.id,
+        attentionAlerts,
+      );
       const contextLabel = getDashboardActionContextLabel(
+        linkedAttention,
         action.id,
         attentionAlerts,
         meetings,
@@ -527,7 +643,7 @@ const buildActionInsights = (
         action,
         'active',
         contextLabel,
-        getLinkedDashboardAttention(action.id, attentionAlerts),
+        linkedAttention,
       );
     }),
   ];
@@ -757,9 +873,11 @@ const buildSpotlight = (
 
   return {
     title: card.title,
-    subtitle: 'Project spotlight',
+    subtitle: card.open_blockers > 0 ? 'Blocked project' : 'Project spotlight',
+    badgeLabel: card.open_blockers > 0 ? 'Blocked' : 'Projects',
     detail: tags.length > 0 ? tags.join(' | ') : 'No blockers surfaced',
     tags,
+    hasBlockers: card.open_blockers > 0,
     target: 'projects',
   };
 };
@@ -772,6 +890,7 @@ const buildHero = (
   if (input.isRecording) {
     return {
       kind: 'recording',
+      label: getHeroLabel('recording'),
       title: 'Recording in progress',
       detail: 'Pluto is listening and will synthesize this conversation next.',
       severity: 'live',
@@ -783,11 +902,19 @@ const buildHero = (
     compareOverdueDashboardActions(a, b, input.attentionAlerts ?? []),
   )[0];
   if (overdueAction) {
+    const hasLinkedBlocker = hasActiveLinkedBlocker(
+      overdueAction.id,
+      input.attentionAlerts ?? [],
+    );
     return {
       kind: 'overdue_action',
+      label: getHeroLabel('overdue_action', { hasLinkedBlocker }),
       title: pluralize(input.overdueActions.length, 'overdue item'),
       detail: joinCountLabels([
-        `${overdueAction.name} needs attention`,
+        getDashboardHeroActionDetail(
+          overdueAction,
+          input.attentionAlerts ?? [],
+        ),
         input.staleActions.length > 0
           ? pluralize(input.staleActions.length, 'stale item')
           : '',
@@ -802,8 +929,13 @@ const buildHero = (
     compareActionsByOldestUpdate,
   )[0];
   if (staleAction) {
+    const hasLinkedBlocker = hasActiveLinkedBlocker(
+      staleAction.id,
+      input.attentionAlerts ?? [],
+    );
     return {
       kind: 'stale_action',
+      label: getHeroLabel('stale_action', { hasLinkedBlocker }),
       title: pluralize(input.staleActions.length, 'stale item'),
       detail: `${staleAction.name} has gone quiet.`,
       severity: 'watch',
@@ -826,16 +958,21 @@ const buildHero = (
     ).length;
     return {
       kind: 'active_action',
+      label: getHeroLabel('active_action', { hasLinkedBlocker: true }),
       title: pluralize(blockedActiveCount, 'blocked item'),
-      detail: `${prioritizedActiveAction.name} needs attention`,
+      detail: getDashboardHeroActionDetail(
+        prioritizedActiveAction,
+        input.attentionAlerts ?? [],
+      ),
       severity: 'urgent',
-      action: { label: 'Open projects', target: 'projects' },
+      action: { label: 'Review blockers', target: 'projects' },
     };
   }
 
   if (prioritizedActiveAction) {
     return {
       kind: 'active_action',
+      label: getHeroLabel('active_action'),
       title: pluralize(input.activeActions.length, 'active follow-up'),
       detail: `${prioritizedActiveAction.name} needs attention`,
       severity: 'watch',
@@ -846,6 +983,7 @@ const buildHero = (
   if (latestMeeting.state === 'populated') {
     return {
       kind: 'latest_meeting',
+      label: getHeroLabel('latest_meeting'),
       title: latestMeeting.title,
       detail: latestMeeting.detail,
       severity: 'calm',
@@ -861,6 +999,7 @@ const buildHero = (
   if (doc) {
     return {
       kind: 'knowledge_doc',
+      label: getHeroLabel('knowledge_doc'),
       title: doc.title,
       detail: doc.description,
       severity: 'calm',
@@ -870,6 +1009,7 @@ const buildHero = (
 
   return {
     kind: 'default',
+    label: getHeroLabel('default'),
     title: 'Start with a conversation',
     detail:
       'Record a meeting to build memory, or ask Pluto to help recover context from what is already here.',
@@ -906,7 +1046,13 @@ const buildQuickActions = (
   }
 
   if (actionInsights.state === 'populated' || spotlight) {
-    actions.push({ label: 'Open projects', target: 'projects' });
+    actions.push({
+      label:
+        actionInsights.state === 'empty' && spotlight?.hasBlockers
+          ? 'Review blockers'
+          : 'Open projects',
+      target: 'projects',
+    });
   }
 
   if (knowledgeDocuments.state === 'populated') {
@@ -920,6 +1066,7 @@ const joinCountLabels = (labels: string[]): string =>
   labels.filter(Boolean).join(' · ');
 
 const buildBriefingFocus = (
+  hero: DashboardHero,
   actionInsights: DashboardActionInsights,
   latestMeeting: DashboardLatestMeeting,
   knowledgeDocuments: DashboardKnowledgeDocuments,
@@ -955,10 +1102,29 @@ const buildBriefingFocus = (
     const blockedActiveCount = activeActions.filter((action) =>
       hasActiveLinkedBlocker(action.id, attentionAlerts),
     ).length;
+    const blockerReason = getActiveLinkedBlockerReason(
+      prioritizedActiveAction.id,
+      attentionAlerts,
+    );
+    return {
+      kind: 'attention',
+      title:
+        blockedActiveCount === 1 ? 'Blocked follow-up' : 'Blocked follow-ups',
+      detail: blockerReason ?? pluralize(blockedActiveCount, 'blocked item'),
+      action: { label: 'Review blockers', target: 'projects' },
+    };
+  }
+
+  if (
+    actionInsights.state === 'populated' &&
+    actionInsights.activeCount > 0 &&
+    hero.kind === 'active_action' &&
+    hero.severity === 'watch'
+  ) {
     return {
       kind: 'attention',
       title: 'Needs attention',
-      detail: pluralize(blockedActiveCount, 'blocked item'),
+      detail: pluralize(actionInsights.activeCount, 'active item'),
       action: { label: 'Review actions', target: 'projects' },
     };
   }
@@ -1027,19 +1193,21 @@ export const buildDashboardHomeModel = (
     workingMemorySnapshots,
   );
   const spotlight = buildSpotlight(input.workspace);
+  const hero = buildHero(
+    {
+      ...input,
+      overdueActions,
+      staleActions,
+      activeActions,
+    },
+    latestMeeting,
+    knowledgeDocuments,
+  );
 
   return {
-    hero: buildHero(
-      {
-        ...input,
-        overdueActions,
-        staleActions,
-        activeActions,
-      },
-      latestMeeting,
-      knowledgeDocuments,
-    ),
+    hero,
     briefingFocus: buildBriefingFocus(
+      hero,
       actionInsights,
       latestMeeting,
       knowledgeDocuments,

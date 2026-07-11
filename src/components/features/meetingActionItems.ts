@@ -92,6 +92,39 @@ const ATTENTION_STATUS_ORDER: Record<
   dismissed: 2,
 };
 
+const isPreferredLinkedAttention = (
+  candidate: Pick<
+    MeetingLinkedAttentionItem,
+    'id' | 'status' | 'kind' | 'reason'
+  >,
+  current: Pick<
+    MeetingLinkedAttentionItem,
+    'id' | 'status' | 'kind' | 'reason'
+  >,
+): boolean => {
+  const candidateRank =
+    ATTENTION_STATUS_ORDER[candidate.status] ?? ATTENTION_STATUS_ORDER.active;
+  const currentRank =
+    ATTENTION_STATUS_ORDER[current.status] ?? ATTENTION_STATUS_ORDER.active;
+  if (candidateRank !== currentRank) {
+    return candidateRank < currentRank;
+  }
+
+  const candidateIsBlocker = candidate.kind === 'blocker';
+  const currentIsBlocker = current.kind === 'blocker';
+  if (candidateIsBlocker !== currentIsBlocker) {
+    return candidateIsBlocker;
+  }
+
+  const candidateReasonLength = normalizeValue(candidate.reason).length;
+  const currentReasonLength = normalizeValue(current.reason).length;
+  if (candidateReasonLength !== currentReasonLength) {
+    return candidateReasonLength > currentReasonLength;
+  }
+
+  return false;
+};
+
 const getMeetingActionItemRank = (status: MeetingActionItemStatus): number => {
   if (status === 'fallback') return 4;
   return ACTION_STATUS_ORDER[status];
@@ -435,13 +468,20 @@ export const buildMeetingActionItems = ({
 
   for (const item of linkedAttentionItems) {
     for (const relatedEntityId of item.related_entity_ids) {
-      if (attentionByEntityId.has(relatedEntityId)) continue;
-      attentionByEntityId.set(relatedEntityId, {
+      const nextAttention = {
         id: item.id,
         status: item.status,
         kind: item.kind,
         reason: item.reason,
-      });
+      };
+      const currentAttention = attentionByEntityId.get(relatedEntityId);
+      if (
+        currentAttention &&
+        !isPreferredLinkedAttention(nextAttention, currentAttention)
+      ) {
+        continue;
+      }
+      attentionByEntityId.set(relatedEntityId, nextAttention);
     }
   }
 
