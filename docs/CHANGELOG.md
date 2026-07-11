@@ -44,6 +44,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Surface blocker state in dashboard action status chips
+- **Issue:** [#348](https://github.com/metagrover/pluto/issues/348)
+- **PR:** Pending.
+- **Changed:** Blocker-backed homepage follow-up cards now spend their primary status chip on `Blocker` instead of a routine `overdue`, `stale`, or `active` label, while the linked blocker reason and follow-up controls remain unchanged. Focused server-render regression coverage now proves the action chip itself carries the blocker state and no longer duplicates it with a routine aging badge.
+- **Why:** `#61` still depends on Pluto classifying blocker-backed commitments differently from routine follow-ups across homepage surfaces. Before this slice, the dashboard already carried blocker context and reason, but the strongest visual status chip still read like ordinary calendar debt, which undercut the trust work already shipping around the same cards.
+- **Replaced:** Spending the follow-up card's main status chip on routine aging labels even when linked active attention had already classified the item as a blocker.
+- **Notes:** This intentionally stays scoped to the dashboard renderer and existing blocker metadata. It does not change follow-up ranking, lifecycle controls, or adjacent hero, briefing, and spotlight copy still tracked in separate PRs.
 ### Surface blocker state in homepage briefing action labels
 - **Issue:** [#336](https://github.com/metagrover/pluto/issues/336)
 - **PR:** Pending.
