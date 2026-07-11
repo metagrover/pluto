@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-10
 
+### Reframe the homepage as a living memory brief
+- **Issue:** [#59](https://github.com/metagrover/pluto/issues/59)
+- **PR:** [#365](https://github.com/metagrover/pluto/pull/365)
+- **Changed:** The homepage now leads with the strongest available synthesized memory read and places trust and source context directly beside it. Attention is limited to three editorial rows before overflow, recent memory is rendered as a compact evidence-bearing list, meeting and project context move into a quiet continuation rail, and the sidebar recording promotion becomes one compact persistent action.
+- **Why:** Pluto should orient users through memory, change, and evidence. The previous composition repeated the same action signal across a hero, focus card, and backlog list, making routine task volume feel more important than synthesis.
+- **Replaced:** A card-heavy task dashboard organized around overdue totals, duplicated briefing regions, and oversized capture and latest-meeting containers.
+- **Notes:** Existing dashboard ranking, lifecycle actions, blocker context, and real-data fallbacks remain intact. A future change-detection slice can make “since your last visit” explicit once the model exposes durable before-and-after state.
+
 ### Prefer blocker-backed stale homepage heroes
 - **Issue:** [#362](https://github.com/metagrover/pluto/issues/362)
 - **PR:** Pending.

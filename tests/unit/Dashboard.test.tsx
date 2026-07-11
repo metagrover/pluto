@@ -137,6 +137,57 @@ const makeWorkspace = (
 });
 
 describe('Dashboard', () => {
+  it('renders one living memory brief with evidence and a deliberately small attention lane', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({ id: 'action-1' }),
+        makeAction({ id: 'action-2', name: 'Confirm launch owner' }),
+        makeAction({ id: 'action-3', name: 'Close privacy review' }),
+        makeAction({ id: 'action-4', name: 'Publish launch notes' }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+        handleUpdateAttentionStatus={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup.match(/Current read/g) ?? []).toHaveLength(1);
+    expect(markup).toContain(
+      'Search indexing is converging around the rollout plan.',
+    );
+    expect(markup).toContain('Synthesized from 4 sources in Indexing Rollout.');
+    expect(markup).toContain('Open knowledge');
+    expect(markup).toContain('Ask Pluto');
+    expect(markup).not.toContain('1 blocker · 2 dependencies</p>');
+    expect(markup).not.toContain('Ask what changed');
+    expect(markup).toContain('Why Pluto believes this');
+    expect(markup).toContain('4 sources');
+    expect(markup).toContain('Attention');
+    expect(
+      markup.match(/data-testid="dashboard-attention-row"/g) ?? [],
+    ).toHaveLength(3);
+    expect(markup).toContain('Review 1 more');
+    expect(markup).not.toContain('Focus now');
+  });
+
   it('renders a blocker-specific homepage hero badge for blocker-backed follow-ups', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -177,7 +228,8 @@ describe('Dashboard', () => {
     );
 
     expect(markup).toContain('>Blocked<');
-    expect(markup).toContain('1 overdue item');
+    expect(markup).toContain('Finalize launch checklist');
+    expect(markup).not.toContain('1 overdue item');
   });
 
   it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
@@ -343,7 +395,11 @@ describe('Dashboard', () => {
       workspace: makeWorkspace({
         docs: [],
         project_cards: [
-          makeProjectCard({ open_blockers: 2, dependency_count: 0, recent_changes: 0 }),
+          makeProjectCard({
+            open_blockers: 2,
+            dependency_count: 0,
+            recent_changes: 0,
+          }),
         ],
       }),
       graphStats: null,
