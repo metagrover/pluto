@@ -61,6 +61,20 @@ export interface DefaultDraftsInput {
 export type DraftId = 'client' | 'internal' | 'slack';
 export type Drafts = Partial<Record<DraftId, string>>;
 
+type PreferredLinkedAttention = Pick<
+  MeetingLinkedAttentionItem,
+  'status' | 'kind' | 'reason'
+>;
+
+const LINKED_ATTENTION_STATUS_PRIORITY: Record<
+  MeetingLinkedAttentionItem['status'],
+  number
+> = {
+  active: 0,
+  snoozed: 1,
+  dismissed: 2,
+};
+
 const normalizeName = (value: string | null | undefined): string =>
   (value || '').trim();
 
@@ -234,6 +248,32 @@ const compareEntities = (a: MeetingEntitySummary, b: MeetingEntitySummary) => {
   return a.name.localeCompare(b.name);
 };
 
+const shouldPreferLinkedAttention = (
+  current: PreferredLinkedAttention,
+  candidate: PreferredLinkedAttention,
+): boolean => {
+  const currentPriority =
+    LINKED_ATTENTION_STATUS_PRIORITY[current.status] ??
+    LINKED_ATTENTION_STATUS_PRIORITY.dismissed;
+  const candidatePriority =
+    LINKED_ATTENTION_STATUS_PRIORITY[candidate.status] ??
+    LINKED_ATTENTION_STATUS_PRIORITY.dismissed;
+
+  if (candidatePriority !== currentPriority) {
+    return candidatePriority < currentPriority;
+  }
+
+  const currentIsBlocker = current.kind === 'blocker';
+  const candidateIsBlocker = candidate.kind === 'blocker';
+  if (candidateIsBlocker !== currentIsBlocker) {
+    return candidateIsBlocker;
+  }
+
+  const currentReason = normalizeName(current.reason);
+  const candidateReason = normalizeName(candidate.reason);
+  return candidateReason.length > currentReason.length;
+};
+
 const getDraftActionPriority = (
   entity: MeetingEntitySummary,
   blockerReason: string,
@@ -341,9 +381,12 @@ const formatActionItem = (
   const dueLabel = formatDueLabel(entity.due_date) || fallbackDetails.due;
   const contextLabel = normalizeName(entity.context) || fallbackDetails.context;
   const blockedReason = blockerReasonByEntityId.get(entity.id) ?? '';
+  const fallbackLifecycleLabel =
+    blockedReason && fallbackDetails.status.toLowerCase().startsWith('blocked')
+      ? ''
+      : fallbackDetails.status;
   const lifecycleLabel =
-    formatLifecycleLabel(entity.status) ||
-    (blockedReason ? '' : fallbackDetails.status);
+    formatLifecycleLabel(entity.status) || fallbackLifecycleLabel;
   const details = [
     fallbackDetails.topic ? `Topic: ${fallbackDetails.topic}` : '',
     lifecycleLabel ? `Status: ${lifecycleLabel}` : '',
@@ -459,23 +502,44 @@ export const buildFollowUpDraftContext = ({
       },
     ]),
   );
+  const preferredAttentionByEntityId = new Map<
+    string,
+    PreferredLinkedAttention
+  >();
+
+  for (const item of linkedAttentionItems) {
+    for (const relatedEntityId of item.related_entity_ids) {
+      const nextAttention: PreferredLinkedAttention = {
+        status: item.status,
+        kind: item.kind,
+        reason: item.reason,
+      };
+      const currentAttention =
+        preferredAttentionByEntityId.get(relatedEntityId);
+      if (
+        currentAttention &&
+        !shouldPreferLinkedAttention(currentAttention, nextAttention)
+      ) {
+        continue;
+      }
+      preferredAttentionByEntityId.set(relatedEntityId, nextAttention);
+    }
+  }
+
   const suppressedEntityIds = new Set(
-    linkedAttentionItems
+    Array.from(preferredAttentionByEntityId.entries())
       .filter(
-        (item) => item.status === 'dismissed' || item.status === 'snoozed',
+        ([, item]) => item.status === 'dismissed' || item.status === 'snoozed',
       )
-      .flatMap((item) => item.related_entity_ids),
+      .map(([entityId]) => entityId),
   );
 
   const blockerReasonByEntityId = new Map<string, string>();
-  for (const item of linkedAttentionItems) {
+  for (const [entityId, item] of preferredAttentionByEntityId.entries()) {
     if (item.kind !== 'blocker' || item.status !== 'active') continue;
     const reason = normalizeName(item.reason).replace(/[.!?]+$/, '');
     if (!reason) continue;
-    for (const relatedEntityId of item.related_entity_ids) {
-      if (blockerReasonByEntityId.has(relatedEntityId)) continue;
-      blockerReasonByEntityId.set(relatedEntityId, reason);
-    }
+    blockerReasonByEntityId.set(entityId, reason);
   }
 
   const allLinkedActionEntities = linkedEntities
