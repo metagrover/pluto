@@ -22,6 +22,10 @@ import {
   persistDashboardActionCompletion,
   persistDashboardAttentionStatus,
 } from './components/features/dashboardActionCompletion';
+import type {
+  CaptureHealth,
+  LiveTranscriptSegment,
+} from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
 
 import { updateEntityStatus } from './api/knowledgeGraph';
@@ -98,7 +102,6 @@ function App() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
   const [askPlutoVisible, setAskPlutoVisible] = useState(false);
-  const [query, setQuery] = useState('');
   const [updatingDashboardTaskIds, setUpdatingDashboardTaskIds] = useState<
     Set<string>
   >(new Set());
@@ -106,8 +109,6 @@ function App() {
     string | null
   >(null);
   const [currentNotes, setCurrentNotes] = useState('');
-  const [inlineAskPluto, setInlineAskPluto] = useState(false);
-  const [plutoResponse, setPlutoResponse] = useState('');
   const [transcriptVisible, setTranscriptVisible] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [autoEndEnabled, setAutoEndEnabled] = useState(true);
@@ -118,15 +119,22 @@ function App() {
   const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(
     null,
   );
-  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
-  const [speakingSource, setSpeakingSource] = useState<'Me' | 'Them' | null>(
-    null,
+  const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
+    [],
   );
+  const [recordingStartedAtMs, setRecordingStartedAtMs] = useState<
+    number | null
+  >(null);
+  const [captureHealth, setCaptureHealth] = useState<{
+    microphone: CaptureHealth;
+    systemAudio: CaptureHealth;
+  }>({
+    microphone: 'healthy',
+    systemAudio: 'healthy',
+  });
 
   // Connect the ref
-  onAnalyserReadyRef.current = (node) => {
-    setAnalyser(node);
-  };
+  onAnalyserReadyRef.current = () => {};
 
   useActiveCallMonitor({
     setupNeeded,
@@ -577,7 +585,12 @@ function App() {
           onStopSessionRef={stopSessionRef}
           onStartSessionRef={startSessionRef}
           onAnalyserReadyRef={onAnalyserReadyRef}
-          onSpeakingChange={setSpeakingSource}
+          onLiveTranscript={setLiveTranscript}
+          onCaptureHealthChange={setCaptureHealth}
+          onRecordingStarted={(startedAtMs) => {
+            setRecordingStartedAtMs(startedAtMs);
+            setLiveTranscript([]);
+          }}
           userTitle={meetingTitle}
           participants={meetingParticipants}
         />
@@ -637,14 +650,9 @@ function App() {
           setParticipantInput={setParticipantInput}
           currentNotes={currentNotes}
           setCurrentNotes={setCurrentNotes}
-          inlineAskPluto={inlineAskPluto}
-          setInlineAskPluto={setInlineAskPluto}
-          query={query}
-          setQuery={setQuery}
-          plutoResponse={plutoResponse}
-          setPlutoResponse={setPlutoResponse}
-          analyser={analyser}
-          speakingSource={speakingSource}
+          liveTranscript={liveTranscript}
+          captureHealth={captureHealth}
+          recordingStartedAtMs={recordingStartedAtMs}
         />
       ) : (
         <main className="flex-1 flex flex-col bg-pro-bg h-full relative z-10 rounded-l-[2.5rem] overflow-hidden content-shift border-l border-pro-border/10">

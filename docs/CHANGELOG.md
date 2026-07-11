@@ -1064,3 +1064,6 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** Pluto's product direction evolves as the app becomes more real. GitHub Issues provide a better live surface for divergence, discussion, scope updates, and acceptance criteria than static PRDs.
 - **Replaced:** PRD-first planning as the default source of truth for active work.
 - **Notes:** This first version intentionally uses templates and agent ritual rather than CI enforcement.
+# 2026-07-10
+
+- Replaced the note-dominant active recording screen with a quiet command center: one clear capture status, readable live transcript, accessible finish action, and a collapsible meeting rail for participants, notes, and diagnostics.

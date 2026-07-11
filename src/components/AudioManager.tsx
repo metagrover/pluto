@@ -53,6 +53,10 @@ import {
   resolveTranscriptionLanguage,
   resolveTranscriptionSettings,
 } from '../utils/transcriptionSettings';
+import type {
+  CaptureHealth,
+  LiveTranscriptSegment,
+} from './features/recordingWorkspaceModel';
 
 interface AudioManagerProps {
   onTranscript: (text: string) => void;
@@ -60,6 +64,12 @@ interface AudioManagerProps {
   onRecordingChange?: (isRecording: boolean) => void;
   onProcessingChange?: (isProcessing: boolean) => void;
   onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
+  onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
+  onCaptureHealthChange?: (health: {
+    microphone: CaptureHealth;
+    systemAudio: CaptureHealth;
+  }) => void;
+  onRecordingStarted?: (startedAtMs: number) => void;
   userNotes?: string;
   userTitle?: string;
   participants?: string[];
@@ -340,6 +350,9 @@ export const AudioManager = ({
   onStartSessionRef,
   onAnalyserReadyRef,
   onSpeakingChange,
+  onLiveTranscript,
+  onCaptureHealthChange,
+  onRecordingStarted,
   systemAudioStatus = 'unknown',
 }: AudioManagerProps) => {
   const [isRecording, setIsRecording] = useState(false);
@@ -498,10 +511,18 @@ export const AudioManager = ({
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
       startTimeRef.current = Date.now();
+      onRecordingStarted?.(startTimeRef.current);
       recordingEndedAtRef.current = 0;
       stopInFlightRef.current = false;
       isRecordingRef.current = true;
       setIsRecording(true);
+      onCaptureHealthChange?.({
+        microphone: 'healthy',
+        systemAudio:
+          systemAudioStatus === 'granted' || systemAudioStatus === 'authorized'
+            ? 'healthy'
+            : 'warning',
+      });
 
       console.log(
         `[Pluto] Starting session ${meetingId} (Robust Mic First)...`,
@@ -3021,6 +3042,20 @@ export const AudioManager = ({
         startTime: s.startTime + chunkStartSec,
         endTime: s.endTime + chunkStartSec,
       })),
+    );
+    onLiveTranscript?.(
+      [...processedMicSegmentsRef.current]
+        .sort((a, b) => a.startTime - b.startTime)
+        .map((segment) => ({
+          id: segment.id,
+          speaker:
+            segment.speaker === 'Me' || segment.speaker === 'Them'
+              ? segment.speaker
+              : 'Unknown',
+          text: segment.text,
+          timestampMs: segment.startTime * 1_000,
+          confirmed: true,
+        })),
     );
   };
 
