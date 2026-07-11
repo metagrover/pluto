@@ -468,6 +468,63 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('prioritizes blocker-backed stale follow-ups ahead of routine stale items while keeping oldest-first order inside each bucket', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [
+        makeAction({
+          id: 'routine-older',
+          name: 'Routine older stale task',
+          due_date: null,
+          updated_at: '2026-04-10T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-newer',
+          name: 'Blocked newer stale task',
+          due_date: null,
+          updated_at: '2026-04-28T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-older',
+          name: 'Blocked older stale task',
+          due_date: null,
+          updated_at: '2026-04-12T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'routine-newer',
+          name: 'Routine newer stale task',
+          due_date: null,
+          updated_at: '2026-04-29T18:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-older',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-older'],
+        }),
+        makeAttentionItem({
+          id: 'attention-blocked-newer',
+          kind: 'blocker',
+          related_entity_ids: ['blocked-newer'],
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items.map((item) => item.id)).toEqual([
+      'blocked-older',
+      'blocked-newer',
+      'routine-older',
+      'routine-newer',
+    ]);
+  });
+
   it('surfaces the highest-priority blocker-backed active follow-up in the hero when nothing is overdue or stale', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -751,6 +808,8 @@ describe('buildDashboardHomeModel', () => {
       contextLabel: 'Blocked by legal approval.',
       attentionLabel: 'Blocker',
       attentionReason: 'Blocked by legal approval.',
+      dismissLabel: 'Dismiss blocker',
+      snoozeLabel: 'Snooze blocker',
     });
   });
 

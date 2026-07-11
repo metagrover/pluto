@@ -74,8 +74,8 @@ export interface DashboardActionInsightItem {
   attentionReason: string | null;
   attentionItemId: string | null;
   attentionStatus: AttentionItem['status'] | null;
-  dismissLabel: 'Dismiss' | 'Reopen' | null;
-  snoozeLabel: 'Snooze' | 'Reopen' | null;
+  dismissLabel: 'Dismiss' | 'Dismiss blocker' | 'Reopen' | null;
+  snoozeLabel: 'Snooze' | 'Snooze blocker' | 'Reopen' | null;
 }
 
 export type DashboardActionInsights =
@@ -516,7 +516,9 @@ const actionToInsightItem = (
         ? 'Reopen'
         : linkedAttention.status === 'snoozed'
           ? null
-          : 'Dismiss',
+          : linkedAttention.kind === 'blocker'
+            ? 'Dismiss blocker'
+            : 'Dismiss',
   snoozeLabel:
     linkedAttention == null
       ? null
@@ -524,7 +526,9 @@ const actionToInsightItem = (
         ? null
         : linkedAttention.status === 'snoozed'
           ? 'Reopen'
-          : 'Snooze',
+          : linkedAttention.kind === 'blocker'
+            ? 'Snooze blocker'
+            : 'Snooze',
 });
 
 const getDashboardActionContextLabel = (
@@ -597,7 +601,9 @@ const buildActionInsights = (
         linkedAttention,
       );
     }),
-    ...sortActions(staleActions, compareActionsByOldestUpdate).map((action) => {
+    ...sortActions(staleActions, (a, b) =>
+      compareStaleDashboardActions(a, b, attentionAlerts),
+    ).map((action) => {
       const linkedAttention = getLinkedDashboardAttention(
         action.id,
         attentionAlerts,

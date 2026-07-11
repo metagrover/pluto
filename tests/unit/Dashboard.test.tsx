@@ -221,6 +221,9 @@ describe('Dashboard', () => {
     );
 
     expect(markup).toContain('Blocker');
+    expect(markup).toContain('Blocked by legal approval.');
+    expect(markup).toContain('Dismiss blocker');
+    expect(markup).toContain('Snooze blocker');
     expect(markup).toContain('Due Apr 26 · Blocked by legal approval.');
     expect(markup).not.toContain('Due Apr 26 · Work');
   });
