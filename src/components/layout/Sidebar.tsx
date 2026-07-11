@@ -42,36 +42,18 @@ export const Sidebar = ({
         <Logo size={40} showText variant="default" />
       </div>
 
-      {/* Simplified Meeting Widget */}
-      <div className="px-6 pb-6 pt-2">
-        <div className="relative group">
-          <div className="relative overflow-hidden rounded-2xl bg-pro-surface border border-pro-border shadow-sm p-5 flex flex-col items-center text-center gap-4 transition-all duration-300 hover:shadow-md hover:border-pro-accent/20">
-            <div className="space-y-1">
-              <h3 className="text-[15px] font-bold text-pro-text-main tracking-tight">
-                New Meeting
-              </h3>
-              <p className="text-[11px] text-pro-text-muted font-medium px-2 leading-normal opacity-70">
-                Capture every detail, effortlessly.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={onStartRecording}
-              className="w-full h-10 rounded-xl bg-pro-accent dark:bg-white text-[#1A2340] dark:text-[#161A23] text-[12px] font-bold hover:bg-pro-accent/90 dark:hover:bg-white/90 transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-premium"
-            >
-              <span>Start Recording</span>
-            </button>
-
-            <div className="flex items-center gap-1.5 opacity-20 group-hover:opacity-40 transition-opacity">
-              <span className="text-[9px] font-bold text-pro-text-muted uppercase tracking-widest flex items-center gap-1">
-                <kbd className="font-sans">Cmd</kbd>
-                <span className="w-0.5 h-0.5 rounded-full bg-stone-300" />
-                <kbd className="font-sans">N</kbd>
-              </span>
-            </div>
-          </div>
-        </div>
+      <div className="px-6 pb-4 pt-1">
+        <button
+          type="button"
+          onClick={onStartRecording}
+          className="flex min-h-11 w-full items-center justify-between rounded-xl bg-pro-accent px-4 text-[#1A2340] shadow-sm transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent dark:bg-white dark:text-[#161A23] dark:hover:bg-white/90"
+        >
+          <span className="flex items-center gap-2 text-[12px] font-black">
+            <span aria-hidden="true" className="text-[13px]">●</span>
+            Start recording
+          </span>
+          <kbd className="font-sans text-[9px] font-bold opacity-45">⌘ N</kbd>
+        </button>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-6 space-y-10 custom-scrollbar sidebar-mask no-drag">

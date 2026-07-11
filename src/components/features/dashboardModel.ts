@@ -99,6 +99,7 @@ export interface DashboardKnowledgeDocumentCard {
   title: string;
   description: string;
   countLabel: string;
+  sourceCountLabel: string;
   status: KnowledgeDoc['status'];
   scopeType: KnowledgeDoc['scope_type'];
   trustStatus: TrustStatus | null;
@@ -830,6 +831,7 @@ const buildKnowledgeDocuments = (
         countLabel: projectCard
           ? formatProjectHealthCountLabel(projectCard)
           : formatCountLabel(detail.sourceCount),
+        sourceCountLabel: formatCountLabel(detail.sourceCount),
         status: doc.status,
         scopeType: doc.scope_type,
         trustStatus: detail.trustStatus,

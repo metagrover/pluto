@@ -242,6 +242,7 @@ describe('buildDashboardHomeModel', () => {
       title: 'Indexing Rollout',
       description: 'Search indexing is converging around the rollout plan.',
       countLabel: '1 blocker · 2 dependencies',
+      sourceCountLabel: '4 sources',
       status: 'up_to_date',
       scopeType: 'project',
       trustStatus: 'grounded',
