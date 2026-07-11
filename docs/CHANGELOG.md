@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-08
 
+### Surface blocker-backed spotlight quick actions on the homepage
+- **Issue:** [#346](https://github.com/metagrover/pluto/issues/346)
+- **PR:** Pending.
+- **Changed:** The homepage quick action row now uses `Review blockers` when a blocked project spotlight is the only reason Pluto is surfacing the projects CTA, with focused model and server-rendered dashboard regression coverage for that spotlight-only path.
+- **Why:** `#61` still depends on homepage follow-up surfaces making blocker-backed state explicit. Before this slice, Pluto could correctly surface a blocked project in the spotlight card while the adjacent hero quick action still fell back to generic `Open projects` copy.
+- **Replaced:** Treating spotlight-driven project quick actions as generic navigation even when the spotlight already carried blocker state.
+- **Notes:** This intentionally stays scoped to the spotlight-only quick action path and leaves overdue/stale action-driven project labels unchanged.
 ### Surface blocker state in the project spotlight badge
 - **Issue:** [#344](https://github.com/metagrover/pluto/issues/344)
 - **PR:** Pending.

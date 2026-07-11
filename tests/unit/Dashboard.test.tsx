@@ -284,4 +284,36 @@ describe('Dashboard', () => {
     expect(markup).toContain('Blocked');
     expect(markup).not.toContain('>Projects<');
   });
+
+  it('renders a blocker-specific spotlight quick action', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: makeWorkspace({
+        docs: [],
+        project_cards: [
+          makeProjectCard({ open_blockers: 2, dependency_count: 0, recent_changes: 0 }),
+        ],
+      }),
+      graphStats: null,
+    });
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+    expect(markup).toContain('Review blockers');
+  });
 });

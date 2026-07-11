@@ -1854,4 +1854,26 @@ describe('buildDashboardHomeModel', () => {
       { label: 'Start with Ask Pluto', target: 'ask' },
     ]);
   });
+
+  it('uses a blocker-specific quick action label when spotlight is blocked', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: makeWorkspace({
+        docs: [],
+        project_cards: [
+          makeProjectCard({ open_blockers: 2, dependency_count: 0, recent_changes: 0 }),
+        ],
+      }),
+      graphStats: null,
+    });
+    expect(model.quickActions).toContainEqual({
+      label: 'Review blockers',
+      target: 'projects',
+    });
+  });
 });
