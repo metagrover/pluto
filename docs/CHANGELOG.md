@@ -18,6 +18,15 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-10
+
+### Surface blocker state in dashboard action-insight secondary controls
+- **Issue:** [#353](https://github.com/metagrover/pluto/issues/353)
+- **PR:** Pending.
+- **Changed:** Blocker-backed homepage action-insight cards now keep their secondary lifecycle controls explicit with blocker-specific `Dismiss blocker` and `Snooze blocker` labels, while routine follow-up cards keep the existing generic labels. Focused dashboard model and rendering regressions now prove the control copy stays aligned with the blocker context Pluto already surfaces on those cards.
+- **Why:** `#61` still depends on homepage follow-up surfaces making blocker-backed work visibly distinct from routine commitments. Before this slice, the dashboard already showed blocker badges and reasons, but the remaining lifecycle controls fell back to generic alert copy that made the last available actions read like ordinary follow-up noise.
+- **Replaced:** Treating blocker-backed action-insight secondary controls as the same generic dismiss/snooze actions used for routine follow-up alerts.
+- **Notes:** This intentionally stays scoped to action-insight secondary control copy and does not overlap the separate open status-chip or primary completion-label PRs.
 ## 2026-07-08
 
 ### Surface blocker-backed spotlight quick actions on the homepage

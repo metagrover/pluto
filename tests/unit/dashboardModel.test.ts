@@ -714,6 +714,8 @@ describe('buildDashboardHomeModel', () => {
       contextLabel: 'Blocked by legal approval.',
       attentionLabel: 'Blocker',
       attentionReason: 'Blocked by legal approval.',
+      dismissLabel: 'Dismiss blocker',
+      snoozeLabel: 'Snooze blocker',
     });
   });
 
