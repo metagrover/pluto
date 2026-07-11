@@ -360,4 +360,39 @@ describe('Dashboard', () => {
     );
     expect(markup).toContain('Review blockers');
   });
+
+  it('keeps completion-oriented labels for overdue and stale follow-up cards', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ id: 'action-overdue' })],
+      staleActions: [
+        makeAction({
+          id: 'action-stale',
+          name: 'Follow up with legal',
+          due_date: null,
+          updated_at: '2026-04-10T10:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+    expect(markup.match(/Mark complete/g) ?? []).toHaveLength(2);
+    expect(markup).not.toContain('Reopen');
+  });
 });

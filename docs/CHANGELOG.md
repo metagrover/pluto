@@ -44,6 +44,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-07
 
+### Fix dashboard action-insight completion labels for aging follow-ups
+- **Issue:** [#351](https://github.com/metagrover/pluto/issues/351)
+- **PR:** Pending.
+- **Changed:** Overdue and stale homepage action-insight cards now keep the primary CTA label aligned with the existing completion handler, so visible follow-up cards consistently say `Mark complete` instead of showing a misleading `Reopen` label for still-open work. Focused dashboard render coverage now proves both aging states keep the completion-oriented action copy.
+- **Why:** `#61` still depends on Pluto's follow-up surfaces being trustworthy at a glance. Before this slice, the homepage action list invoked the completion path for overdue and stale cards while displaying the opposite lifecycle label, which made a shipped dashboard control contradict the behavior behind it.
+- **Replaced:** Reusing the `Reopen` copy on overdue and stale action-insight cards even though those cards still represent active follow-ups and already call the completion flow.
+- **Notes:** This intentionally stays scoped to the dashboard action-insight primary CTA copy. It does not change blocker-state labeling, ranking, or the existing dismiss/snooze controls.
 ### Surface blocker state in dashboard action status chips
 - **Issue:** [#348](https://github.com/metagrover/pluto/issues/348)
 - **PR:** Pending.
