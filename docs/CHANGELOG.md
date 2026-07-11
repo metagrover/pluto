@@ -20,6 +20,13 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-10
 
+### Prefer blocker-backed stale dashboard follow-ups
+- **Issue:** [#355](https://github.com/metagrover/pluto/issues/355)
+- **PR:** Pending.
+- **Changed:** The homepage action-insight list now prefers stale follow-ups backed by active blocker attention before routine stale items, while keeping the existing oldest-update ordering inside the blocker-backed and routine stale buckets. Focused regression coverage now proves blocked stale work stays ahead of routine stale debt without disturbing the rest of the list behavior.
+- **Why:** `#61` depends on Pluto surfacing the highest-value follow-ups consistently across homepage surfaces. Before this slice, overdue and active dashboard follow-ups already respected blocker priority, but stale action insights still sorted only by age and could bury blocked stale work behind routine items.
+- **Replaced:** Treating all stale dashboard follow-ups as equivalent once they entered the stale bucket, regardless of linked blocker attention.
+- **Notes:** This intentionally stays scoped to stale action-insight ordering in `dashboardModel.ts` and does not change hero, briefing, or control copy.
 ### Surface blocker state in dashboard action-insight secondary controls
 - **Issue:** [#353](https://github.com/metagrover/pluto/issues/353)
 - **PR:** Pending.
