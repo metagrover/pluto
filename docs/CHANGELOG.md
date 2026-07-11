@@ -28,6 +28,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Replaced:** A card-heavy task dashboard organized around overdue totals, duplicated briefing regions, and oversized capture and latest-meeting containers.
 - **Notes:** Existing dashboard ranking, lifecycle actions, blocker context, and real-data fallbacks remain intact. A future change-detection slice can make “since your last visit” explicit once the model exposes durable before-and-after state.
 
+### Prefer blocker-backed stale homepage heroes
+- **Issue:** [#362](https://github.com/metagrover/pluto/issues/362)
+- **PR:** Pending.
+- **Changed:** The homepage hero now prefers blocker-backed stale follow-ups before routine stale work while preserving the existing oldest-update ordering inside each stale bucket. Focused dashboard model regression coverage now proves a blocker-backed stale follow-up can headline the page even when a routine stale item is older.
+- **Why:** `#61` still depends on Pluto ranking commitments by trusted attention rather than raw recency alone. Before this slice, the dashboard could correctly identify blocked stale work elsewhere but still headline an older routine stale follow-up in the homepage hero, which weakened the highest-visibility trust signal.
+- **Replaced:** Treating stale homepage hero selection as age-only ordering even when linked blocker attention already marks one stale follow-up as more important.
+- **Notes:** This intentionally stays scoped to homepage hero prioritization and does not reopen the separate stale action-insight ordering PR tracked under `#355`.
+
 ### Prefer blocker-backed stale dashboard follow-ups
 - **Issue:** [#355](https://github.com/metagrover/pluto/issues/355)
 - **PR:** Pending.
@@ -35,6 +43,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` depends on Pluto surfacing the highest-value follow-ups consistently across homepage surfaces. Before this slice, overdue and active dashboard follow-ups already respected blocker priority, but stale action insights still sorted only by age and could bury blocked stale work behind routine items.
 - **Replaced:** Treating all stale dashboard follow-ups as equivalent once they entered the stale bucket, regardless of linked blocker attention.
 - **Notes:** This intentionally stays scoped to stale action-insight ordering in `dashboardModel.ts` and does not change hero, briefing, or control copy.
+
 ### Surface blocker state in dashboard action-insight secondary controls
 - **Issue:** [#353](https://github.com/metagrover/pluto/issues/353)
 - **PR:** Pending.
@@ -51,6 +60,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still depends on homepage follow-up surfaces making blocker-backed state explicit. Before this slice, Pluto could correctly surface a blocked project in the spotlight card while the adjacent hero quick action still fell back to generic `Open projects` copy.
 - **Replaced:** Treating spotlight-driven project quick actions as generic navigation even when the spotlight already carried blocker state.
 - **Notes:** This intentionally stays scoped to the spotlight-only quick action path and leaves overdue/stale action-driven project labels unchanged.
+
 ### Surface blocker state in the project spotlight badge
 - **Issue:** [#344](https://github.com/metagrover/pluto/issues/344)
 - **PR:** Pending.
@@ -58,6 +68,7 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Why:** `#61` still depends on Pluto making blocker-backed follow-ups and project state explicit on homepage surfaces. Before this slice, the spotlight could already carry blocker-specific priority and detail, but the rendered badge stayed generic and hid that trust signal at a glance.
 - **Replaced:** Hardcoding the spotlight badge to `Projects` even when the selected spotlight card already represented blocked project work.
 - **Notes:** This intentionally stays scoped to the spotlight badge. Adjacent spotlight subtitle and hero/briefing blocker-copy slices remain tracked in their separate PRs.
+
 ### Surface blocker state in the homepage hero badge
 - **Issue:** [#342](https://github.com/metagrover/pluto/issues/342)
 - **PR:** Pending.

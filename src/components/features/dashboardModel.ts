@@ -926,9 +926,8 @@ const buildHero = (
     };
   }
 
-  const staleAction = sortActions(
-    input.staleActions,
-    compareActionsByOldestUpdate,
+  const staleAction = sortActions(input.staleActions, (a, b) =>
+    compareStaleDashboardActions(a, b, input.attentionAlerts ?? []),
   )[0];
   if (staleAction) {
     const hasLinkedBlocker = hasActiveLinkedBlocker(
