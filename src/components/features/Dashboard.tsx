@@ -66,28 +66,6 @@ const getHeroTone = (
   return 'text-pro-accent border-pro-accent/20 bg-pro-accent/5';
 };
 
-const getHeroLabel = (
-  kind: DashboardHomeModel['hero']['kind'],
-  loading: boolean,
-) => {
-  if (loading) return 'Syncing';
-  switch (kind) {
-    case 'recording':
-      return 'Live capture';
-    case 'overdue_action':
-    case 'active_action':
-      return 'Needs attention';
-    case 'stale_action':
-      return 'Watch';
-    case 'latest_meeting':
-      return 'Latest meeting';
-    case 'knowledge_doc':
-      return 'Recent memory';
-    case 'default':
-      return 'Ready';
-  }
-};
-
 const getBriefingTone = (kind: DashboardHomeModel['briefingFocus']['kind']) => {
   if (kind === 'attention') {
     return 'border-pro-accent/30 bg-pro-surface dark:border-pro-border dark:bg-pro-surface/55';
@@ -180,7 +158,7 @@ export const Dashboard = ({
                     loading,
                   )}`}
                 >
-                  {getHeroLabel(model.hero.kind, loading)}
+                  {loading ? 'Syncing' : model.hero.label}
                 </span>
               </div>
               <h1 className="max-w-3xl text-[29px] font-black leading-tight tracking-[-0.03em] text-pro-text-main">
@@ -303,9 +281,11 @@ export const Dashboard = ({
                           </p>
                         </div>
                         {item.attentionReason ? (
-                          <p className="mt-1 text-[11px] font-semibold text-pro-urgent/80">
-                            {item.attentionReason}
-                          </p>
+                          item.attentionReason !== item.contextLabel ? (
+                            <p className="mt-1 text-[11px] font-semibold text-pro-urgent/80">
+                              {item.attentionReason}
+                            </p>
+                          ) : null
                         ) : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button
@@ -467,7 +447,7 @@ export const Dashboard = ({
                 className="mt-auto rounded-2xl border border-pro-border/70 bg-pro-bg/45 p-4 text-left transition-all hover:border-pro-accent/30 hover:bg-pro-bg/65"
               >
                 <p className="text-[11px] font-black tracking-[0.14em] text-pro-text-muted/55">
-                  Project signal
+                  {model.spotlight.subtitle}
                 </p>
                 <div className="mt-2 flex items-start justify-between gap-3">
                   <div>
@@ -479,7 +459,7 @@ export const Dashboard = ({
                     </p>
                   </div>
                   <span className="rounded-full bg-pro-accent/10 px-2.5 py-1 text-[10px] font-black text-pro-accent">
-                    Projects
+                    {model.spotlight.badgeLabel}
                   </span>
                 </div>
               </button>
