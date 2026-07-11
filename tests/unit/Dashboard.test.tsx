@@ -137,6 +137,49 @@ const makeWorkspace = (
 });
 
 describe('Dashboard', () => {
+  it('renders a blocker-specific homepage hero badge for blocker-backed follow-ups', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked',
+          kind: 'blocker',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+          related_meeting_ids: [],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('>Blocked<');
+    expect(markup).toContain('1 overdue item');
+  });
+
   it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -181,6 +224,52 @@ describe('Dashboard', () => {
     expect(markup).toContain('Blocked by legal approval.');
     expect(markup).toContain('Dismiss blocker');
     expect(markup).toContain('Snooze blocker');
+    expect(markup).toContain('Due Apr 26 · Blocked by legal approval.');
+    expect(markup).not.toContain('Due Apr 26 · Work');
+  });
+
+  it('uses the primary action status chip for blocker-backed follow-up cards', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+          related_meeting_ids: [],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('>Blocker<');
+    expect(markup).not.toContain('>overdue<');
   });
 
   it('renders linked meeting context on follow-up cards when available', () => {
@@ -212,5 +301,101 @@ describe('Dashboard', () => {
     expect(markup).toContain('Ship privacy review');
     expect(markup).toContain('Due Apr 26 · Launch Review');
     expect(markup).not.toContain('Due Apr 26 · Work');
+  });
+
+  it('renders a blocker-specific spotlight badge when the spotlight project is blocked', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Blocked');
+    expect(markup).not.toContain('>Projects<');
+  });
+
+  it('renders a blocker-specific spotlight quick action', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: makeWorkspace({
+        docs: [],
+        project_cards: [
+          makeProjectCard({ open_blockers: 2, dependency_count: 0, recent_changes: 0 }),
+        ],
+      }),
+      graphStats: null,
+    });
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+    expect(markup).toContain('Review blockers');
+  });
+
+  it('keeps completion-oriented labels for overdue and stale follow-up cards', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ id: 'action-overdue' })],
+      staleActions: [
+        makeAction({
+          id: 'action-stale',
+          name: 'Follow up with legal',
+          due_date: null,
+          updated_at: '2026-04-10T10:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+    expect(markup.match(/Mark complete/g) ?? []).toHaveLength(2);
+    expect(markup).not.toContain('Reopen');
   });
 });
