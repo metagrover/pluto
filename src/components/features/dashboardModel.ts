@@ -922,7 +922,10 @@ const buildHero = (
           : '',
       ]),
       severity: 'urgent',
-      action: { label: 'Open projects', target: 'projects' },
+      action: {
+        label: hasLinkedBlocker ? 'Review blockers' : 'Open projects',
+        target: 'projects',
+      },
     };
   }
 
@@ -946,7 +949,10 @@ const buildHero = (
       title: pluralize(input.staleActions.length, 'stale item'),
       detail: blockerReason ?? `${staleAction.name} has gone quiet.`,
       severity: 'watch',
-      action: { label: 'Open projects', target: 'projects' },
+      action: {
+        label: hasLinkedBlocker ? 'Review blockers' : 'Open projects',
+        target: 'projects',
+      },
     };
   }
 

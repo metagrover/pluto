@@ -459,6 +459,10 @@ describe('buildDashboardHomeModel', () => {
       'Legal approval is still blocking the overdue launch review.',
     );
     expect(model.hero.detail).not.toContain('Routine overdue follow-up');
+    expect(model.hero.action).toEqual({
+      label: 'Review blockers',
+      target: 'projects',
+    });
     expect(model.actionInsights.items[0]).toMatchObject({
       id: 'blocked-overdue',
       title: 'Blocked overdue follow-up',
@@ -550,6 +554,10 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.actionInsights.state).toBe('populated');
+    expect(model.hero.action).toEqual({
+      label: 'Review blockers',
+      target: 'projects',
+    });
     expect(model.actionInsights.items.map((item) => item.id)).toEqual([
       'blocked-older',
       'blocked-newer',
