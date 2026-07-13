@@ -950,7 +950,10 @@ const buildHero = (
       input.attentionAlerts ?? [],
     );
     const blockedStaleCount = hasLinkedBlocker
-      ? countActiveLinkedBlockers(input.staleActions, input.attentionAlerts ?? [])
+      ? countActiveLinkedBlockers(
+          input.staleActions,
+          input.attentionAlerts ?? [],
+        )
       : 0;
     const blockerReason = hasLinkedBlocker
       ? getActiveLinkedBlockerReason(
