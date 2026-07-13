@@ -1078,12 +1078,10 @@ const buildBriefingFocus = (
   latestMeeting: DashboardLatestMeeting,
   knowledgeDocuments: DashboardKnowledgeDocuments,
   activeActions: Entity[],
+  staleActions: Entity[],
   attentionAlerts: AttentionItem[],
 ): DashboardBriefingFocus => {
-  if (
-    actionInsights.state === 'populated' &&
-    (actionInsights.overdueCount > 0 || actionInsights.staleCount > 0)
-  ) {
+  if (actionInsights.state === 'populated' && actionInsights.overdueCount > 0) {
     return {
       kind: 'attention',
       title: 'Needs attention',
@@ -1095,6 +1093,39 @@ const buildBriefingFocus = (
           ? pluralize(actionInsights.staleCount, 'stale item')
           : '',
       ]),
+      action: { label: 'Review actions', target: 'projects' },
+    };
+  }
+
+  const prioritizedStaleAction = sortActions(staleActions, (a, b) =>
+    compareStaleDashboardActions(a, b, attentionAlerts),
+  )[0];
+  if (
+    actionInsights.state === 'populated' &&
+    prioritizedStaleAction &&
+    hasActiveLinkedBlocker(prioritizedStaleAction.id, attentionAlerts)
+  ) {
+    const blockedStaleCount = staleActions.filter((action) =>
+      hasActiveLinkedBlocker(action.id, attentionAlerts),
+    ).length;
+    const blockerReason = getActiveLinkedBlockerReason(
+      prioritizedStaleAction.id,
+      attentionAlerts,
+    );
+    return {
+      kind: 'attention',
+      title:
+        blockedStaleCount === 1 ? 'Blocked follow-up' : 'Blocked follow-ups',
+      detail: blockerReason ?? pluralize(blockedStaleCount, 'blocked item'),
+      action: { label: 'Review blockers', target: 'projects' },
+    };
+  }
+
+  if (actionInsights.state === 'populated' && actionInsights.staleCount > 0) {
+    return {
+      kind: 'attention',
+      title: 'Needs attention',
+      detail: pluralize(actionInsights.staleCount, 'stale item'),
       action: { label: 'Review actions', target: 'projects' },
     };
   }
@@ -1219,6 +1250,7 @@ export const buildDashboardHomeModel = (
       latestMeeting,
       knowledgeDocuments,
       activeActions,
+      staleActions,
       attentionAlerts,
     ),
     latestMeeting,

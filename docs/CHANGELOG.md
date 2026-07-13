@@ -18,6 +18,16 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 - **Notes:** Follow-up context future agents should know.
 ```
 
+## 2026-07-13
+
+### Surface stale blocker context in homepage briefing focus
+- **Issue:** [#368](https://github.com/metagrover/pluto/issues/368)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus panel now surfaces blocker-specific heading, detail, and CTA copy when the highest-priority stale follow-up is backed by active blocker attention. If Pluto has no richer blocker reason, the panel falls back to blocked-item count instead of stale-count copy. Focused dashboard model regression coverage now proves both stale-blocker paths while preserving generic copy for routine stale work.
+- **Why:** `#61` still depends on Pluto's homepage surfaces showing the highest-value follow-ups with consistent trust status. Before this slice, the hero and action insights could already promote blocker-backed stale work, but briefing focus still flattened that same state into generic stale-item wording.
+- **Replaced:** Treating briefing-focus stale states as generic attention copy even when linked blocker attention had already identified the selected follow-up as blocked.
+- **Notes:** This intentionally stays scoped to stale briefing-focus behavior and does not reopen stale hero or action-insight ranking/detail work.
+
 ## 2026-07-10
 
 ### Surface blocker reason on stale homepage heroes
