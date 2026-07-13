@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-10
 
+### Surface blocker reason on stale homepage heroes
+- **Issue:** [#366](https://github.com/metagrover/pluto/issues/366)
+- **PR:** Pending.
+- **Changed:** The homepage hero now reuses the linked active blocker reason when a blocker-backed stale follow-up is the top stale commitment, while keeping the existing `has gone quiet` copy as the fallback when Pluto has no richer blocker detail. Focused dashboard model regression coverage now proves both the blocker-reason path and the generic fallback path.
+- **Why:** `#61` still depends on Pluto's highest-visibility follow-up surface preserving the same trusted blocker evidence it already uses for overdue and active hero states. Before this slice, stale heroes could correctly promote blocked work and label it `Blocked`, but still flatten the detail back to generic stale copy.
+- **Replaced:** Treating stale homepage hero detail as age-only stale wording even when linked blocker attention already carried the stronger reason Pluto should surface.
+- **Notes:** This intentionally stays scoped to stale homepage hero detail and does not reopen stale hero ranking, CTA copy, or briefing behavior.
+
 ### Reframe the homepage as a living memory brief
 - **Issue:** [#59](https://github.com/metagrover/pluto/issues/59)
 - **PR:** [#365](https://github.com/metagrover/pluto/pull/365)

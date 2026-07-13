@@ -934,11 +934,17 @@ const buildHero = (
       staleAction.id,
       input.attentionAlerts ?? [],
     );
+    const blockerReason = hasLinkedBlocker
+      ? getActiveLinkedBlockerReason(
+          staleAction.id,
+          input.attentionAlerts ?? [],
+        )
+      : null;
     return {
       kind: 'stale_action',
       label: getHeroLabel('stale_action', { hasLinkedBlocker }),
       title: pluralize(input.staleActions.length, 'stale item'),
-      detail: `${staleAction.name} has gone quiet.`,
+      detail: blockerReason ?? `${staleAction.name} has gone quiet.`,
       severity: 'watch',
       action: { label: 'Open projects', target: 'projects' },
     };
