@@ -333,6 +333,13 @@ const hasActiveLinkedBlocker = (
       item.related_entity_ids.includes(actionId),
   );
 
+const countActiveLinkedBlockers = (
+  actions: Entity[],
+  attentionAlerts: AttentionItem[],
+): number =>
+  actions.filter((action) => hasActiveLinkedBlocker(action.id, attentionAlerts))
+    .length;
+
 const getActiveLinkedBlockerReason = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -908,10 +915,18 @@ const buildHero = (
       overdueAction.id,
       input.attentionAlerts ?? [],
     );
+    const blockedOverdueCount = hasLinkedBlocker
+      ? countActiveLinkedBlockers(
+          input.overdueActions,
+          input.attentionAlerts ?? [],
+        )
+      : 0;
     return {
       kind: 'overdue_action',
       label: getHeroLabel('overdue_action', { hasLinkedBlocker }),
-      title: pluralize(input.overdueActions.length, 'overdue item'),
+      title: hasLinkedBlocker
+        ? pluralize(blockedOverdueCount, 'blocked item')
+        : pluralize(input.overdueActions.length, 'overdue item'),
       detail: joinCountLabels([
         getDashboardHeroActionDetail(
           overdueAction,
@@ -934,6 +949,9 @@ const buildHero = (
       staleAction.id,
       input.attentionAlerts ?? [],
     );
+    const blockedStaleCount = hasLinkedBlocker
+      ? countActiveLinkedBlockers(input.staleActions, input.attentionAlerts ?? [])
+      : 0;
     const blockerReason = hasLinkedBlocker
       ? getActiveLinkedBlockerReason(
           staleAction.id,
@@ -943,7 +961,9 @@ const buildHero = (
     return {
       kind: 'stale_action',
       label: getHeroLabel('stale_action', { hasLinkedBlocker }),
-      title: pluralize(input.staleActions.length, 'stale item'),
+      title: hasLinkedBlocker
+        ? pluralize(blockedStaleCount, 'blocked item')
+        : pluralize(input.staleActions.length, 'stale item'),
       detail: blockerReason ?? `${staleAction.name} has gone quiet.`,
       severity: 'watch',
       action: { label: 'Open projects', target: 'projects' },
@@ -960,9 +980,10 @@ const buildHero = (
       input.attentionAlerts ?? [],
     )
   ) {
-    const blockedActiveCount = input.activeActions.filter((action) =>
-      hasActiveLinkedBlocker(action.id, input.attentionAlerts ?? []),
-    ).length;
+    const blockedActiveCount = countActiveLinkedBlockers(
+      input.activeActions,
+      input.attentionAlerts ?? [],
+    );
     return {
       kind: 'active_action',
       label: getHeroLabel('active_action', { hasLinkedBlocker: true }),
