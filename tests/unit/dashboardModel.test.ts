@@ -314,6 +314,7 @@ describe('buildDashboardHomeModel', () => {
         makeAttentionItem({
           id: 'attention-blocked-stale',
           kind: 'blocker',
+          reason: 'Blocked by finance approval.',
           related_entity_ids: ['blocked-stale'],
         }),
       ],
@@ -323,8 +324,39 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('stale_action');
     expect(model.hero.label).toBe('Blocked');
-    expect(model.hero.detail).toContain('Blocked stale follow-up');
+    expect(model.hero.detail).toBe('Blocked by finance approval.');
     expect(model.hero.detail).not.toContain('Routine stale follow-up');
+  });
+
+  it('falls back to generic stale hero copy when blocker-backed stale follow-ups have no richer reason', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [
+        makeAction({
+          id: 'blocked-stale',
+          name: 'Blocked stale follow-up',
+          due_date: null,
+          updated_at: '2026-04-20T18:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-stale',
+          kind: 'blocker',
+          reason: '   ',
+          related_entity_ids: ['blocked-stale'],
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.hero.kind).toBe('stale_action');
+    expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.detail).toBe('Blocked stale follow-up has gone quiet.');
   });
 
   it('keeps the generic project spotlight badge when no blockers are open', () => {
