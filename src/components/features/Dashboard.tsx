@@ -49,6 +49,16 @@ const getActionInsightStatusTone = (item: DashboardActionInsightItem) => {
   return 'bg-pro-accent/10 text-pro-accent';
 };
 
+const getActionInsightPrimaryLabel = (item: DashboardActionInsightItem) =>
+  item.attentionLabel === 'Blocker' && item.attentionStatus === 'active'
+    ? 'Resolve blocker'
+    : 'Mark complete';
+
+const getActionInsightPrimaryAriaLabel = (item: DashboardActionInsightItem) =>
+  item.attentionLabel === 'Blocker' && item.attentionStatus === 'active'
+    ? `Resolve blocker: ${item.title}`
+    : `Mark ${item.title} complete`;
+
 const getHeroTone = (
   severity: DashboardHomeModel['hero']['severity'],
   loading: boolean,
@@ -233,6 +243,9 @@ export const Dashboard = ({
                       item.attentionItemId &&
                         updatingTaskIds.has(item.attentionItemId),
                     );
+                  const primaryLabel = getActionInsightPrimaryLabel(item);
+                  const primaryAriaLabel =
+                    getActionInsightPrimaryAriaLabel(item);
                   return (
                     <article
                       key={item.id}
@@ -243,7 +256,7 @@ export const Dashboard = ({
                       <div className="flex items-start gap-3">
                         <button
                           type="button"
-                          aria-label={`Mark ${item.title} complete`}
+                          aria-label={primaryAriaLabel}
                           disabled={isUpdating}
                           onClick={() => handleCompleteTask(item.id)}
                           className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-pro-border text-pro-text-muted transition-colors hover:border-pro-accent hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
@@ -282,7 +295,7 @@ export const Dashboard = ({
                               onClick={() => handleCompleteTask(item.id)}
                               className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main disabled:opacity-50"
                             >
-                              Mark complete
+                              {primaryLabel}
                             </button>
                             {item.attentionItemId && item.dismissLabel ? (
                               <button
