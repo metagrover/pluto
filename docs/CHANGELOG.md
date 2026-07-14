@@ -2,21 +2,11 @@
 
 This is Pluto's human-readable development journal. It is not a formal release-notes file.
 
-Use it to capture shipped changes, meaningful experiments, reversals, and changes in product direction. Good entries explain what changed, why it changed, and what assumption or previous direction it replaced.
+Entries through July 13, 2026 are archived below. New entries are canonical, independently writable fragments under [`docs/changelog/entries`](changelog/entries); see the [fragment authoring guide](changelog/README.md).
 
-## Entry Format
+Use `pnpm run changelog:check` to validate fragments and `pnpm run changelog:build` to assemble the post-migration journal. Ordinary pull requests do not edit this archive or commit generated aggregate output.
 
-```markdown
-## YYYY-MM-DD
-
-### Short change title
-- **Issue:** #123
-- **PR:** #456
-- **Changed:** What shipped or changed.
-- **Why:** The product or technical reason.
-- **Replaced:** The prior assumption, workflow, behavior, or plan this supersedes.
-- **Notes:** Follow-up context future agents should know.
-```
+## Archived entries
 
 ## 2026-07-13
 
