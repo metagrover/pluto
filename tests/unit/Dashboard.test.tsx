@@ -230,6 +230,7 @@ describe('Dashboard', () => {
     expect(markup).toContain('>Blocked<');
     expect(markup).toContain('Finalize launch checklist');
     expect(markup).not.toContain('1 overdue item');
+    expect(markup).toContain('Review blockers');
   });
 
   it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
