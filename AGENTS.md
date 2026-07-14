@@ -32,7 +32,7 @@ GitHub Issues are Pluto's source of truth for active product and implementation 
 - Find or create an outcome-sized GitHub Issue before writing a design, implementation plan, or code.
 - Keep the issue current when scope, acceptance criteria, constraints, or product direction change materially.
 - Record durable decisions in `docs/decisions.md`; create ADRs in `docs/adr/` only for high-impact technical choices.
-- Update `docs/CHANGELOG.md` when work ships or materially changes Pluto's product/development direction.
+- Add a uniquely named fragment under `docs/changelog/entries/` when work ships or materially changes Pluto's product/development direction. Do not edit the archived `docs/CHANGELOG.md` from ordinary pull requests.
 
 ### How to use:
 1.  **Search:** Check the `.agent/skills` directory for a skill that matches your current task.
