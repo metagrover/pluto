@@ -1077,9 +1077,40 @@ const buildBriefingFocus = (
   actionInsights: DashboardActionInsights,
   latestMeeting: DashboardLatestMeeting,
   knowledgeDocuments: DashboardKnowledgeDocuments,
+  overdueActions: Entity[],
   activeActions: Entity[],
   attentionAlerts: AttentionItem[],
 ): DashboardBriefingFocus => {
+  if (
+    actionInsights.state === 'populated' &&
+    actionInsights.overdueCount > 0 &&
+    hero.kind === 'overdue_action'
+  ) {
+    const prioritizedOverdueAction = sortActions(overdueActions, (a, b) =>
+      compareOverdueDashboardActions(a, b, attentionAlerts),
+    )[0];
+    const blockedOverdueCount = overdueActions.filter((action) =>
+      hasActiveLinkedBlocker(action.id, attentionAlerts),
+    ).length;
+    const blockerReason = prioritizedOverdueAction
+      ? getActiveLinkedBlockerReason(
+          prioritizedOverdueAction.id,
+          attentionAlerts,
+        )
+      : null;
+    if (prioritizedOverdueAction && blockedOverdueCount > 0) {
+      return {
+        kind: 'attention',
+        title:
+          blockedOverdueCount === 1
+            ? 'Blocked follow-up'
+            : 'Blocked follow-ups',
+        detail: blockerReason ?? pluralize(blockedOverdueCount, 'blocked item'),
+        action: { label: 'Review blockers', target: 'projects' },
+      };
+    }
+  }
+
   if (
     actionInsights.state === 'populated' &&
     (actionInsights.overdueCount > 0 || actionInsights.staleCount > 0)
@@ -1218,6 +1249,7 @@ export const buildDashboardHomeModel = (
       actionInsights,
       latestMeeting,
       knowledgeDocuments,
+      overdueActions,
       activeActions,
       attentionAlerts,
     ),
