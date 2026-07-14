@@ -1,5 +1,9 @@
 import type { KnowledgeDoc } from '../api/knowledgeDocs';
-import type { KnowledgeGraphStats } from '../api/knowledgeGraph';
+import type {
+  Entity,
+  EntityMeeting,
+  KnowledgeGraphStats,
+} from '../api/knowledgeGraph';
 import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 
 type IpcRendererLike = Window['ipcRenderer'];
@@ -47,6 +51,93 @@ const emptyGraphStats: KnowledgeGraphStats = {
   by_type: { person: 0, topic: 0, action_item: 0, decision: 0, project: 0 },
   total_links: 0,
   total_meeting_connections: 0,
+};
+
+const previewPeople: Entity[] = [
+  {
+    id: 'preview-avery',
+    type: 'person',
+    name: 'Avery Chen',
+    normalized_name: 'avery chen',
+    status: 'active',
+    due_date: null,
+    assigned_to: null,
+    metadata: JSON.stringify({ role: 'Design lead' }),
+    saliency_score: 0.92,
+    domain_tag: 'work',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'preview-maya',
+    type: 'person',
+    name: 'Maya Ortiz',
+    normalized_name: 'maya ortiz',
+    status: 'active',
+    due_date: null,
+    assigned_to: null,
+    metadata: JSON.stringify({ role: 'Product partner' }),
+    saliency_score: 0.86,
+    domain_tag: 'work',
+    created_at: now,
+    updated_at: now,
+  },
+  {
+    id: 'preview-jordan',
+    type: 'person',
+    name: 'Jordan Lee',
+    normalized_name: 'jordan lee',
+    status: 'active',
+    due_date: null,
+    assigned_to: null,
+    metadata: JSON.stringify({ role: 'Engineering' }),
+    saliency_score: 0.81,
+    domain_tag: 'work',
+    created_at: now,
+    updated_at: now,
+  },
+];
+
+const previewMeetings: Record<string, EntityMeeting[]> = {
+  'preview-avery': [
+    {
+      id: 'preview-product-review',
+      title: 'Product review',
+      meeting_type: 'work',
+      started_at: '2026-07-12T17:00:00.000Z',
+      ended_at: null,
+      duration_seconds: 2700,
+      created_at: '2026-07-12T17:00:00.000Z',
+      mention_count: 6,
+      context: 'Aligned on the rollout sequence and evidence requirements.',
+    },
+  ],
+  'preview-maya': [
+    {
+      id: 'preview-weekly-sync',
+      title: 'Weekly product sync',
+      meeting_type: 'work',
+      started_at: '2026-07-10T16:30:00.000Z',
+      ended_at: null,
+      duration_seconds: 1800,
+      created_at: '2026-07-10T16:30:00.000Z',
+      mention_count: 4,
+      context: 'Pressure-tested the current read and attention hierarchy.',
+    },
+  ],
+  'preview-jordan': [
+    {
+      id: 'preview-implementation-review',
+      title: 'Implementation review',
+      meeting_type: 'work',
+      started_at: '2026-07-08T18:00:00.000Z',
+      ended_at: null,
+      duration_seconds: 2400,
+      created_at: '2026-07-08T18:00:00.000Z',
+      mention_count: 3,
+      context: 'Reviewed delivery risks and the next implementation slice.',
+    },
+  ],
 };
 
 const workspaceFor = (docId?: string): KnowledgeWorkspacePayload => {
@@ -152,6 +243,12 @@ const invokeFallback: IpcRendererLike['invoke'] = async <T = unknown>(
       break;
     case 'GET_KNOWLEDGE_GRAPH_STATS':
       result = emptyGraphStats;
+      break;
+    case 'GET_ENTITIES_BY_TYPE':
+      result = args[0] === 'person' ? previewPeople : [];
+      break;
+    case 'GET_ENTITY_MEETINGS':
+      result = previewMeetings[String(args[0])] || [];
       break;
     case 'GET_KNOWLEDGE_TIMELINE':
       result = workspaceFor().timeline;
