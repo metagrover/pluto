@@ -258,6 +258,7 @@ const WORKING_MEMORY_SNAPSHOT_SCOPE_TYPES: KnowledgeDocScopeType[] = [
 
 const LIVE_ATTENTION_QUEUE_SCOPE_TYPES: KnowledgeDocScopeType[] = [
   'global',
+  'project',
   'person_context',
   'team_tracker',
 ];
@@ -1334,6 +1335,13 @@ export const compileNeedsAttention = (
   attentionItems: AttentionItem[] = [],
   workingMemorySnapshot?: WorkingMemorySnapshot | null,
 ): NeedsAttentionItem[] => {
+  const snapshotV2 = matchesWorkingMemorySnapshotToDoc(
+    doc,
+    workingMemorySnapshot,
+  )
+    ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
+    : null;
+
   if (
     doc?.scope_type === 'global' &&
     attentionItems.some((item) => item.status === 'active')
@@ -1372,12 +1380,28 @@ export const compileNeedsAttention = (
     }
   }
 
-  const snapshotV2 = matchesWorkingMemorySnapshotToDoc(
-    doc,
-    workingMemorySnapshot,
-  )
-    ? toWorkingMemorySnapshotStructuredDoc(workingMemorySnapshot)
-    : null;
+  if (doc?.scope_type === 'project') {
+    const projectV2 = snapshotV2 ?? parseStructuredKnowledgeV2Doc(doc);
+    const projectStreamIds = new Set(
+      projectV2?.active_streams
+        .map((stream) => stream.id.trim())
+        .filter(Boolean) ?? [],
+    );
+
+    if (projectStreamIds.size > 0) {
+      const matchingItems = attentionItems.filter(
+        (item) =>
+          item.status === 'active' &&
+          item.related_stream_ids.some((streamId) =>
+            projectStreamIds.has(streamId),
+          ),
+      );
+      if (matchingItems.length > 0) {
+        return matchingItems.map(toNeedsAttentionItem);
+      }
+    }
+  }
+
   const v2 = snapshotV2 ?? parseStructuredKnowledgeV2Doc(doc);
   const structured = v2 ? null : parseStructuredKnowledgeDoc(doc);
   const v2Items: NeedsAttentionItem[] = v2
