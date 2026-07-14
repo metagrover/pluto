@@ -65,6 +65,31 @@ export const buildProjectsBriefing = (tasks: Entity[], now = Date.now()) => {
   };
 };
 
+export const partitionProjectsForDisplay = (
+  projects: Entity[],
+  groupedTasks: Record<string, Entity[]>,
+) => {
+  const activeProjects: Entity[] = [];
+  const completedProjects: Entity[] = [];
+
+  for (const project of projects) {
+    const tasks = groupedTasks[project.id] || [];
+    if (tasks.length === 0) continue;
+
+    const briefing = buildProjectsBriefing(tasks);
+    if (briefing.active.length > 0) {
+      activeProjects.push(project);
+      continue;
+    }
+
+    if (briefing.completed.length > 0) {
+      completedProjects.push(project);
+    }
+  }
+
+  return { activeProjects, completedProjects };
+};
+
 const computeHealth = (tasks: Entity[]): HealthStatus => {
   if (buildProjectsBriefing(tasks).active.length === 0) return 'complete';
   const now = Date.now();
@@ -452,9 +477,10 @@ export const ProjectsExecutionTab: React.FC = () => {
     return { groupedTasks: grouped, ungroupedTasks: ungrouped };
   }, [allTasks, taskLinks, projects]);
 
-  const visibleProjects = useMemo(() => {
-    return projects.filter((p) => (groupedTasks[p.id]?.length ?? 0) > 0);
-  }, [projects, groupedTasks]);
+  const { activeProjects, completedProjects } = useMemo(
+    () => partitionProjectsForDisplay(projects, groupedTasks),
+    [projects, groupedTasks],
+  );
 
   // Stats
   const briefing = buildProjectsBriefing(allTasks);
@@ -499,7 +525,7 @@ export const ProjectsExecutionTab: React.FC = () => {
     );
   }
 
-  if (visibleProjects.length === 0 && ungroupedTasks.length === 0) {
+  if (activeProjects.length === 0 && completedProjects.length === 0 && ungroupedTasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
         <div className="w-20 h-20 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-4xl shadow-premium">
@@ -535,7 +561,7 @@ export const ProjectsExecutionTab: React.FC = () => {
           </h1>
           <p className="mt-2 text-sm font-medium text-pro-text-muted">
             {activeTasks.length > 0
-              ? `${activeTasks.length} open across ${visibleProjects.length} project${visibleProjects.length === 1 ? '' : 's'}`
+              ? `${activeTasks.length} open across ${activeProjects.length} project${activeProjects.length === 1 ? '' : 's'}`
               : 'Completed work is tucked away. Start from the inbox when something new appears.'}
             {overdueTasks.length > 0 && (
               <span className="text-red-500 font-bold ml-2">
@@ -548,7 +574,7 @@ export const ProjectsExecutionTab: React.FC = () => {
 
       {/* Project Groups */}
       <div className="flex flex-col">
-        {visibleProjects.map((project) => (
+        {activeProjects.map((project) => (
           <ProjectHealthCard
             key={project.id}
             project={{
@@ -561,6 +587,29 @@ export const ProjectsExecutionTab: React.FC = () => {
           />
         ))}
       </div>
+
+      {completedProjects.length > 0 && (
+        <details className="rounded-2xl border border-pro-border bg-pro-surface/20">
+          <summary className="cursor-pointer list-none px-5 py-4 text-sm font-bold text-pro-text-muted">
+            Browse {completedProjects.length} completed project
+            {completedProjects.length === 1 ? '' : 's'}
+          </summary>
+          <div className="border-t border-pro-border/30">
+            {completedProjects.map((project) => (
+              <ProjectHealthCard
+                key={project.id}
+                project={{
+                  ...project,
+                  name: formatProjectName(project.name) || project.name,
+                }}
+                tasks={groupedTasks[project.id] || []}
+                onToggleTask={toggleTask}
+                onTaskAdded={fetchData}
+              />
+            ))}
+          </div>
+        </details>
+      )}
 
       {/* Ungrouped / Inbox Tasks */}
       {ungroupedTasks.length > 0 && (

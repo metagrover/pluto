@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import type { Entity } from '../../src/api/knowledgeGraph';
-import { ProjectHealthCard } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
+import {
+  partitionProjectsForDisplay,
+  ProjectHealthCard,
+} from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
 
 const makeEntity = (overrides: Partial<Entity>): Entity => ({
   id: 'entity-1',
@@ -81,5 +84,47 @@ describe('ProjectHealthCard', () => {
 
     expect(markup).toContain('Finalize rollout checklist');
     expect(markup).not.toContain('completed task');
+  });
+});
+
+describe('partitionProjectsForDisplay', () => {
+  it('tucks completed-only projects out of the main execution list', () => {
+    const activeProject = makeEntity({
+      id: 'project-active',
+      metadata: JSON.stringify({ context: 'Current sprint' }),
+    });
+    const completedProject = makeEntity({
+      id: 'project-complete',
+      metadata: JSON.stringify({ context: 'Shipped work' }),
+    });
+    const groupedTasks = {
+      'project-active': [
+        makeEntity({
+          id: 'task-active',
+          type: 'action_item',
+          name: 'Land rollout cleanup',
+        }),
+      ],
+      'project-complete': [
+        makeEntity({
+          id: 'task-complete',
+          type: 'action_item',
+          name: 'Archive notes',
+          status: 'completed',
+        }),
+      ],
+    };
+
+    const result = partitionProjectsForDisplay(
+      [activeProject, completedProject],
+      groupedTasks,
+    );
+
+    expect(result.activeProjects.map((project) => project.id)).toEqual([
+      'project-active',
+    ]);
+    expect(result.completedProjects.map((project) => project.id)).toEqual([
+      'project-complete',
+    ]);
   });
 });
