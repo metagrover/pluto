@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
+  buildExecutionSummary,
   ProjectHealthCard,
   getNextTaskStatusForToggle,
   partitionProjectsForDisplay,
@@ -156,6 +157,28 @@ describe('partitionProjectsForDisplay', () => {
     expect(result.completedProjects.map((project) => project.id)).toEqual([
       'project-complete',
     ]);
+  });
+});
+
+describe('buildExecutionSummary', () => {
+  it('accounts for inbox work alongside linked project counts', () => {
+    expect(
+      buildExecutionSummary({
+        activeTaskCount: 3,
+        activeProjectCount: 1,
+        activeInboxTaskCount: 2,
+      }).detail,
+    ).toBe('3 open across 1 project and 2 inbox items');
+  });
+
+  it('avoids zero-project framing when active work only lives in the inbox', () => {
+    expect(
+      buildExecutionSummary({
+        activeTaskCount: 2,
+        activeProjectCount: 0,
+        activeInboxTaskCount: 2,
+      }).detail,
+    ).toBe('2 open in the inbox');
   });
 });
 
