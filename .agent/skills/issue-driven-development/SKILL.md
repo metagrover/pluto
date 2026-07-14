@@ -44,7 +44,7 @@ An outcome-sized issue describes a user, product, technical, or process outcome 
 4. **Record durable memory**
    - Update `docs/decisions.md` when a product, design, process, or architecture decision should survive beyond the issue thread.
    - Create `docs/adr/YYYY-MM-DD-short-title.md` only for high-impact technical decisions with credible alternatives and long-lived consequences.
-   - Update `docs/CHANGELOG.md` when work ships or materially changes Pluto's product/development direction.
+   - Add a uniquely named fragment under `docs/changelog/entries/` when work ships or materially changes Pluto's product/development direction. Validate it with `pnpm run changelog:check`; ordinary pull requests do not edit the archived `docs/CHANGELOG.md`.
 
 5. **Finish with traceability**
    - PR descriptions should link the issue and mention any decision-log, ADR, or changelog updates.
@@ -67,4 +67,4 @@ When in doubt, reuse an existing relevant issue rather than creating a duplicate
 - Writing a new Markdown spec while the issue stays stale.
 - Hiding product divergence in a final summary instead of commenting on the issue.
 - Creating ADRs for routine product decisions that belong in `docs/decisions.md`.
-- Writing changelog entries that say only what changed, without why it changed.
+- Writing changelog fragments that say only what changed, without why it changed.
