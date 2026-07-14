@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
-  getNextTaskStatusForToggle,
   ProjectHealthCard,
+  getNextTaskStatusForToggle,
   partitionProjectsForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
 
