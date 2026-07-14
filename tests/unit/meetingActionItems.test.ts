@@ -354,8 +354,8 @@ describe('buildMeetingActionItems', () => {
         attentionKindLabel: 'Blocker',
         attentionStatus: 'active',
         actionable: true,
-        dismissLabel: 'Dismiss',
-        snoozeLabel: 'Snooze',
+        dismissLabel: 'Dismiss blocker',
+        snoozeLabel: 'Snooze blocker',
         isBlocked: true,
         blockerReason: 'Waiting on legal approval.',
       }),
@@ -552,8 +552,8 @@ describe('buildMeetingActionItems', () => {
         attentionItemId: 'attention-blocked',
         attentionStatus: 'active',
         actionable: true,
-        dismissLabel: 'Dismiss',
-        snoozeLabel: 'Snooze',
+        dismissLabel: 'Dismiss blocker',
+        snoozeLabel: 'Snooze blocker',
         isBlocked: true,
         blockerReason: 'Legal approval is still blocking launch readiness.',
       }),
@@ -862,8 +862,8 @@ describe('buildMeetingActionItems', () => {
       attentionStatus: 'active',
       isBlocked: true,
       blockerReason: 'Waiting on legal approval.',
-      dismissLabel: 'Dismiss',
-      snoozeLabel: 'Snooze',
+      dismissLabel: 'Dismiss blocker',
+      snoozeLabel: 'Snooze blocker',
     });
   });
 
