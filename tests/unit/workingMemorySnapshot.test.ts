@@ -461,7 +461,12 @@ describe('working memory snapshots', () => {
 
     expect(snapshot.scope_type).toBe('team_tracker');
     expect(snapshot.scope_key).toBe('team-1');
-    expect(snapshot.payload.scope.type).toBe('team_tracker');
+    expect(snapshot.payload.scope).toMatchObject({
+      type: 'team_tracker',
+      key: 'team-1',
+      title: 'Leadership Team',
+      member_entity_ids: ['person-1', 'person-2'],
+    });
 
     const saved = persistTeamTrackerWorkingMemorySnapshot({
       knowledgeDoc: makeKnowledgeDoc({
@@ -493,6 +498,21 @@ describe('working memory snapshots', () => {
       type: 'team_tracker',
       key: 'team-1',
       title: 'Leadership Team',
+      member_entity_ids: ['person-1', 'person-2'],
+    });
+  });
+
+  it('keeps non-team snapshot scope metadata unchanged', () => {
+    const snapshot = buildGlobalWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc(),
+      structured: makeKnowledgeSnapshotDoc(),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    expect(snapshot.payload.scope).toEqual({
+      type: 'global',
+      key: 'global',
+      title: 'Workspace Memory',
     });
   });
 
