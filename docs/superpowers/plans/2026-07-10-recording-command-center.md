@@ -258,7 +258,7 @@ git commit -m "feat: add recording meeting rail"
 - Modify: `src/components/features/ZenMode.tsx`
 - Modify: `src/App.tsx`
 - Modify: `src/index.css`
-- Modify: `docs/CHANGELOG.md`
+- Create: `docs/changelog/entries/2026-07-10-357-recording-command-center.md`
 - Modify: `docs/decisions.md`
 
 - [ ] **Step 1: Compose the workspace**
@@ -288,6 +288,6 @@ Verify light/dark themes, narrow/wide Electron windows, keyboard-only finish and
 Update the changelog with the user outcome, record transcript-as-primary hierarchy in decisions, and comment verification evidence on #357.
 
 ```bash
-git add src/App.tsx src/components/features/ZenMode.tsx src/index.css docs/CHANGELOG.md docs/decisions.md
+git add src/App.tsx src/components/features/ZenMode.tsx src/index.css docs/changelog/entries/2026-07-10-357-recording-command-center.md docs/decisions.md
 git commit -m "feat: make recording a quiet command center"
 ```

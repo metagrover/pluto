@@ -29,5 +29,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Validate changelog fragments
+        run: pnpm run changelog:check
+
       - name: Run lint
         run: pnpm run lint
