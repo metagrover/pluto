@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
-  partitionProjectsForDisplay,
   ProjectHealthCard,
+  partitionProjectsForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
 
 const makeEntity = (overrides: Partial<Entity>): Entity => ({

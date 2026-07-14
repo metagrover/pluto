@@ -525,7 +525,11 @@ export const ProjectsExecutionTab: React.FC = () => {
     );
   }
 
-  if (activeProjects.length === 0 && completedProjects.length === 0 && ungroupedTasks.length === 0) {
+  if (
+    activeProjects.length === 0 &&
+    completedProjects.length === 0 &&
+    ungroupedTasks.length === 0
+  ) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
         <div className="w-20 h-20 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-4xl shadow-premium">
