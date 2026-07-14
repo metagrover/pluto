@@ -765,7 +765,9 @@ function App() {
                 ? 'px-0 py-0'
                 : !selectedMeetingId && activeTab === 'hub'
                   ? 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
-                  : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
+                  : !selectedMeetingId && activeTab === 'people'
+                    ? 'px-5 py-6 md:px-8 md:py-8'
+                    : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
             }`}
           >
             <div className="fixed top-0 right-0 w-[800px] h-[800px] bg-pro-accent/5 rounded-full blur-[120px] -mr-96 -mt-96 pointer-events-none z-0" />
@@ -803,8 +805,10 @@ function App() {
                 }
               />
             ) : activeTab === 'people' ? (
-              <div className="max-w-4xl mx-auto w-full space-y-12 animate-in pb-20">
-                <PeopleTab />
+              <div className="mx-auto w-full max-w-[1180px] animate-in pb-20">
+                <PeopleTab
+                  onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                />
               </div>
             ) : activeTab === 'projects' ? (
               <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">

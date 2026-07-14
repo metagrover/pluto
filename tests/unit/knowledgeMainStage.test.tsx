@@ -45,6 +45,43 @@ describe('Knowledge MainStage', () => {
     vi.useRealTimers();
   });
 
+  it('uses an operating-picture hierarchy instead of stacked dashboard cards', () => {
+    const selectedDoc = makeDoc({
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        current_read: {
+          headline: 'The launch path is clear, with one unresolved owner.',
+          supporting_bullets: ['Launch review established the next milestone.'],
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality: {
+          included_count: 1,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[makeSource({})]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+    expect(markup).toContain('data-testid="knowledge-operating-picture"');
+    expect(markup).toContain('Browse memory');
+    expect(markup).not.toContain('shadow-sm');
+  });
+
   it('keeps a snapshot-backed current read headline visible when synthesis failed', () => {
     const selectedDoc = makeDoc({
       status: 'failed',

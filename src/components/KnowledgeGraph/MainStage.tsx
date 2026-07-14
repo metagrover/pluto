@@ -324,7 +324,7 @@ const SectionShell = ({
   description: string;
   children: React.ReactNode;
 }) => (
-  <section className="rounded-lg border border-pro-border bg-pro-surface p-5 shadow-sm">
+  <section className="border-b border-pro-border py-7 last:border-b-0">
     <p className="text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted">
       {eyebrow}
     </p>
@@ -334,7 +334,7 @@ const SectionShell = ({
     <p className="mt-2 max-w-2xl text-sm leading-6 text-pro-text-muted">
       {description}
     </p>
-    <div className="mt-5">{children}</div>
+    <div className="mt-6">{children}</div>
   </section>
 );
 
@@ -572,7 +572,7 @@ const NeedsAttention = ({
           return (
             <article
               key={item.id}
-              className={`border-l-2 ${style.rail} rounded-lg border-y border-r border-pro-border bg-pro-bg p-4`}
+              className="border-b border-pro-border py-4 last:border-b-0"
             >
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="min-w-0">
@@ -789,14 +789,16 @@ const SourceQualitySummary = ({
 const RisksAndUnknowns = ({
   risks,
   dependencies,
+  v2Items,
   onOpenWhy,
 }: {
   risks: KnowledgeStatement[];
   dependencies: KnowledgeStatement[];
+  v2Items: KnowledgeV2Item[];
   onOpenWhy: (item: WhyItem) => void;
 }) => {
   const items = [...risks, ...dependencies].slice(0, 5);
-  if (items.length === 0) return null;
+  if (items.length === 0 && v2Items.length === 0) return null;
 
   return (
     <SectionShell
@@ -804,11 +806,11 @@ const RisksAndUnknowns = ({
       title="Risks and Unknowns"
       description="Failure modes, unresolved commitments, and cross-context dependencies worth keeping visible."
     >
-      <div className="divide-y divide-pro-border rounded-lg border border-pro-border bg-pro-bg">
+      <div className="divide-y divide-pro-border">
         {items.map((item) => (
           <article
             key={item.id}
-            className="flex flex-col gap-3 p-4 md:flex-row md:items-start md:justify-between"
+            className="flex flex-col gap-3 py-4 md:flex-row md:items-start md:justify-between"
           >
             <div>
               <p className="text-sm font-black leading-6 text-pro-text-main">
@@ -832,10 +834,52 @@ const RisksAndUnknowns = ({
             />
           </article>
         ))}
+        {v2Items.slice(0, Math.max(0, 5 - items.length)).map((item) => (
+          <article
+            key={item.id}
+            className="flex flex-col gap-3 py-4 md:flex-row md:items-start md:justify-between"
+          >
+            <div>
+              <p className="text-sm font-black leading-6 text-pro-text-main">
+                {item.title}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-pro-text-muted">
+                {item.summary || item.why_now}
+              </p>
+            </div>
+            <WhyButton
+              item={{
+                id: item.id,
+                title: item.title,
+                summary: item.summary,
+                reasons: [item.why_now].filter(Boolean),
+                citations: item.citations,
+                evidenceQuality: {
+                  mode: item.evidence_quality.mode,
+                  confidence: item.evidence_quality.confidence,
+                },
+              }}
+              onOpen={onOpenWhy}
+            />
+          </article>
+        ))}
       </div>
     </SectionShell>
   );
 };
+
+const BrowseMemory = ({ children }: { children: React.ReactNode }) => (
+  <details className="knowledge-library">
+    <summary>
+      <span>
+        <strong>Browse memory</strong>
+        <small>Inspect streams, patterns, and source quality</small>
+      </span>
+      <ChevronRight aria-hidden="true" className="h-4 w-4" />
+    </summary>
+    <div className="knowledge-library__content">{children}</div>
+  </details>
+);
 
 const QuietUnavailableState = ({
   selectedDoc,
@@ -1137,7 +1181,10 @@ export const MainStage: React.FC<MainStageProps> = ({
 
   return (
     <div className="h-full w-full overflow-y-auto bg-pro-bg">
-      <div className="mx-auto flex w-full max-w-[860px] flex-col gap-5 px-5 py-6 md:px-8 lg:py-8">
+      <div
+        data-testid="knowledge-operating-picture"
+        className="mx-auto flex w-full max-w-[1120px] flex-col px-5 py-6 md:px-8 lg:py-8"
+      >
         <CurrentRead
           selectedDoc={selectedDoc}
           sources={sources}
@@ -1159,37 +1206,31 @@ export const MainStage: React.FC<MainStageProps> = ({
           onOpenWhy={(item) => setWhyItem(item)}
         />
 
-        <ActiveStreams
-          streams={brief.activeStreams}
-          onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
-        />
-
         <NeedsAttention
           items={attentionItems}
-          onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
-        />
-
-        <V2ItemList
-          title="Patterns and Signals"
-          description="Repeated or emerging context Pluto can support with cited evidence."
-          items={brief.patterns}
           onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
         />
 
         <RisksAndUnknowns
           risks={risks}
           dependencies={dependencies}
+          v2Items={dedupedV2Risks}
           onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
         />
 
-        <V2ItemList
-          title="Risks and Unknowns"
-          description="Blockers, risks, dependencies, and open questions that may affect plans."
-          items={dedupedV2Risks}
-          onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
-        />
-
-        <SourceQualitySummary sourceQuality={brief.sourceQuality} />
+        <BrowseMemory>
+          <ActiveStreams
+            streams={brief.activeStreams}
+            onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
+          />
+          <V2ItemList
+            title="Patterns and Signals"
+            description="Repeated or emerging context Pluto can support with cited evidence."
+            items={brief.patterns}
+            onOpenWhy={(item) => setWhyItem(enrichWhyItem(item))}
+          />
+          <SourceQualitySummary sourceQuality={brief.sourceQuality} />
+        </BrowseMemory>
 
         {!brief.isCompiled && attentionItems.length === 0 && (
           <QuietUnavailableState selectedDoc={selectedDoc} />
