@@ -290,6 +290,80 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('surfaces blocker-backed stale follow-ups in briefing focus before generic stale copy', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [
+        makeAction({
+          id: 'routine-stale',
+          name: 'Routine stale follow-up',
+          due_date: null,
+          updated_at: '2026-04-10T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-stale',
+          name: 'Blocked stale follow-up',
+          due_date: null,
+          updated_at: '2026-04-20T18:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-stale',
+          kind: 'blocker',
+          reason: 'Blocked by finance approval.',
+          related_entity_ids: ['blocked-stale'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Blocked follow-up',
+      detail: 'Blocked by finance approval.',
+      action: { label: 'Review blockers', target: 'projects' },
+    });
+  });
+
+  it('falls back to blocked-item count in briefing focus when stale blockers have no richer reason', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [
+        makeAction({
+          id: 'blocked-stale',
+          name: 'Blocked stale follow-up',
+          due_date: null,
+          updated_at: '2026-04-20T18:00:00.000Z',
+        }),
+      ],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-stale',
+          kind: 'blocker',
+          reason: '   ',
+          related_entity_ids: ['blocked-stale'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Blocked follow-up',
+      detail: '1 blocked item',
+      action: { label: 'Review blockers', target: 'projects' },
+    });
+  });
+
   it('prefers blocker-backed stale follow-ups in the homepage hero', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -463,6 +537,10 @@ describe('buildDashboardHomeModel', () => {
       'Legal approval is still blocking the overdue launch review.',
     );
     expect(model.hero.detail).not.toContain('Routine overdue follow-up');
+    expect(model.hero.action).toEqual({
+      label: 'Review blockers',
+      target: 'projects',
+    });
     expect(model.actionInsights.items[0]).toMatchObject({
       id: 'blocked-overdue',
       title: 'Blocked overdue follow-up',
@@ -558,6 +636,10 @@ describe('buildDashboardHomeModel', () => {
     });
 
     expect(model.actionInsights.state).toBe('populated');
+    expect(model.hero.action).toEqual({
+      label: 'Review blockers',
+      target: 'projects',
+    });
     expect(model.actionInsights.items.map((item) => item.id)).toEqual([
       'blocked-older',
       'blocked-newer',
