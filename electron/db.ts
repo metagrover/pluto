@@ -1762,6 +1762,7 @@ export interface WorkingMemorySnapshotPayload {
     type: WorkingMemorySnapshotScopeType;
     key: string;
     title: string;
+    member_entity_ids?: string[];
   };
   source: {
     knowledge_doc_id: string;

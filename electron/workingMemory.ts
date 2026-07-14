@@ -8,6 +8,32 @@ import type {
 import { upsertWorkingMemorySnapshot } from './db';
 import type { KnowledgeV2Document } from './knowledgeV2';
 
+const parseMemberEntityIds = (
+  knowledgeDoc: KnowledgeDoc,
+): string[] | undefined => {
+  if (knowledgeDoc.scope_type !== 'team_tracker' || !knowledgeDoc.config) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(knowledgeDoc.config) as {
+      member_entity_ids?: unknown;
+    };
+
+    if (!Array.isArray(parsed.member_entity_ids)) {
+      return undefined;
+    }
+
+    const memberEntityIds = parsed.member_entity_ids.filter(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    );
+
+    return memberEntityIds.length > 0 ? memberEntityIds : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const buildWorkingMemorySnapshot = ({
   knowledgeDoc,
   structured,
@@ -23,6 +49,10 @@ const buildWorkingMemorySnapshot = ({
     docStatus: knowledgeDoc.status,
     evidenceQuality: structured.current_read.evidence_quality,
   });
+  const memberEntityIds =
+    scopeType === 'team_tracker'
+      ? parseMemberEntityIds(knowledgeDoc)
+      : undefined;
 
   const payload: WorkingMemorySnapshotPayload = {
     schema_version: 1,
@@ -30,6 +60,7 @@ const buildWorkingMemorySnapshot = ({
       type: scopeType,
       key: knowledgeDoc.scope_key,
       title: knowledgeDoc.title,
+      ...(memberEntityIds ? { member_entity_ids: memberEntityIds } : {}),
     },
     source: {
       knowledge_doc_id: knowledgeDoc.id,
