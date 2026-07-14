@@ -386,6 +386,43 @@ describe('working memory snapshots', () => {
     expect(stored?.payload.change_summary).toEqual(
       makeKnowledgeSnapshotDoc().change_summary,
     );
+    expect(stored?.payload.source).toEqual({
+      knowledge_doc_id: 'doc-global',
+      knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
+      knowledge_doc_last_source_cursor: null,
+    });
+  });
+
+  it('preserves knowledge doc source cursor metadata in snapshot payload source fields', () => {
+    const saved = persistProjectWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc({
+        id: 'doc-project',
+        scope_type: 'project',
+        scope_key: 'project-1',
+        title: 'Project Atlas',
+        last_source_cursor: 'meeting:2026-05-26T14:30:00.000Z',
+      }),
+      structured: makeKnowledgeSnapshotDoc({
+        scope: {
+          type: 'project',
+          title: 'Project Atlas',
+        },
+      }),
+      generatedAt: '2026-05-26T16:00:00.000Z',
+    });
+
+    expect(saved.payload.source).toEqual({
+      knowledge_doc_id: 'doc-project',
+      knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
+      knowledge_doc_last_source_cursor: 'meeting:2026-05-26T14:30:00.000Z',
+    });
+    expect(
+      getWorkingMemorySnapshot('project', 'project-1')?.payload.source,
+    ).toEqual({
+      knowledge_doc_id: 'doc-project',
+      knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
+      knowledge_doc_last_source_cursor: 'meeting:2026-05-26T14:30:00.000Z',
+    });
   });
 
   it('builds and persists a project-scoped snapshot for a project knowledge doc', () => {
@@ -659,5 +696,52 @@ describe('working memory snapshots', () => {
       knowledge_doc_id: 'doc-global',
       knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
     });
+  });
+
+  it('keeps reading snapshots whose payload source predates cursor metadata', () => {
+    upsertWorkingMemorySnapshot({
+      scope_type: 'global',
+      scope_key: 'global',
+      title: 'Workspace Memory',
+      source_doc_id: 'doc-global',
+      source_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
+      freshness: 'fresh',
+      trust_status: 'grounded',
+      source_count: 3,
+      cited_meeting_count: 2,
+      generated_at: '2026-05-26T16:00:00.000Z',
+      payload: {
+        schema_version: 1,
+        scope: {
+          type: 'global',
+          key: 'global',
+          title: 'Workspace Memory',
+        },
+        source: {
+          knowledge_doc_id: 'doc-global',
+          knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
+        },
+        current_read: {
+          headline: 'Current read',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          trust_status: 'grounded',
+          trust_message: 'Backed by direct evidence.',
+          source_count: 3,
+          cited_item_count: 4,
+          cited_meeting_count: 2,
+        },
+        active_streams: [],
+        open_loops: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+      },
+    });
+
+    expect(
+      getWorkingMemorySnapshot('global', 'global')?.payload.source
+        .knowledge_doc_last_source_cursor,
+    ).toBeUndefined();
   });
 });
