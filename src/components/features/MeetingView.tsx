@@ -60,8 +60,8 @@ import {
 } from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
-  type MeetingActionItemCard,
   type MeetingActionEntity,
+  type MeetingActionItemCard,
   type MeetingLinkedAttentionItem,
   buildMeetingActionItems,
 } from './meetingActionItems';
@@ -258,9 +258,7 @@ export const MeetingActionCards = ({
                   onClick={() =>
                     onToggleDismissal(
                       item.attentionItemId as string,
-                      item.attentionStatus === 'snoozed'
-                        ? 'active'
-                        : 'snoozed',
+                      item.attentionStatus === 'snoozed' ? 'active' : 'snoozed',
                     )
                   }
                   className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
