@@ -60,6 +60,7 @@ import {
 } from './followUpDraftContext';
 import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
+  type MeetingActionItemCard,
   type MeetingActionEntity,
   type MeetingLinkedAttentionItem,
   buildMeetingActionItems,
@@ -79,6 +80,209 @@ interface MeetingViewProps {
   transcriptVisible: boolean;
   setTranscriptVisible: (val: boolean) => void;
 }
+
+interface MeetingActionCardsProps {
+  items: MeetingActionItemCard[];
+  highlightEntities: (text: string) => ReactNode;
+  meetingEntitiesLoading: boolean;
+  pendingActionId: string | null;
+  pendingAttentionId: string | null;
+  onToggleAction: (id: string, reopen: boolean) => void;
+  onToggleDismissal: (
+    attentionItemId: string,
+    status: 'active' | 'dismissed' | 'snoozed',
+  ) => void;
+}
+
+export const MeetingActionCards = ({
+  items,
+  highlightEntities,
+  meetingEntitiesLoading,
+  pendingActionId,
+  pendingAttentionId,
+  onToggleAction,
+  onToggleDismissal,
+}: MeetingActionCardsProps) => (
+  <>
+    {items.map((item) => (
+      <div
+        key={item.id}
+        className={`p-6 rounded-2xl border shadow-premium flex gap-4 transition-all card-hover-effect ${
+          item.attentionStatus === 'dismissed'
+            ? 'bg-amber-500/5 border-amber-500/20'
+            : item.attentionStatus === 'snoozed'
+              ? 'bg-sky-500/5 border-sky-500/20'
+              : 'bg-pro-surface border-pro-border'
+        }`}
+      >
+        <button
+          type="button"
+          disabled={
+            !item.actionable ||
+            pendingActionId === item.id ||
+            pendingAttentionId === item.attentionItemId ||
+            meetingEntitiesLoading
+          }
+          onClick={() =>
+            item.actionable
+              ? onToggleAction(item.id, item.status === 'completed')
+              : undefined
+          }
+          className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all ${
+            item.status === 'completed'
+              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
+              : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
+          } ${
+            !item.actionable ||
+            pendingActionId === item.id ||
+            pendingAttentionId === item.attentionItemId
+              ? 'cursor-not-allowed opacity-70'
+              : ''
+          }`}
+          aria-label={item.toggleLabel ?? 'Meeting follow-up'}
+          title={item.toggleLabel ?? undefined}
+        >
+          {pendingActionId === item.id ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+        </button>
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] ${
+                item.status === 'completed'
+                  ? 'bg-emerald-500/10 text-emerald-600'
+                  : item.status === 'overdue'
+                    ? 'bg-red-500/10 text-red-500'
+                    : item.status === 'stale'
+                      ? 'bg-amber-500/10 text-amber-600'
+                      : item.status === 'fallback'
+                        ? 'bg-pro-bg text-pro-text-muted'
+                        : 'bg-pro-accent/10 text-pro-accent'
+              }`}
+            >
+              {item.status === 'fallback' ? 'Summary' : item.status}
+            </span>
+            {item.topicLabel ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                Topic: {item.topicLabel}
+              </span>
+            ) : null}
+            {item.assignee ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                Owner: {item.assignee}
+              </span>
+            ) : null}
+            {item.statusLabel ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                Status: {item.statusLabel}
+              </span>
+            ) : null}
+            {item.attentionKindLabel ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                {item.attentionKindLabel}
+              </span>
+            ) : null}
+            {item.isBlocked ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-red-600">
+                Blocked
+              </span>
+            ) : null}
+            {item.attentionStatus === 'dismissed' ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+                Dismissed
+              </span>
+            ) : item.attentionStatus === 'snoozed' ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">
+                Snoozed
+              </span>
+            ) : null}
+            {item.dueLabel ? (
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+                {item.dueLabel}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
+            {highlightEntities(item.title)}
+          </p>
+          {item.context ? (
+            <p className="text-[12px] font-medium leading-relaxed text-pro-text-muted">
+              {highlightEntities(item.context)}
+            </p>
+          ) : null}
+          {item.blockerReason ? (
+            <p className="text-[12px] font-semibold leading-relaxed text-red-600">
+              Blocked: {highlightEntities(item.blockerReason)}
+            </p>
+          ) : null}
+          {item.attentionItemId && (item.dismissLabel || item.snoozeLabel) ? (
+            <div className="flex flex-wrap gap-3">
+              {item.dismissLabel ? (
+                <button
+                  type="button"
+                  disabled={
+                    pendingAttentionId === item.attentionItemId ||
+                    meetingEntitiesLoading
+                  }
+                  onClick={() =>
+                    onToggleDismissal(
+                      item.attentionItemId as string,
+                      item.attentionStatus === 'dismissed'
+                        ? 'active'
+                        : 'dismissed',
+                    )
+                  }
+                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                    pendingAttentionId === item.attentionItemId
+                      ? 'cursor-not-allowed text-pro-text-muted/50'
+                      : item.attentionStatus === 'dismissed'
+                        ? 'text-amber-700 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200'
+                        : 'text-pro-text-muted/70 hover:text-pro-accent'
+                  }`}
+                >
+                  {pendingAttentionId === item.attentionItemId
+                    ? 'Updating...'
+                    : item.dismissLabel}
+                </button>
+              ) : null}
+              {item.snoozeLabel ? (
+                <button
+                  type="button"
+                  disabled={
+                    pendingAttentionId === item.attentionItemId ||
+                    meetingEntitiesLoading
+                  }
+                  onClick={() =>
+                    onToggleDismissal(
+                      item.attentionItemId as string,
+                      item.attentionStatus === 'snoozed'
+                        ? 'active'
+                        : 'snoozed',
+                    )
+                  }
+                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                    pendingAttentionId === item.attentionItemId
+                      ? 'cursor-not-allowed text-pro-text-muted/50'
+                      : item.attentionStatus === 'snoozed'
+                        ? 'text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200'
+                        : 'text-pro-text-muted/70 hover:text-sky-600 dark:hover:text-sky-300'
+                  }`}
+                >
+                  {pendingAttentionId === item.attentionItemId
+                    ? 'Updating...'
+                    : item.snoozeLabel}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    ))}
+  </>
+);
 
 export const MeetingView = ({
   selectedMeeting,
@@ -1127,189 +1331,16 @@ export const MeetingView = ({
                         </p>
                       </div>
                     ) : (
-                      <div
+                      <MeetingActionCards
                         key={item.id}
-                        className={`p-6 rounded-2xl border shadow-premium flex gap-4 transition-all card-hover-effect ${
-                          item.attentionStatus === 'dismissed'
-                            ? 'bg-amber-500/5 border-amber-500/20'
-                            : item.attentionStatus === 'snoozed'
-                              ? 'bg-sky-500/5 border-sky-500/20'
-                              : 'bg-pro-surface border-pro-border'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          disabled={
-                            !item.actionable ||
-                            pendingActionId === item.id ||
-                            pendingAttentionId === item.attentionItemId ||
-                            meetingEntitiesLoading
-                          }
-                          onClick={() =>
-                            item.actionable
-                              ? toggleMeetingActionItem(
-                                  item.id,
-                                  item.status === 'completed',
-                                )
-                              : undefined
-                          }
-                          className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border transition-all ${
-                            item.status === 'completed'
-                              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'
-                              : 'border-pro-border text-pro-accent hover:border-pro-accent hover:bg-pro-accent/5'
-                          } ${
-                            !item.actionable ||
-                            pendingActionId === item.id ||
-                            pendingAttentionId === item.attentionItemId
-                              ? 'cursor-not-allowed opacity-70'
-                              : ''
-                          }`}
-                          aria-label={item.toggleLabel ?? 'Meeting follow-up'}
-                          title={item.toggleLabel ?? undefined}
-                        >
-                          {pendingActionId === item.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Check className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                        <div className="min-w-0 space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span
-                              className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] ${
-                                item.status === 'completed'
-                                  ? 'bg-emerald-500/10 text-emerald-600'
-                                  : item.status === 'overdue'
-                                    ? 'bg-red-500/10 text-red-500'
-                                    : item.status === 'stale'
-                                      ? 'bg-amber-500/10 text-amber-600'
-                                      : item.status === 'fallback'
-                                        ? 'bg-pro-bg text-pro-text-muted'
-                                        : 'bg-pro-accent/10 text-pro-accent'
-                              }`}
-                            >
-                              {item.status === 'fallback'
-                                ? 'Summary'
-                                : item.status}
-                            </span>
-                            {item.topicLabel ? (
-                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
-                                Topic: {item.topicLabel}
-                              </span>
-                            ) : null}
-                            {item.assignee ? (
-                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
-                                Owner: {item.assignee}
-                              </span>
-                            ) : null}
-                            {item.statusLabel ? (
-                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
-                                Status: {item.statusLabel}
-                              </span>
-                            ) : null}
-                            {item.attentionKindLabel ? (
-                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
-                                {item.attentionKindLabel}
-                              </span>
-                            ) : null}
-                            {item.isBlocked ? (
-                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-red-600">
-                                Blocked
-                              </span>
-                            ) : null}
-                            {item.attentionStatus === 'dismissed' ? (
-                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
-                                Dismissed
-                              </span>
-                            ) : item.attentionStatus === 'snoozed' ? (
-                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">
-                                Snoozed
-                              </span>
-                            ) : null}
-                            {item.dueLabel ? (
-                              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
-                                {item.dueLabel}
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
-                            {highlightEntities(item.title)}
-                          </p>
-                          {item.context ? (
-                            <p className="text-[12px] font-medium leading-relaxed text-pro-text-muted">
-                              {highlightEntities(item.context)}
-                            </p>
-                          ) : null}
-                          {item.blockerReason ? (
-                            <p className="text-[12px] font-semibold leading-relaxed text-red-600">
-                              Blocked: {highlightEntities(item.blockerReason)}
-                            </p>
-                          ) : null}
-                          {item.attentionItemId &&
-                          (item.dismissLabel || item.snoozeLabel) ? (
-                            <div className="flex flex-wrap gap-3">
-                              {item.dismissLabel ? (
-                                <button
-                                  type="button"
-                                  disabled={
-                                    pendingAttentionId ===
-                                      item.attentionItemId ||
-                                    meetingEntitiesLoading
-                                  }
-                                  onClick={() =>
-                                    toggleMeetingActionDismissal(
-                                      item.attentionItemId as string,
-                                      item.attentionStatus === 'dismissed'
-                                        ? 'active'
-                                        : 'dismissed',
-                                    )
-                                  }
-                                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
-                                    pendingAttentionId === item.attentionItemId
-                                      ? 'cursor-not-allowed text-pro-text-muted/50'
-                                      : item.attentionStatus === 'dismissed'
-                                        ? 'text-amber-700 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200'
-                                        : 'text-pro-text-muted/70 hover:text-pro-accent'
-                                  }`}
-                                >
-                                  {pendingAttentionId === item.attentionItemId
-                                    ? 'Updating...'
-                                    : item.dismissLabel}
-                                </button>
-                              ) : null}
-                              {item.snoozeLabel ? (
-                                <button
-                                  type="button"
-                                  disabled={
-                                    pendingAttentionId ===
-                                      item.attentionItemId ||
-                                    meetingEntitiesLoading
-                                  }
-                                  onClick={() =>
-                                    toggleMeetingActionDismissal(
-                                      item.attentionItemId as string,
-                                      item.attentionStatus === 'snoozed'
-                                        ? 'active'
-                                        : 'snoozed',
-                                    )
-                                  }
-                                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
-                                    pendingAttentionId === item.attentionItemId
-                                      ? 'cursor-not-allowed text-pro-text-muted/50'
-                                      : item.attentionStatus === 'snoozed'
-                                        ? 'text-sky-700 hover:text-sky-800 dark:text-sky-300 dark:hover:text-sky-200'
-                                        : 'text-pro-text-muted/70 hover:text-sky-600 dark:hover:text-sky-300'
-                                  }`}
-                                >
-                                  {pendingAttentionId === item.attentionItemId
-                                    ? 'Updating...'
-                                    : item.snoozeLabel}
-                                </button>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
+                        items={[item]}
+                        highlightEntities={highlightEntities}
+                        meetingEntitiesLoading={meetingEntitiesLoading}
+                        pendingActionId={pendingActionId}
+                        pendingAttentionId={pendingAttentionId}
+                        onToggleAction={toggleMeetingActionItem}
+                        onToggleDismissal={toggleMeetingActionDismissal}
+                      />
                     ),
                   )}
                 </div>
