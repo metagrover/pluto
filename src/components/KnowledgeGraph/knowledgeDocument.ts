@@ -1279,6 +1279,19 @@ const mapAttentionKind = (kind: AttentionItem['kind']): NeedsAttentionKind => {
   return 'risk';
 };
 
+const toNeedsAttentionItem = (item: AttentionItem): NeedsAttentionItem => ({
+  id: item.id,
+  title: item.title,
+  summary: item.reason,
+  severity: item.severity,
+  kind: mapAttentionKind(item.kind),
+  reasons: item.reason ? [item.reason] : [],
+  citations: item.evidence.map((evidence) => ({
+    meeting_id: evidence.meeting_id,
+    quote: evidence.quote,
+  })),
+});
+
 export const compileNeedsAttention = (
   doc: KnowledgeDoc | null | undefined,
   docs: KnowledgeDoc[],
@@ -1292,18 +1305,17 @@ export const compileNeedsAttention = (
   ) {
     return attentionItems
       .filter((item) => item.status === 'active')
-      .map((item) => ({
-        id: item.id,
-        title: item.title,
-        summary: item.reason,
-        severity: item.severity,
-        kind: mapAttentionKind(item.kind),
-        reasons: item.reason ? [item.reason] : [],
-        citations: item.evidence.map((evidence) => ({
-          meeting_id: evidence.meeting_id,
-          quote: evidence.quote,
-        })),
-      }));
+      .map(toNeedsAttentionItem);
+  }
+
+  if (doc?.scope_type === 'person_context') {
+    const matchingItems = attentionItems.filter(
+      (item) =>
+        item.status === 'active' && item.related_entity_ids.includes(doc.scope_key),
+    );
+    if (matchingItems.length > 0) {
+      return matchingItems.map(toNeedsAttentionItem);
+    }
   }
 
   const snapshotV2 = matchesWorkingMemorySnapshotToDoc(

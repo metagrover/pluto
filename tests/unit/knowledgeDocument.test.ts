@@ -2175,6 +2175,76 @@ describe('knowledge document utilities', () => {
     ]);
   });
 
+  it('prefers matching active attention items for a person-context Knowledge doc', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-person',
+      scope_type: 'person_context',
+      scope_key: 'person-1',
+      title: 'Alex Rivera',
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'person_context', title: 'Alex Rivera' },
+        chapters: [
+          {
+            chapter_id: 'person',
+            title: 'Alex Rivera',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'risk-fallback',
+                text: 'Legacy person-context fallback item',
+                why_it_matters:
+                  'This should be ignored when a matching queue item exists.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(sourceDoc, [], [], [
+      makeAttentionItem({
+        id: 'attention-person',
+        kind: 'follow_up',
+        severity: 'watch',
+        title: 'Send Alex the renewal summary',
+        reason: 'Alex is still waiting on the renewal summary from the latest meeting.',
+        related_entity_ids: ['person-1'],
+        evidence: [
+          {
+            meeting_id: 'm-person',
+            quote: 'Alex is still waiting on the renewal summary.',
+            source_kind: 'knowledge_v2',
+          },
+        ],
+      }),
+    ]);
+
+    expect(attention).toEqual([
+      {
+        id: 'attention-person',
+        title: 'Send Alex the renewal summary',
+        summary:
+          'Alex is still waiting on the renewal summary from the latest meeting.',
+        severity: 'watch',
+        kind: 'follow_up',
+        reasons: [
+          'Alex is still waiting on the renewal summary from the latest meeting.',
+        ],
+        citations: [
+          {
+            meeting_id: 'm-person',
+            quote: 'Alex is still waiting on the renewal summary.',
+          },
+        ],
+      },
+    ]);
+  });
+
   it('preserves blocker classification from a matching working-memory snapshot', () => {
     const sourceDoc = makeDoc({
       id: 'doc-project',

@@ -1019,7 +1019,11 @@ export const MainStage: React.FC<MainStageProps> = ({
   useEffect(() => {
     let cancelled = false;
 
-    if (!selectedDoc || selectedDoc.scope_type !== 'global') {
+    if (
+      !selectedDoc ||
+      (selectedDoc.scope_type !== 'global' &&
+        selectedDoc.scope_type !== 'person_context')
+    ) {
       setAttentionAlerts([]);
       return () => {
         cancelled = true;
