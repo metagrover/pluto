@@ -1118,10 +1118,7 @@ const buildBriefingFocus = (
     }
   }
 
-  if (
-    actionInsights.state === 'populated' &&
-    actionInsights.overdueCount > 0
-  ) {
+  if (actionInsights.state === 'populated' && actionInsights.overdueCount > 0) {
     return {
       kind: 'attention',
       title: 'Needs attention',
