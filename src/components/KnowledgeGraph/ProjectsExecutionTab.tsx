@@ -90,6 +90,12 @@ export const partitionProjectsForDisplay = (
   return { activeProjects, completedProjects };
 };
 
+export const getNextTaskStatusForToggle = (
+  status: Entity['status'],
+): Entity['status'] => {
+  return status === 'completed' ? 'active' : 'completed';
+};
+
 const computeHealth = (tasks: Entity[]): HealthStatus => {
   if (buildProjectsBriefing(tasks).active.length === 0) return 'complete';
   const now = Date.now();
@@ -435,7 +441,7 @@ export const ProjectsExecutionTab: React.FC = () => {
   }, [fetchData]);
 
   const toggleTask = async (task: Entity) => {
-    const newStatus = task.status === 'active' ? 'completed' : 'active';
+    const newStatus = getNextTaskStatusForToggle(task.status);
     try {
       await updateEntityStatus(task.id, newStatus);
       setAllTasks((prev) =>

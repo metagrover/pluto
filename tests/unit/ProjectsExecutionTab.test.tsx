@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
+  getNextTaskStatusForToggle,
   ProjectHealthCard,
   partitionProjectsForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
@@ -126,5 +127,11 @@ describe('partitionProjectsForDisplay', () => {
     expect(result.completedProjects.map((project) => project.id)).toEqual([
       'project-complete',
     ]);
+  });
+});
+
+describe('getNextTaskStatusForToggle', () => {
+  it('marks overdue execution tasks completed from the checkbox', () => {
+    expect(getNextTaskStatusForToggle('overdue')).toBe('completed');
   });
 });
