@@ -1321,7 +1321,8 @@ export const compileNeedsAttention = (
   }
 
   if (doc?.scope_type === 'team_tracker') {
-    const memberEntityIds = parseKnowledgeDocConfig(doc).member_entity_ids ?? [];
+    const memberEntityIds =
+      parseKnowledgeDocConfig(doc).member_entity_ids ?? [];
     if (memberEntityIds.length > 0) {
       const matchingItems = attentionItems.filter(
         (item) =>
