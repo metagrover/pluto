@@ -2607,6 +2607,159 @@ describe('knowledge document utilities', () => {
     },
   );
 
+  it('prefers matching live attention queue items for team-tracker docs when tracked members are present', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-team-live',
+      scope_type: 'team_tracker',
+      scope_key: 'team-1',
+      title: 'Revenue Team',
+      config: JSON.stringify({ member_entity_ids: ['person-1', 'person-2'] }),
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'team_tracker', title: 'Revenue Team' },
+        chapters: [
+          {
+            chapter_id: 'team',
+            title: 'Revenue Team',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'risk-fallback',
+                text: 'Legacy fallback risk',
+                why_it_matters:
+                  'This should be ignored when a matching live queue item exists.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [
+        {
+          id: 'attention-match',
+          dedupe_key: 'team_tracker:blocker:person-2',
+          kind: 'blocker',
+          severity: 'critical',
+          title: 'Escalate renewal blocker',
+          reason: 'Legal review is still blocking Sam Lee.',
+          source: 'attention_queue',
+          status: 'active',
+          score: 0.92,
+          score_breakdown: null,
+          related_entity_ids: ['person-2', 'topic-legal'],
+          related_stream_ids: [],
+          related_meeting_ids: ['m-team'],
+          evidence: [
+            {
+              meeting_id: 'm-team',
+              source_kind: 'analysis',
+              quote: 'Sam Lee is still waiting on legal review.',
+            },
+          ],
+          created_at: '2026-07-14T12:00:00.000Z',
+          updated_at: '2026-07-14T12:00:00.000Z',
+          last_seen_at: '2026-07-14T12:00:00.000Z',
+          resolved_at: null,
+        },
+        {
+          id: 'attention-unrelated',
+          dedupe_key: 'team_tracker:follow_up:person-9',
+          kind: 'follow_up',
+          severity: 'watch',
+          title: 'Unrelated follow-up',
+          reason: 'It points at someone outside the tracked team.',
+          source: 'attention_queue',
+          status: 'active',
+          score: 0.61,
+          score_breakdown: null,
+          related_entity_ids: ['person-9'],
+          related_stream_ids: [],
+          related_meeting_ids: ['m-other'],
+          evidence: [
+            {
+              meeting_id: 'm-other',
+              source_kind: 'analysis',
+              quote: 'Someone else owns this follow-up.',
+            },
+          ],
+          created_at: '2026-07-14T12:00:00.000Z',
+          updated_at: '2026-07-14T12:00:00.000Z',
+          last_seen_at: '2026-07-14T12:00:00.000Z',
+          resolved_at: null,
+        },
+      ],
+      [],
+      makeWorkingMemorySnapshot({
+        scope_type: 'team_tracker',
+        scope_key: 'team-1',
+        title: 'Revenue Team',
+        source_doc_id: 'doc-team-live',
+        payload: {
+          ...makeWorkingMemorySnapshot().payload,
+          scope: {
+            type: 'team_tracker',
+            key: 'team-1',
+            title: 'Revenue Team',
+            member_entity_ids: ['person-1', 'person-2'],
+          },
+          source: {
+            knowledge_doc_id: 'doc-team-live',
+            knowledge_doc_last_synthesized_at: '2026-04-25T10:00:00.000Z',
+          },
+          open_loops: [
+            {
+              id: 'loop-team-fallback',
+              title: 'Snapshot fallback should not win',
+              summary: 'A matching live queue item is fresher.',
+              kind: 'follow_up',
+              severity: 'watch',
+              why_now: 'The snapshot fallback should be bypassed.',
+              stream_ids: ['stream-1'],
+              citations: [],
+              evidence_quality: {
+                mode: 'direct',
+                confidence: 0.5,
+                cited_meeting_count: 0,
+                source_count: 0,
+                last_reinforced_at: '2026-04-25T10:00:00.000Z',
+                freshness: 'fresh',
+              },
+            },
+          ],
+          patterns: [],
+          risks_and_unknowns: [],
+          evidence_index: [],
+        },
+      }),
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'attention-match',
+        title: 'Escalate renewal blocker',
+        summary: 'Legal review is still blocking Sam Lee.',
+        severity: 'critical',
+        kind: 'blocker',
+        reasons: ['Legal review is still blocking Sam Lee.'],
+        citations: [
+          {
+            meeting_id: 'm-team',
+            quote: 'Sam Lee is still waiting on legal review.',
+          },
+        ],
+      },
+    ]);
+  });
+
   it('falls back to project-card heuristics when the project snapshot is stale', () => {
     const sourceDoc = makeDoc({
       id: 'doc-project',

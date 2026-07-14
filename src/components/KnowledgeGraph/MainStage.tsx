@@ -35,6 +35,7 @@ import {
   compileNeedsAttention,
   formatDocStatus,
   formatRelativeKnowledgeTime,
+  supportsLiveAttentionQueueScope,
   supportsWorkingMemorySnapshotScope,
 } from './knowledgeDocument';
 
@@ -1021,8 +1022,7 @@ export const MainStage: React.FC<MainStageProps> = ({
 
     if (
       !selectedDoc ||
-      (selectedDoc.scope_type !== 'global' &&
-        selectedDoc.scope_type !== 'person_context')
+      !supportsLiveAttentionQueueScope(selectedDoc.scope_type)
     ) {
       setAttentionAlerts([]);
       return () => {
