@@ -24,6 +24,8 @@
     "replay:meeting": "node scripts/replay_meeting_attribution.js",
     "benchmark:transcription": "node scripts/benchmark_transcription_backends.js",
     "benchmark:meeting-notes-quality": "node scripts/evaluate_meeting_notes_quality.js",
+    "changelog:check": "node scripts/changelog.mjs check",
+    "changelog:build": "node scripts/changelog.mjs build",
     "backfill:meeting-intelligence": "node scripts/backfill_meeting_title_analysis.mjs",
     "regenerate:meeting-transcript": "node scripts/replay_meeting_attribution.js",
     "test:meeting-regression": "node scripts/replay_meeting_attribution.js --fixture-file scripts/replay.local-fixtures.json --attempts 1 --require-expected --all-sets --transcript-regressions",
