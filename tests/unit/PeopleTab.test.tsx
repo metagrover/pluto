@@ -16,6 +16,7 @@ const rows: PersonBriefingRow[] = [
     latestMeetingTitle: 'Product review',
     latestMeetingAt: '2026-07-12T12:00:00.000Z',
     context: 'Reviewed the rollout sequence and evidence requirements.',
+    openCommitmentCount: 2,
   },
 ];
 
@@ -25,11 +26,29 @@ describe('PeopleBriefing', () => {
       <PeopleBriefing rows={rows} onOpenMeeting={() => {}} />,
     );
     expect(markup).toContain('Relationship context');
-    expect(markup).toContain('Recently in conversation');
+    expect(markup).toContain('Needs you now');
     expect(markup).toContain('Product review');
-    expect(markup).toContain('4 conversations');
+    expect(markup).toContain('2 open commitments');
     expect(markup).not.toContain('View Profile');
     expect(markup).not.toContain('>Person<');
+  });
+
+  it('keeps the first viewport focused and moves the directory behind disclosure', () => {
+    const manyRows = Array.from({ length: 12 }, (_, index) => ({
+      ...rows[0],
+      id: `person-${index}`,
+      name: `Person ${index}`,
+      openCommitmentCount: index === 9 ? 3 : 0,
+      latestMeetingAt: `2026-07-${String(index + 1).padStart(2, '0')}T12:00:00.000Z`,
+    }));
+    const markup = renderToStaticMarkup(
+      <PeopleBriefing rows={manyRows} onOpenMeeting={() => {}} />,
+    );
+
+    expect(markup).toContain('Needs you now');
+    expect(markup).toContain('3 open commitments');
+    expect(markup).toContain('Browse all 12 people');
+    expect(markup).not.toContain('undefined');
   });
 
   it('teaches the surface when no relationship context exists', () => {

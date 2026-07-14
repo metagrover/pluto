@@ -12,6 +12,7 @@ import {
   knowledgeDocsNeedPolling,
   parseStructuredKnowledgeDoc,
   parseStructuredKnowledgeV2Doc,
+  supportsLiveAttentionQueueScope,
   supportsWorkingMemorySnapshotScope,
 } from '../../src/components/KnowledgeGraph/knowledgeDocument';
 
@@ -930,6 +931,13 @@ describe('knowledge document utilities', () => {
   it('treats person and team knowledge docs as snapshot-eligible scopes', () => {
     expect(supportsWorkingMemorySnapshotScope('person_context')).toBe(true);
     expect(supportsWorkingMemorySnapshotScope('team_tracker')).toBe(true);
+  });
+
+  it('treats project knowledge docs as live attention-queue scopes', () => {
+    expect(supportsLiveAttentionQueueScope('global')).toBe(true);
+    expect(supportsLiveAttentionQueueScope('project')).toBe(true);
+    expect(supportsLiveAttentionQueueScope('person_context')).toBe(true);
+    expect(supportsLiveAttentionQueueScope('team_tracker')).toBe(true);
   });
 
   it('prefers a matching person-context working-memory snapshot for a people knowledge doc', () => {
@@ -2474,7 +2482,114 @@ describe('knowledge document utilities', () => {
     ]);
   });
 
-  it('keeps fallback needs-attention logic for non-global docs even when queue items exist', () => {
+  it('prefers matching live attention queue items for project docs when project streams are present', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-project-live',
+      scope_type: 'project',
+      scope_key: 'project-1',
+      title: 'Project One',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        scope: { type: 'project', title: 'Project One' },
+        current_read: {
+          headline: 'Project One still needs attention.',
+          supporting_bullets: [],
+          freshness: 'fresh',
+          source_count: 1,
+          cited_item_count: 1,
+          cited_meeting_count: 1,
+          trust_message: 'Compiled from project state.',
+          evidence_quality: {
+            mode: 'direct',
+            confidence: 0.8,
+            cited_meeting_count: 1,
+            source_count: 1,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'fresh',
+          },
+        },
+        active_streams: [
+          {
+            id: 'stream-launch',
+            title: 'Launch',
+            domain: 'work',
+            status: 'active',
+            current_read: 'Launch coordination is still active.',
+            last_touched_at: '2026-04-25T10:00:00.000Z',
+            source_count: 1,
+            open_follow_up_count: 1,
+            decision_count: 0,
+            unresolved_question_count: 0,
+            pinned: true,
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.8,
+              cited_meeting_count: 1,
+              source_count: 1,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        needs_attention: [
+          {
+            id: 'fallback-risk',
+            title: 'Fallback project risk',
+            summary: 'This should be ignored when a live queue item matches.',
+            kind: 'risk',
+            severity: 'watch',
+            why_now: 'The project fallback should lose to the live queue.',
+            stream_ids: ['stream-launch'],
+            citations: [],
+            evidence_quality: {
+              mode: 'direct',
+              confidence: 0.6,
+              cited_meeting_count: 0,
+              source_count: 1,
+              last_reinforced_at: '2026-04-25T10:00:00.000Z',
+              freshness: 'fresh',
+            },
+          },
+        ],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [
+        makeAttentionItem({
+          id: 'attention-project-match',
+          title: 'API instrumentation approval is still pending.',
+          reason: 'Approval still blocks the active launch stream.',
+          related_stream_ids: ['stream-launch'],
+        }),
+      ],
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'attention-project-match',
+        title: 'API instrumentation approval is still pending.',
+        summary: 'Approval still blocks the active launch stream.',
+        severity: 'critical',
+        kind: 'blocker',
+        reasons: ['Approval still blocks the active launch stream.'],
+        citations: [
+          {
+            meeting_id: 'm-approval',
+            quote: 'Approval is still pending for instrumentation.',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('keeps fallback needs-attention logic for project docs without usable stream identity', () => {
     const sourceDoc = makeDoc({
       scope_type: 'project',
       scope_key: 'project-1',
