@@ -431,6 +431,10 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.detail).toBe('Blocked by finance approval.');
     expect(model.hero.detail).not.toContain('Routine stale follow-up');
+    expect(model.briefingFocus).toMatchObject({
+      kind: 'attention',
+      title: 'Blocked follow-up',
+    });
   });
 
   it('falls back to generic stale hero copy when blocker-backed stale follow-ups have no richer reason', () => {
@@ -566,6 +570,10 @@ describe('buildDashboardHomeModel', () => {
       'Legal approval is still blocking the overdue launch review.',
     );
     expect(model.hero.detail).not.toContain('Routine overdue follow-up');
+    expect(model.briefingFocus).toMatchObject({
+      kind: 'attention',
+      title: 'Blocked follow-up',
+    });
     expect(model.hero.action).toEqual({
       label: 'Review blockers',
       target: 'projects',
