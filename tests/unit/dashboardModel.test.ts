@@ -290,6 +290,36 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('uses the blocker CTA in briefing focus for blocker-backed overdue follow-ups', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'blocked-overdue-briefing',
+          name: 'Blocked overdue follow-up',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-overdue-briefing',
+          kind: 'blocker',
+          reason: 'Waiting on legal sign-off.',
+          related_entity_ids: ['blocked-overdue-briefing'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toMatchObject({
+      kind: 'attention',
+      action: { label: 'Review blockers', target: 'projects' },
+    });
+  });
+
   it('surfaces blocker-backed stale follow-ups in briefing focus before generic stale copy', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

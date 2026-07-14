@@ -1154,7 +1154,14 @@ const buildBriefingFocus = (
           ? pluralize(actionInsights.staleCount, 'stale item')
           : '',
       ]),
-      action: { label: 'Review actions', target: 'projects' },
+      action: {
+        label:
+          (hero.kind === 'overdue_action' || hero.kind === 'stale_action') &&
+          hero.label === 'Blocked'
+            ? 'Review blockers'
+            : 'Review actions',
+        target: 'projects',
+      },
     };
   }
 
