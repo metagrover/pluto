@@ -52,13 +52,16 @@
     @apply mt-7;
   }
   .people-list__heading {
-    @apply flex items-center justify-between border-b border-pro-border pb-3;
+    @apply flex items-end justify-between border-b border-pro-border pb-3;
   }
   .people-list__heading h2 {
     @apply text-lg font-black tracking-tight text-pro-text-main;
   }
   .people-list__heading span {
     @apply text-xs font-semibold text-pro-text-muted;
+  }
+  .person-commitments {
+    @apply font-bold text-amber-500;
   }
   .person-row {
     @apply grid min-h-[92px] grid-cols-[44px_minmax(130px,0.55fr)_minmax(240px,1.25fr)_minmax(150px,0.65fr)_auto] items-center gap-4 border-b border-pro-border py-4;
@@ -92,6 +95,15 @@
   }
   .person-row > button {
     @apply inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-pro-accent transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-not-allowed disabled:text-pro-text-muted disabled:opacity-50;
+  }
+  .people-directory {
+    @apply border-b border-pro-border py-2;
+  }
+  .people-directory > summary {
+    @apply flex min-h-12 cursor-pointer items-center justify-center rounded-lg text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .people-directory[open] > summary {
+    @apply border-b border-pro-border;
   }
   .people-empty {
     @apply mt-7 flex min-h-56 flex-col items-center justify-center border-y border-pro-border px-5 text-center text-pro-text-muted;

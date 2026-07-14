@@ -11,7 +11,7 @@ import {
 } from '../../api/knowledgeGraph';
 
 // ─── Health Logic ────────────────────────────────────────────────
-type HealthStatus = 'on_track' | 'at_risk' | 'slipping';
+type HealthStatus = 'on_track' | 'at_risk' | 'slipping' | 'complete';
 
 const HEALTH_CONFIG: Record<
   HealthStatus,
@@ -35,12 +35,43 @@ const HEALTH_CONFIG: Record<
     color: 'text-red-500',
     bg: 'bg-red-500/10',
   },
+  complete: {
+    dot: '✓',
+    label: 'Complete',
+    color: 'text-pro-text-muted',
+    bg: 'bg-pro-bg',
+  },
+};
+
+export const buildProjectsBriefing = (tasks: Entity[], now = Date.now()) => {
+  const active = tasks.filter(
+    (task) => task.status === 'active' || task.status === 'overdue',
+  );
+  const completed = tasks.filter((task) => task.status === 'completed');
+  const overdue = active.filter(
+    (task) =>
+      task.status === 'overdue' ||
+      (task.due_date && new Date(task.due_date).getTime() < now),
+  );
+  return {
+    active,
+    completed,
+    overdue,
+    health: (active.length === 0
+      ? 'complete'
+      : overdue.length > 0
+        ? 'slipping'
+        : 'on_track') as HealthStatus,
+  };
 };
 
 const computeHealth = (tasks: Entity[]): HealthStatus => {
+  if (buildProjectsBriefing(tasks).active.length === 0) return 'complete';
   const now = Date.now();
   const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
-  const activeTasks = tasks.filter((t) => t.status === 'active');
+  const activeTasks = tasks.filter(
+    (t) => t.status === 'active' || t.status === 'overdue',
+  );
 
   const hasOverdue = activeTasks.some(
     (t) => t.due_date && new Date(t.due_date).getTime() < now,
@@ -72,10 +103,8 @@ const TaskRow: React.FC<{
 
   return (
     <div
-      className={`group flex items-center gap-4 px-5 py-3.5 rounded-xl border transition-all duration-200 ${
-        isCompleted
-          ? 'bg-pro-bg/30 border-pro-border/30 opacity-50'
-          : 'bg-pro-surface border-pro-border hover:border-pro-accent/20 hover:shadow-sm'
+      className={`group flex items-center gap-4 border-b border-pro-border/30 px-5 py-3.5 transition-colors duration-200 ${
+        isCompleted ? 'opacity-50' : 'hover:bg-pro-hover/60'
       }`}
     >
       {/* Checkbox */}
@@ -216,19 +245,20 @@ const ProjectHealthCard: React.FC<{
   onToggleTask: (task: Entity) => void;
   onTaskAdded: () => void;
 }> = ({ project, tasks, onToggleTask, onTaskAdded }) => {
-  const [expanded, setExpanded] = useState(true);
+  const briefing = buildProjectsBriefing(tasks);
+  const [expanded, setExpanded] = useState(briefing.active.length > 0);
   const health = computeHealth(tasks);
   const healthInfo = HEALTH_CONFIG[health];
-  const completedCount = tasks.filter((t) => t.status === 'completed').length;
+  const completedCount = briefing.completed.length;
   const metadata = JSON.parse(project.metadata || '{}');
 
   return (
-    <div className="rounded-2xl border border-pro-border bg-pro-surface/50 overflow-hidden transition-all hover:shadow-md">
+    <section className="overflow-hidden border-b border-pro-border">
       {/* Project Header */}
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-4 p-5 text-left group"
+        className="group flex w-full items-center gap-4 px-1 py-5 text-left"
       >
         <div className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/30 flex items-center justify-center text-lg shrink-0">
           📁
@@ -250,9 +280,10 @@ const ProjectHealthCard: React.FC<{
           >
             {healthInfo.dot} {healthInfo.label}
           </span>
-          {/* Completion ratio */}
           <span className="text-[10px] font-bold text-pro-text-muted/60">
-            {completedCount}/{tasks.length}
+            {briefing.active.length > 0
+              ? `${briefing.active.length} open`
+              : `${completedCount} finished`}
           </span>
           {/* Chevron */}
           <svg
@@ -274,15 +305,31 @@ const ProjectHealthCard: React.FC<{
 
       {/* Task List */}
       {expanded && (
-        <div className="border-t border-pro-border/30">
+        <div className="border-t border-pro-border/30 pb-4">
           <div className="flex flex-col gap-1.5 p-3">
-            {tasks.map((task) => (
+            {briefing.active.map((task) => (
               <TaskRow key={task.id} task={task} onToggle={onToggleTask} />
             ))}
-            {tasks.length === 0 && (
+            {briefing.active.length === 0 && (
               <p className="text-[11px] text-pro-text-muted/40 italic px-5 py-3">
-                No tasks yet. Add one below.
+                No active commitments.
               </p>
+            )}
+            {briefing.completed.length > 0 && (
+              <details className="px-5 py-2 text-xs text-pro-text-muted">
+                <summary className="cursor-pointer font-semibold">
+                  {briefing.completed.length} completed
+                </summary>
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {briefing.completed.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      onToggle={onToggleTask}
+                    />
+                  ))}
+                </div>
+              </details>
             )}
           </div>
           <div className="border-t border-pro-border/20">
@@ -290,7 +337,7 @@ const ProjectHealthCard: React.FC<{
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 };
 
@@ -393,9 +440,14 @@ export const ProjectsExecutionTab: React.FC = () => {
   }, [projects, groupedTasks]);
 
   // Stats
-  const activeTasks = allTasks.filter((t) => t.status === 'active');
-  const overdueTasks = activeTasks.filter(
-    (t) => t.due_date && new Date(t.due_date).getTime() < Date.now(),
+  const briefing = buildProjectsBriefing(allTasks);
+  const activeTasks = briefing.active;
+  const overdueTasks = briefing.overdue;
+  const activeUngroupedTasks = ungroupedTasks.filter(
+    (task) => task.status === 'active' || task.status === 'overdue',
+  );
+  const completedUngroupedTasks = ungroupedTasks.filter(
+    (task) => task.status === 'completed',
   );
 
   if (loading && allTasks.length === 0) {
@@ -454,23 +506,23 @@ export const ProjectsExecutionTab: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-8" data-testid="projects-briefing">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] mb-1">
-            Execution Board
-          </h2>
-          <p className="text-sm font-medium text-pro-text-muted">
-            Tracking{' '}
-            <span className="text-pro-text-main font-bold">
-              {activeTasks.length} active
-            </span>{' '}
-            across {visibleProjects.length} project
-            {visibleProjects.length !== 1 ? 's' : ''}
+          <p className="workspace-eyebrow">Execution brief</p>
+          <h1 className="mt-2 text-3xl font-black tracking-tight text-pro-text-main">
+            {activeTasks.length > 0
+              ? 'Work in motion'
+              : 'No active commitments'}
+          </h1>
+          <p className="mt-2 text-sm font-medium text-pro-text-muted">
+            {activeTasks.length > 0
+              ? `${activeTasks.length} open across ${visibleProjects.length} project${visibleProjects.length === 1 ? '' : 's'}`
+              : 'Completed work is tucked away. Start from the inbox when something new appears.'}
             {overdueTasks.length > 0 && (
               <span className="text-red-500 font-bold ml-2">
-                · {overdueTasks.length} overdue
+                {overdueTasks.length} overdue
               </span>
             )}
           </p>
@@ -478,7 +530,7 @@ export const ProjectsExecutionTab: React.FC = () => {
       </div>
 
       {/* Project Groups */}
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col">
         {visibleProjects.map((project) => (
           <ProjectHealthCard
             key={project.id}
@@ -509,14 +561,30 @@ export const ProjectsExecutionTab: React.FC = () => {
               </p>
             </div>
             <span className="text-[10px] font-bold text-pro-text-muted/60 ml-auto">
-              {ungroupedTasks.length} item
-              {ungroupedTasks.length !== 1 ? 's' : ''}
+              {activeUngroupedTasks.length} to triage
             </span>
           </div>
           <div className="flex flex-col gap-1.5 p-3">
-            {ungroupedTasks.map((task) => (
+            {activeUngroupedTasks.slice(0, 6).map((task) => (
               <TaskRow key={task.id} task={task} onToggle={toggleTask} />
             ))}
+            {activeUngroupedTasks.length > 6 && (
+              <p className="px-5 py-3 text-xs font-semibold text-pro-text-muted">
+                {activeUngroupedTasks.length - 6} more active items in the inbox
+              </p>
+            )}
+            {completedUngroupedTasks.length > 0 && (
+              <details className="px-5 py-3 text-xs text-pro-text-muted">
+                <summary className="cursor-pointer font-semibold">
+                  Browse {completedUngroupedTasks.length} completed items
+                </summary>
+                <div className="mt-3 flex flex-col gap-1.5">
+                  {completedUngroupedTasks.map((task) => (
+                    <TaskRow key={task.id} task={task} onToggle={toggleTask} />
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
           <div className="border-t border-pro-border/20">
             <QuickAddTask onTaskAdded={fetchData} />

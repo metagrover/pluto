@@ -24,23 +24,27 @@ export type PersonBriefingRow = {
   latestMeetingTitle: string | null;
   latestMeetingAt: string | null;
   context: string | null;
+  openCommitmentCount: number;
 };
 
 const parseRole = (metadata: string | null) => {
-  if (!metadata) return 'Relationship context';
+  if (!metadata) return 'Known from conversations';
   try {
     const value = JSON.parse(metadata) as { role?: unknown };
-    return typeof value.role === 'string' && value.role.trim()
-      ? value.role.trim()
-      : 'Relationship context';
+    if (typeof value.role !== 'string') return 'Known from conversations';
+    const role = value.role.trim();
+    return role && !['undefined', 'null', 'n/a'].includes(role.toLowerCase())
+      ? role
+      : 'Known from conversations';
   } catch {
-    return 'Relationship context';
+    return 'Known from conversations';
   }
 };
 
 export const buildPersonBriefingRow = (
   person: Entity,
   meetings: EntityMeeting[],
+  openCommitmentCount = 0,
 ): PersonBriefingRow => {
   const sorted = [...meetings].sort((a, b) => {
     const aTime = Date.parse(a.started_at || a.created_at || '') || 0;
@@ -61,7 +65,25 @@ export const buildPersonBriefingRow = (
     latestMeetingTitle: latest?.title ?? null,
     latestMeetingAt: latest?.started_at ?? latest?.created_at ?? null,
     context: latest?.context ?? null,
+    openCommitmentCount,
   };
+};
+
+const personMatchesTask = (person: Entity, task: Entity) => {
+  const assignee = task.assigned_to?.trim().toLowerCase();
+  if (assignee === person.id || assignee === person.normalized_name)
+    return true;
+  try {
+    const metadata = JSON.parse(task.metadata || '{}') as {
+      assignee_name?: unknown;
+    };
+    return (
+      typeof metadata.assignee_name === 'string' &&
+      metadata.assignee_name.trim().toLowerCase() === person.normalized_name
+    );
+  } catch {
+    return false;
+  }
 };
 
 const formatDate = (value: string | null) => {
@@ -90,16 +112,71 @@ export const PeopleBriefing = ({
         )
       : rows;
   }, [query, rows]);
+  const prioritized = useMemo(
+    () =>
+      [...filtered].sort(
+        (a, b) =>
+          b.openCommitmentCount - a.openCommitmentCount ||
+          (Date.parse(b.latestMeetingAt || '') || 0) -
+            (Date.parse(a.latestMeetingAt || '') || 0),
+      ),
+    [filtered],
+  );
+  const focusRows = query ? prioritized : prioritized.slice(0, 6);
+  const hasCommitments = focusRows.some((row) => row.openCommitmentCount > 0);
+
+  const renderPerson = (person: PersonBriefingRow) => (
+    <article className="person-row" key={person.id}>
+      <div className="person-avatar" aria-hidden="true">
+        {person.name.slice(0, 1).toUpperCase()}
+      </div>
+      <div className="person-identity">
+        <h3>{person.name}</h3>
+        <p>{person.role}</p>
+      </div>
+      <div className="person-context">
+        <p>{person.latestMeetingTitle ?? 'No linked conversation yet'}</p>
+        {person.context && <span>{person.context}</span>}
+      </div>
+      <div className="person-meta">
+        {person.openCommitmentCount > 0 ? (
+          <span className="person-commitments">
+            {person.openCommitmentCount} open commitment
+            {person.openCommitmentCount === 1 ? '' : 's'}
+          </span>
+        ) : (
+          <span>
+            <MessageCircle aria-hidden="true" size={13} />
+            {person.meetingCount} conversation
+            {person.meetingCount === 1 ? '' : 's'}
+          </span>
+        )}
+        <span>
+          <Clock3 aria-hidden="true" size={13} />
+          {formatDate(person.latestMeetingAt)}
+        </span>
+      </div>
+      <button
+        type="button"
+        disabled={!person.latestMeetingId}
+        onClick={() =>
+          person.latestMeetingId && onOpenMeeting(person.latestMeetingId)
+        }
+      >
+        Open <ArrowRight aria-hidden="true" size={14} />
+      </button>
+    </article>
+  );
 
   return (
     <section aria-labelledby="people-heading" className="people-briefing">
       <header className="people-briefing__header">
         <div>
           <p className="workspace-eyebrow">Relationship context</p>
-          <h1 id="people-heading">People in your memory</h1>
+          <h1 id="people-heading">Relationships in motion</h1>
           <p>
-            Re-enter the conversations, commitments, and context connected to
-            each person.
+            Start with the people tied to open commitments, then return to
+            recent context.
           </p>
         </div>
         {rows.length > 0 && (
@@ -122,52 +199,23 @@ export const PeopleBriefing = ({
           <p>People will appear as Pluto connects them to conversations.</p>
         </div>
       ) : (
-        <div className="people-list" aria-label="Recently in conversation">
+        <div className="people-list" aria-label="Relationship priorities">
           <div className="people-list__heading">
-            <h2>Recently in conversation</h2>
-            <span>{filtered.length} people</span>
+            <div>
+              <p className="workspace-eyebrow">Prioritized</p>
+              <h2>{hasCommitments ? 'Needs you now' : 'Recently active'}</h2>
+            </div>
+            <span>
+              Showing {focusRows.length} of {filtered.length}
+            </span>
           </div>
-          {filtered.map((person) => (
-            <article className="person-row" key={person.id}>
-              <div className="person-avatar" aria-hidden="true">
-                {person.name.slice(0, 1).toUpperCase()}
-              </div>
-              <div className="person-identity">
-                <h3>{person.name}</h3>
-                <p>{person.role}</p>
-              </div>
-              <div className="person-context">
-                <p>
-                  {person.latestMeetingTitle ?? 'No linked conversation yet'}
-                </p>
-                <span>
-                  {person.context ??
-                    'Pluto will add context as this person appears in meetings.'}
-                </span>
-              </div>
-              <div className="person-meta">
-                <span>
-                  <MessageCircle aria-hidden="true" size={13} />
-                  {person.meetingCount} conversation
-                  {person.meetingCount === 1 ? '' : 's'}
-                </span>
-                <span>
-                  <Clock3 aria-hidden="true" size={13} />
-                  {formatDate(person.latestMeetingAt)}
-                </span>
-              </div>
-              <button
-                type="button"
-                disabled={!person.latestMeetingId}
-                onClick={() =>
-                  person.latestMeetingId &&
-                  onOpenMeeting(person.latestMeetingId)
-                }
-              >
-                Open latest <ArrowRight aria-hidden="true" size={14} />
-              </button>
-            </article>
-          ))}
+          {focusRows.map(renderPerson)}
+          {!query && prioritized.length > focusRows.length && (
+            <details className="people-directory">
+              <summary>Browse all {prioritized.length} people</summary>
+              <div>{prioritized.slice(focusRows.length).map(renderPerson)}</div>
+            </details>
+          )}
           {filtered.length === 0 && (
             <p className="people-no-results">No people match “{query}”.</p>
           )}
@@ -190,10 +238,21 @@ export const PeopleTab: React.FC<{
       setLoading(true);
       setError(false);
       try {
-        const people = await getEntitiesByType('person');
+        const [people, actionItems] = await Promise.all([
+          getEntitiesByType('person'),
+          getEntitiesByType('action_item'),
+        ]);
+        const openActionItems = actionItems.filter(
+          (item) => item.status === 'active' || item.status === 'overdue',
+        );
         const briefingRows = await Promise.all(
           people.map(async (person) =>
-            buildPersonBriefingRow(person, await getEntityMeetings(person.id)),
+            buildPersonBriefingRow(
+              person,
+              await getEntityMeetings(person.id),
+              openActionItems.filter((task) => personMatchesTask(person, task))
+                .length,
+            ),
           ),
         );
         if (!cancelled) {
