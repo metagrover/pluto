@@ -385,6 +385,73 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('>Projects<');
   });
 
+  it('renders a blocker-specific spotlight section label when the spotlight project is blocked', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Blocked project signal');
+    expect(markup).not.toContain('>Project signal<');
+  });
+
+  it('keeps the generic spotlight section label when the spotlight project is not blocked', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: makeWorkspace({
+        docs: [],
+        project_cards: [
+          makeProjectCard({
+            open_blockers: 0,
+            dependency_count: 2,
+            recent_changes: 1,
+          }),
+        ],
+      }),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Project signal');
+    expect(markup).not.toContain('Blocked project signal');
+  });
+
   it('renders a blocker-specific spotlight quick action', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

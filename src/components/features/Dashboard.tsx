@@ -477,7 +477,9 @@ export const Dashboard = ({
             <section className="border-t border-pro-border/70 pt-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-[10px] font-black uppercase tracking-[0.16em] text-pro-text-muted/55">
-                  Project signal
+                  {model.spotlight.hasBlockers
+                    ? 'Blocked project signal'
+                    : 'Project signal'}
                 </p>
                 <span
                   className={`rounded-full px-2 py-1 text-[9px] font-black ${model.spotlight.hasBlockers ? 'bg-pro-urgent/10 text-pro-urgent' : 'bg-pro-accent/10 text-pro-accent'}`}
