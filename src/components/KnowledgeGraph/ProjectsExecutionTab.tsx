@@ -300,8 +300,8 @@ export const ProjectHealthCard: React.FC<{
                   className="inline-flex items-center gap-2 rounded-lg border border-pro-border/50 bg-pro-bg px-3 py-2 text-[11px] font-bold text-pro-text-muted transition-colors hover:border-pro-accent/30 hover:text-pro-text-main"
                 >
                   <span>
-                    {showCompleted ? 'Hide' : 'Show'} {completedCount}{' '}
-                    completed task{completedCount === 1 ? '' : 's'}
+                    {showCompleted ? 'Hide' : 'Show'} {completedCount} completed
+                    task{completedCount === 1 ? '' : 's'}
                   </span>
                   <svg
                     aria-hidden="true"
@@ -320,9 +320,10 @@ export const ProjectHealthCard: React.FC<{
                 </button>
               </div>
             )}
-            {showCompleted && completedTasks.map((task) => (
-              <TaskRow key={task.id} task={task} onToggle={onToggleTask} />
-            ))}
+            {showCompleted &&
+              completedTasks.map((task) => (
+                <TaskRow key={task.id} task={task} onToggle={onToggleTask} />
+              ))}
           </div>
           <div className="border-t border-pro-border/20">
             <QuickAddTask projectId={project.id} onTaskAdded={onTaskAdded} />
