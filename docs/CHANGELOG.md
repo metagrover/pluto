@@ -20,6 +20,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-13
 
+### Preserve working-memory source cursor provenance
+- **Issue:** [#391](https://github.com/metagrover/pluto/issues/391)
+- **PR:** Pending.
+- **Changed:** Working-memory snapshots now preserve the source knowledge doc's last source cursor inside `payload.source`, with focused regression coverage for cursor-present, cursor-missing, and backward-compatible round-trips.
+- **Why:** `#80` calls for durable snapshot source-window provenance so downstream consumers and debugging tools can understand which knowledge-doc window produced a snapshot. Before this slice, persisted snapshots retained the doc id and synthesis time but dropped the source cursor after storage.
+- **Replaced:** Treating source provenance as limited to the source doc id and synthesis timestamp, which left snapshots unable to describe their own source window.
+- **Notes:** This stays within the snapshot substrate and does not broaden into Knowledge consumer or UI changes.
+
 ### Surface stale blocker context in homepage briefing focus
 - **Issue:** [#368](https://github.com/metagrover/pluto/issues/368)
 - **PR:** Pending.

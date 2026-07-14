@@ -34,6 +34,7 @@ const buildWorkingMemorySnapshot = ({
     source: {
       knowledge_doc_id: knowledgeDoc.id,
       knowledge_doc_last_synthesized_at: knowledgeDoc.last_synthesized_at,
+      knowledge_doc_last_source_cursor: knowledgeDoc.last_source_cursor,
     },
     current_read: {
       headline: structured.current_read.headline,

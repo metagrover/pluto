@@ -1766,6 +1766,7 @@ export interface WorkingMemorySnapshotPayload {
   source: {
     knowledge_doc_id: string;
     knowledge_doc_last_synthesized_at: string | null;
+    knowledge_doc_last_source_cursor?: string | null;
   };
   current_read: {
     headline: string;
