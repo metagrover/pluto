@@ -398,6 +398,7 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('stale_action');
     expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.detail).toBe('Blocked by finance approval.');
     expect(model.hero.detail).not.toContain('Routine stale follow-up');
   });
@@ -430,6 +431,7 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('stale_action');
     expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.detail).toBe('Blocked stale follow-up has gone quiet.');
   });
 
@@ -529,6 +531,7 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('overdue_action');
     expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.detail).toContain(
       'Legal approval is still blocking the overdue launch review.',
     );
