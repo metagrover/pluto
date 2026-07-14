@@ -2,31 +2,13 @@
 
 This is Pluto's human-readable development journal. It is not a formal release-notes file.
 
-Use it to capture shipped changes, meaningful experiments, reversals, and changes in product direction. Good entries explain what changed, why it changed, and what assumption or previous direction it replaced.
+Entries through July 13, 2026 are archived below. New entries are canonical, independently writable fragments under [`docs/changelog/entries`](changelog/entries); see the [fragment authoring guide](changelog/README.md).
 
-## Entry Format
+Use `pnpm run changelog:check` to validate fragments and `pnpm run changelog:build` to assemble the post-migration journal. Ordinary pull requests do not edit this archive or commit generated aggregate output.
 
-```markdown
-## YYYY-MM-DD
-
-### Short change title
-- **Issue:** #123
-- **PR:** #456
-- **Changed:** What shipped or changed.
-- **Why:** The product or technical reason.
-- **Replaced:** The prior assumption, workflow, behavior, or plan this supersedes.
-- **Notes:** Follow-up context future agents should know.
-```
+## Archived entries
 
 ## 2026-07-13
-
-### Preserve working-memory source cursor provenance
-- **Issue:** [#391](https://github.com/metagrover/pluto/issues/391)
-- **PR:** Pending.
-- **Changed:** Working-memory snapshots now preserve the source knowledge doc's last source cursor inside `payload.source`, with focused regression coverage for cursor-present, cursor-missing, and backward-compatible round-trips.
-- **Why:** `#80` calls for durable snapshot source-window provenance so downstream consumers and debugging tools can understand which knowledge-doc window produced a snapshot. Before this slice, persisted snapshots retained the doc id and synthesis time but dropped the source cursor after storage.
-- **Replaced:** Treating source provenance as limited to the source doc id and synthesis timestamp, which left snapshots unable to describe their own source window.
-- **Notes:** This stays within the snapshot substrate and does not broaden into Knowledge consumer or UI changes.
 
 ### Surface stale blocker context in homepage briefing focus
 - **Issue:** [#368](https://github.com/metagrover/pluto/issues/368)
