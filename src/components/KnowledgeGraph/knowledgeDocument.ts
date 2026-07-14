@@ -4,6 +4,7 @@ import type {
   KnowledgeDoc,
   KnowledgeDocScopeType,
 } from '../../api/knowledgeDocs';
+import { parseKnowledgeDocConfig } from '../../api/knowledgeDocs';
 import type { KnowledgeProjectHealthCard } from '../../api/knowledgeWorkspace';
 import type { TrustStatus } from '../../utils/trustStatus';
 import {
@@ -1316,6 +1317,23 @@ export const compileNeedsAttention = (
     );
     if (matchingItems.length > 0) {
       return matchingItems.map(toNeedsAttentionItem);
+    }
+  }
+
+  if (doc?.scope_type === 'team_tracker') {
+    const memberEntityIds =
+      parseKnowledgeDocConfig(doc).member_entity_ids ?? [];
+    if (memberEntityIds.length > 0) {
+      const matchingItems = attentionItems.filter(
+        (item) =>
+          item.status === 'active' &&
+          item.related_entity_ids.some((entityId) =>
+            memberEntityIds.includes(entityId),
+          ),
+      );
+      if (matchingItems.length > 0) {
+        return matchingItems.map(toNeedsAttentionItem);
+      }
     }
   }
 

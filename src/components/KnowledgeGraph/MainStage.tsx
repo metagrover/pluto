@@ -1022,7 +1022,8 @@ export const MainStage: React.FC<MainStageProps> = ({
     if (
       !selectedDoc ||
       (selectedDoc.scope_type !== 'global' &&
-        selectedDoc.scope_type !== 'person_context')
+        selectedDoc.scope_type !== 'person_context' &&
+        selectedDoc.scope_type !== 'team_tracker')
     ) {
       setAttentionAlerts([]);
       return () => {
