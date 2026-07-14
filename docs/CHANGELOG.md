@@ -2,31 +2,31 @@
 
 This is Pluto's human-readable development journal. It is not a formal release-notes file.
 
-Use it to capture shipped changes, meaningful experiments, reversals, and changes in product direction. Good entries explain what changed, why it changed, and what assumption or previous direction it replaced.
+Entries through July 13, 2026 are archived below. New entries are canonical, independently writable fragments under [`docs/changelog/entries`](changelog/entries); see the [fragment authoring guide](changelog/README.md).
 
-## Entry Format
+Use `pnpm run changelog:check` to validate fragments and `pnpm run changelog:build` to assemble the post-migration journal. Ordinary pull requests do not edit this archive or commit generated aggregate output.
 
-```markdown
-## YYYY-MM-DD
+## Archived entries
 
-### Short change title
-- **Issue:** #123
-- **PR:** #456
-- **Changed:** What shipped or changed.
-- **Why:** The product or technical reason.
-- **Replaced:** The prior assumption, workflow, behavior, or plan this supersedes.
-- **Notes:** Follow-up context future agents should know.
-```
+## 2026-07-13
+
+### Surface stale blocker context in homepage briefing focus
+- **Issue:** [#368](https://github.com/metagrover/pluto/issues/368)
+- **PR:** Pending.
+- **Changed:** The homepage briefing-focus panel now surfaces blocker-specific heading, detail, and CTA copy when the highest-priority stale follow-up is backed by active blocker attention. If Pluto has no richer blocker reason, the panel falls back to blocked-item count instead of stale-count copy. Focused dashboard model regression coverage now proves both stale-blocker paths while preserving generic copy for routine stale work.
+- **Why:** `#61` still depends on Pluto's homepage surfaces showing the highest-value follow-ups with consistent trust status. Before this slice, the hero and action insights could already promote blocker-backed stale work, but briefing focus still flattened that same state into generic stale-item wording.
+- **Replaced:** Treating briefing-focus stale states as generic attention copy even when linked blocker attention had already identified the selected follow-up as blocked.
+- **Notes:** This intentionally stays scoped to stale briefing-focus behavior and does not reopen stale hero or action-insight ranking/detail work.
 
 ## 2026-07-10
 
-### Keep blocker-backed hero titles explicit for overdue and stale follow-ups
-- **Issue:** [#372](https://github.com/metagrover/pluto/issues/372)
+### Surface blocker CTA on overdue and stale homepage heroes
+- **Issue:** [#370](https://github.com/metagrover/pluto/issues/370)
 - **PR:** Pending.
-- **Changed:** The homepage hero now uses blocked-item title copy when an overdue or stale follow-up is backed by active blocker attention, while routine overdue and stale hero states keep their existing status-specific counts. Focused dashboard model regression coverage now proves the blocker-specific title path for both richer blocker-detail and generic stale fallback states.
-- **Why:** `#61` still depends on Pluto's highest-visibility follow-up surface keeping blocker-backed work explicit from badge through action copy. Before this slice, the hero could already show blocker-specific badge, detail, and CTA text but still title the card as generic overdue or stale debt, which weakened the trust signal at a glance.
-- **Replaced:** Treating blocker-backed overdue and stale hero titles as ordinary aging counts even after Pluto had already classified those same follow-ups as blocked.
-- **Notes:** This intentionally stays scoped to homepage hero title copy and does not reopen hero ranking, detail, CTA, briefing, or action-insight behavior.
+- **Changed:** Blocker-backed overdue and stale homepage hero states now use the blocker-specific `Review blockers` CTA, while routine overdue and stale heroes keep the existing `Open projects` action. Focused dashboard model regressions now prove both blocker-backed hero paths keep the stronger CTA.
+- **Why:** `#61` still depends on Pluto's highest-visibility follow-up surface keeping blocker framing explicit from badge to action. Before this slice, overdue and stale heroes could already surface blocker state in their badge and detail but still fell back to generic navigation copy, which weakened the trust signal right before the user acted.
+- **Replaced:** Treating overdue and stale homepage hero actions as generic project navigation even when linked active blocker attention already classified the surfaced follow-up as blocked.
+- **Notes:** This intentionally stays scoped to homepage hero CTA copy and does not reopen hero ranking, hero detail, briefing-focus, or action-insight behavior.
 
 ### Surface blocker reason on stale homepage heroes
 - **Issue:** [#366](https://github.com/metagrover/pluto/issues/366)
