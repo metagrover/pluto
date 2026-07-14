@@ -256,7 +256,7 @@ export const resolveCurrentReadHeadline = ({
   const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
   const hasPartialContext = !isCompiled && coverage.statementCount > 0;
 
-  if ((backingSource === 'snapshot' && isCompiled) || isCompiled) {
+  if (isCompiled || (backingSource !== 'none' && coverage.statementCount > 0)) {
     return headline;
   }
   if (selectedDoc.status === 'failed') {
@@ -272,6 +272,11 @@ export const resolveCurrentReadHeadline = ({
     return 'Pluto is compiling the current read.';
   }
   return 'No current read is available yet.';
+};
+
+export const formatCurrentReadHeadline = (headline: string): string => {
+  const firstThought = headline.split(';')[0]?.trim() || headline.trim();
+  return firstThought.replace(/^[A-Z][\w -]{0,40}:\s*/, '').trim();
 };
 
 const StatusBadge = ({ status }: { status: KnowledgeDocStatus }) => (
@@ -382,14 +387,18 @@ const CurrentRead = ({
     freshnessAt || selectedDoc.last_synthesized_at || selectedDoc.updated_at;
   const synthesisIsLongRunning = isLongRunningSynthesis(selectedDoc);
   const needsRetry = selectedDoc.status === 'failed' || synthesisIsLongRunning;
+  const hasReliableRead =
+    isCompiled || (backingSource !== 'none' && coverage.statementCount > 0);
   const hasPartialContext = !isCompiled && coverage.statementCount > 0;
-  const currentRead = resolveCurrentReadHeadline({
-    selectedDoc,
-    headline,
-    coverage,
-    isCompiled,
-    backingSource,
-  });
+  const currentRead = formatCurrentReadHeadline(
+    resolveCurrentReadHeadline({
+      selectedDoc,
+      headline,
+      coverage,
+      isCompiled,
+      backingSource,
+    }),
+  );
   const citedMeetingLabel = `${coverage.citedMeetingCount} cited meeting${
     coverage.citedMeetingCount === 1 ? '' : 's'
   }`;
@@ -410,7 +419,18 @@ const CurrentRead = ({
     >
       <div className="flex flex-col gap-4 border-b border-pro-border pb-5 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status={selectedDoc.status} />
+          {needsRetry && hasReliableRead ? (
+            <span className="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black text-amber-500">
+              Last reliable read
+            </span>
+          ) : (
+            <StatusBadge status={selectedDoc.status} />
+          )}
+          {needsRetry && hasReliableRead && (
+            <span className="text-[11px] font-bold text-pro-text-muted">
+              Update failed
+            </span>
+          )}
           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-pro-text-muted">
             <RefreshCw className="h-3.5 w-3.5" />
             {formatRelativeKnowledgeTime(freshnessDate)}
@@ -441,7 +461,7 @@ const CurrentRead = ({
               type="button"
               disabled={isRetrying}
               onClick={() => onRetrySynthesis(selectedDoc.id)}
-              className="inline-flex h-9 items-center gap-2 rounded-lg border border-red-500/25 bg-red-500/10 px-3 text-xs font-black text-red-500 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-pro-border px-3 text-xs font-bold text-pro-text-muted hover:bg-pro-hover hover:text-pro-text-main disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isRetrying ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -459,10 +479,10 @@ const CurrentRead = ({
           {currentRead}
         </h1>
 
-        {selectedDoc.status === 'failed' && (
-          <p className="mt-4 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-500">
-            Latest synthesis failed. Pluto is showing only previously saved
-            context until a retry succeeds.
+        {selectedDoc.status === 'failed' && !hasReliableRead && (
+          <p className="mt-4 text-xs font-semibold text-red-500">
+            Pluto could not compile a reliable current read. Retry synthesis to
+            rebuild it.
           </p>
         )}
 
@@ -484,40 +504,44 @@ const CurrentRead = ({
         )}
 
         {(trustStatus || trustMessage) && (
-          <div className="mt-4 rounded-lg border border-pro-border bg-pro-bg px-3 py-2">
-            {trustStatus && (
-              <div className="mb-2 flex flex-wrap items-center gap-2">
-                <span
-                  className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
-                    TRUST_STYLES[getTrustStatusMeta(trustStatus).tone]
-                  }`}
-                  title={
-                    trustDescription ??
-                    getTrustStatusMeta(trustStatus).description
-                  }
-                >
-                  {getTrustStatusMeta(trustStatus).label}
-                </span>
-                <span className="text-[11px] font-semibold text-pro-text-muted">
-                  {trustDescription ??
-                    getTrustStatusMeta(trustStatus).description}
-                </span>
-              </div>
-            )}
-            <p className="text-xs font-semibold text-pro-text-muted">
-              {trustMessage}
-              {sourceQuality
-                ? ` Included ${sourceQuality.included_count}, excluded ${sourceQuality.excluded_count}, weak ${sourceQuality.weak_count}.`
-                : ''}
-            </p>
-            {evidenceQuality && (
-              <p className="mt-2 text-[11px] font-semibold text-pro-text-muted">
-                Evidence is {evidenceQuality.mode}; confidence{' '}
-                {Math.round(evidenceQuality.confidence * 100)}%;{' '}
-                {evidenceQuality.freshness} evidence.
+          <details className="mt-5 border-y border-pro-border py-3 text-pro-text-muted">
+            <summary className="cursor-pointer text-xs font-semibold text-pro-text-main">
+              Evidence and sources
+            </summary>
+            <div className="pt-3">
+              {trustStatus && (
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
+                      TRUST_STYLES[getTrustStatusMeta(trustStatus).tone]
+                    }`}
+                    title={
+                      trustDescription ??
+                      getTrustStatusMeta(trustStatus).description
+                    }
+                  >
+                    {getTrustStatusMeta(trustStatus).label}
+                  </span>
+                  <span className="text-[11px] font-semibold text-pro-text-muted">
+                    {trustDescription ??
+                      getTrustStatusMeta(trustStatus).description}
+                  </span>
+                </div>
+              )}
+              <p className="text-xs font-semibold text-pro-text-muted">
+                {trustMessage}
+                {sourceQuality
+                  ? ` Included ${sourceQuality.included_count}, excluded ${sourceQuality.excluded_count}, weak ${sourceQuality.weak_count}.`
+                  : ''}
               </p>
-            )}
-          </div>
+              {evidenceQuality && (
+                <p className="mt-2 text-[11px] font-semibold text-pro-text-muted">
+                  Evidence quality: {evidenceQuality.freshness}{' '}
+                  {evidenceQuality.mode} support.
+                </p>
+              )}
+            </div>
+          </details>
         )}
 
         {supportingItems.length > 0 && (

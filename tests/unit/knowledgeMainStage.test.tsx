@@ -8,6 +8,7 @@ import type {
 import {
   MainStage,
   buildCurrentReadWhyItem,
+  formatCurrentReadHeadline,
   resolveCurrentReadHeadline,
 } from '../../src/components/KnowledgeGraph/MainStage';
 
@@ -101,6 +102,67 @@ describe('Knowledge MainStage', () => {
         backingSource: 'snapshot',
       }),
     ).toBe('Durable snapshot headline remains available.');
+  });
+
+  it('turns concatenated synthesis output into one editorial headline', () => {
+    expect(
+      formatCurrentReadHeadline(
+        'Adam: Review the launch decision and its implications; You: Explore a second unrelated thread.',
+      ),
+    ).toBe('Review the launch decision and its implications');
+  });
+
+  it('labels failed snapshot content as the last reliable read and hides technical provenance', () => {
+    const selectedDoc = makeDoc({
+      status: 'failed',
+      structured_json: JSON.stringify({
+        schema_version: 2,
+        current_read: {
+          headline: 'A durable read remains useful.',
+          supporting_bullets: [],
+          freshness: 'aging',
+          source_count: 2,
+          cited_item_count: 1,
+          cited_meeting_count: 2,
+          trust_message: 'Grounded in several sources.',
+          evidence_quality: {
+            mode: 'inferred',
+            confidence: 0.72,
+            cited_meeting_count: 2,
+            source_count: 2,
+            last_reinforced_at: '2026-04-25T10:00:00.000Z',
+            freshness: 'aging',
+          },
+        },
+        active_streams: [],
+        needs_attention: [],
+        patterns: [],
+        risks_and_unknowns: [],
+        evidence_index: [],
+        source_quality: {
+          included_count: 2,
+          excluded_count: 0,
+          weak_count: 0,
+          records: [],
+        },
+      }),
+    });
+    const markup = renderToStaticMarkup(
+      <MainStage
+        docs={[selectedDoc]}
+        selectedDoc={selectedDoc}
+        projectCards={[]}
+        sources={[makeSource({})]}
+        sourcesLoading={false}
+        onRetrySynthesis={async () => {}}
+        onSaveCorrection={async () => {}}
+      />,
+    );
+
+    expect(markup).toContain('Last reliable read');
+    expect(markup).toContain('Update failed');
+    expect(markup).toContain('Evidence and sources');
+    expect(markup).not.toContain('confidence 72%');
   });
 
   it('keeps a snapshot-backed current read headline visible when synthesis runs long', () => {
@@ -653,9 +715,8 @@ describe('Knowledge MainStage', () => {
       />,
     );
 
-    expect(markup).toContain('Evidence is direct');
-    expect(markup).toContain('confidence 84%');
-    expect(markup).toContain('fresh evidence');
+    expect(markup).toContain('Evidence quality: fresh direct support.');
+    expect(markup).not.toContain('confidence 84%');
   });
 
   it('renders a why action for Current Read supporting bullets', () => {
