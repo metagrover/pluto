@@ -239,14 +239,15 @@ const QuickAddTask: React.FC<{
 };
 
 // ─── ProjectHealthCard ───────────────────────────────────────────
-const ProjectHealthCard: React.FC<{
+export const ProjectHealthCard: React.FC<{
   project: Entity;
   tasks: Entity[];
   onToggleTask: (task: Entity) => void;
   onTaskAdded: () => void;
 }> = ({ project, tasks, onToggleTask, onTaskAdded }) => {
   const briefing = buildProjectsBriefing(tasks);
-  const [expanded, setExpanded] = useState(briefing.active.length > 0);
+  const [expanded, setExpanded] = useState(true);
+  const [showCompleted, setShowCompleted] = useState(false);
   const health = computeHealth(tasks);
   const healthInfo = HEALTH_CONFIG[health];
   const completedCount = briefing.completed.length;
@@ -315,22 +316,38 @@ const ProjectHealthCard: React.FC<{
                 No active commitments.
               </p>
             )}
-            {briefing.completed.length > 0 && (
-              <details className="px-5 py-2 text-xs text-pro-text-muted">
-                <summary className="cursor-pointer font-semibold">
-                  {briefing.completed.length} completed
-                </summary>
-                <div className="mt-2 flex flex-col gap-1.5">
-                  {briefing.completed.map((task) => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      onToggle={onToggleTask}
+            {completedCount > 0 && (
+              <div className="px-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCompleted((current) => !current)}
+                  className="inline-flex items-center gap-2 rounded-lg border border-pro-border/50 bg-pro-bg px-3 py-2 text-[11px] font-bold text-pro-text-muted transition-colors hover:border-pro-accent/30 hover:text-pro-text-main"
+                >
+                  <span>
+                    {showCompleted ? 'Hide' : 'Show'} {completedCount} completed
+                    task{completedCount === 1 ? '' : 's'}
+                  </span>
+                  <svg
+                    aria-hidden="true"
+                    className={`h-3.5 w-3.5 transition-transform duration-200 ${showCompleted ? 'rotate-180' : ''}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2.5}
+                      d="M19 9l-7 7-7-7"
                     />
-                  ))}
-                </div>
-              </details>
+                  </svg>
+                </button>
+              </div>
             )}
+            {showCompleted &&
+              briefing.completed.map((task) => (
+                <TaskRow key={task.id} task={task} onToggle={onToggleTask} />
+              ))}
           </div>
           <div className="border-t border-pro-border/20">
             <QuickAddTask projectId={project.id} onTaskAdded={onTaskAdded} />
