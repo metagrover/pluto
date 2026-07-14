@@ -281,6 +281,77 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Due Apr 26 · Work');
   });
 
+  it('uses blocker-specific primary completion labels for blocker-backed follow-up cards', () => {
+    const blockedModel = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'action-blocked',
+          name: 'Finalize launch checklist',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked',
+          kind: 'blocker',
+          title: 'Finalize launch checklist',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-blocked'],
+          related_meeting_ids: [],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const blockedMarkup = renderToStaticMarkup(
+      <Dashboard
+        model={blockedModel}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    const routineModel = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction()],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    const routineMarkup = renderToStaticMarkup(
+      <Dashboard
+        model={routineModel}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(blockedMarkup).toContain('Resolve blocker');
+    expect(blockedMarkup).not.toContain('Mark complete');
+    expect(routineMarkup).toContain('Mark complete');
+    expect(routineMarkup).not.toContain('Resolve blocker');
+  });
+
   it('uses the primary action status chip for blocker-backed follow-up cards', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
