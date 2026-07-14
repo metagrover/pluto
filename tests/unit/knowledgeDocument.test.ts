@@ -2206,23 +2206,29 @@ describe('knowledge document utilities', () => {
       }),
     });
 
-    const attention = compileNeedsAttention(sourceDoc, [], [], [
-      makeAttentionItem({
-        id: 'attention-person',
-        kind: 'follow_up',
-        severity: 'watch',
-        title: 'Send Alex the renewal summary',
-        reason: 'Alex is still waiting on the renewal summary from the latest meeting.',
-        related_entity_ids: ['person-1'],
-        evidence: [
-          {
-            meeting_id: 'm-person',
-            quote: 'Alex is still waiting on the renewal summary.',
-            source_kind: 'knowledge_v2',
-          },
-        ],
-      }),
-    ]);
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [
+        makeAttentionItem({
+          id: 'attention-person',
+          kind: 'follow_up',
+          severity: 'watch',
+          title: 'Send Alex the renewal summary',
+          reason:
+            'Alex is still waiting on the renewal summary from the latest meeting.',
+          related_entity_ids: ['person-1'],
+          evidence: [
+            {
+              meeting_id: 'm-person',
+              quote: 'Alex is still waiting on the renewal summary.',
+              source_kind: 'knowledge_v2',
+            },
+          ],
+        }),
+      ],
+    );
 
     expect(attention).toEqual([
       {

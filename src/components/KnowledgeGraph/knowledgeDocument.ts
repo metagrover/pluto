@@ -1311,7 +1311,8 @@ export const compileNeedsAttention = (
   if (doc?.scope_type === 'person_context') {
     const matchingItems = attentionItems.filter(
       (item) =>
-        item.status === 'active' && item.related_entity_ids.includes(doc.scope_key),
+        item.status === 'active' &&
+        item.related_entity_ids.includes(doc.scope_key),
     );
     if (matchingItems.length > 0) {
       return matchingItems.map(toNeedsAttentionItem);
