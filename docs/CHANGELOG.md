@@ -30,6 +30,14 @@ Use it to capture shipped changes, meaningful experiments, reversals, and change
 
 ## 2026-07-10
 
+### Surface blocker CTA on overdue and stale homepage heroes
+- **Issue:** [#370](https://github.com/metagrover/pluto/issues/370)
+- **PR:** Pending.
+- **Changed:** Blocker-backed overdue and stale homepage hero states now use the blocker-specific `Review blockers` CTA, while routine overdue and stale heroes keep the existing `Open projects` action. Focused dashboard model regressions now prove both blocker-backed hero paths keep the stronger CTA.
+- **Why:** `#61` still depends on Pluto's highest-visibility follow-up surface keeping blocker framing explicit from badge to action. Before this slice, overdue and stale heroes could already surface blocker state in their badge and detail but still fell back to generic navigation copy, which weakened the trust signal right before the user acted.
+- **Replaced:** Treating overdue and stale homepage hero actions as generic project navigation even when linked active blocker attention already classified the surfaced follow-up as blocked.
+- **Notes:** This intentionally stays scoped to homepage hero CTA copy and does not reopen hero ranking, hero detail, briefing-focus, or action-insight behavior.
+
 ### Surface blocker reason on stale homepage heroes
 - **Issue:** [#366](https://github.com/metagrover/pluto/issues/366)
 - **PR:** Pending.
