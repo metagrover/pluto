@@ -22,6 +22,35 @@ const makeEntity = (overrides: Partial<Entity>): Entity => ({
 });
 
 describe('ProjectHealthCard', () => {
+  it('treats explicitly overdue tasks as slipping project health', () => {
+    const project = makeEntity({
+      id: 'project-overdue',
+      metadata: JSON.stringify({ context: 'Customer launch' }),
+    });
+    const overdueTask = makeEntity({
+      id: 'task-overdue',
+      type: 'action_item',
+      name: 'Unblock legal review',
+      status: 'overdue',
+      due_date: '2026-07-20T00:00:00.000Z',
+      metadata: JSON.stringify({
+        full_description: 'Unblock legal review',
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <ProjectHealthCard
+        project={project}
+        tasks={[overdueTask]}
+        onToggleTask={() => {}}
+        onTaskAdded={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('🔴 Slipping');
+    expect(markup).not.toContain('🟢 On Track');
+  });
+
   it('collapses completed tasks behind disclosure by default', () => {
     const project = makeEntity({
       id: 'project-1',

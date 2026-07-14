@@ -99,7 +99,9 @@ const computeHealth = (tasks: Entity[]): HealthStatus => {
   );
 
   const hasOverdue = activeTasks.some(
-    (t) => t.due_date && new Date(t.due_date).getTime() < now,
+    (t) =>
+      t.status === 'overdue' ||
+      (t.due_date && new Date(t.due_date).getTime() < now),
   );
   if (hasOverdue) return 'slipping';
 
