@@ -21,7 +21,7 @@
 - Modify `src/components/features/Dashboard.tsx`: composition and responsive grid.
 - Modify `src/App.tsx`: reduce homepage-only outer gutters.
 - Modify `tests/unit/Dashboard.test.tsx`: semantic and state coverage.
-- Modify `docs/CHANGELOG.md` and `docs/decisions.md`: durable outcome and decision.
+- Create `docs/changelog/entries/2026-07-10-59-compact-daily-briefing.md` and modify `docs/decisions.md`: durable outcome and decision.
 
 ### Task 1: Lock the compact hierarchy with failing tests
 
@@ -163,7 +163,7 @@ git commit -m "feat: show recent memory as a compact list"
 **Files:**
 - Modify: `src/App.tsx`
 - Modify: `src/components/features/Dashboard.tsx`
-- Modify: `docs/CHANGELOG.md`
+- Create: `docs/changelog/entries/2026-07-10-59-compact-daily-briefing.md`
 - Modify: `docs/decisions.md`
 
 - [ ] **Step 1: Reduce homepage-only outer spacing**
@@ -189,6 +189,6 @@ Verify narrow/wide Electron windows, light/dark themes, keyboard completion/navi
 Update the changelog with why the homepage is more useful, add the fewer-containers decision to `docs/decisions.md`, and comment verification evidence on #59.
 
 ```bash
-git add src/App.tsx src/components/features/Dashboard.tsx docs/CHANGELOG.md docs/decisions.md
+git add src/App.tsx src/components/features/Dashboard.tsx docs/changelog/entries/2026-07-10-59-compact-daily-briefing.md docs/decisions.md
 git commit -m "feat: make the daily briefing more information dense"
 ```
