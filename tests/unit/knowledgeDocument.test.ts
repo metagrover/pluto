@@ -2251,6 +2251,148 @@ describe('knowledge document utilities', () => {
     ]);
   });
 
+  it('keeps fallback needs-attention logic for a team-tracker doc when queue items do not match tracked members', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-team',
+      scope_type: 'team_tracker',
+      scope_key: 'team-1',
+      title: 'Launch Team',
+      config: JSON.stringify({
+        member_entity_ids: ['person-1', 'person-2'],
+      }),
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'team_tracker', title: 'Launch Team' },
+        chapters: [
+          {
+            chapter_id: 'team',
+            title: 'Launch Team',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'risk-fallback',
+                text: 'Legacy team fallback item',
+                why_it_matters:
+                  'This should remain when queue items target other people.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [
+        makeAttentionItem({
+          id: 'attention-other-team',
+          related_entity_ids: ['person-9'],
+        }),
+      ],
+    );
+
+    expect(attention).toMatchObject([
+      {
+        title: 'Legacy team fallback item',
+        severity: 'critical',
+        kind: 'risk',
+      },
+    ]);
+  });
+
+  it('prefers matching active attention items for a team-tracker Knowledge doc', () => {
+    const sourceDoc = makeDoc({
+      id: 'doc-team',
+      scope_type: 'team_tracker',
+      scope_key: 'team-1',
+      title: 'Launch Team',
+      config: JSON.stringify({
+        member_entity_ids: ['person-1', 'person-2'],
+      }),
+      structured_json: JSON.stringify({
+        schema_version: 1,
+        scope: { type: 'team_tracker', title: 'Launch Team' },
+        chapters: [
+          {
+            chapter_id: 'team',
+            title: 'Launch Team',
+            decisions: [],
+            topic_evolution: [],
+            open_risks: [
+              {
+                id: 'risk-fallback',
+                text: 'Legacy team-tracker fallback item',
+                why_it_matters:
+                  'This should be ignored when a matching queue item exists.',
+                citations: [],
+              },
+            ],
+            signals: [],
+          },
+        ],
+        dependency_suggestions: [],
+      }),
+    });
+
+    const attention = compileNeedsAttention(
+      sourceDoc,
+      [],
+      [],
+      [
+        makeAttentionItem({
+          id: 'attention-team',
+          kind: 'blocker',
+          severity: 'critical',
+          title: 'Legal review is still blocking launch',
+          reason:
+            'Jordan is still waiting on legal review before launch can proceed.',
+          related_entity_ids: ['person-2', 'project-launch'],
+          evidence: [
+            {
+              meeting_id: 'm-team',
+              quote: 'Jordan is still waiting on legal review.',
+              source_kind: 'knowledge_v2',
+            },
+          ],
+        }),
+        makeAttentionItem({
+          id: 'attention-unrelated',
+          kind: 'follow_up',
+          severity: 'watch',
+          title: 'Unrelated queue item',
+          reason: 'This item should not match the selected team.',
+          related_entity_ids: ['person-9'],
+        }),
+      ],
+    );
+
+    expect(attention).toEqual([
+      {
+        id: 'attention-team',
+        title: 'Legal review is still blocking launch',
+        summary:
+          'Jordan is still waiting on legal review before launch can proceed.',
+        severity: 'critical',
+        kind: 'blocker',
+        reasons: [
+          'Jordan is still waiting on legal review before launch can proceed.',
+        ],
+        citations: [
+          {
+            meeting_id: 'm-team',
+            quote: 'Jordan is still waiting on legal review.',
+          },
+        ],
+      },
+    ]);
+  });
+
   it('preserves blocker classification from a matching working-memory snapshot', () => {
     const sourceDoc = makeDoc({
       id: 'doc-project',
