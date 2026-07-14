@@ -39,7 +39,7 @@ export interface MeetingActionItemCard {
   isBlocked: boolean;
   blockerReason: string | null;
   actionable: boolean;
-  toggleLabel: 'Mark complete' | 'Reopen' | null;
+  toggleLabel: 'Mark complete' | 'Resolve blocker' | 'Reopen' | null;
   attentionItemId: string | null;
   attentionStatus: MeetingActionAttentionStatus;
   dismissLabel: 'Dismiss' | 'Reopen' | null;
@@ -128,6 +128,17 @@ const isPreferredLinkedAttention = (
 const getMeetingActionItemRank = (status: MeetingActionItemStatus): number => {
   if (status === 'fallback') return 4;
   return ACTION_STATUS_ORDER[status];
+};
+
+const getMeetingActionToggleLabel = (
+  status: MeetingActionItemStatus,
+  isActiveBlocker: boolean,
+): MeetingActionItemCard['toggleLabel'] => {
+  if (status === 'completed') {
+    return 'Reopen';
+  }
+
+  return isActiveBlocker ? 'Resolve blocker' : 'Mark complete';
 };
 
 const formatDueLabel = (dueDate: string | null): string | null => {
@@ -436,7 +447,10 @@ const mergeLinkedAndFallbackActionItem = (
     context: linked.context ?? fallback.context,
     isBlocked: linked.isBlocked || fallback.isBlocked,
     blockerReason: linked.blockerReason ?? fallback.blockerReason,
-    toggleLabel: mergedStatus === 'completed' ? 'Reopen' : 'Mark complete',
+    toggleLabel: getMeetingActionToggleLabel(
+      mergedStatus,
+      linked.isBlocked && linked.attentionStatus === 'active',
+    ),
   };
 };
 
@@ -513,7 +527,10 @@ export const buildMeetingActionItems = ({
           isBlocked,
           blockerReason: isBlocked ? (linkedAttention?.reason ?? null) : null,
           actionable: linkedAttention?.status !== 'dismissed',
-          toggleLabel: status === 'completed' ? 'Reopen' : 'Mark complete',
+          toggleLabel: getMeetingActionToggleLabel(
+            status,
+            isBlocked && linkedAttention?.status === 'active',
+          ),
           attentionItemId: linkedAttention?.id ?? null,
           attentionStatus: linkedAttention?.status ?? null,
           dismissLabel:
