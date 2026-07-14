@@ -333,6 +333,13 @@ const hasActiveLinkedBlocker = (
       item.related_entity_ids.includes(actionId),
   );
 
+const countActiveLinkedBlockers = (
+  actions: Entity[],
+  attentionAlerts: AttentionItem[],
+): number =>
+  actions.filter((action) => hasActiveLinkedBlocker(action.id, attentionAlerts))
+    .length;
+
 const getActiveLinkedBlockerReason = (
   actionId: string,
   attentionAlerts: AttentionItem[],
@@ -908,10 +915,18 @@ const buildHero = (
       overdueAction.id,
       input.attentionAlerts ?? [],
     );
+    const blockedOverdueCount = hasLinkedBlocker
+      ? countActiveLinkedBlockers(
+          input.overdueActions,
+          input.attentionAlerts ?? [],
+        )
+      : 0;
     return {
       kind: 'overdue_action',
       label: getHeroLabel('overdue_action', { hasLinkedBlocker }),
-      title: pluralize(input.overdueActions.length, 'overdue item'),
+      title: hasLinkedBlocker
+        ? pluralize(blockedOverdueCount, 'blocked item')
+        : pluralize(input.overdueActions.length, 'overdue item'),
       detail: joinCountLabels([
         getDashboardHeroActionDetail(
           overdueAction,
@@ -937,6 +952,12 @@ const buildHero = (
       staleAction.id,
       input.attentionAlerts ?? [],
     );
+    const blockedStaleCount = hasLinkedBlocker
+      ? countActiveLinkedBlockers(
+          input.staleActions,
+          input.attentionAlerts ?? [],
+        )
+      : 0;
     const blockerReason = hasLinkedBlocker
       ? getActiveLinkedBlockerReason(
           staleAction.id,
@@ -946,7 +967,9 @@ const buildHero = (
     return {
       kind: 'stale_action',
       label: getHeroLabel('stale_action', { hasLinkedBlocker }),
-      title: pluralize(input.staleActions.length, 'stale item'),
+      title: hasLinkedBlocker
+        ? pluralize(blockedStaleCount, 'blocked item')
+        : pluralize(input.staleActions.length, 'stale item'),
       detail: blockerReason ?? `${staleAction.name} has gone quiet.`,
       severity: 'watch',
       action: {
@@ -966,9 +989,10 @@ const buildHero = (
       input.attentionAlerts ?? [],
     )
   ) {
-    const blockedActiveCount = input.activeActions.filter((action) =>
-      hasActiveLinkedBlocker(action.id, input.attentionAlerts ?? []),
-    ).length;
+    const blockedActiveCount = countActiveLinkedBlockers(
+      input.activeActions,
+      input.attentionAlerts ?? [],
+    );
     return {
       kind: 'active_action',
       label: getHeroLabel('active_action', { hasLinkedBlocker: true }),
@@ -1090,14 +1114,47 @@ const buildBriefingFocus = (
   actionInsights: DashboardActionInsights,
   latestMeeting: DashboardLatestMeeting,
   knowledgeDocuments: DashboardKnowledgeDocuments,
+  overdueActions: Entity[],
   activeActions: Entity[],
   staleActions: Entity[],
   attentionAlerts: AttentionItem[],
 ): DashboardBriefingFocus => {
+  if (
+    actionInsights.state === 'populated' &&
+    actionInsights.overdueCount > 0 &&
+    hero.kind === 'overdue_action'
+  ) {
+    const prioritizedOverdueAction = sortActions(overdueActions, (a, b) =>
+      compareOverdueDashboardActions(a, b, attentionAlerts),
+    )[0];
+    const blockedOverdueCount = overdueActions.filter((action) =>
+      hasActiveLinkedBlocker(action.id, attentionAlerts),
+    ).length;
+    const blockerReason = prioritizedOverdueAction
+      ? getActiveLinkedBlockerReason(
+          prioritizedOverdueAction.id,
+          attentionAlerts,
+        )
+      : null;
+    if (prioritizedOverdueAction && blockedOverdueCount > 0) {
+      return {
+        kind: 'attention',
+        title:
+          blockedOverdueCount === 1
+            ? 'Blocked follow-up'
+            : 'Blocked follow-ups',
+        detail: blockerReason ?? pluralize(blockedOverdueCount, 'blocked item'),
+        action: { label: 'Review blockers', target: 'projects' },
+      };
+    }
+  }
+
   if (actionInsights.state === 'populated' && actionInsights.overdueCount > 0) {
+    const hasBlockedUrgentFollowUp =
+      hero.kind === 'overdue_action' && hero.label === 'Blocked';
     return {
       kind: 'attention',
-      title: 'Needs attention',
+      title: hasBlockedUrgentFollowUp ? 'Blocked follow-up' : 'Needs attention',
       detail: joinCountLabels([
         actionInsights.overdueCount > 0
           ? pluralize(actionInsights.overdueCount, 'overdue item')
@@ -1106,7 +1163,14 @@ const buildBriefingFocus = (
           ? pluralize(actionInsights.staleCount, 'stale item')
           : '',
       ]),
-      action: { label: 'Review actions', target: 'projects' },
+      action: {
+        label:
+          (hero.kind === 'overdue_action' || hero.kind === 'stale_action') &&
+          hero.label === 'Blocked'
+            ? 'Review blockers'
+            : 'Review actions',
+        target: 'projects',
+      },
     };
   }
 
@@ -1259,6 +1323,7 @@ export const buildDashboardHomeModel = (
     actionInsights,
     latestMeeting,
     knowledgeDocuments,
+    overdueActions,
     activeActions,
     staleActions,
     attentionAlerts,

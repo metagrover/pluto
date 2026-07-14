@@ -290,6 +290,36 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('uses the blocker CTA in briefing focus for blocker-backed overdue follow-ups', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'blocked-overdue-briefing',
+          name: 'Blocked overdue follow-up',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-overdue-briefing',
+          kind: 'blocker',
+          reason: 'Waiting on legal sign-off.',
+          related_entity_ids: ['blocked-overdue-briefing'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toMatchObject({
+      kind: 'attention',
+      action: { label: 'Review blockers', target: 'projects' },
+    });
+  });
+
   it('surfaces blocker-backed stale follow-ups in briefing focus before generic stale copy', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -398,8 +428,13 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('stale_action');
     expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.detail).toBe('Blocked by finance approval.');
     expect(model.hero.detail).not.toContain('Routine stale follow-up');
+    expect(model.briefingFocus).toMatchObject({
+      kind: 'attention',
+      title: 'Blocked follow-up',
+    });
   });
 
   it('falls back to generic stale hero copy when blocker-backed stale follow-ups have no richer reason', () => {
@@ -430,6 +465,7 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('stale_action');
     expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.detail).toBe('Blocked stale follow-up has gone quiet.');
     expect(model.quickActions).toContainEqual({
       label: 'Review blockers',
@@ -533,10 +569,15 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.hero.kind).toBe('overdue_action');
     expect(model.hero.label).toBe('Blocked');
+    expect(model.hero.title).toBe('1 blocked item');
     expect(model.hero.detail).toContain(
       'Legal approval is still blocking the overdue launch review.',
     );
     expect(model.hero.detail).not.toContain('Routine overdue follow-up');
+    expect(model.briefingFocus).toMatchObject({
+      kind: 'attention',
+      title: 'Blocked follow-up',
+    });
     expect(model.hero.action).toEqual({
       label: 'Review blockers',
       target: 'projects',
@@ -757,6 +798,80 @@ describe('buildDashboardHomeModel', () => {
           kind: 'blocker',
           reason: '   ',
           related_entity_ids: ['blocked-active'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Blocked follow-up',
+      detail: '1 blocked item',
+      action: { label: 'Review blockers', target: 'projects' },
+    });
+  });
+
+  it('surfaces blocker-backed overdue follow-ups in briefing focus before generic overdue copy', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'routine-overdue',
+          name: 'Routine overdue follow-up',
+          due_date: '2026-04-20T12:00:00.000Z',
+          updated_at: '2026-04-20T18:00:00.000Z',
+        }),
+        makeAction({
+          id: 'blocked-overdue',
+          name: 'Blocked overdue follow-up',
+          due_date: '2026-04-29T12:00:00.000Z',
+          updated_at: '2026-04-29T18:00:00.000Z',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-overdue',
+          kind: 'blocker',
+          reason: 'Waiting on legal approval for the overdue launch review.',
+          related_entity_ids: ['blocked-overdue'],
+        }),
+      ],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.briefingFocus).toEqual({
+      kind: 'attention',
+      title: 'Blocked follow-up',
+      detail: 'Waiting on legal approval for the overdue launch review.',
+      action: { label: 'Review blockers', target: 'projects' },
+    });
+  });
+
+  it('falls back to blocked-item count for overdue briefing focus when blocker context is thin', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'blocked-overdue',
+          name: 'Blocked overdue follow-up',
+          due_date: '2026-04-29T12:00:00.000Z',
+          updated_at: '2026-04-29T18:00:00.000Z',
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          id: 'attention-blocked-overdue',
+          kind: 'blocker',
+          reason: '   ',
+          related_entity_ids: ['blocked-overdue'],
         }),
       ],
       workspace: makeWorkspace(),

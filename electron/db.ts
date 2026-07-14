@@ -1762,10 +1762,12 @@ export interface WorkingMemorySnapshotPayload {
     type: WorkingMemorySnapshotScopeType;
     key: string;
     title: string;
+    member_entity_ids?: string[];
   };
   source: {
     knowledge_doc_id: string;
     knowledge_doc_last_synthesized_at: string | null;
+    knowledge_doc_last_source_cursor?: string | null;
   };
   current_read: {
     headline: string;
