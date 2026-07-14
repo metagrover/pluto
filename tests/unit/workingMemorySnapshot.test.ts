@@ -416,14 +416,13 @@ describe('working memory snapshots', () => {
       knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
       knowledge_doc_last_source_cursor: 'meeting:2026-05-26T14:30:00.000Z',
     });
-    expect(getWorkingMemorySnapshot('project', 'project-1')?.payload.source).toEqual(
-      {
-        knowledge_doc_id: 'doc-project',
-        knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
-        knowledge_doc_last_source_cursor:
-          'meeting:2026-05-26T14:30:00.000Z',
-      },
-    );
+    expect(
+      getWorkingMemorySnapshot('project', 'project-1')?.payload.source,
+    ).toEqual({
+      knowledge_doc_id: 'doc-project',
+      knowledge_doc_last_synthesized_at: '2026-05-26T15:00:00.000Z',
+      knowledge_doc_last_source_cursor: 'meeting:2026-05-26T14:30:00.000Z',
+    });
   });
 
   it('builds and persists a project-scoped snapshot for a project knowledge doc', () => {
