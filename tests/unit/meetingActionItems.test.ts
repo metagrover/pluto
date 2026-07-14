@@ -552,10 +552,45 @@ describe('buildMeetingActionItems', () => {
         attentionItemId: 'attention-blocked',
         attentionStatus: 'active',
         actionable: true,
+        toggleLabel: 'Resolve blocker',
         dismissLabel: 'Dismiss blocker',
         snoozeLabel: 'Snooze blocker',
         isBlocked: true,
         blockerReason: 'Legal approval is still blocking launch readiness.',
+      }),
+    ]);
+  });
+
+  it('keeps generic completion wording when blocker attention is no longer active', () => {
+    const items = buildMeetingActionItems({
+      meetingEntities: [
+        makeMeetingEntity({
+          id: 'blocked-follow-up',
+          name: 'Confirm launch plan',
+        }),
+      ],
+      linkedAttentionItems: [
+        {
+          id: 'attention-blocked',
+          kind: 'blocker',
+          reason: 'Legal approval is still blocking launch readiness.',
+          status: 'snoozed',
+          related_entity_ids: ['blocked-follow-up'],
+        },
+      ],
+      fallbackActionItems: [],
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        id: 'blocked-follow-up',
+        attentionItemId: 'attention-blocked',
+        attentionStatus: 'snoozed',
+        actionable: true,
+        toggleLabel: 'Mark complete',
+        dismissLabel: null,
+        snoozeLabel: 'Reopen',
+        isBlocked: true,
       }),
     ]);
   });
