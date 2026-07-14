@@ -1089,9 +1089,7 @@ const buildBriefingFocus = (
       hero.label === 'Blocked';
     return {
       kind: 'attention',
-      title: hasBlockedUrgentFollowUp
-        ? 'Blocked follow-up'
-        : 'Needs attention',
+      title: hasBlockedUrgentFollowUp ? 'Blocked follow-up' : 'Needs attention',
       detail: joinCountLabels([
         actionInsights.overdueCount > 0
           ? pluralize(actionInsights.overdueCount, 'overdue item')
