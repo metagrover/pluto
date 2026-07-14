@@ -256,6 +256,12 @@ const WORKING_MEMORY_SNAPSHOT_SCOPE_TYPES: KnowledgeDocScopeType[] = [
   'team_tracker',
 ];
 
+const LIVE_ATTENTION_QUEUE_SCOPE_TYPES: KnowledgeDocScopeType[] = [
+  'global',
+  'person_context',
+  'team_tracker',
+];
+
 const isObject = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
@@ -732,6 +738,34 @@ export const matchesWorkingMemorySnapshotToDoc = (
 export const supportsWorkingMemorySnapshotScope = (
   scopeType: KnowledgeDocScopeType,
 ): boolean => WORKING_MEMORY_SNAPSHOT_SCOPE_TYPES.includes(scopeType);
+
+export const supportsLiveAttentionQueueScope = (
+  scopeType: KnowledgeDocScopeType,
+): boolean => LIVE_ATTENTION_QUEUE_SCOPE_TYPES.includes(scopeType);
+
+const getTeamTrackerMemberEntityIds = (
+  doc: KnowledgeDoc,
+  workingMemorySnapshot?: WorkingMemorySnapshot | null,
+): string[] => {
+  const snapshotMemberIds =
+    workingMemorySnapshot?.scope_type === 'team_tracker' &&
+    workingMemorySnapshot.scope_key === doc.scope_key &&
+    Array.isArray(workingMemorySnapshot.payload?.scope?.member_entity_ids)
+      ? workingMemorySnapshot.payload.scope.member_entity_ids
+      : [];
+  if (snapshotMemberIds.length > 0) {
+    return snapshotMemberIds
+      .filter((memberId): memberId is string => typeof memberId === 'string')
+      .map((memberId) => memberId.trim())
+      .filter(Boolean);
+  }
+
+  const docMemberIds = parseKnowledgeDocConfig(doc).member_entity_ids ?? [];
+  return docMemberIds
+    .filter((memberId): memberId is string => typeof memberId === 'string')
+    .map((memberId) => memberId.trim())
+    .filter(Boolean);
+};
 
 export const parseStructuredKnowledgeDoc = (
   doc: KnowledgeDoc | null | undefined,
@@ -1321,15 +1355,16 @@ export const compileNeedsAttention = (
   }
 
   if (doc?.scope_type === 'team_tracker') {
-    const memberEntityIds =
-      parseKnowledgeDocConfig(doc).member_entity_ids ?? [];
+    const memberEntityIds = getTeamTrackerMemberEntityIds(
+      doc,
+      workingMemorySnapshot,
+    );
     if (memberEntityIds.length > 0) {
+      const memberIdSet = new Set(memberEntityIds);
       const matchingItems = attentionItems.filter(
         (item) =>
           item.status === 'active' &&
-          item.related_entity_ids.some((entityId) =>
-            memberEntityIds.includes(entityId),
-          ),
+          item.related_entity_ids.some((entityId) => memberIdSet.has(entityId)),
       );
       if (matchingItems.length > 0) {
         return matchingItems.map(toNeedsAttentionItem);
