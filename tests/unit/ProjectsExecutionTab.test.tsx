@@ -52,6 +52,35 @@ describe('ProjectHealthCard', () => {
     expect(markup).not.toContain('🟢 On Track');
   });
 
+  it('renders overdue styling for explicitly overdue task due badges', () => {
+    const project = makeEntity({
+      id: 'project-overdue-badge',
+      metadata: JSON.stringify({ context: 'Customer launch' }),
+    });
+    const overdueTask = makeEntity({
+      id: 'task-overdue-badge',
+      type: 'action_item',
+      name: 'Unblock legal review',
+      status: 'overdue',
+      due_date: '2026-07-20T00:00:00.000Z',
+      metadata: JSON.stringify({
+        full_description: 'Unblock legal review',
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <ProjectHealthCard
+        project={project}
+        tasks={[overdueTask]}
+        onToggleTask={() => {}}
+        onTaskAdded={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('bg-red-500/10 text-red-500');
+    expect(markup).not.toContain('bg-pro-bg text-pro-text-muted');
+  });
+
   it('collapses completed tasks behind disclosure by default', () => {
     const project = makeEntity({
       id: 'project-1',
