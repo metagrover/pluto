@@ -357,6 +357,10 @@ describe('buildDashboardHomeModel', () => {
     expect(model.hero.kind).toBe('stale_action');
     expect(model.hero.label).toBe('Blocked');
     expect(model.hero.detail).toBe('Blocked stale follow-up has gone quiet.');
+    expect(model.quickActions).toContainEqual({
+      label: 'Review blockers',
+      target: 'projects',
+    });
   });
 
   it('keeps the generic project spotlight badge when no blockers are open', () => {
@@ -463,6 +467,10 @@ describe('buildDashboardHomeModel', () => {
       id: 'blocked-overdue',
       title: 'Blocked overdue follow-up',
       status: 'overdue',
+    });
+    expect(model.quickActions).toContainEqual({
+      label: 'Review blockers',
+      target: 'projects',
     });
   });
 
@@ -604,6 +612,10 @@ describe('buildDashboardHomeModel', () => {
       'blocked-active',
       'routine-active',
     ]);
+    expect(model.quickActions).toContainEqual({
+      label: 'Review blockers',
+      target: 'projects',
+    });
   });
 
   it('surfaces blocker-backed active follow-ups in briefing focus when nothing is overdue or stale', () => {

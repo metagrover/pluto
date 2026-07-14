@@ -1026,6 +1026,8 @@ const buildHero = (
 };
 
 const buildQuickActions = (
+  hero: DashboardHero,
+  briefingFocus: DashboardBriefingFocus,
   latestMeeting: DashboardLatestMeeting,
   actionInsights: DashboardActionInsights,
   knowledgeDocuments: DashboardKnowledgeDocuments,
@@ -1053,9 +1055,14 @@ const buildQuickActions = (
   }
 
   if (actionInsights.state === 'populated' || spotlight) {
+    const hasBlockedFollowUpState =
+      hero.label === 'Blocked' ||
+      briefingFocus.title === 'Blocked follow-up' ||
+      briefingFocus.title === 'Blocked follow-ups';
     actions.push({
       label:
-        actionInsights.state === 'empty' && spotlight?.hasBlockers
+        hasBlockedFollowUpState ||
+        (actionInsights.state === 'empty' && spotlight?.hasBlockers)
           ? 'Review blockers'
           : 'Open projects',
       target: 'projects',
@@ -1210,22 +1217,25 @@ export const buildDashboardHomeModel = (
     latestMeeting,
     knowledgeDocuments,
   );
+  const briefingFocus = buildBriefingFocus(
+    hero,
+    actionInsights,
+    latestMeeting,
+    knowledgeDocuments,
+    activeActions,
+    attentionAlerts,
+  );
 
   return {
     hero,
-    briefingFocus: buildBriefingFocus(
-      hero,
-      actionInsights,
-      latestMeeting,
-      knowledgeDocuments,
-      activeActions,
-      attentionAlerts,
-    ),
+    briefingFocus,
     latestMeeting,
     actionInsights,
     knowledgeDocuments,
     spotlight,
     quickActions: buildQuickActions(
+      hero,
+      briefingFocus,
       latestMeeting,
       actionInsights,
       knowledgeDocuments,
