@@ -42,8 +42,8 @@ export interface MeetingActionItemCard {
   toggleLabel: 'Mark complete' | 'Resolve blocker' | 'Reopen' | null;
   attentionItemId: string | null;
   attentionStatus: MeetingActionAttentionStatus;
-  dismissLabel: 'Dismiss' | 'Reopen' | null;
-  snoozeLabel: 'Snooze' | 'Reopen' | null;
+  dismissLabel: 'Dismiss' | 'Dismiss blocker' | 'Reopen' | null;
+  snoozeLabel: 'Snooze' | 'Snooze blocker' | 'Reopen' | null;
 }
 
 interface BuildMeetingActionItemsParams {
@@ -540,7 +540,9 @@ export const buildMeetingActionItems = ({
                 ? 'Reopen'
                 : linkedAttention.status === 'snoozed'
                   ? null
-                  : 'Dismiss',
+                  : isBlocked
+                    ? 'Dismiss blocker'
+                    : 'Dismiss',
           snoozeLabel:
             linkedAttention == null
               ? null
@@ -548,7 +550,9 @@ export const buildMeetingActionItems = ({
                 ? null
                 : linkedAttention.status === 'snoozed'
                   ? 'Reopen'
-                  : 'Snooze',
+                  : isBlocked
+                    ? 'Snooze blocker'
+                    : 'Snooze',
         },
         fallbackByTitle.get(normalizeActionKey(entity.name)),
       );
