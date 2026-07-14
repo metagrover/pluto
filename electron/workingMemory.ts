@@ -8,7 +8,9 @@ import type {
 import { upsertWorkingMemorySnapshot } from './db';
 import type { KnowledgeV2Document } from './knowledgeV2';
 
-const parseMemberEntityIds = (knowledgeDoc: KnowledgeDoc): string[] | undefined => {
+const parseMemberEntityIds = (
+  knowledgeDoc: KnowledgeDoc,
+): string[] | undefined => {
   if (knowledgeDoc.scope_type !== 'team_tracker' || !knowledgeDoc.config) {
     return undefined;
   }
@@ -48,7 +50,9 @@ const buildWorkingMemorySnapshot = ({
     evidenceQuality: structured.current_read.evidence_quality,
   });
   const memberEntityIds =
-    scopeType === 'team_tracker' ? parseMemberEntityIds(knowledgeDoc) : undefined;
+    scopeType === 'team_tracker'
+      ? parseMemberEntityIds(knowledgeDoc)
+      : undefined;
 
   const payload: WorkingMemorySnapshotPayload = {
     schema_version: 1,
