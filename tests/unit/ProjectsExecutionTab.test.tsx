@@ -6,6 +6,7 @@ import {
   ProjectHealthCard,
   getNextTaskStatusForToggle,
   partitionProjectsForDisplay,
+  sortExecutionTasksForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
 
 const makeEntity = (overrides: Partial<Entity>): Entity => ({
@@ -162,5 +163,43 @@ describe('partitionProjectsForDisplay', () => {
 describe('getNextTaskStatusForToggle', () => {
   it('marks overdue execution tasks completed from the checkbox', () => {
     expect(getNextTaskStatusForToggle('overdue')).toBe('completed');
+  });
+});
+
+describe('sortExecutionTasksForDisplay', () => {
+  it('keeps newer items first within the same lifecycle bucket', () => {
+    const result = sortExecutionTasksForDisplay([
+      makeEntity({
+        id: 'active-older',
+        type: 'action_item',
+        status: 'active',
+        created_at: '2026-07-12T00:00:00.000Z',
+      }),
+      makeEntity({
+        id: 'active-newer',
+        type: 'action_item',
+        status: 'active',
+        created_at: '2026-07-14T00:00:00.000Z',
+      }),
+      makeEntity({
+        id: 'overdue-older',
+        type: 'action_item',
+        status: 'overdue',
+        created_at: '2026-07-11T00:00:00.000Z',
+      }),
+      makeEntity({
+        id: 'overdue-newer',
+        type: 'action_item',
+        status: 'overdue',
+        created_at: '2026-07-13T00:00:00.000Z',
+      }),
+    ]);
+
+    expect(result.map((item) => item.id)).toEqual([
+      'overdue-newer',
+      'overdue-older',
+      'active-newer',
+      'active-older',
+    ]);
   });
 });
