@@ -165,6 +165,9 @@ export const buildExecutionSummary = ({
     overdueCount: overdueTaskCount,
   });
 
+  const overdueLabel =
+    overdueTaskCount === 1 ? '1 overdue' : `${overdueTaskCount} overdue`;
+
   if (heading === 'No active commitments') {
     return {
       heading,
@@ -175,6 +178,32 @@ export const buildExecutionSummary = ({
 
   const projectLabel =
     activeProjectCount === 1 ? '1 project' : `${activeProjectCount} projects`;
+
+  if (overdueTaskCount > 0) {
+    if (activeProjectCount === 0) {
+      return {
+        heading,
+        detail: `${overdueLabel} in the inbox`,
+      };
+    }
+
+    if (activeInboxTaskCount === 0) {
+      return {
+        heading,
+        detail: `${overdueLabel} across ${projectLabel}`,
+      };
+    }
+
+    const inboxLabel =
+      activeInboxTaskCount === 1
+        ? '1 inbox item'
+        : `${activeInboxTaskCount} inbox items`;
+
+    return {
+      heading,
+      detail: `${overdueLabel} across ${projectLabel} and ${inboxLabel}`,
+    };
+  }
 
   if (activeProjectCount === 0) {
     return {
@@ -674,11 +703,6 @@ export const ProjectsExecutionTab: React.FC = () => {
           </h1>
           <p className="mt-2 text-sm font-medium text-pro-text-muted">
             {executionSummary.detail}
-            {overdueTasks.length > 0 && (
-              <span className="text-red-500 font-bold ml-2">
-                {overdueTasks.length} overdue
-              </span>
-            )}
           </p>
         </div>
       </div>
