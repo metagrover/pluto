@@ -1,0 +1,47 @@
+{
+  "type": "transcript_validation",
+  "meetingId": "synthetic-overlap-union",
+  "recordingDurationSeconds": 10,
+  "provisionalSegments": [],
+  "activityWindows": [
+    { "speaker": "Me", "startTime": 0, "endTime": 10 }
+  ],
+  "sources": {
+    "mic": {
+      "durationSeconds": 10,
+      "segments": []
+    },
+    "mix": {
+      "durationSeconds": 10,
+      "segments": [
+        {
+          "start": 0,
+          "end": 4,
+          "text": "Synthetic first overlapping segment"
+        },
+        {
+          "start": 0,
+          "end": 4,
+          "text": "Synthetic second overlapping segment"
+        },
+        {
+          "start": 2,
+          "end": 6,
+          "text": "Synthetic partially overlapping segment"
+        }
+      ]
+    },
+    "system": {
+      "durationSeconds": 10,
+      "segments": []
+    }
+  },
+  "expected": {
+    "status": "needs_attention",
+    "requiredReasons": ["local_speech_unaccounted"],
+    "primaryMetric": {
+      "name": "localTranscriptCoveredSeconds",
+      "value": 6
+    }
+  }
+}

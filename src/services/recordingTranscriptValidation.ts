@@ -1,13 +1,13 @@
 import type {
   AttributionSegment,
   SpeakerActivityWindow,
-} from '../utils/speakerAttribution';
+} from '../utils/speakerAttribution.ts';
 import {
   type TranscriptIntegrityEvidence,
   type TranscriptIntegrityReason,
   reconcileCanonicalTranscript,
   validateTranscriptIntegrity,
-} from '../utils/transcriptIntegrity';
+} from '../utils/transcriptIntegrity.ts';
 
 type RawWhisperSegment = {
   start: number;

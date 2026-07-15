@@ -1,0 +1,38 @@
+{
+  "type": "transcript_validation",
+  "meetingId": "synthetic-opening-audio",
+  "recordingDurationSeconds": 12,
+  "provisionalSegments": [],
+  "activityWindows": [
+    { "speaker": "Me", "startTime": 0, "endTime": 3 },
+    { "speaker": "Them", "startTime": 4, "endTime": 7 }
+  ],
+  "sources": {
+    "mic": {
+      "durationSeconds": 12,
+      "segments": [
+        { "start": 0, "end": 3, "text": "Synthetic opening statement." }
+      ]
+    },
+    "mix": {
+      "durationSeconds": 12,
+      "segments": [
+        { "start": 0, "end": 3, "text": "Synthetic opening statement." },
+        { "start": 4, "end": 7, "text": "Synthetic reply." }
+      ]
+    },
+    "system": {
+      "durationSeconds": 12,
+      "segments": [
+        { "start": 4, "end": 7, "text": "Synthetic reply." }
+      ]
+    }
+  },
+  "expected": {
+    "status": "validated",
+    "primaryMetric": {
+      "name": "localTranscriptCoveredSeconds",
+      "value": 3
+    }
+  }
+}

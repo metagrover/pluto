@@ -1,4 +1,4 @@
-import { TRANSCRIPTION_TUNING } from './transcriptionConfig';
+import { TRANSCRIPTION_TUNING } from './transcriptionConfig.ts';
 
 const TRANSCRIPT_DEBUG_ENABLED: boolean =
   (typeof process !== 'undefined' &&

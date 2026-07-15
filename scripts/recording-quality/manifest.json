@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "baselineReport": "baselines/current-master.json",
+  "cases": [
+    {
+      "id": "issue-25-opening-audio",
+      "issue": 25,
+      "title": "Opening local speech is preserved",
+      "kind": "transcript_validation",
+      "fixture": "fixtures/issue-25-opening-audio.json"
+    },
+    {
+      "id": "issue-75-finalization-single-flight",
+      "issue": 75,
+      "title": "Finalization stays single-flight and freezes timing",
+      "kind": "recording_finalization",
+      "fixture": "fixtures/issue-75-finalization-single-flight.json"
+    },
+    {
+      "id": "issue-428-local-speech-recovery",
+      "issue": 428,
+      "title": "Sparse provisional local chunks still recover canonical local speech",
+      "kind": "transcript_validation",
+      "fixture": "fixtures/issue-428-local-speech-recovery.json"
+    },
+    {
+      "id": "issue-434-overlap-union",
+      "issue": 434,
+      "title": "Overlapping transcript segments count coverage once",
+      "kind": "transcript_validation",
+      "fixture": "fixtures/issue-434-overlap-union.json"
+    }
+  ]
+}
