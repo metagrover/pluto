@@ -96,6 +96,23 @@ export const getNextTaskStatusForToggle = (
   return status === 'completed' ? 'active' : 'completed';
 };
 
+const EXECUTION_STATUS_PRIORITY: Partial<Record<Entity['status'], number>> = {
+  overdue: 0,
+  active: 1,
+};
+
+export const sortExecutionTasksForDisplay = (tasks: Entity[]): Entity[] => {
+  return [...tasks].sort((a, b) => {
+    const priorityA = EXECUTION_STATUS_PRIORITY[a.status] ?? 2;
+    const priorityB = EXECUTION_STATUS_PRIORITY[b.status] ?? 2;
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+};
+
 export const getExecutionBriefHeading = ({
   activeCount,
   overdueCount,
@@ -481,15 +498,7 @@ export const ProjectsExecutionTab: React.FC = () => {
       ]);
       setProjects(projectData);
 
-      // Sort: active first, then by date
-      const sorted = [...taskData].sort((a, b) => {
-        if (a.status === 'active' && b.status !== 'active') return -1;
-        if (a.status !== 'active' && b.status === 'active') return 1;
-        return (
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-      });
-      setAllTasks(sorted);
+      setAllTasks(sortExecutionTasksForDisplay(taskData));
 
       // Fetch links for all tasks to determine project grouping
       const linkPromises = taskData.map((t) => getEntityLinks(t.id));

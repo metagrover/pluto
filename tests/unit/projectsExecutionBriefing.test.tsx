@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Entity } from '../../src/api/knowledgeGraph';
-import { buildProjectsBriefing } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
+import {
+  buildProjectsBriefing,
+  sortExecutionTasksForDisplay,
+} from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
 
 const task = (
   id: string,
@@ -39,5 +42,21 @@ describe('buildProjectsBriefing', () => {
   it('does not call a project on track when it has no active work', () => {
     const result = buildProjectsBriefing([task('done', 'completed')]);
     expect(result.health).toBe('complete');
+  });
+});
+
+describe('sortExecutionTasksForDisplay', () => {
+  it('prioritizes overdue work ahead of routine active items', () => {
+    const result = sortExecutionTasksForDisplay([
+      task('active-newer', 'active'),
+      task('overdue-older', 'overdue'),
+      task('active-older', 'active'),
+    ]);
+
+    expect(result.map((item) => item.id)).toEqual([
+      'overdue-older',
+      'active-newer',
+      'active-older',
+    ]);
   });
 });
