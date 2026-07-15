@@ -97,7 +97,10 @@ const normalizeSpeakerAttributionFallbackReason = (
     case 'low_them_overlap':
     case 'ambiguous_speaker':
     case 'low_confidence':
-      return reason.trim().toLowerCase().replace(/\s+/g, '_') as TranscriptSpeakerAttributionFallbackReason;
+      return reason
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_') as TranscriptSpeakerAttributionFallbackReason;
     default:
       return 'unknown_diarization_fallback';
   }

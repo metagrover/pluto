@@ -6,8 +6,8 @@ import {
 } from '../../src/utils/transcript';
 import {
   TRANSCRIPT_JSON_SCHEMA_VERSION,
-  buildTranscriptSpeakerAttribution,
   buildTranscriptJsonPayload,
+  buildTranscriptSpeakerAttribution,
 } from '../../src/utils/transcriptSchema';
 
 describe('transcriptSchema', () => {
