@@ -17,6 +17,11 @@ import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { createActiveCallDetector } from './activeCall/detector';
+import {
+  appendCaptureJournalChunk,
+  createCaptureJournal,
+  sealCaptureJournal,
+} from './captureJournal';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -89,6 +94,14 @@ function createWindow() {
     win.loadFile(path.join(RENDERER_DIST, 'index.html'));
   }
 }
+
+const getMeetingArtifactsRootDir = () => {
+  const meetingsDir = path.join(app.getPath('userData'), 'meetings');
+  if (!fs.existsSync(meetingsDir)) {
+    fs.mkdirSync(meetingsDir, { recursive: true });
+  }
+  return meetingsDir;
+};
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -384,6 +397,55 @@ app.whenReady().then(async () => {
     }
     return true;
   });
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_START',
+    async (_event, { meetingId, startedAtMs } = {}) => {
+      return await createCaptureJournal(getMeetingArtifactsRootDir(), {
+        meetingId: String(meetingId || ''),
+        startedAtMs:
+          typeof startedAtMs === 'number' ? startedAtMs : Date.now(),
+      });
+    },
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_APPEND',
+    async (
+      _event,
+      {
+        meetingId,
+        source,
+        sequence,
+        chunkStartSec,
+        chunkEndSec,
+        format,
+        data,
+      } = {},
+    ) => {
+      return await appendCaptureJournalChunk(getMeetingArtifactsRootDir(), {
+        meetingId: String(meetingId || ''),
+        source: source === 'system' ? 'system' : 'mic',
+        sequence:
+          typeof sequence === 'number' ? sequence : Number(sequence || 0),
+        chunkStartSec:
+          typeof chunkStartSec === 'number' ? chunkStartSec : 0,
+        chunkEndSec: typeof chunkEndSec === 'number' ? chunkEndSec : 0,
+        format: typeof format === 'string' ? format : 'bin',
+        data: Buffer.from(data ?? []),
+      });
+    },
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_SEAL',
+    async (_event, { meetingId, endedAtMs } = {}) => {
+      return await sealCaptureJournal(getMeetingArtifactsRootDir(), {
+        meetingId: String(meetingId || ''),
+        endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
+      });
+    },
+  );
 
   // --- NATIVE AUDIO CAPTURE (AUDIOCAP) ---
   let nativeAudioProcess: ChildProcess | null = null;
