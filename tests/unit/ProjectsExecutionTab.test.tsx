@@ -5,6 +5,7 @@ import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   ProjectHealthCard,
   buildExecutionSummary,
+  getExecutionBriefHeading,
   getNextTaskStatusForToggle,
   partitionProjectsForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
@@ -208,6 +209,26 @@ describe('buildExecutionSummary', () => {
         activeInboxTaskCount: 2,
       }).detail,
     ).toBe('2 open in the inbox');
+  });
+});
+
+describe('getExecutionBriefHeading', () => {
+  it('surfaces slipping work when overdue commitments are present', () => {
+    expect(getExecutionBriefHeading({ activeCount: 3, overdueCount: 1 })).toBe(
+      'Slipping commitments',
+    );
+  });
+
+  it('keeps routine active work on the default heading when nothing is overdue', () => {
+    expect(getExecutionBriefHeading({ activeCount: 3, overdueCount: 0 })).toBe(
+      'Work in motion',
+    );
+  });
+
+  it('keeps the empty-state heading when no active commitments remain', () => {
+    expect(getExecutionBriefHeading({ activeCount: 0, overdueCount: 0 })).toBe(
+      'No active commitments',
+    );
   });
 });
 
