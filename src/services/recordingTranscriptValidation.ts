@@ -83,44 +83,74 @@ const toSegments = (
       words: segment.words,
     }));
 
-const overlapSeconds = (
-  left: Pick<AttributionSegment, 'startTime' | 'endTime'>,
-  right: Pick<AttributionSegment, 'startTime' | 'endTime'>,
+type TimelineInterval = { start: number; end: number };
+
+const mergeIntervals = (intervals: TimelineInterval[]): TimelineInterval[] => {
+  const sorted = intervals
+    .filter((interval) => interval.end > interval.start)
+    .sort((left, right) => left.start - right.start);
+  const merged: TimelineInterval[] = [];
+  for (const interval of sorted) {
+    const prior = merged.at(-1);
+    if (!prior || interval.start > prior.end) {
+      merged.push({ ...interval });
+    } else {
+      prior.end = Math.max(prior.end, interval.end);
+    }
+  }
+  return merged;
+};
+
+const speakerActivityIntervals = (
+  windows: SpeakerActivityWindow[],
+  speaker: 'Me' | 'Them',
 ) =>
-  Math.max(
-    0,
-    Math.min(left.endTime, right.endTime) -
-      Math.max(left.startTime, right.startTime),
+  mergeIntervals(
+    windows
+      .filter((window) => window.speaker === speaker)
+      .map((window) => ({ start: window.startTime, end: window.endTime })),
   );
 
 const activitySeconds = (
   windows: SpeakerActivityWindow[],
   speaker: 'Me' | 'Them',
 ) =>
-  windows
-    .filter((window) => window.speaker === speaker)
-    .reduce(
-      (total, window) => total + Math.max(0, window.endTime - window.startTime),
-      0,
-    );
+  speakerActivityIntervals(windows, speaker).reduce(
+    (total, interval) => total + interval.end - interval.start,
+    0,
+  );
 
 const coveredActivitySeconds = (
   windows: SpeakerActivityWindow[],
   segments: AttributionSegment[],
   speaker: 'Me' | 'Them',
-) =>
-  windows
-    .filter((window) => window.speaker === speaker)
-    .reduce((total, window) => {
-      const covered = segments
-        .filter((segment) => segment.speaker === speaker)
-        .reduce(
-          (windowTotal, segment) =>
-            windowTotal + overlapSeconds(window, segment),
-          0,
-        );
-      return total + Math.min(window.endTime - window.startTime, covered);
-    }, 0);
+) => {
+  const activity = speakerActivityIntervals(windows, speaker);
+  const transcript = mergeIntervals(
+    segments
+      .filter((segment) => segment.speaker === speaker)
+      .map((segment) => ({
+        start: segment.startTime,
+        end: segment.endTime,
+      })),
+  );
+
+  return activity.reduce(
+    (total, active) =>
+      total +
+      transcript.reduce(
+        (covered, segment) =>
+          covered +
+          Math.max(
+            0,
+            Math.min(active.end, segment.end) -
+              Math.max(active.start, segment.start),
+          ),
+        0,
+      ),
+    0,
+  );
+};
 
 export type RecordingTranscriptValidationResult = {
   status: 'validated' | 'needs_attention';

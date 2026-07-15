@@ -64,6 +64,58 @@ describe('runRecordingTranscriptValidation', () => {
     expect(result.attempts.system).toBe(2);
   });
 
+  it('counts duplicate and overlapping transcript segments once when measuring coverage', async () => {
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'synthetic-meeting',
+      recordingDurationSeconds: 10,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '/synthetic/mix.wav',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [],
+      activityWindows: [{ speaker: 'Me', startTime: 0, endTime: 10 }],
+      transcribe: async (path) => ({
+        segments: path.includes('mix')
+          ? [
+              rawSegment(0, 4, 'Synthetic first overlapping segment'),
+              rawSegment(0, 4, 'Synthetic second overlapping segment'),
+              rawSegment(2, 6, 'Synthetic partially overlapping segment'),
+            ]
+          : [],
+      }),
+      probeDuration: async () => 10,
+    });
+
+    expect(result.evidence.localTranscriptCoveredSeconds).toBe(6);
+    expect(result.status).toBe('needs_attention');
+    expect(result.reasons).toContain('local_speech_unaccounted');
+  });
+
+  it('counts overlapping activity windows once when measuring coverage', async () => {
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'synthetic-meeting',
+      recordingDurationSeconds: 12,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '/synthetic/mix.wav',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0, endTime: 10 },
+        { speaker: 'Me', startTime: 2, endTime: 12 },
+      ],
+      transcribe: async (path) => ({
+        segments: path.includes('mix')
+          ? [rawSegment(2, 9, 'Synthetic partial coverage')]
+          : [],
+      }),
+      probeDuration: async () => 12,
+    });
+
+    expect(result.evidence.micActivitySeconds).toBe(12);
+    expect(result.evidence.localTranscriptCoveredSeconds).toBe(7);
+    expect(result.status).toBe('needs_attention');
+    expect(result.reasons).toContain('local_speech_unaccounted');
+  });
+
   it('does not expose source paths or transcript text in integrity evidence', async () => {
     const result = await runRecordingTranscriptValidation({
       meetingId: 'synthetic-meeting',
