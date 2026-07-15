@@ -37,17 +37,22 @@ const readRunId = (meeting: Meeting): string | null => {
   }
 };
 
-const hadUnaccountedLocalSpeech = (meeting: Meeting): boolean => {
+const hadUnaccountedSpeech = (
+  meeting: Meeting,
+  reason: 'local_speech_unaccounted' | 'remote_speech_unaccounted',
+  activityKey: 'micActivitySeconds' | 'systemActivitySeconds',
+): boolean => {
   try {
     const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       reasons?: unknown;
       micActivitySeconds?: unknown;
+      systemActivitySeconds?: unknown;
     };
     return (
       Array.isArray(parsed.reasons) &&
-      parsed.reasons.includes('local_speech_unaccounted') &&
-      typeof parsed.micActivitySeconds === 'number' &&
-      parsed.micActivitySeconds >= 3
+      parsed.reasons.includes(reason) &&
+      typeof parsed[activityKey] === 'number' &&
+      parsed[activityKey] >= 3
     );
   } catch {
     return false;
@@ -105,14 +110,33 @@ export const retryMeetingTranscriptValidation = async (
   };
 
   const priorLocalSpeechStillMissing =
-    hadUnaccountedLocalSpeech(meeting) &&
-    validation.sourceSegmentCounts.mic === 0;
-  if (validation.status === 'needs_attention' || priorLocalSpeechStillMissing) {
+    hadUnaccountedSpeech(
+      meeting,
+      'local_speech_unaccounted',
+      'micActivitySeconds',
+    ) && validation.sourceSegmentCounts.mic === 0;
+  const priorRemoteSpeechStillMissing =
+    hadUnaccountedSpeech(
+      meeting,
+      'remote_speech_unaccounted',
+      'systemActivitySeconds',
+    ) && validation.sourceSegmentCounts.system === 0;
+  if (
+    validation.status === 'needs_attention' ||
+    priorLocalSpeechStillMissing ||
+    priorRemoteSpeechStillMissing
+  ) {
     if (
       priorLocalSpeechStillMissing &&
       !integrity.reasons.includes('local_speech_unaccounted')
     ) {
       integrity.reasons.push('local_speech_unaccounted');
+    }
+    if (
+      priorRemoteSpeechStillMissing &&
+      !integrity.reasons.includes('remote_speech_unaccounted')
+    ) {
+      integrity.reasons.push('remote_speech_unaccounted');
     }
     await invoke('SAVE_MEETING', {
       ...meeting,
