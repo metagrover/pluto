@@ -13,6 +13,8 @@ export type TranscriptIntegrityReason =
   | 'local_transcript_coverage_low'
   | 'local_speech_unaccounted'
   | 'remote_speech_unaccounted'
+  | 'deterministic_retry_evidence_missing'
+  | 'deterministic_retry_evidence_corrupt'
   | 'required_source_failed'
   | 'channel_duration_mismatch'
   | 'ambiguous_pass_through';

@@ -8,6 +8,7 @@ import {
   buildStoredTranscriptActivityEvidence,
   parseStoredTranscriptActivityEvidence,
 } from '../utils/transcriptActivityEvidence';
+import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity';
 import { buildTranscriptJsonPayload } from '../utils/transcriptSchema';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation';
 
@@ -73,10 +74,12 @@ const readStoredActivityWindows = (
 ): {
   windows: SpeakerActivityWindow[];
   source: TranscriptActivityEvidenceFallbackSource;
+  failureReason: TranscriptIntegrityReason | null;
 } => {
   try {
     const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       activityEvidence?: unknown;
+      activityEvidenceSource?: unknown;
     };
     const stored = parseStoredTranscriptActivityEvidence(
       parsed.activityEvidence,
@@ -85,10 +88,38 @@ const readStoredActivityWindows = (
       return {
         windows: stored.windows,
         source: stored.source,
+        failureReason: null,
+      };
+    }
+
+    const priorSource =
+      parsed.activityEvidenceSource === 'capture_activity_v1'
+        ? 'capture_activity_v1'
+        : parsed.activityEvidenceSource === 'legacy_provisional_segments'
+          ? 'legacy_provisional_segments'
+          : null;
+
+    if (parsed.activityEvidence !== undefined) {
+      return {
+        windows: [],
+        source: 'capture_activity_corrupt',
+        failureReason: 'deterministic_retry_evidence_corrupt',
+      };
+    }
+
+    if (priorSource === 'capture_activity_v1') {
+      return {
+        windows: [],
+        source: 'capture_activity_missing',
+        failureReason: 'deterministic_retry_evidence_missing',
       };
     }
   } catch {
-    // Legacy or malformed integrity payloads fall back to transcript-derived windows.
+    return {
+      windows: [],
+      source: 'capture_activity_corrupt',
+      failureReason: 'deterministic_retry_evidence_corrupt',
+    };
   }
 
   return {
@@ -98,6 +129,7 @@ const readStoredActivityWindows = (
       speaker: segment.speaker === 'Them' ? 'Them' : 'Me',
     })),
     source: 'legacy_provisional_segments',
+    failureReason: null,
   };
 };
 
@@ -146,7 +178,10 @@ export const retryMeetingTranscriptValidation = async (
   });
   const integrity = {
     ...validation.evidence,
-    reasons: validation.reasons,
+    reasons:
+      activityEvidence.failureReason == null
+        ? [...validation.reasons]
+        : [...new Set([activityEvidence.failureReason, ...validation.reasons])],
     attempts: validation.attempts,
     activityEvidenceSource: activityEvidence.source,
     ...(activityEvidence.source === 'capture_activity_v1'
@@ -173,6 +208,7 @@ export const retryMeetingTranscriptValidation = async (
     ) && validation.sourceSegmentCounts.system === 0;
   if (
     validation.status === 'needs_attention' ||
+    activityEvidence.failureReason != null ||
     priorLocalSpeechStillMissing ||
     priorRemoteSpeechStillMissing
   ) {
