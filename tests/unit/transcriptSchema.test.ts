@@ -82,4 +82,27 @@ describe('transcriptSchema', () => {
       ),
     ).toBe(true);
   });
+
+  it('stores validation lifecycle and content-free integrity evidence', () => {
+    const payload = buildTranscriptJsonPayload([], {
+      canonicalSource: 'mix',
+      postHydrationBleedPass: false,
+      lifecycleStatus: 'needs_attention',
+      integrity: {
+        micActivitySeconds: 40,
+        systemActivitySeconds: 90,
+        localTranscriptCoveredSeconds: 2,
+        remoteTranscriptCoveredSeconds: 86,
+        unexplainedMicSeconds: 38,
+        unexplainedSystemSeconds: 4,
+        collapsedPassThroughSeconds: 6,
+        unresolvedAmbiguousSeconds: 0,
+        reasons: ['local_speech_unaccounted'],
+      },
+    });
+
+    expect(payload.lifecycleStatus).toBe('needs_attention');
+    expect(payload.integrity?.reasons).toEqual(['local_speech_unaccounted']);
+    expect(JSON.stringify(payload.integrity)).not.toContain('text');
+  });
 });

@@ -6,7 +6,13 @@
 export const TRANSCRIPT_JSON_SCHEMA_VERSION = 2;
 
 /** Bump when attribution / merge / ASR routing logic changes materially. */
-export const TRANSCRIPT_PIPELINE_VERSION = '1.2.0';
+import type {
+  TranscriptIntegrityEvidence,
+  TranscriptIntegrityReason,
+  TranscriptLifecycleStatus,
+} from './transcriptIntegrity';
+
+export const TRANSCRIPT_PIPELINE_VERSION = '2.0.0';
 
 export type CanonicalTranscriptSource = 'mic' | 'mix';
 export type TranscriptPipelineMode = 'legacy' | 'canonical_session_v2';
@@ -22,6 +28,10 @@ export type TranscriptTranscriptionMeta = {
   elapsedMs: number;
   providerLabel?: string;
   warnings?: string[];
+};
+
+export type StoredTranscriptIntegrity = TranscriptIntegrityEvidence & {
+  reasons: TranscriptIntegrityReason[];
 };
 
 export type StoredTranscriptV2 = {
@@ -40,6 +50,8 @@ export type StoredTranscriptV2 = {
   transcription?: TranscriptTranscriptionMeta;
   /** Optional full-session fallback metadata when session recovery ran. */
   sessionFallbackTranscription?: TranscriptTranscriptionMeta;
+  lifecycleStatus?: TranscriptLifecycleStatus;
+  integrity?: StoredTranscriptIntegrity;
   segments: unknown[];
 };
 
@@ -54,6 +66,8 @@ export function buildTranscriptJsonPayload(
     postHydrationBleedDroppedMe?: number;
     transcription?: TranscriptTranscriptionMeta;
     sessionFallbackTranscription?: TranscriptTranscriptionMeta;
+    lifecycleStatus?: TranscriptLifecycleStatus;
+    integrity?: StoredTranscriptIntegrity;
   },
 ): StoredTranscriptV2 {
   return {
@@ -67,6 +81,8 @@ export function buildTranscriptJsonPayload(
     postHydrationBleedDroppedMe: options.postHydrationBleedDroppedMe,
     transcription: options.transcription,
     sessionFallbackTranscription: options.sessionFallbackTranscription,
+    lifecycleStatus: options.lifecycleStatus,
+    integrity: options.integrity,
     segments,
   };
 }
