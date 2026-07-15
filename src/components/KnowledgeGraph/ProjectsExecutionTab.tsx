@@ -169,6 +169,20 @@ export const getProjectCardSummary = ({
   return activeCount === 1 ? '1 open' : `${activeCount} open`;
 };
 
+export const getInboxSummaryLabel = ({
+  activeCount,
+  overdueCount,
+}: {
+  activeCount: number;
+  overdueCount: number;
+}) => {
+  if (overdueCount > 0) {
+    return overdueCount === 1 ? '1 overdue' : `${overdueCount} overdue`;
+  }
+
+  return activeCount === 1 ? '1 to triage' : `${activeCount} to triage`;
+};
+
 export const buildExecutionSummary = ({
   activeTaskCount,
   activeProjectCount,
@@ -646,6 +660,9 @@ export const ProjectsExecutionTab: React.FC = () => {
   const activeUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'active' || task.status === 'overdue',
   );
+  const overdueUngroupedTasks = activeUngroupedTasks.filter(
+    (task) => task.status === 'overdue',
+  );
   const completedUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'completed',
   );
@@ -785,7 +802,10 @@ export const ProjectsExecutionTab: React.FC = () => {
               </p>
             </div>
             <span className="text-[10px] font-bold text-pro-text-muted/60 ml-auto">
-              {activeUngroupedTasks.length} to triage
+              {getInboxSummaryLabel({
+                activeCount: activeUngroupedTasks.length,
+                overdueCount: overdueUngroupedTasks.length,
+              })}
             </span>
           </div>
           <div className="flex flex-col gap-1.5 p-3">

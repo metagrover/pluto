@@ -6,6 +6,7 @@ import {
   ProjectHealthCard,
   buildExecutionSummary,
   getExecutionBriefHeading,
+  getInboxSummaryLabel,
   getNextTaskStatusForToggle,
   getProjectCardSummary,
   partitionProjectsForDisplay,
@@ -374,6 +375,20 @@ describe('getProjectCardSummary', () => {
         completedCount: 2,
       }),
     ).toBe('2 finished');
+  });
+});
+
+describe('getInboxSummaryLabel', () => {
+  it('surfaces overdue counts for slipping inbox work', () => {
+    expect(getInboxSummaryLabel({ activeCount: 3, overdueCount: 1 })).toBe(
+      '1 overdue',
+    );
+  });
+
+  it('keeps routine inbox summaries unchanged when nothing is overdue', () => {
+    expect(getInboxSummaryLabel({ activeCount: 2, overdueCount: 0 })).toBe(
+      '2 to triage',
+    );
   });
 });
 
