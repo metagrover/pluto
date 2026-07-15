@@ -15,6 +15,7 @@ import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscript
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
+  buildSpeakerAttributionRetryPlan,
   resolveFinalizationCleanupPaths,
 } from '../utils/recordingFinalization';
 import { getSessionFallbackDecision } from '../utils/sessionTranscriptionFallback';
@@ -4017,11 +4018,49 @@ export const AudioManager = ({
       const diarizationAudioPath =
         mixedAudioPath || systemAudioPath || primaryAudioPath;
       if (diarizationEnabled && diarizationAudioPath) {
-        try {
+        const collectActivityWindowsForAttribution = () => {
+          const windows = [...speakerTimelineRef.current];
+          const activeWindow = activeSpeakerWindowRef.current;
+          if (activeWindow) {
+            windows.push({
+              startTime: activeWindow.startTime,
+              endTime: getMeetingElapsedSeconds(),
+              speaker: activeWindow.speaker,
+            });
+          }
+          return windows;
+        };
+
+        const runDiarizationRefinementAttempt = async ({
+          attemptLabel,
+          segments,
+          transcriptionOverrides,
+        }: {
+          attemptLabel: string;
+          segments: TranscriptionSegment[];
+          transcriptionOverrides?: Partial<Required<TranscriptionSettings>>;
+        }): Promise<{
+          segments: TranscriptionSegment[];
+          mappingConfident: boolean;
+          mappingReason: string | null;
+          mappingConfidence: number;
+          splitsApplied: number;
+          relabeled: number;
+        }> => {
+          const diarizationOptions = transcriptionOverrides
+            ? {
+                backend: transcriptionOverrides.backend,
+                preset: transcriptionOverrides.preset,
+                model: transcriptionOverrides.model,
+                device: transcriptionOverrides.device,
+                computeType: transcriptionOverrides.computeType,
+              }
+            : {};
           const diarizationResult = await window.ipcRenderer.invoke(
             'WHISPER_TRANSCRIBE',
             diarizationAudioPath,
             buildTranscriptionOptions({
+              ...diarizationOptions,
               diarize: true,
               hfToken: hfTokenValue,
               meetingId: currentMeetingIdRef.current,
@@ -4049,52 +4088,141 @@ export const AudioManager = ({
                 )
             : [];
 
-          if (diarizationSegments.length > 0) {
-            const mapping = mapDiarizationSpeakers({
-              diarizationSegments,
-              referenceSegments: finalizedSegments,
-              activityWindows: speakerTimelineRef.current,
-            });
-            if (Object.keys(mapping.mapping).length > 0) {
-              const diarBoundary = splitSegmentsAtDiarizationBoundaries(
-                finalizedSegments,
-                diarizationSegments,
-                mapping.mapping,
-              );
-              if (diarBoundary.splitsApplied > 0) {
-                finalizedSegments =
-                  diarBoundary.segments as TranscriptionSegment[];
-                console.log(
-                  `[Pluto] Diarization boundary split: applied=${diarBoundary.splitsApplied}, segments=${finalizedSegments.length}`,
-                );
-              }
-              transcriptPipeline.diarizationBoundarySplits =
-                diarBoundary.splitsApplied;
+          if (diarizationSegments.length === 0) {
+            console.log(
+              `[Pluto] ${attemptLabel} diarization refinement skipped: no diarization segments`,
+            );
+            return {
+              segments,
+              mappingConfident: false,
+              mappingReason: 'no diarization segments',
+              mappingConfidence: 0,
+              splitsApplied: 0,
+              relabeled: 0,
+            };
+          }
 
-              const applied = applyDiarizationRefinement({
+          const mapping = mapDiarizationSpeakers({
+            diarizationSegments,
+            referenceSegments: segments,
+            activityWindows: collectActivityWindowsForAttribution(),
+          });
+          if (Object.keys(mapping.mapping).length === 0) {
+            console.log(
+              `[Pluto] ${attemptLabel} diarization refinement skipped: ${mapping.reason || 'insufficient confidence'}`,
+            );
+            return {
+              segments,
+              mappingConfident: false,
+              mappingReason: mapping.reason || 'insufficient confidence',
+              mappingConfidence: 0,
+              splitsApplied: 0,
+              relabeled: 0,
+            };
+          }
+
+          let updatedSegments = segments;
+          const diarBoundary = splitSegmentsAtDiarizationBoundaries(
+            updatedSegments,
+            diarizationSegments,
+            mapping.mapping,
+          );
+          if (diarBoundary.splitsApplied > 0) {
+            updatedSegments = diarBoundary.segments as TranscriptionSegment[];
+            console.log(
+              `[Pluto] ${attemptLabel} diarization boundary split: applied=${diarBoundary.splitsApplied}, segments=${updatedSegments.length}`,
+            );
+          }
+
+          const applied = applyDiarizationRefinement({
+            segments: updatedSegments,
+            diarizationSegments,
+            mapping: mapping.mapping,
+          });
+          updatedSegments = applied.segments as TranscriptionSegment[];
+          if (applied.relabeled > 0) {
+            console.log(
+              `[Pluto] ${attemptLabel} diarization refinement applied: relabeled=${applied.relabeled}, confidence=${mapping.confidence.toFixed(2)}`,
+            );
+          } else {
+            console.log(
+              `[Pluto] ${attemptLabel} diarization refinement kept existing labels: confidence=${mapping.confidence.toFixed(2)}`,
+            );
+          }
+
+          return {
+            segments: updatedSegments,
+            mappingConfident: true,
+            mappingReason: null,
+            mappingConfidence: mapping.confidence,
+            splitsApplied: diarBoundary.splitsApplied,
+            relabeled: applied.relabeled,
+          };
+        };
+
+        try {
+          const initialDiarizationAttempt =
+            await runDiarizationRefinementAttempt({
+              attemptLabel: 'Initial',
+              segments: finalizedSegments,
+            });
+          finalizedSegments = initialDiarizationAttempt.segments;
+          transcriptPipeline.diarizationBoundarySplits =
+            initialDiarizationAttempt.splitsApplied;
+
+          const speakerAttributionRetryPlan = buildSpeakerAttributionRetryPlan({
+            diarizationEnabled,
+            mappingConfident: initialDiarizationAttempt.mappingConfident,
+            retryAlreadyUsed: false,
+            settings: resolvedTranscriptionSettings,
+          });
+          transcriptPipeline.speakerAttributionRetryPlan =
+            speakerAttributionRetryPlan.reason;
+
+          if (
+            speakerAttributionRetryPlan.shouldRetry &&
+            speakerAttributionRetryPlan.strongerOptions
+          ) {
+            const { backend, preset, model, device, computeType } =
+              speakerAttributionRetryPlan.strongerOptions;
+            console.log(
+              `[Pluto] Retrying speaker attribution with stronger policy: ${backend}/${preset}/${model}/${computeType}`,
+            );
+            const retryDiarizationAttempt =
+              await runDiarizationRefinementAttempt({
+                attemptLabel: 'Retry',
                 segments: finalizedSegments,
-                diarizationSegments,
-                mapping: mapping.mapping,
+                transcriptionOverrides: {
+                  backend,
+                  preset,
+                  model,
+                  device,
+                  computeType,
+                  language: resolvedTranscriptionSettings.language,
+                },
               });
-              if (applied.relabeled > 0) {
-                finalizedSegments = applied.segments as TranscriptionSegment[];
-                console.log(
-                  `[Pluto] Diarization refinement applied: relabeled=${applied.relabeled}, confidence=${mapping.confidence.toFixed(2)}`,
-                );
-              } else {
-                console.log(
-                  '[Pluto] Diarization refinement skipped: no relabels applied',
-                );
-              }
-            } else {
-              console.log(
-                `[Pluto] Diarization refinement skipped: ${mapping.reason || 'insufficient confidence'}`,
+
+            transcriptPipeline.speakerAttributionRetryUsed = 1;
+            transcriptPipeline.speakerAttributionRetryOutcome =
+              retryDiarizationAttempt.mappingConfident
+                ? 'mapping-confident'
+                : (retryDiarizationAttempt.mappingReason ??
+                  'insufficient-confidence');
+
+            if (retryDiarizationAttempt.mappingConfident) {
+              finalizedSegments = retryDiarizationAttempt.segments;
+              transcriptPipeline.diarizationBoundarySplits = Math.max(
+                Number(transcriptPipeline.diarizationBoundarySplits || 0),
+                retryDiarizationAttempt.splitsApplied,
               );
             }
           } else {
-            console.log(
-              '[Pluto] Diarization refinement skipped: no diarization segments',
-            );
+            transcriptPipeline.speakerAttributionRetryUsed = 0;
+            transcriptPipeline.speakerAttributionRetryOutcome =
+              initialDiarizationAttempt.mappingConfident
+                ? 'mapping-confident'
+                : (initialDiarizationAttempt.mappingReason ??
+                  'insufficient-confidence');
           }
         } catch (e) {
           console.warn('[Pluto] Diarization refinement failed:', e);
