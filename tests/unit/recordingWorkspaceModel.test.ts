@@ -9,6 +9,7 @@ describe('buildRecordingWorkspaceModel', () => {
       isProcessing: false,
       microphone: 'healthy',
       systemAudio: 'healthy',
+      liveTranscriptIntegrity: 'healthy',
       segments: [
         {
           id: '1',
@@ -33,10 +34,29 @@ describe('buildRecordingWorkspaceModel', () => {
       isProcessing: false,
       microphone: 'warning',
       systemAudio: 'healthy',
+      liveTranscriptIntegrity: 'healthy',
       segments: [],
       interimText: '',
     });
     expect(model.needsAttention).toBe(true);
     expect(model.statusMessage).toContain('Microphone');
+  });
+
+  it('distinguishes transcript lag from microphone capture failure', () => {
+    const model = buildRecordingWorkspaceModel({
+      startedAtMs: 1_000,
+      nowMs: 11_000,
+      isProcessing: false,
+      microphone: 'healthy',
+      systemAudio: 'healthy',
+      liveTranscriptIntegrity: 'lagging',
+      segments: [],
+      interimText: '',
+    });
+
+    expect(model.needsAttention).toBe(true);
+    expect(model.statusMessage).toBe(
+      'Your audio is recording, but live transcription is falling behind',
+    );
   });
 });

@@ -24,6 +24,7 @@ import {
 } from './components/features/dashboardActionCompletion';
 import type {
   CaptureHealth,
+  LiveTranscriptIntegrity,
   LiveTranscriptSegment,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
@@ -132,6 +133,8 @@ function App() {
     microphone: 'healthy',
     systemAudio: 'healthy',
   });
+  const [liveTranscriptIntegrity, setLiveTranscriptIntegrity] =
+    useState<LiveTranscriptIntegrity>('healthy');
 
   // Connect the ref
   onAnalyserReadyRef.current = () => {};
@@ -587,9 +590,11 @@ function App() {
           onAnalyserReadyRef={onAnalyserReadyRef}
           onLiveTranscript={setLiveTranscript}
           onCaptureHealthChange={setCaptureHealth}
+          onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
           onRecordingStarted={(startedAtMs) => {
             setRecordingStartedAtMs(startedAtMs);
             setLiveTranscript([]);
+            setLiveTranscriptIntegrity('healthy');
           }}
           userTitle={meetingTitle}
           participants={meetingParticipants}
@@ -652,6 +657,7 @@ function App() {
           setCurrentNotes={setCurrentNotes}
           liveTranscript={liveTranscript}
           captureHealth={captureHealth}
+          liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
         />
       ) : (

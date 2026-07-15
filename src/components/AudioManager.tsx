@@ -39,6 +39,7 @@ import {
   type TimedAudioChunk,
   shouldUseSystemAudioReconstructionFallback,
 } from '../utils/systemAudioReconstruction';
+import { evaluateLiveTranscriptCoverage } from '../utils/transcriptIntegrity';
 import {
   type CanonicalTranscriptSource,
   type TranscriptPipelineMode,
@@ -55,6 +56,7 @@ import {
 } from '../utils/transcriptionSettings';
 import type {
   CaptureHealth,
+  LiveTranscriptIntegrity,
   LiveTranscriptSegment,
 } from './features/recordingWorkspaceModel';
 
@@ -69,6 +71,9 @@ interface AudioManagerProps {
     microphone: CaptureHealth;
     systemAudio: CaptureHealth;
   }) => void;
+  onLiveTranscriptIntegrityChange?: (
+    state: LiveTranscriptIntegrity,
+  ) => void;
   onRecordingStarted?: (startedAtMs: number) => void;
   userNotes?: string;
   userTitle?: string;
@@ -352,6 +357,7 @@ export const AudioManager = ({
   onSpeakingChange,
   onLiveTranscript,
   onCaptureHealthChange,
+  onLiveTranscriptIntegrityChange,
   onRecordingStarted,
   systemAudioStatus = 'unknown',
 }: AudioManagerProps) => {
@@ -2478,7 +2484,8 @@ export const AudioManager = ({
     chunkIndex: number;
     chunkStartSec?: number;
     chunkEndSec?: number;
-  }) => {
+    retryCount?: number;
+  }): Promise<void> => {
     const chunkStartSec =
       typeof opts.chunkStartSec === 'number'
         ? opts.chunkStartSec
@@ -2788,6 +2795,30 @@ export const AudioManager = ({
       processStream('Me', opts.micBlob, opts.micFormat),
       processStream('Them', opts.systemBlob, 'wav'),
     ]);
+    const micActivitySeconds = getSpeakerActivityCoverage(
+      chunkStartSec,
+      chunkEndSec,
+      'Me',
+    );
+    const localTranscriptSeconds = micResult.segments.reduce(
+      (total: number, segment: TranscriptionSegment) =>
+        total + Math.max(0, segment.endTime - segment.startTime),
+      0,
+    );
+    const liveIntegrity = evaluateLiveTranscriptCoverage({
+      micActivitySeconds,
+      localTranscriptSeconds,
+      conversionFailed: micResult.conversionFailed,
+      priorRetries: opts.retryCount || 0,
+    });
+    onLiveTranscriptIntegrityChange?.(liveIntegrity.state);
+    if (liveIntegrity.shouldRetry) {
+      await transcribeChunkPair({
+        ...opts,
+        retryCount: (opts.retryCount || 0) + 1,
+      });
+      return;
+    }
     if (systemResult.audioPath) {
       savedSystemChunkAudioRef.current.set(opts.chunkIndex, {
         chunkIndex: opts.chunkIndex,

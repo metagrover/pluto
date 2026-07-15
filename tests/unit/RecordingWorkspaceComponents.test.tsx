@@ -14,6 +14,7 @@ describe('recording workspace components', () => {
         statusMessage="Capture is healthy"
         microphone="healthy"
         systemAudio="healthy"
+        liveTranscriptIntegrity="healthy"
         title="Weekly review"
         onTitleChange={() => {}}
         onFinish={() => {}}
@@ -24,6 +25,25 @@ describe('recording workspace components', () => {
     expect(html).toContain('System audio');
     expect(html).toContain('Finish recording');
     expect(html).toContain('03:12');
+  });
+
+  it('announces live transcript lag without reporting capture failure', () => {
+    const html = renderToStaticMarkup(
+      <RecordingCaptureBar
+        status="recording"
+        elapsedLabel="04:10"
+        statusMessage="Your audio is recording, but live transcription is falling behind"
+        microphone="healthy"
+        systemAudio="healthy"
+        liveTranscriptIntegrity="lagging"
+        title="Synthetic meeting"
+        onTitleChange={() => {}}
+        onFinish={() => {}}
+      />,
+    );
+
+    expect(html).toContain('aria-live="assertive"');
+    expect(html).toContain('live transcription is falling behind');
   });
 
   it('renders transcript entries as a continuous conversation', () => {
