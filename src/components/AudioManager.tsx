@@ -46,6 +46,7 @@ import {
   type TranscriptTranscriptionMeta,
   buildTranscriptJsonPayload,
 } from '../utils/transcriptSchema';
+import { buildStoredTranscriptActivityEvidence } from '../utils/transcriptActivityEvidence';
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
   type TranscriptionSettings,
@@ -4180,6 +4181,10 @@ export const AudioManager = ({
         ...(integrityValidation.segments as TranscriptionSegment[]),
       );
 
+      const storedActivityEvidence = buildStoredTranscriptActivityEvidence(
+        speakerTimelineRef.current,
+      );
+
       if (integrityValidation.status === 'needs_attention') {
         const recoverableMeeting = {
           id: stopSnapshot.meetingId,
@@ -4196,6 +4201,8 @@ export const AudioManager = ({
             ...integrityValidation.evidence,
             reasons: integrityValidation.reasons,
             attempts: integrityValidation.attempts,
+            activityEvidenceSource: storedActivityEvidence.source,
+            activityEvidence: storedActivityEvidence,
           }),
           transcript_validated_at: null,
           transcript_json: JSON.stringify(
@@ -4347,6 +4354,8 @@ export const AudioManager = ({
           ...integrityValidation.evidence,
           reasons: integrityValidation.reasons,
           attempts: integrityValidation.attempts,
+          activityEvidenceSource: storedActivityEvidence.source,
+          activityEvidence: storedActivityEvidence,
         }),
         transcript_validated_at:
           integrityValidation.status === 'validated'

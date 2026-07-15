@@ -143,4 +143,139 @@ describe('retryMeetingTranscriptValidation', () => {
       expect.anything(),
     );
   });
+
+  it('reuses stored activity evidence when partial retry recovery is still below the original coverage gate', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        micActivitySeconds: 20,
+        systemActivitySeconds: 10,
+        reasons: ['local_speech_unaccounted'],
+        activityEvidence: {
+          schemaVersion: 1,
+          source: 'capture_activity_v1',
+          windows: [
+            { startTime: 0, endTime: 20, speaker: 'Me' },
+            { startTime: 20, endTime: 30, speaker: 'Them' },
+          ],
+        },
+      }),
+      transcript_json: JSON.stringify({
+        segments: [
+          {
+            speaker: 'Me',
+            startTime: 0,
+            endTime: 2,
+            text: 'Short recovered local segment.',
+          },
+        ],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        const audioPath = String(payload);
+        if (audioPath.includes('mic')) {
+          return {
+            segments: [rawSegment(0, 2, 'Short recovered local segment.')],
+          };
+        }
+        if (audioPath.includes('system')) {
+          return {
+            segments: [rawSegment(20, 30, 'Synthetic remote statement.')],
+          };
+        }
+        return {
+          segments: [
+            rawSegment(0, 2, 'Short recovered local segment.'),
+            rawSegment(20, 30, 'Synthetic remote statement.'),
+          ],
+        };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('needs_attention');
+    expect(
+      JSON.parse(String(current.transcript_integrity_json)).reasons,
+    ).toContain('local_speech_unaccounted');
+    expect(
+      JSON.parse(String(current.transcript_integrity_json)).activityEvidenceSource,
+    ).toBe('capture_activity_v1');
+  });
+
+  it('labels legacy retries when they fall back to provisional transcript activity windows', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        micActivitySeconds: 4,
+        reasons: [],
+      }),
+      transcript_json: JSON.stringify({
+        segments: [
+          {
+            speaker: 'Me',
+            startTime: 0,
+            endTime: 4,
+            text: 'Recovered local statement.',
+          },
+          {
+            speaker: 'Them',
+            startTime: 10,
+            endTime: 14,
+            text: 'Recovered remote statement.',
+          },
+        ],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        const audioPath = String(payload);
+        if (audioPath.includes('system')) {
+          return {
+            segments: [rawSegment(10, 14, 'Recovered remote statement.')],
+          };
+        }
+        return {
+          segments: [rawSegment(0, 4, 'Recovered local statement.')],
+        };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'GENERATE_TITLE') return 'Synthetic meeting';
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
+      }
+      if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('needs_attention');
+    expect(
+      JSON.parse(String(current.transcript_integrity_json)).activityEvidenceSource,
+    ).toBe('legacy_provisional_segments');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_ANALYSIS_V2',
+      expect.anything(),
+    );
+  });
 });
