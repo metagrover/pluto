@@ -96,18 +96,37 @@ export const getNextTaskStatusForToggle = (
   return status === 'completed' ? 'active' : 'completed';
 };
 
+export const getExecutionBriefHeading = ({
+  activeCount,
+  overdueCount,
+}: {
+  activeCount: number;
+  overdueCount: number;
+}) => {
+  if (activeCount === 0) return 'No active commitments';
+  if (overdueCount > 0) return 'Slipping commitments';
+  return 'Work in motion';
+};
+
 export const buildExecutionSummary = ({
   activeTaskCount,
   activeProjectCount,
   activeInboxTaskCount,
+  overdueTaskCount,
 }: {
   activeTaskCount: number;
   activeProjectCount: number;
   activeInboxTaskCount: number;
+  overdueTaskCount: number;
 }) => {
-  if (activeTaskCount === 0) {
+  const heading = getExecutionBriefHeading({
+    activeCount: activeTaskCount,
+    overdueCount: overdueTaskCount,
+  });
+
+  if (heading === 'No active commitments') {
     return {
-      heading: 'No active commitments',
+      heading,
       detail:
         'Completed work is tucked away. Start from the inbox when something new appears.',
     };
@@ -118,14 +137,14 @@ export const buildExecutionSummary = ({
 
   if (activeProjectCount === 0) {
     return {
-      heading: 'Work in motion',
+      heading,
       detail: `${activeTaskCount} open in the inbox`,
     };
   }
 
   if (activeInboxTaskCount === 0) {
     return {
-      heading: 'Work in motion',
+      heading,
       detail: `${activeTaskCount} open across ${projectLabel}`,
     };
   }
@@ -136,7 +155,7 @@ export const buildExecutionSummary = ({
       : `${activeInboxTaskCount} inbox items`;
 
   return {
-    heading: 'Work in motion',
+    heading,
     detail: `${activeTaskCount} open across ${projectLabel} and ${inboxLabel}`,
   };
 };
@@ -549,6 +568,7 @@ export const ProjectsExecutionTab: React.FC = () => {
     activeTaskCount: activeTasks.length,
     activeProjectCount: activeProjects.length,
     activeInboxTaskCount: activeUngroupedTasks.length,
+    overdueTaskCount: overdueTasks.length,
   });
 
   if (loading && allTasks.length === 0) {
