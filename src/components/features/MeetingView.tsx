@@ -122,6 +122,10 @@ export const TranscriptIntegrityPanel = ({
   );
 };
 
+export const canGenerateMeetingIntelligence = (
+  status: Meeting['transcript_status'],
+) => status == null || status === 'validated';
+
 interface MeetingActionCardsProps {
   items: MeetingActionItemCard[];
   highlightEntities: (text: string) => ReactNode;
@@ -662,6 +666,12 @@ export const MeetingView = ({
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
+    if (!canGenerateMeetingIntelligence(selectedMeeting.transcript_status)) {
+      setRegenerateNotesError(
+        'Transcript validation must finish before Pluto creates intelligence.',
+      );
+      return;
+    }
 
     setRegenerateNotesError(null);
     const transcript = buildAnalysisTranscriptFromJson(
@@ -1111,18 +1121,20 @@ export const MeetingView = ({
 
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
       <div className="mb-12 space-y-6">
-        <FollowUpDrafts
-          meeting={selectedMeeting}
-          overview={followUpDraftOverview}
-          actionItems={followUpDraftContext.actionItems}
-          decisions={followUpDraftContext.decisions}
-          entityContext={followUpDraftContext.entityContext}
-          discussionPoints={discussionPoints}
-          participants={followUpDraftParticipants}
-          openQuestions={followUpDraftOpenQuestions}
-          topicSummaries={followUpDraftTopicSummaries}
-          fetchMeetings={fetchMeetings}
-        />
+        {canGenerateMeetingIntelligence(selectedMeeting.transcript_status) ? (
+          <FollowUpDrafts
+            meeting={selectedMeeting}
+            overview={followUpDraftOverview}
+            actionItems={followUpDraftContext.actionItems}
+            decisions={followUpDraftContext.decisions}
+            entityContext={followUpDraftContext.entityContext}
+            discussionPoints={discussionPoints}
+            participants={followUpDraftParticipants}
+            openQuestions={followUpDraftOpenQuestions}
+            topicSummaries={followUpDraftTopicSummaries}
+            fetchMeetings={fetchMeetings}
+          />
+        ) : null}
 
         <EntitySidebar
           meetingId={String(selectedMeeting.id)}
