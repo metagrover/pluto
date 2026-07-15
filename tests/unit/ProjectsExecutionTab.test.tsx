@@ -85,6 +85,34 @@ describe('ProjectHealthCard', () => {
     expect(markup).not.toContain('1 open');
   });
 
+  it('surfaces due-soon counts in at-risk project summaries', () => {
+    const project = makeEntity({
+      id: 'project-at-risk-summary',
+      metadata: JSON.stringify({ context: 'Customer launch' }),
+    });
+    const dueSoonTask = makeEntity({
+      id: 'task-at-risk-summary',
+      type: 'action_item',
+      name: 'Confirm stakeholder review',
+      due_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      metadata: JSON.stringify({
+        full_description: 'Confirm stakeholder review',
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <ProjectHealthCard
+        project={project}
+        tasks={[dueSoonTask]}
+        onToggleTask={() => {}}
+        onTaskAdded={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('1 due soon');
+    expect(markup).not.toContain('1 open');
+  });
+
   it('renders overdue styling for explicitly overdue task due badges', () => {
     const project = makeEntity({
       id: 'project-overdue-badge',
@@ -351,9 +379,21 @@ describe('getProjectCardSummary', () => {
       getProjectCardSummary({
         activeCount: 3,
         overdueCount: 1,
+        atRiskCount: 0,
         completedCount: 0,
       }),
     ).toBe('1 overdue');
+  });
+
+  it('surfaces due-soon counts for at-risk projects', () => {
+    expect(
+      getProjectCardSummary({
+        activeCount: 2,
+        overdueCount: 0,
+        atRiskCount: 1,
+        completedCount: 0,
+      }),
+    ).toBe('1 due soon');
   });
 
   it('keeps routine active project summaries unchanged when nothing is overdue', () => {
@@ -361,6 +401,7 @@ describe('getProjectCardSummary', () => {
       getProjectCardSummary({
         activeCount: 2,
         overdueCount: 0,
+        atRiskCount: 0,
         completedCount: 0,
       }),
     ).toBe('2 open');
@@ -371,6 +412,7 @@ describe('getProjectCardSummary', () => {
       getProjectCardSummary({
         activeCount: 0,
         overdueCount: 0,
+        atRiskCount: 0,
         completedCount: 2,
       }),
     ).toBe('2 finished');
