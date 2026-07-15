@@ -175,9 +175,9 @@ const TaskRow: React.FC<{
   const metadata = JSON.parse(task.metadata || '{}');
   const isCompleted = task.status === 'completed';
   const isOverdue =
-    task.due_date &&
-    task.status === 'active' &&
-    new Date(task.due_date).getTime() < Date.now();
+    !isCompleted &&
+    (task.status === 'overdue' ||
+      (task.due_date && new Date(task.due_date).getTime() < Date.now()));
 
   return (
     <div
