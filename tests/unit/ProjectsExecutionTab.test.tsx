@@ -250,6 +250,7 @@ describe('buildExecutionSummary', () => {
         activeTaskCount: 3,
         activeProjectCount: 1,
         activeInboxTaskCount: 2,
+        overdueTaskCount: 0,
       }).detail,
     ).toBe('3 open across 1 project and 2 inbox items');
   });
@@ -260,8 +261,37 @@ describe('buildExecutionSummary', () => {
         activeTaskCount: 2,
         activeProjectCount: 0,
         activeInboxTaskCount: 2,
+        overdueTaskCount: 0,
       }).detail,
     ).toBe('2 open in the inbox');
+  });
+
+  it('foregrounds overdue counts when slipping work spans projects and inbox tasks', () => {
+    expect(
+      buildExecutionSummary({
+        activeTaskCount: 5,
+        activeProjectCount: 2,
+        activeInboxTaskCount: 1,
+        overdueTaskCount: 2,
+      }),
+    ).toEqual({
+      heading: 'Slipping commitments',
+      detail: '2 overdue across 2 projects and 1 inbox item',
+    });
+  });
+
+  it('foregrounds overdue counts for inbox-only slipping work', () => {
+    expect(
+      buildExecutionSummary({
+        activeTaskCount: 3,
+        activeProjectCount: 0,
+        activeInboxTaskCount: 3,
+        overdueTaskCount: 1,
+      }),
+    ).toEqual({
+      heading: 'Slipping commitments',
+      detail: '1 overdue in the inbox',
+    });
   });
 });
 
