@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   ProjectHealthCard,
+  buildExecutionSummary,
+  getExecutionBriefHeading,
   getNextTaskStatusForToggle,
   partitionProjectsForDisplay,
   sortExecutionTasksForDisplay,
@@ -51,6 +53,35 @@ describe('ProjectHealthCard', () => {
 
     expect(markup).toContain('🔴 Slipping');
     expect(markup).not.toContain('🟢 On Track');
+  });
+
+  it('renders overdue styling for explicitly overdue task due badges', () => {
+    const project = makeEntity({
+      id: 'project-overdue-badge',
+      metadata: JSON.stringify({ context: 'Customer launch' }),
+    });
+    const overdueTask = makeEntity({
+      id: 'task-overdue-badge',
+      type: 'action_item',
+      name: 'Unblock legal review',
+      status: 'overdue',
+      due_date: '2026-07-20T00:00:00.000Z',
+      metadata: JSON.stringify({
+        full_description: 'Unblock legal review',
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <ProjectHealthCard
+        project={project}
+        tasks={[overdueTask]}
+        onToggleTask={() => {}}
+        onTaskAdded={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('bg-red-500/10 text-red-500');
+    expect(markup).not.toContain('bg-pro-bg text-pro-text-muted');
   });
 
   it('collapses completed tasks behind disclosure by default', () => {
@@ -157,6 +188,48 @@ describe('partitionProjectsForDisplay', () => {
     expect(result.completedProjects.map((project) => project.id)).toEqual([
       'project-complete',
     ]);
+  });
+});
+
+describe('buildExecutionSummary', () => {
+  it('accounts for inbox work alongside linked project counts', () => {
+    expect(
+      buildExecutionSummary({
+        activeTaskCount: 3,
+        activeProjectCount: 1,
+        activeInboxTaskCount: 2,
+      }).detail,
+    ).toBe('3 open across 1 project and 2 inbox items');
+  });
+
+  it('avoids zero-project framing when active work only lives in the inbox', () => {
+    expect(
+      buildExecutionSummary({
+        activeTaskCount: 2,
+        activeProjectCount: 0,
+        activeInboxTaskCount: 2,
+      }).detail,
+    ).toBe('2 open in the inbox');
+  });
+});
+
+describe('getExecutionBriefHeading', () => {
+  it('surfaces slipping work when overdue commitments are present', () => {
+    expect(getExecutionBriefHeading({ activeCount: 3, overdueCount: 1 })).toBe(
+      'Slipping commitments',
+    );
+  });
+
+  it('keeps routine active work on the default heading when nothing is overdue', () => {
+    expect(getExecutionBriefHeading({ activeCount: 3, overdueCount: 0 })).toBe(
+      'Work in motion',
+    );
+  });
+
+  it('keeps the empty-state heading when no active commitments remain', () => {
+    expect(getExecutionBriefHeading({ activeCount: 0, overdueCount: 0 })).toBe(
+      'No active commitments',
+    );
   });
 });
 

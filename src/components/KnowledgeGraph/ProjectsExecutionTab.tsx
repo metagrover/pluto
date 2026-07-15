@@ -113,6 +113,70 @@ export const sortExecutionTasksForDisplay = (tasks: Entity[]): Entity[] => {
   });
 };
 
+export const getExecutionBriefHeading = ({
+  activeCount,
+  overdueCount,
+}: {
+  activeCount: number;
+  overdueCount: number;
+}) => {
+  if (activeCount === 0) return 'No active commitments';
+  if (overdueCount > 0) return 'Slipping commitments';
+  return 'Work in motion';
+};
+
+export const buildExecutionSummary = ({
+  activeTaskCount,
+  activeProjectCount,
+  activeInboxTaskCount,
+  overdueTaskCount,
+}: {
+  activeTaskCount: number;
+  activeProjectCount: number;
+  activeInboxTaskCount: number;
+  overdueTaskCount: number;
+}) => {
+  const heading = getExecutionBriefHeading({
+    activeCount: activeTaskCount,
+    overdueCount: overdueTaskCount,
+  });
+
+  if (heading === 'No active commitments') {
+    return {
+      heading,
+      detail:
+        'Completed work is tucked away. Start from the inbox when something new appears.',
+    };
+  }
+
+  const projectLabel =
+    activeProjectCount === 1 ? '1 project' : `${activeProjectCount} projects`;
+
+  if (activeProjectCount === 0) {
+    return {
+      heading,
+      detail: `${activeTaskCount} open in the inbox`,
+    };
+  }
+
+  if (activeInboxTaskCount === 0) {
+    return {
+      heading,
+      detail: `${activeTaskCount} open across ${projectLabel}`,
+    };
+  }
+
+  const inboxLabel =
+    activeInboxTaskCount === 1
+      ? '1 inbox item'
+      : `${activeInboxTaskCount} inbox items`;
+
+  return {
+    heading,
+    detail: `${activeTaskCount} open across ${projectLabel} and ${inboxLabel}`,
+  };
+};
+
 const computeHealth = (tasks: Entity[]): HealthStatus => {
   if (buildProjectsBriefing(tasks).active.length === 0) return 'complete';
   const now = Date.now();
@@ -147,9 +211,9 @@ const TaskRow: React.FC<{
   const metadata = JSON.parse(task.metadata || '{}');
   const isCompleted = task.status === 'completed';
   const isOverdue =
-    task.due_date &&
-    task.status === 'active' &&
-    new Date(task.due_date).getTime() < Date.now();
+    !isCompleted &&
+    (task.status === 'overdue' ||
+      (task.due_date && new Date(task.due_date).getTime() < Date.now()));
 
   return (
     <div
@@ -509,6 +573,12 @@ export const ProjectsExecutionTab: React.FC = () => {
   const completedUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'completed',
   );
+  const executionSummary = buildExecutionSummary({
+    activeTaskCount: activeTasks.length,
+    activeProjectCount: activeProjects.length,
+    activeInboxTaskCount: activeUngroupedTasks.length,
+    overdueTaskCount: overdueTasks.length,
+  });
 
   if (loading && allTasks.length === 0) {
     return (
@@ -576,14 +646,10 @@ export const ProjectsExecutionTab: React.FC = () => {
         <div>
           <p className="workspace-eyebrow">Execution brief</p>
           <h1 className="mt-2 text-3xl font-black tracking-tight text-pro-text-main">
-            {activeTasks.length > 0
-              ? 'Work in motion'
-              : 'No active commitments'}
+            {executionSummary.heading}
           </h1>
           <p className="mt-2 text-sm font-medium text-pro-text-muted">
-            {activeTasks.length > 0
-              ? `${activeTasks.length} open across ${activeProjects.length} project${activeProjects.length === 1 ? '' : 's'}`
-              : 'Completed work is tucked away. Start from the inbox when something new appears.'}
+            {executionSummary.detail}
             {overdueTasks.length > 0 && (
               <span className="text-red-500 font-bold ml-2">
                 {overdueTasks.length} overdue
