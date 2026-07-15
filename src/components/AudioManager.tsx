@@ -14,8 +14,8 @@ import {
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import {
   beginRecordingFinalization,
-  buildSpeakerAttributionRetryPlan,
   buildMeetingTiming,
+  buildSpeakerAttributionRetryPlan,
   resolveFinalizationCleanupPaths,
 } from '../utils/recordingFinalization';
 import { getSessionFallbackDecision } from '../utils/sessionTranscriptionFallback';
@@ -4183,13 +4183,8 @@ export const AudioManager = ({
             speakerAttributionRetryPlan.shouldRetry &&
             speakerAttributionRetryPlan.strongerOptions
           ) {
-            const {
-              backend,
-              preset,
-              model,
-              device,
-              computeType,
-            } = speakerAttributionRetryPlan.strongerOptions;
+            const { backend, preset, model, device, computeType } =
+              speakerAttributionRetryPlan.strongerOptions;
             console.log(
               `[Pluto] Retrying speaker attribution with stronger policy: ${backend}/${preset}/${model}/${computeType}`,
             );
@@ -4212,7 +4207,7 @@ export const AudioManager = ({
               retryDiarizationAttempt.mappingConfident
                 ? 'mapping-confident'
                 : (retryDiarizationAttempt.mappingReason ??
-                    'insufficient-confidence');
+                  'insufficient-confidence');
 
             if (retryDiarizationAttempt.mappingConfident) {
               finalizedSegments = retryDiarizationAttempt.segments;
@@ -4227,7 +4222,7 @@ export const AudioManager = ({
               initialDiarizationAttempt.mappingConfident
                 ? 'mapping-confident'
                 : (initialDiarizationAttempt.mappingReason ??
-                    'insufficient-confidence');
+                  'insufficient-confidence');
           }
         } catch (e) {
           console.warn('[Pluto] Diarization refinement failed:', e);

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   beginRecordingFinalization,
-  buildSpeakerAttributionRetryPlan,
   buildMeetingTiming,
+  buildSpeakerAttributionRetryPlan,
   collectDisposableRecordingArtifactPaths,
   getStrongerSpeakerAttributionPolicy,
   resolveFinalizationCleanupPaths,

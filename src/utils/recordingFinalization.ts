@@ -1,6 +1,6 @@
 import {
-  resolveBackendOptions,
   type ResolvedBackendOptions,
+  resolveBackendOptions,
 } from './transcriptionBackendConfig';
 import type { TranscriptionSettings } from './transcriptionSettings';
 
