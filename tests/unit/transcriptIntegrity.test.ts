@@ -78,6 +78,39 @@ describe('transcriptIntegrity', () => {
     expect(result.evidence.collapsedPassThroughSeconds).toBeGreaterThan(0);
   });
 
+  it('prefers the system channel when exact pass-through evidence ties', () => {
+    const result = reconcileCanonicalTranscript({
+      mixedSegments: [segment('Unknown', 20, 25, 'Synthetic remote update')],
+      micSegments: [segment('Me', 20, 25, 'Synthetic remote update')],
+      systemSegments: [segment('Them', 20, 25, 'Synthetic remote update')],
+      provisionalSegments: [],
+      activityWindows: [{ speaker: 'Them', startTime: 20, endTime: 25 }],
+    });
+
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0].speaker).toBe('Them');
+  });
+
+  it('keeps distinct local speech that overlaps a longer remote segment', () => {
+    const result = reconcileCanonicalTranscript({
+      mixedSegments: [segment('Unknown', 10, 20, 'Synthetic remote response')],
+      micSegments: [segment('Me', 12, 15, 'Synthetic distinct local question')],
+      systemSegments: [segment('Them', 10, 20, 'Synthetic remote response')],
+      provisionalSegments: [],
+      activityWindows: [
+        { speaker: 'Them', startTime: 10, endTime: 12 },
+        { speaker: 'Me', startTime: 12, endTime: 15 },
+        { speaker: 'Them', startTime: 15, endTime: 20 },
+      ],
+    });
+
+    expect(result.segments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'Synthetic distinct local question' }),
+      ]),
+    );
+  });
+
   it('validates healthy synthetic two-channel coverage', () => {
     expect(
       validateTranscriptIntegrity({

@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { retryMeetingTranscriptValidation } from '../../src/services/retryMeetingTranscriptValidation';
 
+const rawSegment = (start: number, end: number, text: string) => ({
+  start,
+  end,
+  text,
+});
+
 const meeting = {
   id: 'synthetic-id',
   title: 'Meeting',
@@ -101,5 +107,40 @@ describe('retryMeetingTranscriptValidation', () => {
         ([channel]) => channel === 'EXTRACT_AND_PROCESS_ENTITIES',
       ),
     ).toHaveLength(1);
+  });
+
+  it('does not clear prior missing-local-speech evidence when the mic retry stays empty', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        micActivitySeconds: 20,
+        reasons: ['local_speech_unaccounted'],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        return String(payload).includes('mic')
+          ? { segments: [] }
+          : { segments: [rawSegment(10, 20, 'Synthetic remote statement')] };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('needs_attention');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_ANALYSIS_V2',
+      expect.anything(),
+    );
   });
 });

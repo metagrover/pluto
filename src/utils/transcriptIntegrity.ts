@@ -135,8 +135,14 @@ export const reconcileCanonicalTranscript = <
     const provisionalSpeaker = input.provisionalSegments.find(
       (candidate) => overlapSeconds(canonical, candidate) >= 0.25,
     )?.speaker;
+    const systemPassThrough = input.systemSegments.some(
+      (system) =>
+        overlapSeconds(canonical, system) >= 0.25 &&
+        tokenSimilarity(canonical.text, system.text) >= 0.5,
+    );
     const speaker =
-      systemEvidence > micEvidence
+      systemEvidence > micEvidence ||
+      (systemPassThrough && systemEvidence >= micEvidence)
         ? 'Them'
         : micEvidence > 0
           ? 'Me'
@@ -146,7 +152,16 @@ export const reconcileCanonicalTranscript = <
 
   const recoveredMicSegments = input.micSegments.filter(
     (mic) =>
-      !attributed.some((candidate) => overlapSeconds(mic, candidate) >= 0.25),
+      !attributed.some(
+        (candidate) =>
+          overlapSeconds(mic, candidate) >= 0.25 &&
+          tokenSimilarity(mic.text, candidate.text) >= 0.5,
+      ) &&
+      !input.systemSegments.some(
+        (system) =>
+          overlapSeconds(mic, system) >= 0.25 &&
+          tokenSimilarity(mic.text, system.text) >= 0.5,
+      ),
   );
 
   const collapsedPassThroughSeconds = input.micSegments.reduce((total, mic) => {

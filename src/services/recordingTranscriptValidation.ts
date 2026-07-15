@@ -129,6 +129,7 @@ export type RecordingTranscriptValidationResult = {
   evidence: TranscriptIntegrityEvidence;
   attempts: Record<CanonicalSource, number>;
   transcriptionMeta: Partial<Record<CanonicalSource, Record<string, unknown>>>;
+  sourceSegmentCounts: Record<CanonicalSource, number>;
 };
 
 export const runRecordingTranscriptValidation = async (input: {
@@ -243,6 +244,11 @@ export const runRecordingTranscriptValidation = async (input: {
       ...(mic.result?.meta ? { mic: mic.result.meta } : {}),
       ...(mix.result?.meta ? { mix: mix.result.meta } : {}),
       ...(system.result?.meta ? { system: system.result.meta } : {}),
+    },
+    sourceSegmentCounts: {
+      mic: micSegments.length,
+      mix: mixedSegments.length,
+      system: systemSegments.length,
     },
   };
 };

@@ -37,6 +37,23 @@ const readRunId = (meeting: Meeting): string | null => {
   }
 };
 
+const hadUnaccountedLocalSpeech = (meeting: Meeting): boolean => {
+  try {
+    const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      reasons?: unknown;
+      micActivitySeconds?: unknown;
+    };
+    return (
+      Array.isArray(parsed.reasons) &&
+      parsed.reasons.includes('local_speech_unaccounted') &&
+      typeof parsed.micActivitySeconds === 'number' &&
+      parsed.micActivitySeconds >= 3
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const retryMeetingTranscriptValidation = async (
   meetingId: string | number,
   invoke: Invoke,
@@ -87,7 +104,16 @@ export const retryMeetingTranscriptValidation = async (
     validation_run_id: runId,
   };
 
-  if (validation.status === 'needs_attention') {
+  const priorLocalSpeechStillMissing =
+    hadUnaccountedLocalSpeech(meeting) &&
+    validation.sourceSegmentCounts.mic === 0;
+  if (validation.status === 'needs_attention' || priorLocalSpeechStillMissing) {
+    if (
+      priorLocalSpeechStillMissing &&
+      !integrity.reasons.includes('local_speech_unaccounted')
+    ) {
+      integrity.reasons.push('local_speech_unaccounted');
+    }
     await invoke('SAVE_MEETING', {
       ...meeting,
       transcript_status: 'needs_attention',
