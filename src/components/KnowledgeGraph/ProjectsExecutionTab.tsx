@@ -13,6 +13,13 @@ import {
 // ─── Health Logic ────────────────────────────────────────────────
 type HealthStatus = 'on_track' | 'at_risk' | 'slipping' | 'complete';
 
+const HEALTH_PRIORITY: Record<HealthStatus, number> = {
+  slipping: 0,
+  at_risk: 1,
+  on_track: 2,
+  complete: 3,
+};
+
 const HEALTH_CONFIG: Record<
   HealthStatus,
   { dot: string; label: string; color: string; bg: string }
@@ -69,16 +76,24 @@ export const partitionProjectsForDisplay = (
   projects: Entity[],
   groupedTasks: Record<string, Entity[]>,
 ) => {
-  const activeProjects: Entity[] = [];
+  const activeProjects: Array<{
+    project: Entity;
+    index: number;
+    health: HealthStatus;
+  }> = [];
   const completedProjects: Entity[] = [];
 
-  for (const project of projects) {
+  for (const [index, project] of projects.entries()) {
     const tasks = groupedTasks[project.id] || [];
     if (tasks.length === 0) continue;
 
     const briefing = buildProjectsBriefing(tasks);
     if (briefing.active.length > 0) {
-      activeProjects.push(project);
+      activeProjects.push({
+        project,
+        index,
+        health: computeHealth(tasks),
+      });
       continue;
     }
 
@@ -87,7 +102,16 @@ export const partitionProjectsForDisplay = (
     }
   }
 
-  return { activeProjects, completedProjects };
+  activeProjects.sort((a, b) => {
+    const priorityDelta = HEALTH_PRIORITY[a.health] - HEALTH_PRIORITY[b.health];
+    if (priorityDelta !== 0) return priorityDelta;
+    return a.index - b.index;
+  });
+
+  return {
+    activeProjects: activeProjects.map(({ project }) => project),
+    completedProjects,
+  };
 };
 
 export const getNextTaskStatusForToggle = (
