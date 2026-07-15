@@ -1,0 +1,37 @@
+{
+  "type": "recording_finalization",
+  "begin": {
+    "first": {
+      "meetingId": "meeting-75",
+      "stopInFlight": false,
+      "recordingStartedAtMs": 1746820800000,
+      "nowMs": 1746821862900
+    },
+    "second": {
+      "meetingId": "meeting-75",
+      "stopInFlight": true,
+      "recordingStartedAtMs": 1746820800000,
+      "nowMs": 1746821900000
+    }
+  },
+  "timing": {
+    "recordingStartedAtMs": 1746820800000,
+    "recordingEndedAtMs": 1746821862900
+  },
+  "cleanup": {
+    "primaryAudioPath": "/tmp/session-mic.wav",
+    "systemAudioPath": "/tmp/session-system.wav",
+    "rebuiltSystemAudioPath": "/tmp/session-system-rebuilt.wav",
+    "mixedAudioPath": "/tmp/session-mix.wav",
+    "validationStatus": "validated"
+  },
+  "expected": {
+    "status": "validated",
+    "secondCallReturnsNull": true,
+    "cleanupPaths": ["/tmp/session-system.wav"],
+    "primaryMetric": {
+      "name": "durationSeconds",
+      "value": 1062
+    }
+  }
+}

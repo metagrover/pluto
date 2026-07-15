@@ -1,0 +1,82 @@
+{
+  "type": "transcript_validation",
+  "meetingId": "synthetic-local-recovery",
+  "recordingDurationSeconds": 1500,
+  "provisionalSegments": [
+    {
+      "id": "synthetic-short-1",
+      "speaker": "Me",
+      "startTime": 7,
+      "endTime": 7.2,
+      "text": "Acknowledged."
+    },
+    {
+      "id": "synthetic-short-2",
+      "speaker": "Me",
+      "startTime": 25,
+      "endTime": 25.2,
+      "text": "Confirmed."
+    }
+  ],
+  "activityWindows": [
+    { "speaker": "Me", "startTime": 420, "endTime": 450 },
+    { "speaker": "Me", "startTime": 680, "endTime": 720 },
+    { "speaker": "Me", "startTime": 1020, "endTime": 1060 },
+    { "speaker": "Them", "startTime": 100, "endTime": 160 },
+    { "speaker": "Them", "startTime": 500, "endTime": 570 },
+    { "speaker": "Them", "startTime": 1150, "endTime": 1220 }
+  ],
+  "sources": {
+    "mic": {
+      "durationSeconds": 1500,
+      "segments": [
+        {
+          "start": 420,
+          "end": 450,
+          "text": "Synthetic proposal with multiple supporting points."
+        },
+        {
+          "start": 680,
+          "end": 720,
+          "text": "Synthetic follow-up question and recommendation."
+        },
+        {
+          "start": 1020,
+          "end": 1060,
+          "text": "Synthetic implementation constraints."
+        }
+      ]
+    },
+    "mix": {
+      "durationSeconds": 1500,
+      "segments": [
+        { "start": 100, "end": 160, "text": "Synthetic remote context." },
+        { "start": 500, "end": 570, "text": "Synthetic remote response." },
+        {
+          "start": 1150,
+          "end": 1220,
+          "text": "Synthetic remote conclusion."
+        }
+      ]
+    },
+    "system": {
+      "durationSeconds": 1500,
+      "segments": [
+        { "start": 100, "end": 160, "text": "Synthetic remote context." },
+        { "start": 500, "end": 570, "text": "Synthetic remote response." },
+        {
+          "start": 1150,
+          "end": 1220,
+          "text": "Synthetic remote conclusion."
+        }
+      ]
+    }
+  },
+  "expected": {
+    "status": "validated",
+    "primaryMetric": {
+      "name": "localTranscriptCoveredSeconds",
+      "value": 110
+    }
+  }
+}

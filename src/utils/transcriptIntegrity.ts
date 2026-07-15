@@ -1,7 +1,7 @@
 import type {
   AttributionSegment,
   SpeakerActivityWindow,
-} from './speakerAttribution';
+} from './speakerAttribution.ts';
 
 export type TranscriptLifecycleStatus =
   | 'provisional'

@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-15T15:40:34.403Z",
+  "manifestPath": "scripts/recording-quality/manifest.json",
+  "baselineReportPath": "scripts/recording-quality/baselines/current-master.json",
+  "sourceCommit": "026bdcf6",
+  "environment": {
+    "nodeVersion": "v24.11.1",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "summary": {
+    "totalCases": 4,
+    "passedCases": 4,
+    "failedCases": 0,
+    "passRate": 1,
+    "issueCoverage": [25, 75, 428, 434],
+    "kinds": {
+      "recording_finalization": {
+        "passed": 1,
+        "failed": 0
+      },
+      "transcript_validation": {
+        "passed": 3,
+        "failed": 0
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "issue-25-opening-audio",
+      "issue": 25,
+      "title": "Opening local speech is preserved",
+      "kind": "transcript_validation",
+      "passed": true,
+      "actual": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "localTranscriptCoveredSeconds",
+          "value": 3
+        },
+        "reasons": []
+      },
+      "expected": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "localTranscriptCoveredSeconds",
+          "value": 3
+        }
+      }
+    },
+    {
+      "id": "issue-75-finalization-single-flight",
+      "issue": 75,
+      "title": "Finalization stays single-flight and freezes timing",
+      "kind": "recording_finalization",
+      "passed": true,
+      "actual": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "durationSeconds",
+          "value": 1062
+        },
+        "reasons": []
+      },
+      "expected": {
+        "status": "validated",
+        "secondCallReturnsNull": true,
+        "cleanupPaths": ["/tmp/session-system.wav"],
+        "primaryMetric": {
+          "name": "durationSeconds",
+          "value": 1062
+        }
+      }
+    },
+    {
+      "id": "issue-428-local-speech-recovery",
+      "issue": 428,
+      "title": "Sparse provisional local chunks still recover canonical local speech",
+      "kind": "transcript_validation",
+      "passed": true,
+      "actual": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "localTranscriptCoveredSeconds",
+          "value": 110
+        },
+        "reasons": []
+      },
+      "expected": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "localTranscriptCoveredSeconds",
+          "value": 110
+        }
+      }
+    },
+    {
+      "id": "issue-434-overlap-union",
+      "issue": 434,
+      "title": "Overlapping transcript segments count coverage once",
+      "kind": "transcript_validation",
+      "passed": true,
+      "actual": {
+        "status": "needs_attention",
+        "primaryMetric": {
+          "name": "localTranscriptCoveredSeconds",
+          "value": 6
+        },
+        "reasons": ["local_speech_unaccounted"]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requiredReasons": ["local_speech_unaccounted"],
+        "primaryMetric": {
+          "name": "localTranscriptCoveredSeconds",
+          "value": 6
+        }
+      }
+    }
+  ],
+  "failures": []
+}
