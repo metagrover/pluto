@@ -1,7 +1,7 @@
 # Recording Transcript Integrity Design
 
-**Issue:** [#428](https://github.com/metagrover/pluto/issues/428)  
-**Status:** Approved design  
+**Issue:** [#428](https://github.com/metagrover/pluto/issues/428)
+**Status:** Approved design
 **Priority:** Accuracy and completeness over processing performance
 
 ## Outcome
