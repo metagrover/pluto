@@ -149,6 +149,26 @@ export const getExecutionBriefHeading = ({
   return 'Work in motion';
 };
 
+export const getProjectCardSummary = ({
+  activeCount,
+  overdueCount,
+  completedCount,
+}: {
+  activeCount: number;
+  overdueCount: number;
+  completedCount: number;
+}) => {
+  if (activeCount === 0) {
+    return `${completedCount} finished`;
+  }
+
+  if (overdueCount > 0) {
+    return overdueCount === 1 ? '1 overdue' : `${overdueCount} overdue`;
+  }
+
+  return activeCount === 1 ? '1 open' : `${activeCount} open`;
+};
+
 export const buildExecutionSummary = ({
   activeTaskCount,
   activeProjectCount,
@@ -419,6 +439,11 @@ export const ProjectHealthCard: React.FC<{
   const healthInfo = HEALTH_CONFIG[health];
   const completedCount = briefing.completed.length;
   const metadata = JSON.parse(project.metadata || '{}');
+  const summary = getProjectCardSummary({
+    activeCount: briefing.active.length,
+    overdueCount: briefing.overdue.length,
+    completedCount,
+  });
 
   return (
     <section className="overflow-hidden border-b border-pro-border">
@@ -449,9 +474,7 @@ export const ProjectHealthCard: React.FC<{
             {healthInfo.dot} {healthInfo.label}
           </span>
           <span className="text-[10px] font-bold text-pro-text-muted/60">
-            {briefing.active.length > 0
-              ? `${briefing.active.length} open`
-              : `${completedCount} finished`}
+            {summary}
           </span>
           {/* Chevron */}
           <svg

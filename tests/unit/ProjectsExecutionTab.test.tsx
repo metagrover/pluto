@@ -7,6 +7,7 @@ import {
   buildExecutionSummary,
   getExecutionBriefHeading,
   getNextTaskStatusForToggle,
+  getProjectCardSummary,
   partitionProjectsForDisplay,
   sortExecutionTasksForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
@@ -53,6 +54,35 @@ describe('ProjectHealthCard', () => {
 
     expect(markup).toContain('🔴 Slipping');
     expect(markup).not.toContain('🟢 On Track');
+  });
+
+  it('surfaces overdue counts in slipping project summaries', () => {
+    const project = makeEntity({
+      id: 'project-overdue-summary',
+      metadata: JSON.stringify({ context: 'Customer launch' }),
+    });
+    const overdueTask = makeEntity({
+      id: 'task-overdue-summary',
+      type: 'action_item',
+      name: 'Unblock legal review',
+      status: 'overdue',
+      due_date: '2026-07-20T00:00:00.000Z',
+      metadata: JSON.stringify({
+        full_description: 'Unblock legal review',
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <ProjectHealthCard
+        project={project}
+        tasks={[overdueTask]}
+        onToggleTask={() => {}}
+        onTaskAdded={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('1 overdue');
+    expect(markup).not.toContain('1 open');
   });
 
   it('renders overdue styling for explicitly overdue task due badges', () => {
@@ -312,6 +342,38 @@ describe('getExecutionBriefHeading', () => {
     expect(getExecutionBriefHeading({ activeCount: 0, overdueCount: 0 })).toBe(
       'No active commitments',
     );
+  });
+});
+
+describe('getProjectCardSummary', () => {
+  it('surfaces overdue counts for slipping projects', () => {
+    expect(
+      getProjectCardSummary({
+        activeCount: 3,
+        overdueCount: 1,
+        completedCount: 0,
+      }),
+    ).toBe('1 overdue');
+  });
+
+  it('keeps routine active project summaries unchanged when nothing is overdue', () => {
+    expect(
+      getProjectCardSummary({
+        activeCount: 2,
+        overdueCount: 0,
+        completedCount: 0,
+      }),
+    ).toBe('2 open');
+  });
+
+  it('keeps completed-only project summaries unchanged', () => {
+    expect(
+      getProjectCardSummary({
+        activeCount: 0,
+        overdueCount: 0,
+        completedCount: 2,
+      }),
+    ).toBe('2 finished');
   });
 });
 
