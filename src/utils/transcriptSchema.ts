@@ -30,6 +30,31 @@ export type TranscriptTranscriptionMeta = {
   warnings?: string[];
 };
 
+export type TranscriptSpeakerAttributionSource =
+  | 'diarization'
+  | 'channel_fallback';
+
+export type TranscriptSpeakerAttributionFallbackReason =
+  | 'diarization_disabled'
+  | 'missing_diarization_audio'
+  | 'diarization_error'
+  | 'no_diarization_segments'
+  | 'not_enough_speakers'
+  | 'no_candidates'
+  | 'low_me_overlap'
+  | 'low_them_overlap'
+  | 'ambiguous_speaker'
+  | 'low_confidence'
+  | 'unknown_diarization_fallback';
+
+export type StoredTranscriptSpeakerAttribution = {
+  source: TranscriptSpeakerAttributionSource;
+  confidence: number;
+  diarizationAttempted: boolean;
+  mappingApplied: boolean;
+  fallbackReason?: TranscriptSpeakerAttributionFallbackReason;
+};
+
 export type StoredTranscriptIntegrity = TranscriptIntegrityEvidence & {
   reasons: TranscriptIntegrityReason[];
 };
@@ -50,10 +75,75 @@ export type StoredTranscriptV2 = {
   transcription?: TranscriptTranscriptionMeta;
   /** Optional full-session fallback metadata when session recovery ran. */
   sessionFallbackTranscription?: TranscriptTranscriptionMeta;
+  speakerAttribution?: StoredTranscriptSpeakerAttribution;
   lifecycleStatus?: TranscriptLifecycleStatus;
   integrity?: StoredTranscriptIntegrity;
   segments: unknown[];
 };
+
+const normalizeSpeakerAttributionFallbackReason = (
+  reason?: string,
+): TranscriptSpeakerAttributionFallbackReason | undefined => {
+  if (!reason || !reason.trim()) return undefined;
+
+  switch (reason.trim().toLowerCase().replace(/\s+/g, '_')) {
+    case 'diarization_disabled':
+    case 'missing_diarization_audio':
+    case 'diarization_error':
+    case 'no_diarization_segments':
+    case 'not_enough_speakers':
+    case 'no_candidates':
+    case 'low_me_overlap':
+    case 'low_them_overlap':
+    case 'ambiguous_speaker':
+    case 'low_confidence':
+      return reason
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_') as TranscriptSpeakerAttributionFallbackReason;
+    default:
+      return 'unknown_diarization_fallback';
+  }
+};
+
+export function buildTranscriptSpeakerAttribution(options: {
+  diarizationEnabled: boolean;
+  diarizationAttempted?: boolean;
+  mappingApplied?: boolean;
+  confidence?: number;
+  fallbackReason?: string;
+}): StoredTranscriptSpeakerAttribution {
+  const diarizationAttempted = options.diarizationAttempted === true;
+  const mappingApplied = options.mappingApplied === true;
+  const confidence = Number.isFinite(options.confidence)
+    ? Math.max(0, Math.min(1, Number(options.confidence)))
+    : 0;
+
+  if (mappingApplied) {
+    return {
+      source: 'diarization',
+      confidence,
+      diarizationAttempted,
+      mappingApplied: true,
+    };
+  }
+
+  const fallbackReason =
+    normalizeSpeakerAttributionFallbackReason(options.fallbackReason) ??
+    (options.diarizationEnabled
+      ? diarizationAttempted
+        ? 'unknown_diarization_fallback'
+        : 'missing_diarization_audio'
+      : 'diarization_disabled');
+
+  return {
+    source: 'channel_fallback',
+    confidence,
+    diarizationAttempted,
+    mappingApplied: false,
+    fallbackReason,
+  };
+}
 
 export function buildTranscriptJsonPayload(
   segments: unknown[],
@@ -66,6 +156,7 @@ export function buildTranscriptJsonPayload(
     postHydrationBleedDroppedMe?: number;
     transcription?: TranscriptTranscriptionMeta;
     sessionFallbackTranscription?: TranscriptTranscriptionMeta;
+    speakerAttribution?: StoredTranscriptSpeakerAttribution;
     lifecycleStatus?: TranscriptLifecycleStatus;
     integrity?: StoredTranscriptIntegrity;
   },
@@ -81,6 +172,7 @@ export function buildTranscriptJsonPayload(
     postHydrationBleedDroppedMe: options.postHydrationBleedDroppedMe,
     transcription: options.transcription,
     sessionFallbackTranscription: options.sessionFallbackTranscription,
+    speakerAttribution: options.speakerAttribution,
     lifecycleStatus: options.lifecycleStatus,
     integrity: options.integrity,
     segments,

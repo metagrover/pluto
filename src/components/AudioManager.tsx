@@ -44,9 +44,11 @@ import { buildStoredTranscriptActivityEvidence } from '../utils/transcriptActivi
 import { evaluateLiveTranscriptCoverage } from '../utils/transcriptIntegrity';
 import {
   type CanonicalTranscriptSource,
+  type StoredTranscriptSpeakerAttribution,
   type TranscriptPipelineMode,
   type TranscriptTranscriptionMeta,
   buildTranscriptJsonPayload,
+  buildTranscriptSpeakerAttribution,
 } from '../utils/transcriptSchema';
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
@@ -4017,6 +4019,16 @@ export const AudioManager = ({
 
       const diarizationAudioPath =
         mixedAudioPath || systemAudioPath || primaryAudioPath;
+      let speakerAttribution: StoredTranscriptSpeakerAttribution =
+        buildTranscriptSpeakerAttribution({
+          diarizationEnabled,
+          diarizationAttempted: false,
+          fallbackReason: diarizationEnabled
+            ? diarizationAudioPath
+              ? 'unknown_diarization_fallback'
+              : 'missing_diarization_audio'
+            : 'diarization_disabled',
+        });
       if (diarizationEnabled && diarizationAudioPath) {
         const collectActivityWindowsForAttribution = () => {
           const windows = [...speakerTimelineRef.current];
@@ -4167,6 +4179,14 @@ export const AudioManager = ({
               segments: finalizedSegments,
             });
           finalizedSegments = initialDiarizationAttempt.segments;
+          speakerAttribution = buildTranscriptSpeakerAttribution({
+            diarizationEnabled: true,
+            diarizationAttempted: true,
+            mappingApplied: initialDiarizationAttempt.mappingConfident,
+            confidence: initialDiarizationAttempt.mappingConfidence,
+            fallbackReason:
+              initialDiarizationAttempt.mappingReason ?? undefined,
+          });
           transcriptPipeline.diarizationBoundarySplits =
             initialDiarizationAttempt.splitsApplied;
 
@@ -4202,6 +4222,15 @@ export const AudioManager = ({
                 },
               });
 
+            speakerAttribution = buildTranscriptSpeakerAttribution({
+              diarizationEnabled: true,
+              diarizationAttempted: true,
+              mappingApplied: retryDiarizationAttempt.mappingConfident,
+              confidence: retryDiarizationAttempt.mappingConfidence,
+              fallbackReason:
+                retryDiarizationAttempt.mappingReason ?? undefined,
+            });
+
             transcriptPipeline.speakerAttributionRetryUsed = 1;
             transcriptPipeline.speakerAttributionRetryOutcome =
               retryDiarizationAttempt.mappingConfident
@@ -4225,6 +4254,11 @@ export const AudioManager = ({
                   'insufficient-confidence');
           }
         } catch (e) {
+          speakerAttribution = buildTranscriptSpeakerAttribution({
+            diarizationEnabled: true,
+            diarizationAttempted: true,
+            fallbackReason: 'diarization_error',
+          });
           console.warn('[Pluto] Diarization refinement failed:', e);
         }
       }
@@ -4409,6 +4443,7 @@ export const AudioManager = ({
               pipelineMode,
               canonicalSource: mixedAudioPath ? 'mix' : 'mic',
               postHydrationBleedPass: false,
+              speakerAttribution,
               lifecycleStatus: 'needs_attention',
               integrity: {
                 ...integrityValidation.evidence,
@@ -4570,6 +4605,7 @@ export const AudioManager = ({
             postHydrationBleedDroppedMe,
             transcription: transcriptMeta,
             sessionFallbackTranscription: sessionFallbackTranscriptMeta,
+            speakerAttribution,
             lifecycleStatus: integrityValidation.status,
             integrity: {
               ...integrityValidation.evidence,

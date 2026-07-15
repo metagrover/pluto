@@ -7,6 +7,7 @@ import {
 import {
   TRANSCRIPT_JSON_SCHEMA_VERSION,
   buildTranscriptJsonPayload,
+  buildTranscriptSpeakerAttribution,
 } from '../../src/utils/transcriptSchema';
 
 describe('transcriptSchema', () => {
@@ -39,6 +40,12 @@ describe('transcriptSchema', () => {
           diarization: false,
           elapsedMs: 1234,
         },
+        speakerAttribution: buildTranscriptSpeakerAttribution({
+          diarizationEnabled: true,
+          diarizationAttempted: true,
+          mappingApplied: true,
+          confidence: 0.82,
+        }),
       },
     );
     expect(payload.schemaVersion).toBe(TRANSCRIPT_JSON_SCHEMA_VERSION);
@@ -54,7 +61,59 @@ describe('transcriptSchema', () => {
       'whisperx_tuned',
     );
     expect(payload.sessionFallbackTranscription?.elapsedMs).toBe(1234);
+    expect(payload.speakerAttribution).toEqual({
+      source: 'diarization',
+      confidence: 0.82,
+      diarizationAttempted: true,
+      mappingApplied: true,
+    });
     expect(payload.segments).toHaveLength(1);
+  });
+
+  it('records diarization-backed speaker attribution trust metadata', () => {
+    const attribution = buildTranscriptSpeakerAttribution({
+      diarizationEnabled: true,
+      diarizationAttempted: true,
+      mappingApplied: true,
+      confidence: 0.67,
+    });
+
+    expect(attribution).toEqual({
+      source: 'diarization',
+      confidence: 0.67,
+      diarizationAttempted: true,
+      mappingApplied: true,
+    });
+  });
+
+  it('records explicit fallback reason when diarization confidence is too low', () => {
+    const attribution = buildTranscriptSpeakerAttribution({
+      diarizationEnabled: true,
+      diarizationAttempted: true,
+      fallbackReason: 'low confidence',
+    });
+
+    expect(attribution).toEqual({
+      source: 'channel_fallback',
+      confidence: 0,
+      diarizationAttempted: true,
+      mappingApplied: false,
+      fallbackReason: 'low_confidence',
+    });
+  });
+
+  it('records explicit fallback reason when diarization is disabled', () => {
+    const attribution = buildTranscriptSpeakerAttribution({
+      diarizationEnabled: false,
+    });
+
+    expect(attribution).toEqual({
+      source: 'channel_fallback',
+      confidence: 0,
+      diarizationAttempted: false,
+      mappingApplied: false,
+      fallbackReason: 'diarization_disabled',
+    });
   });
 
   it('parseTranscriptSegments reads v2 wrapper', () => {
