@@ -570,7 +570,10 @@ export const AudioManager = ({
           startedAtMs: startTimeRef.current,
         });
       } catch (journalErr) {
-        console.warn('[Pluto] Failed to initialize capture journal:', journalErr);
+        console.warn(
+          '[Pluto] Failed to initialize capture journal:',
+          journalErr,
+        );
       }
 
       // 0. Acquire Microphone Stream (Critical Path)

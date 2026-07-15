@@ -403,8 +403,7 @@ app.whenReady().then(async () => {
     async (_event, { meetingId, startedAtMs } = {}) => {
       return await createCaptureJournal(getMeetingArtifactsRootDir(), {
         meetingId: String(meetingId || ''),
-        startedAtMs:
-          typeof startedAtMs === 'number' ? startedAtMs : Date.now(),
+        startedAtMs: typeof startedAtMs === 'number' ? startedAtMs : Date.now(),
       });
     },
   );
@@ -428,8 +427,7 @@ app.whenReady().then(async () => {
         source: source === 'system' ? 'system' : 'mic',
         sequence:
           typeof sequence === 'number' ? sequence : Number(sequence || 0),
-        chunkStartSec:
-          typeof chunkStartSec === 'number' ? chunkStartSec : 0,
+        chunkStartSec: typeof chunkStartSec === 'number' ? chunkStartSec : 0,
         chunkEndSec: typeof chunkEndSec === 'number' ? chunkEndSec : 0,
         format: typeof format === 'string' ? format : 'bin',
         data: Buffer.from(data ?? []),

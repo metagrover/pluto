@@ -168,7 +168,10 @@ export const appendCaptureJournalChunk = async (
 
   const sequence = normalizeSequence(args.sequence);
   const chunkStartSec = normalizeSeconds(args.chunkStartSec);
-  const chunkEndSec = Math.max(chunkStartSec, normalizeSeconds(args.chunkEndSec));
+  const chunkEndSec = Math.max(
+    chunkStartSec,
+    normalizeSeconds(args.chunkEndSec),
+  );
   const format = String(args.format || 'bin');
   const data = toBuffer(args.data);
   const checksumSha256 = computeChecksum(data);
