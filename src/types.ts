@@ -126,6 +126,7 @@ export interface Meeting {
   created_at: string;
   started_at: string;
   duration_seconds?: number;
+  audio_path?: string;
   meeting_type?: string;
   enhanced_notes?: string;
   transcript_json?: string;

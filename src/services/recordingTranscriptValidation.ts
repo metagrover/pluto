@@ -195,7 +195,8 @@ export const runRecordingTranscriptValidation = async (input: {
       system.result &&
       micDuration != null &&
       mixDuration != null &&
-      systemDuration != null,
+      systemDuration != null &&
+      micSegments.length + mixedSegments.length + systemSegments.length > 0,
   );
   const validation = validateTranscriptIntegrity({
     recordingDurationSeconds: input.recordingDurationSeconds,

@@ -28,6 +28,7 @@ import type {
   LiveTranscriptSegment,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
+import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 
 import { updateEntityStatus } from './api/knowledgeGraph';
 // Knowledge Graph
@@ -59,6 +60,8 @@ function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const [isServerReady, setIsServerReady] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
+    useState(false);
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingParticipants, setMeetingParticipants] = useState<string[]>([]);
   const [participantInput, setParticipantInput] = useState('');
@@ -419,6 +422,22 @@ function App() {
     } catch (e) {
       console.error('Failed to fetch meetings', e);
       setMeetings([]);
+    }
+  };
+
+  const handleRetryTranscriptValidation = async () => {
+    if (!selectedMeetingId || transcriptValidationRetrying) return;
+    setTranscriptValidationRetrying(true);
+    try {
+      await retryMeetingTranscriptValidation(
+        selectedMeetingId,
+        (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+      );
+      await fetchMeetings();
+    } catch (error) {
+      console.error('[Pluto] Transcript validation retry failed', error);
+    } finally {
+      setTranscriptValidationRetrying(false);
     }
   };
 
@@ -796,6 +815,8 @@ function App() {
                 highlightEntities={highlightEntities}
                 transcriptVisible={transcriptVisible}
                 setTranscriptVisible={setTranscriptVisible}
+                onRetryTranscriptValidation={handleRetryTranscriptValidation}
+                transcriptValidationRetrying={transcriptValidationRetrying}
               />
             ) : activeTab === 'hub' ? (
               <Dashboard
