@@ -463,6 +463,7 @@ export const AudioManager = ({
     new Map(),
   );
   const processingQueueRef = useRef(Promise.resolve());
+  const captureJournalWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const processedMicSegmentsRef = useRef<TranscriptionSegment[]>([]);
   const zeroMicChunkStreakRef = useRef(0);
   const micChunkConversionFailuresRef = useRef(0);
@@ -495,6 +496,43 @@ export const AudioManager = ({
   // --- Native Capture Logic ---
   // Functions defined below, event listeners set up after
 
+  const enqueueCaptureJournalWrite = (task: () => Promise<void>) => {
+    const next = captureJournalWriteQueueRef.current.then(task);
+    captureJournalWriteQueueRef.current = next.catch((error) => {
+      console.warn('[Pluto] Capture journal write failed:', error);
+    });
+    return captureJournalWriteQueueRef.current;
+  };
+
+  const appendCaptureJournalBlob = async ({
+    meetingId,
+    source,
+    sequence,
+    chunkStartSec,
+    chunkEndSec,
+    format,
+    blob,
+  }: {
+    meetingId: string;
+    source: 'mic' | 'system';
+    sequence: number;
+    chunkStartSec: number;
+    chunkEndSec: number;
+    format: string;
+    blob: Blob;
+  }) => {
+    const data = await blob.arrayBuffer();
+    await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_APPEND', {
+      meetingId,
+      source,
+      sequence,
+      chunkStartSec,
+      chunkEndSec,
+      format,
+      data,
+    });
+  };
+
   const startSession = async () => {
     if (
       isRecordingRef.current ||
@@ -509,6 +547,7 @@ export const AudioManager = ({
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
       startTimeRef.current = Date.now();
+      captureJournalWriteQueueRef.current = Promise.resolve();
       onRecordingStarted?.(startTimeRef.current);
       recordingEndedAtRef.current = 0;
       stopInFlightRef.current = false;
@@ -525,6 +564,17 @@ export const AudioManager = ({
       console.log(
         `[Pluto] Starting session ${meetingId} (Robust Mic First)...`,
       );
+      try {
+        await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_START', {
+          meetingId,
+          startedAtMs: startTimeRef.current,
+        });
+      } catch (journalErr) {
+        console.warn(
+          '[Pluto] Failed to initialize capture journal:',
+          journalErr,
+        );
+      }
 
       // 0. Acquire Microphone Stream (Critical Path)
       let micStream: MediaStream | null = null;
@@ -825,51 +875,61 @@ export const AudioManager = ({
               systemPcmChunksRef.current = [];
             }
 
-            // Manually handle chunks
-            handleChunkBlob(
-              'mic',
-              index,
-              finalMicBlob,
-              micChunkFormat,
-              chunkStartSec,
-              chunkEndSec,
-            );
-            if (systemBlob) {
+            const meetingIdForChunk = currentMeetingIdRef.current;
+            void enqueueCaptureJournalWrite(async () => {
+              if (meetingIdForChunk) {
+                await appendCaptureJournalBlob({
+                  meetingId: meetingIdForChunk,
+                  source: 'mic',
+                  sequence: index,
+                  chunkStartSec,
+                  chunkEndSec,
+                  format: micChunkFormat,
+                  blob: finalMicBlob,
+                });
+                if (systemBlob) {
+                  await appendCaptureJournalBlob({
+                    meetingId: meetingIdForChunk,
+                    source: 'system',
+                    sequence: index,
+                    chunkStartSec,
+                    chunkEndSec,
+                    format: 'wav',
+                    blob: systemBlob,
+                  });
+                }
+              }
+
+              handleChunkBlob(
+                'mic',
+                index,
+                finalMicBlob,
+                micChunkFormat,
+                chunkStartSec,
+                chunkEndSec,
+              );
+              if (systemBlob) {
+                handleChunkBlob(
+                  'system',
+                  index,
+                  systemBlob,
+                  'wav',
+                  chunkStartSec,
+                  chunkEndSec,
+                );
+                return;
+              }
+
+              const silence = new Float32Array(systemPcmSampleRateRef.current);
               handleChunkBlob(
                 'system',
                 index,
-                systemBlob,
+                createWavBlob(silence, systemPcmSampleRateRef.current, 1),
                 'wav',
                 chunkStartSec,
                 chunkEndSec,
               );
-            } else {
-              // If no system audio, effectively "silence" - handleChunkBlob logic
-              // expects to wait if hasSystemRecorderRef is true.
-              // But for native capture, we might have pure silence if no output.
-              // Send empty blob or nothing?
-              // If we send nothing, 'handleChunkBlob' might hang waiting for it.
-              // Let's create an empty 1-second silence WAV to keep pipeline flowing?
-              // Or simpler: handleChunkBlob checks "micBlob && (systemBlob || !hasSystemRecorderRef)".
-              // If hasSystemRecorderRef is true, we MUST provide a systemBlob.
-              // So create dummy silence.
-              const silence = new Float32Array(
-                systemPcmSampleRateRef.current * 1,
-              ); // 1 sec silence
-              systemBlob = createWavBlob(
-                silence,
-                systemPcmSampleRateRef.current,
-                1,
-              );
-              handleChunkBlob(
-                'system',
-                index,
-                systemBlob,
-                'wav',
-                chunkStartSec,
-                chunkEndSec,
-              );
-            }
+            });
           }
         };
 
@@ -3341,9 +3401,20 @@ export const AudioManager = ({
       pendingSystemChunksRef.current.clear();
       zeroMicChunkStreakRef.current = 0;
 
+      await captureJournalWriteQueueRef.current;
+
       // Wait for queue
       await processingQueueRef.current;
       if (!currentMeetingIdRef.current) return; // Session aborted or never started
+
+      try {
+        await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_SEAL', {
+          meetingId: currentMeetingIdRef.current,
+          endedAtMs: stopSnapshot.recordingEndedAtMs,
+        });
+      } catch (journalErr) {
+        console.warn('[Pluto] Failed to seal capture journal:', journalErr);
+      }
 
       // Store a single full audio file for playback
       const primaryBlob = micBlob; // Default to mic
