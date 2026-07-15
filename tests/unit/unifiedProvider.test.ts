@@ -335,6 +335,32 @@ describe('UnifiedLLMProvider', () => {
     expect(maxTokens).toBe(50);
   });
 
+  it('strips a model response label from a generated title', async () => {
+    installFetchMock(() =>
+      jsonResponse({ content: [{ text: 'Title: Roadmap Review' }] }),
+    );
+
+    const provider = new UnifiedLLMProvider('claude', {
+      claude_api_key: 'test-key',
+    });
+
+    await expect(
+      provider.generateTitle('Speaker A: roadmap review'),
+    ).resolves.toBe('Roadmap Review');
+  });
+
+  it('falls back when a generated title contains only a response label', async () => {
+    installFetchMock(() => jsonResponse({ content: [{ text: 'TITLE:   ' }] }));
+
+    const provider = new UnifiedLLMProvider('claude', {
+      claude_api_key: 'test-key',
+    });
+
+    await expect(
+      provider.generateTitle('Speaker A: roadmap review'),
+    ).resolves.toBe('Meeting');
+  });
+
   it('routes gemini entities extraction in JSON mode', async () => {
     geminiGenerateContentMock.mockResolvedValue({
       response: Promise.resolve({

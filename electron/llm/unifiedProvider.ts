@@ -821,9 +821,13 @@ export class UnifiedLLMProvider implements LLMProvider {
     const prompt = getTitlePrompt(transcript);
 
     try {
-      const title = (await this.generateText({ prompt, task: 'title' })).trim();
+      const title = (await this.generateText({ prompt, task: 'title' }))
+        .trim()
+        .replace(/["']/g, '')
+        .replace(/^title\s*:\s*/i, '')
+        .trim();
       if (title && title.length < 100) {
-        return title.replace(/["']/g, '');
+        return title;
       }
       return 'Meeting';
     } catch (e) {
