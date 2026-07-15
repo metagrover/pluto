@@ -1,5 +1,13 @@
 import type { Meeting } from '../types';
-import type { AttributionSegment } from '../utils/speakerAttribution';
+import type {
+  AttributionSegment,
+  SpeakerActivityWindow,
+} from '../utils/speakerAttribution';
+import {
+  type TranscriptActivityEvidenceFallbackSource,
+  buildStoredTranscriptActivityEvidence,
+  parseStoredTranscriptActivityEvidence,
+} from '../utils/transcriptActivityEvidence';
 import { buildTranscriptJsonPayload } from '../utils/transcriptSchema';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation';
 
@@ -59,6 +67,40 @@ const hadUnaccountedSpeech = (
   }
 };
 
+const readStoredActivityWindows = (
+  meeting: Meeting,
+  provisionalSegments: AttributionSegment[],
+): {
+  windows: SpeakerActivityWindow[];
+  source: TranscriptActivityEvidenceFallbackSource;
+} => {
+  try {
+    const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      activityEvidence?: unknown;
+    };
+    const stored = parseStoredTranscriptActivityEvidence(
+      parsed.activityEvidence,
+    );
+    if (stored) {
+      return {
+        windows: stored.windows,
+        source: stored.source,
+      };
+    }
+  } catch {
+    // Legacy or malformed integrity payloads fall back to transcript-derived windows.
+  }
+
+  return {
+    windows: provisionalSegments.map((segment) => ({
+      startTime: segment.startTime,
+      endTime: segment.endTime,
+      speaker: segment.speaker === 'Them' ? 'Them' : 'Me',
+    })),
+    source: 'legacy_provisional_segments',
+  };
+};
+
 export const retryMeetingTranscriptValidation = async (
   meetingId: string | number,
   invoke: Invoke,
@@ -76,6 +118,10 @@ export const retryMeetingTranscriptValidation = async (
     mix: meeting.mixed_audio_path || '',
   };
   const provisionalSegments = parseSegments(meeting.transcript_json);
+  const activityEvidence = readStoredActivityWindows(
+    meeting,
+    provisionalSegments,
+  );
   await invoke('SAVE_MEETING', {
     ...meeting,
     transcript_status: 'validating',
@@ -89,11 +135,7 @@ export const retryMeetingTranscriptValidation = async (
     systemAudioPath: sourcePaths.system,
     mixAudioPath: sourcePaths.mix,
     provisionalSegments,
-    activityWindows: provisionalSegments.map((segment) => ({
-      startTime: segment.startTime,
-      endTime: segment.endTime,
-      speaker: segment.speaker === 'Them' ? 'Them' : 'Me',
-    })),
+    activityWindows: activityEvidence.windows,
     transcribe: async (audioPath, options) =>
       (await invoke('WHISPER_TRANSCRIBE', audioPath, options)) as {
         segments?: Array<{ start: number; end: number; text: string }>;
@@ -106,6 +148,14 @@ export const retryMeetingTranscriptValidation = async (
     ...validation.evidence,
     reasons: validation.reasons,
     attempts: validation.attempts,
+    activityEvidenceSource: activityEvidence.source,
+    ...(activityEvidence.source === 'capture_activity_v1'
+      ? {
+          activityEvidence: buildStoredTranscriptActivityEvidence(
+            activityEvidence.windows,
+          ),
+        }
+      : {}),
     validation_run_id: runId,
   };
 
