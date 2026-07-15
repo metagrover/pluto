@@ -38,10 +38,7 @@ describe('runRecordingTranscriptValidation', () => {
 
     expect(transcribe).toHaveBeenCalledTimes(3);
     expect(result.status).toBe('validated');
-    expect(result.segments.map((item) => item.speaker)).toEqual([
-      'Me',
-      'Them',
-    ]);
+    expect(result.segments.map((item) => item.speaker)).toEqual(['Me', 'Them']);
   });
 
   it('returns needs_attention when a required source fails twice', async () => {

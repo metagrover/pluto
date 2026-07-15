@@ -1,5 +1,6 @@
 import { Loader2, Mic } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { runRecordingTranscriptValidation } from '../services/recordingTranscriptValidation';
 import type { AnalysisDocumentV3 } from '../types';
 import {
   analysisDocumentV3ToMarkdown,
@@ -14,7 +15,6 @@ import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscript
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
-  collectRecordingArtifactPaths,
   resolveFinalizationCleanupPaths,
 } from '../utils/recordingFinalization';
 import { getSessionFallbackDecision } from '../utils/sessionTranscriptionFallback';
@@ -71,9 +71,7 @@ interface AudioManagerProps {
     microphone: CaptureHealth;
     systemAudio: CaptureHealth;
   }) => void;
-  onLiveTranscriptIntegrityChange?: (
-    state: LiveTranscriptIntegrity,
-  ) => void;
+  onLiveTranscriptIntegrityChange?: (state: LiveTranscriptIntegrity) => void;
   onRecordingStarted?: (startedAtMs: number) => void;
   userNotes?: string;
   userTitle?: string;
@@ -196,12 +194,6 @@ const TRANSCRIPT_PIPELINE_LOG: boolean =
   (typeof process !== 'undefined' &&
     typeof process.env !== 'undefined' &&
     process.env.PLUTO_TRANSCRIPT_PIPELINE_LOG === '1');
-
-const CANONICAL_SESSION_V2_ENABLED: boolean =
-  (typeof process !== 'undefined' &&
-    typeof process.env !== 'undefined' &&
-    process.env.PLUTO_CANONICAL_SESSION_V2 === '1') ||
-  false;
 
 const normalizeSignalTag = (value: unknown): InternalSignalTag | null => {
   if (!value || typeof value !== 'object') return null;
@@ -3467,14 +3459,12 @@ export const AudioManager = ({
         (segment) => segment.speaker === 'Them',
       );
       const hasChunkMeSegments = chunkMeSegments.length > 0;
-      const pipelineMode: TranscriptPipelineMode = CANONICAL_SESSION_V2_ENABLED
-        ? 'canonical_session_v2'
-        : 'legacy';
+      const pipelineMode: TranscriptPipelineMode = 'canonical_session_v2';
       const chunkWordCount = collectedSegments.reduce((total, segment) => {
         return total + segment.text.trim().split(/\s+/).filter(Boolean).length;
       }, 0);
       const provisionalMeetingDurationSeconds = getMeetingElapsedSeconds();
-      const sessionFallbackDecision = getSessionFallbackDecision({
+      const provisionalFallbackDecision = getSessionFallbackDecision({
         meetingDurationSeconds: provisionalMeetingDurationSeconds,
         totalSpeakerWindowSeconds,
         segmentCount: collectedSegments.length,
@@ -3485,12 +3475,14 @@ export const AudioManager = ({
         micTranscriptionDisabled: disableMicChunkTranscriptionRef.current,
         systemChunkDecodeDropCount: systemChunkDecodeDropCountRef.current,
       });
-      transcriptPipeline.sessionFallbackUsed = sessionFallbackDecision.shouldRun
-        ? 1
-        : 0;
-      if (sessionFallbackDecision.reasons.length > 0) {
-        transcriptPipeline.sessionFallbackReasons =
-          sessionFallbackDecision.reasons.join(',');
+      const sessionFallbackDecision = {
+        ...provisionalFallbackDecision,
+        shouldRun: false,
+      };
+      transcriptPipeline.sessionFallbackUsed = 0;
+      if (provisionalFallbackDecision.reasons.length > 0) {
+        transcriptPipeline.provisionalRecoveryReasons =
+          provisionalFallbackDecision.reasons.join(',');
       }
 
       const useMixForCanonical = shouldUseMixForCanonicalTranscript({
@@ -4159,6 +4151,79 @@ export const AudioManager = ({
         });
       }
 
+      const meetingTiming = buildMeetingTiming(stopSnapshot);
+      const integrityValidation = await runRecordingTranscriptValidation({
+        meetingId: stopSnapshot.meetingId,
+        recordingDurationSeconds: meetingTiming.durationSeconds,
+        micAudioPath: primaryAudioPath,
+        mixAudioPath: mixedAudioPath,
+        systemAudioPath,
+        provisionalSegments: newTranscription,
+        activityWindows: speakerTimelineRef.current,
+        transcribe: async (audioPath, options) =>
+          await window.ipcRenderer.invoke(
+            'WHISPER_TRANSCRIBE',
+            audioPath,
+            buildTranscriptionOptions({
+              diarize: false,
+              meetingId: stopSnapshot.meetingId,
+              canonicalSource:
+                options.canonicalSource === 'mix' ? 'mix' : 'mic',
+            }),
+          ),
+        probeDuration: async (audioPath) =>
+          await window.ipcRenderer.invoke('AUDIO_PROBE_DURATION', audioPath),
+      });
+      newTranscription.splice(
+        0,
+        newTranscription.length,
+        ...(integrityValidation.segments as TranscriptionSegment[]),
+      );
+
+      if (integrityValidation.status === 'needs_attention') {
+        const recoverableMeeting = {
+          id: stopSnapshot.meetingId,
+          title: userTitle || 'Meeting',
+          meeting_type: 'Recording',
+          started_at: meetingTiming.startedAtIso,
+          ended_at: meetingTiming.endedAtIso,
+          duration_seconds: meetingTiming.durationSeconds,
+          audio_path: primaryAudioPath || null,
+          system_audio_path: systemAudioPath || null,
+          mixed_audio_path: mixedAudioPath || null,
+          transcript_status: 'needs_attention',
+          transcript_integrity_json: JSON.stringify({
+            ...integrityValidation.evidence,
+            reasons: integrityValidation.reasons,
+            attempts: integrityValidation.attempts,
+          }),
+          transcript_validated_at: null,
+          transcript_json: JSON.stringify(
+            buildTranscriptJsonPayload(newTranscription, {
+              pipelineMode,
+              canonicalSource: mixedAudioPath ? 'mix' : 'mic',
+              postHydrationBleedPass: false,
+              lifecycleStatus: 'needs_attention',
+              integrity: {
+                ...integrityValidation.evidence,
+                reasons: integrityValidation.reasons,
+              },
+            }),
+          ),
+          user_notes: userNotes,
+          enhanced_notes: null,
+          analysis_json: null,
+          value_signals_json: null,
+          participants,
+          folder_id: null,
+          is_favorite: false,
+          end_reason: endReason || 'manual',
+        };
+        await window.ipcRenderer.invoke('SAVE_MEETING', recoverableMeeting);
+        onSessionComplete?.(recoverableMeeting.id);
+        return;
+      }
+
       if (onTranscript && newTranscription.length > 0) {
         const fullText = newTranscription.map((s) => s.text).join(' ');
         onTranscript(fullText);
@@ -4209,7 +4274,6 @@ export const AudioManager = ({
       const labeledTranscription = newTranscription;
 
       // 4. Save to DB
-      const meetingTiming = buildMeetingTiming(stopSnapshot);
 
       // Generate intelligent title
       let title = userTitle || 'Meeting';
@@ -4276,6 +4340,18 @@ export const AudioManager = ({
         ended_at: meetingTiming.endedAtIso,
         duration_seconds: meetingTiming.durationSeconds,
         audio_path: primaryAudioPath,
+        system_audio_path: systemAudioPath,
+        mixed_audio_path: mixedAudioPath,
+        transcript_status: integrityValidation.status,
+        transcript_integrity_json: JSON.stringify({
+          ...integrityValidation.evidence,
+          reasons: integrityValidation.reasons,
+          attempts: integrityValidation.attempts,
+        }),
+        transcript_validated_at:
+          integrityValidation.status === 'validated'
+            ? new Date().toISOString()
+            : null,
         transcript_json: JSON.stringify(
           buildTranscriptJsonPayload(labeledTranscription, {
             pipelineMode,
@@ -4286,6 +4362,11 @@ export const AudioManager = ({
             postHydrationBleedDroppedMe,
             transcription: transcriptMeta,
             sessionFallbackTranscription: sessionFallbackTranscriptMeta,
+            lifecycleStatus: integrityValidation.status,
+            integrity: {
+              ...integrityValidation.evidence,
+              reasons: integrityValidation.reasons,
+            },
           }),
         ),
         user_notes: userNotes,
@@ -4315,6 +4396,7 @@ export const AudioManager = ({
         systemAudioPath,
         rebuiltSystemAudioPath,
         mixedAudioPath,
+        validationStatus: integrityValidation.status,
       });
       if (cleanupPaths.length > 0) {
         try {
@@ -4391,21 +4473,42 @@ export const AudioManager = ({
       }
     } catch (e) {
       console.error('[Pluto] Processing failed:', e);
-      const artifactPaths = collectRecordingArtifactPaths(
-        primaryAudioPath,
-        systemAudioPath,
-        mixedAudioPath,
-        rebuiltSystemAudioPath,
-      );
-      if (artifactPaths.length > 0) {
-        void window.ipcRenderer
-          .invoke('AUDIO_DELETE_FILES', artifactPaths)
-          .catch((cleanupErr) => {
-            console.warn(
-              '[Pluto] Failed to clean recording artifacts after finalization error:',
-              cleanupErr,
-            );
+      if (
+        currentMeetingIdRef.current &&
+        (primaryAudioPath || systemAudioPath || mixedAudioPath)
+      ) {
+        try {
+          const meetingTiming = buildMeetingTiming(stopSnapshot);
+          await window.ipcRenderer.invoke('SAVE_MEETING', {
+            id: currentMeetingIdRef.current,
+            title: userTitle || 'Meeting',
+            meeting_type: 'Recording',
+            started_at: meetingTiming.startedAtIso,
+            ended_at: meetingTiming.endedAtIso,
+            duration_seconds: meetingTiming.durationSeconds,
+            audio_path: primaryAudioPath || null,
+            system_audio_path:
+              rebuiltSystemAudioPath || systemAudioPath || null,
+            mixed_audio_path: mixedAudioPath || null,
+            transcript_status: 'needs_attention',
+            transcript_integrity_json: JSON.stringify({
+              reasons: ['required_source_failed'],
+            }),
+            transcript_validated_at: null,
+            transcript_json: JSON.stringify([]),
+            user_notes: userNotes,
+            enhanced_notes: null,
+            analysis_json: null,
+            value_signals_json: null,
+            participants,
+            folder_id: null,
+            is_favorite: false,
+            end_reason: endReason || 'processing_error',
           });
+          onSessionComplete?.(currentMeetingIdRef.current);
+        } catch {
+          console.error('[Pluto] Failed to save recoverable recording state');
+        }
       }
       alert(`Failed to process recording: ${(e as Error).message}`);
       isRecordingRef.current = false;

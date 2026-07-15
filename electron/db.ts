@@ -535,10 +535,10 @@ const initDb = () => {
       db.exec('ALTER TABLE meetings ADD COLUMN mixed_audio_path TEXT');
       console.log('[DB] Added meetings.mixed_audio_path column');
     }
-    if (
-      !meetingColumns.some((col) => col.name === 'transcript_validated_at')
-    ) {
-      db.exec('ALTER TABLE meetings ADD COLUMN transcript_validated_at DATETIME');
+    if (!meetingColumns.some((col) => col.name === 'transcript_validated_at')) {
+      db.exec(
+        'ALTER TABLE meetings ADD COLUMN transcript_validated_at DATETIME',
+      );
       console.log('[DB] Added meetings.transcript_validated_at column');
     }
   } catch (e) {

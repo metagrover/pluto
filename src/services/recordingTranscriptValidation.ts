@@ -1,6 +1,6 @@
-import {
-  type AttributionSegment,
-  type SpeakerActivityWindow,
+import type {
+  AttributionSegment,
+  SpeakerActivityWindow,
 } from '../utils/speakerAttribution';
 import {
   type TranscriptIntegrityEvidence,
@@ -39,6 +39,7 @@ const transcribeWithRetry = async (
   meetingId: string,
   canonicalSource: CanonicalSource,
 ): Promise<SourceResult> => {
+  if (!audioPath) return { attempts: 0, result: null };
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
       return {
@@ -50,6 +51,14 @@ const transcribeWithRetry = async (
     }
   }
   return { attempts: 2, result: null };
+};
+
+const probeDuration = async (
+  probe: (audioPath: string) => Promise<number | null>,
+  audioPath: string,
+): Promise<number | null> => {
+  if (!audioPath) return null;
+  return probe(audioPath).catch(() => null);
 };
 
 const toSegments = (
@@ -91,8 +100,7 @@ const activitySeconds = (
   windows
     .filter((window) => window.speaker === speaker)
     .reduce(
-      (total, window) =>
-        total + Math.max(0, window.endTime - window.startTime),
+      (total, window) => total + Math.max(0, window.endTime - window.startTime),
       0,
     );
 
@@ -154,9 +162,9 @@ export const runRecordingTranscriptValidation = async (input: {
         input.meetingId,
         'system',
       ),
-      input.probeDuration(input.micAudioPath).catch(() => null),
-      input.probeDuration(input.mixAudioPath).catch(() => null),
-      input.probeDuration(input.systemAudioPath).catch(() => null),
+      probeDuration(input.probeDuration, input.micAudioPath),
+      probeDuration(input.probeDuration, input.mixAudioPath),
+      probeDuration(input.probeDuration, input.systemAudioPath),
     ]);
 
   const micSegments = toSegments(mic.result, 'Me', 'mic');
@@ -170,10 +178,7 @@ export const runRecordingTranscriptValidation = async (input: {
     activityWindows: input.activityWindows,
   });
   const micActivitySeconds = activitySeconds(input.activityWindows, 'Me');
-  const systemActivitySeconds = activitySeconds(
-    input.activityWindows,
-    'Them',
-  );
+  const systemActivitySeconds = activitySeconds(input.activityWindows, 'Them');
   const localTranscriptCoveredSeconds = coveredActivitySeconds(
     input.activityWindows,
     reconciliation.segments,
