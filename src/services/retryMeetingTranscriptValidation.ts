@@ -181,12 +181,7 @@ export const retryMeetingTranscriptValidation = async (
     reasons:
       activityEvidence.failureReason == null
         ? [...validation.reasons]
-        : [
-            ...new Set([
-              activityEvidence.failureReason,
-              ...validation.reasons,
-            ]),
-          ],
+        : [...new Set([activityEvidence.failureReason, ...validation.reasons])],
     attempts: validation.attempts,
     activityEvidenceSource: activityEvidence.source,
     ...(activityEvidence.source === 'capture_activity_v1'
