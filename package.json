@@ -18,7 +18,7 @@
     "build-python": "./scripts/build_python.sh",
     "fix-sqlite-abi": "npx electron-rebuild -f -w better-sqlite3",
     "prepare": "lefthook install",
-    "audit:high": "pnpm audit --audit-level high",
+    "audit:high": "node scripts/audit-high.mjs",
     "test": "vitest",
     "test:manual": "vitest run tests/manual/**/*.test.ts",
     "replay:meeting": "node scripts/replay_meeting_attribution.js",
