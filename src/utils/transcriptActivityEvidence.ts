@@ -5,7 +5,9 @@ export const STORED_TRANSCRIPT_ACTIVITY_EVIDENCE_SCHEMA_VERSION = 1;
 export type TranscriptActivityEvidenceSource = 'capture_activity_v1';
 export type TranscriptActivityEvidenceFallbackSource =
   | 'capture_activity_v1'
-  | 'legacy_provisional_segments';
+  | 'legacy_provisional_segments'
+  | 'capture_activity_missing'
+  | 'capture_activity_corrupt';
 
 export type StoredTranscriptActivityWindow = {
   startTime: number;

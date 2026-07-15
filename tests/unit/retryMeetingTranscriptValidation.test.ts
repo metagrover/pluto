@@ -280,4 +280,137 @@ describe('retryMeetingTranscriptValidation', () => {
       expect.anything(),
     );
   });
+
+  it('fails closed when a deterministic retry expects stored activity evidence but none is present', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        activityEvidenceSource: 'capture_activity_v1',
+        reasons: [],
+      }),
+      transcript_json: JSON.stringify({
+        segments: [
+          {
+            speaker: 'Me',
+            startTime: 0,
+            endTime: 4,
+            text: 'Recovered local statement.',
+          },
+          {
+            speaker: 'Them',
+            startTime: 10,
+            endTime: 14,
+            text: 'Recovered remote statement.',
+          },
+        ],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        const audioPath = String(payload);
+        if (audioPath.includes('system')) {
+          return {
+            segments: [rawSegment(10, 14, 'Recovered remote statement.')],
+          };
+        }
+        return {
+          segments: [rawSegment(0, 4, 'Recovered local statement.')],
+        };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('needs_attention');
+    expect(
+      JSON.parse(String(current.transcript_integrity_json)).reasons,
+    ).toContain('deterministic_retry_evidence_missing');
+    expect(
+      JSON.parse(String(current.transcript_integrity_json))
+        .activityEvidenceSource,
+    ).toBe('capture_activity_missing');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_ANALYSIS_V2',
+      expect.anything(),
+    );
+  });
+
+  it('fails closed when stored deterministic retry evidence is corrupt', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        activityEvidenceSource: 'capture_activity_v1',
+        activityEvidence: {
+          schemaVersion: 999,
+          source: 'capture_activity_v1',
+          windows: [{ startTime: 0, endTime: 4, speaker: 'Me' }],
+        },
+        reasons: [],
+      }),
+      transcript_json: JSON.stringify({
+        segments: [
+          {
+            speaker: 'Me',
+            startTime: 0,
+            endTime: 4,
+            text: 'Recovered local statement.',
+          },
+          {
+            speaker: 'Them',
+            startTime: 10,
+            endTime: 14,
+            text: 'Recovered remote statement.',
+          },
+        ],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        const audioPath = String(payload);
+        if (audioPath.includes('system')) {
+          return {
+            segments: [rawSegment(10, 14, 'Recovered remote statement.')],
+          };
+        }
+        return {
+          segments: [rawSegment(0, 4, 'Recovered local statement.')],
+        };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('needs_attention');
+    expect(
+      JSON.parse(String(current.transcript_integrity_json)).reasons,
+    ).toContain('deterministic_retry_evidence_corrupt');
+    expect(
+      JSON.parse(String(current.transcript_integrity_json))
+        .activityEvidenceSource,
+    ).toBe('capture_activity_corrupt');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_ANALYSIS_V2',
+      expect.anything(),
+    );
+  });
 });
