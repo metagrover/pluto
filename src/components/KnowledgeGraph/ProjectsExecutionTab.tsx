@@ -96,6 +96,51 @@ export const getNextTaskStatusForToggle = (
   return status === 'completed' ? 'active' : 'completed';
 };
 
+export const buildExecutionSummary = ({
+  activeTaskCount,
+  activeProjectCount,
+  activeInboxTaskCount,
+}: {
+  activeTaskCount: number;
+  activeProjectCount: number;
+  activeInboxTaskCount: number;
+}) => {
+  if (activeTaskCount === 0) {
+    return {
+      heading: 'No active commitments',
+      detail:
+        'Completed work is tucked away. Start from the inbox when something new appears.',
+    };
+  }
+
+  const projectLabel =
+    activeProjectCount === 1 ? '1 project' : `${activeProjectCount} projects`;
+
+  if (activeProjectCount === 0) {
+    return {
+      heading: 'Work in motion',
+      detail: `${activeTaskCount} open in the inbox`,
+    };
+  }
+
+  if (activeInboxTaskCount === 0) {
+    return {
+      heading: 'Work in motion',
+      detail: `${activeTaskCount} open across ${projectLabel}`,
+    };
+  }
+
+  const inboxLabel =
+    activeInboxTaskCount === 1
+      ? '1 inbox item'
+      : `${activeInboxTaskCount} inbox items`;
+
+  return {
+    heading: 'Work in motion',
+    detail: `${activeTaskCount} open across ${projectLabel} and ${inboxLabel}`,
+  };
+};
+
 const computeHealth = (tasks: Entity[]): HealthStatus => {
   if (buildProjectsBriefing(tasks).active.length === 0) return 'complete';
   const now = Date.now();
@@ -500,6 +545,11 @@ export const ProjectsExecutionTab: React.FC = () => {
   const completedUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'completed',
   );
+  const executionSummary = buildExecutionSummary({
+    activeTaskCount: activeTasks.length,
+    activeProjectCount: activeProjects.length,
+    activeInboxTaskCount: activeUngroupedTasks.length,
+  });
 
   if (loading && allTasks.length === 0) {
     return (
@@ -567,14 +617,10 @@ export const ProjectsExecutionTab: React.FC = () => {
         <div>
           <p className="workspace-eyebrow">Execution brief</p>
           <h1 className="mt-2 text-3xl font-black tracking-tight text-pro-text-main">
-            {activeTasks.length > 0
-              ? 'Work in motion'
-              : 'No active commitments'}
+            {executionSummary.heading}
           </h1>
           <p className="mt-2 text-sm font-medium text-pro-text-muted">
-            {activeTasks.length > 0
-              ? `${activeTasks.length} open across ${activeProjects.length} project${activeProjects.length === 1 ? '' : 's'}`
-              : 'Completed work is tucked away. Start from the inbox when something new appears.'}
+            {executionSummary.detail}
             {overdueTasks.length > 0 && (
               <span className="text-red-500 font-bold ml-2">
                 {overdueTasks.length} overdue
