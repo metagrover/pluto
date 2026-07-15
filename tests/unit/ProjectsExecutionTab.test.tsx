@@ -157,6 +157,58 @@ describe('partitionProjectsForDisplay', () => {
       'project-complete',
     ]);
   });
+
+  it('prioritizes slipping projects ahead of routine work while keeping stable order within a health bucket', () => {
+    const onTrackFirst = makeEntity({
+      id: 'project-on-track-first',
+      name: 'Routine first',
+    });
+    const slippingProject = makeEntity({
+      id: 'project-slipping',
+      name: 'Slipping launch',
+    });
+    const onTrackSecond = makeEntity({
+      id: 'project-on-track-second',
+      name: 'Routine second',
+    });
+    const groupedTasks = {
+      'project-on-track-first': [
+        makeEntity({
+          id: 'task-on-track-first',
+          type: 'action_item',
+          name: 'Prepare notes',
+          due_date: '2026-07-20T00:00:00.000Z',
+        }),
+      ],
+      'project-slipping': [
+        makeEntity({
+          id: 'task-slipping',
+          type: 'action_item',
+          name: 'Unblock review',
+          status: 'overdue',
+        }),
+      ],
+      'project-on-track-second': [
+        makeEntity({
+          id: 'task-on-track-second',
+          type: 'action_item',
+          name: 'Share agenda',
+          due_date: '2026-07-21T00:00:00.000Z',
+        }),
+      ],
+    };
+
+    const result = partitionProjectsForDisplay(
+      [onTrackFirst, slippingProject, onTrackSecond],
+      groupedTasks,
+    );
+
+    expect(result.activeProjects.map((project) => project.id)).toEqual([
+      'project-slipping',
+      'project-on-track-first',
+      'project-on-track-second',
+    ]);
+  });
 });
 
 describe('getNextTaskStatusForToggle', () => {
