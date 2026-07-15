@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   beginRecordingFinalization,
+  buildSpeakerAttributionRetryPlan,
   buildMeetingTiming,
   collectDisposableRecordingArtifactPaths,
+  getStrongerSpeakerAttributionPolicy,
   resolveFinalizationCleanupPaths,
 } from '../../src/utils/recordingFinalization';
 
@@ -90,5 +92,101 @@ describe('recording finalization helpers', () => {
     });
 
     expect(cleanup).toEqual([]);
+  });
+
+  it('returns a stronger speaker-attribution policy when current settings are weaker', () => {
+    expect(
+      getStrongerSpeakerAttributionPolicy({
+        backend: 'whisperx_current',
+        preset: 'balanced',
+        model: 'small',
+        device: 'cpu',
+        computeType: 'int8',
+        language: 'en',
+      }),
+    ).toMatchObject({
+      backend: 'whisperx_tuned',
+      preset: 'accuracy_first',
+      model: 'large-v3',
+      computeType: 'float32',
+    });
+  });
+
+  it('does not request a stronger speaker-attribution policy when already strongest', () => {
+    expect(
+      getStrongerSpeakerAttributionPolicy({
+        backend: 'whisperx_tuned',
+        preset: 'accuracy_first',
+        model: 'large-v3',
+        device: 'cpu',
+        computeType: 'float32',
+        language: 'en',
+      }),
+    ).toBeNull();
+  });
+
+  it('retries low-confidence speaker attribution only when a stronger policy exists', () => {
+    expect(
+      buildSpeakerAttributionRetryPlan({
+        diarizationEnabled: true,
+        mappingConfident: false,
+        retryAlreadyUsed: false,
+        settings: {
+          backend: 'whisperx_current',
+          preset: 'balanced',
+          model: 'small',
+          device: 'cpu',
+          computeType: 'int8',
+          language: 'en',
+        },
+      }),
+    ).toMatchObject({
+      shouldRetry: true,
+      reason: 'retry-with-stronger-policy',
+      strongerOptions: {
+        backend: 'whisperx_tuned',
+        preset: 'accuracy_first',
+      },
+    });
+  });
+
+  it('skips the retry when mapping is already confident or the stronger pass already ran', () => {
+    expect(
+      buildSpeakerAttributionRetryPlan({
+        diarizationEnabled: true,
+        mappingConfident: true,
+        retryAlreadyUsed: false,
+        settings: {
+          backend: 'whisperx_current',
+          preset: 'balanced',
+          model: 'small',
+          device: 'cpu',
+          computeType: 'int8',
+          language: 'en',
+        },
+      }),
+    ).toMatchObject({
+      shouldRetry: false,
+      reason: 'mapping-confident',
+    });
+
+    expect(
+      buildSpeakerAttributionRetryPlan({
+        diarizationEnabled: true,
+        mappingConfident: false,
+        retryAlreadyUsed: true,
+        settings: {
+          backend: 'whisperx_current',
+          preset: 'balanced',
+          model: 'small',
+          device: 'cpu',
+          computeType: 'int8',
+          language: 'en',
+        },
+      }),
+    ).toMatchObject({
+      shouldRetry: false,
+      reason: 'retry-already-used',
+    });
   });
 });
