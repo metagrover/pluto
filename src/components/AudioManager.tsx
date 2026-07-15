@@ -39,6 +39,7 @@ import {
   type TimedAudioChunk,
   shouldUseSystemAudioReconstructionFallback,
 } from '../utils/systemAudioReconstruction';
+import { buildStoredTranscriptActivityEvidence } from '../utils/transcriptActivityEvidence';
 import { evaluateLiveTranscriptCoverage } from '../utils/transcriptIntegrity';
 import {
   type CanonicalTranscriptSource,
@@ -46,7 +47,6 @@ import {
   type TranscriptTranscriptionMeta,
   buildTranscriptJsonPayload,
 } from '../utils/transcriptSchema';
-import { buildStoredTranscriptActivityEvidence } from '../utils/transcriptActivityEvidence';
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
   type TranscriptionSettings,

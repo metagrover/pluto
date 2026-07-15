@@ -4,9 +4,9 @@ import type {
   SpeakerActivityWindow,
 } from '../utils/speakerAttribution';
 import {
+  type TranscriptActivityEvidenceFallbackSource,
   buildStoredTranscriptActivityEvidence,
   parseStoredTranscriptActivityEvidence,
-  type TranscriptActivityEvidenceFallbackSource,
 } from '../utils/transcriptActivityEvidence';
 import { buildTranscriptJsonPayload } from '../utils/transcriptSchema';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation';
@@ -78,7 +78,9 @@ const readStoredActivityWindows = (
     const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       activityEvidence?: unknown;
     };
-    const stored = parseStoredTranscriptActivityEvidence(parsed.activityEvidence);
+    const stored = parseStoredTranscriptActivityEvidence(
+      parsed.activityEvidence,
+    );
     if (stored) {
       return {
         windows: stored.windows,
@@ -116,7 +118,10 @@ export const retryMeetingTranscriptValidation = async (
     mix: meeting.mixed_audio_path || '',
   };
   const provisionalSegments = parseSegments(meeting.transcript_json);
-  const activityEvidence = readStoredActivityWindows(meeting, provisionalSegments);
+  const activityEvidence = readStoredActivityWindows(
+    meeting,
+    provisionalSegments,
+  );
   await invoke('SAVE_MEETING', {
     ...meeting,
     transcript_status: 'validating',

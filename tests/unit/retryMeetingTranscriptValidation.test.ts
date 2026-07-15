@@ -210,7 +210,8 @@ describe('retryMeetingTranscriptValidation', () => {
       JSON.parse(String(current.transcript_integrity_json)).reasons,
     ).toContain('local_speech_unaccounted');
     expect(
-      JSON.parse(String(current.transcript_integrity_json)).activityEvidenceSource,
+      JSON.parse(String(current.transcript_integrity_json))
+        .activityEvidenceSource,
     ).toBe('capture_activity_v1');
   });
 
@@ -271,7 +272,8 @@ describe('retryMeetingTranscriptValidation', () => {
 
     expect(result.status).toBe('needs_attention');
     expect(
-      JSON.parse(String(current.transcript_integrity_json)).activityEvidenceSource,
+      JSON.parse(String(current.transcript_integrity_json))
+        .activityEvidenceSource,
     ).toBe('legacy_provisional_segments');
     expect(invoke).not.toHaveBeenCalledWith(
       'GENERATE_ANALYSIS_V2',

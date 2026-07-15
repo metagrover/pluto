@@ -68,12 +68,14 @@ export const parseStoredTranscriptActivityEvidence = (
     return null;
   }
 
-  const windows = raw.windows.filter(isStoredWindow).filter(
-    (window) =>
-      Number.isFinite(window.startTime) &&
-      Number.isFinite(window.endTime) &&
-      window.endTime > window.startTime,
-  );
+  const windows = raw.windows
+    .filter(isStoredWindow)
+    .filter(
+      (window) =>
+        Number.isFinite(window.startTime) &&
+        Number.isFinite(window.endTime) &&
+        window.endTime > window.startTime,
+    );
 
   return {
     schemaVersion: STORED_TRANSCRIPT_ACTIVITY_EVIDENCE_SCHEMA_VERSION,
