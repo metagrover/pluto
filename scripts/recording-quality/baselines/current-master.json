@@ -14,12 +14,7 @@
     "passedCases": 4,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [
-      25,
-      75,
-      428,
-      434
-    ],
+    "issueCoverage": [25, 75, 428, 434],
     "kinds": {
       "recording_finalization": {
         "passed": 1,
@@ -71,9 +66,7 @@
       "expected": {
         "status": "validated",
         "secondCallReturnsNull": true,
-        "cleanupPaths": [
-          "/tmp/session-system.wav"
-        ],
+        "cleanupPaths": ["/tmp/session-system.wav"],
         "primaryMetric": {
           "name": "durationSeconds",
           "value": 1062
@@ -114,15 +107,11 @@
           "name": "localTranscriptCoveredSeconds",
           "value": 6
         },
-        "reasons": [
-          "local_speech_unaccounted"
-        ]
+        "reasons": ["local_speech_unaccounted"]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": [
-          "local_speech_unaccounted"
-        ],
+        "requiredReasons": ["local_speech_unaccounted"],
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 6

@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type RecordingQualityBenchmarkCaseResult,
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
-  type RecordingQualityBenchmarkCaseResult,
+  parseRecordingQualityBenchmarkCliArgs,
 } from '../../src/services/recordingQualityBenchmark';
+
+describe('parseRecordingQualityBenchmarkCliArgs', () => {
+  it('accepts pnpm passthrough separators and explicit output paths', () => {
+    expect(
+      parseRecordingQualityBenchmarkCliArgs(
+        ['--', '--out', 'tmp/recording-quality-benchmark.json'],
+        '/repo',
+        123,
+      ),
+    ).toEqual({
+      manifest: '/repo/scripts/recording-quality/manifest.json',
+      out: 'tmp/recording-quality-benchmark.json',
+    });
+  });
+});
 
 describe('loadRecordingQualityBenchmarkManifest', () => {
   it('loads committed benchmark cases and rejects duplicate ids', () => {
@@ -94,7 +110,10 @@ describe('buildRecordingQualityBenchmarkReport', () => {
             value: 6,
           },
         },
-        failures: ['status mismatch', 'covered seconds exceeded expected union'],
+        failures: [
+          'status mismatch',
+          'covered seconds exceeded expected union',
+        ],
       },
       {
         id: 'issue-75-finalization-single-flight',
@@ -143,7 +162,10 @@ describe('buildRecordingQualityBenchmarkReport', () => {
     expect(report.failures).toEqual([
       expect.objectContaining({
         id: 'issue-434-overlap-union',
-        failures: ['status mismatch', 'covered seconds exceeded expected union'],
+        failures: [
+          'status mismatch',
+          'covered seconds exceeded expected union',
+        ],
       }),
     ]);
   });

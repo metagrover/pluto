@@ -3,9 +3,7 @@
   "meetingId": "synthetic-overlap-union",
   "recordingDurationSeconds": 10,
   "provisionalSegments": [],
-  "activityWindows": [
-    { "speaker": "Me", "startTime": 0, "endTime": 10 }
-  ],
+  "activityWindows": [{ "speaker": "Me", "startTime": 0, "endTime": 10 }],
   "sources": {
     "mic": {
       "durationSeconds": 10,

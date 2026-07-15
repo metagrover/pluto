@@ -23,9 +23,7 @@
     },
     "system": {
       "durationSeconds": 12,
-      "segments": [
-        { "start": 4, "end": 7, "text": "Synthetic reply." }
-      ]
+      "segments": [{ "start": 4, "end": 7, "text": "Synthetic reply." }]
     }
   },
   "expected": {

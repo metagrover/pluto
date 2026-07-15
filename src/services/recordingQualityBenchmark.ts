@@ -1,9 +1,5 @@
 import path from 'node:path';
 import {
-  runRecordingTranscriptValidation,
-  type RecordingTranscriptValidationResult,
-} from './recordingTranscriptValidation.ts';
-import {
   beginRecordingFinalization,
   buildMeetingTiming,
   resolveFinalizationCleanupPaths,
@@ -12,6 +8,10 @@ import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from '../utils/speakerAttribution.ts';
+import {
+  type RecordingTranscriptValidationResult,
+  runRecordingTranscriptValidation,
+} from './recordingTranscriptValidation.ts';
 
 export type RecordingQualityBenchmarkCaseKind =
   | 'transcript_validation'
@@ -201,10 +201,14 @@ export const loadRecordingQualityBenchmarkManifest = (
   const baselineReport = String(raw.baselineReport || '').trim();
   const casesRaw = Array.isArray(raw.cases) ? raw.cases : [];
   if (!Number.isInteger(schemaVersion) || schemaVersion <= 0) {
-    throw new Error('Recording quality benchmark manifest needs a schemaVersion.');
+    throw new Error(
+      'Recording quality benchmark manifest needs a schemaVersion.',
+    );
   }
   if (!baselineReport) {
-    throw new Error('Recording quality benchmark manifest needs a baselineReport.');
+    throw new Error(
+      'Recording quality benchmark manifest needs a baselineReport.',
+    );
   }
 
   const seenIds = new Set<string>();
@@ -305,8 +309,10 @@ export const runTranscriptValidationBenchmarkCase = async (
       return fixture.sources.system;
     },
     probeDuration: async (audioPath) => {
-      if (audioPath.includes('/mic.')) return fixture.sources.mic.durationSeconds;
-      if (audioPath.includes('/mix.')) return fixture.sources.mix.durationSeconds;
+      if (audioPath.includes('/mic.'))
+        return fixture.sources.mic.durationSeconds;
+      if (audioPath.includes('/mix.'))
+        return fixture.sources.mix.durationSeconds;
       return fixture.sources.system.durationSeconds;
     },
   });
@@ -318,9 +324,9 @@ export const runTranscriptValidationBenchmarkCase = async (
   const failures = [
     ...(result.status === fixture.expected.status ? [] : ['status mismatch']),
     ...compareMetric(actualMetric, fixture.expected.primaryMetric),
-    ...((fixture.expected.requiredReasons || []).filter(
-      (reason) => !result.reasons.includes(reason),
-    ).map((reason) => `missing required reason ${reason}`)),
+    ...(fixture.expected.requiredReasons || [])
+      .filter((reason) => !result.reasons.includes(reason))
+      .map((reason) => `missing required reason ${reason}`),
   ];
 
   return {
@@ -353,9 +359,9 @@ export const runRecordingFinalizationBenchmarkCase = (
   };
 
   const failures = [
-    ...(second === null) === fixture.expected.secondCallReturnsNull
+    ...((second === null) === fixture.expected.secondCallReturnsNull
       ? []
-      : ['finalization re-entry mismatch'],
+      : ['finalization re-entry mismatch']),
     ...compareMetric(actualMetric, fixture.expected.primaryMetric),
     ...(cleanupPaths.join('|') === fixture.expected.cleanupPaths.join('|')
       ? []
@@ -422,7 +428,9 @@ export const buildRecordingQualityBenchmarkReport = (input: {
         input.results.length === 0
           ? 0
           : Number((passedCases / input.results.length).toFixed(4)),
-      issueCoverage: sortNumeric(new Set(input.results.map((result) => result.issue))),
+      issueCoverage: sortNumeric(
+        new Set(input.results.map((result) => result.issue)),
+      ),
       kinds,
     },
     results: input.results,

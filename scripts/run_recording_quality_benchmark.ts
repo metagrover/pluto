@@ -1,51 +1,18 @@
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { execSync } from 'node:child_process';
 
 import {
-  buildRecordingQualityBenchmarkReport,
-  loadRecordingQualityBenchmarkManifest,
-  runRecordingFinalizationBenchmarkCase,
-  runTranscriptValidationBenchmarkCase,
   type RecordingFinalizationFixture,
   type RecordingQualityBenchmarkFixture,
   type TranscriptValidationFixture,
+  buildRecordingQualityBenchmarkReport,
+  loadRecordingQualityBenchmarkManifest,
+  parseRecordingQualityBenchmarkCliArgs,
+  runRecordingFinalizationBenchmarkCase,
+  runTranscriptValidationBenchmarkCase,
 } from '../src/services/recordingQualityBenchmark.ts';
-
-const DEFAULT_MANIFEST = path.join(
-  process.cwd(),
-  'scripts',
-  'recording-quality',
-  'manifest.json',
-);
-
-const parseArgs = () => {
-  const args = process.argv.slice(2);
-  const options = {
-    manifest: DEFAULT_MANIFEST,
-    out: path.join(
-      process.cwd(),
-      'tmp',
-      `recording-quality-benchmark-${Date.now()}.json`,
-    ),
-  };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === '--') continue;
-    if ((arg === '--manifest' || arg === '--out') && index + 1 < args.length) {
-      const value = args[index + 1];
-      if (arg === '--manifest') options.manifest = value;
-      if (arg === '--out') options.out = value;
-      index += 1;
-      continue;
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
-
-  return options;
-};
 
 const readJson = <T>(filePath: string): T =>
   JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
@@ -66,9 +33,14 @@ const getSourceCommit = () => {
 };
 
 const main = async () => {
-  const options = parseArgs();
+  const options = parseRecordingQualityBenchmarkCliArgs(
+    process.argv.slice(2),
+    process.cwd(),
+  );
   const manifestPath = path.resolve(options.manifest);
-  const manifest = loadRecordingQualityBenchmarkManifest(readJson(manifestPath));
+  const manifest = loadRecordingQualityBenchmarkManifest(
+    readJson(manifestPath),
+  );
   const results = [];
 
   for (const entry of manifest.cases) {
