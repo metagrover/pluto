@@ -72,6 +72,17 @@ export const buildProjectsBriefing = (tasks: Entity[], now = Date.now()) => {
   };
 };
 
+export const countAtRiskTasks = (tasks: Entity[], now = Date.now()) => {
+  const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
+
+  return tasks.filter((task) => {
+    if (task.status !== 'active' || !task.due_date) return false;
+
+    const dueAt = new Date(task.due_date).getTime();
+    return dueAt >= now && dueAt - now < twoDaysMs;
+  }).length;
+};
+
 export const partitionProjectsForDisplay = (
   projects: Entity[],
   groupedTasks: Record<string, Entity[]>,
@@ -152,10 +163,12 @@ export const getExecutionBriefHeading = ({
 export const getProjectCardSummary = ({
   activeCount,
   overdueCount,
+  atRiskCount,
   completedCount,
 }: {
   activeCount: number;
   overdueCount: number;
+  atRiskCount: number;
   completedCount: number;
 }) => {
   if (activeCount === 0) {
@@ -164,6 +177,10 @@ export const getProjectCardSummary = ({
 
   if (overdueCount > 0) {
     return overdueCount === 1 ? '1 overdue' : `${overdueCount} overdue`;
+  }
+
+  if (atRiskCount > 0) {
+    return atRiskCount === 1 ? '1 due soon' : `${atRiskCount} due soon`;
   }
 
   return activeCount === 1 ? '1 open' : `${activeCount} open`;
@@ -458,6 +475,7 @@ export const ProjectHealthCard: React.FC<{
   const summary = getProjectCardSummary({
     activeCount: briefing.active.length,
     overdueCount: briefing.overdue.length,
+    atRiskCount: countAtRiskTasks(briefing.active),
     completedCount,
   });
 
