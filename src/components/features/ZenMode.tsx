@@ -4,6 +4,7 @@ import { RecordingCaptureBar } from './RecordingCaptureBar';
 import { RecordingMeetingRail } from './RecordingMeetingRail';
 import {
   type CaptureHealth,
+  type LiveTranscriptIntegrity,
   type LiveTranscriptSegment,
   buildRecordingWorkspaceModel,
 } from './recordingWorkspaceModel';
@@ -23,6 +24,7 @@ interface ZenModeProps {
   setCurrentNotes: (value: string) => void;
   liveTranscript: LiveTranscriptSegment[];
   captureHealth: { microphone: CaptureHealth; systemAudio: CaptureHealth };
+  liveTranscriptIntegrity: LiveTranscriptIntegrity;
   recordingStartedAtMs: number | null;
 }
 
@@ -39,6 +41,7 @@ export const ZenMode = ({
   setCurrentNotes,
   liveTranscript,
   captureHealth,
+  liveTranscriptIntegrity,
   recordingStartedAtMs,
 }: ZenModeProps) => {
   const [nowMs, setNowMs] = useState(Date.now());
@@ -54,10 +57,18 @@ export const ZenMode = ({
         isProcessing,
         microphone: captureHealth.microphone,
         systemAudio: captureHealth.systemAudio,
+        liveTranscriptIntegrity,
         segments: liveTranscript,
         interimText: '',
       }),
-    [captureHealth, isProcessing, liveTranscript, nowMs, recordingStartedAtMs],
+    [
+      captureHealth,
+      isProcessing,
+      liveTranscript,
+      liveTranscriptIntegrity,
+      nowMs,
+      recordingStartedAtMs,
+    ],
   );
   const addParticipant = () => {
     const participant = participantInput.trim();
@@ -73,6 +84,7 @@ export const ZenMode = ({
         statusMessage={model.statusMessage}
         microphone={model.microphone}
         systemAudio={model.systemAudio}
+        liveTranscriptIntegrity={liveTranscriptIntegrity}
         title={meetingTitle}
         onTitleChange={setMeetingTitle}
         onFinish={onEndMeeting}

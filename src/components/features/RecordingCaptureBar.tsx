@@ -1,5 +1,8 @@
 import { CircleStop, Mic, MonitorSpeaker } from 'lucide-react';
-import type { CaptureHealth } from './recordingWorkspaceModel';
+import type {
+  CaptureHealth,
+  LiveTranscriptIntegrity,
+} from './recordingWorkspaceModel';
 
 type Props = {
   status: 'recording' | 'processing';
@@ -7,6 +10,7 @@ type Props = {
   statusMessage: string;
   microphone: CaptureHealth;
   systemAudio: CaptureHealth;
+  liveTranscriptIntegrity: LiveTranscriptIntegrity;
   title: string;
   onTitleChange: (title: string) => void;
   onFinish: () => void;
@@ -30,12 +34,16 @@ export const RecordingCaptureBar = ({
   statusMessage,
   microphone,
   systemAudio,
+  liveTranscriptIntegrity,
   title,
   onTitleChange,
   onFinish,
 }: Props) => (
   <header className="recording-capture-bar drag-region">
-    <div className="recording-status no-drag" aria-live="polite">
+    <div
+      className="recording-status no-drag"
+      aria-live={liveTranscriptIntegrity === 'lagging' ? 'assertive' : 'polite'}
+    >
       <span
         className={`recording-dot recording-dot--${status}`}
         aria-hidden="true"

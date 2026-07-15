@@ -14,6 +14,7 @@ import {
   systemPreferences,
 } from 'electron';
 import ffmpegStatic from 'ffmpeg-static';
+import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { createActiveCallDetector } from './activeCall/detector';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
@@ -926,6 +927,36 @@ app.whenReady().then(async () => {
     }
 
     return { deleted };
+  });
+
+  ipcMain.handle('AUDIO_PROBE_DURATION', async (_event, rawPath) => {
+    if (typeof rawPath !== 'string' || rawPath.length === 0) return null;
+    const resolvedPath = path.resolve(rawPath);
+    const meetingsRoot = path.resolve(app.getPath('userData'), 'meetings');
+    if (!resolvedPath.startsWith(`${meetingsRoot}${path.sep}`)) return null;
+    if (!fs.existsSync(resolvedPath)) return null;
+
+    return await new Promise<number | null>((resolve) => {
+      const probe = spawn(ffprobeStatic.path, [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        resolvedPath,
+      ]);
+      let stdout = '';
+      probe.stdout.on('data', (chunk) => {
+        stdout += String(chunk);
+      });
+      probe.on('error', () => resolve(null));
+      probe.on('close', (code) => {
+        if (code !== 0) return resolve(null);
+        const duration = Number.parseFloat(stdout.trim());
+        resolve(Number.isFinite(duration) && duration >= 0 ? duration : null);
+      });
+    });
   });
 
   // Database handlers

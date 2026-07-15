@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { app } from 'electron';
+import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import type { TrustStatus } from '../src/utils/trustStatus';
 import type {
   AttentionEvidenceReference,
@@ -94,6 +95,11 @@ export interface PersistedMeeting {
   end_reason?: string | null;
   mid_json?: string | null;
   user_edits_json?: string | null;
+  transcript_status?: TranscriptLifecycleStatus | null;
+  transcript_integrity_json?: string | null;
+  system_audio_path?: string | null;
+  mixed_audio_path?: string | null;
+  transcript_validated_at?: string | null;
   created_at?: string | null;
 }
 
@@ -171,6 +177,11 @@ const initDb = () => {
         analysis_error_categories_json TEXT,
         value_signals_json TEXT,
         follow_up_drafts_json TEXT,
+        transcript_status TEXT DEFAULT 'validated',
+        transcript_integrity_json TEXT,
+        system_audio_path TEXT,
+        mixed_audio_path TEXT,
+        transcript_validated_at DATETIME,
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -503,6 +514,32 @@ const initDb = () => {
     if (!meetingColumns.some((col) => col.name === 'follow_up_drafts_json')) {
       db.exec('ALTER TABLE meetings ADD COLUMN follow_up_drafts_json TEXT');
       console.log('[DB] Added meetings.follow_up_drafts_json column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'transcript_status')) {
+      db.exec(
+        "ALTER TABLE meetings ADD COLUMN transcript_status TEXT DEFAULT 'validated'",
+      );
+      console.log('[DB] Added meetings.transcript_status column');
+    }
+    if (
+      !meetingColumns.some((col) => col.name === 'transcript_integrity_json')
+    ) {
+      db.exec('ALTER TABLE meetings ADD COLUMN transcript_integrity_json TEXT');
+      console.log('[DB] Added meetings.transcript_integrity_json column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'system_audio_path')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN system_audio_path TEXT');
+      console.log('[DB] Added meetings.system_audio_path column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'mixed_audio_path')) {
+      db.exec('ALTER TABLE meetings ADD COLUMN mixed_audio_path TEXT');
+      console.log('[DB] Added meetings.mixed_audio_path column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'transcript_validated_at')) {
+      db.exec(
+        'ALTER TABLE meetings ADD COLUMN transcript_validated_at DATETIME',
+      );
+      console.log('[DB] Added meetings.transcript_validated_at column');
     }
   } catch (e) {
     console.warn('[DB] Optional column migration failed:', e);
@@ -1333,6 +1370,11 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
     meeting.is_favorite ? 1 : 0,
     meeting.end_reason || 'manual',
     meeting.user_edits_json || null,
+    meeting.transcript_status || 'validated',
+    meeting.transcript_integrity_json || null,
+    meeting.system_audio_path || null,
+    meeting.mixed_audio_path || null,
+    meeting.transcript_validated_at || null,
     meeting.created_at,
   );
 

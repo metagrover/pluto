@@ -1,4 +1,5 @@
 export type CaptureHealth = 'healthy' | 'warning' | 'unavailable';
+export type LiveTranscriptIntegrity = 'healthy' | 'lagging';
 
 export type LiveTranscriptSegment = {
   id: string;
@@ -14,6 +15,7 @@ export type RecordingWorkspaceInput = {
   isProcessing: boolean;
   microphone: CaptureHealth;
   systemAudio: CaptureHealth;
+  liveTranscriptIntegrity: LiveTranscriptIntegrity;
   segments: LiveTranscriptSegment[];
   interimText: string;
 };
@@ -28,6 +30,7 @@ export const buildRecordingWorkspaceModel = (
 ) => {
   const microphoneWarning = input.microphone !== 'healthy';
   const systemAudioWarning = input.systemAudio !== 'healthy';
+  const transcriptWarning = input.liveTranscriptIntegrity === 'lagging';
   return {
     status: input.isProcessing
       ? ('processing' as const)
@@ -37,14 +40,17 @@ export const buildRecordingWorkspaceModel = (
     ),
     microphone: input.microphone,
     systemAudio: input.systemAudio,
-    needsAttention: microphoneWarning || systemAudioWarning,
+    needsAttention:
+      microphoneWarning || systemAudioWarning || transcriptWarning,
     statusMessage: microphoneWarning
       ? 'Microphone needs attention'
       : systemAudioWarning
         ? 'System audio needs attention'
-        : input.isProcessing
-          ? 'Finalizing notes. Keep Pluto open.'
-          : 'Capture is healthy',
+        : transcriptWarning
+          ? 'Your audio is recording, but live transcription is falling behind'
+          : input.isProcessing
+            ? 'Finalizing notes. Keep Pluto open.'
+            : 'Capture is healthy',
     transcript: input.segments.filter((segment) => segment.text.trim()),
     interimText: input.interimText.trim(),
   };

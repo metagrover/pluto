@@ -54,20 +54,22 @@ type ResolveFinalizationCleanupPathsArgs = {
   systemAudioPath: string;
   rebuiltSystemAudioPath: string;
   mixedAudioPath: string;
+  validationStatus: 'validated' | 'needs_attention';
 };
 
-export const collectRecordingArtifactPaths = (
-  ...paths: Array<string | null | undefined>
-): string[] => {
-  return [...new Set(paths.filter((value): value is string => Boolean(value)))];
-};
+export const collectDisposableRecordingArtifactPaths = (
+  _paths: Omit<ResolveFinalizationCleanupPathsArgs, 'validationStatus'>,
+): string[] => [];
 
 export const resolveFinalizationCleanupPaths = ({
   primaryAudioPath,
   systemAudioPath,
   rebuiltSystemAudioPath,
   mixedAudioPath,
+  validationStatus,
 }: ResolveFinalizationCleanupPathsArgs): string[] => {
+  if (validationStatus === 'needs_attention') return [];
+
   const retained = new Set(
     [
       primaryAudioPath,

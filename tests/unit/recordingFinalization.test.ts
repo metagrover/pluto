@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
-  collectRecordingArtifactPaths,
+  collectDisposableRecordingArtifactPaths,
   resolveFinalizationCleanupPaths,
 } from '../../src/utils/recordingFinalization';
 
@@ -51,6 +51,7 @@ describe('recording finalization helpers', () => {
       systemAudioPath: '/tmp/session-system.wav',
       rebuiltSystemAudioPath: '/tmp/session-system-rebuilt.wav',
       mixedAudioPath: '/tmp/session-mix.wav',
+      validationStatus: 'validated',
     });
 
     expect(cleanup).toEqual(['/tmp/session-system.wav']);
@@ -62,24 +63,32 @@ describe('recording finalization helpers', () => {
       systemAudioPath: '/tmp/session-system.wav',
       rebuiltSystemAudioPath: '',
       mixedAudioPath: '/tmp/session-mix.wav',
+      validationStatus: 'validated',
     });
 
     expect(cleanup).toEqual([]);
   });
 
-  it('collects unique non-empty artifact paths for failure cleanup', () => {
-    const cleanup = collectRecordingArtifactPaths(
-      '/tmp/session-mic.wav',
-      '',
-      '/tmp/session-system.wav',
-      '/tmp/session-mic.wav',
-      undefined,
-      null,
-    );
+  it('preserves every source artifact when validation needs attention', () => {
+    const cleanup = resolveFinalizationCleanupPaths({
+      primaryAudioPath: '/tmp/session-mic.wav',
+      systemAudioPath: '/tmp/session-system.wav',
+      rebuiltSystemAudioPath: '/tmp/session-system-rebuilt.wav',
+      mixedAudioPath: '/tmp/session-mix.wav',
+      validationStatus: 'needs_attention',
+    });
 
-    expect(cleanup).toEqual([
-      '/tmp/session-mic.wav',
-      '/tmp/session-system.wav',
-    ]);
+    expect(cleanup).toEqual([]);
+  });
+
+  it('never treats canonical recording sources as disposable failure artifacts', () => {
+    const cleanup = collectDisposableRecordingArtifactPaths({
+      primaryAudioPath: '/tmp/session-mic.wav',
+      systemAudioPath: '/tmp/session-system.wav',
+      rebuiltSystemAudioPath: '/tmp/session-system-rebuilt.wav',
+      mixedAudioPath: '/tmp/session-mix.wav',
+    });
+
+    expect(cleanup).toEqual([]);
   });
 });

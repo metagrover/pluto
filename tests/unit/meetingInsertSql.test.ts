@@ -19,6 +19,11 @@ describe('MEETING_INSERT_SQL', () => {
     expect(columns?.length).toBeGreaterThan(0);
     expect(countMatches(MEETING_INSERT_SQL, /\?/g)).toBe(columns?.length ?? 0);
     expect(columns).toContain('created_at');
+    expect(columns).toContain('transcript_status');
+    expect(columns).toContain('transcript_integrity_json');
+    expect(columns).toContain('system_audio_path');
+    expect(columns).toContain('mixed_audio_path');
+    expect(columns).toContain('transcript_validated_at');
     expect(MEETING_INSERT_SQL).toContain('COALESCE(?, CURRENT_TIMESTAMP)');
   });
 });

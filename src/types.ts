@@ -1,3 +1,5 @@
+import type { TranscriptLifecycleStatus } from './utils/transcriptIntegrity';
+
 export interface TranscriptSegment {
   text: string;
   speaker?: string | number;
@@ -124,6 +126,7 @@ export interface Meeting {
   created_at: string;
   started_at: string;
   duration_seconds?: number;
+  audio_path?: string;
   meeting_type?: string;
   enhanced_notes?: string;
   transcript_json?: string;
@@ -142,4 +145,9 @@ export interface Meeting {
   analysis_generated_at?: string;
   analysis_error_categories_json?: string;
   user_edits_json?: string;
+  transcript_status?: TranscriptLifecycleStatus;
+  transcript_integrity_json?: string;
+  system_audio_path?: string;
+  mixed_audio_path?: string;
+  transcript_validated_at?: string;
 }

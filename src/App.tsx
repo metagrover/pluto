@@ -24,9 +24,11 @@ import {
 } from './components/features/dashboardActionCompletion';
 import type {
   CaptureHealth,
+  LiveTranscriptIntegrity,
   LiveTranscriptSegment,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
+import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 
 import { updateEntityStatus } from './api/knowledgeGraph';
 // Knowledge Graph
@@ -58,6 +60,8 @@ function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
   const [isServerReady, setIsServerReady] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
+    useState(false);
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingParticipants, setMeetingParticipants] = useState<string[]>([]);
   const [participantInput, setParticipantInput] = useState('');
@@ -132,6 +136,8 @@ function App() {
     microphone: 'healthy',
     systemAudio: 'healthy',
   });
+  const [liveTranscriptIntegrity, setLiveTranscriptIntegrity] =
+    useState<LiveTranscriptIntegrity>('healthy');
 
   // Connect the ref
   onAnalyserReadyRef.current = () => {};
@@ -419,6 +425,22 @@ function App() {
     }
   };
 
+  const handleRetryTranscriptValidation = async () => {
+    if (!selectedMeetingId || transcriptValidationRetrying) return;
+    setTranscriptValidationRetrying(true);
+    try {
+      await retryMeetingTranscriptValidation(
+        selectedMeetingId,
+        (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+      );
+      await fetchMeetings();
+    } catch (error) {
+      console.error('[Pluto] Transcript validation retry failed', error);
+    } finally {
+      setTranscriptValidationRetrying(false);
+    }
+  };
+
   const handleRecordingChange = (recording: boolean) => {
     const wasRecording = isRecording;
     setIsRecording(recording);
@@ -587,9 +609,11 @@ function App() {
           onAnalyserReadyRef={onAnalyserReadyRef}
           onLiveTranscript={setLiveTranscript}
           onCaptureHealthChange={setCaptureHealth}
+          onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
           onRecordingStarted={(startedAtMs) => {
             setRecordingStartedAtMs(startedAtMs);
             setLiveTranscript([]);
+            setLiveTranscriptIntegrity('healthy');
           }}
           userTitle={meetingTitle}
           participants={meetingParticipants}
@@ -652,6 +676,7 @@ function App() {
           setCurrentNotes={setCurrentNotes}
           liveTranscript={liveTranscript}
           captureHealth={captureHealth}
+          liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
         />
       ) : (
@@ -790,6 +815,8 @@ function App() {
                 highlightEntities={highlightEntities}
                 transcriptVisible={transcriptVisible}
                 setTranscriptVisible={setTranscriptVisible}
+                onRetryTranscriptValidation={handleRetryTranscriptValidation}
+                transcriptValidationRetrying={transcriptValidationRetrying}
               />
             ) : activeTab === 'hub' ? (
               <Dashboard

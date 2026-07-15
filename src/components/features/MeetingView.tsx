@@ -79,7 +79,52 @@ interface MeetingViewProps {
   highlightEntities: (text: string) => ReactNode;
   transcriptVisible: boolean;
   setTranscriptVisible: (val: boolean) => void;
+  onRetryTranscriptValidation?: () => void;
+  transcriptValidationRetrying?: boolean;
 }
+
+export const TranscriptIntegrityPanel = ({
+  status,
+  onRetry,
+  retrying = false,
+}: {
+  status: Meeting['transcript_status'];
+  onRetry?: () => void;
+  retrying?: boolean;
+}) => {
+  if (status !== 'validating' && status !== 'needs_attention') return null;
+  return (
+    <section
+      aria-live="polite"
+      className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5"
+    >
+      <strong className="text-sm text-pro-text">
+        {status === 'validating'
+          ? 'Validating transcript'
+          : 'Transcript needs attention'}
+      </strong>
+      <p className="mt-1 text-sm text-pro-text-muted">
+        {status === 'validating'
+          ? 'Pluto is checking the complete recording before creating intelligence.'
+          : 'The recording is safe, but Pluto could not account for all captured speech.'}
+      </p>
+      {status === 'needs_attention' ? (
+        <button
+          type="button"
+          disabled={retrying}
+          onClick={onRetry}
+          className="mt-4 rounded-xl bg-pro-accent px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
+        >
+          {retrying ? 'Retrying validation…' : 'Retry transcript validation'}
+        </button>
+      ) : null}
+    </section>
+  );
+};
+
+export const canGenerateMeetingIntelligence = (
+  status: Meeting['transcript_status'],
+) => status == null || status === 'validated';
 
 interface MeetingActionCardsProps {
   items: MeetingActionItemCard[];
@@ -295,6 +340,8 @@ export const MeetingView = ({
   highlightEntities,
   transcriptVisible,
   setTranscriptVisible,
+  onRetryTranscriptValidation,
+  transcriptValidationRetrying = false,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
 
@@ -619,6 +666,12 @@ export const MeetingView = ({
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
+    if (!canGenerateMeetingIntelligence(selectedMeeting.transcript_status)) {
+      setRegenerateNotesError(
+        'Transcript validation must finish before Pluto creates intelligence.',
+      );
+      return;
+    }
 
     setRegenerateNotesError(null);
     const transcript = buildAnalysisTranscriptFromJson(
@@ -870,6 +923,11 @@ export const MeetingView = ({
       key={selectedMeeting.id}
       className="max-w-4xl mx-auto w-full space-y-20 animate-in pb-32"
     >
+      <TranscriptIntegrityPanel
+        status={selectedMeeting.transcript_status}
+        onRetry={onRetryTranscriptValidation}
+        retrying={transcriptValidationRetrying}
+      />
       {/* Clean Hero Header */}
       <div className="flex flex-col md:flex-row items-start justify-between gap-8 border-b border-pro-border/40 pb-12">
         <div className="space-y-4 flex-1">
@@ -1063,18 +1121,20 @@ export const MeetingView = ({
 
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
       <div className="mb-12 space-y-6">
-        <FollowUpDrafts
-          meeting={selectedMeeting}
-          overview={followUpDraftOverview}
-          actionItems={followUpDraftContext.actionItems}
-          decisions={followUpDraftContext.decisions}
-          entityContext={followUpDraftContext.entityContext}
-          discussionPoints={discussionPoints}
-          participants={followUpDraftParticipants}
-          openQuestions={followUpDraftOpenQuestions}
-          topicSummaries={followUpDraftTopicSummaries}
-          fetchMeetings={fetchMeetings}
-        />
+        {canGenerateMeetingIntelligence(selectedMeeting.transcript_status) ? (
+          <FollowUpDrafts
+            meeting={selectedMeeting}
+            overview={followUpDraftOverview}
+            actionItems={followUpDraftContext.actionItems}
+            decisions={followUpDraftContext.decisions}
+            entityContext={followUpDraftContext.entityContext}
+            discussionPoints={discussionPoints}
+            participants={followUpDraftParticipants}
+            openQuestions={followUpDraftOpenQuestions}
+            topicSummaries={followUpDraftTopicSummaries}
+            fetchMeetings={fetchMeetings}
+          />
+        ) : null}
 
         <EntitySidebar
           meetingId={String(selectedMeeting.id)}
