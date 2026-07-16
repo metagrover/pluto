@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { runLocalAttributionCandidate } from '../../src/services/localSpeakerAttributionBenchmark';
 
 const adapter = path.resolve(
   process.cwd(),
@@ -122,11 +123,78 @@ describe('speaker attribution benchmark adapter', () => {
     });
     expect(result.responses[1]).toMatchObject({
       id: 'unknown',
-      error: { code: 'candidate_unknown' },
+      error: { code: 'candidate_contract_mismatch' },
     });
     expect(result.responses[2]).toMatchObject({ id: 'good', output: {} });
     expect(result.stdout).not.toMatch(/Traceback|INFO|WARNING/);
   });
+
+  it('runs the synthetic adapter end to end through the TypeScript candidate runner', async () => {
+    const result = await runLocalAttributionCandidate(
+      {
+        id: 'synthetic',
+        kind: 'asr',
+        version: '1',
+        command: ['python3', adapter],
+        model: { id: 'synthetic', version: '1' },
+        config: {
+          turns: [{ startTime: 0, endTime: 1, cluster: 'speaker-0' }],
+        },
+      },
+      [
+        {
+          id: 'runner-case',
+          recordingId: 'synthetic-recording',
+          provenance: { tier: 'synthetic', source: 'generated-fixture' },
+          audio: { mixedPath: 'not-read-by-synthetic-mode.wav' },
+          referencePath: 'not-read-by-synthetic-mode.json',
+        },
+      ],
+      { timeoutMs: 2_000 },
+    );
+
+    expect(result.results[0]).toMatchObject({
+      caseId: 'runner-case',
+      status: 'success',
+      output: {
+        candidateId: 'synthetic',
+        diarization: {
+          turns: [{ startTime: 0, endTime: 1, cluster: 'speaker-0' }],
+        },
+      },
+    });
+  });
+
+  it.each(['pyannote-community-1', 'nemo-local'])(
+    'preserves an adapter model failure through the runner for %s',
+    async (candidateId) => {
+      const result = await runLocalAttributionCandidate(
+        {
+          id: candidateId,
+          kind: 'diarizer',
+          version: '1',
+          command: ['python3', adapter],
+          model: { id: candidateId, version: 'test' },
+          config: {},
+        },
+        [
+          {
+            id: `${candidateId}-case`,
+            recordingId: 'synthetic-recording',
+            provenance: { tier: 'synthetic', source: 'generated-fixture' },
+            audio: { mixedPath: 'unavailable-local-audio.wav' },
+            referencePath: 'not-read-on-model-failure.json',
+          },
+        ],
+        { timeoutMs: 2_000 },
+      );
+
+      expect(result.results[0]).toMatchObject({
+        status: 'failure',
+        error: { code: 'candidate_model_missing', message: '[redacted]' },
+      });
+    },
+  );
 
   it('probes the current WhisperX installation deterministically', async () => {
     const result = await runAdapter([

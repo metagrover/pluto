@@ -87,7 +87,7 @@ def _validate_request(raw: Any) -> dict[str, Any]:
     candidate = _object(request.get("candidate"), "candidate")
     candidate_id = _nonempty_string(candidate.get("id"), "candidate.id")
     if candidate_id not in KNOWN_CANDIDATES:
-        raise CandidateError("candidate_unknown", "Unknown local candidate.")
+        raise CandidateError("candidate_contract_mismatch", "Unknown local candidate.")
     if not isinstance(candidate.get("config", {}), dict):
         raise CandidateError(
             "candidate_contract_mismatch", "candidate.config must be an object."
@@ -159,7 +159,7 @@ def _probe(candidate_id: str, config: dict[str, Any]) -> tuple[list[dict[str, st
         if not _model_path(config):
             raise CandidateError("candidate_model_missing", "An explicit local model is required.")
         return [_identity("nvidia-nemo-diarizer", _package_version("nemo_toolkit"))], _hardware()
-    raise CandidateError("candidate_unknown", "Unknown local candidate.")
+    raise CandidateError("candidate_contract_mismatch", "Unknown local candidate.")
 
 
 def _safe_audio_path(request: dict[str, Any]) -> str:
@@ -167,7 +167,9 @@ def _safe_audio_path(request: dict[str, Any]) -> str:
     audio = _object(case.get("audio"), "case.audio")
     path = Path(_nonempty_string(audio.get("mixedPath"), "case.audio.mixedPath"))
     if not path.is_file():
-        raise CandidateError("candidate_model_missing", "The local audio input is unavailable.")
+        raise CandidateError(
+            "candidate_contract_mismatch", "The local audio input is unavailable."
+        )
     return str(path.resolve())
 
 
@@ -198,10 +200,10 @@ def _normalize_transcript(result: dict[str, Any]) -> tuple[list[dict[str, Any]],
 
 
 def _transcribe(candidate_id: str, request: dict[str, Any], config: dict[str, Any]) -> tuple[Any, Any, list[Any], str]:
-    audio_path = _safe_audio_path(request)
     model_name = str(config.get("model", "small"))
     if candidate_id == "current-whisperx":
         version = _package_version("whisperx")
+        audio_path = _safe_audio_path(request)
         whisperx = importlib.import_module("whisperx")
         device = str(config.get("device", "cpu"))
         compute_type = str(config.get("computeType", "int8"))
@@ -211,6 +213,7 @@ def _transcribe(candidate_id: str, request: dict[str, Any], config: dict[str, An
         return words, segments, [_identity(f"whisperx:{model_name}", version)], device
     if candidate_id == "apple-silicon-asr":
         models, hardware = _probe(candidate_id, config)
+        audio_path = _safe_audio_path(request)
         mlx_whisper = importlib.import_module("mlx_whisper")
         result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=model_name)
         words, segments = _normalize_transcript(result)
@@ -244,12 +247,12 @@ def _synthetic_output(request: dict[str, Any], config: dict[str, Any]) -> tuple[
 
 
 def _diarize(candidate_id: str, request: dict[str, Any], config: dict[str, Any]) -> tuple[list[Any], list[Any], list[Any], str]:
-    audio_path = _safe_audio_path(request)
     model_path = _model_path(config)
     if not model_path:
         raise CandidateError("candidate_model_missing", "An explicit local model is required.")
     if candidate_id == "pyannote-community-1":
         models, hardware = _probe(candidate_id, config)
+        audio_path = _safe_audio_path(request)
         pyannote = importlib.import_module("pyannote.audio")
         pipeline = pyannote.Pipeline.from_pretrained(model_path)
         result = pipeline(audio_path)
@@ -264,6 +267,7 @@ def _diarize(candidate_id: str, request: dict[str, Any], config: dict[str, Any])
         # NeMo is intentionally installed in the candidate command's isolated
         # environment. Its manifest/config path is consumed by ClusteringDiarizer.
         models, hardware = _probe(candidate_id, config)
+        _safe_audio_path(request)
         nemo_models = importlib.import_module("nemo.collections.asr.models")
         diarizer = nemo_models.ClusteringDiarizer(cfg=model_path)
         diarizer.diarize()

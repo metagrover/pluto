@@ -630,6 +630,24 @@ describe('runLocalAttributionCandidate', () => {
     expect(result.results.map((entry) => entry.caseId)).toEqual(['one', 'two']);
   });
 
+  it.each([
+    ['asr', 'transcribe'],
+    ['pipeline', 'transcribe'],
+    ['diarizer', 'diarize'],
+  ] as const)(
+    'emits the versioned %s operation as %s',
+    async (kind, action) => {
+      const script = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);if(q.action!==${JSON.stringify(action)}){process.stdout.write(JSON.stringify({schemaVersion:1,id:q.id,error:{code:'candidate_contract_mismatch',message:'wrong operation'}})+'\\n');return}const output=${JSON.stringify(validOutput('operation'))};output.caseId=q.case.id;process.stdout.write(JSON.stringify({schemaVersion:1,id:q.id,output})+'\\n')})`;
+      const result = await runLocalAttributionCandidate(
+        { ...candidate(script), kind },
+        [benchmarkCase(`operation-${kind}`)],
+        { timeoutMs: 500 },
+      );
+
+      expect(result.results[0].status).toBe('success');
+    },
+  );
+
   it('kills a hung candidate within the configured timeout', async () => {
     const started = Date.now();
     const result = await runLocalAttributionCandidate(

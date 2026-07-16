@@ -37,6 +37,7 @@ export type LocalAttributionBenchmarkCase = {
   referencePath: string;
 };
 export type CandidateKind = 'asr' | 'diarizer' | 'pipeline';
+export type CandidateOperation = 'transcribe' | 'diarize';
 export type CandidateModelIdentity = { id: string; version: string };
 export type CandidateManifestEntry = {
   id: string;
@@ -709,6 +710,8 @@ export const runLocalAttributionCandidate = async (
       benchmarkCase.id,
     ]),
   );
+  const operation: CandidateOperation =
+    candidate.kind === 'diarizer' ? 'diarize' : 'transcribe';
   const caseResults = new Map<
     string,
     CandidateCaseSuccess | CandidateCaseFailure
@@ -925,6 +928,7 @@ export const runLocalAttributionCandidate = async (
           id,
           requestId: id,
           schemaVersion: 1,
+          action: operation,
           candidate: {
             id: candidate.id,
             kind: candidate.kind,
