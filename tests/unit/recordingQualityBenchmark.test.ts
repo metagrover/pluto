@@ -1,3 +1,7 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -168,5 +172,39 @@ describe('buildRecordingQualityBenchmarkReport', () => {
         ],
       }),
     ]);
+  });
+});
+
+describe('benchmark:recording-quality CLI', () => {
+  it('runs the committed benchmark corpus successfully', () => {
+    const outputDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'recording-quality-benchmark-'),
+    );
+    const outputPath = path.join(outputDir, 'report.json');
+    const repoRoot = path.resolve(__dirname, '../..');
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        'scripts/run_recording_quality_benchmark.ts',
+        '--',
+        '--out',
+        outputPath,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    expect({
+      status: result.status,
+      stderr: result.stderr,
+      stdout: result.stdout,
+    }).toMatchObject({
+      status: 0,
+    });
+    expect(fs.existsSync(outputPath)).toBe(true);
   });
 });
