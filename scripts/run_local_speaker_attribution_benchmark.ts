@@ -179,12 +179,55 @@ const resolveInput = (inputPath: string) =>
     ? inputPath
     : path.resolve(process.cwd(), inputPath);
 
+const overlapSeconds = (
+  left: { startTime: number; endTime: number },
+  right: { startTime: number; endTime: number },
+) =>
+  Math.max(
+    0,
+    Math.min(left.endTime, right.endTime) -
+      Math.max(left.startTime, right.startTime),
+  );
+
+/**
+ * Oracle mapping used only to score a diarizer against a reviewed benchmark
+ * reference. Production must identify `Me` from acoustic near-end/AEC evidence;
+ * it must never have access to this reference-derived mapping.
+ */
+export const mapBenchmarkClustersFromReference = (
+  turns: LocalAttributionCandidateOutput['diarization']['turns'],
+  reference: BenchmarkTurn[],
+): ReadonlyMap<string, BenchmarkSpeaker> => {
+  const clusters = [...new Set(turns.map(({ cluster }) => cluster))].sort();
+  return new Map(
+    clusters.map((cluster) => {
+      const clusterTurns = turns.filter((turn) => turn.cluster === cluster);
+      const support = (speaker: BenchmarkSpeaker) =>
+        clusterTurns.reduce(
+          (total, turn) =>
+            total +
+            reference
+              .filter((item) => item.speaker === speaker)
+              .reduce(
+                (subtotal, item) => subtotal + overlapSeconds(turn, item),
+                0,
+              ),
+          0,
+        );
+      // `Them` wins exact ties, including clusters outside/without reference.
+      return [cluster, support('Me') > support('Them') ? 'Me' : 'Them'];
+    }),
+  );
+};
+
 const speakerFor = (
   candidate: CandidateManifestEntry,
   cluster: string,
+  oracleMap?: ReadonlyMap<string, BenchmarkSpeaker>,
 ): BenchmarkSpeaker => {
+  if (oracleMap) return oracleMap.get(cluster) ?? 'Them';
   if (cluster === 'Me' || cluster === 'Them') return cluster;
-  const map = candidate.config.speakerMap;
+  const map = candidate.id === 'synthetic' ? candidate.config.speakerMap : undefined;
   if (typeof map === 'object' && map !== null && !Array.isArray(map)) {
     const mapped = (map as Record<string, unknown>)[cluster];
     if (mapped === 'Me' || mapped === 'Them') return mapped;
@@ -196,8 +239,12 @@ export const composeCandidateAttributedTurns = (
   output: LocalAttributionCandidateOutput,
   candidate: CandidateManifestEntry,
   transcriptOutput = output,
+  benchmarkReference?: BenchmarkTurn[],
 ): BenchmarkTurn[] => {
   const turns = output.diarization.turns;
+  const oracleMap = benchmarkReference
+    ? mapBenchmarkClustersFromReference(turns, benchmarkReference)
+    : undefined;
   const assignedText = turns.map(() => [] as string[]);
   const units =
     transcriptOutput.transcript.words.length > 0
@@ -229,7 +276,7 @@ export const composeCandidateAttributedTurns = (
   return turns.map((turn, index) => ({
     startTime: turn.startTime,
     endTime: turn.endTime,
-    speaker: speakerFor(candidate, turn.cluster),
+    speaker: speakerFor(candidate, turn.cluster, oracleMap),
     text: assignedText[index].join(' '),
   }));
 };
@@ -401,6 +448,7 @@ export const runLocalSpeakerAttributionBenchmark = async (
             diarizerSuccess.output,
             combination.diarizer,
             asrSuccess.output,
+            reference.turns,
           ),
           ...(audioDurationSeconds > 0
             ? { audioDurationSeconds, elapsedMs }

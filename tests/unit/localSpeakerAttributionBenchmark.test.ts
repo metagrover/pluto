@@ -266,6 +266,115 @@ describe('computeLocalAttributionMetrics', () => {
   });
 });
 
+describe('benchmark-only oracle cluster mapping', () => {
+  const output = (clusters: Array<[number, number, string]>) =>
+    loadLocalAttributionCandidateOutput({
+      schemaVersion: 1,
+      caseId: 'oracle-case',
+      candidateId: 'real-diarizer',
+      transcript: { words: [], segments: [] },
+      diarization: {
+        turns: clusters.map(([startTime, endTime, cluster]) => ({
+          startTime,
+          endTime,
+          cluster,
+        })),
+      },
+      runtime: {
+        pipelineVersion: '1',
+        models: [{ id: 'fixture', version: '1' }],
+        elapsedMs: 1,
+      },
+    });
+  const candidate = {
+    id: 'real-diarizer',
+    kind: 'diarizer' as const,
+    version: '1',
+    command: ['fixture'],
+    model: { id: 'fixture', version: '1' },
+    config: {},
+  };
+  const reference = [
+    { startTime: 0, endTime: 2, speaker: 'Me' as const, text: '' },
+    { startTime: 2, endTime: 5, speaker: 'Them' as const, text: '' },
+  ];
+
+  it('is invariant to arbitrary cluster renames and input permutations', () => {
+    const first = composeCandidateAttributedTurns(
+      output([[0, 2, 'speaker-99'], [2, 5, 'speaker-01']]),
+      candidate,
+      undefined,
+      reference,
+    );
+    const renamed = composeCandidateAttributedTurns(
+      output([[0, 2, 'z'], [2, 5, 'a']]),
+      candidate,
+      undefined,
+      reference,
+    );
+    expect(first.map(({ speaker }) => speaker)).toEqual(['Me', 'Them']);
+    expect(renamed.map(({ speaker }) => speaker)).toEqual(['Me', 'Them']);
+    expect(
+      composeCandidateAttributedTurns(
+        output([[0, 2, 'Them'], [2, 5, 'Me']]),
+        candidate,
+        undefined,
+        reference,
+      ).map(({ speaker }) => speaker),
+    ).toEqual(['Me', 'Them']);
+  });
+
+  it('maps fragmented Me clusters only when doing so improves speaker-time accuracy', () => {
+    const generated = composeCandidateAttributedTurns(
+      output([
+        [0, 1, 'me-fragment-a'],
+        [1, 2.5, 'me-fragment-b'],
+        [2.5, 4, 'remote'],
+        [4, 5, 'tie-with-no-reference'],
+      ]),
+      candidate,
+      undefined,
+      reference,
+    );
+    expect(generated.map(({ speaker }) => speaker)).toEqual([
+      'Me',
+      'Me',
+      'Them',
+      'Them',
+    ]);
+    const metrics = computeLocalAttributionMetrics({ reference, generated });
+    expect(
+      metrics.me.predictedSeconds - metrics.me.truePositiveSeconds,
+    ).toBeCloseTo(0.5);
+    expect(
+      metrics.me.referenceSeconds - metrics.me.truePositiveSeconds,
+    ).toBe(0);
+  });
+
+  it('uses deterministic Them tie-breaking for overlaps and empty references', () => {
+    const overlappingReference = [
+      { startTime: 0, endTime: 2, speaker: 'Me' as const, text: '' },
+      { startTime: 0, endTime: 2, speaker: 'Them' as const, text: '' },
+    ];
+    expect(
+      composeCandidateAttributedTurns(
+        output([[0, 2, 'ambiguous']]),
+        candidate,
+        undefined,
+        overlappingReference,
+      )[0].speaker,
+    ).toBe('Them');
+    expect(
+      composeCandidateAttributedTurns(
+        output([[0, 2, 'unknown']]),
+        candidate,
+        undefined,
+        [],
+      )[0].speaker,
+    ).toBe('Them');
+  });
+});
+
 const temporaryDirectories: string[] = [];
 
 const makePrivateCorpus = () => {
