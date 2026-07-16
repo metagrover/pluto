@@ -1,6 +1,6 @@
 # Recording Quality Benchmark
 
-`pnpm run benchmark:recording-quality` runs Pluto's committed, content-safe recording benchmark corpus. The command exercises current transcript-validation, retry-validation, and recording-finalization helpers against synthetic fixtures for the regression shapes tracked in `#25`, `#75`, `#428`, `#434`, and `#458`, then compares tracked metrics against the recorded `master` baseline.
+`pnpm run benchmark:recording-quality` runs Pluto's committed, content-safe recording benchmark corpus. The command exercises current capture-recovery, transcript-validation, retry-validation, and recording-finalization helpers against synthetic fixtures for the regression shapes tracked in `#25`, `#75`, `#428`, `#434`, `#458`, and `#493`, then compares tracked metrics against the recorded `master` baseline.
 
 ## What it writes
 
@@ -17,6 +17,7 @@ The report includes schema version, environment metadata, source commit, per-cas
 
 Each fixture must stay synthetic and content-safe. Do not commit private meeting text, audio paths, or raw recordings.
 Retry-validation fixtures model persisted meeting state plus mocked transcription/probe responses, so they can cover fail-closed evidence handling without replaying private recordings.
+Capture-recovery fixtures materialize synthetic chunk bytes in a temporary directory, run the real interrupted-journal recovery boundary, and remove the artifacts after each case. Their gap reasons use `reason:source:sequence` labels so checksum or incomplete-tail regressions stay explicit without exposing content or paths.
 
 Each manifest case can optionally declare `trackedMetrics`:
 
@@ -53,6 +54,7 @@ Use this command when changing local speaker-attribution scoring or candidate-ru
 - `status mismatch` means the current helper behavior no longer matches the committed regression expectation.
 - Metric mismatches mean a tracked value such as `localTranscriptCoveredSeconds` or `durationSeconds` drifted.
 - Retry-validation metric mismatches can also track labeled state such as `activityEvidenceSource`.
+- Capture-recovery metric mismatches report drift in the recovered-to-acknowledged chunk ratio; missing source or gap assertions fail the case independently.
 - Required-reason failures mean the benchmark no longer surfaces an expected integrity reason.
 - Stable baseline regressions fail the command even when the fixture expectation itself still passes.
 - Hardware-dependent drift and missing baseline entries stay visible in the summary so they can be reviewed before baseline updates.

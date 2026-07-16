@@ -10,12 +10,16 @@
     "arch": "arm64"
   },
   "summary": {
-    "totalCases": 6,
-    "passedCases": 6,
+    "totalCases": 7,
+    "passedCases": 7,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434, 458],
+    "issueCoverage": [25, 75, 428, 434, 458, 493],
     "kinds": {
+      "capture_recovery": {
+        "passed": 1,
+        "failed": 0
+      },
       "recording_finalization": {
         "passed": 1,
         "failed": 0
@@ -31,6 +35,37 @@
     }
   },
   "results": [
+    {
+      "id": "issue-493-capture-recovery",
+      "issue": 493,
+      "title": "Interrupted capture journals recover acknowledged evidence",
+      "kind": "capture_recovery",
+      "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "recoveredChunkRatio",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
+      "actual": {
+        "status": "needs_attention",
+        "primaryMetric": {
+          "name": "recoveredChunkRatio",
+          "value": 0.75
+        },
+        "reasons": ["checksum_mismatch:mic:1"]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requiredRecoveredSources": ["mic", "system"],
+        "requiredReasons": ["checksum_mismatch:mic:1"],
+        "primaryMetric": {
+          "name": "recoveredChunkRatio",
+          "value": 0.75
+        }
+      }
+    },
     {
       "id": "issue-25-opening-audio",
       "issue": 25,

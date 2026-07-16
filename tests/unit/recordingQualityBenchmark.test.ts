@@ -10,6 +10,7 @@ import {
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
+  runCaptureRecoveryBenchmarkCase,
   runRetryValidationBenchmarkCase,
 } from '../../src/services/recordingQualityBenchmark';
 
@@ -94,6 +95,28 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
       id: 'issue-458-missing-retry-evidence',
       issue: 458,
       kind: 'retry_validation',
+    });
+  });
+
+  it('accepts capture-recovery benchmark cases', () => {
+    const manifest = loadRecordingQualityBenchmarkManifest({
+      schemaVersion: 1,
+      baselineReport: 'baselines/current-master.json',
+      cases: [
+        {
+          id: 'issue-493-capture-recovery',
+          issue: 493,
+          title: 'Interrupted capture journals recover acknowledged evidence',
+          kind: 'capture_recovery',
+          fixture: 'fixtures/issue-493-capture-recovery.json',
+        },
+      ],
+    });
+
+    expect(manifest.cases[0]).toMatchObject({
+      id: 'issue-493-capture-recovery',
+      issue: 493,
+      kind: 'capture_recovery',
     });
   });
 
@@ -201,6 +224,79 @@ describe('runRetryValidationBenchmarkCase', () => {
   });
 });
 
+describe('runCaptureRecoveryBenchmarkCase', () => {
+  it('recovers both sources while excluding and reporting a corrupt tail', async () => {
+    const result = await runCaptureRecoveryBenchmarkCase(
+      {
+        id: 'issue-493-capture-recovery',
+        issue: 493,
+        title: 'Interrupted capture journals recover acknowledged evidence',
+        kind: 'capture_recovery',
+        fixture: 'fixtures/issue-493-capture-recovery.json',
+      },
+      {
+        type: 'capture_recovery',
+        meetingId: 'synthetic-recovery-case',
+        startedAtMs: 1_000,
+        chunks: [
+          {
+            source: 'mic',
+            sequence: 0,
+            startSec: 0,
+            endSec: 2,
+            data: 'synthetic-mic-0',
+          },
+          {
+            source: 'mic',
+            sequence: 1,
+            startSec: 2,
+            endSec: 4,
+            data: 'synthetic-mic-1',
+          },
+          {
+            source: 'system',
+            sequence: 0,
+            startSec: 0,
+            endSec: 2,
+            data: 'synthetic-system-0',
+          },
+          {
+            source: 'system',
+            sequence: 1,
+            startSec: 2,
+            endSec: 4,
+            data: 'synthetic-system-1',
+          },
+        ],
+        corruptAfterJournal: {
+          source: 'mic',
+          sequence: 1,
+          replacementData: 'synthetic-mic-x',
+        },
+        expected: {
+          status: 'needs_attention',
+          requiredRecoveredSources: ['mic', 'system'],
+          requiredReasons: ['checksum_mismatch:mic:1'],
+          primaryMetric: {
+            name: 'recoveredChunkRatio',
+            value: 0.75,
+          },
+        },
+      },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.actual).toEqual({
+      status: 'needs_attention',
+      primaryMetric: {
+        name: 'recoveredChunkRatio',
+        value: 0.75,
+      },
+      reasons: ['checksum_mismatch:mic:1'],
+    });
+  });
+});
+
 describe('buildRecordingQualityBenchmarkReport', () => {
   it('summarizes passed and failed committed regression cases', () => {
     const results: RecordingQualityBenchmarkCaseResult[] = [
@@ -287,6 +383,7 @@ describe('buildRecordingQualityBenchmarkReport', () => {
     });
     expect(report.summary.issueCoverage).toEqual([25, 75, 434]);
     expect(report.summary.kinds).toEqual({
+      capture_recovery: { passed: 0, failed: 0 },
       recording_finalization: { passed: 1, failed: 0 },
       retry_validation: { passed: 0, failed: 0 },
       transcript_validation: { passed: 1, failed: 1 },
@@ -549,5 +646,16 @@ describe('benchmark:recording-quality CLI', () => {
       status: 0,
     });
     expect(fs.existsSync(outputPath)).toBe(true);
+    const report = JSON.parse(fs.readFileSync(outputPath, 'utf8')) as {
+      summary: {
+        issueCoverage: number[];
+        kinds: Record<string, { passed: number; failed: number }>;
+      };
+    };
+    expect(report.summary.issueCoverage).toContain(493);
+    expect(report.summary.kinds.capture_recovery).toEqual({
+      passed: 1,
+      failed: 0,
+    });
   });
 });
