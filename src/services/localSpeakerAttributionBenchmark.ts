@@ -99,6 +99,7 @@ export type LocalCandidateRunOptions = {
 
 export type CandidateFailureCode =
   | 'candidate_not_found'
+  | 'candidate_unknown'
   | 'candidate_timeout'
   | 'candidate_exit_nonzero'
   | 'candidate_output_too_large'
@@ -125,6 +126,7 @@ export type PublicCandidateResult = {
 
 const candidateFailureCodes = new Set<CandidateFailureCode>([
   'candidate_not_found',
+  'candidate_unknown',
   'candidate_timeout',
   'candidate_exit_nonzero',
   'candidate_output_too_large',

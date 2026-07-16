@@ -783,6 +783,20 @@ describe('runLocalAttributionCandidate', () => {
     });
   });
 
+  it('preserves the typed candidate_unknown failure code', async () => {
+    const script = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);process.stdout.write(JSON.stringify({schemaVersion:1,id:q.id,error:{code:'candidate_unknown',message:'unknown candidate'}})+'\\n')})`;
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('unknown-candidate')],
+      { timeoutMs: 500 },
+    );
+
+    expect(result.results[0]).toMatchObject({
+      status: 'failure',
+      error: { code: 'candidate_unknown', message: '[redacted]' },
+    });
+  });
+
   it('caps cumulative stdout even when every individual JSONL line is below the limit', async () => {
     const script =
       "for(let i=0;i<12;i+=1)process.stdout.write(' '.repeat(900*1024)+'\\n')";
@@ -866,6 +880,19 @@ describe('runLocalAttributionCandidate', () => {
 });
 
 describe('sanitizeCandidateResult', () => {
+  it('preserves candidate_unknown in sanitized public results', () => {
+    expect(
+      sanitizeCandidateResult({
+        caseHash: 'case-hash',
+        candidateId: 'missing-engine',
+        status: 'failed',
+        failureCode: 'candidate_unknown',
+        elapsedMs: 1,
+        peakMemoryMb: 2,
+      }),
+    ).toMatchObject({ failureCode: 'candidate_unknown' });
+  });
+
   it.each(['ok', 'failed'] as const)(
     'constructs an allowlisted %s public result',
     (status) => {

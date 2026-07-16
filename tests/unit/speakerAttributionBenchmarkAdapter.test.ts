@@ -123,10 +123,38 @@ describe('speaker attribution benchmark adapter', () => {
     });
     expect(result.responses[1]).toMatchObject({
       id: 'unknown',
-      error: { code: 'candidate_contract_mismatch' },
+      error: { code: 'candidate_unknown' },
     });
     expect(result.responses[2]).toMatchObject({ id: 'good', output: {} });
     expect(result.stdout).not.toMatch(/Traceback|INFO|WARNING/);
+  });
+
+  it('preserves candidate_unknown through the TypeScript runner', async () => {
+    const result = await runLocalAttributionCandidate(
+      {
+        id: 'unknown-local-engine',
+        kind: 'asr',
+        version: '1',
+        command: ['python3', adapter],
+        model: { id: 'unknown-local-engine', version: '1' },
+        config: {},
+      },
+      [
+        {
+          id: 'unknown-case',
+          recordingId: 'synthetic-recording',
+          provenance: { tier: 'synthetic', source: 'generated-fixture' },
+          audio: { mixedPath: 'unused.wav' },
+          referencePath: 'unused.json',
+        },
+      ],
+      { timeoutMs: 2_000 },
+    );
+
+    expect(result.results[0]).toMatchObject({
+      status: 'failure',
+      error: { code: 'candidate_unknown', message: '[redacted]' },
+    });
   });
 
   it('runs the synthetic adapter end to end through the TypeScript candidate runner', async () => {

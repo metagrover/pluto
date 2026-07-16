@@ -87,7 +87,7 @@ def _validate_request(raw: Any) -> dict[str, Any]:
     candidate = _object(request.get("candidate"), "candidate")
     candidate_id = _nonempty_string(candidate.get("id"), "candidate.id")
     if candidate_id not in KNOWN_CANDIDATES:
-        raise CandidateError("candidate_contract_mismatch", "Unknown local candidate.")
+        raise CandidateError("candidate_unknown", "Unknown local candidate.")
     if not isinstance(candidate.get("config", {}), dict):
         raise CandidateError(
             "candidate_contract_mismatch", "candidate.config must be an object."
@@ -159,7 +159,7 @@ def _probe(candidate_id: str, config: dict[str, Any]) -> tuple[list[dict[str, st
         if not _model_path(config):
             raise CandidateError("candidate_model_missing", "An explicit local model is required.")
         return [_identity("nvidia-nemo-diarizer", _package_version("nemo_toolkit"))], _hardware()
-    raise CandidateError("candidate_contract_mismatch", "Unknown local candidate.")
+    raise CandidateError("candidate_unknown", "Unknown local candidate.")
 
 
 def _safe_audio_path(request: dict[str, Any]) -> str:
