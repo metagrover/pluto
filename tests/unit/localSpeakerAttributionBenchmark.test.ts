@@ -66,8 +66,26 @@ describe('computeLocalAttributionMetrics', () => {
       },
       generatedSpeakerCount: 2,
       speakerCountCorrect: true,
+      speakerCount: 2,
+      falseMeSeconds: 3,
+      missedMeSeconds: 1,
+      wordErrorRate: 0,
+      diarizationErrorRate: 0.4,
       runtimeFactor: 0.5,
     });
+  });
+
+  it('does not treat a fixed-label swap as correct just because the counts match', () => {
+    const metrics = computeLocalAttributionMetrics({
+      reference: [{ startTime: 0, endTime: 1, speaker: 'Me', text: 'local' }],
+      generated: [{ startTime: 0, endTime: 1, speaker: 'Them', text: 'local' }],
+    });
+
+    expect(metrics.generatedSpeakerCount).toBe(1);
+    expect(metrics.speakerCount).toBe(1);
+    expect(metrics.speakerCountCorrect).toBe(false);
+    expect(metrics.falseMeSeconds).toBe(0);
+    expect(metrics.missedMeSeconds).toBe(1);
   });
 
   it('uses active-speaker sets on overlap and exposes missed, false-alarm, and confusion components', () => {
@@ -135,6 +153,35 @@ describe('computeLocalAttributionMetrics', () => {
         elapsedMs: -1,
       }),
     ).toThrow(/non-negative/i);
+    expect(() =>
+      computeLocalAttributionMetrics({
+        reference: [
+          { startTime: 0, endTime: 2, speaker: 'Them', text: 'remote' },
+        ],
+        generated: [],
+        audioDurationSeconds: 1,
+      }),
+    ).toThrow(/cannot end before/i);
+  });
+
+  it('reports overlap, speaker boundary, and local-turn recall deterministically', () => {
+    const input = {
+      reference: [
+        { startTime: 0, endTime: 4, speaker: 'Them' as const, text: 'remote' },
+        { startTime: 3, endTime: 5, speaker: 'Me' as const, text: 'local' },
+      ],
+      generated: [
+        { startTime: 0, endTime: 4, speaker: 'Them' as const, text: 'remote' },
+        { startTime: 4, endTime: 5, speaker: 'Me' as const, text: 'local' },
+      ],
+    };
+
+    const first = computeLocalAttributionMetrics(input);
+    const second = computeLocalAttributionMetrics(input);
+    expect(second).toEqual(first);
+    expect(first.boundaryErrorSeconds).toBe(1);
+    expect(first.overlapAccuracy).toBe(0);
+    expect(first.shortLocalTurnRecall).toBe(0);
   });
 });
 

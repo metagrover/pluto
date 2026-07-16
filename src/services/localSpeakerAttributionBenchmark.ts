@@ -89,6 +89,11 @@ export type SpeakerClassificationMetrics = {
   f1: number;
 };
 export type LocalAttributionMetrics = {
+  wordErrorRate: number;
+  diarizationErrorRate: number;
+  falseMeSeconds: number;
+  missedMeSeconds: number;
+  speakerCount: number;
   transcript: WordErrorMetrics;
   speakerAttributedWords: WordErrorMetrics;
   diarization: {
@@ -710,6 +715,11 @@ export const computeLocalAttributionMetrics = (
     new Set(turns.map((turn) => turn.speaker)).size;
   const expectedSpeakerCount = speakersIn(reference);
   const generatedSpeakerCount = speakersIn(generated);
+  const referenceLabels = new Set(reference.map((turn) => turn.speaker));
+  const generatedLabels = new Set(generated.map((turn) => turn.speaker));
+  const speakerCountCorrect =
+    referenceLabels.size === generatedLabels.size &&
+    [...referenceLabels].every((speaker) => generatedLabels.has(speaker));
   const referenceChanges = reference
     .slice(1)
     .filter((turn, index) => turn.speaker !== reference[index].speaker)
@@ -751,7 +761,22 @@ export const computeLocalAttributionMetrics = (
     return overlap / (turn.endTime - turn.startTime) >= 0.65;
   }).length;
 
+  const diarizationErrorRate = safeRate(
+    missedSpeechSeconds + falseAlarmSeconds + speakerConfusionSeconds,
+    referenceSpeakerSeconds,
+  );
+  const me = speakerMetrics(
+    perSpeaker.Me.truePositive,
+    perSpeaker.Me.predicted,
+    perSpeaker.Me.reference,
+  );
+
   return {
+    wordErrorRate: transcript.wordErrorRate,
+    diarizationErrorRate,
+    falseMeSeconds: me.predictedSeconds - me.truePositiveSeconds,
+    missedMeSeconds: me.referenceSeconds - me.truePositiveSeconds,
+    speakerCount: generatedSpeakerCount,
     transcript,
     speakerAttributedWords,
     diarization: {
@@ -759,16 +784,9 @@ export const computeLocalAttributionMetrics = (
       missedSpeechSeconds,
       falseAlarmSeconds,
       speakerConfusionSeconds,
-      errorRate: safeRate(
-        missedSpeechSeconds + falseAlarmSeconds + speakerConfusionSeconds,
-        referenceSpeakerSeconds,
-      ),
+      errorRate: diarizationErrorRate,
     },
-    me: speakerMetrics(
-      perSpeaker.Me.truePositive,
-      perSpeaker.Me.predicted,
-      perSpeaker.Me.reference,
-    ),
+    me,
     them: speakerMetrics(
       perSpeaker.Them.truePositive,
       perSpeaker.Them.predicted,
@@ -776,7 +794,7 @@ export const computeLocalAttributionMetrics = (
     ),
     expectedSpeakerCount,
     generatedSpeakerCount,
-    speakerCountCorrect: expectedSpeakerCount === generatedSpeakerCount,
+    speakerCountCorrect,
     boundaryErrorSeconds,
     overlapAccuracy:
       overlapSeconds === 0 ? 1 : overlapCorrectSeconds / overlapSeconds,
