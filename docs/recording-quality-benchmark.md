@@ -17,6 +17,16 @@ The report includes schema version, environment metadata, source commit, per-cas
 
 Each fixture must stay synthetic and content-safe. Do not commit private meeting text, audio paths, or raw recordings.
 
+## Local speaker-attribution benchmark
+
+`pnpm run benchmark:speaker-attribution` runs the local speaker-attribution benchmark introduced for `#479`. It exercises candidate ASR/diarizer pipelines against committed synthetic fixtures through the JSONL adapter contract in `python/speaker_attribution_benchmark_adapter.py` and writes paired JSON/Markdown reports under `tmp/`.
+
+- Manifest: `scripts/speaker-attribution/manifest.example.json`
+- Synthetic fixtures: `scripts/speaker-attribution/fixtures/*.json`
+- Focus: attribution WER/DER, false or missed `Me`, boundary error, overlap accuracy, short-local-turn recall, and runtime/memory
+
+Use this command when changing local speaker-attribution scoring or candidate-runner behavior. Keep private-corpus validation and credential-free eligibility work on their dedicated issue paths (`#474` and `#477`) rather than extending this committed synthetic slice.
+
 ## Adding a case
 
 1. Add a new fixture JSON under `scripts/recording-quality/fixtures/`.
