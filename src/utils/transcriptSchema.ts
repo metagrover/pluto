@@ -10,7 +10,7 @@ import type {
   TranscriptIntegrityEvidence,
   TranscriptIntegrityReason,
   TranscriptLifecycleStatus,
-} from './transcriptIntegrity';
+} from './transcriptIntegrity.ts';
 
 export const TRANSCRIPT_PIPELINE_VERSION = '2.0.0';
 

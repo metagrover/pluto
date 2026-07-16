@@ -22,6 +22,7 @@ import {
   createCaptureJournal,
   sealCaptureJournal,
 } from './captureJournal';
+import { recoverInterruptedCaptureJournals } from './captureJournalRecovery';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -866,90 +867,105 @@ app.whenReady().then(async () => {
     },
   );
 
+  const stitchWavSegments = async ({
+    segments,
+    outputTag,
+  }: {
+    segments?: Array<{
+      path?: string;
+      startSec?: number;
+      endSec?: number;
+      chunkIndex?: number;
+    }>;
+    outputTag?: string;
+  }) => {
+    if (!Array.isArray(segments) || segments.length === 0) return null;
+
+    const validSegments = segments
+      .filter(
+        (
+          value,
+        ): value is {
+          path: string;
+          startSec: number;
+          endSec: number;
+          chunkIndex?: number;
+        } =>
+          value &&
+          typeof value === 'object' &&
+          typeof value.path === 'string' &&
+          value.path.length > 0 &&
+          fs.existsSync(value.path) &&
+          typeof value.startSec === 'number' &&
+          Number.isFinite(value.startSec) &&
+          value.startSec >= 0 &&
+          typeof value.endSec === 'number' &&
+          Number.isFinite(value.endSec) &&
+          value.endSec > value.startSec,
+      )
+      .sort((left, right) => left.startSec - right.startSec);
+
+    if (validSegments.length === 0) return null;
+
+    const tag =
+      (typeof outputTag === 'string' ? outputTag : 'stitched')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '')
+        .slice(0, 24) || 'stitched';
+    const outputDir = path.join(app.getPath('userData'), 'meetings');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+    const outputPath = path.join(
+      outputDir,
+      `${tag}_${Date.now()}_${randomUUID()}.wav`,
+    );
+
+    return await new Promise<string | null>((resolve) => {
+      const command = ffmpeg();
+      const filterParts: string[] = [];
+      const mixInputs: string[] = [];
+
+      for (let i = 0; i < validSegments.length; i++) {
+        const segment = validSegments[i];
+        command.input(segment.path);
+        const delayMs = Math.max(0, Math.round(segment.startSec * 1000));
+        filterParts.push(
+          `[${i}:a]adelay=${delayMs}|${delayMs},volume=1[a${i}]`,
+        );
+        mixInputs.push(`[a${i}]`);
+      }
+
+      command
+        .complexFilter([
+          ...filterParts,
+          `${mixInputs.join('')}amix=inputs=${validSegments.length}:duration=longest:normalize=0`,
+        ])
+        .audioChannels(1)
+        .audioFrequency(16000)
+        .toFormat('wav')
+        .on('end', () => {
+          console.log(
+            `[Pluto] Reconstructed WAV from ${validSegments.length} timed segments: ${outputPath}`,
+          );
+          resolve(outputPath);
+        })
+        .on('error', (err) => {
+          console.warn(
+            '[Pluto] Timed WAV reconstruction failed:',
+            err instanceof Error ? err.message : err,
+          );
+          if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+          resolve(null);
+        })
+        .save(outputPath);
+    });
+  };
+
   ipcMain.handle(
     'AUDIO_STITCH_WAV_SEGMENTS',
     async (_event, { segments, outputTag } = {}) => {
-      if (!Array.isArray(segments) || segments.length === 0) return null;
-
-      const validSegments = segments
-        .filter(
-          (
-            value,
-          ): value is {
-            path: string;
-            startSec: number;
-            endSec: number;
-            chunkIndex?: number;
-          } =>
-            value &&
-            typeof value === 'object' &&
-            typeof value.path === 'string' &&
-            value.path.length > 0 &&
-            fs.existsSync(value.path) &&
-            typeof value.startSec === 'number' &&
-            Number.isFinite(value.startSec) &&
-            value.startSec >= 0 &&
-            typeof value.endSec === 'number' &&
-            Number.isFinite(value.endSec) &&
-            value.endSec > value.startSec,
-        )
-        .sort((left, right) => left.startSec - right.startSec);
-
-      if (validSegments.length === 0) return null;
-
-      const tag =
-        (typeof outputTag === 'string' ? outputTag : 'stitched')
-          .toLowerCase()
-          .replace(/[^a-z0-9_-]/g, '')
-          .slice(0, 24) || 'stitched';
-      const outputDir = path.join(app.getPath('userData'), 'meetings');
-      if (!fs.existsSync(outputDir)) {
-        fs.mkdirSync(outputDir, { recursive: true });
-      }
-      const outputPath = path.join(
-        outputDir,
-        `${tag}_${Date.now()}_${randomUUID()}.wav`,
-      );
-
-      return await new Promise<string | null>((resolve) => {
-        const command = ffmpeg();
-        const filterParts: string[] = [];
-        const mixInputs: string[] = [];
-
-        for (let i = 0; i < validSegments.length; i++) {
-          const segment = validSegments[i];
-          command.input(segment.path);
-          const delayMs = Math.max(0, Math.round(segment.startSec * 1000));
-          filterParts.push(
-            `[${i}:a]adelay=${delayMs}|${delayMs},volume=1[a${i}]`,
-          );
-          mixInputs.push(`[a${i}]`);
-        }
-
-        command
-          .complexFilter([
-            ...filterParts,
-            `${mixInputs.join('')}amix=inputs=${validSegments.length}:duration=longest:normalize=0`,
-          ])
-          .audioChannels(1)
-          .audioFrequency(16000)
-          .toFormat('wav')
-          .on('end', () => {
-            console.log(
-              `[Pluto] Reconstructed WAV from ${validSegments.length} timed segments: ${outputPath}`,
-            );
-            resolve(outputPath);
-          })
-          .on('error', (err) => {
-            console.warn(
-              '[Pluto] Timed WAV reconstruction failed:',
-              err instanceof Error ? err.message : err,
-            );
-            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-            resolve(null);
-          })
-          .save(outputPath);
-      });
+      return await stitchWavSegments({ segments, outputTag });
     },
   );
 
@@ -2118,6 +2134,31 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.warn(
       '[AttentionSync] Failed to bootstrap action-tracker signals:',
+      error,
+    );
+  }
+
+  try {
+    const recovery = await recoverInterruptedCaptureJournals(
+      getMeetingArtifactsRootDir(),
+      {
+        getMeeting: (meetingId) =>
+          (db.getMeeting(meetingId) as db.PersistedMeeting | null) ?? null,
+        saveMeeting: (meeting) => db.saveMeeting(meeting),
+        stitchWavSegments: async (segments, outputTag) =>
+          await stitchWavSegments({ segments, outputTag }),
+      },
+    );
+    if (
+      recovery.recoveredCount > 0 ||
+      recovery.failedRecoveryCount > 0 ||
+      recovery.skippedInvalidManifestCount > 0
+    ) {
+      console.log('[Pluto] Capture-journal recovery summary:', recovery);
+    }
+  } catch (error) {
+    console.warn(
+      '[Pluto] Failed to recover interrupted capture journals:',
       error,
     );
   }

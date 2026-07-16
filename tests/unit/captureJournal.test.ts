@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -103,6 +103,43 @@ describe('capture journal', () => {
       data: Buffer.from('system-bytes'),
     });
 
+    expect(manifest.entries).toHaveLength(1);
+  });
+
+  it('rejects duplicate delivery when the stored chunk checksum changed', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    const original = Buffer.from('mic-bytes');
+    const appended = await appendCaptureJournalChunk(root, {
+      meetingId: 'meeting-123',
+      source: 'mic',
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+      format: 'wav',
+      data: original,
+    });
+    await writeFile(
+      join(root, appended.entries[0].relativePath),
+      Buffer.from('bad-bytes'),
+    );
+
+    await expect(
+      appendCaptureJournalChunk(root, {
+        meetingId: 'meeting-123',
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        format: 'wav',
+        data: original,
+      }),
+    ).rejects.toThrow(/artifact checksum mismatch/i);
+
+    const manifest = await readCaptureJournalManifest(root, 'meeting-123');
     expect(manifest.entries).toHaveLength(1);
   });
 

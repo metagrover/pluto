@@ -10,11 +10,11 @@
     "arch": "arm64"
   },
   "summary": {
-    "totalCases": 5,
-    "passedCases": 5,
+    "totalCases": 7,
+    "passedCases": 7,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434, 476],
+    "issueCoverage": [25, 75, 428, 434, 458, 476],
     "kinds": {
       "candidate_eligibility": {
         "passed": 1,
@@ -26,6 +26,10 @@
       },
       "transcript_validation": {
         "passed": 3,
+        "failed": 0
+      },
+      "retry_validation": {
+        "passed": 2,
         "failed": 0
       }
     }
@@ -159,6 +163,52 @@
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 6
+        }
+      }
+    },
+    {
+      "id": "issue-458-missing-retry-evidence",
+      "issue": 458,
+      "title": "Missing deterministic retry evidence fails closed",
+      "kind": "retry_validation",
+      "passed": true,
+      "actual": {
+        "status": "needs_attention",
+        "primaryMetric": {
+          "name": "activityEvidenceSource",
+          "value": "capture_activity_missing"
+        },
+        "reasons": ["deterministic_retry_evidence_missing"]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requiredReasons": ["deterministic_retry_evidence_missing"],
+        "primaryMetric": {
+          "name": "activityEvidenceSource",
+          "value": "capture_activity_missing"
+        }
+      }
+    },
+    {
+      "id": "issue-458-corrupt-retry-evidence",
+      "issue": 458,
+      "title": "Corrupt deterministic retry evidence fails closed",
+      "kind": "retry_validation",
+      "passed": true,
+      "actual": {
+        "status": "needs_attention",
+        "primaryMetric": {
+          "name": "activityEvidenceSource",
+          "value": "capture_activity_corrupt"
+        },
+        "reasons": ["deterministic_retry_evidence_corrupt"]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requiredReasons": ["deterministic_retry_evidence_corrupt"],
+        "primaryMetric": {
+          "name": "activityEvidenceSource",
+          "value": "capture_activity_corrupt"
         }
       }
     }

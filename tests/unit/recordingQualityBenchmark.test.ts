@@ -1,13 +1,19 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
   type CandidateEligibilityFixture,
   type RecordingQualityBenchmarkCaseResult,
+  buildRecordingQualityBenchmarkComparisonSummary,
   buildRecordingQualityBenchmarkReport,
   evaluateCandidateDistributionEligibility,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
   runCandidateEligibilityBenchmarkCase,
+  runRetryValidationBenchmarkCase,
 } from '../../src/services/recordingQualityBenchmark';
 
 describe('parseRecordingQualityBenchmarkCliArgs', () => {
@@ -82,6 +88,131 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
         ],
       }),
     ).toThrow(/duplicate benchmark case id/i);
+  });
+
+  it('accepts retry-validation benchmark cases', () => {
+    const manifest = loadRecordingQualityBenchmarkManifest({
+      schemaVersion: 1,
+      baselineReport: 'baselines/current-master.json',
+      cases: [
+        {
+          id: 'issue-458-missing-retry-evidence',
+          issue: 458,
+          title: 'Missing deterministic retry evidence fails closed',
+          kind: 'retry_validation',
+          fixture: 'fixtures/issue-458-missing-retry-evidence.json',
+        },
+      ],
+    });
+
+    expect(manifest.cases[0]).toMatchObject({
+      id: 'issue-458-missing-retry-evidence',
+      issue: 458,
+      kind: 'retry_validation',
+    });
+  });
+
+  it('loads tracked metrics with tolerance and stability rules', () => {
+    const manifest = loadRecordingQualityBenchmarkManifest({
+      schemaVersion: 1,
+      baselineReport: 'baselines/current-master.json',
+      cases: [
+        {
+          id: 'issue-75-finalization-single-flight',
+          issue: 75,
+          title: 'Finalization stays single-flight',
+          kind: 'recording_finalization',
+          fixture: 'fixtures/issue-75-finalization-single-flight.json',
+          trackedMetrics: [
+            {
+              name: 'durationSeconds',
+              tolerance: 3,
+              stability: 'hardware_dependent',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(manifest.cases[0].trackedMetrics).toEqual([
+      {
+        name: 'durationSeconds',
+        tolerance: 3,
+        stability: 'hardware_dependent',
+      },
+    ]);
+  });
+});
+
+describe('runRetryValidationBenchmarkCase', () => {
+  it('reports missing deterministic evidence as needs_attention', async () => {
+    const result = await runRetryValidationBenchmarkCase(
+      {
+        id: 'issue-458-missing-retry-evidence',
+        issue: 458,
+        title: 'Missing deterministic retry evidence fails closed',
+        kind: 'retry_validation',
+        fixture: 'fixtures/issue-458-missing-retry-evidence.json',
+      },
+      {
+        type: 'retry_validation',
+        meeting: {
+          id: 'retry-missing',
+          title: 'Meeting',
+          created_at: '2026-07-15T00:00:00.000Z',
+          started_at: '2026-07-15T00:00:00.000Z',
+          duration_seconds: 60,
+          audio_path: '/synthetic/mic.wav',
+          system_audio_path: '/synthetic/system.wav',
+          mixed_audio_path: '/synthetic/mix.wav',
+          transcript_status: 'needs_attention',
+          transcript_json: JSON.stringify({
+            segments: [
+              { start: 0, end: 2, text: 'Sparse provisional local text.' },
+            ],
+          }),
+          transcript_integrity_json: JSON.stringify({
+            activityEvidenceSource: 'capture_activity_v1',
+          }),
+        },
+        transcribeByPath: {
+          '/synthetic/mic.wav': {
+            segments: [
+              { start: 0, end: 2, text: 'Sparse provisional local text.' },
+            ],
+          },
+          '/synthetic/system.wav': { segments: [] },
+          '/synthetic/mix.wav': {
+            segments: [
+              { start: 0, end: 2, text: 'Sparse provisional local text.' },
+            ],
+          },
+        },
+        probeDurationByPath: {
+          '/synthetic/mic.wav': 60,
+          '/synthetic/system.wav': 60,
+          '/synthetic/mix.wav': 60,
+        },
+        expected: {
+          status: 'needs_attention',
+          requiredReasons: ['deterministic_retry_evidence_missing'],
+          primaryMetric: {
+            name: 'activityEvidenceSource',
+            value: 'capture_activity_missing',
+          },
+        },
+      },
+    );
+
+    expect(result.passed).toBe(true);
+    expect(result.actual).toMatchObject({
+      status: 'needs_attention',
+      primaryMetric: {
+        name: 'activityEvidenceSource',
+        value: 'capture_activity_missing',
+      },
+      reasons: expect.arrayContaining(['deterministic_retry_evidence_missing']),
+    });
   });
 });
 
@@ -270,6 +401,7 @@ describe('buildRecordingQualityBenchmarkReport', () => {
     expect(report.summary.kinds).toEqual({
       candidate_eligibility: { passed: 1, failed: 0 },
       recording_finalization: { passed: 1, failed: 0 },
+      retry_validation: { passed: 0, failed: 0 },
       transcript_validation: { passed: 1, failed: 1 },
     });
     expect(report.failures).toEqual([
@@ -281,5 +413,254 @@ describe('buildRecordingQualityBenchmarkReport', () => {
         ],
       }),
     ]);
+    expect(report.comparisonSummary).toEqual({
+      stableRegressions: 0,
+      stableImprovements: 0,
+      stableWithinTolerance: 0,
+      hardwareDependentDrift: 0,
+      missingBaselineMetrics: 0,
+    });
+  });
+});
+
+describe('buildRecordingQualityBenchmarkComparisonSummary', () => {
+  it('flags stable regressions, tolerates small drift, reports hardware-dependent drift, and notes missing baselines', () => {
+    const summary = buildRecordingQualityBenchmarkComparisonSummary({
+      baselineResults: [
+        {
+          id: 'stable-regression',
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 12,
+            },
+          },
+        },
+        {
+          id: 'within-tolerance',
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 10,
+            },
+          },
+        },
+        {
+          id: 'hardware-drift',
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 1062,
+            },
+          },
+        },
+        {
+          id: 'hardware-within-tolerance',
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 900,
+            },
+          },
+        },
+      ],
+      results: [
+        {
+          id: 'stable-regression',
+          issue: 25,
+          title: 'Stable regression',
+          kind: 'transcript_validation',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'localTranscriptCoveredSeconds',
+              tolerance: 1,
+              stability: 'stable',
+            },
+          ],
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 9,
+            },
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+        {
+          id: 'within-tolerance',
+          issue: 428,
+          title: 'Within tolerance',
+          kind: 'transcript_validation',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'localTranscriptCoveredSeconds',
+              tolerance: 2,
+              stability: 'stable',
+            },
+          ],
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 11,
+            },
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+        {
+          id: 'hardware-drift',
+          issue: 75,
+          title: 'Hardware drift',
+          kind: 'recording_finalization',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'durationSeconds',
+              tolerance: 2,
+              stability: 'hardware_dependent',
+            },
+          ],
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 1058,
+            },
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+        {
+          id: 'missing-baseline',
+          issue: 458,
+          title: 'Missing baseline',
+          kind: 'retry_validation',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'activityEvidenceSource',
+              tolerance: 0,
+              stability: 'stable',
+            },
+          ],
+          actual: {
+            status: 'needs_attention',
+            primaryMetric: {
+              name: 'activityEvidenceSource',
+              value: 'capture_activity_missing',
+            },
+          },
+          expected: {
+            status: 'needs_attention',
+          },
+        },
+        {
+          id: 'hardware-within-tolerance',
+          issue: 75,
+          title: 'Hardware within tolerance',
+          kind: 'recording_finalization',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'durationSeconds',
+              tolerance: 2,
+              stability: 'hardware_dependent',
+            },
+          ],
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 901,
+            },
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+      ],
+    });
+
+    expect(summary.counts).toEqual({
+      stableRegressions: 1,
+      stableImprovements: 0,
+      stableWithinTolerance: 2,
+      hardwareDependentDrift: 1,
+      missingBaselineMetrics: 1,
+    });
+    expect(summary.failures).toEqual([
+      expect.objectContaining({
+        id: 'stable-regression',
+        metricName: 'localTranscriptCoveredSeconds',
+        outcome: 'stable_regression',
+        delta: -3,
+      }),
+    ]);
+    expect(summary.sections.hardwareDependent).toEqual([
+      expect.objectContaining({
+        id: 'hardware-drift',
+        metricName: 'durationSeconds',
+        outcome: 'hardware_dependent_drift',
+        delta: -4,
+      }),
+    ]);
+    expect(summary.sections.missingBaseline).toEqual([
+      expect.objectContaining({
+        id: 'missing-baseline',
+        outcome: 'missing_baseline_metric',
+      }),
+    ]);
+    expect(summary.lines).toEqual([
+      'stable regressions: stable-regression localTranscriptCoveredSeconds 12 -> 9 (tol +/-1)',
+      'stable within tolerance: within-tolerance localTranscriptCoveredSeconds 10 -> 11 (tol +/-2)',
+      'stable within tolerance: hardware-within-tolerance durationSeconds 900 -> 901 (tol +/-2)',
+      'hardware-dependent drift: hardware-drift durationSeconds 1062 -> 1058 (tol +/-2)',
+      'missing baseline metrics: missing-baseline activityEvidenceSource',
+    ]);
+  });
+});
+
+describe('benchmark:recording-quality CLI', () => {
+  it('runs the committed benchmark corpus successfully', () => {
+    const outputDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'recording-quality-benchmark-'),
+    );
+    const outputPath = path.join(outputDir, 'report.json');
+    const repoRoot = path.resolve(__dirname, '../..');
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        'scripts/run_recording_quality_benchmark.ts',
+        '--',
+        '--out',
+        outputPath,
+      ],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      },
+    );
+
+    expect({
+      status: result.status,
+      stderr: result.stderr,
+      stdout: result.stdout,
+    }).toMatchObject({
+      status: 0,
+    });
+    expect(fs.existsSync(outputPath)).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { Meeting } from '../types.ts';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -12,10 +13,12 @@ import {
   type RecordingTranscriptValidationResult,
   runRecordingTranscriptValidation,
 } from './recordingTranscriptValidation.ts';
+import { retryMeetingTranscriptValidation } from './retryMeetingTranscriptValidation.ts';
 
 export type RecordingQualityBenchmarkCaseKind =
   | 'transcript_validation'
   | 'recording_finalization'
+  | 'retry_validation'
   | 'candidate_eligibility';
 
 export type RecordingQualityBenchmarkManifestCase = {
@@ -24,6 +27,7 @@ export type RecordingQualityBenchmarkManifestCase = {
   title: string;
   kind: RecordingQualityBenchmarkCaseKind;
   fixture: string;
+  trackedMetrics?: RecordingQualityBenchmarkTrackedMetric[];
 };
 
 export type RecordingQualityBenchmarkManifest = {
@@ -35,6 +39,12 @@ export type RecordingQualityBenchmarkManifest = {
 export type RecordingQualityBenchmarkMetric = {
   name: string;
   value: number | string | boolean;
+};
+
+export type RecordingQualityBenchmarkTrackedMetric = {
+  name: string;
+  tolerance: number;
+  stability: 'stable' | 'hardware_dependent';
 };
 
 export type RecordingQualityBenchmarkExpectation = {
@@ -52,6 +62,7 @@ export type RecordingQualityBenchmarkCaseResult = {
   title: string;
   kind: RecordingQualityBenchmarkCaseKind;
   passed: boolean;
+  trackedMetrics?: RecordingQualityBenchmarkTrackedMetric[];
   actual: {
     status: 'validated' | 'needs_attention';
     primaryMetric?: RecordingQualityBenchmarkMetric;
@@ -92,6 +103,36 @@ export type RecordingQualityBenchmarkReport = {
   };
   results: RecordingQualityBenchmarkCaseResult[];
   failures: RecordingQualityBenchmarkCaseResult[];
+  comparisonSummary: RecordingQualityBenchmarkComparisonCounts;
+  comparisons: RecordingQualityBenchmarkComparisonEntry[];
+};
+
+export type RecordingQualityBenchmarkComparisonOutcome =
+  | 'stable_regression'
+  | 'stable_improvement'
+  | 'stable_within_tolerance'
+  | 'hardware_dependent_drift'
+  | 'missing_baseline_metric';
+
+export type RecordingQualityBenchmarkComparisonEntry = {
+  id: string;
+  issue: number;
+  title: string;
+  metricName: string;
+  tolerance: number;
+  stability: 'stable' | 'hardware_dependent';
+  outcome: RecordingQualityBenchmarkComparisonOutcome;
+  baselineValue?: number | string | boolean;
+  currentValue?: number | string | boolean;
+  delta?: number;
+};
+
+export type RecordingQualityBenchmarkComparisonCounts = {
+  stableRegressions: number;
+  stableImprovements: number;
+  stableWithinTolerance: number;
+  hardwareDependentDrift: number;
+  missingBaselineMetrics: number;
 };
 
 export type RecordingQualityBenchmarkCliOptions = {
@@ -189,13 +230,34 @@ export type CandidateEligibilityFixture = {
 export type RecordingQualityBenchmarkFixture =
   | TranscriptValidationFixture
   | RecordingFinalizationFixture
+  | RetryValidationFixture
   | CandidateEligibilityFixture;
+
+type RetryValidationFixtureTranscription = {
+  segments: Array<{
+    start: number;
+    end: number;
+    text: string;
+  }>;
+  meta?: Record<string, unknown>;
+};
+
+export type RetryValidationFixture = {
+  type: 'retry_validation';
+  meeting: Meeting;
+  transcribeByPath: Record<string, RetryValidationFixtureTranscription>;
+  probeDurationByPath: Record<string, number | null>;
+  expected: RecordingQualityBenchmarkExpectation & {
+    requiredReasons?: string[];
+  };
+};
 
 const isSupportedBenchmarkCaseKind = (
   kind: string,
 ): kind is RecordingQualityBenchmarkCaseKind =>
   kind === 'transcript_validation' ||
   kind === 'recording_finalization' ||
+  kind === 'retry_validation' ||
   kind === 'candidate_eligibility';
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -203,6 +265,15 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 const sortNumeric = (values: Iterable<number>) =>
   [...values].sort((left, right) => left - right);
+
+const defaultComparisonCounts =
+  (): RecordingQualityBenchmarkComparisonCounts => ({
+    stableRegressions: 0,
+    stableImprovements: 0,
+    stableWithinTolerance: 0,
+    hardwareDependentDrift: 0,
+    missingBaselineMetrics: 0,
+  });
 
 export const parseRecordingQualityBenchmarkCliArgs = (
   args: string[],
@@ -280,6 +351,34 @@ export const loadRecordingQualityBenchmarkManifest = (
       title: String(entry.title || '').trim(),
       kind,
       fixture: String(entry.fixture || '').trim(),
+      trackedMetrics: Array.isArray(entry.trackedMetrics)
+        ? entry.trackedMetrics.map((metric) => {
+            if (!isObject(metric)) {
+              throw new Error(`Tracked metrics for ${id} must be objects.`);
+            }
+            const name = String(metric.name || '').trim();
+            const tolerance = Number(metric.tolerance);
+            const stability = String(metric.stability || '').trim();
+            if (!name) {
+              throw new Error(`Tracked metrics for ${id} need a name.`);
+            }
+            if (Number.isNaN(tolerance) || tolerance < 0) {
+              throw new Error(
+                `Tracked metric ${name} for ${id} needs a non-negative tolerance.`,
+              );
+            }
+            if (stability !== 'stable' && stability !== 'hardware_dependent') {
+              throw new Error(
+                `Tracked metric ${name} for ${id} has unsupported stability ${stability}.`,
+              );
+            }
+            return {
+              name,
+              tolerance,
+              stability,
+            } satisfies RecordingQualityBenchmarkTrackedMetric;
+          })
+        : undefined,
     } satisfies RecordingQualityBenchmarkManifestCase;
   });
 
@@ -438,6 +537,7 @@ export const runTranscriptValidationBenchmarkCase = async (
     title: meta.title,
     kind: meta.kind,
     passed: failures.length === 0,
+    trackedMetrics: meta.trackedMetrics,
     actual: {
       status: result.status,
       primaryMetric: actualMetric,
@@ -478,10 +578,122 @@ export const runRecordingFinalizationBenchmarkCase = (
     title: meta.title,
     kind: meta.kind,
     passed: failures.length === 0,
+    trackedMetrics: meta.trackedMetrics,
     actual: {
       status: failures.length === 0 ? 'validated' : 'needs_attention',
       primaryMetric: actualMetric,
       reasons: failures,
+    },
+    expected: fixture.expected,
+    ...(failures.length > 0 ? { failures } : {}),
+  };
+};
+
+const makeRetryValidationMetric = (
+  meeting: Meeting,
+  metricName?: string,
+): RecordingQualityBenchmarkMetric | undefined => {
+  if (!metricName) return undefined;
+
+  let parsedIntegrity: Record<string, unknown> = {};
+  try {
+    parsedIntegrity = JSON.parse(
+      meeting.transcript_integrity_json || '{}',
+    ) as Record<string, unknown>;
+  } catch {
+    parsedIntegrity = {};
+  }
+
+  switch (metricName) {
+    case 'activityEvidenceSource':
+      return typeof parsedIntegrity.activityEvidenceSource === 'string'
+        ? {
+            name: metricName,
+            value: parsedIntegrity.activityEvidenceSource,
+          }
+        : undefined;
+    default:
+      return undefined;
+  }
+};
+
+const readRetryValidationReasons = (meeting: Meeting): string[] => {
+  try {
+    const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      reasons?: unknown;
+    };
+    return Array.isArray(parsed.reasons)
+      ? parsed.reasons.filter(
+          (reason): reason is string => typeof reason === 'string',
+        )
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+export const runRetryValidationBenchmarkCase = async (
+  meta: RecordingQualityBenchmarkManifestCase,
+  fixture: RetryValidationFixture,
+): Promise<RecordingQualityBenchmarkCaseResult> => {
+  let currentMeeting: Meeting = structuredClone(fixture.meeting);
+
+  const invoke = async (channel: string, ...args: unknown[]) => {
+    if (channel === 'GET_MEETING') return currentMeeting;
+    if (channel === 'SAVE_MEETING') {
+      currentMeeting = {
+        ...currentMeeting,
+        ...((args[0] as Partial<Meeting> | undefined) || {}),
+      };
+      return true;
+    }
+    if (channel === 'WHISPER_TRANSCRIBE') {
+      const audioPath = String(args[0] || '');
+      return fixture.transcribeByPath[audioPath] || { segments: [] };
+    }
+    if (channel === 'AUDIO_PROBE_DURATION') {
+      const audioPath = String(args[0] || '');
+      return fixture.probeDurationByPath[audioPath] ?? null;
+    }
+    throw new Error(
+      `Unexpected retry-validation benchmark channel: ${channel}`,
+    );
+  };
+
+  const retryResult = await retryMeetingTranscriptValidation(
+    String(fixture.meeting.id),
+    invoke,
+  );
+  const actualMetric = makeRetryValidationMetric(
+    currentMeeting,
+    fixture.expected.primaryMetric?.name,
+  );
+  const reasons = readRetryValidationReasons(currentMeeting);
+  const actualStatus =
+    retryResult.status === 'superseded'
+      ? 'needs_attention'
+      : currentMeeting.transcript_status === 'validated'
+        ? 'validated'
+        : 'needs_attention';
+  const failures = [
+    ...(actualStatus === fixture.expected.status ? [] : ['status mismatch']),
+    ...compareMetric(actualMetric, fixture.expected.primaryMetric),
+    ...(fixture.expected.requiredReasons || [])
+      .filter((reason) => !reasons.includes(reason))
+      .map((reason) => `missing required reason ${reason}`),
+  ];
+
+  return {
+    id: meta.id,
+    issue: meta.issue,
+    title: meta.title,
+    kind: meta.kind,
+    passed: failures.length === 0,
+    trackedMetrics: meta.trackedMetrics,
+    actual: {
+      status: actualStatus,
+      primaryMetric: actualMetric,
+      reasons,
     },
     expected: fixture.expected,
     ...(failures.length > 0 ? { failures } : {}),
@@ -522,6 +734,171 @@ export const runCandidateEligibilityBenchmarkCase = (
   };
 };
 
+const calculateMetricDelta = (
+  baselineValue: number | string | boolean,
+  currentValue: number | string | boolean,
+) => {
+  if (typeof baselineValue === 'number' && typeof currentValue === 'number') {
+    return Number((currentValue - baselineValue).toFixed(4));
+  }
+  return undefined;
+};
+
+const formatValue = (value: number | string | boolean | undefined) =>
+  value === undefined ? 'n/a' : String(value);
+
+export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
+  baselineResults: Array<{
+    id: string;
+    actual?: {
+      primaryMetric?: RecordingQualityBenchmarkMetric;
+    };
+  }>;
+  results: RecordingQualityBenchmarkCaseResult[];
+}) => {
+  const counts = defaultComparisonCounts();
+  const baselineById = new Map(
+    input.baselineResults.map((result) => [result.id, result]),
+  );
+  const comparisons: RecordingQualityBenchmarkComparisonEntry[] = [];
+  const sections = {
+    stableRegressions: [] as RecordingQualityBenchmarkComparisonEntry[],
+    stableImprovements: [] as RecordingQualityBenchmarkComparisonEntry[],
+    stableWithinTolerance: [] as RecordingQualityBenchmarkComparisonEntry[],
+    hardwareDependent: [] as RecordingQualityBenchmarkComparisonEntry[],
+    missingBaseline: [] as RecordingQualityBenchmarkComparisonEntry[],
+  };
+
+  for (const result of input.results) {
+    for (const trackedMetric of result.trackedMetrics || []) {
+      const baselineMetric = baselineById.get(result.id)?.actual?.primaryMetric;
+
+      if (!baselineMetric || baselineMetric.name !== trackedMetric.name) {
+        counts.missingBaselineMetrics += 1;
+        comparisons.push({
+          id: result.id,
+          issue: result.issue,
+          title: result.title,
+          metricName: trackedMetric.name,
+          tolerance: trackedMetric.tolerance,
+          stability: trackedMetric.stability,
+          outcome: 'missing_baseline_metric',
+          currentValue:
+            result.actual.primaryMetric?.name === trackedMetric.name
+              ? result.actual.primaryMetric.value
+              : undefined,
+        });
+        sections.missingBaseline.push(comparisons[comparisons.length - 1]);
+        continue;
+      }
+
+      const currentMetric =
+        result.actual.primaryMetric?.name === trackedMetric.name
+          ? result.actual.primaryMetric
+          : undefined;
+
+      if (!currentMetric) {
+        counts.missingBaselineMetrics += 1;
+        comparisons.push({
+          id: result.id,
+          issue: result.issue,
+          title: result.title,
+          metricName: trackedMetric.name,
+          tolerance: trackedMetric.tolerance,
+          stability: trackedMetric.stability,
+          outcome: 'missing_baseline_metric',
+          baselineValue: baselineMetric.value,
+        });
+        sections.missingBaseline.push(comparisons[comparisons.length - 1]);
+        continue;
+      }
+
+      const delta = calculateMetricDelta(
+        baselineMetric.value,
+        currentMetric.value,
+      );
+      const valuesMatch = baselineMetric.value === currentMetric.value;
+      const absDelta =
+        typeof delta === 'number'
+          ? Math.abs(delta)
+          : valuesMatch
+            ? 0
+            : Number.POSITIVE_INFINITY;
+      let outcome: RecordingQualityBenchmarkComparisonOutcome;
+
+      if (trackedMetric.stability === 'hardware_dependent') {
+        if (absDelta > trackedMetric.tolerance) {
+          counts.hardwareDependentDrift += 1;
+          outcome = 'hardware_dependent_drift';
+        } else {
+          counts.stableWithinTolerance += 1;
+          outcome = 'stable_within_tolerance';
+        }
+      } else if (absDelta <= trackedMetric.tolerance) {
+        counts.stableWithinTolerance += 1;
+        outcome = 'stable_within_tolerance';
+      } else if (typeof delta === 'number' && delta > 0) {
+        counts.stableImprovements += 1;
+        outcome = 'stable_improvement';
+      } else {
+        counts.stableRegressions += 1;
+        outcome = 'stable_regression';
+      }
+
+      comparisons.push({
+        id: result.id,
+        issue: result.issue,
+        title: result.title,
+        metricName: trackedMetric.name,
+        tolerance: trackedMetric.tolerance,
+        stability: trackedMetric.stability,
+        outcome,
+        baselineValue: baselineMetric.value,
+        currentValue: currentMetric.value,
+        delta,
+      });
+
+      const entry = comparisons[comparisons.length - 1];
+      if (outcome === 'stable_regression') {
+        sections.stableRegressions.push(entry);
+      } else if (outcome === 'stable_improvement') {
+        sections.stableImprovements.push(entry);
+      } else if (outcome === 'stable_within_tolerance') {
+        sections.stableWithinTolerance.push(entry);
+      } else if (outcome === 'hardware_dependent_drift') {
+        sections.hardwareDependent.push(entry);
+      }
+    }
+  }
+
+  return {
+    counts,
+    comparisons,
+    failures: sections.stableRegressions,
+    sections,
+    lines: [
+      ...sections.stableRegressions.map(
+        (entry) =>
+          `stable regressions: ${entry.id} ${entry.metricName} ${formatValue(entry.baselineValue)} -> ${formatValue(entry.currentValue)} (tol +/-${entry.tolerance})`,
+      ),
+      ...sections.stableImprovements.map(
+        (entry) =>
+          `stable improvements: ${entry.id} ${entry.metricName} ${formatValue(entry.baselineValue)} -> ${formatValue(entry.currentValue)} (tol +/-${entry.tolerance})`,
+      ),
+      ...sections.stableWithinTolerance.map(
+        (entry) =>
+          `stable within tolerance: ${entry.id} ${entry.metricName} ${formatValue(entry.baselineValue)} -> ${formatValue(entry.currentValue)} (tol +/-${entry.tolerance})`,
+      ),
+      ...sections.hardwareDependent.map(
+        (entry) =>
+          `hardware-dependent drift: ${entry.id} ${entry.metricName} ${formatValue(entry.baselineValue)} -> ${formatValue(entry.currentValue)} (tol +/-${entry.tolerance})`,
+      ),
+      ...sections.missingBaseline.map(
+        (entry) => `missing baseline metrics: ${entry.id} ${entry.metricName}`,
+      ),
+    ],
+  };
+};
 export const buildRecordingQualityBenchmarkReport = (input: {
   schemaVersion: number;
   manifestPath: string;
@@ -534,6 +911,12 @@ export const buildRecordingQualityBenchmarkReport = (input: {
   };
   sourceCommit: string;
   results: RecordingQualityBenchmarkCaseResult[];
+  baselineResults?: Array<{
+    id: string;
+    actual?: {
+      primaryMetric?: RecordingQualityBenchmarkMetric;
+    };
+  }>;
 }): RecordingQualityBenchmarkReport => {
   const passedCases = input.results.filter((result) => result.passed).length;
   const failedCases = input.results.length - passedCases;
@@ -544,12 +927,23 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     candidate_eligibility: { passed: 0, failed: 0 },
     recording_finalization: { passed: 0, failed: 0 },
     transcript_validation: { passed: 0, failed: 0 },
+    retry_validation: { passed: 0, failed: 0 },
   };
 
   for (const result of input.results) {
     if (result.passed) kinds[result.kind].passed += 1;
     else kinds[result.kind].failed += 1;
   }
+
+  const comparisonSummary = input.baselineResults
+    ? buildRecordingQualityBenchmarkComparisonSummary({
+        baselineResults: input.baselineResults,
+        results: input.results,
+      })
+    : {
+        counts: defaultComparisonCounts(),
+        comparisons: [],
+      };
 
   return {
     schemaVersion: input.schemaVersion,
@@ -573,5 +967,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     },
     results: input.results,
     failures: input.results.filter((result) => !result.passed),
+    comparisonSummary: comparisonSummary.counts,
+    comparisons: comparisonSummary.comparisons,
   };
 };

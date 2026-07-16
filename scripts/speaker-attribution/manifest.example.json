@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "synthetic-one-local-turn",
+      "recordingId": "synthetic-recording-001",
+      "provenance": {
+        "tier": "synthetic",
+        "source": "generated-fixture"
+      },
+      "audio": {
+        "mixedPath": "scripts/speaker-attribution/fixtures/synthetic-audio.fixture.json"
+      },
+      "referencePath": "scripts/speaker-attribution/fixtures/synthetic-reference.json"
+    }
+  ],
+  "candidates": [
+    {
+      "id": "synthetic",
+      "kind": "pipeline",
+      "version": "1.0.0",
+      "command": ["python3", "python/speaker_attribution_benchmark_adapter.py"],
+      "model": {
+        "id": "synthetic",
+        "version": "1"
+      },
+      "config": {
+        "turns": [
+          {
+            "startTime": 0,
+            "endTime": 1,
+            "cluster": "Me"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -335,4 +335,166 @@ describe('synthetic speaker attribution fixtures', () => {
       'Them: Chuckle is true. Look out for himself.',
     ]);
   });
+
+  it('keeps all-remote pass-through from surfacing as Me', () => {
+    const fixture: Segment[] = [
+      {
+        startTime: 0.0,
+        endTime: 5.8,
+        speaker: 'Them',
+        text: 'The launch metrics slipped because onboarding dropped after the pricing test.',
+      },
+      {
+        startTime: 0.1,
+        endTime: 5.7,
+        speaker: 'Me',
+        text: 'The launch metrics slipped because onboarding dropped after the pricing test.',
+      },
+      {
+        startTime: 6.0,
+        endTime: 11.8,
+        speaker: 'Them',
+        text: 'We should freeze the variant and compare retention before we widen the audience.',
+      },
+      {
+        startTime: 6.2,
+        endTime: 11.6,
+        speaker: 'Me',
+        text: 'We should freeze the variant and compare retention before we widen the audience.',
+      },
+    ];
+
+    const { cleaned } = runSyntheticAttribution(fixture);
+    const lines = transcriptLines(cleaned.segments);
+
+    expect(lines).toEqual([
+      'Them: The launch metrics slipped because onboarding dropped after the pricing test. We should freeze the variant and compare retention before we widen the audience.',
+    ]);
+  });
+
+  it('preserves one short genuine Me turn between remote pass-through spans', () => {
+    const fixture: Segment[] = [
+      {
+        startTime: 0.0,
+        endTime: 6.2,
+        speaker: 'Them',
+        text: 'The launch metrics slipped because onboarding dropped after the pricing test.',
+      },
+      {
+        startTime: 0.1,
+        endTime: 6.0,
+        speaker: 'Me',
+        text: 'The launch metrics slipped because onboarding dropped after the pricing test.',
+      },
+      {
+        startTime: 6.4,
+        endTime: 7.1,
+        speaker: 'Me',
+        text: 'Yep.',
+      },
+      {
+        startTime: 7.3,
+        endTime: 12.7,
+        speaker: 'Them',
+        text: 'So I need the exact drop by country before tomorrow morning.',
+      },
+      {
+        startTime: 7.5,
+        endTime: 12.5,
+        speaker: 'Me',
+        text: 'So I need the exact drop by country before tomorrow morning.',
+      },
+    ];
+
+    const { cleaned } = runSyntheticAttribution(fixture);
+    const lines = transcriptLines(cleaned.segments);
+
+    expect(lines).toEqual([
+      'Them: The launch metrics slipped because onboarding dropped after the pricing test.',
+      'Me: Yep.',
+      'Them: So I need the exact drop by country before tomorrow morning.',
+    ]);
+  });
+
+  it('keeps a longer Me anchor between remote pass-through spans', () => {
+    const fixture: Segment[] = [
+      {
+        startTime: 0.0,
+        endTime: 5.2,
+        speaker: 'Them',
+        text: 'The launch metrics slipped because onboarding dropped after the pricing test.',
+      },
+      {
+        startTime: 0.1,
+        endTime: 5.0,
+        speaker: 'Me',
+        text: 'The launch metrics slipped because onboarding dropped after the pricing test.',
+      },
+      {
+        startTime: 5.4,
+        endTime: 9.7,
+        speaker: 'Me',
+        text: 'I already pulled the country cut and LATAM is where the drop accelerated after the variant flip.',
+      },
+      {
+        startTime: 9.9,
+        endTime: 14.4,
+        speaker: 'Them',
+        text: 'Then freeze the test tonight and send me the retention split before breakfast.',
+      },
+      {
+        startTime: 10.1,
+        endTime: 14.2,
+        speaker: 'Me',
+        text: 'Then freeze the test tonight and send me the retention split before breakfast.',
+      },
+    ];
+
+    const { cleaned } = runSyntheticAttribution(fixture);
+    const lines = transcriptLines(cleaned.segments);
+
+    expect(lines).toEqual([
+      'Them: The launch metrics slipped because onboarding dropped after the pricing test.',
+      'Me: I already pulled the country cut and LATAM is where the drop accelerated after the variant flip.',
+      'Them: Then freeze the test tonight and send me the retention split before breakfast.',
+    ]);
+  });
+
+  it('keeps the local anchor readable when remote pass-through is followed by overlap', () => {
+    const fixture: Segment[] = [
+      {
+        startTime: 0.0,
+        endTime: 4.0,
+        speaker: 'Them',
+        text: 'If we reroute support to sales, churn will look lower without improving the product.',
+      },
+      {
+        startTime: 0.2,
+        endTime: 3.8,
+        speaker: 'Me',
+        text: 'If we reroute support to sales, churn will look lower without improving the product.',
+      },
+      {
+        startTime: 4.1,
+        endTime: 5.0,
+        speaker: 'Me',
+        text: 'That is exactly my concern.',
+      },
+      {
+        startTime: 4.8,
+        endTime: 7.7,
+        speaker: 'Them',
+        text: 'Then let us keep the handoff but flag support-origin churn separately.',
+      },
+    ];
+
+    const { cleaned } = runSyntheticAttribution(fixture);
+    const lines = transcriptLines(cleaned.segments);
+
+    expect(lines).toEqual([
+      'Them: If we reroute support to sales, churn will look lower without improving the product.',
+      'Me: That is exactly my concern.',
+      'Them: Then let us keep the handoff but flag support-origin churn separately.',
+    ]);
+  });
 });
