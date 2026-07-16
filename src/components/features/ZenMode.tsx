@@ -3,7 +3,7 @@ import { LiveTranscript } from './LiveTranscript';
 import { RecordingCaptureBar } from './RecordingCaptureBar';
 import { RecordingMeetingRail } from './RecordingMeetingRail';
 import {
-  type CaptureHealth,
+  type CaptureHealthState,
   type LiveTranscriptIntegrity,
   type LiveTranscriptSegment,
   buildRecordingWorkspaceModel,
@@ -23,7 +23,7 @@ interface ZenModeProps {
   currentNotes: string;
   setCurrentNotes: (value: string) => void;
   liveTranscript: LiveTranscriptSegment[];
-  captureHealth: { microphone: CaptureHealth; systemAudio: CaptureHealth };
+  captureHealth: CaptureHealthState;
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
   recordingStartedAtMs: number | null;
 }
@@ -57,6 +57,7 @@ export const ZenMode = ({
         isProcessing,
         microphone: captureHealth.microphone,
         systemAudio: captureHealth.systemAudio,
+        captureDurability: captureHealth.captureDurability,
         liveTranscriptIntegrity,
         segments: liveTranscript,
         interimText: '',

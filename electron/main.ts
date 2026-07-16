@@ -2151,6 +2151,7 @@ app.whenReady().then(async () => {
     );
     if (
       recovery.recoveredCount > 0 ||
+      recovery.failedRecoveryCount > 0 ||
       recovery.skippedInvalidManifestCount > 0
     ) {
       console.log('[Pluto] Capture-journal recovery summary:', recovery);

@@ -200,6 +200,12 @@ export const appendCaptureJournalChunk = async (
         `Capture journal artifact size mismatch for ${meetingId} ${args.source}#${sequence}`,
       );
     }
+    const existingData = await readFile(join(rootDir, existing.relativePath));
+    if (computeChecksum(existingData) !== existing.checksumSha256) {
+      throw new Error(
+        `Capture journal artifact checksum mismatch for ${meetingId} ${args.source}#${sequence}`,
+      );
+    }
     return manifest;
   }
 

@@ -5,13 +5,17 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  type CandidateEligibilityFixture,
   type RecordingQualityBenchmarkCaseResult,
   buildRecordingQualityBenchmarkComparisonSummary,
   buildRecordingQualityBenchmarkReport,
+  evaluateCandidateDistributionEligibility,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
+  runCandidateEligibilityBenchmarkCase,
   runCaptureRecoveryBenchmarkCase,
   runRetryValidationBenchmarkCase,
+  selectRecordingQualityBenchmarkCases,
 } from '../../src/services/recordingQualityBenchmark';
 
 describe('parseRecordingQualityBenchmarkCliArgs', () => {
@@ -25,7 +29,26 @@ describe('parseRecordingQualityBenchmarkCliArgs', () => {
     ).toEqual({
       manifest: '/repo/scripts/recording-quality/manifest.json',
       out: 'tmp/recording-quality-benchmark.json',
+      tier: 'pr',
     });
+  });
+
+  it('accepts explicit manual and all tier selectors', () => {
+    expect(
+      parseRecordingQualityBenchmarkCliArgs(['--tier', 'manual'], '/repo', 123)
+        .tier,
+    ).toBe('manual');
+    expect(
+      parseRecordingQualityBenchmarkCliArgs(['--tier', 'all'], '/repo', 123)
+        .tier,
+    ).toBe('all');
+    expect(() =>
+      parseRecordingQualityBenchmarkCliArgs(
+        ['--tier', 'nightly'],
+        '/repo',
+        123,
+      ),
+    ).toThrow(/unsupported benchmark tier: nightly/i);
   });
 });
 
@@ -36,20 +59,36 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
       baselineReport: 'baselines/current-master.json',
       cases: [
         {
+          id: 'issue-476-credential-free-distribution',
+          issue: 476,
+          title: 'Credential-free distribution metadata gate',
+          kind: 'candidate_eligibility',
+          fixture: 'fixtures/issue-476-credential-free-distribution.json',
+          tier: 'pr',
+        },
+        {
           id: 'issue-25-opening-audio',
           issue: 25,
           title: 'Opening audio is preserved',
           kind: 'transcript_validation',
           fixture: 'fixtures/issue-25-opening-audio.json',
+          tier: 'pr',
         },
       ],
     });
 
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.cases[0]).toMatchObject({
+      id: 'issue-476-credential-free-distribution',
+      issue: 476,
+      kind: 'candidate_eligibility',
+      tier: 'pr',
+    });
+    expect(manifest.cases[1]).toMatchObject({
       id: 'issue-25-opening-audio',
       issue: 25,
       kind: 'transcript_validation',
+      tier: 'pr',
     });
 
     expect(() =>
@@ -63,6 +102,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
             title: 'First copy',
             kind: 'transcript_validation',
             fixture: 'fixtures/one.json',
+            tier: 'pr',
           },
           {
             id: 'duplicate-case',
@@ -70,6 +110,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
             title: 'Second copy',
             kind: 'recording_finalization',
             fixture: 'fixtures/two.json',
+            tier: 'pr',
           },
         ],
       }),
@@ -87,6 +128,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
           title: 'Missing deterministic retry evidence fails closed',
           kind: 'retry_validation',
           fixture: 'fixtures/issue-458-missing-retry-evidence.json',
+          tier: 'pr',
         },
       ],
     });
@@ -109,6 +151,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
           title: 'Interrupted capture journals recover acknowledged evidence',
           kind: 'capture_recovery',
           fixture: 'fixtures/issue-493-capture-recovery.json',
+          tier: 'pr',
         },
       ],
     });
@@ -117,6 +160,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
       id: 'issue-493-capture-recovery',
       issue: 493,
       kind: 'capture_recovery',
+      tier: 'pr',
     });
   });
 
@@ -131,6 +175,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
           title: 'Finalization stays single-flight',
           kind: 'recording_finalization',
           fixture: 'fixtures/issue-75-finalization-single-flight.json',
+          tier: 'pr',
           trackedMetrics: [
             {
               name: 'durationSeconds',
@@ -150,6 +195,68 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
       },
     ]);
   });
+
+  it('requires every case to declare a supported tier', () => {
+    const baseCase = {
+      id: 'tiered-case',
+      issue: 495,
+      title: 'Tiered benchmark case',
+      kind: 'transcript_validation',
+      fixture: 'fixtures/tiered.json',
+    };
+
+    expect(() =>
+      loadRecordingQualityBenchmarkManifest({
+        schemaVersion: 2,
+        baselineReport: 'baselines/current-master.json',
+        cases: [baseCase],
+      }),
+    ).toThrow(/tiered-case needs a benchmark tier/i);
+    expect(() =>
+      loadRecordingQualityBenchmarkManifest({
+        schemaVersion: 2,
+        baselineReport: 'baselines/current-master.json',
+        cases: [{ ...baseCase, tier: 'nightly' }],
+      }),
+    ).toThrow(/unsupported benchmark tier: nightly/i);
+  });
+});
+
+describe('selectRecordingQualityBenchmarkCases', () => {
+  const cases = [
+    {
+      id: 'fast',
+      issue: 495,
+      title: 'Fast case',
+      kind: 'transcript_validation' as const,
+      fixture: 'fixtures/fast.json',
+      tier: 'pr' as const,
+    },
+    {
+      id: 'long',
+      issue: 495,
+      title: 'Long case',
+      kind: 'recording_finalization' as const,
+      fixture: 'fixtures/long.json',
+      tier: 'manual' as const,
+    },
+  ];
+
+  it('selects PR, manual, and all cases without mixing tiers', () => {
+    expect(selectRecordingQualityBenchmarkCases(cases, 'pr')).toEqual([
+      cases[0],
+    ]);
+    expect(selectRecordingQualityBenchmarkCases(cases, 'manual')).toEqual([
+      cases[1],
+    ]);
+    expect(selectRecordingQualityBenchmarkCases(cases, 'all')).toEqual(cases);
+  });
+
+  it('fails clearly when the selected tier is empty', () => {
+    expect(() =>
+      selectRecordingQualityBenchmarkCases([cases[0]], 'manual'),
+    ).toThrow(/no manual benchmark cases/i);
+  });
 });
 
 describe('runRetryValidationBenchmarkCase', () => {
@@ -161,6 +268,7 @@ describe('runRetryValidationBenchmarkCase', () => {
         title: 'Missing deterministic retry evidence fails closed',
         kind: 'retry_validation',
         fixture: 'fixtures/issue-458-missing-retry-evidence.json',
+        tier: 'pr',
       },
       {
         type: 'retry_validation',
@@ -224,6 +332,82 @@ describe('runRetryValidationBenchmarkCase', () => {
   });
 });
 
+describe('evaluateCandidateDistributionEligibility', () => {
+  it('rejects candidates that require credentials, manual terms, mutable artifacts, or unsupported platforms', () => {
+    expect(
+      evaluateCandidateDistributionEligibility(
+        {
+          candidateId: 'hf-community-one',
+          acquisitionMode: 'external_hub_download',
+          licenseId: 'mit',
+          supportedPlatforms: ['linux-x64'],
+          requiresUserCredentials: true,
+          requiresManualTermsAcceptance: true,
+          artifactChecksumSha256: '',
+        },
+        'darwin-arm64',
+      ),
+    ).toEqual({
+      eligible: false,
+      reasons: [
+        'requires_user_credentials',
+        'requires_manual_terms_acceptance',
+        'artifact_not_pinned',
+        'unsupported_platform',
+        'non_pluto_distribution_channel',
+      ],
+    });
+  });
+});
+
+describe('runCandidateEligibilityBenchmarkCase', () => {
+  it('returns a deterministic eligibility verdict and redacted reasons', () => {
+    const fixture: CandidateEligibilityFixture = {
+      type: 'candidate_eligibility',
+      candidate: {
+        candidateId: 'whisperkit-bundle',
+        acquisitionMode: 'bundled',
+        licenseId: 'apache-2.0',
+        supportedPlatforms: ['darwin-arm64'],
+        requiresUserCredentials: false,
+        requiresManualTermsAcceptance: false,
+        artifactChecksumSha256:
+          '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      },
+      expected: {
+        status: 'validated',
+        eligibility: {
+          eligible: true,
+          reasons: [],
+        },
+      },
+    };
+
+    expect(
+      runCandidateEligibilityBenchmarkCase(
+        {
+          id: 'issue-476-credential-free-distribution',
+          issue: 476,
+          title: 'Credential-free distribution metadata gate',
+          kind: 'candidate_eligibility',
+          fixture: 'fixtures/issue-476-credential-free-distribution.json',
+        },
+        fixture,
+        'darwin-arm64',
+      ),
+    ).toMatchObject({
+      passed: true,
+      actual: {
+        status: 'validated',
+        eligibility: {
+          eligible: true,
+          reasons: [],
+        },
+      },
+    });
+  });
+});
+
 describe('runCaptureRecoveryBenchmarkCase', () => {
   it('recovers both sources while excluding and reporting a corrupt tail', async () => {
     const result = await runCaptureRecoveryBenchmarkCase(
@@ -233,6 +417,7 @@ describe('runCaptureRecoveryBenchmarkCase', () => {
         title: 'Interrupted capture journals recover acknowledged evidence',
         kind: 'capture_recovery',
         fixture: 'fixtures/issue-493-capture-recovery.json',
+        tier: 'pr',
       },
       {
         type: 'capture_recovery',
@@ -300,6 +485,27 @@ describe('runCaptureRecoveryBenchmarkCase', () => {
 describe('buildRecordingQualityBenchmarkReport', () => {
   it('summarizes passed and failed committed regression cases', () => {
     const results: RecordingQualityBenchmarkCaseResult[] = [
+      {
+        id: 'issue-476-credential-free-distribution',
+        issue: 476,
+        title: 'Credential-free distribution metadata gate',
+        kind: 'candidate_eligibility',
+        passed: true,
+        actual: {
+          status: 'validated',
+          eligibility: {
+            eligible: true,
+            reasons: [],
+          },
+        },
+        expected: {
+          status: 'validated',
+          eligibility: {
+            eligible: true,
+            reasons: [],
+          },
+        },
+      },
       {
         id: 'issue-25-opening-audio',
         issue: 25,
@@ -372,17 +578,20 @@ describe('buildRecordingQualityBenchmarkReport', () => {
         arch: 'arm64',
       },
       sourceCommit: '026bdcf6',
+      tier: 'pr',
       results,
     });
 
     expect(report.summary).toMatchObject({
-      totalCases: 3,
-      passedCases: 2,
+      totalCases: 4,
+      passedCases: 3,
       failedCases: 1,
-      passRate: 0.6667,
+      passRate: 0.75,
     });
-    expect(report.summary.issueCoverage).toEqual([25, 75, 434]);
+    expect(report.tier).toBe('pr');
+    expect(report.summary.issueCoverage).toEqual([25, 75, 434, 476]);
     expect(report.summary.kinds).toEqual({
+      candidate_eligibility: { passed: 1, failed: 0 },
       capture_recovery: { passed: 0, failed: 0 },
       recording_finalization: { passed: 1, failed: 0 },
       retry_validation: { passed: 0, failed: 0 },
@@ -644,18 +853,46 @@ describe('benchmark:recording-quality CLI', () => {
       stdout: result.stdout,
     }).toMatchObject({
       status: 0,
+      stdout: expect.stringContaining('tier=pr 8/8 cases passed'),
     });
     expect(fs.existsSync(outputPath)).toBe(true);
-    const report = JSON.parse(fs.readFileSync(outputPath, 'utf8')) as {
+    expect(JSON.parse(fs.readFileSync(outputPath, 'utf8'))).toMatchObject({
+      tier: 'pr',
       summary: {
-        issueCoverage: number[];
-        kinds: Record<string, { passed: number; failed: number }>;
-      };
-    };
-    expect(report.summary.issueCoverage).toContain(493);
-    expect(report.summary.kinds.capture_recovery).toEqual({
-      passed: 1,
-      failed: 0,
+        totalCases: 8,
+        issueCoverage: expect.arrayContaining([493]),
+        kinds: {
+          capture_recovery: { passed: 1, failed: 0 },
+        },
+      },
     });
+  });
+
+  it('runs all declared tiers and fails clearly when manual has no cases', () => {
+    const repoRoot = path.resolve(__dirname, '../..');
+    const run = (tier: string) =>
+      spawnSync(
+        process.execPath,
+        [
+          '--experimental-strip-types',
+          'scripts/run_recording_quality_benchmark.ts',
+          '--',
+          '--tier',
+          tier,
+          '--out',
+          path.join(os.tmpdir(), `recording-quality-${tier}.json`),
+        ],
+        { cwd: repoRoot, encoding: 'utf8' },
+      );
+
+    const all = run('all');
+    expect(all.status).toBe(0);
+    expect(all.stdout).toContain('tier=all 8/8 cases passed');
+
+    const manual = run('manual');
+    expect(manual.status).toBe(1);
+    expect(manual.stderr).toContain(
+      'ERROR No manual benchmark cases are declared in the manifest.',
+    );
   });
 });

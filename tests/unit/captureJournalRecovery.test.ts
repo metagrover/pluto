@@ -121,6 +121,77 @@ describe('capture journal recovery', () => {
     expect(saveMeeting).toHaveBeenCalledTimes(1);
   });
 
+  it('continues recovering later journals after one stitch operation fails', async () => {
+    const root = await makeRoot();
+    for (const meetingId of ['meeting-a', 'meeting-b']) {
+      await createCaptureJournal(root, { meetingId, startedAtMs: 1_000 });
+      await appendCaptureJournalChunk(root, {
+        meetingId,
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 1,
+        format: 'wav',
+        data: Buffer.from(`${meetingId}-mic`),
+      });
+    }
+
+    const savedMeetingIds: string[] = [];
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting: (meeting) => savedMeetingIds.push(meeting.id),
+      stitchWavSegments: async (_segments, outputTag) => {
+        if (outputTag.startsWith('meeting-a-')) {
+          throw new Error('synthetic stitch failure');
+        }
+        return join(root, `${outputTag}.wav`);
+      },
+      nowMs: 5_000,
+    });
+
+    expect(result).toMatchObject({
+      recoveredCount: 1,
+      failedRecoveryCount: 1,
+    });
+    expect(savedMeetingIds).toEqual(['meeting-b']);
+  });
+
+  it('continues recovering later journals after one meeting save fails', async () => {
+    const root = await makeRoot();
+    for (const meetingId of ['meeting-a', 'meeting-b']) {
+      await createCaptureJournal(root, { meetingId, startedAtMs: 1_000 });
+      await appendCaptureJournalChunk(root, {
+        meetingId,
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 1,
+        format: 'wav',
+        data: Buffer.from(`${meetingId}-mic`),
+      });
+    }
+
+    const savedMeetingIds: string[] = [];
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting: async (meeting) => {
+        if (meeting.id === 'meeting-a') {
+          throw new Error('synthetic async save failure');
+        }
+        savedMeetingIds.push(meeting.id);
+      },
+      stitchWavSegments: async (_segments, outputTag) =>
+        join(root, `${outputTag}.wav`),
+      nowMs: 5_000,
+    });
+
+    expect(result).toMatchObject({
+      recoveredCount: 1,
+      failedRecoveryCount: 1,
+    });
+    expect(savedMeetingIds).toEqual(['meeting-b']);
+  });
+
   it('ignores sealed journals during startup recovery', async () => {
     const root = await makeRoot();
     await createCaptureJournal(root, {
