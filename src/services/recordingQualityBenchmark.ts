@@ -20,12 +20,18 @@ export type RecordingQualityBenchmarkCaseKind =
   | 'recording_finalization'
   | 'retry_validation';
 
+export type RecordingQualityBenchmarkTier = 'pr' | 'manual';
+export type RecordingQualityBenchmarkTierSelection =
+  | RecordingQualityBenchmarkTier
+  | 'all';
+
 export type RecordingQualityBenchmarkManifestCase = {
   id: string;
   issue: number;
   title: string;
   kind: RecordingQualityBenchmarkCaseKind;
   fixture: string;
+  tier: RecordingQualityBenchmarkTier;
   trackedMetrics?: RecordingQualityBenchmarkTrackedMetric[];
 };
 
@@ -69,6 +75,7 @@ export type RecordingQualityBenchmarkCaseResult = {
 
 export type RecordingQualityBenchmarkReport = {
   schemaVersion: number;
+  tier: RecordingQualityBenchmarkTierSelection;
   generatedAt: string;
   manifestPath: string;
   baselineReportPath: string;
@@ -129,6 +136,7 @@ export type RecordingQualityBenchmarkComparisonCounts = {
 export type RecordingQualityBenchmarkCliOptions = {
   manifest: string;
   out: string;
+  tier: RecordingQualityBenchmarkTierSelection;
 };
 
 type TranscriptValidationFixtureSource = {
@@ -238,6 +246,7 @@ export const parseRecordingQualityBenchmarkCliArgs = (
   const options: RecordingQualityBenchmarkCliOptions = {
     manifest: path.join(cwd, 'scripts', 'recording-quality', 'manifest.json'),
     out: path.join(cwd, 'tmp', `recording-quality-benchmark-${now}.json`),
+    tier: 'pr',
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -246,10 +255,19 @@ export const parseRecordingQualityBenchmarkCliArgs = (
       continue;
     }
 
-    if ((arg === '--manifest' || arg === '--out') && index + 1 < args.length) {
+    if (
+      (arg === '--manifest' || arg === '--out' || arg === '--tier') &&
+      index + 1 < args.length
+    ) {
       const value = args[index + 1];
       if (arg === '--manifest') options.manifest = value;
       if (arg === '--out') options.out = value;
+      if (arg === '--tier') {
+        if (value !== 'pr' && value !== 'manual' && value !== 'all') {
+          throw new Error(`Unsupported benchmark tier: ${value}`);
+        }
+        options.tier = value;
+      }
       index += 1;
       continue;
     }
@@ -303,6 +321,13 @@ export const loadRecordingQualityBenchmarkManifest = (
     ) {
       throw new Error(`Unsupported benchmark case kind: ${kind}`);
     }
+    const tier = String(entry.tier || '').trim();
+    if (!tier) {
+      throw new Error(`${id} needs a benchmark tier.`);
+    }
+    if (tier !== 'pr' && tier !== 'manual') {
+      throw new Error(`Unsupported benchmark tier: ${tier}`);
+    }
 
     return {
       id,
@@ -310,6 +335,7 @@ export const loadRecordingQualityBenchmarkManifest = (
       title: String(entry.title || '').trim(),
       kind,
       fixture: String(entry.fixture || '').trim(),
+      tier,
       trackedMetrics: Array.isArray(entry.trackedMetrics)
         ? entry.trackedMetrics.map((metric) => {
             if (!isObject(metric)) {
@@ -346,6 +372,18 @@ export const loadRecordingQualityBenchmarkManifest = (
     baselineReport,
     cases,
   };
+};
+
+export const selectRecordingQualityBenchmarkCases = (
+  cases: RecordingQualityBenchmarkManifestCase[],
+  tier: RecordingQualityBenchmarkTierSelection,
+) => {
+  const selected =
+    tier === 'all' ? cases : cases.filter((entry) => entry.tier === tier);
+  if (selected.length === 0) {
+    throw new Error(`No ${tier} benchmark cases are declared in the manifest.`);
+  }
+  return selected;
 };
 
 const compareMetric = (
@@ -768,6 +806,7 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
 
 export const buildRecordingQualityBenchmarkReport = (input: {
   schemaVersion: number;
+  tier: RecordingQualityBenchmarkTierSelection;
   manifestPath: string;
   baselineReportPath: string;
   generatedAt: string;
@@ -813,6 +852,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
 
   return {
     schemaVersion: input.schemaVersion,
+    tier: input.tier,
     generatedAt: input.generatedAt,
     manifestPath: input.manifestPath,
     baselineReportPath: input.baselineReportPath,

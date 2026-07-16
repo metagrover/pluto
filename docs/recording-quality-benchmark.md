@@ -1,13 +1,15 @@
 # Recording Quality Benchmark
 
-`pnpm run benchmark:recording-quality` runs Pluto's committed, content-safe recording benchmark corpus. The command exercises current transcript-validation, retry-validation, and recording-finalization helpers against synthetic fixtures for the regression shapes tracked in `#25`, `#75`, `#428`, `#434`, and `#458`, then compares tracked metrics against the recorded `master` baseline.
+`pnpm run benchmark:recording-quality` runs Pluto's fast, content-safe `pr` recording benchmark tier. The command exercises current transcript-validation, retry-validation, and recording-finalization helpers against synthetic fixtures for the regression shapes tracked in `#25`, `#75`, `#428`, `#434`, and `#458`, then compares tracked metrics against the recorded `master` baseline.
+
+Use `--tier manual` for explicitly opt-in long-running or hardware-sensitive cases and `--tier all` to run every declared tier. The command fails clearly when the selected tier has no cases, so an empty manual corpus cannot look like a successful quality run.
 
 ## What it writes
 
 - A versioned JSON report under `tmp/recording-quality-benchmark-*.json`
 - A concise terminal summary with pass counts, baseline drift status, and the artifact path
 
-The report includes schema version, environment metadata, source commit, per-case results, baseline comparisons, and any failing assertions.
+The report includes schema version, selected tier, environment metadata, source commit, per-case results, baseline comparisons, and any failing assertions.
 
 ## Corpus layout
 
@@ -17,6 +19,13 @@ The report includes schema version, environment metadata, source commit, per-cas
 
 Each fixture must stay synthetic and content-safe. Do not commit private meeting text, audio paths, or raw recordings.
 Retry-validation fixtures model persisted meeting state plus mocked transcription/probe responses, so they can cover fail-closed evidence handling without replaying private recordings.
+
+Every manifest case declares one tier:
+
+- `pr`: deterministic, content-safe, and fast enough for ordinary pull-request verification.
+- `manual`: long-running or hardware-sensitive evidence that must be requested explicitly and should not slow the default gate.
+
+Do not classify private or consented local-only corpora as `manual`; those remain outside source control and need their own local manifest contract.
 
 Each manifest case can optionally declare `trackedMetrics`:
 
@@ -37,7 +46,7 @@ Use this command when changing local speaker-attribution scoring or candidate-ru
 ## Adding a case
 
 1. Add a new fixture JSON under `scripts/recording-quality/fixtures/`.
-2. Add the case to `scripts/recording-quality/manifest.json` with its issue number, title, kind, and relative fixture path.
+2. Add the case to `scripts/recording-quality/manifest.json` with its issue number, title, kind, relative fixture path, and explicit `pr` or `manual` tier.
 3. Run `pnpm exec vitest run tests/unit/recordingQualityBenchmark.test.ts`.
 4. Run `pnpm run benchmark:recording-quality -- --out tmp/recording-quality-benchmark.json`.
 5. Review the baseline summary:
