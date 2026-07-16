@@ -4,6 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
+  type CandidateEligibilityFixture,
   type RecordingFinalizationFixture,
   type RecordingQualityBenchmarkFixture,
   type RetryValidationFixture,
@@ -11,6 +12,7 @@ import {
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
+  runCandidateEligibilityBenchmarkCase,
   runRecordingFinalizationBenchmarkCase,
   runRetryValidationBenchmarkCase,
   runTranscriptValidationBenchmarkCase,
@@ -75,6 +77,16 @@ const main = async () => {
       );
       continue;
     }
+    if (fixture.type === 'candidate_eligibility') {
+      results.push(
+        runCandidateEligibilityBenchmarkCase(
+          entry,
+          fixture as CandidateEligibilityFixture,
+          `${process.platform}-${process.arch}`,
+        ),
+      );
+      continue;
+    }
     throw new Error(`Unsupported fixture type in ${fixturePath}`);
   }
 
@@ -107,7 +119,7 @@ const main = async () => {
     `[RecordingQualityBenchmark] ${report.summary.passedCases}/${report.summary.totalCases} cases passed`,
   );
   console.log(
-    `[RecordingQualityBenchmark] transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} retry_validation=${report.summary.kinds.retry_validation.passed}/${report.summary.kinds.retry_validation.passed + report.summary.kinds.retry_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed}`,
+    `[RecordingQualityBenchmark] transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} retry_validation=${report.summary.kinds.retry_validation.passed}/${report.summary.kinds.retry_validation.passed + report.summary.kinds.retry_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed} candidate_eligibility=${report.summary.kinds.candidate_eligibility.passed}/${report.summary.kinds.candidate_eligibility.passed + report.summary.kinds.candidate_eligibility.failed}`,
   );
   console.log(
     `[RecordingQualityBenchmark] baseline stable_regressions=${report.comparisonSummary.stableRegressions} stable_improvements=${report.comparisonSummary.stableImprovements} within_tolerance=${report.comparisonSummary.stableWithinTolerance} hardware_drift=${report.comparisonSummary.hardwareDependentDrift} missing_baseline=${report.comparisonSummary.missingBaselineMetrics}`,

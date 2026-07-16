@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-16T00:07:59.892Z",
+  "generatedAt": "2026-07-16T05:08:04.827Z",
   "manifestPath": "scripts/recording-quality/manifest.json",
   "baselineReportPath": "scripts/recording-quality/baselines/current-master.json",
   "sourceCommit": "d1228ab2",
@@ -10,12 +10,16 @@
     "arch": "arm64"
   },
   "summary": {
-    "totalCases": 6,
-    "passedCases": 6,
+    "totalCases": 7,
+    "passedCases": 7,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434, 458],
+    "issueCoverage": [25, 75, 428, 434, 458, 476],
     "kinds": {
+      "candidate_eligibility": {
+        "passed": 1,
+        "failed": 0
+      },
       "recording_finalization": {
         "passed": 1,
         "failed": 0
@@ -31,6 +35,46 @@
     }
   },
   "results": [
+    {
+      "id": "issue-476-credential-free-distribution",
+      "issue": 476,
+      "title": "Credential-free distribution metadata gate",
+      "kind": "candidate_eligibility",
+      "passed": true,
+      "actual": {
+        "status": "needs_attention",
+        "eligibility": {
+          "eligible": false,
+          "reasons": [
+            "requires_user_credentials",
+            "requires_manual_terms_acceptance",
+            "artifact_not_pinned",
+            "unsupported_platform",
+            "non_pluto_distribution_channel"
+          ]
+        },
+        "reasons": [
+          "requires_user_credentials",
+          "requires_manual_terms_acceptance",
+          "artifact_not_pinned",
+          "unsupported_platform",
+          "non_pluto_distribution_channel"
+        ]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "eligibility": {
+          "eligible": false,
+          "reasons": [
+            "requires_user_credentials",
+            "requires_manual_terms_acceptance",
+            "artifact_not_pinned",
+            "unsupported_platform",
+            "non_pluto_distribution_channel"
+          ]
+        }
+      }
+    },
     {
       "id": "issue-25-opening-audio",
       "issue": 25,
