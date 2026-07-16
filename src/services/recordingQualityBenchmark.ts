@@ -697,7 +697,8 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
           counts.hardwareDependentDrift += 1;
           outcome = 'hardware_dependent_drift';
         } else {
-          continue;
+          counts.stableWithinTolerance += 1;
+          outcome = 'stable_within_tolerance';
         }
       } else if (absDelta <= trackedMetric.tolerance) {
         counts.stableWithinTolerance += 1;

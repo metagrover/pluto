@@ -344,6 +344,16 @@ describe('buildRecordingQualityBenchmarkComparisonSummary', () => {
             },
           },
         },
+        {
+          id: 'hardware-within-tolerance',
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 900,
+            },
+          },
+        },
       ],
       results: [
         {
@@ -442,13 +452,37 @@ describe('buildRecordingQualityBenchmarkComparisonSummary', () => {
             status: 'needs_attention',
           },
         },
+        {
+          id: 'hardware-within-tolerance',
+          issue: 75,
+          title: 'Hardware within tolerance',
+          kind: 'recording_finalization',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'durationSeconds',
+              tolerance: 2,
+              stability: 'hardware_dependent',
+            },
+          ],
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 901,
+            },
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
       ],
     });
 
     expect(summary.counts).toEqual({
       stableRegressions: 1,
       stableImprovements: 0,
-      stableWithinTolerance: 1,
+      stableWithinTolerance: 2,
       hardwareDependentDrift: 1,
       missingBaselineMetrics: 1,
     });
@@ -477,6 +511,7 @@ describe('buildRecordingQualityBenchmarkComparisonSummary', () => {
     expect(summary.lines).toEqual([
       'stable regressions: stable-regression localTranscriptCoveredSeconds 12 -> 9 (tol +/-1)',
       'stable within tolerance: within-tolerance localTranscriptCoveredSeconds 10 -> 11 (tol +/-2)',
+      'stable within tolerance: hardware-within-tolerance durationSeconds 900 -> 901 (tol +/-2)',
       'hardware-dependent drift: hardware-drift durationSeconds 1062 -> 1058 (tol +/-2)',
       'missing baseline metrics: missing-baseline activityEvidenceSource',
     ]);
