@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process';
+import { realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 export type BenchmarkSpeaker = 'Me' | 'Them';
@@ -69,6 +71,30 @@ export type LocalAttributionCandidateOutput = {
     elapsedMs: number;
     hardware?: string;
   };
+};
+
+export type CandidateCaseFailure = {
+  caseId: string;
+  status: 'failure';
+  error: {
+    code: string;
+    message: string;
+  };
+};
+export type CandidateCaseSuccess = {
+  caseId: string;
+  status: 'success';
+  output: LocalAttributionCandidateOutput;
+};
+export type LocalCandidateRunResult = {
+  candidateId: string;
+  results: (CandidateCaseSuccess | CandidateCaseFailure)[];
+  diagnostics?: { stderr: '[redacted]'; stderrBytes: number };
+};
+export type LocalCandidateRunOptions = {
+  timeoutMs?: number;
+  privateCorpusRoot?: string;
+  maxStderrBytes?: number;
 };
 
 export type WordErrorMetrics = {
@@ -233,8 +259,26 @@ const safeCorpusPath = (
       fail(field, 'a private corpus root must be supplied');
     if (!path.isAbsolute(candidate))
       fail(field, 'expected an absolute path inside the private corpus root');
-    const root = path.resolve(privateCorpusRoot as string);
-    const relative = path.relative(root, path.resolve(candidate));
+    const root = (() => {
+      try {
+        const canonicalRoot = realpathSync(privateCorpusRoot as string);
+        if (!statSync(canonicalRoot).isDirectory())
+          throw new Error('not a directory');
+        return canonicalRoot;
+      } catch {
+        return fail('private corpus root', 'expected an existing directory');
+      }
+    })();
+    const canonicalCandidate = (() => {
+      try {
+        const canonicalInput = realpathSync(candidate);
+        if (!statSync(canonicalInput).isFile()) throw new Error('not a file');
+        return canonicalInput;
+      } catch {
+        return fail(field, 'expected an existing private corpus file');
+      }
+    })();
+    const relative = path.relative(root, canonicalCandidate);
     if (
       relative === '..' ||
       relative.startsWith(`..${path.sep}`) ||
@@ -242,7 +286,9 @@ const safeCorpusPath = (
     ) {
       fail(field, 'expected a path inside the private corpus root');
     }
-  } else if (path.isAbsolute(candidate)) {
+    return canonicalCandidate;
+  }
+  if (path.isAbsolute(candidate)) {
     fail(field, 'committed and synthetic paths must be repository-relative');
   }
   return candidate;
@@ -461,6 +507,246 @@ export const loadLocalAttributionCandidateOutput = (
       elapsedMs,
       ...(hardware === undefined ? {} : { hardware }),
     },
+  };
+};
+
+const protocolFailure = (
+  caseId: string,
+  code: CandidateCaseFailure['error']['code'],
+  message: string,
+): CandidateCaseFailure => ({
+  caseId,
+  status: 'failure',
+  error: { code, message },
+});
+
+/**
+ * Runs one local candidate process using newline-delimited JSON. Candidate
+ * output is deliberately treated as untrusted: private inputs are sent to the
+ * process, but neither its payloads nor its stderr are ever surfaced verbatim.
+ */
+export const runLocalAttributionCandidate = async (
+  candidate: CandidateManifestEntry,
+  cases: LocalAttributionBenchmarkCase[],
+  options: LocalCandidateRunOptions = {},
+): Promise<LocalCandidateRunResult> => {
+  if (candidate.command.length === 0) {
+    return {
+      candidateId: candidate.id,
+      results: cases.map(({ id }) =>
+        protocolFailure(id, 'process-error', 'Candidate command is empty.'),
+      ),
+    };
+  }
+  const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('Invalid timeoutMs: expected a finite positive duration.');
+  }
+  const maxStderrBytes = options.maxStderrBytes ?? 8_192;
+  if (!Number.isInteger(maxStderrBytes) || maxStderrBytes < 0) {
+    throw new Error('Invalid maxStderrBytes: expected a non-negative integer.');
+  }
+
+  const requestIds = new Map(
+    cases.map((benchmarkCase, index) => [
+      `${candidate.id}:${index}:${benchmarkCase.id}`,
+      benchmarkCase.id,
+    ]),
+  );
+  const caseResults = new Map<
+    string,
+    CandidateCaseSuccess | CandidateCaseFailure
+  >();
+  let stderrBytes = 0;
+  let stdoutBuffer = '';
+  let terminalFailure:
+    | { code: CandidateCaseFailure['error']['code']; message: string }
+    | undefined;
+
+  const child = spawn(candidate.command[0], candidate.command.slice(1), {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    shell: false,
+  });
+
+  const terminate = () => {
+    if (!child.killed) child.kill('SIGKILL');
+  };
+  const failProtocol = (
+    code: CandidateCaseFailure['error']['code'],
+    message: string,
+  ) => {
+    if (terminalFailure) return;
+    terminalFailure = { code, message };
+    for (const { id } of cases) {
+      caseResults.set(id, protocolFailure(id, code, message));
+    }
+    terminate();
+  };
+
+  child.stdin.on('error', () => {
+    failProtocol('process-error', 'Candidate process input failed.');
+  });
+  child.stderr.on('data', (chunk: Buffer | string) => {
+    if (stderrBytes >= maxStderrBytes) return;
+    stderrBytes += Math.min(
+      Buffer.byteLength(chunk),
+      maxStderrBytes - stderrBytes,
+    );
+  });
+  child.stdout.on('data', (chunk: Buffer | string) => {
+    stdoutBuffer += chunk.toString();
+    if (Buffer.byteLength(stdoutBuffer) > 1024 * 1024) {
+      failProtocol(
+        'malformed-response',
+        'Candidate response exceeded the maximum JSONL line size.',
+      );
+      return;
+    }
+    while (stdoutBuffer.includes('\n')) {
+      const newline = stdoutBuffer.indexOf('\n');
+      const line = stdoutBuffer.slice(0, newline);
+      stdoutBuffer = stdoutBuffer.slice(newline + 1);
+      if (line.trim() === '') continue;
+      let raw: UnknownRecord;
+      try {
+        raw = objectAt(JSON.parse(line), 'candidate response');
+      } catch {
+        failProtocol(
+          'malformed-response',
+          'Candidate returned malformed JSONL output.',
+        );
+        return;
+      }
+      const responseId = typeof raw.id === 'string' ? raw.id : '';
+      const caseId = requestIds.get(responseId);
+      if (!caseId) {
+        failProtocol(
+          'unexpected-response',
+          'Candidate returned an unexpected response identifier.',
+        );
+        return;
+      }
+      if (caseResults.has(caseId)) {
+        caseResults.set(
+          caseId,
+          protocolFailure(
+            caseId,
+            'duplicate-response',
+            'Candidate returned more than one response for the case.',
+          ),
+        );
+        failProtocol(
+          'duplicate-response',
+          'Candidate returned a duplicate response identifier.',
+        );
+        return;
+      }
+      if (raw.error !== undefined) {
+        const candidateError =
+          typeof raw.error === 'object' && raw.error !== null
+            ? (raw.error as UnknownRecord)
+            : {};
+        const safeCode =
+          typeof candidateError.code === 'string' &&
+          /^[a-z][a-z0-9-]{0,63}$/.test(candidateError.code)
+            ? candidateError.code
+            : 'candidate-error';
+        caseResults.set(caseId, {
+          caseId,
+          status: 'failure',
+          error: {
+            code: safeCode,
+            message: '[redacted]',
+          },
+        });
+        continue;
+      }
+      try {
+        const output = loadLocalAttributionCandidateOutput(raw.output);
+        if (output.caseId !== caseId || output.candidateId !== candidate.id) {
+          throw new Error('identity mismatch');
+        }
+        caseResults.set(caseId, { caseId, status: 'success', output });
+      } catch {
+        caseResults.set(
+          caseId,
+          protocolFailure(
+            caseId,
+            'invalid-output',
+            'Candidate output failed schema or identity validation.',
+          ),
+        );
+      }
+    }
+  });
+
+  const completion = new Promise<void>((resolve) => {
+    child.once('error', () => {
+      terminalFailure ??= {
+        code: 'process-error',
+        message: 'Candidate process could not be started.',
+      };
+      resolve();
+    });
+    child.once('close', () => resolve());
+  });
+  const timer = setTimeout(() => {
+    terminalFailure ??= {
+      code: 'timeout',
+      message: 'Candidate exceeded the configured timeout.',
+    };
+    terminate();
+  }, timeoutMs);
+
+  for (const [id, caseId] of requestIds) {
+    const benchmarkCase = cases.find((entry) => entry.id === caseId) as
+      | LocalAttributionBenchmarkCase
+      | undefined;
+    if (benchmarkCase) {
+      child.stdin.write(
+        `${JSON.stringify({
+          id,
+          schemaVersion: 1,
+          candidate: {
+            id: candidate.id,
+            kind: candidate.kind,
+            version: candidate.version,
+            model: candidate.model,
+            config: candidate.config,
+          },
+          case: benchmarkCase,
+        })}\n`,
+      );
+    }
+  }
+  child.stdin.end();
+  await completion;
+  clearTimeout(timer);
+
+  if (!terminalFailure && stdoutBuffer.trim() !== '') {
+    terminalFailure = {
+      code: 'malformed-response',
+      message: 'Candidate returned an incomplete JSONL response.',
+    };
+  }
+  const results = cases.map(({ id }) => {
+    const result = caseResults.get(id);
+    if (result) return result;
+    if (terminalFailure) {
+      return protocolFailure(id, terminalFailure.code, terminalFailure.message);
+    }
+    return protocolFailure(
+      id,
+      'missing-response',
+      'Candidate did not return a response for the case.',
+    );
+  });
+  return {
+    candidateId: candidate.id,
+    results,
+    ...(stderrBytes === 0
+      ? {}
+      : { diagnostics: { stderr: '[redacted]' as const, stderrBytes } }),
   };
 };
 

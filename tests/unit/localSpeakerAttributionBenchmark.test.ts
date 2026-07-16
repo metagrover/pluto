@@ -13,6 +13,7 @@ import {
   loadLocalAttributionCandidateOutput,
   loadLocalAttributionManifest,
   loadSpeakerReference,
+  runLocalAttributionCandidate,
 } from '../../src/services/localSpeakerAttributionBenchmark';
 
 describe('computeLocalAttributionMetrics', () => {
@@ -579,5 +580,142 @@ describe('loadLocalAttributionCandidateOutput', () => {
         runtime: { pipelineVersion: '1', models: [], elapsedMs: 1 },
       }),
     ).toThrow(/confidence|models/i);
+  });
+});
+
+describe('runLocalAttributionCandidate', () => {
+  const benchmarkCase = (id: string, mixedPath = `fixtures/${id}.wav`) => ({
+    id,
+    recordingId: `recording-${id}`,
+    provenance: { tier: 'synthetic' as const, source: 'fixture' },
+    audio: { mixedPath },
+    referencePath: `fixtures/${id}.json`,
+  });
+  const candidate = (source: string) => ({
+    id: 'fixture-candidate',
+    kind: 'pipeline' as const,
+    version: '1',
+    command: [process.execPath, '-e', source],
+    model: { id: 'fixture-model', version: '1' },
+    config: {},
+  });
+  const validOutput = (caseId: string) => ({
+    schemaVersion: 1,
+    caseId,
+    candidateId: 'fixture-candidate',
+    transcript: { words: [], segments: [] },
+    diarization: { turns: [] },
+    runtime: {
+      pipelineVersion: '1',
+      models: [{ id: 'fixture-model', version: '1' }],
+      elapsedMs: 1,
+    },
+  });
+  const lineReader =
+    "const r=require('readline').createInterface({input:process.stdin});";
+
+  it('exchanges one request and successful response per case over JSONL', async () => {
+    const script = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);const output=${JSON.stringify(validOutput('placeholder'))};output.caseId=q.case.id;process.stdout.write(JSON.stringify({id:q.id,output})+'\\n')})`;
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('one'), benchmarkCase('two')],
+      { timeoutMs: 2_000 },
+    );
+
+    expect(result.results.map((entry) => entry.status)).toEqual([
+      'success',
+      'success',
+    ]);
+    expect(result.results.map((entry) => entry.caseId)).toEqual(['one', 'two']);
+  });
+
+  it('kills a hung candidate within the configured timeout', async () => {
+    const started = Date.now();
+    const result = await runLocalAttributionCandidate(
+      candidate('process.stdin.resume();setInterval(()=>{},1000)'),
+      [benchmarkCase('hung')],
+      { timeoutMs: 80 },
+    );
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(result.results[0]).toMatchObject({
+      caseId: 'hung',
+      status: 'failure',
+      error: { code: 'timeout' },
+    });
+  });
+
+  it.each([
+    [
+      'malformed output',
+      "process.stdout.write('not-json\\n')",
+      'malformed-response',
+    ],
+    [
+      'mismatched response id',
+      `${lineReader}r.on('line',()=>process.stdout.write(JSON.stringify({id:'wrong',error:{code:'bad',message:'no'}})+'\\n'))`,
+      'unexpected-response',
+    ],
+  ])('contains %s as structured failures', async (_name, script, code) => {
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('case-one')],
+      { timeoutMs: 500 },
+    );
+    expect(result.results[0]).toMatchObject({
+      status: 'failure',
+      error: { code },
+    });
+  });
+
+  it('rejects duplicate and missing responses', async () => {
+    const duplicateScript = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);const output=${JSON.stringify(validOutput('duplicate'))};const response=JSON.stringify({id:q.id,output})+'\\n';process.stdout.write(response+response)})`;
+    const duplicate = await runLocalAttributionCandidate(
+      candidate(duplicateScript),
+      [benchmarkCase('duplicate')],
+      { timeoutMs: 500 },
+    );
+    expect(duplicate.results[0]).toMatchObject({
+      status: 'failure',
+      error: { code: 'duplicate-response' },
+    });
+
+    const missing = await runLocalAttributionCandidate(
+      candidate('process.stdin.resume()'),
+      [benchmarkCase('missing')],
+      { timeoutMs: 500 },
+    );
+    expect(missing.results[0]).toMatchObject({
+      status: 'failure',
+      error: { code: 'missing-response' },
+    });
+  });
+
+  it('redacts private paths, stderr, and candidate payloads from surfaced errors', async () => {
+    const secretRoot = path.join(tmpdir(), 'private-corpus-secret');
+    const secretTranscript = 'confidential transcript sentence';
+    const script = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);process.stderr.write(q.case.audio.mixedPath+' ${secretTranscript}');process.stdout.write(JSON.stringify({id:q.id,error:{code:'candidate-error',message:q.case.audio.mixedPath+' ${secretTranscript}'}})+'\\n')})`;
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('private', path.join(secretRoot, 'meeting.wav'))],
+      { timeoutMs: 500, privateCorpusRoot: secretRoot },
+    );
+    const surfaced = JSON.stringify(result);
+    expect(surfaced).not.toContain(secretRoot);
+    expect(surfaced).not.toContain('meeting.wav');
+    expect(surfaced).not.toContain(secretTranscript);
+    expect(surfaced).toContain('[redacted]');
+  });
+
+  it('continues after a candidate reports a per-case error', async () => {
+    const script = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);if(q.case.id==='bad'){process.stdout.write(JSON.stringify({id:q.id,error:{code:'unsupported',message:'safe failure'}})+'\\n');return}const output=${JSON.stringify(validOutput('good'))};process.stdout.write(JSON.stringify({id:q.id,output})+'\\n')})`;
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('bad'), benchmarkCase('good')],
+      { timeoutMs: 1_000 },
+    );
+    expect(result.results).toMatchObject([
+      { caseId: 'bad', status: 'failure', error: { code: 'unsupported' } },
+      { caseId: 'good', status: 'success' },
+    ]);
   });
 });
