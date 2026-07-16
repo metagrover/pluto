@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 export type CaptureJournalSource = 'mic' | 'system';
 export type CaptureJournalLifecycleState = 'recording' | 'sealed';
@@ -45,6 +52,11 @@ type AppendCaptureJournalChunkArgs = {
 type SealCaptureJournalArgs = {
   meetingId: string;
   endedAtMs: number;
+};
+
+export type CaptureJournalDurability = {
+  syncFile: (path: string) => Promise<void>;
+  syncDirectory: (path: string) => Promise<void>;
 };
 
 const MANIFEST_FILE = 'manifest.json';
@@ -93,16 +105,33 @@ const padSequence = (sequence: number) => String(sequence).padStart(6, '0');
 const computeChecksum = (data: Buffer) =>
   createHash('sha256').update(data).digest('hex');
 
+const syncPath = async (path: string) => {
+  const handle = await open(path, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+};
+
+const defaultDurability: CaptureJournalDurability = {
+  syncFile: syncPath,
+  syncDirectory: syncPath,
+};
+
 const writeManifest = async (
   rootDir: string,
   manifest: CaptureJournalManifest,
+  durability: CaptureJournalDurability,
 ) => {
   const artifactRootPath = getArtifactRootPath(rootDir, manifest.meetingId);
   await mkdir(artifactRootPath, { recursive: true });
   const manifestPath = getManifestPath(rootDir, manifest.meetingId);
   const tempPath = `${manifestPath}.tmp`;
   await writeFile(tempPath, JSON.stringify(manifest, null, 2));
+  await durability.syncFile(tempPath);
   await rename(tempPath, manifestPath);
+  await durability.syncDirectory(dirname(manifestPath));
 };
 
 export const readCaptureJournalManifest = async (
@@ -124,6 +153,7 @@ export const readCaptureJournalManifest = async (
 export const createCaptureJournal = async (
   rootDir: string,
   { meetingId, startedAtMs }: CreateCaptureJournalArgs,
+  durability: CaptureJournalDurability = defaultDurability,
 ): Promise<CaptureJournalManifest> => {
   const normalizedMeetingId = normalizeMeetingId(meetingId);
   const artifactRootRelativePath =
@@ -148,19 +178,24 @@ export const createCaptureJournal = async (
     entries: [],
   };
 
-  await writeManifest(rootDir, manifest);
+  await writeManifest(rootDir, manifest, durability);
   return manifest;
 };
 
 export const appendCaptureJournalChunk = async (
   rootDir: string,
   args: AppendCaptureJournalChunkArgs,
+  durability: CaptureJournalDurability = defaultDurability,
 ): Promise<CaptureJournalManifest> => {
   const meetingId = normalizeMeetingId(args.meetingId);
-  const manifest = await createCaptureJournal(rootDir, {
-    meetingId,
-    startedAtMs: 0,
-  });
+  const manifest = await createCaptureJournal(
+    rootDir,
+    {
+      meetingId,
+      startedAtMs: 0,
+    },
+    durability,
+  );
 
   if (manifest.lifecycleState === 'sealed') {
     throw new Error(`Capture journal for ${meetingId} is already sealed`);
@@ -213,7 +248,9 @@ export const appendCaptureJournalChunk = async (
   await mkdir(join(chunkPath, '..'), { recursive: true });
   const tempChunkPath = `${chunkPath}.tmp`;
   await writeFile(tempChunkPath, data);
+  await durability.syncFile(tempChunkPath);
   await rename(tempChunkPath, chunkPath);
+  await durability.syncDirectory(dirname(chunkPath));
 
   const nextManifest: CaptureJournalManifest = {
     ...manifest,
@@ -231,18 +268,23 @@ export const appendCaptureJournalChunk = async (
       },
     ],
   };
-  await writeManifest(rootDir, nextManifest);
+  await writeManifest(rootDir, nextManifest, durability);
   return nextManifest;
 };
 
 export const sealCaptureJournal = async (
   rootDir: string,
   { meetingId, endedAtMs }: SealCaptureJournalArgs,
+  durability: CaptureJournalDurability = defaultDurability,
 ): Promise<CaptureJournalManifest> => {
-  const manifest = await createCaptureJournal(rootDir, {
-    meetingId,
-    startedAtMs: 0,
-  });
+  const manifest = await createCaptureJournal(
+    rootDir,
+    {
+      meetingId,
+      startedAtMs: 0,
+    },
+    durability,
+  );
   const normalizedEndedAtMs = Math.max(
     manifest.startedAtMs,
     normalizeTimestampMs(endedAtMs),
@@ -260,6 +302,6 @@ export const sealCaptureJournal = async (
     lifecycleState: 'sealed',
     endedAtMs: normalizedEndedAtMs,
   };
-  await writeManifest(rootDir, nextManifest);
+  await writeManifest(rootDir, nextManifest, durability);
   return nextManifest;
 };
