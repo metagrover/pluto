@@ -126,11 +126,15 @@ describe('runRetryValidationBenchmarkCase', () => {
         },
         transcribeByPath: {
           '/synthetic/mic.wav': {
-            segments: [{ start: 0, end: 2, text: 'Sparse provisional local text.' }],
+            segments: [
+              { start: 0, end: 2, text: 'Sparse provisional local text.' },
+            ],
           },
           '/synthetic/system.wav': { segments: [] },
           '/synthetic/mix.wav': {
-            segments: [{ start: 0, end: 2, text: 'Sparse provisional local text.' }],
+            segments: [
+              { start: 0, end: 2, text: 'Sparse provisional local text.' },
+            ],
           },
         },
         probeDurationByPath: {

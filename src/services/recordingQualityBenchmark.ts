@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { Meeting } from '../types.ts';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -13,7 +14,6 @@ import {
   runRecordingTranscriptValidation,
 } from './recordingTranscriptValidation.ts';
 import { retryMeetingTranscriptValidation } from './retryMeetingTranscriptValidation.ts';
-import type { Meeting } from '../types.ts';
 
 export type RecordingQualityBenchmarkCaseKind =
   | 'transcript_validation'
@@ -420,10 +420,9 @@ const makeRetryValidationMetric = (
 
   let parsedIntegrity: Record<string, unknown> = {};
   try {
-    parsedIntegrity = JSON.parse(meeting.transcript_integrity_json || '{}') as Record<
-      string,
-      unknown
-    >;
+    parsedIntegrity = JSON.parse(
+      meeting.transcript_integrity_json || '{}',
+    ) as Record<string, unknown>;
   } catch {
     parsedIntegrity = {};
   }
@@ -479,7 +478,9 @@ export const runRetryValidationBenchmarkCase = async (
       const audioPath = String(args[0] || '');
       return fixture.probeDurationByPath[audioPath] ?? null;
     }
-    throw new Error(`Unexpected retry-validation benchmark channel: ${channel}`);
+    throw new Error(
+      `Unexpected retry-validation benchmark channel: ${channel}`,
+    );
   };
 
   const retryResult = await retryMeetingTranscriptValidation(

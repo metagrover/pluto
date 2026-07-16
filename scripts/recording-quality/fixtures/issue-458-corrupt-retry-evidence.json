@@ -43,9 +43,7 @@
   },
   "expected": {
     "status": "needs_attention",
-    "requiredReasons": [
-      "deterministic_retry_evidence_corrupt"
-    ],
+    "requiredReasons": ["deterministic_retry_evidence_corrupt"],
     "primaryMetric": {
       "name": "activityEvidenceSource",
       "value": "capture_activity_corrupt"
