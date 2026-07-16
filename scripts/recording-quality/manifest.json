@@ -11,6 +11,21 @@
       "tier": "pr"
     },
     {
+      "id": "issue-493-capture-recovery",
+      "issue": 493,
+      "title": "Interrupted capture journals recover acknowledged evidence",
+      "kind": "capture_recovery",
+      "fixture": "fixtures/issue-493-capture-recovery.json",
+      "tier": "pr",
+      "trackedMetrics": [
+        {
+          "name": "recoveredChunkRatio",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
+    },
+    {
       "id": "issue-25-opening-audio",
       "issue": 25,
       "title": "Opening local speech is preserved",
