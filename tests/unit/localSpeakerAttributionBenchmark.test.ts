@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  composeCandidateAttributedTurns,
   parseBenchmarkCliArgs,
   runBenchmarkCli,
   runLocalSpeakerAttributionBenchmark,
@@ -285,6 +286,104 @@ afterEach(() => {
 });
 
 describe('local attribution benchmark reporting', () => {
+  it('assigns crossing-boundary ASR words exactly once by timestamp', () => {
+    const turns = composeCandidateAttributedTurns(
+      {
+        schemaVersion: 1,
+        caseId: 'case',
+        candidateId: 'diarizer',
+        transcript: { words: [], segments: [] },
+        diarization: {
+          turns: [
+            { startTime: 0, endTime: 1, cluster: 'Me' },
+            { startTime: 1, endTime: 2, cluster: 'Them' },
+          ],
+        },
+        runtime: {
+          pipelineVersion: '1',
+          models: [{ id: 'd', version: '1' }],
+          elapsedMs: 1,
+        },
+      },
+      {
+        id: 'diarizer',
+        kind: 'diarizer',
+        version: '1',
+        command: ['local'],
+        model: { id: 'd', version: '1' },
+        config: {},
+      },
+      {
+        schemaVersion: 1,
+        caseId: 'case',
+        candidateId: 'asr',
+        transcript: {
+          words: [
+            { startTime: 0.4, endTime: 0.8, text: 'hello' },
+            { startTime: 1.2, endTime: 1.6, text: 'remote' },
+          ],
+          segments: [{ startTime: 0, endTime: 2, text: 'hello remote' }],
+        },
+        diarization: { turns: [] },
+        runtime: {
+          pipelineVersion: '1',
+          models: [{ id: 'a', version: '1' }],
+          elapsedMs: 1,
+        },
+      },
+    );
+
+    expect(turns.map(({ speaker, text }) => ({ speaker, text }))).toEqual([
+      { speaker: 'Me', text: 'hello' },
+      { speaker: 'Them', text: 'remote' },
+    ]);
+    expect(turns.flatMap(({ text }) => text.split(/\s+/))).toEqual([
+      'hello',
+      'remote',
+    ]);
+  });
+
+  it('assigns a segment-only fallback once with a deterministic overlap tie-break', () => {
+    const diarization = {
+      schemaVersion: 1 as const,
+      caseId: 'case',
+      candidateId: 'd',
+      transcript: { words: [], segments: [] },
+      diarization: {
+        turns: [
+          { startTime: 0, endTime: 1, cluster: 'Me' },
+          { startTime: 1, endTime: 2, cluster: 'Them' },
+        ],
+      },
+      runtime: {
+        pipelineVersion: '1',
+        models: [{ id: 'd', version: '1' }],
+        elapsedMs: 1,
+      },
+    };
+    const transcript = {
+      ...diarization,
+      candidateId: 'a',
+      transcript: {
+        words: [],
+        segments: [{ startTime: 0.5, endTime: 1.5, text: 'once only' }],
+      },
+    };
+    const turns = composeCandidateAttributedTurns(
+      diarization,
+      {
+        id: 'd',
+        kind: 'diarizer',
+        version: '1',
+        command: ['local'],
+        model: { id: 'd', version: '1' },
+        config: {},
+      },
+      transcript,
+    );
+    expect(turns.map(({ text }) => text)).toEqual(['', 'once only']);
+  });
+
   it('builds a deterministic, sanitized report with tier aggregates', () => {
     const privateId = 'customer-call-secret';
     const privatePath = '/private/corpus/customer-call.wav';
@@ -394,6 +493,42 @@ describe('local attribution benchmark reporting', () => {
         runs: [...reportInput(report).runs].reverse(),
       }),
     ).toEqual(report);
+  });
+
+  it('rounds non-exact aggregate means to four decimal places', () => {
+    const base = {
+      generatedAt: '2026-07-15T12:00:00.000Z',
+      sourceCommit: 'abc1234',
+      environment: { platform: 'darwin', arch: 'arm64', nodeVersion: 'v24' },
+      candidates: [
+        {
+          id: 'candidate',
+          kind: 'pipeline' as const,
+          version: '1',
+          command: ['local'],
+          model: { id: 'model', version: '1' },
+          config: {},
+        },
+      ],
+    };
+    const run = (caseId: string, metric: number, elapsedMs: number) => ({
+      caseId,
+      tier: 'synthetic' as const,
+      candidateId: 'candidate',
+      status: 'ok' as const,
+      elapsedMs,
+      peakMemoryMb: elapsedMs,
+      metrics: { wordErrorRate: metric },
+    });
+    const report = buildLocalAttributionBenchmarkReport({
+      ...base,
+      runs: [run('one', 0.123456, 1.11111), run('two', 0.333333, 2.22222)],
+    });
+    expect(report.summary.byCandidateTier[0].meanMetrics).toMatchObject({
+      wordErrorRate: 0.2284,
+      elapsedMs: 1.6667,
+      peakMemoryMb: 1.6667,
+    });
   });
 
   it('parses stable CLI options and candidate filters', () => {
@@ -608,6 +743,12 @@ describe('local attribution benchmark reporting', () => {
     expect(report.results.every(({ status }) => status === 'ok')).toBe(true);
     expect(
       report.results.every(
+        ({ provenance }) =>
+          provenance?.pipelineVersion === 'fixture-v1+fixture-v1',
+      ),
+    ).toBe(true);
+    expect(
+      report.results.every(
         ({ metrics }) =>
           metrics?.wordErrorRate === 0 &&
           metrics?.diarizationErrorRate === 0 &&
@@ -693,6 +834,35 @@ describe('local attribution benchmark reporting', () => {
     stdout.mockRestore();
     stderr.mockRestore();
   });
+
+  it.each(['json', 'markdown'] as const)(
+    'rejects a pre-existing %s report symlink without modifying its private target',
+    async (kind) => {
+      const directory = mkdtempSync(
+        path.resolve('tmp/pluto-attribution-symlink-'),
+      );
+      temporaryDirectories.push(directory);
+      const { root } = makePrivateCorpus();
+      const target = path.join(root, 'references', 'case.json');
+      const outputPath = path.join(directory, 'report.json');
+      const link =
+        kind === 'json' ? outputPath : path.join(directory, 'report.md');
+      writeFileSync(target, 'private target unchanged');
+      symlinkSync(target, link);
+
+      await expect(
+        runLocalSpeakerAttributionBenchmark({
+          manifestPath: 'scripts/speaker-attribution/manifest.example.json',
+          outputPath,
+          timeoutMs: 2_000,
+          candidateIds: [],
+          privateCorpusRoot: root,
+        }),
+      ).rejects.toThrow(/symlink|unsafe output/i);
+      expect(readFileSync(target, 'utf8')).toBe('private target unchanged');
+      if (kind === 'markdown') expect(() => readFileSync(outputPath)).toThrow();
+    },
+  );
 });
 
 const reportInput = (

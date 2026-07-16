@@ -1,5 +1,14 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  constants,
+  closeSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -98,10 +107,18 @@ const safeOutputPath = (
 ): string => {
   const resolved = path.resolve(outputPath);
   const canonicalParent = (() => {
-    try {
-      return realpathSync(path.dirname(resolved));
-    } catch {
-      return path.dirname(resolved);
+    let ancestor = path.dirname(resolved);
+    const missingParts: string[] = [];
+    while (true) {
+      try {
+        return path.join(realpathSync(ancestor), ...missingParts);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        const parent = path.dirname(ancestor);
+        if (parent === ancestor) throw error;
+        missingParts.unshift(path.basename(ancestor));
+        ancestor = parent;
+      }
     }
   })();
   const canonicalOutput = path.join(canonicalParent, path.basename(resolved));
@@ -113,6 +130,46 @@ const safeOutputPath = (
       'Unsafe output location: reports cannot be written inside the private corpus root.',
     );
   return canonicalOutput;
+};
+
+const markdownOutputPath = (outputPath: string) =>
+  outputPath.endsWith('.json')
+    ? `${outputPath.slice(0, -5)}.md`
+    : `${outputPath}.md`;
+
+const validateReportDestination = (
+  outputPath: string,
+  privateCorpusRoot?: string,
+) => {
+  const safePath = safeOutputPath(outputPath, privateCorpusRoot);
+  try {
+    const status = lstatSync(safePath);
+    if (status.isSymbolicLink())
+      throw new Error('Unsafe output location: report symlinks are forbidden.');
+    if (!status.isFile())
+      throw new Error(
+        'Unsafe output location: expected a regular report file.',
+      );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  return safePath;
+};
+
+const writeReportFile = (filePath: string, content: string) => {
+  const descriptor = openSync(
+    filePath,
+    constants.O_WRONLY |
+      constants.O_CREAT |
+      constants.O_TRUNC |
+      (constants.O_NOFOLLOW ?? 0),
+    0o600,
+  );
+  try {
+    writeFileSync(descriptor, content, { encoding: 'utf8' });
+  } finally {
+    closeSync(descriptor);
+  }
 };
 
 const jsonAt = (filePath: string): unknown =>
@@ -135,23 +192,47 @@ const speakerFor = (
   return 'Them';
 };
 
-const generatedTurns = (
+export const composeCandidateAttributedTurns = (
   output: LocalAttributionCandidateOutput,
   candidate: CandidateManifestEntry,
   transcriptOutput = output,
-): BenchmarkTurn[] =>
-  output.diarization.turns.map((turn) => ({
+): BenchmarkTurn[] => {
+  const turns = output.diarization.turns;
+  const assignedText = turns.map(() => [] as string[]);
+  const units =
+    transcriptOutput.transcript.words.length > 0
+      ? transcriptOutput.transcript.words
+      : transcriptOutput.transcript.segments;
+  for (const unit of units) {
+    const midpoint = (unit.startTime + unit.endTime) / 2;
+    const assignment = turns
+      .map((turn, index) => ({
+        index,
+        overlap: Math.max(
+          0,
+          Math.min(unit.endTime, turn.endTime) -
+            Math.max(unit.startTime, turn.startTime),
+        ),
+        containsMidpoint:
+          midpoint >= turn.startTime && midpoint < turn.endTime ? 1 : 0,
+        distance: Math.abs(midpoint - (turn.startTime + turn.endTime) / 2),
+      }))
+      .sort(
+        (left, right) =>
+          right.overlap - left.overlap ||
+          right.containsMidpoint - left.containsMidpoint ||
+          left.distance - right.distance ||
+          left.index - right.index,
+      )[0];
+    if (assignment) assignedText[assignment.index].push(unit.text);
+  }
+  return turns.map((turn, index) => ({
     startTime: turn.startTime,
     endTime: turn.endTime,
     speaker: speakerFor(candidate, turn.cluster),
-    text: transcriptOutput.transcript.segments
-      .filter(
-        (segment) =>
-          segment.startTime < turn.endTime && segment.endTime > turn.startTime,
-      )
-      .map(({ text }) => text)
-      .join(' '),
+    text: assignedText[index].join(' '),
   }));
+};
 
 const failureStatus = (code: CandidateFailureCode) =>
   code === 'candidate_unsupported_hardware'
@@ -208,8 +289,12 @@ export const runLocalSpeakerAttributionBenchmark = async (
   options: BenchmarkCliOptions,
 ) => {
   const manifestPath = path.resolve(options.manifestPath);
-  const outputPath = safeOutputPath(
+  const outputPath = validateReportDestination(
     options.outputPath,
+    options.privateCorpusRoot,
+  );
+  const markdownPath = validateReportDestination(
+    markdownOutputPath(outputPath),
     options.privateCorpusRoot,
   );
   const manifest = loadLocalAttributionManifest(jsonAt(manifestPath), {
@@ -312,7 +397,7 @@ export const runLocalSpeakerAttributionBenchmark = async (
         status: 'ok',
         metrics: computeLocalAttributionMetrics({
           reference: reference.turns,
-          generated: generatedTurns(
+          generated: composeCandidateAttributedTurns(
             diarizerSuccess.output,
             combination.diarizer,
             asrSuccess.output,
@@ -350,17 +435,10 @@ export const runLocalSpeakerAttributionBenchmark = async (
     runs,
   });
   mkdirSync(path.dirname(outputPath), { recursive: true });
-  writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
-  const markdownPath = outputPath.endsWith('.json')
-    ? `${outputPath.slice(0, -5)}.md`
-    : `${outputPath}.md`;
-  writeFileSync(markdownPath, reportAsMarkdown(report), {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
+  validateReportDestination(outputPath, options.privateCorpusRoot);
+  validateReportDestination(markdownPath, options.privateCorpusRoot);
+  writeReportFile(outputPath, `${JSON.stringify(report, null, 2)}\n`);
+  writeReportFile(markdownPath, reportAsMarkdown(report));
   return report;
 };
 

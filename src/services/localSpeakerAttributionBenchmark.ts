@@ -147,7 +147,7 @@ export const sanitizeCandidateResult = (
   const safeIdentifier = (value: unknown): string =>
     typeof value === 'string' &&
     value.length <= 128 &&
-    /^[a-zA-Z0-9._:-]+$/.test(value)
+    /^[a-zA-Z0-9._:+@-]+$/.test(value)
       ? value
       : '';
   const status =
@@ -849,7 +849,11 @@ export const buildLocalAttributionBenchmarkReport = (input: {
           (row) => row.status === 'ok' && row.metrics,
         );
         const mean = (values: number[]) =>
-          values.reduce((total, value) => total + value, 0) / values.length;
+          Math.round(
+            (values.reduce((total, value) => total + value, 0) /
+              values.length) *
+              10_000,
+          ) / 10_000;
         return {
           asrCandidate,
           diarizerCandidate,
