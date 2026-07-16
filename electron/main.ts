@@ -2149,11 +2149,17 @@ app.whenReady().then(async () => {
           await stitchWavSegments({ segments, outputTag }),
       },
     );
-    if (recovery.recoveredCount > 0 || recovery.skippedInvalidManifestCount > 0) {
+    if (
+      recovery.recoveredCount > 0 ||
+      recovery.skippedInvalidManifestCount > 0
+    ) {
       console.log('[Pluto] Capture-journal recovery summary:', recovery);
     }
   } catch (error) {
-    console.warn('[Pluto] Failed to recover interrupted capture journals:', error);
+    console.warn(
+      '[Pluto] Failed to recover interrupted capture journals:',
+      error,
+    );
   }
 
   // macOS: Proactively request microphone access

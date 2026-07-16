@@ -89,22 +89,23 @@ describe('capture journal recovery', () => {
       duration_seconds: 2,
     });
 
-    expect(JSON.parse(String(recoveredMeeting?.transcript_integrity_json)))
-      .toMatchObject({
-        recovery_source: 'capture_journal',
-        journal_lifecycle_state: 'recording',
-        gap_detected: false,
-        recovered_sources: {
-          mic: {
-            acknowledgedChunkCount: 1,
-            recoveredChunkCount: 1,
-          },
-          system: {
-            acknowledgedChunkCount: 1,
-            recoveredChunkCount: 1,
-          },
+    expect(
+      JSON.parse(String(recoveredMeeting?.transcript_integrity_json)),
+    ).toMatchObject({
+      recovery_source: 'capture_journal',
+      journal_lifecycle_state: 'recording',
+      gap_detected: false,
+      recovered_sources: {
+        mic: {
+          acknowledgedChunkCount: 1,
+          recoveredChunkCount: 1,
         },
-      });
+        system: {
+          acknowledgedChunkCount: 1,
+          recoveredChunkCount: 1,
+        },
+      },
+    });
 
     const second = await recoverInterruptedCaptureJournals(root, {
       getMeeting: (meetingId) => savedMeetings.get(meetingId) ?? null,
@@ -211,7 +212,11 @@ describe('capture journal recovery', () => {
           recoveredChunkCount: number;
         };
       };
-      recovery_gaps: Array<{ source: string; sequence: number; reason: string }>;
+      recovery_gaps: Array<{
+        source: string;
+        sequence: number;
+        reason: string;
+      }>;
     };
 
     expect(integrity.gap_detected).toBe(true);
@@ -227,6 +232,8 @@ describe('capture journal recovery', () => {
 
     const recoveredPath = String(recoveredMeeting.audio_path);
     expect(recoveredPath).toContain('meeting-123-mic-recovered.wav');
-    expect(await stat(join(root, manifest.entries[0].relativePath))).toBeTruthy();
+    expect(
+      await stat(join(root, manifest.entries[0].relativePath)),
+    ).toBeTruthy();
   });
 });

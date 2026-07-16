@@ -1,15 +1,15 @@
-import { access, readdir, stat } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
+import { access, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { buildTranscriptJsonPayload } from '../src/utils/transcriptSchema';
-import type { PersistedMeeting } from './db';
 import type {
   CaptureJournalEntry,
   CaptureJournalManifest,
   CaptureJournalSource,
 } from './captureJournal';
 import { readCaptureJournalManifest } from './captureJournal';
+import type { PersistedMeeting } from './db';
 
 type RecoveryGapReason = 'missing_artifact' | 'byte_count_mismatch';
 
@@ -88,7 +88,9 @@ const buildSourceSegments = async (
   const segments: TimedSegment[] = [];
   const gaps: RecoveryGap[] = [];
 
-  for (const entry of [...entries].sort((left, right) => left.sequence - right.sequence)) {
+  for (const entry of [...entries].sort(
+    (left, right) => left.sequence - right.sequence,
+  )) {
     const absolutePath = join(rootDir, entry.relativePath);
     try {
       await access(absolutePath, fsConstants.R_OK);
@@ -204,7 +206,9 @@ export const recoverInterruptedCaptureJournals = async (
       continue;
     }
 
-    const micEntries = manifest.entries.filter((entry) => entry.source === 'mic');
+    const micEntries = manifest.entries.filter(
+      (entry) => entry.source === 'mic',
+    );
     const systemEntries = manifest.entries.filter(
       (entry) => entry.source === 'system',
     );
