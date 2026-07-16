@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runLocalAttributionCandidate } from '../../src/services/localSpeakerAttributionBenchmark';
@@ -8,9 +10,13 @@ const adapter = path.resolve(
   'python/speaker_attribution_benchmark_adapter.py',
 );
 
-const runAdapter = async (requests: unknown[]) => {
+const runAdapter = async (
+  requests: unknown[],
+  environment: NodeJS.ProcessEnv = process.env,
+) => {
   const child = spawn('python3', [adapter], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: environment,
   });
   let stdout = '';
   let stderr = '';
@@ -264,4 +270,113 @@ describe('speaker attribution benchmark adapter', () => {
     }
     expect(result.stdout).not.toContain(missingPath);
   });
+
+  it('rejects malformed optional ASR output without leaking its contents', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'pluto-fake-whisperx-'));
+    try {
+      writeFileSync(path.join(root, 'audio.wav'), 'synthetic');
+      writeFileSync(
+        path.join(root, 'whisperx.py'),
+        "class Model:\n def transcribe(self,*args,**kwargs):\n  if kwargs.get('language')=='bad-words': return {'segments':[{'start':0,'end':1,'text':'private transcript','words':'not-a-list'}]}\n  return {'segments':[{'start':'not-time','end':1,'text':'private transcript'}]}\ndef load_model(*args,**kwargs): return Model()\n",
+      );
+      const metadata = path.join(root, 'whisperx-9.9.dist-info');
+      mkdirSync(metadata);
+      writeFileSync(
+        path.join(metadata, 'METADATA'),
+        'Metadata-Version: 2.1\nName: whisperx\nVersion: 9.9\n',
+      );
+      const badTime = request(
+        'malformed-asr',
+        'transcribe',
+        'current-whisperx',
+        { language: 'bad-time' },
+      );
+      const badWords = request(
+        'malformed-words',
+        'transcribe',
+        'current-whisperx',
+        { language: 'bad-words' },
+      );
+      badTime.case.audio.mixedPath = path.join(root, 'audio.wav');
+      badWords.case.audio.mixedPath = path.join(root, 'audio.wav');
+
+      const result = await runAdapter([badTime, badWords], {
+        ...process.env,
+        PYTHONPATH: root,
+      });
+
+      expect(result.responses).toHaveLength(2);
+      for (const response of result.responses)
+        expect(response).toMatchObject({
+          error: { code: 'candidate_contract_mismatch' },
+        });
+      expect(result.stdout).not.toContain('private transcript');
+      expect(result.stdout).not.toContain(root);
+      expect(result.stdout).not.toContain('Traceback');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([true, false])(
+    'binds NeMo to request audio and %s fresh output instead of caller RTTM',
+    async (writeFreshOutput) => {
+      const root = mkdtempSync(path.join(tmpdir(), 'pluto-fake-nemo-'));
+      try {
+        const packageDir = path.join(root, 'nemo/collections/asr');
+        mkdirSync(packageDir, { recursive: true });
+        for (const init of [
+          'nemo/__init__.py',
+          'nemo/collections/__init__.py',
+          'nemo/collections/asr/__init__.py',
+        ])
+          writeFileSync(path.join(root, init), '');
+        writeFileSync(
+          path.join(packageDir, 'models.py'),
+          "import json,os\nclass ClusteringDiarizer:\n def __init__(self,cfg): self.cfg=cfg\n def diarize(self):\n  manifest=json.loads(open(self.cfg['diarizer']['manifest_filepath']).readline())\n  if not manifest['audio_filepath'].endswith('requested.wav'): raise RuntimeError('wrong private audio')\n  if self.cfg.get('write_output'):\n   out=os.path.join(self.cfg['diarizer']['out_dir'],'pred_rttms');os.makedirs(out)\n   open(os.path.join(out,'fresh.rttm'),'w').write('SPEAKER file 1 0.0 1.0 <NA> <NA> speaker_0 <NA> <NA>\\n')\n",
+        );
+        const metadata = path.join(root, 'nemo_toolkit-9.9.dist-info');
+        mkdirSync(metadata);
+        writeFileSync(
+          path.join(metadata, 'METADATA'),
+          'Metadata-Version: 2.1\nName: nemo_toolkit\nVersion: 9.9\n',
+        );
+        const audio = path.join(root, 'requested.wav');
+        const model = path.join(root, 'model.json');
+        const stale = path.join(root, 'stale.rttm');
+        writeFileSync(audio, 'synthetic');
+        writeFileSync(
+          model,
+          JSON.stringify({ diarizer: {}, write_output: writeFreshOutput }),
+        );
+        writeFileSync(
+          stale,
+          'SPEAKER stale 1 0.0 9.0 <NA> <NA> stale <NA> <NA>\n',
+        );
+        const nemo = request('nemo-run', 'diarize', 'nemo-local', {
+          modelPath: model,
+          rttmPath: stale,
+        });
+        nemo.case.audio.mixedPath = audio;
+
+        const result = await runAdapter([nemo], {
+          ...process.env,
+          PYTHONPATH: root,
+        });
+
+        if (writeFreshOutput) {
+          expect(result.responses[0].output.diarization.turns).toEqual([
+            { startTime: 0, endTime: 1, cluster: 'speaker_0' },
+          ]);
+        } else {
+          expect(result.responses[0]).toMatchObject({
+            error: { code: 'candidate_contract_mismatch' },
+          });
+          expect(JSON.stringify(result.responses[0])).not.toContain('stale');
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 });

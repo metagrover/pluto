@@ -13,9 +13,11 @@ import hashlib
 import importlib
 import importlib.metadata
 import json
+import math
 import platform
 import resource
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -174,29 +176,116 @@ def _safe_audio_path(request: dict[str, Any]) -> str:
 
 
 def _normalize_transcript(result: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
+        raise CandidateError(
+            "candidate_contract_mismatch", "The ASR result has an invalid shape."
+        )
+
+    def timestamp(value: Any) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise CandidateError(
+                "candidate_contract_mismatch", "The ASR result has invalid timestamps."
+            )
+        normalized = float(value)
+        if not math.isfinite(normalized) or normalized < 0:
+            raise CandidateError(
+                "candidate_contract_mismatch", "The ASR result has invalid timestamps."
+            )
+        return normalized
+
     words: list[dict[str, Any]] = []
     segments: list[dict[str, Any]] = []
-    for segment in result.get("segments", []):
-        start = float(segment.get("start", 0))
-        end = float(segment.get("end", start))
-        text = str(segment.get("text", ""))
-        if end > start:
-            segments.append({"startTime": start, "endTime": end, "text": text})
-        for word in segment.get("words", []):
-            word_start = float(word.get("start", start))
-            word_end = float(word.get("end", word_start))
-            if word_end <= word_start:
-                continue
+    for raw_segment in result["segments"]:
+        segment = _object(raw_segment, "ASR segment")
+        start = timestamp(segment.get("start"))
+        end = timestamp(segment.get("end"))
+        text = segment.get("text")
+        if end <= start or not isinstance(text, str):
+            raise CandidateError(
+                "candidate_contract_mismatch", "The ASR segment is invalid."
+            )
+        segments.append({"startTime": start, "endTime": end, "text": text})
+        raw_words = segment.get("words", [])
+        if not isinstance(raw_words, list):
+            raise CandidateError(
+                "candidate_contract_mismatch", "The ASR words have an invalid shape."
+            )
+        for raw_word in raw_words:
+            word = _object(raw_word, "ASR word")
+            word_start = timestamp(word.get("start"))
+            word_end = timestamp(word.get("end"))
+            word_text = word.get("word")
+            if word_end <= word_start or not isinstance(word_text, str):
+                raise CandidateError(
+                    "candidate_contract_mismatch", "The ASR word is invalid."
+                )
             normalized = {
                 "startTime": word_start,
                 "endTime": word_end,
-                "text": str(word.get("word", "")),
+                "text": word_text,
             }
             score = word.get("score")
-            if isinstance(score, (int, float)) and 0 <= score <= 1:
+            if score is not None:
+                if (
+                    isinstance(score, bool)
+                    or not isinstance(score, (int, float))
+                    or not math.isfinite(float(score))
+                    or not 0 <= float(score) <= 1
+                ):
+                    raise CandidateError(
+                        "candidate_contract_mismatch",
+                        "The ASR word confidence is invalid.",
+                    )
                 normalized["confidence"] = float(score)
             words.append(normalized)
+    segments.sort(key=lambda item: (item["startTime"], item["endTime"]))
+    words.sort(key=lambda item: (item["startTime"], item["endTime"]))
     return words, segments
+
+
+def _load_nemo_config(model_path: str) -> dict[str, Any]:
+    try:
+        loaded = json.loads(Path(model_path).read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        omega_conf = importlib.import_module("omegaconf")
+        loaded = omega_conf.OmegaConf.to_container(
+            omega_conf.OmegaConf.load(model_path), resolve=True
+        )
+    if not isinstance(loaded, dict):
+        raise CandidateError(
+            "candidate_contract_mismatch", "The NeMo model configuration is invalid."
+        )
+    # Round-tripping prevents mutation of objects owned by an optional loader.
+    return json.loads(json.dumps(loaded))
+
+
+def _parse_rttm(output_path: Path) -> list[dict[str, Any]]:
+    turns = []
+    for line in output_path.read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) < 8 or parts[0] != "SPEAKER":
+            continue
+        try:
+            start, duration = float(parts[3]), float(parts[4])
+        except ValueError:
+            raise CandidateError(
+                "candidate_contract_mismatch", "NeMo produced an invalid RTTM result."
+            ) from None
+        if (
+            not math.isfinite(start)
+            or not math.isfinite(duration)
+            or start < 0
+            or duration <= 0
+            or not parts[7]
+        ):
+            raise CandidateError(
+                "candidate_contract_mismatch", "NeMo produced an invalid RTTM result."
+            )
+        turns.append(
+            {"startTime": start, "endTime": start + duration, "cluster": parts[7]}
+        )
+    turns.sort(key=lambda item: (item["startTime"], item["endTime"]))
+    return turns
 
 
 def _transcribe(candidate_id: str, request: dict[str, Any], config: dict[str, Any]) -> tuple[Any, Any, list[Any], str]:
@@ -267,21 +356,57 @@ def _diarize(candidate_id: str, request: dict[str, Any], config: dict[str, Any])
         # NeMo is intentionally installed in the candidate command's isolated
         # environment. Its manifest/config path is consumed by ClusteringDiarizer.
         models, hardware = _probe(candidate_id, config)
-        _safe_audio_path(request)
+        audio_path = _safe_audio_path(request)
         nemo_models = importlib.import_module("nemo.collections.asr.models")
-        diarizer = nemo_models.ClusteringDiarizer(cfg=model_path)
-        diarizer.diarize()
-        output_path = config.get("rttmPath")
-        if not isinstance(output_path, str) or not Path(output_path).is_file():
-            raise CandidateError("candidate_contract_mismatch", "NeMo did not produce a local RTTM result.")
-        turns = []
-        for line in Path(output_path).read_text(encoding="utf-8").splitlines():
-            parts = line.split()
-            if len(parts) < 8 or parts[0] != "SPEAKER":
-                continue
-            start, duration = float(parts[3]), float(parts[4])
-            if duration > 0:
-                turns.append({"startTime": start, "endTime": start + duration, "cluster": parts[7]})
+        with tempfile.TemporaryDirectory(prefix="pluto-nemo-benchmark-") as work_dir:
+            work_path = Path(work_dir)
+            manifest_path = work_path / "request.jsonl"
+            output_dir = work_path / "output"
+            output_dir.mkdir()
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "audio_filepath": audio_path,
+                        "offset": 0,
+                        "duration": None,
+                        "label": "infer",
+                        "text": "-",
+                        "num_speakers": config.get("numSpeakers"),
+                        "rttm_filepath": None,
+                        "uem_filepath": None,
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            nemo_config = _load_nemo_config(model_path)
+            diarizer_config = nemo_config.setdefault("diarizer", {})
+            if not isinstance(diarizer_config, dict):
+                raise CandidateError(
+                    "candidate_contract_mismatch",
+                    "The NeMo diarizer configuration is invalid.",
+                )
+            diarizer_config["manifest_filepath"] = str(manifest_path)
+            diarizer_config["out_dir"] = str(output_dir)
+            try:
+                omega_conf = importlib.import_module("omegaconf")
+                runtime_config = omega_conf.OmegaConf.create(nemo_config)
+            except ModuleNotFoundError:
+                # Dependency-free fake runtimes use the plain mapping seam;
+                # real NeMo environments include OmegaConf.
+                runtime_config = nemo_config
+            diarizer = nemo_models.ClusteringDiarizer(cfg=runtime_config)
+            diarizer.diarize()
+            # Only this newly-created isolated directory is eligible. Caller
+            # supplied RTTM paths and pre-existing outputs are never inspected.
+            outputs = sorted(output_dir.rglob("*.rttm"))
+            if len(outputs) != 1:
+                raise CandidateError(
+                    "candidate_contract_mismatch",
+                    "NeMo did not produce exactly one fresh RTTM result.",
+                )
+            turns = _parse_rttm(outputs[0])
         return [], [], turns, hardware
     raise CandidateError("candidate_contract_mismatch", "Candidate does not support diarization.")
 
