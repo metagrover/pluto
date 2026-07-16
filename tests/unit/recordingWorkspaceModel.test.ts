@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildRecordingWorkspaceModel,
+  resolveSystemCaptureHealth,
+  scheduleSystemCaptureTimeout,
   withCaptureDurabilityWarning,
 } from '../../src/components/features/recordingWorkspaceModel';
 
@@ -113,5 +115,48 @@ describe('withCaptureDurabilityWarning', () => {
       systemAudio: 'healthy',
       captureDurability: 'warning',
     });
+  });
+});
+
+describe('resolveSystemCaptureHealth', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps a started native capture pending until valid PCM arrives', () => {
+    expect(
+      resolveSystemCaptureHealth({ nativeStarted: true, validPcmSeen: false }),
+    ).toBe('warning');
+  });
+
+  it('marks a native capture unavailable when startup fails', () => {
+    expect(
+      resolveSystemCaptureHealth({ nativeStarted: false, validPcmSeen: false }),
+    ).toBe('unavailable');
+  });
+
+  it('marks system audio healthy after valid PCM arrives', () => {
+    expect(
+      resolveSystemCaptureHealth({ nativeStarted: true, validPcmSeen: true }),
+    ).toBe('healthy');
+  });
+
+  it('marks a started capture unavailable when valid PCM times out', () => {
+    expect(
+      resolveSystemCaptureHealth({
+        nativeStarted: true,
+        validPcmSeen: false,
+        timedOut: true,
+      }),
+    ).toBe('unavailable');
+  });
+
+  it('cancels the pending timeout after valid PCM arrives', () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const cancel = scheduleSystemCaptureTimeout(onTimeout, 3_000);
+
+    cancel();
+    vi.advanceTimersByTime(3_000);
+
+    expect(onTimeout).not.toHaveBeenCalled();
   });
 });

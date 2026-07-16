@@ -26,6 +26,27 @@ export type RecordingWorkspaceInput = {
   interimText: string;
 };
 
+export const resolveSystemCaptureHealth = ({
+  nativeStarted,
+  validPcmSeen,
+  timedOut = false,
+}: {
+  nativeStarted: boolean;
+  validPcmSeen: boolean;
+  timedOut?: boolean;
+}): CaptureHealth => {
+  if (!nativeStarted || timedOut) return 'unavailable';
+  return validPcmSeen ? 'healthy' : 'warning';
+};
+
+export const scheduleSystemCaptureTimeout = (
+  onTimeout: () => void,
+  delayMs: number,
+) => {
+  const timeout = globalThis.setTimeout(onTimeout, delayMs);
+  return () => globalThis.clearTimeout(timeout);
+};
+
 export const withCaptureDurabilityWarning = (
   health: CaptureHealthState,
 ): CaptureHealthState => ({

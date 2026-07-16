@@ -23,6 +23,7 @@ import {
   sealCaptureJournal,
 } from './captureJournal';
 import { recoverInterruptedCaptureJournals } from './captureJournalRecovery';
+import { waitForNativeAudioSpawn } from './nativeAudioCapture';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -626,6 +627,13 @@ app.whenReady().then(async () => {
         console.log('[Pluto] AudioCap exited with code', code);
         nativeAudioProcess = null;
       });
+
+      const nativeStarted = await waitForNativeAudioSpawn(nativeAudioProcess);
+      if (!nativeStarted) {
+        console.error('[Pluto] AudioCap failed to spawn');
+        nativeAudioProcess = null;
+        return false;
+      }
 
       return true;
     } catch (e) {
