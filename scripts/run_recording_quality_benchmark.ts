@@ -96,7 +96,8 @@ const main = async () => {
     },
     sourceCommit: getSourceCommit(),
     results,
-    baselineResults: readJson<{ results: typeof results }>(baselineReportPath).results,
+    baselineResults: readJson<{ results: typeof results }>(baselineReportPath)
+      .results,
   });
 
   fs.mkdirSync(path.dirname(options.out), { recursive: true });

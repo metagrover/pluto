@@ -221,13 +221,14 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const sortNumeric = (values: Iterable<number>) =>
   [...values].sort((left, right) => left - right);
 
-const defaultComparisonCounts = (): RecordingQualityBenchmarkComparisonCounts => ({
-  stableRegressions: 0,
-  stableImprovements: 0,
-  stableWithinTolerance: 0,
-  hardwareDependentDrift: 0,
-  missingBaselineMetrics: 0,
-});
+const defaultComparisonCounts =
+  (): RecordingQualityBenchmarkComparisonCounts => ({
+    stableRegressions: 0,
+    stableImprovements: 0,
+    stableWithinTolerance: 0,
+    hardwareDependentDrift: 0,
+    missingBaselineMetrics: 0,
+  });
 
 export const parseRecordingQualityBenchmarkCliArgs = (
   args: string[],
@@ -312,9 +313,7 @@ export const loadRecordingQualityBenchmarkManifest = (
       trackedMetrics: Array.isArray(entry.trackedMetrics)
         ? entry.trackedMetrics.map((metric) => {
             if (!isObject(metric)) {
-              throw new Error(
-                `Tracked metrics for ${id} must be objects.`,
-              );
+              throw new Error(`Tracked metrics for ${id} must be objects.`);
             }
             const name = String(metric.name || '').trim();
             const tolerance = Number(metric.tolerance);
@@ -327,10 +326,7 @@ export const loadRecordingQualityBenchmarkManifest = (
                 `Tracked metric ${name} for ${id} needs a non-negative tolerance.`,
               );
             }
-            if (
-              stability !== 'stable' &&
-              stability !== 'hardware_dependent'
-            ) {
+            if (stability !== 'stable' && stability !== 'hardware_dependent') {
               throw new Error(
                 `Tracked metric ${name} for ${id} has unsupported stability ${stability}.`,
               );
@@ -641,8 +637,7 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
 
   for (const result of input.results) {
     for (const trackedMetric of result.trackedMetrics || []) {
-      const baselineMetric =
-        baselineById.get(result.id)?.actual?.primaryMetric;
+      const baselineMetric = baselineById.get(result.id)?.actual?.primaryMetric;
 
       if (!baselineMetric || baselineMetric.name !== trackedMetric.name) {
         counts.missingBaselineMetrics += 1;
@@ -764,8 +759,7 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
           `hardware-dependent drift: ${entry.id} ${entry.metricName} ${formatValue(entry.baselineValue)} -> ${formatValue(entry.currentValue)} (tol +/-${entry.tolerance})`,
       ),
       ...sections.missingBaseline.map(
-        (entry) =>
-          `missing baseline metrics: ${entry.id} ${entry.metricName}`,
+        (entry) => `missing baseline metrics: ${entry.id} ${entry.metricName}`,
       ),
     ],
   };
