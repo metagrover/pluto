@@ -58,10 +58,12 @@ import {
   resolveTranscriptionLanguage,
   resolveTranscriptionSettings,
 } from '../utils/transcriptionSettings';
-import type {
-  CaptureHealth,
-  LiveTranscriptIntegrity,
-  LiveTranscriptSegment,
+import {
+  type CaptureHealth,
+  type LiveTranscriptIntegrity,
+  type LiveTranscriptSegment,
+  resolveSystemCaptureHealth,
+  scheduleSystemCaptureTimeout,
 } from './features/recordingWorkspaceModel';
 
 interface AudioManagerProps {
@@ -444,6 +446,8 @@ export const AudioManager = ({
     | null
   >(null);
   const systemAudioChunkSeenRef = useRef(false);
+  const systemAudioHealthRef = useRef<CaptureHealth>('warning');
+  const cancelSystemAudioHealthTimeoutRef = useRef<(() => void) | null>(null);
 
   const speakingLoopRef = useRef<number | null>(null);
   const lastSpeakerRef = useRef<'Me' | 'Them' | null>(null);
@@ -557,12 +561,10 @@ export const AudioManager = ({
       stopInFlightRef.current = false;
       isRecordingRef.current = true;
       setIsRecording(true);
+      systemAudioHealthRef.current = 'warning';
       onCaptureHealthChange?.({
         microphone: 'healthy',
-        systemAudio:
-          systemAudioStatus === 'granted' || systemAudioStatus === 'authorized'
-            ? 'healthy'
-            : 'warning',
+        systemAudio: systemAudioHealthRef.current,
       });
 
       console.log(
@@ -680,9 +682,33 @@ export const AudioManager = ({
       // 4. System Audio: Native AudioCap
       console.log('[Pluto] Starting Native AudioCap...');
       try {
-        await window.ipcRenderer.invoke('NATIVE_AUDIO_START');
-        hasSystemRecorderRef.current = true;
+        const nativeStarted =
+          await window.ipcRenderer.invoke('NATIVE_AUDIO_START');
+        hasSystemRecorderRef.current = nativeStarted === true;
         systemAudioChunkSeenRef.current = false;
+        systemAudioHealthRef.current = resolveSystemCaptureHealth({
+          nativeStarted: nativeStarted === true,
+          validPcmSeen: false,
+        });
+        onCaptureHealthChange?.({
+          microphone: 'healthy',
+          systemAudio: systemAudioHealthRef.current,
+        });
+        if (!nativeStarted) {
+          throw new Error('Native system audio capture did not start');
+        }
+        cancelSystemAudioHealthTimeoutRef.current =
+          scheduleSystemCaptureTimeout(() => {
+            systemAudioHealthRef.current = resolveSystemCaptureHealth({
+              nativeStarted: true,
+              validPcmSeen: false,
+              timedOut: true,
+            });
+            onCaptureHealthChange?.({
+              microphone: 'healthy',
+              systemAudio: systemAudioHealthRef.current,
+            });
+          }, 3_000);
 
         // Setup Listener
         const handler = (_: unknown, chunk: NativeAudioChunk) => {
@@ -724,6 +750,18 @@ export const AudioManager = ({
             );
             systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
             if (decoded.samples.length === 0) return;
+            if (systemAudioHealthRef.current !== 'healthy') {
+              cancelSystemAudioHealthTimeoutRef.current?.();
+              cancelSystemAudioHealthTimeoutRef.current = null;
+              systemAudioHealthRef.current = resolveSystemCaptureHealth({
+                nativeStarted: true,
+                validPcmSeen: true,
+              });
+              onCaptureHealthChange?.({
+                microphone: 'healthy',
+                systemAudio: systemAudioHealthRef.current,
+              });
+            }
             systemPcmChunksRef.current.push(decoded.samples);
             fullSessionSystemPcmChunksRef.current.push(decoded.samples);
             const rms = computeRms(decoded.samples);
@@ -735,6 +773,12 @@ export const AudioManager = ({
         window.ipcRenderer.on('NATIVE_AUDIO_CHUNK', handler);
         console.log('[Pluto] Native AudioCap started & listening.');
       } catch (sysErr) {
+        hasSystemRecorderRef.current = false;
+        systemAudioHealthRef.current = 'unavailable';
+        onCaptureHealthChange?.({
+          microphone: 'healthy',
+          systemAudio: systemAudioHealthRef.current,
+        });
         console.warn('[Pluto] System audio failed:', sysErr);
       }
 
@@ -3316,6 +3360,8 @@ export const AudioManager = ({
       );
 
       // Stop Native Capture
+      cancelSystemAudioHealthTimeoutRef.current?.();
+      cancelSystemAudioHealthTimeoutRef.current = null;
       await window.ipcRenderer.invoke('NATIVE_AUDIO_STOP');
       if (nativeAudioListenerRef.current) {
         window.ipcRenderer.off(
@@ -4808,12 +4854,16 @@ export const AudioManager = ({
         ) {
           micRecorderRef.current.stop();
         }
+        cancelSystemAudioHealthTimeoutRef.current?.();
+        cancelSystemAudioHealthTimeoutRef.current = null;
         window.ipcRenderer.invoke('NATIVE_AUDIO_STOP').catch(() => {});
       }
     };
     window.ipcRenderer.on('MEETING_DELETED', handleMeetingDeleted);
 
     return () => {
+      cancelSystemAudioHealthTimeoutRef.current?.();
+      cancelSystemAudioHealthTimeoutRef.current = null;
       window.removeEventListener('STOP_RECORDING', handleStopRecording);
       window.removeEventListener('START_RECORDING', handleStartRecording);
       window.ipcRenderer.off('MEETING_DELETED', handleMeetingDeleted);

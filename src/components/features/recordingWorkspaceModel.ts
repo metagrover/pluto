@@ -20,6 +20,27 @@ export type RecordingWorkspaceInput = {
   interimText: string;
 };
 
+export const resolveSystemCaptureHealth = ({
+  nativeStarted,
+  validPcmSeen,
+  timedOut = false,
+}: {
+  nativeStarted: boolean;
+  validPcmSeen: boolean;
+  timedOut?: boolean;
+}): CaptureHealth => {
+  if (!nativeStarted || timedOut) return 'unavailable';
+  return validPcmSeen ? 'healthy' : 'warning';
+};
+
+export const scheduleSystemCaptureTimeout = (
+  onTimeout: () => void,
+  delayMs: number,
+) => {
+  const timeout = globalThis.setTimeout(onTimeout, delayMs);
+  return () => globalThis.clearTimeout(timeout);
+};
+
 const formatElapsed = (milliseconds: number) => {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
