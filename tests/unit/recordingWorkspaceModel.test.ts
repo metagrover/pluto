@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildRecordingWorkspaceModel } from '../../src/components/features/recordingWorkspaceModel';
+import {
+  buildRecordingWorkspaceModel,
+  withCaptureDurabilityWarning,
+} from '../../src/components/features/recordingWorkspaceModel';
 
 describe('buildRecordingWorkspaceModel', () => {
   it('keeps healthy capture calm while exposing transcript state', () => {
@@ -9,6 +12,7 @@ describe('buildRecordingWorkspaceModel', () => {
       isProcessing: false,
       microphone: 'healthy',
       systemAudio: 'healthy',
+      captureDurability: 'healthy',
       liveTranscriptIntegrity: 'healthy',
       segments: [
         {
@@ -34,6 +38,7 @@ describe('buildRecordingWorkspaceModel', () => {
       isProcessing: false,
       microphone: 'warning',
       systemAudio: 'healthy',
+      captureDurability: 'healthy',
       liveTranscriptIntegrity: 'healthy',
       segments: [],
       interimText: '',
@@ -49,6 +54,7 @@ describe('buildRecordingWorkspaceModel', () => {
       isProcessing: false,
       microphone: 'healthy',
       systemAudio: 'healthy',
+      captureDurability: 'healthy',
       liveTranscriptIntegrity: 'lagging',
       segments: [],
       interimText: '',
@@ -58,5 +64,54 @@ describe('buildRecordingWorkspaceModel', () => {
     expect(model.statusMessage).toBe(
       'Your audio is recording, but live transcription is falling behind',
     );
+  });
+
+  it('warns when capture durability is degraded even if audio is still healthy', () => {
+    const model = buildRecordingWorkspaceModel({
+      startedAtMs: 1_000,
+      nowMs: 11_000,
+      isProcessing: false,
+      microphone: 'healthy',
+      systemAudio: 'healthy',
+      captureDurability: 'warning',
+      liveTranscriptIntegrity: 'healthy',
+      segments: [],
+      interimText: '',
+    });
+
+    expect(model.needsAttention).toBe(true);
+    expect(model.statusMessage).toBe(
+      'Audio may still be recording, but crash recovery is no longer guaranteed',
+    );
+  });
+});
+
+describe('withCaptureDurabilityWarning', () => {
+  it('marks durability as warning without changing microphone or system-audio health', () => {
+    expect(
+      withCaptureDurabilityWarning({
+        microphone: 'healthy',
+        systemAudio: 'warning',
+        captureDurability: 'healthy',
+      }),
+    ).toEqual({
+      microphone: 'healthy',
+      systemAudio: 'warning',
+      captureDurability: 'warning',
+    });
+  });
+
+  it('keeps an existing durability warning sticky', () => {
+    expect(
+      withCaptureDurabilityWarning({
+        microphone: 'healthy',
+        systemAudio: 'healthy',
+        captureDurability: 'warning',
+      }),
+    ).toEqual({
+      microphone: 'healthy',
+      systemAudio: 'healthy',
+      captureDurability: 'warning',
+    });
   });
 });
