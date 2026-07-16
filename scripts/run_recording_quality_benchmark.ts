@@ -4,14 +4,14 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
-  compareRecordingQualityBenchmarkToBaseline,
-  formatRecordingQualityBenchmarkComparisonSummary,
   type RecordingFinalizationFixture,
   type RecordingQualityBenchmarkFixture,
   type RecordingQualityBenchmarkReport,
   type RetryValidationFixture,
   type TranscriptValidationFixture,
   buildRecordingQualityBenchmarkReport,
+  compareRecordingQualityBenchmarkToBaseline,
+  formatRecordingQualityBenchmarkComparisonSummary,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
   runRecordingFinalizationBenchmarkCase,
@@ -100,9 +100,8 @@ const main = async () => {
     sourceCommit: getSourceCommit(),
     results,
   });
-  const baselineReport = readJson<RecordingQualityBenchmarkReport>(
-    baselineReportPath,
-  );
+  const baselineReport =
+    readJson<RecordingQualityBenchmarkReport>(baselineReportPath);
   const comparison = compareRecordingQualityBenchmarkToBaseline({
     report,
     baselineReport,

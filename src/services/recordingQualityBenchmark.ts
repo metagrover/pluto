@@ -366,8 +366,7 @@ const compareMetric = (
 
 const metricArray = (
   metric: RecordingQualityBenchmarkMetric | undefined,
-): RecordingQualityBenchmarkMetric[] =>
-  metric ? [metric] : [];
+): RecordingQualityBenchmarkMetric[] => (metric ? [metric] : []);
 
 const collectTranscriptMetrics = (
   result: RecordingTranscriptValidationResult,
@@ -707,7 +706,8 @@ const getActualMetric = (
   result: RecordingQualityBenchmarkCaseResult,
   metricName: string,
 ): RecordingQualityBenchmarkMetric | undefined => {
-  const metrics = result.actual.metrics || metricArray(result.actual.primaryMetric);
+  const metrics =
+    result.actual.metrics || metricArray(result.actual.primaryMetric);
   return metrics.find((metric) => metric.name === metricName);
 };
 
@@ -818,7 +818,10 @@ export const compareRecordingQualityBenchmarkToBaseline = (input: {
 
     for (const trackedMetric of trackedMetrics) {
       const currentMetric = getActualMetric(result, trackedMetric.name);
-      const baselineMetric = getActualMetric(baselineResult, trackedMetric.name);
+      const baselineMetric = getActualMetric(
+        baselineResult,
+        trackedMetric.name,
+      );
       if (!currentMetric || !baselineMetric) {
         comparison.missingBaselineMetrics.push({
           caseId: result.id,

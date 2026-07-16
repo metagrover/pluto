@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-16T00:07:59.892Z",
+  "generatedAt": "2026-07-16T15:05:58.768Z",
   "manifestPath": "scripts/recording-quality/manifest.json",
   "baselineReportPath": "scripts/recording-quality/baselines/current-master.json",
-  "sourceCommit": "d1228ab2",
+  "sourceCommit": "079cb4d0",
   "environment": {
     "nodeVersion": "v24.11.1",
     "platform": "darwin",
@@ -14,7 +14,13 @@
     "passedCases": 6,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434, 458],
+    "issueCoverage": [
+      25,
+      75,
+      428,
+      434,
+      458
+    ],
     "kinds": {
       "recording_finalization": {
         "passed": 1,
@@ -43,6 +49,20 @@
           "name": "localTranscriptCoveredSeconds",
           "value": 3
         },
+        "metrics": [
+          {
+            "name": "localTranscriptCoveredSeconds",
+            "value": 3
+          },
+          {
+            "name": "remoteTranscriptCoveredSeconds",
+            "value": 3
+          },
+          {
+            "name": "unresolvedAmbiguousSeconds",
+            "value": 0
+          }
+        ],
         "reasons": []
       },
       "expected": {
@@ -50,7 +70,14 @@
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 3
-        }
+        },
+        "trackedMetrics": [
+          {
+            "name": "localTranscriptCoveredSeconds",
+            "tolerance": 0,
+            "stability": "stable"
+          }
+        ]
       }
     },
     {
@@ -65,16 +92,31 @@
           "name": "durationSeconds",
           "value": 1062
         },
+        "metrics": [
+          {
+            "name": "durationSeconds",
+            "value": 1062
+          }
+        ],
         "reasons": []
       },
       "expected": {
         "status": "validated",
         "secondCallReturnsNull": true,
-        "cleanupPaths": ["/tmp/session-system.wav"],
+        "cleanupPaths": [
+          "/tmp/session-system.wav"
+        ],
         "primaryMetric": {
           "name": "durationSeconds",
           "value": 1062
-        }
+        },
+        "trackedMetrics": [
+          {
+            "name": "durationSeconds",
+            "tolerance": 1,
+            "stability": "hardware_dependent"
+          }
+        ]
       }
     },
     {
@@ -89,6 +131,20 @@
           "name": "localTranscriptCoveredSeconds",
           "value": 110
         },
+        "metrics": [
+          {
+            "name": "localTranscriptCoveredSeconds",
+            "value": 110
+          },
+          {
+            "name": "remoteTranscriptCoveredSeconds",
+            "value": 200
+          },
+          {
+            "name": "unresolvedAmbiguousSeconds",
+            "value": 0
+          }
+        ],
         "reasons": []
       },
       "expected": {
@@ -96,7 +152,14 @@
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 110
-        }
+        },
+        "trackedMetrics": [
+          {
+            "name": "localTranscriptCoveredSeconds",
+            "tolerance": 0,
+            "stability": "stable"
+          }
+        ]
       }
     },
     {
@@ -111,15 +174,40 @@
           "name": "localTranscriptCoveredSeconds",
           "value": 6
         },
-        "reasons": ["local_speech_unaccounted"]
+        "metrics": [
+          {
+            "name": "localTranscriptCoveredSeconds",
+            "value": 6
+          },
+          {
+            "name": "remoteTranscriptCoveredSeconds",
+            "value": 0
+          },
+          {
+            "name": "unresolvedAmbiguousSeconds",
+            "value": 0
+          }
+        ],
+        "reasons": [
+          "local_speech_unaccounted"
+        ]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": ["local_speech_unaccounted"],
+        "requiredReasons": [
+          "local_speech_unaccounted"
+        ],
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 6
-        }
+        },
+        "trackedMetrics": [
+          {
+            "name": "localTranscriptCoveredSeconds",
+            "tolerance": 0,
+            "stability": "stable"
+          }
+        ]
       }
     },
     {
@@ -134,11 +222,21 @@
           "name": "activityEvidenceSource",
           "value": "capture_activity_missing"
         },
-        "reasons": ["deterministic_retry_evidence_missing"]
+        "metrics": [
+          {
+            "name": "activityEvidenceSource",
+            "value": "capture_activity_missing"
+          }
+        ],
+        "reasons": [
+          "deterministic_retry_evidence_missing"
+        ]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": ["deterministic_retry_evidence_missing"],
+        "requiredReasons": [
+          "deterministic_retry_evidence_missing"
+        ],
         "primaryMetric": {
           "name": "activityEvidenceSource",
           "value": "capture_activity_missing"
@@ -157,11 +255,21 @@
           "name": "activityEvidenceSource",
           "value": "capture_activity_corrupt"
         },
-        "reasons": ["deterministic_retry_evidence_corrupt"]
+        "metrics": [
+          {
+            "name": "activityEvidenceSource",
+            "value": "capture_activity_corrupt"
+          }
+        ],
+        "reasons": [
+          "deterministic_retry_evidence_corrupt"
+        ]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": ["deterministic_retry_evidence_corrupt"],
+        "requiredReasons": [
+          "deterministic_retry_evidence_corrupt"
+        ],
         "primaryMetric": {
           "name": "activityEvidenceSource",
           "value": "capture_activity_corrupt"
@@ -169,5 +277,54 @@
       }
     }
   ],
-  "failures": []
+  "failures": [],
+  "baselineComparison": {
+    "summary": {
+      "stableRegressions": 0,
+      "hardwareDependentChanges": 0,
+      "missingBaselineCases": 0,
+      "missingBaselineMetrics": 0,
+      "withinTolerance": 4,
+      "improvements": 0
+    },
+    "stableRegressions": [],
+    "hardwareDependentChanges": [],
+    "missingBaselineCases": [],
+    "missingBaselineMetrics": [],
+    "withinTolerance": [
+      {
+        "caseId": "issue-25-opening-audio",
+        "metricName": "localTranscriptCoveredSeconds",
+        "baselineValue": 3,
+        "currentValue": 3,
+        "tolerance": 0,
+        "delta": 0
+      },
+      {
+        "caseId": "issue-75-finalization-single-flight",
+        "metricName": "durationSeconds",
+        "baselineValue": 1062,
+        "currentValue": 1062,
+        "tolerance": 1,
+        "delta": 0
+      },
+      {
+        "caseId": "issue-428-local-speech-recovery",
+        "metricName": "localTranscriptCoveredSeconds",
+        "baselineValue": 110,
+        "currentValue": 110,
+        "tolerance": 0,
+        "delta": 0
+      },
+      {
+        "caseId": "issue-434-overlap-union",
+        "metricName": "localTranscriptCoveredSeconds",
+        "baselineValue": 6,
+        "currentValue": 6,
+        "tolerance": 0,
+        "delta": 0
+      }
+    ],
+    "improvements": []
+  }
 }

@@ -5,10 +5,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-  compareRecordingQualityBenchmarkToBaseline,
-  formatRecordingQualityBenchmarkComparisonSummary,
   type RecordingQualityBenchmarkCaseResult,
   buildRecordingQualityBenchmarkReport,
+  compareRecordingQualityBenchmarkToBaseline,
+  formatRecordingQualityBenchmarkComparisonSummary,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
   runRetryValidationBenchmarkCase,
@@ -507,7 +507,9 @@ describe('compareRecordingQualityBenchmarkToBaseline', () => {
       }),
     ]);
     expect(comparison.missingBaselineCases).toEqual(['missing-baseline']);
-    expect(formatRecordingQualityBenchmarkComparisonSummary(comparison)).toContain(
+    expect(
+      formatRecordingQualityBenchmarkComparisonSummary(comparison),
+    ).toContain(
       'stable regressions: stable-regression.localTranscriptCoveredSeconds',
     );
   });
