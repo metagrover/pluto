@@ -11,6 +11,7 @@ import {
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
   runRetryValidationBenchmarkCase,
+  selectRecordingQualityBenchmarkCases,
 } from '../../src/services/recordingQualityBenchmark';
 
 describe('parseRecordingQualityBenchmarkCliArgs', () => {
@@ -24,7 +25,26 @@ describe('parseRecordingQualityBenchmarkCliArgs', () => {
     ).toEqual({
       manifest: '/repo/scripts/recording-quality/manifest.json',
       out: 'tmp/recording-quality-benchmark.json',
+      tier: 'pr',
     });
+  });
+
+  it('accepts explicit manual and all tier selectors', () => {
+    expect(
+      parseRecordingQualityBenchmarkCliArgs(['--tier', 'manual'], '/repo', 123)
+        .tier,
+    ).toBe('manual');
+    expect(
+      parseRecordingQualityBenchmarkCliArgs(['--tier', 'all'], '/repo', 123)
+        .tier,
+    ).toBe('all');
+    expect(() =>
+      parseRecordingQualityBenchmarkCliArgs(
+        ['--tier', 'nightly'],
+        '/repo',
+        123,
+      ),
+    ).toThrow(/unsupported benchmark tier: nightly/i);
   });
 });
 
@@ -40,6 +60,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
           title: 'Opening audio is preserved',
           kind: 'transcript_validation',
           fixture: 'fixtures/issue-25-opening-audio.json',
+          tier: 'pr',
         },
       ],
     });
@@ -49,6 +70,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
       id: 'issue-25-opening-audio',
       issue: 25,
       kind: 'transcript_validation',
+      tier: 'pr',
     });
 
     expect(() =>
@@ -62,6 +84,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
             title: 'First copy',
             kind: 'transcript_validation',
             fixture: 'fixtures/one.json',
+            tier: 'pr',
           },
           {
             id: 'duplicate-case',
@@ -69,6 +92,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
             title: 'Second copy',
             kind: 'recording_finalization',
             fixture: 'fixtures/two.json',
+            tier: 'pr',
           },
         ],
       }),
@@ -86,6 +110,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
           title: 'Missing deterministic retry evidence fails closed',
           kind: 'retry_validation',
           fixture: 'fixtures/issue-458-missing-retry-evidence.json',
+          tier: 'pr',
         },
       ],
     });
@@ -108,6 +133,7 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
           title: 'Finalization stays single-flight',
           kind: 'recording_finalization',
           fixture: 'fixtures/issue-75-finalization-single-flight.json',
+          tier: 'pr',
           trackedMetrics: [
             {
               name: 'durationSeconds',
@@ -127,6 +153,68 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
       },
     ]);
   });
+
+  it('requires every case to declare a supported tier', () => {
+    const baseCase = {
+      id: 'tiered-case',
+      issue: 495,
+      title: 'Tiered benchmark case',
+      kind: 'transcript_validation',
+      fixture: 'fixtures/tiered.json',
+    };
+
+    expect(() =>
+      loadRecordingQualityBenchmarkManifest({
+        schemaVersion: 2,
+        baselineReport: 'baselines/current-master.json',
+        cases: [baseCase],
+      }),
+    ).toThrow(/tiered-case needs a benchmark tier/i);
+    expect(() =>
+      loadRecordingQualityBenchmarkManifest({
+        schemaVersion: 2,
+        baselineReport: 'baselines/current-master.json',
+        cases: [{ ...baseCase, tier: 'nightly' }],
+      }),
+    ).toThrow(/unsupported benchmark tier: nightly/i);
+  });
+});
+
+describe('selectRecordingQualityBenchmarkCases', () => {
+  const cases = [
+    {
+      id: 'fast',
+      issue: 495,
+      title: 'Fast case',
+      kind: 'transcript_validation' as const,
+      fixture: 'fixtures/fast.json',
+      tier: 'pr' as const,
+    },
+    {
+      id: 'long',
+      issue: 495,
+      title: 'Long case',
+      kind: 'recording_finalization' as const,
+      fixture: 'fixtures/long.json',
+      tier: 'manual' as const,
+    },
+  ];
+
+  it('selects PR, manual, and all cases without mixing tiers', () => {
+    expect(selectRecordingQualityBenchmarkCases(cases, 'pr')).toEqual([
+      cases[0],
+    ]);
+    expect(selectRecordingQualityBenchmarkCases(cases, 'manual')).toEqual([
+      cases[1],
+    ]);
+    expect(selectRecordingQualityBenchmarkCases(cases, 'all')).toEqual(cases);
+  });
+
+  it('fails clearly when the selected tier is empty', () => {
+    expect(() =>
+      selectRecordingQualityBenchmarkCases([cases[0]], 'manual'),
+    ).toThrow(/no manual benchmark cases/i);
+  });
 });
 
 describe('runRetryValidationBenchmarkCase', () => {
@@ -138,6 +226,7 @@ describe('runRetryValidationBenchmarkCase', () => {
         title: 'Missing deterministic retry evidence fails closed',
         kind: 'retry_validation',
         fixture: 'fixtures/issue-458-missing-retry-evidence.json',
+        tier: 'pr',
       },
       {
         type: 'retry_validation',
@@ -276,6 +365,7 @@ describe('buildRecordingQualityBenchmarkReport', () => {
         arch: 'arm64',
       },
       sourceCommit: '026bdcf6',
+      tier: 'pr',
       results,
     });
 
@@ -285,6 +375,7 @@ describe('buildRecordingQualityBenchmarkReport', () => {
       failedCases: 1,
       passRate: 0.6667,
     });
+    expect(report.tier).toBe('pr');
     expect(report.summary.issueCoverage).toEqual([25, 75, 434]);
     expect(report.summary.kinds).toEqual({
       recording_finalization: { passed: 1, failed: 0 },
@@ -547,7 +638,40 @@ describe('benchmark:recording-quality CLI', () => {
       stdout: result.stdout,
     }).toMatchObject({
       status: 0,
+      stdout: expect.stringContaining('tier=pr 6/6 cases passed'),
     });
     expect(fs.existsSync(outputPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(outputPath, 'utf8'))).toMatchObject({
+      tier: 'pr',
+      summary: { totalCases: 6 },
+    });
+  });
+
+  it('runs all declared tiers and fails clearly when manual has no cases', () => {
+    const repoRoot = path.resolve(__dirname, '../..');
+    const run = (tier: string) =>
+      spawnSync(
+        process.execPath,
+        [
+          '--experimental-strip-types',
+          'scripts/run_recording_quality_benchmark.ts',
+          '--',
+          '--tier',
+          tier,
+          '--out',
+          path.join(os.tmpdir(), `recording-quality-${tier}.json`),
+        ],
+        { cwd: repoRoot, encoding: 'utf8' },
+      );
+
+    const all = run('all');
+    expect(all.status).toBe(0);
+    expect(all.stdout).toContain('tier=all 6/6 cases passed');
+
+    const manual = run('manual');
+    expect(manual.status).toBe(1);
+    expect(manual.stderr).toContain(
+      'ERROR No manual benchmark cases are declared in the manifest.',
+    );
   });
 });

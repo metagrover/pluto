@@ -14,6 +14,7 @@ import {
   runRecordingFinalizationBenchmarkCase,
   runRetryValidationBenchmarkCase,
   runTranscriptValidationBenchmarkCase,
+  selectRecordingQualityBenchmarkCases,
 } from '../src/services/recordingQualityBenchmark.ts';
 
 const readJson = <T>(filePath: string): T =>
@@ -45,7 +46,12 @@ const main = async () => {
   );
   const results = [];
 
-  for (const entry of manifest.cases) {
+  const selectedCases = selectRecordingQualityBenchmarkCases(
+    manifest.cases,
+    options.tier,
+  );
+
+  for (const entry of selectedCases) {
     const fixturePath = resolveFixture(manifestPath, entry.fixture);
     const fixture = readJson<RecordingQualityBenchmarkFixture>(fixturePath);
     if (fixture.type === 'transcript_validation') {
@@ -86,6 +92,7 @@ const main = async () => {
     path.relative(process.cwd(), filePath) || '.';
   const report = buildRecordingQualityBenchmarkReport({
     schemaVersion: manifest.schemaVersion,
+    tier: options.tier,
     manifestPath: relativeFromRepo(manifestPath),
     baselineReportPath: relativeFromRepo(baselineReportPath),
     generatedAt: new Date().toISOString(),
@@ -104,7 +111,7 @@ const main = async () => {
   fs.writeFileSync(options.out, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
   console.log(
-    `[RecordingQualityBenchmark] ${report.summary.passedCases}/${report.summary.totalCases} cases passed`,
+    `[RecordingQualityBenchmark] tier=${report.tier} ${report.summary.passedCases}/${report.summary.totalCases} cases passed`,
   );
   console.log(
     `[RecordingQualityBenchmark] transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} retry_validation=${report.summary.kinds.retry_validation.passed}/${report.summary.kinds.retry_validation.passed + report.summary.kinds.retry_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed}`,
