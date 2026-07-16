@@ -533,6 +533,166 @@ describe('local attribution benchmark reporting', () => {
       }),
     ).rejects.toThrow(/unsafe output/i);
   });
+
+  it('runs every selected ASR and diarizer pair and composes their outputs', async () => {
+    const directory = mkdtempSync(path.resolve('tmp/pluto-attribution-pairs-'));
+    temporaryDirectories.push(directory);
+    const referencePath = path.join(directory, 'reference.json');
+    writeFileSync(
+      referencePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        transcript: {
+          words: [{ startTime: 0, endTime: 1, text: 'hello' }],
+        },
+        turns: [{ startTime: 0, endTime: 1, speaker: 'Me', text: 'hello' }],
+      }),
+    );
+    const candidates = [
+      ...['asr-a', 'asr-b'].map((id) => ({
+        id,
+        kind: 'asr',
+        version: '1',
+        command: jsonlCandidateCommand('asr'),
+        model: { id, version: '1' },
+        config: {},
+      })),
+      ...['diarizer-a', 'diarizer-b'].map((id) => ({
+        id,
+        kind: 'diarizer',
+        version: '1',
+        command: jsonlCandidateCommand('diarizer'),
+        model: { id, version: '1' },
+        config: {},
+      })),
+    ];
+    const manifestPath = path.join(directory, 'manifest.json');
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        cases: [
+          {
+            id: 'pair-case',
+            recordingId: 'synthetic-pair-recording',
+            provenance: { tier: 'synthetic', source: 'fixture' },
+            audio: {
+              mixedPath: 'scripts/speaker-attribution/fixtures/audio.json',
+            },
+            referencePath: path.relative(process.cwd(), referencePath),
+          },
+        ],
+        candidates,
+      }),
+    );
+
+    const report = await runLocalSpeakerAttributionBenchmark({
+      manifestPath,
+      outputPath: path.join(directory, 'report.json'),
+      timeoutMs: 2_000,
+      candidateIds: candidates.map(({ id }) => id),
+    });
+
+    expect(
+      report.results.map(
+        ({ asrCandidate, diarizerCandidate }) =>
+          `${asrCandidate}+${diarizerCandidate}`,
+      ),
+    ).toEqual([
+      'asr-a+diarizer-a',
+      'asr-a+diarizer-b',
+      'asr-b+diarizer-a',
+      'asr-b+diarizer-b',
+    ]);
+    expect(report.results).toHaveLength(4);
+    expect(report.results.every(({ status }) => status === 'ok')).toBe(true);
+    expect(
+      report.results.every(
+        ({ metrics }) =>
+          metrics?.wordErrorRate === 0 &&
+          metrics?.diarizationErrorRate === 0 &&
+          metrics?.missedMeSeconds === 0,
+      ),
+    ).toBe(true);
+  });
+
+  it('returns zero for sanitized candidate failure and unsupported rows', async () => {
+    const directory = mkdtempSync(path.resolve('tmp/pluto-attribution-exits-'));
+    temporaryDirectories.push(directory);
+    const referencePath = path.join(directory, 'reference.json');
+    writeFileSync(
+      referencePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        transcript: { words: [] },
+        turns: [],
+      }),
+    );
+    const manifestPath = path.join(directory, 'manifest.json');
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        cases: [
+          {
+            id: 'private-looking-case-id',
+            recordingId: 'private-looking-recording-id',
+            provenance: { tier: 'synthetic', source: 'fixture' },
+            audio: { mixedPath: 'unused.json' },
+            referencePath: path.relative(process.cwd(), referencePath),
+          },
+        ],
+        candidates: [
+          {
+            id: 'failed-local',
+            kind: 'pipeline',
+            version: '1',
+            command: jsonlCandidateCommand('asr', 'candidate_model_missing'),
+            model: { id: 'failed-local', version: '1' },
+            config: {},
+          },
+          {
+            id: 'unsupported-local',
+            kind: 'pipeline',
+            version: '1',
+            command: jsonlCandidateCommand(
+              'asr',
+              'candidate_unsupported_hardware',
+            ),
+            model: { id: 'unsupported-local', version: '1' },
+            config: {},
+          },
+        ],
+      }),
+    );
+    const outputPath = path.join(directory, 'report.json');
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+
+    expect(
+      await runBenchmarkCli([
+        '--manifest',
+        manifestPath,
+        '--out',
+        outputPath,
+        '--timeout-ms',
+        '2000',
+      ]),
+    ).toBe(0);
+    const serialized = readFileSync(outputPath, 'utf8');
+    expect(serialized).toContain('candidate_model_missing');
+    expect(serialized).toContain('candidate_unsupported_hardware');
+    expect(serialized).not.toMatch(
+      /private-looking|private diagnostic|reference\.json|manifest\.json/,
+    );
+    expect(stderr).not.toHaveBeenCalled();
+    stdout.mockRestore();
+    stderr.mockRestore();
+  });
 });
 
 const reportInput = (
@@ -584,6 +744,15 @@ const reportInput = (
     },
   ],
 });
+
+const jsonlCandidateCommand = (
+  output: 'asr' | 'diarizer',
+  failureCode?: string,
+) => [
+  process.execPath,
+  '-e',
+  `const r=require('node:readline').createInterface({input:process.stdin});r.on('line',line=>{const q=JSON.parse(line);const base={id:q.id,requestId:q.id,schemaVersion:1};if(${JSON.stringify(failureCode)})return console.log(JSON.stringify({...base,error:{code:${JSON.stringify(failureCode)},message:'private diagnostic'}}));const asr=${JSON.stringify(output)}==='asr';console.log(JSON.stringify({...base,output:{schemaVersion:1,caseId:q.case.id,candidateId:q.candidate.id,transcript:{words:asr?[{startTime:0,endTime:1,text:'hello'}]:[],segments:asr?[{startTime:0,endTime:1,text:'hello'}]:[]},diarization:{turns:asr?[]:[{startTime:0,endTime:1,cluster:'Me'}]},runtime:{pipelineVersion:'fixture-v1',models:[{id:q.candidate.id,version:'1'}],elapsedMs:1,peakResidentMemoryMb:2}}}))});`,
+];
 
 describe('loadLocalAttributionManifest', () => {
   it('loads synthetic and consented-private cases plus versioned candidates', () => {
