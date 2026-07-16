@@ -1,14 +1,165 @@
-import { describe, expect, it } from 'vitest';
 import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  computeLocalAttributionMetrics,
   loadLocalAttributionCandidateOutput,
   loadLocalAttributionManifest,
   loadSpeakerReference,
 } from '../../src/services/localSpeakerAttributionBenchmark';
 
-const privateRoot = '/private/pluto-speaker-corpus';
+describe('computeLocalAttributionMetrics', () => {
+  it('audits transcript, speaker-attributed word, and duration classification errors', () => {
+    const metrics = computeLocalAttributionMetrics({
+      reference: [
+        { startTime: 0, endTime: 8, speaker: 'Them', text: 'alpha beta' },
+        { startTime: 8, endTime: 10, speaker: 'Me', text: 'gamma delta' },
+      ],
+      generated: [
+        { startTime: 0, endTime: 3, speaker: 'Me', text: 'alpha' },
+        { startTime: 3, endTime: 9, speaker: 'Them', text: 'beta' },
+        { startTime: 9, endTime: 10, speaker: 'Me', text: 'gamma delta' },
+      ],
+      audioDurationSeconds: 10,
+      elapsedMs: 5000,
+    });
+
+    expect(metrics).toMatchObject({
+      transcript: { referenceWords: 4, errors: 0, wordErrorRate: 0 },
+      speakerAttributedWords: {
+        referenceWords: 4,
+        substitutions: 0,
+        deletions: 1,
+        insertions: 1,
+        errors: 2,
+        wordErrorRate: 0.5,
+      },
+      diarization: {
+        referenceSpeakerSeconds: 10,
+        missedSpeechSeconds: 0,
+        falseAlarmSeconds: 0,
+        speakerConfusionSeconds: 4,
+        errorRate: 0.4,
+      },
+      me: {
+        truePositiveSeconds: 1,
+        predictedSeconds: 4,
+        referenceSeconds: 2,
+        precision: 0.25,
+        recall: 0.5,
+        f1: 1 / 3,
+      },
+      them: {
+        truePositiveSeconds: 5,
+        predictedSeconds: 6,
+        referenceSeconds: 8,
+        precision: 5 / 6,
+        recall: 0.625,
+        f1: 5 / 7,
+      },
+      generatedSpeakerCount: 2,
+      speakerCountCorrect: true,
+      runtimeFactor: 0.5,
+    });
+  });
+
+  it('uses active-speaker sets on overlap and exposes missed, false-alarm, and confusion components', () => {
+    const metrics = computeLocalAttributionMetrics({
+      reference: [
+        { startTime: 0, endTime: 2, speaker: 'Them', text: 'remote' },
+        { startTime: 1, endTime: 3, speaker: 'Me', text: 'local' },
+      ],
+      generated: [
+        { startTime: 0, endTime: 1, speaker: 'Me', text: 'remote' },
+        { startTime: 1, endTime: 2, speaker: 'Me', text: 'local' },
+        { startTime: 2, endTime: 4, speaker: 'Them', text: 'extra' },
+      ],
+    });
+
+    expect(metrics.diarization).toEqual({
+      referenceSpeakerSeconds: 4,
+      missedSpeechSeconds: 1,
+      falseAlarmSeconds: 1,
+      speakerConfusionSeconds: 2,
+      errorRate: 1,
+    });
+  });
+
+  it('returns finite deterministic scores for empty inputs and validates runtime timing', () => {
+    const empty = computeLocalAttributionMetrics({
+      reference: [],
+      generated: [],
+    });
+    expect(empty.transcript).toEqual({
+      referenceWords: 0,
+      hypothesisWords: 0,
+      substitutions: 0,
+      deletions: 0,
+      insertions: 0,
+      errors: 0,
+      wordErrorRate: 0,
+    });
+    expect(empty.diarization.errorRate).toBe(0);
+    expect(empty.me).toMatchObject({ precision: 1, recall: 1, f1: 1 });
+    expect(empty.speakerCountCorrect).toBe(true);
+    expect(empty.runtimeFactor).toBeUndefined();
+    expect(JSON.stringify(empty)).not.toMatch(/NaN|Infinity/);
+
+    expect(() =>
+      computeLocalAttributionMetrics({
+        reference: [],
+        generated: [],
+        elapsedMs: 10,
+      }),
+    ).toThrow(/audioDurationSeconds/i);
+    expect(() =>
+      computeLocalAttributionMetrics({
+        reference: [],
+        generated: [],
+        audioDurationSeconds: 0,
+        elapsedMs: 10,
+      }),
+    ).toThrow(/positive/i);
+    expect(() =>
+      computeLocalAttributionMetrics({
+        reference: [],
+        generated: [],
+        audioDurationSeconds: 1,
+        elapsedMs: -1,
+      }),
+    ).toThrow(/non-negative/i);
+  });
+});
+
+const temporaryDirectories: string[] = [];
+
+const makePrivateCorpus = () => {
+  const parent = mkdtempSync(path.join(tmpdir(), 'pluto-attribution-test-'));
+  temporaryDirectories.push(parent);
+  const root = path.join(parent, 'corpus');
+  mkdirSync(path.join(root, 'audio'), { recursive: true });
+  mkdirSync(path.join(root, 'references'), { recursive: true });
+  writeFileSync(path.join(root, 'audio', 'mixed.wav'), 'synthetic audio');
+  writeFileSync(path.join(root, 'references', 'case.json'), '{}');
+  return { parent, root };
+};
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 describe('loadLocalAttributionManifest', () => {
   it('loads synthetic and consented-private cases plus versioned candidates', () => {
+    const { root } = makePrivateCorpus();
     const manifest = loadLocalAttributionManifest(
       {
         schemaVersion: 1,
@@ -31,8 +182,8 @@ describe('loadLocalAttributionManifest', () => {
               tier: 'consented-private',
               source: 'local-consented-corpus',
             },
-            audio: { mixedPath: `${privateRoot}/audio/mixed.wav` },
-            referencePath: `${privateRoot}/references/case.json`,
+            audio: { mixedPath: path.join(root, 'audio', 'mixed.wav') },
+            referencePath: path.join(root, 'references', 'case.json'),
           },
         ],
         candidates: [
@@ -52,7 +203,7 @@ describe('loadLocalAttributionManifest', () => {
           },
         ],
       },
-      { privateCorpusRoot: privateRoot },
+      { privateCorpusRoot: root },
     );
 
     expect(manifest.cases[1].provenance.tier).toBe('consented-private');
@@ -110,7 +261,9 @@ describe('loadLocalAttributionManifest', () => {
       }),
     ).toThrow(/mixedPath.*traversal/i);
 
-    const outside = '/private/other-corpus/audio.wav';
+    const { parent, root } = makePrivateCorpus();
+    const outside = path.join(parent, 'outside.wav');
+    writeFileSync(outside, 'synthetic outside audio');
     let message = '';
     try {
       loadLocalAttributionManifest(
@@ -122,18 +275,86 @@ describe('loadLocalAttributionManifest', () => {
               recordingId: 'recording-private',
               provenance: { tier: 'consented-private', source: 'consented' },
               audio: { mixedPath: outside },
-              referencePath: `${privateRoot}/reference.json`,
+              referencePath: path.join(root, 'references', 'case.json'),
             },
           ],
           candidates: [],
         },
-        { privateCorpusRoot: privateRoot },
+        { privateCorpusRoot: root },
       );
     } catch (error) {
       message = (error as Error).message;
     }
     expect(message).toMatch(/mixedPath.*private corpus root/i);
     expect(message).not.toContain(outside);
+  });
+
+  it('rejects an in-root symlink whose canonical target escapes the private corpus', () => {
+    const { parent, root } = makePrivateCorpus();
+    const outside = path.join(parent, 'outside.wav');
+    const linkedInput = path.join(root, 'audio', 'linked.wav');
+    writeFileSync(outside, 'synthetic outside audio');
+    symlinkSync(outside, linkedInput);
+
+    let message = '';
+    try {
+      loadLocalAttributionManifest(
+        {
+          schemaVersion: 1,
+          cases: [
+            {
+              id: 'symlink-escape',
+              recordingId: 'synthetic-private-recording',
+              provenance: { tier: 'consented-private', source: 'consented' },
+              audio: { mixedPath: linkedInput },
+              referencePath: path.join(root, 'references', 'case.json'),
+            },
+          ],
+          candidates: [],
+        },
+        { privateCorpusRoot: root },
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    expect(message).toMatch(/mixedPath.*private corpus root/i);
+    expect(message).not.toContain(outside);
+    expect(message).not.toContain(linkedInput);
+  });
+
+  it('rejects nonexistent private roots and inputs without echoing their paths', () => {
+    const { parent, root } = makePrivateCorpus();
+    const missingRoot = path.join(parent, 'missing-root');
+    const missingInput = path.join(root, 'audio', 'missing.wav');
+    const manifestWith = (mixedPath: string) => ({
+      schemaVersion: 1,
+      cases: [
+        {
+          id: 'missing-private-input',
+          recordingId: 'synthetic-private-recording',
+          provenance: { tier: 'consented-private', source: 'consented' },
+          audio: { mixedPath },
+          referencePath: path.join(root, 'references', 'case.json'),
+        },
+      ],
+      candidates: [],
+    });
+
+    expect(() =>
+      loadLocalAttributionManifest(manifestWith(missingInput), {
+        privateCorpusRoot: missingRoot,
+      }),
+    ).toThrow(/private corpus root.*exist/i);
+    try {
+      loadLocalAttributionManifest(manifestWith(missingInput), {
+        privateCorpusRoot: root,
+      });
+      throw new Error('expected missing private input to be rejected');
+    } catch (error) {
+      expect((error as Error).message).toMatch(/mixedPath.*exist/i);
+      expect((error as Error).message).not.toContain(missingInput);
+    }
   });
 });
 

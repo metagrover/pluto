@@ -71,6 +71,51 @@ export type LocalAttributionCandidateOutput = {
   };
 };
 
+export type WordErrorMetrics = {
+  referenceWords: number;
+  hypothesisWords: number;
+  substitutions: number;
+  deletions: number;
+  insertions: number;
+  errors: number;
+  wordErrorRate: number;
+};
+export type SpeakerClassificationMetrics = {
+  truePositiveSeconds: number;
+  predictedSeconds: number;
+  referenceSeconds: number;
+  precision: number;
+  recall: number;
+  f1: number;
+};
+export type LocalAttributionMetrics = {
+  transcript: WordErrorMetrics;
+  speakerAttributedWords: WordErrorMetrics;
+  diarization: {
+    referenceSpeakerSeconds: number;
+    missedSpeechSeconds: number;
+    falseAlarmSeconds: number;
+    speakerConfusionSeconds: number;
+    errorRate: number;
+  };
+  me: SpeakerClassificationMetrics;
+  them: SpeakerClassificationMetrics;
+  expectedSpeakerCount: number;
+  generatedSpeakerCount: number;
+  speakerCountCorrect: boolean;
+  boundaryErrorSeconds: number;
+  overlapAccuracy: number;
+  shortLocalTurnRecall: number;
+  runtimeFactor?: number;
+};
+
+export type LocalAttributionMetricInput = {
+  reference: BenchmarkTurn[];
+  generated: BenchmarkTurn[];
+  audioDurationSeconds?: number;
+  elapsedMs?: number;
+};
+
 type ManifestOptions = { privateCorpusRoot?: string };
 type UnknownRecord = Record<string, unknown>;
 
@@ -411,5 +456,337 @@ export const loadLocalAttributionCandidateOutput = (
       elapsedMs,
       ...(hardware === undefined ? {} : { hardware }),
     },
+  };
+};
+
+const tokens = (text: string): string[] =>
+  text.toLocaleLowerCase('en-US').match(/[\p{L}\p{N}]+/gu) ?? [];
+
+type EditCounts = {
+  substitutions: number;
+  deletions: number;
+  insertions: number;
+};
+
+const editCounts = (reference: string[], hypothesis: string[]): EditCounts => {
+  type Cell = EditCounts & { cost: number };
+  let previous: Cell[] = Array.from(
+    { length: hypothesis.length + 1 },
+    (_, insertions) => ({
+      cost: insertions,
+      substitutions: 0,
+      deletions: 0,
+      insertions,
+    }),
+  );
+  for (let row = 1; row <= reference.length; row += 1) {
+    const current: Cell[] = [
+      { cost: row, substitutions: 0, deletions: row, insertions: 0 },
+    ];
+    for (let column = 1; column <= hypothesis.length; column += 1) {
+      const matches = reference[row - 1] === hypothesis[column - 1];
+      const diagonal = {
+        ...previous[column - 1],
+        cost: previous[column - 1].cost + (matches ? 0 : 1),
+        substitutions: previous[column - 1].substitutions + (matches ? 0 : 1),
+      };
+      const deletion = {
+        ...previous[column],
+        cost: previous[column].cost + 1,
+        deletions: previous[column].deletions + 1,
+      };
+      const insertion = {
+        ...current[column - 1],
+        cost: current[column - 1].cost + 1,
+        insertions: current[column - 1].insertions + 1,
+      };
+      current[column] = [diagonal, deletion, insertion].reduce(
+        (best, candidate) => (candidate.cost < best.cost ? candidate : best),
+      );
+    }
+    previous = current;
+  }
+  const { substitutions, deletions, insertions } = previous[hypothesis.length];
+  return { substitutions, deletions, insertions };
+};
+
+const safeRate = (numerator: number, denominator: number): number =>
+  denominator === 0 ? (numerator === 0 ? 0 : 1) : numerator / denominator;
+
+const wordMetrics = (
+  reference: string[],
+  hypothesis: string[],
+): WordErrorMetrics => {
+  const components = editCounts(reference, hypothesis);
+  const errors =
+    components.substitutions + components.deletions + components.insertions;
+  return {
+    referenceWords: reference.length,
+    hypothesisWords: hypothesis.length,
+    ...components,
+    errors,
+    wordErrorRate: safeRate(errors, reference.length),
+  };
+};
+
+const validateMetricTurns = (turns: BenchmarkTurn[], field: string): void => {
+  turns.forEach((turn, index) => {
+    const prefix = `${field}[${index}]`;
+    if (
+      !Number.isFinite(turn.startTime) ||
+      !Number.isFinite(turn.endTime) ||
+      turn.startTime < 0 ||
+      turn.endTime <= turn.startTime
+    ) {
+      fail(prefix, 'expected finite timestamps with a positive duration');
+    }
+    if (turn.speaker !== 'Me' && turn.speaker !== 'Them') {
+      fail(`${prefix}.speaker`, 'expected Me or Them');
+    }
+  });
+};
+
+const activeSpeakers = (
+  turns: BenchmarkTurn[],
+  startTime: number,
+  endTime: number,
+): Set<BenchmarkSpeaker> =>
+  new Set(
+    turns
+      .filter((turn) => turn.startTime < endTime && turn.endTime > startTime)
+      .map((turn) => turn.speaker),
+  );
+
+const speakerMetrics = (
+  truePositiveSeconds: number,
+  predictedSeconds: number,
+  referenceSeconds: number,
+): SpeakerClassificationMetrics => {
+  const precision =
+    predictedSeconds === 0
+      ? referenceSeconds === 0
+        ? 1
+        : 0
+      : truePositiveSeconds / predictedSeconds;
+  const recall =
+    referenceSeconds === 0
+      ? predictedSeconds === 0
+        ? 1
+        : 0
+      : truePositiveSeconds / referenceSeconds;
+  return {
+    truePositiveSeconds,
+    predictedSeconds,
+    referenceSeconds,
+    precision,
+    recall,
+    f1:
+      precision + recall === 0
+        ? 0
+        : (2 * precision * recall) / (precision + recall),
+  };
+};
+
+/**
+ * Scores fixed Me/Them labels over half-open intervals [start, end). At every
+ * boundary, active speakers form a set, so overlap contributes one
+ * speaker-second per active label. Unmatched reference/hypothesis labels are
+ * paired as confusion first; remaining labels are missed speech/false alarm.
+ */
+export const computeLocalAttributionMetrics = (
+  input: LocalAttributionMetricInput,
+): LocalAttributionMetrics => {
+  validateMetricTurns(input.reference, 'reference');
+  validateMetricTurns(input.generated, 'generated');
+  const maxTurnEnd = Math.max(
+    0,
+    ...input.reference.map((turn) => turn.endTime),
+    ...input.generated.map((turn) => turn.endTime),
+  );
+  if (input.audioDurationSeconds !== undefined) {
+    if (
+      !Number.isFinite(input.audioDurationSeconds) ||
+      input.audioDurationSeconds <= 0
+    ) {
+      fail('audioDurationSeconds', 'expected a finite positive duration');
+    }
+    if (input.audioDurationSeconds < maxTurnEnd) {
+      fail('audioDurationSeconds', 'cannot end before a transcript turn');
+    }
+  }
+  if (input.elapsedMs !== undefined) {
+    if (!Number.isFinite(input.elapsedMs) || input.elapsedMs < 0) {
+      fail('elapsedMs', 'expected a finite non-negative duration');
+    }
+    if (input.audioDurationSeconds === undefined) {
+      fail('elapsedMs', 'audioDurationSeconds is required');
+    }
+  }
+
+  const ordered = (turns: BenchmarkTurn[]): BenchmarkTurn[] =>
+    [...turns].sort(
+      (left, right) =>
+        left.startTime - right.startTime || left.endTime - right.endTime,
+    );
+  const reference = ordered(input.reference);
+  const generated = ordered(input.generated);
+  const referenceTokens = reference.flatMap((turn) => tokens(turn.text));
+  const generatedTokens = generated.flatMap((turn) => tokens(turn.text));
+  const transcript = wordMetrics(referenceTokens, generatedTokens);
+  const speakerWordParts = (speaker: BenchmarkSpeaker) =>
+    wordMetrics(
+      reference
+        .filter((turn) => turn.speaker === speaker)
+        .flatMap((turn) => tokens(turn.text)),
+      generated
+        .filter((turn) => turn.speaker === speaker)
+        .flatMap((turn) => tokens(turn.text)),
+    );
+  const meWords = speakerWordParts('Me');
+  const themWords = speakerWordParts('Them');
+  const speakerAttributedWords: WordErrorMetrics = {
+    referenceWords: meWords.referenceWords + themWords.referenceWords,
+    hypothesisWords: meWords.hypothesisWords + themWords.hypothesisWords,
+    substitutions: meWords.substitutions + themWords.substitutions,
+    deletions: meWords.deletions + themWords.deletions,
+    insertions: meWords.insertions + themWords.insertions,
+    errors: meWords.errors + themWords.errors,
+    wordErrorRate: safeRate(
+      meWords.errors + themWords.errors,
+      meWords.referenceWords + themWords.referenceWords,
+    ),
+  };
+
+  const boundaries = [
+    ...new Set(
+      [...reference, ...generated].flatMap((turn) => [
+        turn.startTime,
+        turn.endTime,
+      ]),
+    ),
+  ].sort((left, right) => left - right);
+  let referenceSpeakerSeconds = 0;
+  let missedSpeechSeconds = 0;
+  let falseAlarmSeconds = 0;
+  let speakerConfusionSeconds = 0;
+  let overlapSeconds = 0;
+  let overlapCorrectSeconds = 0;
+  const perSpeaker = {
+    Me: { truePositive: 0, predicted: 0, reference: 0 },
+    Them: { truePositive: 0, predicted: 0, reference: 0 },
+  };
+  for (let index = 1; index < boundaries.length; index += 1) {
+    const startTime = boundaries[index - 1];
+    const endTime = boundaries[index];
+    const duration = endTime - startTime;
+    const expected = activeSpeakers(reference, startTime, endTime);
+    const actual = activeSpeakers(generated, startTime, endTime);
+    const shared = [...expected].filter((speaker) =>
+      actual.has(speaker),
+    ).length;
+    const unmatchedExpected = expected.size - shared;
+    const unmatchedActual = actual.size - shared;
+    const confused = Math.min(unmatchedExpected, unmatchedActual);
+    referenceSpeakerSeconds += expected.size * duration;
+    speakerConfusionSeconds += confused * duration;
+    missedSpeechSeconds += (unmatchedExpected - confused) * duration;
+    falseAlarmSeconds += (unmatchedActual - confused) * duration;
+    if (expected.size > 1) {
+      overlapSeconds += duration;
+      if ([...expected].every((speaker) => actual.has(speaker))) {
+        overlapCorrectSeconds += duration;
+      }
+    }
+    for (const speaker of ['Me', 'Them'] as const) {
+      if (expected.has(speaker)) perSpeaker[speaker].reference += duration;
+      if (actual.has(speaker)) perSpeaker[speaker].predicted += duration;
+      if (expected.has(speaker) && actual.has(speaker)) {
+        perSpeaker[speaker].truePositive += duration;
+      }
+    }
+  }
+
+  const speakersIn = (turns: BenchmarkTurn[]) =>
+    new Set(turns.map((turn) => turn.speaker)).size;
+  const expectedSpeakerCount = speakersIn(reference);
+  const generatedSpeakerCount = speakersIn(generated);
+  const referenceChanges = reference
+    .slice(1)
+    .filter((turn, index) => turn.speaker !== reference[index].speaker)
+    .map((turn) => turn.startTime);
+  const generatedChanges = generated
+    .slice(1)
+    .filter((turn, index) => turn.speaker !== generated[index].speaker)
+    .map((turn) => turn.startTime);
+  const recordingDuration = input.audioDurationSeconds ?? maxTurnEnd;
+  const boundaryErrorSeconds =
+    referenceChanges.length === 0
+      ? 0
+      : referenceChanges.reduce(
+          (total, boundary) =>
+            total +
+            (generatedChanges.length === 0
+              ? recordingDuration
+              : Math.min(
+                  ...generatedChanges.map((candidate) =>
+                    Math.abs(candidate - boundary),
+                  ),
+                )),
+          0,
+        ) / referenceChanges.length;
+  const localTurns = reference.filter((turn) => turn.speaker === 'Me');
+  const recalledLocalTurns = localTurns.filter((turn) => {
+    const overlap = generated
+      .filter((candidate) => candidate.speaker === 'Me')
+      .reduce(
+        (total, candidate) =>
+          total +
+          Math.max(
+            0,
+            Math.min(turn.endTime, candidate.endTime) -
+              Math.max(turn.startTime, candidate.startTime),
+          ),
+        0,
+      );
+    return overlap / (turn.endTime - turn.startTime) >= 0.65;
+  }).length;
+
+  return {
+    transcript,
+    speakerAttributedWords,
+    diarization: {
+      referenceSpeakerSeconds,
+      missedSpeechSeconds,
+      falseAlarmSeconds,
+      speakerConfusionSeconds,
+      errorRate: safeRate(
+        missedSpeechSeconds + falseAlarmSeconds + speakerConfusionSeconds,
+        referenceSpeakerSeconds,
+      ),
+    },
+    me: speakerMetrics(
+      perSpeaker.Me.truePositive,
+      perSpeaker.Me.predicted,
+      perSpeaker.Me.reference,
+    ),
+    them: speakerMetrics(
+      perSpeaker.Them.truePositive,
+      perSpeaker.Them.predicted,
+      perSpeaker.Them.reference,
+    ),
+    expectedSpeakerCount,
+    generatedSpeakerCount,
+    speakerCountCorrect: expectedSpeakerCount === generatedSpeakerCount,
+    boundaryErrorSeconds,
+    overlapAccuracy:
+      overlapSeconds === 0 ? 1 : overlapCorrectSeconds / overlapSeconds,
+    shortLocalTurnRecall:
+      localTurns.length === 0 ? 1 : recalledLocalTurns / localTurns.length,
+    ...(input.elapsedMs === undefined
+      ? {}
+      : {
+          runtimeFactor:
+            input.elapsedMs / 1000 / (input.audioDurationSeconds as number),
+        }),
   };
 };
