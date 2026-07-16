@@ -14,13 +14,7 @@
     "passedCases": 6,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [
-      25,
-      75,
-      428,
-      434,
-      458
-    ],
+    "issueCoverage": [25, 75, 428, 434, 458],
     "kinds": {
       "recording_finalization": {
         "passed": 1,
@@ -103,9 +97,7 @@
       "expected": {
         "status": "validated",
         "secondCallReturnsNull": true,
-        "cleanupPaths": [
-          "/tmp/session-system.wav"
-        ],
+        "cleanupPaths": ["/tmp/session-system.wav"],
         "primaryMetric": {
           "name": "durationSeconds",
           "value": 1062
@@ -188,15 +180,11 @@
             "value": 0
           }
         ],
-        "reasons": [
-          "local_speech_unaccounted"
-        ]
+        "reasons": ["local_speech_unaccounted"]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": [
-          "local_speech_unaccounted"
-        ],
+        "requiredReasons": ["local_speech_unaccounted"],
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 6
@@ -228,15 +216,11 @@
             "value": "capture_activity_missing"
           }
         ],
-        "reasons": [
-          "deterministic_retry_evidence_missing"
-        ]
+        "reasons": ["deterministic_retry_evidence_missing"]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": [
-          "deterministic_retry_evidence_missing"
-        ],
+        "requiredReasons": ["deterministic_retry_evidence_missing"],
         "primaryMetric": {
           "name": "activityEvidenceSource",
           "value": "capture_activity_missing"
@@ -261,15 +245,11 @@
             "value": "capture_activity_corrupt"
           }
         ],
-        "reasons": [
-          "deterministic_retry_evidence_corrupt"
-        ]
+        "reasons": ["deterministic_retry_evidence_corrupt"]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": [
-          "deterministic_retry_evidence_corrupt"
-        ],
+        "requiredReasons": ["deterministic_retry_evidence_corrupt"],
         "primaryMetric": {
           "name": "activityEvidenceSource",
           "value": "capture_activity_corrupt"
