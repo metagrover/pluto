@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 
@@ -71,6 +72,7 @@ export type LocalAttributionCandidateOutput = {
     models: CandidateModelIdentity[];
     elapsedMs: number;
     hardware?: string;
+    peakResidentMemoryMb?: number;
   };
 };
 
@@ -203,7 +205,7 @@ export const sanitizeCandidateResult = (
       if (!metricKeys.has(key)) continue;
       if (typeof item === 'boolean') result[key] = item;
       else if (typeof item === 'number' && Number.isFinite(item))
-        result[key] = item;
+        result[key] = Math.round(item * 10_000) / 10_000;
       else {
         const nested = safeMetrics(item);
         if (nested) result[key] = nested;
@@ -633,6 +635,12 @@ export const loadLocalAttributionCandidateOutput = (
     runtime.hardware === undefined
       ? undefined
       : stringAt(runtime.hardware, 'runtime.hardware');
+  const peakResidentMemoryMb =
+    runtime.peakResidentMemoryMb === undefined
+      ? undefined
+      : numberAt(runtime.peakResidentMemoryMb, 'runtime.peakResidentMemoryMb');
+  if (peakResidentMemoryMb !== undefined && peakResidentMemoryMb < 0)
+    fail('runtime.peakResidentMemoryMb', 'expected a non-negative value');
   return {
     schemaVersion: 1,
     caseId: stringAt(value.caseId, 'caseId'),
@@ -661,6 +669,222 @@ export const loadLocalAttributionCandidateOutput = (
       models,
       elapsedMs,
       ...(hardware === undefined ? {} : { hardware }),
+      ...(peakResidentMemoryMb === undefined ? {} : { peakResidentMemoryMb }),
+    },
+  };
+};
+
+export type LocalAttributionBenchmarkRun = {
+  caseId: string;
+  tier: CorpusProvenance['tier'];
+  candidateId: string;
+  asrCandidate?: string;
+  diarizerCandidate?: string;
+  status: 'ok' | 'failed' | 'unsupported';
+  metrics?: LocalAttributionMetrics | Record<string, unknown>;
+  elapsedMs: number;
+  peakMemoryMb: number;
+  failureCode?: CandidateFailureCode;
+  provenance?: { pipelineVersion: string; models: CandidateModelIdentity[] };
+  // Callers may carry private diagnostics, but report construction never copies them.
+  [privateField: string]: unknown;
+};
+
+export type LocalAttributionBenchmarkReport = {
+  schemaVersion: 1;
+  generatedAt: string;
+  sourceCommit: string;
+  environment: { platform: string; arch: string; nodeVersion: string };
+  candidates: Array<{ id: string; kind: CandidateKind; model: string }>;
+  results: Array<{
+    caseHash: string;
+    asrCandidate: string;
+    diarizerCandidate: string;
+    status: 'ok' | 'failed' | 'unsupported';
+    metrics?: Record<string, unknown>;
+    elapsedMs: number;
+    peakMemoryMb: number;
+    failureCode?: CandidateFailureCode;
+    provenance?: { pipelineVersion: string; models: CandidateModelIdentity[] };
+  }>;
+  summary: {
+    successfulRuns: number;
+    failedRuns: number;
+    unsupportedRuns: number;
+    byTier: Array<{
+      tier: CorpusProvenance['tier'];
+      successfulRuns: number;
+      failedRuns: number;
+      unsupportedRuns: number;
+    }>;
+    byCandidateTier: Array<{
+      asrCandidate: string;
+      diarizerCandidate: string;
+      tier: CorpusProvenance['tier'];
+      successfulRuns: number;
+      failedRuns: number;
+      unsupportedRuns: number;
+      meanMetrics?: {
+        wordErrorRate: number;
+        diarizationErrorRate: number;
+        falseMeSeconds: number;
+        missedMeSeconds: number;
+        elapsedMs: number;
+        peakMemoryMb: number;
+      };
+    }>;
+  };
+};
+
+export const benchmarkCaseHash = (caseId: string): string =>
+  createHash('sha256').update(caseId, 'utf8').digest('hex');
+
+const publicIdentifier = (value: string): string =>
+  value.length <= 128 && /^[a-zA-Z0-9._:@+-]+$/.test(value) ? value : 'invalid';
+
+const publicModel = (model: CandidateModelIdentity): string => {
+  const id = /^[a-zA-Z0-9._-]+(?:\/[a-zA-Z0-9._-]+)?$/.test(model.id)
+    ? model.id
+    : 'invalid';
+  const version = publicIdentifier(model.version);
+  return `${id}@${version}`;
+};
+
+export const buildLocalAttributionBenchmarkReport = (input: {
+  generatedAt: string;
+  sourceCommit: string;
+  environment: LocalAttributionBenchmarkReport['environment'];
+  candidates: CandidateManifestEntry[];
+  runs: LocalAttributionBenchmarkRun[];
+}): LocalAttributionBenchmarkReport => {
+  const candidates = input.candidates
+    .map(({ id, kind, model }) => ({
+      id: publicIdentifier(id),
+      kind,
+      model: publicModel(model),
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const tierByHash = new Map<string, CorpusProvenance['tier']>();
+  const results = input.runs
+    .map((run) => {
+      const caseHash = benchmarkCaseHash(run.caseId);
+      tierByHash.set(caseHash, run.tier);
+      const safe = sanitizeCandidateResult({
+        caseHash,
+        candidateId: run.candidateId,
+        status: run.status,
+        elapsedMs: run.elapsedMs,
+        peakMemoryMb: run.peakMemoryMb,
+        failureCode: run.failureCode,
+        metrics: run.metrics,
+        provenance: run.provenance,
+      });
+      return {
+        caseHash: safe.caseHash,
+        asrCandidate: publicIdentifier(run.asrCandidate ?? run.candidateId),
+        diarizerCandidate: publicIdentifier(
+          run.diarizerCandidate ?? run.candidateId,
+        ),
+        status: safe.status,
+        ...(safe.metrics === undefined ? {} : { metrics: safe.metrics }),
+        elapsedMs: safe.elapsedMs,
+        peakMemoryMb: safe.peakMemoryMb,
+        ...(safe.failureCode === undefined
+          ? {}
+          : { failureCode: safe.failureCode }),
+        ...(safe.provenance === undefined
+          ? {}
+          : { provenance: safe.provenance }),
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.asrCandidate.localeCompare(right.asrCandidate) ||
+        left.diarizerCandidate.localeCompare(right.diarizerCandidate) ||
+        left.caseHash.localeCompare(right.caseHash),
+    );
+  const counts = (rows: typeof results) => ({
+    successfulRuns: rows.filter(({ status }) => status === 'ok').length,
+    failedRuns: rows.filter(({ status }) => status === 'failed').length,
+    unsupportedRuns: rows.filter(({ status }) => status === 'unsupported')
+      .length,
+  });
+  const tiers = [...new Set(input.runs.map(({ tier }) => tier))].sort();
+  const candidateTierKeys = [
+    ...new Set(
+      results.map(
+        (row) =>
+          `${row.asrCandidate}\0${row.diarizerCandidate}\0${tierByHash.get(row.caseHash)}`,
+      ),
+    ),
+  ].sort();
+  return {
+    schemaVersion: 1,
+    generatedAt: input.generatedAt,
+    sourceCommit: input.sourceCommit,
+    environment: { ...input.environment },
+    candidates,
+    results,
+    summary: {
+      ...counts(results),
+      byTier: tiers.map((tier) => ({
+        tier,
+        ...counts(
+          results.filter((row) => tierByHash.get(row.caseHash) === tier),
+        ),
+      })),
+      byCandidateTier: candidateTierKeys.map((key) => {
+        const [asrCandidate, diarizerCandidate, tier] = key.split('\0') as [
+          string,
+          string,
+          CorpusProvenance['tier'],
+        ];
+        const rows = results.filter(
+          (row) =>
+            row.asrCandidate === asrCandidate &&
+            row.diarizerCandidate === diarizerCandidate &&
+            tierByHash.get(row.caseHash) === tier,
+        );
+        const successful = rows.filter(
+          (row) => row.status === 'ok' && row.metrics,
+        );
+        const mean = (values: number[]) =>
+          values.reduce((total, value) => total + value, 0) / values.length;
+        return {
+          asrCandidate,
+          diarizerCandidate,
+          tier,
+          ...counts(rows),
+          ...(successful.length === 0
+            ? {}
+            : {
+                meanMetrics: {
+                  wordErrorRate: mean(
+                    successful.map((row) =>
+                      Number(row.metrics?.wordErrorRate ?? 0),
+                    ),
+                  ),
+                  diarizationErrorRate: mean(
+                    successful.map((row) =>
+                      Number(row.metrics?.diarizationErrorRate ?? 0),
+                    ),
+                  ),
+                  falseMeSeconds: mean(
+                    successful.map((row) =>
+                      Number(row.metrics?.falseMeSeconds ?? 0),
+                    ),
+                  ),
+                  missedMeSeconds: mean(
+                    successful.map((row) =>
+                      Number(row.metrics?.missedMeSeconds ?? 0),
+                    ),
+                  ),
+                  elapsedMs: mean(successful.map((row) => row.elapsedMs)),
+                  peakMemoryMb: mean(successful.map((row) => row.peakMemoryMb)),
+                },
+              }),
+        };
+      }),
     },
   };
 };

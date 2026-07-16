@@ -1,14 +1,21 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  parseBenchmarkCliArgs,
+  runBenchmarkCli,
+  runLocalSpeakerAttributionBenchmark,
+} from '../../scripts/run_local_speaker_attribution_benchmark';
+import {
+  buildLocalAttributionBenchmarkReport,
   computeLocalAttributionMetrics,
   loadLocalAttributionCandidateOutput,
   loadLocalAttributionManifest,
@@ -275,6 +282,306 @@ afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+describe('local attribution benchmark reporting', () => {
+  it('builds a deterministic, sanitized report with tier aggregates', () => {
+    const privateId = 'customer-call-secret';
+    const privatePath = '/private/corpus/customer-call.wav';
+    const report = buildLocalAttributionBenchmarkReport({
+      generatedAt: '2026-07-15T12:00:00.000Z',
+      sourceCommit: 'abc123',
+      environment: {
+        platform: 'darwin',
+        arch: 'arm64',
+        nodeVersion: 'v24.11.0',
+      },
+      candidates: [
+        {
+          id: 'z-failure',
+          kind: 'diarizer',
+          version: '1',
+          command: ['false'],
+          model: { id: 'z-model', version: '1' },
+          config: {},
+        },
+        {
+          id: 'a-success',
+          kind: 'pipeline',
+          version: '1',
+          command: ['local'],
+          model: { id: 'a-model', version: '2' },
+          config: {},
+        },
+      ],
+      runs: [
+        {
+          caseId: privateId,
+          tier: 'consented-private',
+          candidateId: 'z-failure',
+          status: 'failed',
+          elapsedMs: 0,
+          peakMemoryMb: 0,
+          failureCode: 'candidate_exit_nonzero',
+          unsafeDiagnostic: privatePath,
+        },
+        {
+          caseId: 'synthetic-case',
+          tier: 'synthetic',
+          candidateId: 'a-success',
+          status: 'ok',
+          elapsedMs: 10,
+          peakMemoryMb: 12,
+          metrics: {
+            wordErrorRate: 0,
+            diarizationErrorRate: 0,
+            falseMeSeconds: 0,
+          },
+          provenance: {
+            pipelineVersion: 'pipeline-v1',
+            models: [{ id: 'model', version: '1' }],
+          },
+        },
+      ],
+    });
+
+    expect(report.candidates.map((candidate) => candidate.id)).toEqual([
+      'a-success',
+      'z-failure',
+    ]);
+    expect(report.results.map((result) => result.diarizerCandidate)).toEqual([
+      'a-success',
+      'z-failure',
+    ]);
+    expect(report.results[0].caseHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(report.summary).toMatchObject({
+      successfulRuns: 1,
+      failedRuns: 1,
+      unsupportedRuns: 0,
+    });
+    expect(report.summary.byTier).toEqual([
+      {
+        tier: 'consented-private',
+        successfulRuns: 0,
+        failedRuns: 1,
+        unsupportedRuns: 0,
+      },
+      {
+        tier: 'synthetic',
+        successfulRuns: 1,
+        failedRuns: 0,
+        unsupportedRuns: 0,
+      },
+    ]);
+    expect(report.summary.byCandidateTier[0]).toMatchObject({
+      asrCandidate: 'a-success',
+      diarizerCandidate: 'a-success',
+      tier: 'synthetic',
+      successfulRuns: 1,
+      meanMetrics: {
+        wordErrorRate: 0,
+        diarizationErrorRate: 0,
+        falseMeSeconds: 0,
+        elapsedMs: 10,
+        peakMemoryMb: 12,
+      },
+    });
+    expect(JSON.stringify(report)).not.toContain(privateId);
+    expect(JSON.stringify(report)).not.toContain(privatePath);
+    expect(
+      buildLocalAttributionBenchmarkReport({
+        ...reportInput(report),
+        runs: [...reportInput(report).runs].reverse(),
+      }),
+    ).toEqual(report);
+  });
+
+  it('parses stable CLI options and candidate filters', () => {
+    expect(
+      parseBenchmarkCliArgs([
+        '--',
+        '--manifest',
+        'manifest.json',
+        '--out',
+        'report.json',
+        '--timeout-ms',
+        '1200',
+        '--candidate',
+        'one',
+        '--candidate=two',
+      ]),
+    ).toEqual({
+      manifestPath: 'manifest.json',
+      outputPath: 'report.json',
+      timeoutMs: 1200,
+      candidateIds: ['one', 'two'],
+    });
+    expect(() => parseBenchmarkCliArgs(['--timeout-ms', '0'])).toThrow(
+      /timeout/i,
+    );
+    expect(() => parseBenchmarkCliArgs(['--unknown'])).toThrow(/unknown/i);
+  });
+
+  it('runs the synthetic adapter end to end, continues candidate failures, and emits only sanitized reports', async () => {
+    const directory = mkdtempSync(
+      path.join(tmpdir(), 'pluto-attribution-cli-'),
+    );
+    temporaryDirectories.push(directory);
+    const referenceText = 'private words must never reach report';
+    writeFileSync(
+      path.join(directory, 'reference.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        transcript: { words: [{ startTime: 0, endTime: 1, text: 'private' }] },
+        turns: [
+          { startTime: 0, endTime: 1, speaker: 'Me', text: referenceText },
+        ],
+      }),
+    );
+    const adapter = path.resolve(
+      'python/speaker_attribution_benchmark_adapter.py',
+    );
+    const manifestPath = path.join(directory, 'manifest.json');
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        cases: [
+          {
+            id: 'sensitive-case-name',
+            recordingId: 'sensitive-recording',
+            provenance: { tier: 'synthetic', source: 'fixture' },
+            audio: { mixedPath: 'unused.wav' },
+            referencePath: 'reference.json',
+          },
+        ],
+        candidates: [
+          {
+            id: 'synthetic',
+            kind: 'pipeline',
+            version: '1',
+            command: ['python3', adapter],
+            model: { id: 'synthetic', version: '1' },
+            config: { turns: [{ startTime: 0, endTime: 1, cluster: 'Me' }] },
+          },
+          {
+            id: 'unknown-local',
+            kind: 'pipeline',
+            version: '1',
+            command: ['python3', adapter],
+            model: { id: 'unknown-local', version: '1' },
+            config: {},
+          },
+        ],
+      }),
+    );
+    const outputPath = path.join(directory, 'report.json');
+    const report = await runLocalSpeakerAttributionBenchmark({
+      manifestPath,
+      outputPath,
+      timeoutMs: 2_000,
+      candidateIds: [],
+    });
+
+    expect(report.results.map(({ status }) => status)).toEqual([
+      'ok',
+      'failed',
+    ]);
+    expect(report.summary).toMatchObject({ successfulRuns: 1, failedRuns: 1 });
+    const json = readFileSync(outputPath, 'utf8');
+    const markdown = readFileSync(path.join(directory, 'report.md'), 'utf8');
+    for (const unsafe of [
+      'sensitive-case-name',
+      'sensitive-recording',
+      referenceText,
+      directory,
+      adapter,
+    ]) {
+      expect(json).not.toContain(unsafe);
+      expect(markdown).not.toContain(unsafe);
+    }
+  });
+
+  it('uses non-zero exit codes only for harness failures and rejects private output locations', async () => {
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+    expect(
+      await runBenchmarkCli([
+        '--manifest',
+        'missing.json',
+        '--out',
+        'report.json',
+      ]),
+    ).toBe(1);
+    expect(stderr).toHaveBeenCalled();
+    stdout.mockRestore();
+    stderr.mockRestore();
+
+    const { root } = makePrivateCorpus();
+    await expect(
+      runLocalSpeakerAttributionBenchmark({
+        manifestPath: 'not-read.json',
+        outputPath: path.join(root, 'unsafe.json'),
+        timeoutMs: 100,
+        candidateIds: [],
+        privateCorpusRoot: root,
+      }),
+    ).rejects.toThrow(/unsafe output/i);
+  });
+});
+
+const reportInput = (
+  report: ReturnType<typeof buildLocalAttributionBenchmarkReport>,
+) => ({
+  generatedAt: report.generatedAt,
+  sourceCommit: report.sourceCommit,
+  environment: report.environment,
+  candidates: [
+    {
+      id: 'z-failure',
+      kind: 'diarizer' as const,
+      version: '1',
+      command: ['false'],
+      model: { id: 'z-model', version: '1' },
+      config: {},
+    },
+    {
+      id: 'a-success',
+      kind: 'pipeline' as const,
+      version: '1',
+      command: ['local'],
+      model: { id: 'a-model', version: '2' },
+      config: {},
+    },
+  ],
+  runs: [
+    {
+      caseId: 'customer-call-secret',
+      tier: 'consented-private' as const,
+      candidateId: 'z-failure',
+      status: 'failed' as const,
+      elapsedMs: 0,
+      peakMemoryMb: 0,
+      failureCode: 'candidate_exit_nonzero' as const,
+    },
+    {
+      caseId: 'synthetic-case',
+      tier: 'synthetic' as const,
+      candidateId: 'a-success',
+      status: 'ok' as const,
+      elapsedMs: 10,
+      peakMemoryMb: 12,
+      metrics: { wordErrorRate: 0, diarizationErrorRate: 0, falseMeSeconds: 0 },
+      provenance: {
+        pipelineVersion: 'pipeline-v1',
+        models: [{ id: 'model', version: '1' }],
+      },
+    },
+  ],
 });
 
 describe('loadLocalAttributionManifest', () => {
