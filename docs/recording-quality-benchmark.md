@@ -1,6 +1,6 @@
 # Recording Quality Benchmark
 
-`pnpm run benchmark:recording-quality` runs Pluto's committed, content-safe recording benchmark corpus. The command exercises current transcript-validation and recording-finalization helpers against synthetic fixtures for the regression shapes tracked in `#25`, `#75`, `#428`, and `#434`.
+`pnpm run benchmark:recording-quality` runs Pluto's committed, content-safe recording benchmark corpus. The command exercises current transcript-validation, retry-validation, and recording-finalization helpers against synthetic fixtures for the regression shapes tracked in `#25`, `#75`, `#428`, `#434`, and `#458`.
 
 ## What it writes
 
@@ -16,6 +16,7 @@ The report includes schema version, environment metadata, source commit, per-cas
 - Baseline report: `scripts/recording-quality/baselines/current-master.json`
 
 Each fixture must stay synthetic and content-safe. Do not commit private meeting text, audio paths, or raw recordings.
+Retry-validation fixtures model persisted meeting state plus mocked transcription/probe responses, so they can cover fail-closed evidence handling without replaying private recordings.
 
 ## Local speaker-attribution benchmark
 
@@ -39,4 +40,5 @@ Use this command when changing local speaker-attribution scoring or candidate-ru
 
 - `status mismatch` means the current helper behavior no longer matches the committed regression expectation.
 - Metric mismatches mean a tracked value such as `localTranscriptCoveredSeconds` or `durationSeconds` drifted.
+- Retry-validation metric mismatches can also track labeled state such as `activityEvidenceSource`.
 - Required-reason failures mean the benchmark no longer surfaces an expected integrity reason.

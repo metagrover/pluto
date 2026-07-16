@@ -29,6 +29,20 @@
       "title": "Overlapping transcript segments count coverage once",
       "kind": "transcript_validation",
       "fixture": "fixtures/issue-434-overlap-union.json"
+    },
+    {
+      "id": "issue-458-missing-retry-evidence",
+      "issue": 458,
+      "title": "Missing deterministic retry evidence fails closed",
+      "kind": "retry_validation",
+      "fixture": "fixtures/issue-458-missing-retry-evidence.json"
+    },
+    {
+      "id": "issue-458-corrupt-retry-evidence",
+      "issue": 458,
+      "title": "Corrupt deterministic retry evidence fails closed",
+      "kind": "retry_validation",
+      "fixture": "fixtures/issue-458-corrupt-retry-evidence.json"
     }
   ]
 }

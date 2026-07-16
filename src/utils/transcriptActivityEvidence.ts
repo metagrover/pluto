@@ -1,4 +1,4 @@
-import type { SpeakerActivityWindow } from './speakerAttribution';
+import type { SpeakerActivityWindow } from './speakerAttribution.ts';
 
 export const STORED_TRANSCRIPT_ACTIVITY_EVIDENCE_SCHEMA_VERSION = 1;
 

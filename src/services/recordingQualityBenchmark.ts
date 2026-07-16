@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { Meeting } from '../types.ts';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -12,10 +13,12 @@ import {
   type RecordingTranscriptValidationResult,
   runRecordingTranscriptValidation,
 } from './recordingTranscriptValidation.ts';
+import { retryMeetingTranscriptValidation } from './retryMeetingTranscriptValidation.ts';
 
 export type RecordingQualityBenchmarkCaseKind =
   | 'transcript_validation'
-  | 'recording_finalization';
+  | 'recording_finalization'
+  | 'retry_validation';
 
 export type RecordingQualityBenchmarkManifestCase = {
   id: string;
@@ -152,7 +155,27 @@ export type RecordingFinalizationFixture = {
 
 export type RecordingQualityBenchmarkFixture =
   | TranscriptValidationFixture
-  | RecordingFinalizationFixture;
+  | RecordingFinalizationFixture
+  | RetryValidationFixture;
+
+type RetryValidationFixtureTranscription = {
+  segments: Array<{
+    start: number;
+    end: number;
+    text: string;
+  }>;
+  meta?: Record<string, unknown>;
+};
+
+export type RetryValidationFixture = {
+  type: 'retry_validation';
+  meeting: Meeting;
+  transcribeByPath: Record<string, RetryValidationFixtureTranscription>;
+  probeDurationByPath: Record<string, number | null>;
+  expected: RecordingQualityBenchmarkExpectation & {
+    requiredReasons?: string[];
+  };
+};
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -226,7 +249,11 @@ export const loadRecordingQualityBenchmarkManifest = (
     seenIds.add(id);
 
     const kind = String(entry.kind || '').trim();
-    if (kind !== 'transcript_validation' && kind !== 'recording_finalization') {
+    if (
+      kind !== 'transcript_validation' &&
+      kind !== 'recording_finalization' &&
+      kind !== 'retry_validation'
+    ) {
       throw new Error(`Unsupported benchmark case kind: ${kind}`);
     }
 
@@ -385,6 +412,116 @@ export const runRecordingFinalizationBenchmarkCase = (
   };
 };
 
+const makeRetryValidationMetric = (
+  meeting: Meeting,
+  metricName?: string,
+): RecordingQualityBenchmarkMetric | undefined => {
+  if (!metricName) return undefined;
+
+  let parsedIntegrity: Record<string, unknown> = {};
+  try {
+    parsedIntegrity = JSON.parse(
+      meeting.transcript_integrity_json || '{}',
+    ) as Record<string, unknown>;
+  } catch {
+    parsedIntegrity = {};
+  }
+
+  switch (metricName) {
+    case 'activityEvidenceSource':
+      return typeof parsedIntegrity.activityEvidenceSource === 'string'
+        ? {
+            name: metricName,
+            value: parsedIntegrity.activityEvidenceSource,
+          }
+        : undefined;
+    default:
+      return undefined;
+  }
+};
+
+const readRetryValidationReasons = (meeting: Meeting): string[] => {
+  try {
+    const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      reasons?: unknown;
+    };
+    return Array.isArray(parsed.reasons)
+      ? parsed.reasons.filter(
+          (reason): reason is string => typeof reason === 'string',
+        )
+      : [];
+  } catch {
+    return [];
+  }
+};
+
+export const runRetryValidationBenchmarkCase = async (
+  meta: RecordingQualityBenchmarkManifestCase,
+  fixture: RetryValidationFixture,
+): Promise<RecordingQualityBenchmarkCaseResult> => {
+  let currentMeeting: Meeting = structuredClone(fixture.meeting);
+
+  const invoke = async (channel: string, ...args: unknown[]) => {
+    if (channel === 'GET_MEETING') return currentMeeting;
+    if (channel === 'SAVE_MEETING') {
+      currentMeeting = {
+        ...currentMeeting,
+        ...((args[0] as Partial<Meeting> | undefined) || {}),
+      };
+      return true;
+    }
+    if (channel === 'WHISPER_TRANSCRIBE') {
+      const audioPath = String(args[0] || '');
+      return fixture.transcribeByPath[audioPath] || { segments: [] };
+    }
+    if (channel === 'AUDIO_PROBE_DURATION') {
+      const audioPath = String(args[0] || '');
+      return fixture.probeDurationByPath[audioPath] ?? null;
+    }
+    throw new Error(
+      `Unexpected retry-validation benchmark channel: ${channel}`,
+    );
+  };
+
+  const retryResult = await retryMeetingTranscriptValidation(
+    String(fixture.meeting.id),
+    invoke,
+  );
+  const actualMetric = makeRetryValidationMetric(
+    currentMeeting,
+    fixture.expected.primaryMetric?.name,
+  );
+  const reasons = readRetryValidationReasons(currentMeeting);
+  const actualStatus =
+    retryResult.status === 'superseded'
+      ? 'needs_attention'
+      : currentMeeting.transcript_status === 'validated'
+        ? 'validated'
+        : 'needs_attention';
+  const failures = [
+    ...(actualStatus === fixture.expected.status ? [] : ['status mismatch']),
+    ...compareMetric(actualMetric, fixture.expected.primaryMetric),
+    ...(fixture.expected.requiredReasons || [])
+      .filter((reason) => !reasons.includes(reason))
+      .map((reason) => `missing required reason ${reason}`),
+  ];
+
+  return {
+    id: meta.id,
+    issue: meta.issue,
+    title: meta.title,
+    kind: meta.kind,
+    passed: failures.length === 0,
+    actual: {
+      status: actualStatus,
+      primaryMetric: actualMetric,
+      reasons,
+    },
+    expected: fixture.expected,
+    ...(failures.length > 0 ? { failures } : {}),
+  };
+};
+
 export const buildRecordingQualityBenchmarkReport = (input: {
   schemaVersion: number;
   manifestPath: string;
@@ -406,6 +543,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
   > = {
     recording_finalization: { passed: 0, failed: 0 },
     transcript_validation: { passed: 0, failed: 0 },
+    retry_validation: { passed: 0, failed: 0 },
   };
 
   for (const result of input.results) {
