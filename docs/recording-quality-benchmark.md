@@ -1,13 +1,13 @@
 # Recording Quality Benchmark
 
-`pnpm run benchmark:recording-quality` runs Pluto's committed, content-safe recording benchmark corpus. The command exercises current transcript-validation, retry-validation, and recording-finalization helpers against synthetic fixtures for the regression shapes tracked in `#25`, `#75`, `#428`, `#434`, and `#458`.
+`pnpm run benchmark:recording-quality` runs Pluto's committed, content-safe recording benchmark corpus. The command exercises current transcript-validation, retry-validation, and recording-finalization helpers against synthetic fixtures for the regression shapes tracked in `#25`, `#75`, `#428`, `#434`, and `#458`, then compares tracked metrics against the recorded `master` baseline.
 
 ## What it writes
 
 - A versioned JSON report under `tmp/recording-quality-benchmark-*.json`
-- A concise terminal summary with pass counts and the artifact path
+- A concise terminal summary with pass counts, baseline drift status, and the artifact path
 
-The report includes schema version, environment metadata, source commit, per-case results, and any failing assertions.
+The report includes schema version, environment metadata, source commit, per-case results, baseline comparisons, and any failing assertions.
 
 ## Corpus layout
 
@@ -17,6 +17,12 @@ The report includes schema version, environment metadata, source commit, per-cas
 
 Each fixture must stay synthetic and content-safe. Do not commit private meeting text, audio paths, or raw recordings.
 Retry-validation fixtures model persisted meeting state plus mocked transcription/probe responses, so they can cover fail-closed evidence handling without replaying private recordings.
+
+Each manifest case can optionally declare `trackedMetrics`:
+
+- `name`: the metric exposed by the benchmark result's `actual.primaryMetric`
+- `tolerance`: the allowed numeric drift from the baseline
+- `stability`: `stable` to fail the run on drift outside tolerance, or `hardware_dependent` to report drift separately without failing
 
 ## Local speaker-attribution benchmark
 
@@ -34,7 +40,13 @@ Use this command when changing local speaker-attribution scoring or candidate-ru
 2. Add the case to `scripts/recording-quality/manifest.json` with its issue number, title, kind, and relative fixture path.
 3. Run `pnpm exec vitest run tests/unit/recordingQualityBenchmark.test.ts`.
 4. Run `pnpm run benchmark:recording-quality -- --out tmp/recording-quality-benchmark.json`.
-5. If the new output is the intended `master` baseline, update `scripts/recording-quality/baselines/current-master.json`.
+5. Review the baseline summary:
+   - `REGRESSION` means a stable tracked metric drifted outside tolerance and the command exits non-zero.
+   - `IMPROVEMENT` means a stable tracked metric moved outside tolerance in the favorable direction.
+   - `WITHIN_TOLERANCE` means the metric drift stayed within the allowed range.
+   - `HARDWARE_DRIFT` means a hardware-dependent metric drifted outside tolerance but did not fail the run.
+   - `MISSING_BASELINE` means the case or tracked metric is not present in the recorded baseline report.
+6. If the new output is the intended `master` baseline, update `scripts/recording-quality/baselines/current-master.json`.
 
 ## Interpreting failures
 
@@ -42,3 +54,5 @@ Use this command when changing local speaker-attribution scoring or candidate-ru
 - Metric mismatches mean a tracked value such as `localTranscriptCoveredSeconds` or `durationSeconds` drifted.
 - Retry-validation metric mismatches can also track labeled state such as `activityEvidenceSource`.
 - Required-reason failures mean the benchmark no longer surfaces an expected integrity reason.
+- Stable baseline regressions fail the command even when the fixture expectation itself still passes.
+- Hardware-dependent drift and missing baseline entries stay visible in the summary so they can be reviewed before baseline updates.

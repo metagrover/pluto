@@ -5,6 +5,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildRecordingQualityBenchmarkComparisonSummary,
   type RecordingQualityBenchmarkCaseResult,
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
@@ -94,6 +95,37 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
       issue: 458,
       kind: 'retry_validation',
     });
+  });
+
+  it('loads tracked metrics with tolerance and stability rules', () => {
+    const manifest = loadRecordingQualityBenchmarkManifest({
+      schemaVersion: 1,
+      baselineReport: 'baselines/current-master.json',
+      cases: [
+        {
+          id: 'issue-75-finalization-single-flight',
+          issue: 75,
+          title: 'Finalization stays single-flight',
+          kind: 'recording_finalization',
+          fixture: 'fixtures/issue-75-finalization-single-flight.json',
+          trackedMetrics: [
+            {
+              name: 'durationSeconds',
+              tolerance: 3,
+              stability: 'hardware_dependent',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(manifest.cases[0].trackedMetrics).toEqual([
+      {
+        name: 'durationSeconds',
+        tolerance: 3,
+        stability: 'hardware_dependent',
+      },
+    ]);
   });
 });
 
@@ -267,6 +299,186 @@ describe('buildRecordingQualityBenchmarkReport', () => {
           'covered seconds exceeded expected union',
         ],
       }),
+    ]);
+    expect(report.comparisonSummary).toEqual({
+      stableRegressions: 0,
+      stableImprovements: 0,
+      stableWithinTolerance: 0,
+      hardwareDependentDrift: 0,
+      missingBaselineMetrics: 0,
+    });
+  });
+});
+
+describe('buildRecordingQualityBenchmarkComparisonSummary', () => {
+  it('flags stable regressions, tolerates small drift, reports hardware-dependent drift, and notes missing baselines', () => {
+    const summary = buildRecordingQualityBenchmarkComparisonSummary({
+      baselineResults: [
+        {
+          id: 'stable-regression',
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 12,
+            },
+          },
+        },
+        {
+          id: 'within-tolerance',
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 10,
+            },
+          },
+        },
+        {
+          id: 'hardware-drift',
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 1062,
+            },
+          },
+        },
+      ],
+      results: [
+        {
+          id: 'stable-regression',
+          issue: 25,
+          title: 'Stable regression',
+          kind: 'transcript_validation',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'localTranscriptCoveredSeconds',
+              tolerance: 1,
+              stability: 'stable',
+            },
+          ],
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 9,
+            },
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+        {
+          id: 'within-tolerance',
+          issue: 428,
+          title: 'Within tolerance',
+          kind: 'transcript_validation',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'localTranscriptCoveredSeconds',
+              tolerance: 2,
+              stability: 'stable',
+            },
+          ],
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 11,
+            },
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+        {
+          id: 'hardware-drift',
+          issue: 75,
+          title: 'Hardware drift',
+          kind: 'recording_finalization',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'durationSeconds',
+              tolerance: 2,
+              stability: 'hardware_dependent',
+            },
+          ],
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 1058,
+            },
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+        {
+          id: 'missing-baseline',
+          issue: 458,
+          title: 'Missing baseline',
+          kind: 'retry_validation',
+          passed: true,
+          trackedMetrics: [
+            {
+              name: 'activityEvidenceSource',
+              tolerance: 0,
+              stability: 'stable',
+            },
+          ],
+          actual: {
+            status: 'needs_attention',
+            primaryMetric: {
+              name: 'activityEvidenceSource',
+              value: 'capture_activity_missing',
+            },
+          },
+          expected: {
+            status: 'needs_attention',
+          },
+        },
+      ],
+    });
+
+    expect(summary.counts).toEqual({
+      stableRegressions: 1,
+      stableImprovements: 0,
+      stableWithinTolerance: 1,
+      hardwareDependentDrift: 1,
+      missingBaselineMetrics: 1,
+    });
+    expect(summary.failures).toEqual([
+      expect.objectContaining({
+        id: 'stable-regression',
+        metricName: 'localTranscriptCoveredSeconds',
+        outcome: 'stable_regression',
+        delta: -3,
+      }),
+    ]);
+    expect(summary.sections.hardwareDependent).toEqual([
+      expect.objectContaining({
+        id: 'hardware-drift',
+        metricName: 'durationSeconds',
+        outcome: 'hardware_dependent_drift',
+        delta: -4,
+      }),
+    ]);
+    expect(summary.sections.missingBaseline).toEqual([
+      expect.objectContaining({
+        id: 'missing-baseline',
+        outcome: 'missing_baseline_metric',
+      }),
+    ]);
+    expect(summary.lines).toEqual([
+      'stable regressions: stable-regression localTranscriptCoveredSeconds 12 -> 9 (tol +/-1)',
+      'stable within tolerance: within-tolerance localTranscriptCoveredSeconds 10 -> 11 (tol +/-2)',
+      'hardware-dependent drift: hardware-drift durationSeconds 1062 -> 1058 (tol +/-2)',
+      'missing baseline metrics: missing-baseline activityEvidenceSource',
     ]);
   });
 });
