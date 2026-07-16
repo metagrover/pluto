@@ -54,7 +54,6 @@ export const useAutoEndMonitor = ({
     }
   }, []);
 
-
   useEffect(() => {
     if (!isRecording || !autoEndEnabled) {
       clearGraceTimer();
@@ -78,6 +77,12 @@ export const useAutoEndMonitor = ({
             active: Boolean(result?.active),
             appName:
               typeof result?.appName === 'string' ? result.appName : null,
+            confidence:
+              result?.confidence === 'high' ||
+              result?.confidence === 'medium' ||
+              result?.confidence === 'low'
+                ? result.confidence
+                : 'low',
             reason: typeof result?.reason === 'string' ? result.reason : '',
           },
           trackedApp: trackedAppRef.current,

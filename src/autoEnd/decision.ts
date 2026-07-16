@@ -4,6 +4,7 @@ export const GRACE_LONG_MS = 120_000;
 export type PollInput = {
   active: boolean;
   appName: string | null;
+  confidence: 'low' | 'medium' | 'high';
   reason: string;
 };
 
@@ -21,18 +22,19 @@ export type AutoEndAction =
 
 export function autoEndDecision(input: AutoEndInput): AutoEndAction {
   const { poll, trackedApp, graceActive } = input;
-  const isActive = poll.active && Boolean(poll.appName);
+  const isConfirmedActive =
+    poll.active && Boolean(poll.appName) && poll.confidence === 'high';
 
   // Phase 1: No app locked yet — waiting to discover which call app is in use
   if (!trackedApp) {
-    if (isActive && poll.appName) {
+    if (isConfirmedActive && poll.appName) {
       return { type: 'lock_app', appName: poll.appName };
     }
     return { type: 'no_op' };
   }
 
   // Phase 2: We have a tracked app — check if it's still active
-  const isTrackedAppActive = isActive && poll.appName === trackedApp;
+  const isTrackedAppActive = isConfirmedActive && poll.appName === trackedApp;
 
   if (isTrackedAppActive) {
     return graceActive ? { type: 'cancel_grace' } : { type: 'no_op' };

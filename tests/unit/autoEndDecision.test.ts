@@ -12,7 +12,12 @@ describe('autoEndDecision', () => {
 
   it('returns no_op when no tracked app and no active call', () => {
     const result = autoEndDecision({
-      poll: { active: false, appName: null, reason: 'no-call-app-running' },
+      poll: {
+        active: false,
+        appName: null,
+        confidence: 'low',
+        reason: 'no-call-app-running',
+      },
       trackedApp: null,
       graceActive: false,
     });
@@ -24,6 +29,7 @@ describe('autoEndDecision', () => {
       poll: {
         active: true,
         appName: 'Zoom',
+        confidence: 'high',
         reason: 'call-app-running-with-active-audio',
       },
       trackedApp: null,
@@ -34,7 +40,21 @@ describe('autoEndDecision', () => {
 
   it('returns no_op when poll active but appName is null', () => {
     const result = autoEndDecision({
-      poll: { active: true, appName: null, reason: '' },
+      poll: { active: true, appName: null, confidence: 'low', reason: '' },
+      trackedApp: null,
+      graceActive: false,
+    });
+    expect(result).toEqual({ type: 'no_op' });
+  });
+
+  it('does not lock onto an unconfirmed silent call app', () => {
+    const result = autoEndDecision({
+      poll: {
+        active: true,
+        appName: 'Zoom',
+        confidence: 'medium',
+        reason: 'call-app-running-silent-fallback',
+      },
       trackedApp: null,
       graceActive: false,
     });
@@ -50,6 +70,7 @@ describe('autoEndDecision', () => {
       poll: {
         active: true,
         appName: 'Zoom',
+        confidence: 'high',
         reason: 'call-app-running-with-active-audio',
       },
       trackedApp: 'Zoom',
@@ -63,6 +84,7 @@ describe('autoEndDecision', () => {
       poll: {
         active: true,
         appName: 'Zoom',
+        confidence: 'high',
         reason: 'call-app-running-with-active-audio',
       },
       trackedApp: 'Zoom',
@@ -77,7 +99,12 @@ describe('autoEndDecision', () => {
 
   it('returns start_grace (60s) when tracked app exited', () => {
     const result = autoEndDecision({
-      poll: { active: false, appName: null, reason: 'no-call-app-running' },
+      poll: {
+        active: false,
+        appName: null,
+        confidence: 'low',
+        reason: 'no-call-app-running',
+      },
       trackedApp: 'Zoom',
       graceActive: false,
     });
@@ -93,7 +120,26 @@ describe('autoEndDecision', () => {
       poll: {
         active: false,
         appName: 'Zoom',
+        confidence: 'low',
         reason: 'call-app-running-without-target-audio',
+      },
+      trackedApp: 'Zoom',
+      graceActive: false,
+    });
+    expect(result).toEqual({
+      type: 'start_grace',
+      graceMs: GRACE_LONG_MS,
+      reasonCode: 'audio_inactive_timeout',
+    });
+  });
+
+  it('starts grace when a confirmed call falls back to a silent attached app', () => {
+    const result = autoEndDecision({
+      poll: {
+        active: true,
+        appName: 'Zoom',
+        confidence: 'medium',
+        reason: 'call-app-running-silent-fallback',
       },
       trackedApp: 'Zoom',
       graceActive: false,
@@ -107,7 +153,12 @@ describe('autoEndDecision', () => {
 
   it('returns no_op when tracked app inactive but grace already running', () => {
     const result = autoEndDecision({
-      poll: { active: false, appName: null, reason: 'no-call-app-running' },
+      poll: {
+        active: false,
+        appName: null,
+        confidence: 'low',
+        reason: 'no-call-app-running',
+      },
       trackedApp: 'Zoom',
       graceActive: true,
     });
@@ -123,6 +174,7 @@ describe('autoEndDecision', () => {
       poll: {
         active: true,
         appName: 'Chrome',
+        confidence: 'high',
         reason: 'call-app-running-with-active-audio',
       },
       trackedApp: 'Zoom',
@@ -140,6 +192,7 @@ describe('autoEndDecision', () => {
       poll: {
         active: true,
         appName: 'Chrome',
+        confidence: 'high',
         reason: 'call-app-running-with-active-audio',
       },
       trackedApp: 'Zoom',
