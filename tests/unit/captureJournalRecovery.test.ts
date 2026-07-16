@@ -1,4 +1,4 @@
-import { mkdtemp, rm, stat, truncate } from 'node:fs/promises';
+import { mkdtemp, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -235,5 +235,85 @@ describe('capture journal recovery', () => {
     expect(
       await stat(join(root, manifest.entries[0].relativePath)),
     ).toBeTruthy();
+  });
+
+  it('skips checksum-mismatched chunks even when byte count still matches', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    await appendCaptureJournalChunk(root, {
+      meetingId: 'meeting-123',
+      source: 'mic',
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 2,
+      format: 'wav',
+      data: Buffer.from('mic-0'),
+    });
+    const manifest = await appendCaptureJournalChunk(root, {
+      meetingId: 'meeting-123',
+      source: 'mic',
+      sequence: 1,
+      chunkStartSec: 2,
+      chunkEndSec: 4,
+      format: 'wav',
+      data: Buffer.from('mic-1'),
+    });
+
+    await writeFile(
+      join(root, manifest.entries[1].relativePath),
+      Buffer.from('mic-x'),
+    );
+
+    const stitchWavSegments = vi
+      .fn()
+      .mockImplementation(async (segments, outputTag: string) => {
+        expect(segments).toHaveLength(1);
+        return join(root, `${outputTag}.wav`);
+      });
+    const saveMeeting = vi.fn();
+
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting,
+      stitchWavSegments,
+      nowMs: 5_000,
+    });
+
+    expect(result.recoveredCount).toBe(1);
+    expect(saveMeeting).toHaveBeenCalledTimes(1);
+    const recoveredMeeting = saveMeeting.mock.calls[0]?.[0] as Record<
+      string,
+      unknown
+    >;
+    const integrity = JSON.parse(
+      String(recoveredMeeting.transcript_integrity_json),
+    ) as {
+      gap_detected: boolean;
+      recovered_sources: {
+        mic: {
+          gapCount: number;
+          recoveredChunkCount: number;
+        };
+      };
+      recovery_gaps: Array<{
+        source: string;
+        sequence: number;
+        reason: string;
+      }>;
+    };
+
+    expect(integrity.gap_detected).toBe(true);
+    expect(integrity.recovered_sources.mic).toMatchObject({
+      gapCount: 1,
+      recoveredChunkCount: 1,
+    });
+    expect(integrity.recovery_gaps).toContainEqual({
+      source: 'mic',
+      sequence: 1,
+      reason: 'checksum_mismatch',
+    });
   });
 });
