@@ -5,6 +5,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  compareRecordingQualityBenchmarkToBaseline,
+  formatRecordingQualityBenchmarkComparisonSummary,
   type RecordingQualityBenchmarkCaseResult,
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
@@ -94,6 +96,47 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
       issue: 458,
       kind: 'retry_validation',
     });
+  });
+
+  it('loads tolerance-tracked metrics for baseline comparisons', () => {
+    const manifest = loadRecordingQualityBenchmarkManifest({
+      schemaVersion: 1,
+      baselineReport: 'baselines/current-master.json',
+      cases: [
+        {
+          id: 'issue-25-opening-audio',
+          issue: 25,
+          title: 'Opening audio is preserved',
+          kind: 'transcript_validation',
+          fixture: 'fixtures/issue-25-opening-audio.json',
+          trackedMetrics: [
+            {
+              name: 'localTranscriptCoveredSeconds',
+              tolerance: 0.25,
+              stability: 'stable',
+            },
+            {
+              name: 'durationSeconds',
+              tolerance: 2,
+              stability: 'hardware_dependent',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(manifest.cases[0].trackedMetrics).toEqual([
+      {
+        name: 'localTranscriptCoveredSeconds',
+        tolerance: 0.25,
+        stability: 'stable',
+      },
+      {
+        name: 'durationSeconds',
+        tolerance: 2,
+        stability: 'hardware_dependent',
+      },
+    ]);
   });
 });
 
@@ -271,8 +314,207 @@ describe('buildRecordingQualityBenchmarkReport', () => {
   });
 });
 
+describe('compareRecordingQualityBenchmarkToBaseline', () => {
+  it('fails stable drifts, separates hardware-dependent changes, and reports missing baseline entries', () => {
+    const report = buildRecordingQualityBenchmarkReport({
+      schemaVersion: 1,
+      manifestPath: '/tmp/manifest.json',
+      baselineReportPath: '/tmp/baselines/current-master.json',
+      generatedAt: '2026-07-16T15:00:00.000Z',
+      environment: {
+        nodeVersion: 'v24.11.0',
+        platform: 'darwin',
+        arch: 'arm64',
+      },
+      sourceCommit: '7ab556f2',
+      results: [
+        {
+          id: 'stable-regression',
+          issue: 428,
+          title: 'Stable drift regresses',
+          kind: 'transcript_validation',
+          passed: true,
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 108,
+            },
+            metrics: [
+              {
+                name: 'localTranscriptCoveredSeconds',
+                value: 108,
+              },
+            ],
+          },
+          expected: {
+            status: 'validated',
+            trackedMetrics: [
+              {
+                name: 'localTranscriptCoveredSeconds',
+                tolerance: 1,
+                stability: 'stable',
+              },
+            ],
+          },
+        },
+        {
+          id: 'hardware-drift',
+          issue: 75,
+          title: 'Hardware drift is reported separately',
+          kind: 'recording_finalization',
+          passed: true,
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 1065,
+            },
+            metrics: [
+              {
+                name: 'durationSeconds',
+                value: 1065,
+              },
+            ],
+          },
+          expected: {
+            status: 'validated',
+            trackedMetrics: [
+              {
+                name: 'durationSeconds',
+                tolerance: 1,
+                stability: 'hardware_dependent',
+              },
+            ],
+          },
+        },
+        {
+          id: 'missing-baseline',
+          issue: 25,
+          title: 'Missing baseline case',
+          kind: 'transcript_validation',
+          passed: true,
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 3,
+            },
+            metrics: [
+              {
+                name: 'localTranscriptCoveredSeconds',
+                value: 3,
+              },
+            ],
+          },
+          expected: {
+            status: 'validated',
+            trackedMetrics: [
+              {
+                name: 'localTranscriptCoveredSeconds',
+                tolerance: 0,
+                stability: 'stable',
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const baselineReport = buildRecordingQualityBenchmarkReport({
+      schemaVersion: 1,
+      manifestPath: '/tmp/manifest.json',
+      baselineReportPath: '/tmp/baselines/current-master.json',
+      generatedAt: '2026-07-16T00:00:00.000Z',
+      environment: {
+        nodeVersion: 'v24.11.0',
+        platform: 'darwin',
+        arch: 'arm64',
+      },
+      sourceCommit: 'd1228ab2',
+      results: [
+        {
+          id: 'stable-regression',
+          issue: 428,
+          title: 'Stable drift regresses',
+          kind: 'transcript_validation',
+          passed: true,
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'localTranscriptCoveredSeconds',
+              value: 110,
+            },
+            metrics: [
+              {
+                name: 'localTranscriptCoveredSeconds',
+                value: 110,
+              },
+            ],
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+        {
+          id: 'hardware-drift',
+          issue: 75,
+          title: 'Hardware drift is reported separately',
+          kind: 'recording_finalization',
+          passed: true,
+          actual: {
+            status: 'validated',
+            primaryMetric: {
+              name: 'durationSeconds',
+              value: 1062,
+            },
+            metrics: [
+              {
+                name: 'durationSeconds',
+                value: 1062,
+              },
+            ],
+          },
+          expected: {
+            status: 'validated',
+          },
+        },
+      ],
+    });
+
+    const comparison = compareRecordingQualityBenchmarkToBaseline({
+      report,
+      baselineReport,
+    });
+
+    expect(comparison.summary).toMatchObject({
+      stableRegressions: 1,
+      hardwareDependentChanges: 1,
+      missingBaselineCases: 1,
+      withinTolerance: 0,
+      improvements: 0,
+    });
+    expect(comparison.stableRegressions).toEqual([
+      expect.objectContaining({
+        caseId: 'stable-regression',
+        metricName: 'localTranscriptCoveredSeconds',
+      }),
+    ]);
+    expect(comparison.hardwareDependentChanges).toEqual([
+      expect.objectContaining({
+        caseId: 'hardware-drift',
+        metricName: 'durationSeconds',
+      }),
+    ]);
+    expect(comparison.missingBaselineCases).toEqual(['missing-baseline']);
+    expect(formatRecordingQualityBenchmarkComparisonSummary(comparison)).toContain(
+      'stable regressions: stable-regression.localTranscriptCoveredSeconds',
+    );
+  });
+});
+
 describe('benchmark:recording-quality CLI', () => {
-  it('runs the committed benchmark corpus successfully', () => {
+  it('runs the committed benchmark corpus successfully and prints the baseline comparison summary', () => {
     const outputDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'recording-quality-benchmark-'),
     );
@@ -302,5 +544,7 @@ describe('benchmark:recording-quality CLI', () => {
       status: 0,
     });
     expect(fs.existsSync(outputPath)).toBe(true);
+    expect(result.stdout).toContain('baseline comparison');
+    expect(result.stdout).toContain('within tolerance');
   });
 });

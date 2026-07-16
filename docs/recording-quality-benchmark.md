@@ -5,7 +5,7 @@
 ## What it writes
 
 - A versioned JSON report under `tmp/recording-quality-benchmark-*.json`
-- A concise terminal summary with pass counts and the artifact path
+- A concise terminal summary with pass counts, baseline comparison buckets, and the artifact path
 
 The report includes schema version, environment metadata, source commit, per-case results, and any failing assertions.
 
@@ -31,10 +31,14 @@ Use this command when changing local speaker-attribution scoring or candidate-ru
 ## Adding a case
 
 1. Add a new fixture JSON under `scripts/recording-quality/fixtures/`.
-2. Add the case to `scripts/recording-quality/manifest.json` with its issue number, title, kind, and relative fixture path.
-3. Run `pnpm exec vitest run tests/unit/recordingQualityBenchmark.test.ts`.
-4. Run `pnpm run benchmark:recording-quality -- --out tmp/recording-quality-benchmark.json`.
-5. If the new output is the intended `master` baseline, update `scripts/recording-quality/baselines/current-master.json`.
+2. Add the case to `scripts/recording-quality/manifest.json` with its issue number, title, kind, relative fixture path, and any `trackedMetrics` that should be gated against the committed baseline.
+3. For each tracked metric, set:
+   - `name`: the metric key written into the report
+   - `tolerance`: the allowed absolute drift before Pluto treats the change as meaningful
+   - `stability`: `stable` for metrics that should fail the run outside tolerance, or `hardware_dependent` for metrics that should only be reported
+4. Run `pnpm exec vitest run tests/unit/recordingQualityBenchmark.test.ts`.
+5. Run `pnpm run benchmark:recording-quality -- --out tmp/recording-quality-benchmark.json`.
+6. If the new output is the intended baseline, replace `scripts/recording-quality/baselines/current-master.json` intentionally in the same PR and mention why the drift is expected.
 
 ## Interpreting failures
 
@@ -42,3 +46,6 @@ Use this command when changing local speaker-attribution scoring or candidate-ru
 - Metric mismatches mean a tracked value such as `localTranscriptCoveredSeconds` or `durationSeconds` drifted.
 - Retry-validation metric mismatches can also track labeled state such as `activityEvidenceSource`.
 - Required-reason failures mean the benchmark no longer surfaces an expected integrity reason.
+- Stable tracked metrics that drift outside tolerance fail the run and print a `REGRESSION` line with baseline, current value, and tolerance.
+- Hardware-dependent tracked metrics never fail the run on their own; they appear in a separate comparison section so model/runtime tradeoffs stay visible without pretending all machines are identical.
+- Missing baseline cases or metrics fail the run because Pluto cannot prove whether that benchmark drift was intentional.

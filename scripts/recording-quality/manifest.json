@@ -7,42 +7,84 @@
       "issue": 25,
       "title": "Opening local speech is preserved",
       "kind": "transcript_validation",
-      "fixture": "fixtures/issue-25-opening-audio.json"
+      "fixture": "fixtures/issue-25-opening-audio.json",
+      "trackedMetrics": [
+        {
+          "name": "localTranscriptCoveredSeconds",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
     },
     {
       "id": "issue-75-finalization-single-flight",
       "issue": 75,
       "title": "Finalization stays single-flight and freezes timing",
       "kind": "recording_finalization",
-      "fixture": "fixtures/issue-75-finalization-single-flight.json"
+      "fixture": "fixtures/issue-75-finalization-single-flight.json",
+      "trackedMetrics": [
+        {
+          "name": "durationSeconds",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
     },
     {
       "id": "issue-428-local-speech-recovery",
       "issue": 428,
       "title": "Sparse provisional local chunks still recover canonical local speech",
       "kind": "transcript_validation",
-      "fixture": "fixtures/issue-428-local-speech-recovery.json"
+      "fixture": "fixtures/issue-428-local-speech-recovery.json",
+      "trackedMetrics": [
+        {
+          "name": "localTranscriptCoveredSeconds",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
     },
     {
       "id": "issue-434-overlap-union",
       "issue": 434,
       "title": "Overlapping transcript segments count coverage once",
       "kind": "transcript_validation",
-      "fixture": "fixtures/issue-434-overlap-union.json"
+      "fixture": "fixtures/issue-434-overlap-union.json",
+      "trackedMetrics": [
+        {
+          "name": "localTranscriptCoveredSeconds",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
     },
     {
       "id": "issue-458-missing-retry-evidence",
       "issue": 458,
       "title": "Missing deterministic retry evidence fails closed",
       "kind": "retry_validation",
-      "fixture": "fixtures/issue-458-missing-retry-evidence.json"
+      "fixture": "fixtures/issue-458-missing-retry-evidence.json",
+      "trackedMetrics": [
+        {
+          "name": "activityEvidenceSource",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
     },
     {
       "id": "issue-458-corrupt-retry-evidence",
       "issue": 458,
       "title": "Corrupt deterministic retry evidence fails closed",
       "kind": "retry_validation",
-      "fixture": "fixtures/issue-458-corrupt-retry-evidence.json"
+      "fixture": "fixtures/issue-458-corrupt-retry-evidence.json",
+      "trackedMetrics": [
+        {
+          "name": "activityEvidenceSource",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
     }
   ]
 }
