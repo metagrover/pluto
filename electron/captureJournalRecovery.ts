@@ -48,7 +48,7 @@ type TimedSegment = {
 
 type RecoveryDependencies = {
   getMeeting: (meetingId: string) => PersistedMeeting | null | undefined;
-  saveMeeting: (meeting: PersistedMeeting) => unknown;
+  saveMeeting: (meeting: PersistedMeeting) => unknown | Promise<unknown>;
   stitchWavSegments: (
     segments: TimedSegment[],
     outputTag: string,
@@ -58,6 +58,7 @@ type RecoveryDependencies = {
 
 export type CaptureJournalRecoveryResult = {
   recoveredCount: number;
+  failedRecoveryCount: number;
   skippedExistingCount: number;
   skippedSealedCount: number;
   skippedEmptyCount: number;
@@ -194,6 +195,7 @@ export const recoverInterruptedCaptureJournals = async (
 ): Promise<CaptureJournalRecoveryResult> => {
   const result: CaptureJournalRecoveryResult = {
     recoveredCount: 0,
+    failedRecoveryCount: 0,
     skippedExistingCount: 0,
     skippedSealedCount: 0,
     skippedEmptyCount: 0,
@@ -222,71 +224,75 @@ export const recoverInterruptedCaptureJournals = async (
       continue;
     }
 
-    const micEntries = manifest.entries.filter(
-      (entry) => entry.source === 'mic',
-    );
-    const systemEntries = manifest.entries.filter(
-      (entry) => entry.source === 'system',
-    );
+    try {
+      const micEntries = manifest.entries.filter(
+        (entry) => entry.source === 'mic',
+      );
+      const systemEntries = manifest.entries.filter(
+        (entry) => entry.source === 'system',
+      );
 
-    const [micRecovery, systemRecovery] = await Promise.all([
-      buildSourceSegments(rootDir, micEntries),
-      buildSourceSegments(rootDir, systemEntries),
-    ]);
+      const [micRecovery, systemRecovery] = await Promise.all([
+        buildSourceSegments(rootDir, micEntries),
+        buildSourceSegments(rootDir, systemEntries),
+      ]);
 
-    const micAudioPath =
-      micRecovery.segments.length > 0
-        ? await deps.stitchWavSegments(
-            micRecovery.segments,
-            `${manifest.meetingId}-mic-recovered`,
-          )
-        : null;
-    const systemAudioPath =
-      systemRecovery.segments.length > 0
-        ? await deps.stitchWavSegments(
-            systemRecovery.segments,
-            `${manifest.meetingId}-system-recovered`,
-          )
-        : null;
+      const micAudioPath =
+        micRecovery.segments.length > 0
+          ? await deps.stitchWavSegments(
+              micRecovery.segments,
+              `${manifest.meetingId}-mic-recovered`,
+            )
+          : null;
+      const systemAudioPath =
+        systemRecovery.segments.length > 0
+          ? await deps.stitchWavSegments(
+              systemRecovery.segments,
+              `${manifest.meetingId}-system-recovered`,
+            )
+          : null;
 
-    if (!micAudioPath && !systemAudioPath) {
-      result.skippedEmptyCount += 1;
-      continue;
+      if (!micAudioPath && !systemAudioPath) {
+        result.skippedEmptyCount += 1;
+        continue;
+      }
+
+      const integrity: RecoveryMeetingIntegrity = {
+        recovery_source: 'capture_journal',
+        journal_lifecycle_state: manifest.lifecycleState,
+        gap_detected:
+          micRecovery.gaps.length > 0 || systemRecovery.gaps.length > 0,
+        recovered_at: new Date(nowMs).toISOString(),
+        recovered_sources: {
+          mic: {
+            acknowledgedChunkCount: micEntries.length,
+            recoveredChunkCount: micRecovery.segments.length,
+            gapCount: micRecovery.gaps.length,
+            recoveredAudioPath: micAudioPath,
+          },
+          system: {
+            acknowledgedChunkCount: systemEntries.length,
+            recoveredChunkCount: systemRecovery.segments.length,
+            gapCount: systemRecovery.gaps.length,
+            recoveredAudioPath: systemAudioPath,
+          },
+        },
+        recovery_gaps: [...micRecovery.gaps, ...systemRecovery.gaps],
+      };
+
+      await deps.saveMeeting(
+        buildRecoveredMeeting({
+          manifest,
+          nowMs,
+          micAudioPath,
+          systemAudioPath,
+          integrity,
+        }),
+      );
+      result.recoveredCount += 1;
+    } catch {
+      result.failedRecoveryCount += 1;
     }
-
-    const integrity: RecoveryMeetingIntegrity = {
-      recovery_source: 'capture_journal',
-      journal_lifecycle_state: manifest.lifecycleState,
-      gap_detected:
-        micRecovery.gaps.length > 0 || systemRecovery.gaps.length > 0,
-      recovered_at: new Date(nowMs).toISOString(),
-      recovered_sources: {
-        mic: {
-          acknowledgedChunkCount: micEntries.length,
-          recoveredChunkCount: micRecovery.segments.length,
-          gapCount: micRecovery.gaps.length,
-          recoveredAudioPath: micAudioPath,
-        },
-        system: {
-          acknowledgedChunkCount: systemEntries.length,
-          recoveredChunkCount: systemRecovery.segments.length,
-          gapCount: systemRecovery.gaps.length,
-          recoveredAudioPath: systemAudioPath,
-        },
-      },
-      recovery_gaps: [...micRecovery.gaps, ...systemRecovery.gaps],
-    };
-
-    deps.saveMeeting(
-      buildRecoveredMeeting({
-        manifest,
-        nowMs,
-        micAudioPath,
-        systemAudioPath,
-        integrity,
-      }),
-    );
-    result.recoveredCount += 1;
   }
 
   return result;
