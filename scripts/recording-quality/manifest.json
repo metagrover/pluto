@@ -3,6 +3,14 @@
   "baselineReport": "baselines/current-master.json",
   "cases": [
     {
+      "id": "issue-476-credential-free-distribution",
+      "issue": 476,
+      "title": "Credential-free distribution metadata gate",
+      "kind": "candidate_eligibility",
+      "fixture": "fixtures/issue-476-credential-free-distribution.json",
+      "tier": "pr"
+    },
+    {
       "id": "issue-25-opening-audio",
       "issue": 25,
       "title": "Opening local speech is preserved",
