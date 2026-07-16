@@ -3,14 +3,14 @@ import { constants as fsConstants } from 'node:fs';
 import { access, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { buildTranscriptJsonPayload } from '../src/utils/transcriptSchema';
+import { buildTranscriptJsonPayload } from '../src/utils/transcriptSchema.ts';
 import type {
   CaptureJournalEntry,
   CaptureJournalManifest,
   CaptureJournalSource,
-} from './captureJournal';
-import { readCaptureJournalManifest } from './captureJournal';
-import type { PersistedMeeting } from './db';
+} from './captureJournal.ts';
+import { readCaptureJournalManifest } from './captureJournal.ts';
+import type { PersistedMeeting } from './db.ts';
 
 type RecoveryGapReason =
   | 'missing_artifact'

@@ -1,22 +1,27 @@
 {
-  "schemaVersion": 1,
-  "generatedAt": "2026-07-16T05:08:04.827Z",
+  "schemaVersion": 2,
+  "tier": "pr",
+  "generatedAt": "2026-07-16T20:21:26.763Z",
   "manifestPath": "scripts/recording-quality/manifest.json",
   "baselineReportPath": "scripts/recording-quality/baselines/current-master.json",
-  "sourceCommit": "d1228ab2",
+  "sourceCommit": "9377346",
   "environment": {
     "nodeVersion": "v24.11.1",
     "platform": "darwin",
     "arch": "arm64"
   },
   "summary": {
-    "totalCases": 7,
-    "passedCases": 7,
+    "totalCases": 8,
+    "passedCases": 8,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434, 458, 476],
+    "issueCoverage": [25, 75, 428, 434, 458, 476, 493],
     "kinds": {
       "candidate_eligibility": {
+        "passed": 1,
+        "failed": 0
+      },
+      "capture_recovery": {
         "passed": 1,
         "failed": 0
       },
@@ -76,11 +81,49 @@
       }
     },
     {
+      "id": "issue-493-capture-recovery",
+      "issue": 493,
+      "title": "Interrupted capture journals recover acknowledged evidence",
+      "kind": "capture_recovery",
+      "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "recoveredChunkRatio",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
+      "actual": {
+        "status": "needs_attention",
+        "primaryMetric": {
+          "name": "recoveredChunkRatio",
+          "value": 0.75
+        },
+        "reasons": ["checksum_mismatch:mic:1"]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requiredRecoveredSources": ["mic", "system"],
+        "requiredReasons": ["checksum_mismatch:mic:1"],
+        "primaryMetric": {
+          "name": "recoveredChunkRatio",
+          "value": 0.75
+        }
+      }
+    },
+    {
       "id": "issue-25-opening-audio",
       "issue": 25,
       "title": "Opening local speech is preserved",
       "kind": "transcript_validation",
       "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "localTranscriptCoveredSeconds",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
       "actual": {
         "status": "validated",
         "primaryMetric": {
@@ -103,6 +146,13 @@
       "title": "Finalization stays single-flight and freezes timing",
       "kind": "recording_finalization",
       "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "durationSeconds",
+          "tolerance": 0,
+          "stability": "hardware_dependent"
+        }
+      ],
       "actual": {
         "status": "validated",
         "primaryMetric": {
@@ -127,6 +177,13 @@
       "title": "Sparse provisional local chunks still recover canonical local speech",
       "kind": "transcript_validation",
       "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "localTranscriptCoveredSeconds",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
       "actual": {
         "status": "validated",
         "primaryMetric": {
@@ -149,6 +206,13 @@
       "title": "Overlapping transcript segments count coverage once",
       "kind": "transcript_validation",
       "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "localTranscriptCoveredSeconds",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
       "actual": {
         "status": "needs_attention",
         "primaryMetric": {
@@ -172,6 +236,13 @@
       "title": "Missing deterministic retry evidence fails closed",
       "kind": "retry_validation",
       "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "activityEvidenceSource",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
       "actual": {
         "status": "needs_attention",
         "primaryMetric": {
@@ -195,6 +266,13 @@
       "title": "Corrupt deterministic retry evidence fails closed",
       "kind": "retry_validation",
       "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "activityEvidenceSource",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
       "actual": {
         "status": "needs_attention",
         "primaryMetric": {
@@ -213,5 +291,94 @@
       }
     }
   ],
-  "failures": []
+  "failures": [],
+  "comparisonSummary": {
+    "stableRegressions": 0,
+    "stableImprovements": 0,
+    "stableWithinTolerance": 6,
+    "hardwareDependentDrift": 0,
+    "missingBaselineMetrics": 1
+  },
+  "comparisons": [
+    {
+      "id": "issue-493-capture-recovery",
+      "issue": 493,
+      "title": "Interrupted capture journals recover acknowledged evidence",
+      "metricName": "recoveredChunkRatio",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "missing_baseline_metric",
+      "currentValue": 0.75
+    },
+    {
+      "id": "issue-25-opening-audio",
+      "issue": 25,
+      "title": "Opening local speech is preserved",
+      "metricName": "localTranscriptCoveredSeconds",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": 3,
+      "currentValue": 3,
+      "delta": 0
+    },
+    {
+      "id": "issue-75-finalization-single-flight",
+      "issue": 75,
+      "title": "Finalization stays single-flight and freezes timing",
+      "metricName": "durationSeconds",
+      "tolerance": 0,
+      "stability": "hardware_dependent",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": 1062,
+      "currentValue": 1062,
+      "delta": 0
+    },
+    {
+      "id": "issue-428-local-speech-recovery",
+      "issue": 428,
+      "title": "Sparse provisional local chunks still recover canonical local speech",
+      "metricName": "localTranscriptCoveredSeconds",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": 110,
+      "currentValue": 110,
+      "delta": 0
+    },
+    {
+      "id": "issue-434-overlap-union",
+      "issue": 434,
+      "title": "Overlapping transcript segments count coverage once",
+      "metricName": "localTranscriptCoveredSeconds",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": 6,
+      "currentValue": 6,
+      "delta": 0
+    },
+    {
+      "id": "issue-458-missing-retry-evidence",
+      "issue": 458,
+      "title": "Missing deterministic retry evidence fails closed",
+      "metricName": "activityEvidenceSource",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": "capture_activity_missing",
+      "currentValue": "capture_activity_missing"
+    },
+    {
+      "id": "issue-458-corrupt-retry-evidence",
+      "issue": 458,
+      "title": "Corrupt deterministic retry evidence fails closed",
+      "metricName": "activityEvidenceSource",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": "capture_activity_corrupt",
+      "currentValue": "capture_activity_corrupt"
+    }
+  ]
 }

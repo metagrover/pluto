@@ -1,0 +1,49 @@
+{
+  "type": "capture_recovery",
+  "meetingId": "synthetic-recovery-case",
+  "startedAtMs": 1000,
+  "chunks": [
+    {
+      "source": "mic",
+      "sequence": 0,
+      "startSec": 0,
+      "endSec": 2,
+      "data": "synthetic-mic-0"
+    },
+    {
+      "source": "mic",
+      "sequence": 1,
+      "startSec": 2,
+      "endSec": 4,
+      "data": "synthetic-mic-1"
+    },
+    {
+      "source": "system",
+      "sequence": 0,
+      "startSec": 0,
+      "endSec": 2,
+      "data": "synthetic-system-0"
+    },
+    {
+      "source": "system",
+      "sequence": 1,
+      "startSec": 2,
+      "endSec": 4,
+      "data": "synthetic-system-1"
+    }
+  ],
+  "corruptAfterJournal": {
+    "source": "mic",
+    "sequence": 1,
+    "replacementData": "synthetic-mic-x"
+  },
+  "expected": {
+    "status": "needs_attention",
+    "requiredRecoveredSources": ["mic", "system"],
+    "requiredReasons": ["checksum_mismatch:mic:1"],
+    "primaryMetric": {
+      "name": "recoveredChunkRatio",
+      "value": 0.75
+    }
+  }
+}
