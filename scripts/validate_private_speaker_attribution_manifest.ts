@@ -51,7 +51,11 @@ const main = () => {
   const summary = buildPrivateSpeakerAttributionManifestSummary(manifest);
 
   fs.mkdirSync(path.dirname(options.out), { recursive: true });
-  fs.writeFileSync(options.out, `${JSON.stringify(summary, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(
+    options.out,
+    `${JSON.stringify(summary, null, 2)}\n`,
+    'utf8',
+  );
 
   console.log(
     `[PrivateSpeakerAttributionBenchmark] validated ${summary.totalCases} cases`,

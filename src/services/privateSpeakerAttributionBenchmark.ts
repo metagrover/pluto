@@ -69,7 +69,9 @@ export const loadPrivateSpeakerAttributionManifest = (
   raw: unknown,
 ): PrivateSpeakerAttributionBenchmarkManifest => {
   if (!isObject(raw)) {
-    throw new Error('Private speaker-attribution benchmark manifest must be an object.');
+    throw new Error(
+      'Private speaker-attribution benchmark manifest must be an object.',
+    );
   }
 
   const schemaVersion = Number(raw.schemaVersion);
@@ -145,7 +147,9 @@ const redactCaseId = (id: string) =>
 export const buildPrivateSpeakerAttributionManifestSummary = (
   manifest: PrivateSpeakerAttributionBenchmarkManifest,
 ): PrivateSpeakerAttributionManifestSummary => {
-  const speakerSet = [...new Set(manifest.cases.flatMap((entry) => entry.transcript.speakers))].sort() as PrivateSpeakerLabel[];
+  const speakerSet = [
+    ...new Set(manifest.cases.flatMap((entry) => entry.transcript.speakers)),
+  ].sort() as PrivateSpeakerLabel[];
 
   return {
     schemaVersion: manifest.schemaVersion,
@@ -153,7 +157,9 @@ export const buildPrivateSpeakerAttributionManifestSummary = (
     speakerSet,
     cases: manifest.cases.map((entry) => ({
       caseId: redactCaseId(entry.id),
-      speakerSet: [...entry.transcript.speakers].sort() as PrivateSpeakerLabel[],
+      speakerSet: [
+        ...entry.transcript.speakers,
+      ].sort() as PrivateSpeakerLabel[],
       hasMixedAudio: entry.audio.mixedAudioPath.length > 0,
       hasMicAudio: entry.audio.micAudioPath.length > 0,
       hasSystemAudio: entry.audio.systemAudioPath.length > 0,
