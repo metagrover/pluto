@@ -423,9 +423,7 @@ describe('local attribution benchmark reporting', () => {
   });
 
   it('runs the synthetic adapter end to end, continues candidate failures, and emits only sanitized reports', async () => {
-    const directory = mkdtempSync(
-      path.join(tmpdir(), 'pluto-attribution-cli-'),
-    );
+    const directory = mkdtempSync(path.resolve('tmp/pluto-attribution-cli-'));
     temporaryDirectories.push(directory);
     const referenceText = 'private words must never reach report';
     writeFileSync(
@@ -452,7 +450,10 @@ describe('local attribution benchmark reporting', () => {
             recordingId: 'sensitive-recording',
             provenance: { tier: 'synthetic', source: 'fixture' },
             audio: { mixedPath: 'unused.wav' },
-            referencePath: 'reference.json',
+            referencePath: path.relative(
+              process.cwd(),
+              path.join(directory, 'reference.json'),
+            ),
           },
         ],
         candidates: [

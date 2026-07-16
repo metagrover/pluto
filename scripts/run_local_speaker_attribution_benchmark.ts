@@ -117,10 +117,10 @@ const safeOutputPath = (
 
 const jsonAt = (filePath: string): unknown =>
   JSON.parse(readFileSync(filePath, 'utf8'));
-const resolveInput = (manifestPath: string, inputPath: string) =>
+const resolveInput = (inputPath: string) =>
   path.isAbsolute(inputPath)
     ? inputPath
-    : path.resolve(path.dirname(manifestPath), inputPath);
+    : path.resolve(process.cwd(), inputPath);
 
 const speakerFor = (
   candidate: CandidateManifestEntry,
@@ -240,9 +240,7 @@ export const runLocalSpeakerAttributionBenchmark = async (
   const references = new Map(
     manifest.cases.map((benchmarkCase) => [
       benchmarkCase.id,
-      loadSpeakerReference(
-        jsonAt(resolveInput(manifestPath, benchmarkCase.referencePath)),
-      ),
+      loadSpeakerReference(jsonAt(resolveInput(benchmarkCase.referencePath))),
     ]),
   );
   const runs: LocalAttributionBenchmarkRun[] = [];
