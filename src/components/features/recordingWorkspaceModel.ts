@@ -66,11 +66,11 @@ export const buildRecordingWorkspaceModel = (
         ? 'System audio needs attention'
         : durabilityWarning
           ? 'Audio may still be recording, but crash recovery is no longer guaranteed'
-        : transcriptWarning
-          ? 'Your audio is recording, but live transcription is falling behind'
-          : input.isProcessing
-            ? 'Finalizing notes. Keep Pluto open.'
-            : 'Capture is healthy',
+          : transcriptWarning
+            ? 'Your audio is recording, but live transcription is falling behind'
+            : input.isProcessing
+              ? 'Finalizing notes. Keep Pluto open.'
+              : 'Capture is healthy',
     transcript: input.segments.filter((segment) => segment.text.trim()),
     interimText: input.interimText.trim(),
   };
