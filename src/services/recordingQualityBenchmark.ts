@@ -1,4 +1,11 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
+import {
+  appendCaptureJournalChunk,
+  createCaptureJournal,
+} from '../../electron/captureJournal.ts';
+import { recoverInterruptedCaptureJournals } from '../../electron/captureJournalRecovery.ts';
 import type { Meeting } from '../types.ts';
 import {
   beginRecordingFinalization,
@@ -16,9 +23,16 @@ import {
 import { retryMeetingTranscriptValidation } from './retryMeetingTranscriptValidation.ts';
 
 export type RecordingQualityBenchmarkCaseKind =
+  | 'capture_recovery'
   | 'transcript_validation'
   | 'recording_finalization'
-  | 'retry_validation';
+  | 'retry_validation'
+  | 'candidate_eligibility';
+
+export type RecordingQualityBenchmarkTier = 'pr' | 'manual';
+export type RecordingQualityBenchmarkTierSelection =
+  | RecordingQualityBenchmarkTier
+  | 'all';
 
 export type RecordingQualityBenchmarkManifestCase = {
   id: string;
@@ -26,6 +40,7 @@ export type RecordingQualityBenchmarkManifestCase = {
   title: string;
   kind: RecordingQualityBenchmarkCaseKind;
   fixture: string;
+  tier: RecordingQualityBenchmarkTier;
   trackedMetrics?: RecordingQualityBenchmarkTrackedMetric[];
 };
 
@@ -49,6 +64,10 @@ export type RecordingQualityBenchmarkTrackedMetric = {
 export type RecordingQualityBenchmarkExpectation = {
   status: 'validated' | 'needs_attention';
   primaryMetric?: RecordingQualityBenchmarkMetric;
+  eligibility?: {
+    eligible: boolean;
+    reasons: string[];
+  };
 };
 
 export type RecordingQualityBenchmarkCaseResult = {
@@ -61,6 +80,10 @@ export type RecordingQualityBenchmarkCaseResult = {
   actual: {
     status: 'validated' | 'needs_attention';
     primaryMetric?: RecordingQualityBenchmarkMetric;
+    eligibility?: {
+      eligible: boolean;
+      reasons: string[];
+    };
     reasons?: string[];
   };
   expected: RecordingQualityBenchmarkExpectation;
@@ -69,6 +92,7 @@ export type RecordingQualityBenchmarkCaseResult = {
 
 export type RecordingQualityBenchmarkReport = {
   schemaVersion: number;
+  tier: RecordingQualityBenchmarkTierSelection;
   generatedAt: string;
   manifestPath: string;
   baselineReportPath: string;
@@ -129,6 +153,7 @@ export type RecordingQualityBenchmarkComparisonCounts = {
 export type RecordingQualityBenchmarkCliOptions = {
   manifest: string;
   out: string;
+  tier: RecordingQualityBenchmarkTierSelection;
 };
 
 type TranscriptValidationFixtureSource = {
@@ -191,10 +216,39 @@ export type RecordingFinalizationFixture = {
   };
 };
 
+export type CandidateAcquisitionMode =
+  | 'bundled'
+  | 'pluto_managed_download'
+  | 'external_hub_download'
+  | 'manual_download';
+
+export type CandidateDistributionMetadata = {
+  candidateId: string;
+  acquisitionMode: CandidateAcquisitionMode;
+  licenseId: string;
+  supportedPlatforms: string[];
+  requiresUserCredentials: boolean;
+  requiresManualTermsAcceptance: boolean;
+  artifactChecksumSha256: string;
+};
+
+export type CandidateEligibilityFixture = {
+  type: 'candidate_eligibility';
+  candidate: CandidateDistributionMetadata;
+  expected: RecordingQualityBenchmarkExpectation & {
+    eligibility: {
+      eligible: boolean;
+      reasons: string[];
+    };
+  };
+};
+
 export type RecordingQualityBenchmarkFixture =
+  | CaptureRecoveryFixture
   | TranscriptValidationFixture
   | RecordingFinalizationFixture
-  | RetryValidationFixture;
+  | RetryValidationFixture
+  | CandidateEligibilityFixture;
 
 type RetryValidationFixtureTranscription = {
   segments: Array<{
@@ -214,6 +268,39 @@ export type RetryValidationFixture = {
     requiredReasons?: string[];
   };
 };
+
+type CaptureRecoveryFixtureChunk = {
+  source: 'mic' | 'system';
+  sequence: number;
+  startSec: number;
+  endSec: number;
+  data: string;
+};
+
+export type CaptureRecoveryFixture = {
+  type: 'capture_recovery';
+  meetingId: string;
+  startedAtMs: number;
+  chunks: CaptureRecoveryFixtureChunk[];
+  corruptAfterJournal?: {
+    source: 'mic' | 'system';
+    sequence: number;
+    replacementData: string;
+  };
+  expected: RecordingQualityBenchmarkExpectation & {
+    requiredRecoveredSources?: Array<'mic' | 'system'>;
+    requiredReasons?: string[];
+  };
+};
+
+const isSupportedBenchmarkCaseKind = (
+  kind: string,
+): kind is RecordingQualityBenchmarkCaseKind =>
+  kind === 'capture_recovery' ||
+  kind === 'transcript_validation' ||
+  kind === 'recording_finalization' ||
+  kind === 'retry_validation' ||
+  kind === 'candidate_eligibility';
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -238,6 +325,7 @@ export const parseRecordingQualityBenchmarkCliArgs = (
   const options: RecordingQualityBenchmarkCliOptions = {
     manifest: path.join(cwd, 'scripts', 'recording-quality', 'manifest.json'),
     out: path.join(cwd, 'tmp', `recording-quality-benchmark-${now}.json`),
+    tier: 'pr',
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -246,10 +334,19 @@ export const parseRecordingQualityBenchmarkCliArgs = (
       continue;
     }
 
-    if ((arg === '--manifest' || arg === '--out') && index + 1 < args.length) {
+    if (
+      (arg === '--manifest' || arg === '--out' || arg === '--tier') &&
+      index + 1 < args.length
+    ) {
       const value = args[index + 1];
       if (arg === '--manifest') options.manifest = value;
       if (arg === '--out') options.out = value;
+      if (arg === '--tier') {
+        if (value !== 'pr' && value !== 'manual' && value !== 'all') {
+          throw new Error(`Unsupported benchmark tier: ${value}`);
+        }
+        options.tier = value;
+      }
       index += 1;
       continue;
     }
@@ -296,12 +393,15 @@ export const loadRecordingQualityBenchmarkManifest = (
     seenIds.add(id);
 
     const kind = String(entry.kind || '').trim();
-    if (
-      kind !== 'transcript_validation' &&
-      kind !== 'recording_finalization' &&
-      kind !== 'retry_validation'
-    ) {
+    if (!isSupportedBenchmarkCaseKind(kind)) {
       throw new Error(`Unsupported benchmark case kind: ${kind}`);
+    }
+    const tier = String(entry.tier || '').trim();
+    if (!tier) {
+      throw new Error(`${id} needs a benchmark tier.`);
+    }
+    if (tier !== 'pr' && tier !== 'manual') {
+      throw new Error(`Unsupported benchmark tier: ${tier}`);
     }
 
     return {
@@ -310,6 +410,7 @@ export const loadRecordingQualityBenchmarkManifest = (
       title: String(entry.title || '').trim(),
       kind,
       fixture: String(entry.fixture || '').trim(),
+      tier,
       trackedMetrics: Array.isArray(entry.trackedMetrics)
         ? entry.trackedMetrics.map((metric) => {
             if (!isObject(metric)) {
@@ -348,6 +449,18 @@ export const loadRecordingQualityBenchmarkManifest = (
   };
 };
 
+export const selectRecordingQualityBenchmarkCases = (
+  cases: RecordingQualityBenchmarkManifestCase[],
+  tier: RecordingQualityBenchmarkTierSelection,
+) => {
+  const selected =
+    tier === 'all' ? cases : cases.filter((entry) => entry.tier === tier);
+  if (selected.length === 0) {
+    throw new Error(`No ${tier} benchmark cases are declared in the manifest.`);
+  }
+  return selected;
+};
+
 const compareMetric = (
   actual: RecordingQualityBenchmarkMetric | undefined,
   expected: RecordingQualityBenchmarkMetric | undefined,
@@ -366,6 +479,65 @@ const compareMetric = (
     );
   }
   return failures;
+};
+
+const compareEligibility = (
+  actual:
+    | {
+        eligible: boolean;
+        reasons: string[];
+      }
+    | undefined,
+  expected:
+    | {
+        eligible: boolean;
+        reasons: string[];
+      }
+    | undefined,
+) => {
+  if (!expected) return [];
+  if (!actual) return ['missing eligibility verdict'];
+  const failures: string[] = [];
+  if (actual.eligible !== expected.eligible) {
+    failures.push(
+      `eligibility mismatch: expected ${String(expected.eligible)}, received ${String(actual.eligible)}`,
+    );
+  }
+  if (actual.reasons.join('|') !== expected.reasons.join('|')) {
+    failures.push(
+      `eligibility reasons mismatch: expected ${expected.reasons.join(', ') || 'none'}, received ${actual.reasons.join(', ') || 'none'}`,
+    );
+  }
+  return failures;
+};
+
+export const evaluateCandidateDistributionEligibility = (
+  candidate: CandidateDistributionMetadata,
+  platform: string,
+) => {
+  const reasons: string[] = [];
+  if (candidate.requiresUserCredentials) {
+    reasons.push('requires_user_credentials');
+  }
+  if (candidate.requiresManualTermsAcceptance) {
+    reasons.push('requires_manual_terms_acceptance');
+  }
+  if (!candidate.artifactChecksumSha256.trim()) {
+    reasons.push('artifact_not_pinned');
+  }
+  if (!candidate.supportedPlatforms.includes(platform)) {
+    reasons.push('unsupported_platform');
+  }
+  if (
+    candidate.acquisitionMode !== 'bundled' &&
+    candidate.acquisitionMode !== 'pluto_managed_download'
+  ) {
+    reasons.push('non_pluto_distribution_channel');
+  }
+  return {
+    eligible: reasons.length === 0,
+    reasons,
+  };
 };
 
 const makeTranscriptMetric = (
@@ -600,6 +772,172 @@ export const runRetryValidationBenchmarkCase = async (
   };
 };
 
+export const runCandidateEligibilityBenchmarkCase = (
+  meta: RecordingQualityBenchmarkManifestCase,
+  fixture: CandidateEligibilityFixture,
+  platform: string,
+): RecordingQualityBenchmarkCaseResult => {
+  const eligibility = evaluateCandidateDistributionEligibility(
+    fixture.candidate,
+    platform,
+  );
+  const failures = compareEligibility(
+    eligibility,
+    fixture.expected.eligibility,
+  );
+  const status =
+    eligibility.eligible && failures.length === 0
+      ? 'validated'
+      : 'needs_attention';
+
+  return {
+    id: meta.id,
+    issue: meta.issue,
+    title: meta.title,
+    kind: meta.kind,
+    passed: failures.length === 0,
+    actual: {
+      status,
+      eligibility,
+      reasons: eligibility.reasons,
+    },
+    expected: fixture.expected,
+    ...(failures.length > 0 ? { failures } : {}),
+  };
+};
+
+type CaptureRecoveryIntegrity = {
+  gap_detected: boolean;
+  recovered_sources: Record<
+    'mic' | 'system',
+    {
+      acknowledgedChunkCount: number;
+      recoveredChunkCount: number;
+      recoveredAudioPath: string | null;
+    }
+  >;
+  recovery_gaps: Array<{
+    source: 'mic' | 'system';
+    sequence: number;
+    reason: string;
+  }>;
+};
+
+export const runCaptureRecoveryBenchmarkCase = async (
+  meta: RecordingQualityBenchmarkManifestCase,
+  fixture: CaptureRecoveryFixture,
+): Promise<RecordingQualityBenchmarkCaseResult> => {
+  const rootDir = await mkdtemp(
+    path.join(tmpdir(), 'pluto-recording-quality-recovery-'),
+  );
+
+  try {
+    let manifest = await createCaptureJournal(rootDir, {
+      meetingId: fixture.meetingId,
+      startedAtMs: fixture.startedAtMs,
+    });
+    for (const chunk of fixture.chunks) {
+      manifest = await appendCaptureJournalChunk(rootDir, {
+        meetingId: fixture.meetingId,
+        source: chunk.source,
+        sequence: chunk.sequence,
+        chunkStartSec: chunk.startSec,
+        chunkEndSec: chunk.endSec,
+        format: 'wav',
+        data: Buffer.from(chunk.data),
+      });
+    }
+
+    if (fixture.corruptAfterJournal) {
+      const corruptEntry = manifest.entries.find(
+        (entry) =>
+          entry.source === fixture.corruptAfterJournal?.source &&
+          entry.sequence === fixture.corruptAfterJournal.sequence,
+      );
+      if (!corruptEntry) {
+        throw new Error(
+          'Capture recovery fixture corruption target is missing',
+        );
+      }
+      await writeFile(
+        path.join(rootDir, corruptEntry.relativePath),
+        Buffer.from(fixture.corruptAfterJournal.replacementData),
+      );
+    }
+
+    let savedMeeting: { transcript_integrity_json?: string | null } | null =
+      null;
+    await recoverInterruptedCaptureJournals(rootDir, {
+      getMeeting: () => null,
+      saveMeeting: (meeting) => {
+        savedMeeting = meeting;
+        return meeting;
+      },
+      stitchWavSegments: async (_segments, outputTag) =>
+        path.join(rootDir, `${outputTag}.wav`),
+      nowMs: fixture.startedAtMs + 10_000,
+    });
+
+    if (!savedMeeting) {
+      throw new Error('Capture recovery benchmark did not save a meeting');
+    }
+    const integrity = JSON.parse(
+      savedMeeting.transcript_integrity_json || '{}',
+    ) as CaptureRecoveryIntegrity;
+    const acknowledgedChunks = Object.values(
+      integrity.recovered_sources,
+    ).reduce((total, source) => total + source.acknowledgedChunkCount, 0);
+    const recoveredChunks = Object.values(integrity.recovered_sources).reduce(
+      (total, source) => total + source.recoveredChunkCount,
+      0,
+    );
+    const actualMetric: RecordingQualityBenchmarkMetric = {
+      name: 'recoveredChunkRatio',
+      value:
+        acknowledgedChunks === 0
+          ? 0
+          : Number((recoveredChunks / acknowledgedChunks).toFixed(4)),
+    };
+    const reasons = integrity.recovery_gaps.map(
+      (gap) => `${gap.reason}:${gap.source}:${gap.sequence}`,
+    );
+    const actualStatus = integrity.gap_detected
+      ? 'needs_attention'
+      : 'validated';
+    const missingSources = (fixture.expected.requiredRecoveredSources || [])
+      .filter(
+        (source) => !integrity.recovered_sources[source].recoveredAudioPath,
+      )
+      .map((source) => `missing recovered source ${source}`);
+    const failures = [
+      ...(actualStatus === fixture.expected.status ? [] : ['status mismatch']),
+      ...compareMetric(actualMetric, fixture.expected.primaryMetric),
+      ...(fixture.expected.requiredReasons || [])
+        .filter((reason) => !reasons.includes(reason))
+        .map((reason) => `missing required reason ${reason}`),
+      ...missingSources,
+    ];
+
+    return {
+      id: meta.id,
+      issue: meta.issue,
+      title: meta.title,
+      kind: meta.kind,
+      passed: failures.length === 0,
+      trackedMetrics: meta.trackedMetrics,
+      actual: {
+        status: actualStatus,
+        primaryMetric: actualMetric,
+        reasons,
+      },
+      expected: fixture.expected,
+      ...(failures.length > 0 ? { failures } : {}),
+    };
+  } finally {
+    await rm(rootDir, { recursive: true, force: true });
+  }
+};
+
 const calculateMetricDelta = (
   baselineValue: number | string | boolean,
   currentValue: number | string | boolean,
@@ -765,9 +1103,9 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
     ],
   };
 };
-
 export const buildRecordingQualityBenchmarkReport = (input: {
   schemaVersion: number;
+  tier: RecordingQualityBenchmarkTierSelection;
   manifestPath: string;
   baselineReportPath: string;
   generatedAt: string;
@@ -791,6 +1129,8 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     RecordingQualityBenchmarkCaseKind,
     { passed: number; failed: number }
   > = {
+    candidate_eligibility: { passed: 0, failed: 0 },
+    capture_recovery: { passed: 0, failed: 0 },
     recording_finalization: { passed: 0, failed: 0 },
     transcript_validation: { passed: 0, failed: 0 },
     retry_validation: { passed: 0, failed: 0 },
@@ -813,6 +1153,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
 
   return {
     schemaVersion: input.schemaVersion,
+    tier: input.tier,
     generatedAt: input.generatedAt,
     manifestPath: input.manifestPath,
     baselineReportPath: input.baselineReportPath,

@@ -23,7 +23,7 @@ import {
   persistDashboardAttentionStatus,
 } from './components/features/dashboardActionCompletion';
 import type {
-  CaptureHealth,
+  CaptureHealthState,
   LiveTranscriptIntegrity,
   LiveTranscriptSegment,
 } from './components/features/recordingWorkspaceModel';
@@ -129,12 +129,10 @@ function App() {
   const [recordingStartedAtMs, setRecordingStartedAtMs] = useState<
     number | null
   >(null);
-  const [captureHealth, setCaptureHealth] = useState<{
-    microphone: CaptureHealth;
-    systemAudio: CaptureHealth;
-  }>({
+  const [captureHealth, setCaptureHealth] = useState<CaptureHealthState>({
     microphone: 'healthy',
     systemAudio: 'healthy',
+    captureDurability: 'healthy',
   });
   const [liveTranscriptIntegrity, setLiveTranscriptIntegrity] =
     useState<LiveTranscriptIntegrity>('healthy');

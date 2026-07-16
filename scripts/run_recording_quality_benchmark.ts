@@ -4,6 +4,8 @@ import path from 'node:path';
 import process from 'node:process';
 
 import {
+  type CandidateEligibilityFixture,
+  type CaptureRecoveryFixture,
   type RecordingFinalizationFixture,
   type RecordingQualityBenchmarkFixture,
   type RetryValidationFixture,
@@ -11,9 +13,12 @@ import {
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
+  runCandidateEligibilityBenchmarkCase,
+  runCaptureRecoveryBenchmarkCase,
   runRecordingFinalizationBenchmarkCase,
   runRetryValidationBenchmarkCase,
   runTranscriptValidationBenchmarkCase,
+  selectRecordingQualityBenchmarkCases,
 } from '../src/services/recordingQualityBenchmark.ts';
 
 const readJson = <T>(filePath: string): T =>
@@ -45,9 +50,23 @@ const main = async () => {
   );
   const results = [];
 
-  for (const entry of manifest.cases) {
+  const selectedCases = selectRecordingQualityBenchmarkCases(
+    manifest.cases,
+    options.tier,
+  );
+
+  for (const entry of selectedCases) {
     const fixturePath = resolveFixture(manifestPath, entry.fixture);
     const fixture = readJson<RecordingQualityBenchmarkFixture>(fixturePath);
+    if (fixture.type === 'capture_recovery') {
+      results.push(
+        await runCaptureRecoveryBenchmarkCase(
+          entry,
+          fixture as CaptureRecoveryFixture,
+        ),
+      );
+      continue;
+    }
     if (fixture.type === 'transcript_validation') {
       results.push(
         await runTranscriptValidationBenchmarkCase(
@@ -75,6 +94,16 @@ const main = async () => {
       );
       continue;
     }
+    if (fixture.type === 'candidate_eligibility') {
+      results.push(
+        runCandidateEligibilityBenchmarkCase(
+          entry,
+          fixture as CandidateEligibilityFixture,
+          `${process.platform}-${process.arch}`,
+        ),
+      );
+      continue;
+    }
     throw new Error(`Unsupported fixture type in ${fixturePath}`);
   }
 
@@ -86,6 +115,7 @@ const main = async () => {
     path.relative(process.cwd(), filePath) || '.';
   const report = buildRecordingQualityBenchmarkReport({
     schemaVersion: manifest.schemaVersion,
+    tier: options.tier,
     manifestPath: relativeFromRepo(manifestPath),
     baselineReportPath: relativeFromRepo(baselineReportPath),
     generatedAt: new Date().toISOString(),
@@ -104,10 +134,10 @@ const main = async () => {
   fs.writeFileSync(options.out, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
 
   console.log(
-    `[RecordingQualityBenchmark] ${report.summary.passedCases}/${report.summary.totalCases} cases passed`,
+    `[RecordingQualityBenchmark] tier=${report.tier} ${report.summary.passedCases}/${report.summary.totalCases} cases passed`,
   );
   console.log(
-    `[RecordingQualityBenchmark] transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} retry_validation=${report.summary.kinds.retry_validation.passed}/${report.summary.kinds.retry_validation.passed + report.summary.kinds.retry_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed}`,
+    `[RecordingQualityBenchmark] capture_recovery=${report.summary.kinds.capture_recovery.passed}/${report.summary.kinds.capture_recovery.passed + report.summary.kinds.capture_recovery.failed} transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} retry_validation=${report.summary.kinds.retry_validation.passed}/${report.summary.kinds.retry_validation.passed + report.summary.kinds.retry_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed} candidate_eligibility=${report.summary.kinds.candidate_eligibility.passed}/${report.summary.kinds.candidate_eligibility.passed + report.summary.kinds.candidate_eligibility.failed}`,
   );
   console.log(
     `[RecordingQualityBenchmark] baseline stable_regressions=${report.comparisonSummary.stableRegressions} stable_improvements=${report.comparisonSummary.stableImprovements} within_tolerance=${report.comparisonSummary.stableWithinTolerance} hardware_drift=${report.comparisonSummary.hardwareDependentDrift} missing_baseline=${report.comparisonSummary.missingBaselineMetrics}`,
