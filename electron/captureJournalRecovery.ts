@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { access, readdir, stat } from 'node:fs/promises';
+import { access, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { buildTranscriptJsonPayload } from '../src/utils/transcriptSchema';
@@ -11,7 +12,10 @@ import type {
 import { readCaptureJournalManifest } from './captureJournal';
 import type { PersistedMeeting } from './db';
 
-type RecoveryGapReason = 'missing_artifact' | 'byte_count_mismatch';
+type RecoveryGapReason =
+  | 'missing_artifact'
+  | 'byte_count_mismatch'
+  | 'checksum_mismatch';
 
 type RecoveryGap = {
   source: CaptureJournalSource;
@@ -81,6 +85,9 @@ const listCaptureJournalMeetingIds = async (rootDir: string) => {
   return meetingIds.sort();
 };
 
+const computeChecksum = (data: Buffer) =>
+  createHash('sha256').update(data).digest('hex');
+
 const buildSourceSegments = async (
   rootDir: string,
   entries: CaptureJournalEntry[],
@@ -100,6 +107,15 @@ const buildSourceSegments = async (
           source: entry.source,
           sequence: entry.sequence,
           reason: 'byte_count_mismatch',
+        });
+        continue;
+      }
+      const fileData = await readFile(absolutePath);
+      if (computeChecksum(fileData) !== entry.checksumSha256) {
+        gaps.push({
+          source: entry.source,
+          sequence: entry.sequence,
+          reason: 'checksum_mismatch',
         });
         continue;
       }
