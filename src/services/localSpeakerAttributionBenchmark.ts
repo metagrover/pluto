@@ -77,7 +77,7 @@ export type CandidateCaseFailure = {
   caseId: string;
   status: 'failure';
   error: {
-    code: string;
+    code: CandidateFailureCode;
     message: string;
   };
 };
@@ -93,8 +93,160 @@ export type LocalCandidateRunResult = {
 };
 export type LocalCandidateRunOptions = {
   timeoutMs?: number;
-  privateCorpusRoot?: string;
   maxStderrBytes?: number;
+};
+
+export type CandidateFailureCode =
+  | 'candidate_not_found'
+  | 'candidate_timeout'
+  | 'candidate_exit_nonzero'
+  | 'candidate_output_too_large'
+  | 'candidate_invalid_json'
+  | 'candidate_contract_mismatch'
+  | 'candidate_unsupported_hardware'
+  | 'candidate_model_missing'
+  | 'candidate_model_checksum_failed'
+  | 'candidate_out_of_memory';
+
+export type PublicCandidateResult = {
+  caseHash: string;
+  candidateId: string;
+  status: 'ok' | 'failed' | 'unsupported';
+  elapsedMs: number;
+  peakMemoryMb: number;
+  failureCode?: CandidateFailureCode;
+  metrics?: Record<string, unknown>;
+  provenance?: {
+    pipelineVersion: string;
+    models: CandidateModelIdentity[];
+  };
+};
+
+const candidateFailureCodes = new Set<CandidateFailureCode>([
+  'candidate_not_found',
+  'candidate_timeout',
+  'candidate_exit_nonzero',
+  'candidate_output_too_large',
+  'candidate_invalid_json',
+  'candidate_contract_mismatch',
+  'candidate_unsupported_hardware',
+  'candidate_model_missing',
+  'candidate_model_checksum_failed',
+  'candidate_out_of_memory',
+]);
+
+/** Constructs a new public value; arbitrary input fields are never copied. */
+export const sanitizeCandidateResult = (
+  input: Record<string, unknown>,
+): PublicCandidateResult => {
+  const safeIdentifier = (value: unknown): string =>
+    typeof value === 'string' &&
+    value.length <= 128 &&
+    /^[a-zA-Z0-9._:-]+$/.test(value)
+      ? value
+      : '';
+  const status =
+    input.status === 'ok' ||
+    input.status === 'failed' ||
+    input.status === 'unsupported'
+      ? input.status
+      : 'failed';
+  const failureCode = candidateFailureCodes.has(
+    input.failureCode as CandidateFailureCode,
+  )
+    ? (input.failureCode as CandidateFailureCode)
+    : undefined;
+  const metricKeys = new Set([
+    'wordErrorRate',
+    'diarizationErrorRate',
+    'falseMeSeconds',
+    'missedMeSeconds',
+    'speakerCount',
+    'transcript',
+    'speakerAttributedWords',
+    'diarization',
+    'me',
+    'them',
+    'expectedSpeakerCount',
+    'generatedSpeakerCount',
+    'speakerCountCorrect',
+    'boundaryErrorSeconds',
+    'overlapAccuracy',
+    'shortLocalTurnRecall',
+    'runtimeFactor',
+    'referenceWords',
+    'hypothesisWords',
+    'substitutions',
+    'deletions',
+    'insertions',
+    'errors',
+    'referenceSpeakerSeconds',
+    'missedSpeechSeconds',
+    'falseAlarmSeconds',
+    'speakerConfusionSeconds',
+    'errorRate',
+    'truePositiveSeconds',
+    'predictedSeconds',
+    'referenceSeconds',
+    'precision',
+    'recall',
+    'f1',
+  ]);
+  const safeMetrics = (value: unknown): Record<string, unknown> | undefined => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value))
+      return undefined;
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (!metricKeys.has(key)) continue;
+      if (typeof item === 'boolean') result[key] = item;
+      else if (typeof item === 'number' && Number.isFinite(item))
+        result[key] = item;
+      else {
+        const nested = safeMetrics(item);
+        if (nested) result[key] = nested;
+      }
+    }
+    return result;
+  };
+  const metrics = safeMetrics(input.metrics);
+  const rawProvenance =
+    typeof input.provenance === 'object' && input.provenance !== null
+      ? (input.provenance as UnknownRecord)
+      : undefined;
+  const provenance = rawProvenance
+    ? {
+        pipelineVersion: safeIdentifier(rawProvenance.pipelineVersion),
+        models: Array.isArray(rawProvenance.models)
+          ? rawProvenance.models.flatMap((rawModel) => {
+              if (typeof rawModel !== 'object' || rawModel === null) return [];
+              const model = rawModel as UnknownRecord;
+              const id = safeIdentifier(model.id);
+              const version = safeIdentifier(model.version);
+              return id && version ? [{ id, version }] : [];
+            })
+          : [],
+      }
+    : undefined;
+  return {
+    caseHash: safeIdentifier(input.caseHash),
+    candidateId: safeIdentifier(input.candidateId),
+    status,
+    elapsedMs:
+      typeof input.elapsedMs === 'number' &&
+      Number.isFinite(input.elapsedMs) &&
+      input.elapsedMs >= 0
+        ? input.elapsedMs
+        : 0,
+    peakMemoryMb:
+      typeof input.peakMemoryMb === 'number' &&
+      Number.isFinite(input.peakMemoryMb) &&
+      input.peakMemoryMb >= 0
+        ? input.peakMemoryMb
+        : 0,
+    ...(failureCode === undefined ? {} : { failureCode }),
+    ...(metrics === undefined ? {} : { metrics }),
+    ...(provenance === undefined ? {} : { provenance }),
+  };
 };
 
 export type WordErrorMetrics = {
@@ -512,7 +664,7 @@ export const loadLocalAttributionCandidateOutput = (
 
 const protocolFailure = (
   caseId: string,
-  code: CandidateCaseFailure['error']['code'],
+  code: CandidateFailureCode,
   message: string,
 ): CandidateCaseFailure => ({
   caseId,
@@ -534,7 +686,11 @@ export const runLocalAttributionCandidate = async (
     return {
       candidateId: candidate.id,
       results: cases.map(({ id }) =>
-        protocolFailure(id, 'process-error', 'Candidate command is empty.'),
+        protocolFailure(
+          id,
+          'candidate_not_found',
+          'Candidate command is empty.',
+        ),
       ),
     };
   }
@@ -560,8 +716,9 @@ export const runLocalAttributionCandidate = async (
   let stderrBytes = 0;
   let stdoutBuffer = '';
   let terminalFailure:
-    | { code: CandidateCaseFailure['error']['code']; message: string }
+    | { code: CandidateFailureCode; message: string }
     | undefined;
+  let spawnErrorCode: string | undefined;
 
   const child = spawn(candidate.command[0], candidate.command.slice(1), {
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -569,12 +726,9 @@ export const runLocalAttributionCandidate = async (
   });
 
   const terminate = () => {
-    if (!child.killed) child.kill('SIGKILL');
+    if (!child.killed) child.kill('SIGTERM');
   };
-  const failProtocol = (
-    code: CandidateCaseFailure['error']['code'],
-    message: string,
-  ) => {
+  const failProtocol = (code: CandidateFailureCode, message: string) => {
     if (terminalFailure) return;
     terminalFailure = { code, message };
     for (const { id } of cases) {
@@ -584,7 +738,9 @@ export const runLocalAttributionCandidate = async (
   };
 
   child.stdin.on('error', () => {
-    failProtocol('process-error', 'Candidate process input failed.');
+    if (!spawnErrorCode) {
+      failProtocol('candidate_exit_nonzero', 'Candidate process input failed.');
+    }
   });
   child.stderr.on('data', (chunk: Buffer | string) => {
     if (stderrBytes >= maxStderrBytes) return;
@@ -595,9 +751,9 @@ export const runLocalAttributionCandidate = async (
   });
   child.stdout.on('data', (chunk: Buffer | string) => {
     stdoutBuffer += chunk.toString();
-    if (Buffer.byteLength(stdoutBuffer) > 1024 * 1024) {
+    if (Buffer.byteLength(stdoutBuffer) > 10 * 1024 * 1024) {
       failProtocol(
-        'malformed-response',
+        'candidate_output_too_large',
         'Candidate response exceeded the maximum JSONL line size.',
       );
       return;
@@ -612,16 +768,39 @@ export const runLocalAttributionCandidate = async (
         raw = objectAt(JSON.parse(line), 'candidate response');
       } catch {
         failProtocol(
-          'malformed-response',
+          'candidate_invalid_json',
           'Candidate returned malformed JSONL output.',
         );
         return;
       }
-      const responseId = typeof raw.id === 'string' ? raw.id : '';
+      if (raw.schemaVersion !== 1) {
+        failProtocol(
+          'candidate_contract_mismatch',
+          'Candidate returned an unsupported envelope version.',
+        );
+        return;
+      }
+      if (
+        raw.requestId !== undefined &&
+        raw.id !== undefined &&
+        raw.requestId !== raw.id
+      ) {
+        failProtocol(
+          'candidate_contract_mismatch',
+          'Candidate returned conflicting response identifiers.',
+        );
+        return;
+      }
+      const responseId =
+        typeof raw.requestId === 'string'
+          ? raw.requestId
+          : typeof raw.id === 'string'
+            ? raw.id
+            : '';
       const caseId = requestIds.get(responseId);
       if (!caseId) {
         failProtocol(
-          'unexpected-response',
+          'candidate_contract_mismatch',
           'Candidate returned an unexpected response identifier.',
         );
         return;
@@ -631,12 +810,12 @@ export const runLocalAttributionCandidate = async (
           caseId,
           protocolFailure(
             caseId,
-            'duplicate-response',
+            'candidate_contract_mismatch',
             'Candidate returned more than one response for the case.',
           ),
         );
         failProtocol(
-          'duplicate-response',
+          'candidate_contract_mismatch',
           'Candidate returned a duplicate response identifier.',
         );
         return;
@@ -646,11 +825,11 @@ export const runLocalAttributionCandidate = async (
           typeof raw.error === 'object' && raw.error !== null
             ? (raw.error as UnknownRecord)
             : {};
-        const safeCode =
-          typeof candidateError.code === 'string' &&
-          /^[a-z][a-z0-9-]{0,63}$/.test(candidateError.code)
-            ? candidateError.code
-            : 'candidate-error';
+        const safeCode = candidateFailureCodes.has(
+          candidateError.code as CandidateFailureCode,
+        )
+          ? (candidateError.code as CandidateFailureCode)
+          : 'candidate_contract_mismatch';
         caseResults.set(caseId, {
           caseId,
           status: 'failure',
@@ -672,7 +851,7 @@ export const runLocalAttributionCandidate = async (
           caseId,
           protocolFailure(
             caseId,
-            'invalid-output',
+            'candidate_contract_mismatch',
             'Candidate output failed schema or identity validation.',
           ),
         );
@@ -680,22 +859,27 @@ export const runLocalAttributionCandidate = async (
     }
   });
 
-  const completion = new Promise<void>((resolve) => {
-    child.once('error', () => {
-      terminalFailure ??= {
-        code: 'process-error',
-        message: 'Candidate process could not be started.',
-      };
-      resolve();
+  const completion = new Promise<{
+    exitCode: number | null;
+    signal: NodeJS.Signals | null;
+  }>((resolve) => {
+    child.once('error', (error: NodeJS.ErrnoException) => {
+      spawnErrorCode = error.code;
     });
-    child.once('close', () => resolve());
+    child.once('close', (exitCode, signal) => resolve({ exitCode, signal }));
   });
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
   const timer = setTimeout(() => {
     terminalFailure ??= {
-      code: 'timeout',
+      code: 'candidate_timeout',
       message: 'Candidate exceeded the configured timeout.',
     };
     terminate();
+    forceKillTimer = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+      }
+    }, 100);
   }, timeoutMs);
 
   for (const [id, caseId] of requestIds) {
@@ -706,6 +890,7 @@ export const runLocalAttributionCandidate = async (
       child.stdin.write(
         `${JSON.stringify({
           id,
+          requestId: id,
           schemaVersion: 1,
           candidate: {
             id: candidate.id,
@@ -720,12 +905,34 @@ export const runLocalAttributionCandidate = async (
     }
   }
   child.stdin.end();
-  await completion;
+  const { exitCode, signal } = await completion;
   clearTimeout(timer);
+  if (forceKillTimer) clearTimeout(forceKillTimer);
+
+  if (!terminalFailure && spawnErrorCode) {
+    terminalFailure = {
+      code:
+        spawnErrorCode === 'ENOENT'
+          ? 'candidate_not_found'
+          : 'candidate_exit_nonzero',
+      message: 'Candidate process could not be started.',
+    };
+  } else if (!terminalFailure && (exitCode !== 0 || signal !== null)) {
+    terminalFailure = {
+      code: 'candidate_exit_nonzero',
+      message: 'Candidate process exited unsuccessfully.',
+    };
+    for (const { id } of cases) {
+      caseResults.set(
+        id,
+        protocolFailure(id, terminalFailure.code, terminalFailure.message),
+      );
+    }
+  }
 
   if (!terminalFailure && stdoutBuffer.trim() !== '') {
     terminalFailure = {
-      code: 'malformed-response',
+      code: 'candidate_invalid_json',
       message: 'Candidate returned an incomplete JSONL response.',
     };
   }
@@ -737,7 +944,7 @@ export const runLocalAttributionCandidate = async (
     }
     return protocolFailure(
       id,
-      'missing-response',
+      'candidate_contract_mismatch',
       'Candidate did not return a response for the case.',
     );
   });
