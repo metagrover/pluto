@@ -1,8 +1,8 @@
 import {
   type ResolvedBackendOptions,
   resolveBackendOptions,
-} from './transcriptionBackendConfig';
-import type { TranscriptionSettings } from './transcriptionSettings';
+} from './transcriptionBackendConfig.ts';
+import type { TranscriptionSettings } from './transcriptionSettings.ts';
 
 export type RecordingStopSnapshot = {
   meetingId: string;

@@ -1,21 +1,31 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-15T15:40:34.403Z",
+  "generatedAt": "2026-07-16T05:08:04.827Z",
   "manifestPath": "scripts/recording-quality/manifest.json",
   "baselineReportPath": "scripts/recording-quality/baselines/current-master.json",
-  "sourceCommit": "026bdcf6",
+  "sourceCommit": "d1228ab2",
   "environment": {
     "nodeVersion": "v24.11.1",
     "platform": "darwin",
     "arch": "arm64"
   },
   "summary": {
-    "totalCases": 4,
-    "passedCases": 4,
+    "totalCases": 5,
+    "passedCases": 5,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434],
+    "issueCoverage": [
+      25,
+      75,
+      428,
+      434,
+      476
+    ],
     "kinds": {
+      "candidate_eligibility": {
+        "passed": 1,
+        "failed": 0
+      },
       "recording_finalization": {
         "passed": 1,
         "failed": 0
@@ -27,6 +37,46 @@
     }
   },
   "results": [
+    {
+      "id": "issue-476-credential-free-distribution",
+      "issue": 476,
+      "title": "Credential-free distribution metadata gate",
+      "kind": "candidate_eligibility",
+      "passed": true,
+      "actual": {
+        "status": "needs_attention",
+        "eligibility": {
+          "eligible": false,
+          "reasons": [
+            "requires_user_credentials",
+            "requires_manual_terms_acceptance",
+            "artifact_not_pinned",
+            "unsupported_platform",
+            "non_pluto_distribution_channel"
+          ]
+        },
+        "reasons": [
+          "requires_user_credentials",
+          "requires_manual_terms_acceptance",
+          "artifact_not_pinned",
+          "unsupported_platform",
+          "non_pluto_distribution_channel"
+        ]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "eligibility": {
+          "eligible": false,
+          "reasons": [
+            "requires_user_credentials",
+            "requires_manual_terms_acceptance",
+            "artifact_not_pinned",
+            "unsupported_platform",
+            "non_pluto_distribution_channel"
+          ]
+        }
+      }
+    },
     {
       "id": "issue-25-opening-audio",
       "issue": 25,
@@ -66,7 +116,9 @@
       "expected": {
         "status": "validated",
         "secondCallReturnsNull": true,
-        "cleanupPaths": ["/tmp/session-system.wav"],
+        "cleanupPaths": [
+          "/tmp/session-system.wav"
+        ],
         "primaryMetric": {
           "name": "durationSeconds",
           "value": 1062
@@ -107,11 +159,15 @@
           "name": "localTranscriptCoveredSeconds",
           "value": 6
         },
-        "reasons": ["local_speech_unaccounted"]
+        "reasons": [
+          "local_speech_unaccounted"
+        ]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": ["local_speech_unaccounted"],
+        "requiredReasons": [
+          "local_speech_unaccounted"
+        ],
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 6

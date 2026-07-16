@@ -15,7 +15,8 @@ import {
 
 export type RecordingQualityBenchmarkCaseKind =
   | 'transcript_validation'
-  | 'recording_finalization';
+  | 'recording_finalization'
+  | 'candidate_eligibility';
 
 export type RecordingQualityBenchmarkManifestCase = {
   id: string;
@@ -39,6 +40,10 @@ export type RecordingQualityBenchmarkMetric = {
 export type RecordingQualityBenchmarkExpectation = {
   status: 'validated' | 'needs_attention';
   primaryMetric?: RecordingQualityBenchmarkMetric;
+  eligibility?: {
+    eligible: boolean;
+    reasons: string[];
+  };
 };
 
 export type RecordingQualityBenchmarkCaseResult = {
@@ -50,6 +55,10 @@ export type RecordingQualityBenchmarkCaseResult = {
   actual: {
     status: 'validated' | 'needs_attention';
     primaryMetric?: RecordingQualityBenchmarkMetric;
+    eligibility?: {
+      eligible: boolean;
+      reasons: string[];
+    };
     reasons?: string[];
   };
   expected: RecordingQualityBenchmarkExpectation;
@@ -150,9 +159,44 @@ export type RecordingFinalizationFixture = {
   };
 };
 
+export type CandidateAcquisitionMode =
+  | 'bundled'
+  | 'pluto_managed_download'
+  | 'external_hub_download'
+  | 'manual_download';
+
+export type CandidateDistributionMetadata = {
+  candidateId: string;
+  acquisitionMode: CandidateAcquisitionMode;
+  licenseId: string;
+  supportedPlatforms: string[];
+  requiresUserCredentials: boolean;
+  requiresManualTermsAcceptance: boolean;
+  artifactChecksumSha256: string;
+};
+
+export type CandidateEligibilityFixture = {
+  type: 'candidate_eligibility';
+  candidate: CandidateDistributionMetadata;
+  expected: RecordingQualityBenchmarkExpectation & {
+    eligibility: {
+      eligible: boolean;
+      reasons: string[];
+    };
+  };
+};
+
 export type RecordingQualityBenchmarkFixture =
   | TranscriptValidationFixture
-  | RecordingFinalizationFixture;
+  | RecordingFinalizationFixture
+  | CandidateEligibilityFixture;
+
+const isSupportedBenchmarkCaseKind = (
+  kind: string,
+): kind is RecordingQualityBenchmarkCaseKind =>
+  kind === 'transcript_validation' ||
+  kind === 'recording_finalization' ||
+  kind === 'candidate_eligibility';
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -226,7 +270,7 @@ export const loadRecordingQualityBenchmarkManifest = (
     seenIds.add(id);
 
     const kind = String(entry.kind || '').trim();
-    if (kind !== 'transcript_validation' && kind !== 'recording_finalization') {
+    if (!isSupportedBenchmarkCaseKind(kind)) {
       throw new Error(`Unsupported benchmark case kind: ${kind}`);
     }
 
@@ -264,6 +308,65 @@ const compareMetric = (
     );
   }
   return failures;
+};
+
+const compareEligibility = (
+  actual:
+    | {
+        eligible: boolean;
+        reasons: string[];
+      }
+    | undefined,
+  expected:
+    | {
+        eligible: boolean;
+        reasons: string[];
+      }
+    | undefined,
+) => {
+  if (!expected) return [];
+  if (!actual) return ['missing eligibility verdict'];
+  const failures: string[] = [];
+  if (actual.eligible !== expected.eligible) {
+    failures.push(
+      `eligibility mismatch: expected ${String(expected.eligible)}, received ${String(actual.eligible)}`,
+    );
+  }
+  if (actual.reasons.join('|') !== expected.reasons.join('|')) {
+    failures.push(
+      `eligibility reasons mismatch: expected ${expected.reasons.join(', ') || 'none'}, received ${actual.reasons.join(', ') || 'none'}`,
+    );
+  }
+  return failures;
+};
+
+export const evaluateCandidateDistributionEligibility = (
+  candidate: CandidateDistributionMetadata,
+  platform: string,
+) => {
+  const reasons: string[] = [];
+  if (candidate.requiresUserCredentials) {
+    reasons.push('requires_user_credentials');
+  }
+  if (candidate.requiresManualTermsAcceptance) {
+    reasons.push('requires_manual_terms_acceptance');
+  }
+  if (!candidate.artifactChecksumSha256.trim()) {
+    reasons.push('artifact_not_pinned');
+  }
+  if (!candidate.supportedPlatforms.includes(platform)) {
+    reasons.push('unsupported_platform');
+  }
+  if (
+    candidate.acquisitionMode !== 'bundled' &&
+    candidate.acquisitionMode !== 'pluto_managed_download'
+  ) {
+    reasons.push('non_pluto_distribution_channel');
+  }
+  return {
+    eligible: reasons.length === 0,
+    reasons,
+  };
 };
 
 const makeTranscriptMetric = (
@@ -385,6 +488,40 @@ export const runRecordingFinalizationBenchmarkCase = (
   };
 };
 
+export const runCandidateEligibilityBenchmarkCase = (
+  meta: RecordingQualityBenchmarkManifestCase,
+  fixture: CandidateEligibilityFixture,
+  platform: string,
+): RecordingQualityBenchmarkCaseResult => {
+  const eligibility = evaluateCandidateDistributionEligibility(
+    fixture.candidate,
+    platform,
+  );
+  const failures = compareEligibility(
+    eligibility,
+    fixture.expected.eligibility,
+  );
+  const status =
+    eligibility.eligible && failures.length === 0
+      ? 'validated'
+      : 'needs_attention';
+
+  return {
+    id: meta.id,
+    issue: meta.issue,
+    title: meta.title,
+    kind: meta.kind,
+    passed: failures.length === 0,
+    actual: {
+      status,
+      eligibility,
+      reasons: eligibility.reasons,
+    },
+    expected: fixture.expected,
+    ...(failures.length > 0 ? { failures } : {}),
+  };
+};
+
 export const buildRecordingQualityBenchmarkReport = (input: {
   schemaVersion: number;
   manifestPath: string;
@@ -404,6 +541,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     RecordingQualityBenchmarkCaseKind,
     { passed: number; failed: number }
   > = {
+    candidate_eligibility: { passed: 0, failed: 0 },
     recording_finalization: { passed: 0, failed: 0 },
     transcript_validation: { passed: 0, failed: 0 },
   };
