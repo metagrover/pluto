@@ -720,14 +720,36 @@ export const runLocalAttributionCandidate = async (
     | { code: CandidateFailureCode; message: string }
     | undefined;
   let spawnErrorCode: string | undefined;
+  let processClosed = false;
+  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+  const usesProcessGroup = process.platform !== 'win32';
 
   const child = spawn(candidate.command[0], candidate.command.slice(1), {
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: false,
+    detached: usesProcessGroup,
   });
 
+  const signalCandidate = (signal: NodeJS.Signals) => {
+    if (usesProcessGroup && child.pid !== undefined) {
+      try {
+        process.kill(-child.pid, signal);
+        return;
+      } catch {
+        // The group may have exited between the state check and signal.
+      }
+    }
+    try {
+      child.kill(signal);
+    } catch {
+      // A process that already exited needs no further cleanup.
+    }
+  };
   const terminate = () => {
-    if (!child.killed) child.kill('SIGTERM');
+    signalCandidate('SIGTERM');
+    forceKillTimer ??= setTimeout(() => {
+      if (!processClosed) signalCandidate('SIGKILL');
+    }, 100);
   };
   const failProtocol = (code: CandidateFailureCode, message: string) => {
     if (terminalFailure) return;
@@ -751,6 +773,7 @@ export const runLocalAttributionCandidate = async (
     );
   });
   child.stdout.on('data', (chunk: Buffer | string) => {
+    if (terminalFailure) return;
     stdoutBytes += Buffer.byteLength(chunk);
     if (stdoutBytes > 10 * 1024 * 1024) {
       failProtocol(
@@ -868,28 +891,36 @@ export const runLocalAttributionCandidate = async (
     child.once('error', (error: NodeJS.ErrnoException) => {
       spawnErrorCode = error.code;
     });
-    child.once('close', (exitCode, signal) => resolve({ exitCode, signal }));
+    child.once('close', (exitCode, signal) => {
+      processClosed = true;
+      resolve({ exitCode, signal });
+    });
   });
-  let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
   const timer = setTimeout(() => {
-    terminalFailure ??= {
-      code: 'candidate_timeout',
-      message: 'Candidate exceeded the configured timeout.',
-    };
-    terminate();
-    forceKillTimer = setTimeout(() => {
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill('SIGKILL');
-      }
-    }, 100);
+    failProtocol(
+      'candidate_timeout',
+      'Candidate exceeded the configured timeout.',
+    );
   }, timeoutMs);
 
-  for (const [id, caseId] of requestIds) {
-    const benchmarkCase = cases.find((entry) => entry.id === caseId) as
-      | LocalAttributionBenchmarkCase
-      | undefined;
-    if (benchmarkCase) {
-      child.stdin.write(
+  const waitForDrainOrClose = (): Promise<void> =>
+    new Promise((resolve) => {
+      const done = () => {
+        child.stdin.off('drain', done);
+        child.stdin.off('close', done);
+        child.stdin.off('error', done);
+        resolve();
+      };
+      child.stdin.once('drain', done);
+      child.stdin.once('close', done);
+      child.stdin.once('error', done);
+    });
+  const writeRequests = async () => {
+    for (const [id, caseId] of requestIds) {
+      if (terminalFailure || child.stdin.destroyed) break;
+      const benchmarkCase = cases.find((entry) => entry.id === caseId);
+      if (!benchmarkCase) continue;
+      const accepted = child.stdin.write(
         `${JSON.stringify({
           id,
           requestId: id,
@@ -904,10 +935,15 @@ export const runLocalAttributionCandidate = async (
           case: benchmarkCase,
         })}\n`,
       );
+      if (!accepted) {
+        await waitForDrainOrClose();
+      }
     }
-  }
-  child.stdin.end();
+    if (!terminalFailure && !child.stdin.destroyed) child.stdin.end();
+  };
+  const writing = writeRequests();
   const { exitCode, signal } = await completion;
+  await writing;
   clearTimeout(timer);
   if (forceKillTimer) clearTimeout(forceKillTimer);
 
@@ -939,11 +975,11 @@ export const runLocalAttributionCandidate = async (
     };
   }
   const results = cases.map(({ id }) => {
-    const result = caseResults.get(id);
-    if (result) return result;
     if (terminalFailure) {
       return protocolFailure(id, terminalFailure.code, terminalFailure.message);
     }
+    const result = caseResults.get(id);
+    if (result) return result;
     return protocolFailure(
       id,
       'candidate_contract_mismatch',

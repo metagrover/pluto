@@ -660,6 +660,20 @@ describe('runLocalAttributionCandidate', () => {
     });
   });
 
+  it('keeps timeout authoritative when a SIGTERM handler emits a valid response', async () => {
+    const output = JSON.stringify(validOutput('late'));
+    const script = `${lineReader}let q;r.on('line',line=>{q=JSON.parse(line)});process.on('SIGTERM',()=>{process.stdout.write(JSON.stringify({schemaVersion:1,id:q.id,output:${output}})+'\\n');process.exit(0)});setInterval(()=>{},1000)`;
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('late')],
+      { timeoutMs: 60 },
+    );
+    expect(result.results[0]).toMatchObject({
+      status: 'failure',
+      error: { code: 'candidate_timeout' },
+    });
+  });
+
   it.each([
     [
       'malformed output',
@@ -784,6 +798,52 @@ describe('runLocalAttributionCandidate', () => {
     expect(exitResult.results[0]).toMatchObject({
       error: { code: 'candidate_exit_nonzero' },
     });
+  });
+
+  it('rejects a valid response followed by unterminated garbage', async () => {
+    const script = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);const output=${JSON.stringify(validOutput('garbage'))};process.stdout.write(JSON.stringify({schemaVersion:1,id:q.id,output})+'\\n');process.stdout.write('private trailing garbage')})`;
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('garbage')],
+      { timeoutMs: 500 },
+    );
+    expect(result.results[0]).toMatchObject({
+      status: 'failure',
+      error: { code: 'candidate_invalid_json' },
+    });
+  });
+
+  it('kills a candidate process group whose grandchild inherits stdout', async () => {
+    if (process.platform === 'win32') return;
+    const script = `require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:['ignore','inherit','inherit']});process.stdin.resume();setInterval(()=>{},1000)`;
+    const started = Date.now();
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('process-tree')],
+      { timeoutMs: 60 },
+    );
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(result.results[0]).toMatchObject({
+      error: { code: 'candidate_timeout' },
+    });
+  });
+
+  it('streams a high-volume multi-case request set with backpressure', async () => {
+    const script = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);const output=${JSON.stringify(validOutput('placeholder'))};output.caseId=q.case.id;process.stdout.write(JSON.stringify({schemaVersion:1,id:q.id,output})+'\\n')})`;
+    const cases = Array.from({ length: 1_500 }, (_, index) =>
+      benchmarkCase(`bulk-${index}`),
+    );
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      cases,
+      {
+        timeoutMs: 5_000,
+      },
+    );
+    expect(result.results).toHaveLength(cases.length);
+    expect(result.results.every((entry) => entry.status === 'success')).toBe(
+      true,
+    );
   });
 });
 
