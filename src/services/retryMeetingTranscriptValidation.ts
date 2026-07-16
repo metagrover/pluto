@@ -1,16 +1,16 @@
-import type { Meeting } from '../types';
+import type { Meeting } from '../types.ts';
 import type {
   AttributionSegment,
   SpeakerActivityWindow,
-} from '../utils/speakerAttribution';
+} from '../utils/speakerAttribution.ts';
 import {
   type TranscriptActivityEvidenceFallbackSource,
   buildStoredTranscriptActivityEvidence,
   parseStoredTranscriptActivityEvidence,
-} from '../utils/transcriptActivityEvidence';
-import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity';
-import { buildTranscriptJsonPayload } from '../utils/transcriptSchema';
-import { runRecordingTranscriptValidation } from './recordingTranscriptValidation';
+} from '../utils/transcriptActivityEvidence.ts';
+import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity.ts';
+import { buildTranscriptJsonPayload } from '../utils/transcriptSchema.ts';
+import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 

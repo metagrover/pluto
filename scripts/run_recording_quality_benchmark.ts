@@ -6,11 +6,13 @@ import process from 'node:process';
 import {
   type RecordingFinalizationFixture,
   type RecordingQualityBenchmarkFixture,
+  type RetryValidationFixture,
   type TranscriptValidationFixture,
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
   runRecordingFinalizationBenchmarkCase,
+  runRetryValidationBenchmarkCase,
   runTranscriptValidationBenchmarkCase,
 } from '../src/services/recordingQualityBenchmark.ts';
 
@@ -64,6 +66,15 @@ const main = async () => {
       );
       continue;
     }
+    if (fixture.type === 'retry_validation') {
+      results.push(
+        await runRetryValidationBenchmarkCase(
+          entry,
+          fixture as RetryValidationFixture,
+        ),
+      );
+      continue;
+    }
     throw new Error(`Unsupported fixture type in ${fixturePath}`);
   }
 
@@ -85,6 +96,8 @@ const main = async () => {
     },
     sourceCommit: getSourceCommit(),
     results,
+    baselineResults: readJson<{ results: typeof results }>(baselineReportPath)
+      .results,
   });
 
   fs.mkdirSync(path.dirname(options.out), { recursive: true });
@@ -94,8 +107,40 @@ const main = async () => {
     `[RecordingQualityBenchmark] ${report.summary.passedCases}/${report.summary.totalCases} cases passed`,
   );
   console.log(
-    `[RecordingQualityBenchmark] transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed}`,
+    `[RecordingQualityBenchmark] transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} retry_validation=${report.summary.kinds.retry_validation.passed}/${report.summary.kinds.retry_validation.passed + report.summary.kinds.retry_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed}`,
   );
+  console.log(
+    `[RecordingQualityBenchmark] baseline stable_regressions=${report.comparisonSummary.stableRegressions} stable_improvements=${report.comparisonSummary.stableImprovements} within_tolerance=${report.comparisonSummary.stableWithinTolerance} hardware_drift=${report.comparisonSummary.hardwareDependentDrift} missing_baseline=${report.comparisonSummary.missingBaselineMetrics}`,
+  );
+  for (const comparison of report.comparisons) {
+    if (comparison.outcome === 'stable_regression') {
+      console.log(
+        `[RecordingQualityBenchmark] REGRESSION ${comparison.id} ${comparison.metricName}: ${String(comparison.baselineValue)} -> ${String(comparison.currentValue)} (tol +/-${comparison.tolerance})`,
+      );
+      continue;
+    }
+    if (comparison.outcome === 'stable_improvement') {
+      console.log(
+        `[RecordingQualityBenchmark] IMPROVEMENT ${comparison.id} ${comparison.metricName}: ${String(comparison.baselineValue)} -> ${String(comparison.currentValue)} (tol +/-${comparison.tolerance})`,
+      );
+      continue;
+    }
+    if (comparison.outcome === 'stable_within_tolerance') {
+      console.log(
+        `[RecordingQualityBenchmark] WITHIN_TOLERANCE ${comparison.id} ${comparison.metricName}: ${String(comparison.baselineValue)} -> ${String(comparison.currentValue)} (tol +/-${comparison.tolerance})`,
+      );
+      continue;
+    }
+    if (comparison.outcome === 'hardware_dependent_drift') {
+      console.log(
+        `[RecordingQualityBenchmark] HARDWARE_DRIFT ${comparison.id} ${comparison.metricName}: ${String(comparison.baselineValue)} -> ${String(comparison.currentValue)} (tol +/-${comparison.tolerance})`,
+      );
+      continue;
+    }
+    console.log(
+      `[RecordingQualityBenchmark] MISSING_BASELINE ${comparison.id} ${comparison.metricName}`,
+    );
+  }
   console.log(`[RecordingQualityBenchmark] wrote ${options.out}`);
 
   if (report.summary.failedCases > 0) {
@@ -104,6 +149,10 @@ const main = async () => {
         `[RecordingQualityBenchmark] FAIL ${failure.id}: ${(failure.failures || []).join('; ')}`,
       );
     }
+    process.exitCode = 1;
+  }
+
+  if (report.comparisonSummary.stableRegressions > 0) {
     process.exitCode = 1;
   }
 };

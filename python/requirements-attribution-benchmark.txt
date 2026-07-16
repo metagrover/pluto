@@ -1,0 +1,6 @@
+# Optional benchmark environment only. Do not merge these into production deps.
+pyannote.audio==4.0.0
+psutil==7.0.0
+
+# NVIDIA NeMo must remain in a separate isolated environment because its
+# dependency graph has not yet been proven compatible with pyannote.audio.

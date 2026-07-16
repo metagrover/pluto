@@ -1,11 +1,11 @@
-import { resolveTranscriptionLanguage } from './transcriptionSettings';
+import { resolveTranscriptionLanguage } from './transcriptionSettings.ts';
 import type {
   TranscriptionBackend,
   TranscriptionPreset,
   WhisperComputeType,
   WhisperDevice,
   WhisperModel,
-} from './transcriptionSettings';
+} from './transcriptionSettings.ts';
 
 export interface TranscriptionCapabilities {
   backend: TranscriptionBackend;

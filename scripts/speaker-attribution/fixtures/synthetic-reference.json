@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "transcript": {
+    "words": []
+  },
+  "turns": [
+    {
+      "startTime": 0,
+      "endTime": 1,
+      "speaker": "Me",
+      "text": "synthetic local speech"
+    }
+  ]
+}
