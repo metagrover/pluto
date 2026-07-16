@@ -116,6 +116,33 @@ describe('createActiveCallDetector', () => {
     expect(result.confidence).toBe('high');
   });
 
+  it('reports silent attached Zoom as medium-confidence fallback', async () => {
+    setPlatform('darwin');
+    const runAudioProbe = vi.fn(
+      async ({ allowSilent }: { allowSilent?: boolean }) =>
+        Boolean(allowSilent),
+    );
+    const detector = createDetector({
+      processes: [
+        {
+          pid: 302,
+          ppid: 1,
+          name: 'zoom.us',
+          command: '/Applications/zoom.us.app/Contents/MacOS/zoom.us',
+        },
+      ],
+      runAudioProbe,
+      browserProviders: new Map(),
+    });
+
+    const result = await detector();
+
+    expect(result.active).toBe(true);
+    expect(result.appName).toBe('Zoom');
+    expect(result.confidence).toBe('medium');
+    expect(result.reason).toBe('call-app-running-silent-fallback');
+  });
+
   it('falls back to medium confidence for supported browser calls when audio probe is silent', async () => {
     setPlatform('darwin');
     const runAudioProbe = vi.fn(
