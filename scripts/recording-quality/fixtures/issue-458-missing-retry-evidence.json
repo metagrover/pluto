@@ -1,0 +1,54 @@
+{
+  "type": "retry_validation",
+  "meeting": {
+    "id": "retry-missing",
+    "title": "Meeting",
+    "created_at": "2026-07-15T00:00:00.000Z",
+    "started_at": "2026-07-15T00:00:00.000Z",
+    "duration_seconds": 60,
+    "audio_path": "/synthetic/mic.wav",
+    "system_audio_path": "/synthetic/system.wav",
+    "mixed_audio_path": "/synthetic/mix.wav",
+    "transcript_status": "needs_attention",
+    "transcript_json": "{\"segments\":[{\"start\":0,\"end\":2,\"text\":\"Sparse provisional local text.\"}]}",
+    "transcript_integrity_json": "{\"activityEvidenceSource\":\"capture_activity_v1\"}"
+  },
+  "transcribeByPath": {
+    "/synthetic/mic.wav": {
+      "segments": [
+        {
+          "start": 0,
+          "end": 2,
+          "text": "Sparse provisional local text."
+        }
+      ]
+    },
+    "/synthetic/system.wav": {
+      "segments": []
+    },
+    "/synthetic/mix.wav": {
+      "segments": [
+        {
+          "start": 0,
+          "end": 2,
+          "text": "Sparse provisional local text."
+        }
+      ]
+    }
+  },
+  "probeDurationByPath": {
+    "/synthetic/mic.wav": 60,
+    "/synthetic/system.wav": 60,
+    "/synthetic/mix.wav": 60
+  },
+  "expected": {
+    "status": "needs_attention",
+    "requiredReasons": [
+      "deterministic_retry_evidence_missing"
+    ],
+    "primaryMetric": {
+      "name": "activityEvidenceSource",
+      "value": "capture_activity_missing"
+    }
+  }
+}

@@ -1,20 +1,26 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-15T15:40:34.403Z",
+  "generatedAt": "2026-07-16T00:07:59.892Z",
   "manifestPath": "scripts/recording-quality/manifest.json",
   "baselineReportPath": "scripts/recording-quality/baselines/current-master.json",
-  "sourceCommit": "026bdcf6",
+  "sourceCommit": "d1228ab2",
   "environment": {
     "nodeVersion": "v24.11.1",
     "platform": "darwin",
     "arch": "arm64"
   },
   "summary": {
-    "totalCases": 4,
-    "passedCases": 4,
+    "totalCases": 6,
+    "passedCases": 6,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434],
+    "issueCoverage": [
+      25,
+      75,
+      428,
+      434,
+      458
+    ],
     "kinds": {
       "recording_finalization": {
         "passed": 1,
@@ -22,6 +28,10 @@
       },
       "transcript_validation": {
         "passed": 3,
+        "failed": 0
+      },
+      "retry_validation": {
+        "passed": 2,
         "failed": 0
       }
     }
@@ -66,7 +76,9 @@
       "expected": {
         "status": "validated",
         "secondCallReturnsNull": true,
-        "cleanupPaths": ["/tmp/session-system.wav"],
+        "cleanupPaths": [
+          "/tmp/session-system.wav"
+        ],
         "primaryMetric": {
           "name": "durationSeconds",
           "value": 1062
@@ -107,14 +119,72 @@
           "name": "localTranscriptCoveredSeconds",
           "value": 6
         },
-        "reasons": ["local_speech_unaccounted"]
+        "reasons": [
+          "local_speech_unaccounted"
+        ]
       },
       "expected": {
         "status": "needs_attention",
-        "requiredReasons": ["local_speech_unaccounted"],
+        "requiredReasons": [
+          "local_speech_unaccounted"
+        ],
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 6
+        }
+      }
+    },
+    {
+      "id": "issue-458-missing-retry-evidence",
+      "issue": 458,
+      "title": "Missing deterministic retry evidence fails closed",
+      "kind": "retry_validation",
+      "passed": true,
+      "actual": {
+        "status": "needs_attention",
+        "primaryMetric": {
+          "name": "activityEvidenceSource",
+          "value": "capture_activity_missing"
+        },
+        "reasons": [
+          "deterministic_retry_evidence_missing"
+        ]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requiredReasons": [
+          "deterministic_retry_evidence_missing"
+        ],
+        "primaryMetric": {
+          "name": "activityEvidenceSource",
+          "value": "capture_activity_missing"
+        }
+      }
+    },
+    {
+      "id": "issue-458-corrupt-retry-evidence",
+      "issue": 458,
+      "title": "Corrupt deterministic retry evidence fails closed",
+      "kind": "retry_validation",
+      "passed": true,
+      "actual": {
+        "status": "needs_attention",
+        "primaryMetric": {
+          "name": "activityEvidenceSource",
+          "value": "capture_activity_corrupt"
+        },
+        "reasons": [
+          "deterministic_retry_evidence_corrupt"
+        ]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requiredReasons": [
+          "deterministic_retry_evidence_corrupt"
+        ],
+        "primaryMetric": {
+          "name": "activityEvidenceSource",
+          "value": "capture_activity_corrupt"
         }
       }
     }

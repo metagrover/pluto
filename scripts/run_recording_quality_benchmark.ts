@@ -6,11 +6,13 @@ import process from 'node:process';
 import {
   type RecordingFinalizationFixture,
   type RecordingQualityBenchmarkFixture,
+  type RetryValidationFixture,
   type TranscriptValidationFixture,
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
   parseRecordingQualityBenchmarkCliArgs,
   runRecordingFinalizationBenchmarkCase,
+  runRetryValidationBenchmarkCase,
   runTranscriptValidationBenchmarkCase,
 } from '../src/services/recordingQualityBenchmark.ts';
 
@@ -64,6 +66,15 @@ const main = async () => {
       );
       continue;
     }
+    if (fixture.type === 'retry_validation') {
+      results.push(
+        await runRetryValidationBenchmarkCase(
+          entry,
+          fixture as RetryValidationFixture,
+        ),
+      );
+      continue;
+    }
     throw new Error(`Unsupported fixture type in ${fixturePath}`);
   }
 
@@ -94,7 +105,7 @@ const main = async () => {
     `[RecordingQualityBenchmark] ${report.summary.passedCases}/${report.summary.totalCases} cases passed`,
   );
   console.log(
-    `[RecordingQualityBenchmark] transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed}`,
+    `[RecordingQualityBenchmark] transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} retry_validation=${report.summary.kinds.retry_validation.passed}/${report.summary.kinds.retry_validation.passed + report.summary.kinds.retry_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed}`,
   );
   console.log(`[RecordingQualityBenchmark] wrote ${options.out}`);
 
