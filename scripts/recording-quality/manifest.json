@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "baselineReport": "baselines/current-master.json",
   "cases": [
     {
@@ -7,7 +7,8 @@
       "issue": 476,
       "title": "Credential-free distribution metadata gate",
       "kind": "candidate_eligibility",
-      "fixture": "fixtures/issue-476-credential-free-distribution.json"
+      "fixture": "fixtures/issue-476-credential-free-distribution.json",
+      "tier": "pr"
     },
     {
       "id": "issue-25-opening-audio",
@@ -15,6 +16,7 @@
       "title": "Opening local speech is preserved",
       "kind": "transcript_validation",
       "fixture": "fixtures/issue-25-opening-audio.json",
+      "tier": "pr",
       "trackedMetrics": [
         {
           "name": "localTranscriptCoveredSeconds",
@@ -29,6 +31,7 @@
       "title": "Finalization stays single-flight and freezes timing",
       "kind": "recording_finalization",
       "fixture": "fixtures/issue-75-finalization-single-flight.json",
+      "tier": "pr",
       "trackedMetrics": [
         {
           "name": "durationSeconds",
@@ -43,6 +46,7 @@
       "title": "Sparse provisional local chunks still recover canonical local speech",
       "kind": "transcript_validation",
       "fixture": "fixtures/issue-428-local-speech-recovery.json",
+      "tier": "pr",
       "trackedMetrics": [
         {
           "name": "localTranscriptCoveredSeconds",
@@ -57,6 +61,7 @@
       "title": "Overlapping transcript segments count coverage once",
       "kind": "transcript_validation",
       "fixture": "fixtures/issue-434-overlap-union.json",
+      "tier": "pr",
       "trackedMetrics": [
         {
           "name": "localTranscriptCoveredSeconds",
@@ -71,6 +76,7 @@
       "title": "Missing deterministic retry evidence fails closed",
       "kind": "retry_validation",
       "fixture": "fixtures/issue-458-missing-retry-evidence.json",
+      "tier": "pr",
       "trackedMetrics": [
         {
           "name": "activityEvidenceSource",
@@ -85,6 +91,7 @@
       "title": "Corrupt deterministic retry evidence fails closed",
       "kind": "retry_validation",
       "fixture": "fixtures/issue-458-corrupt-retry-evidence.json",
+      "tier": "pr",
       "trackedMetrics": [
         {
           "name": "activityEvidenceSource",

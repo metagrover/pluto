@@ -58,10 +58,11 @@ import {
   resolveTranscriptionLanguage,
   resolveTranscriptionSettings,
 } from '../utils/transcriptionSettings';
-import type {
-  CaptureHealth,
-  LiveTranscriptIntegrity,
-  LiveTranscriptSegment,
+import {
+  type CaptureHealthState,
+  type LiveTranscriptIntegrity,
+  type LiveTranscriptSegment,
+  withCaptureDurabilityWarning,
 } from './features/recordingWorkspaceModel';
 
 interface AudioManagerProps {
@@ -71,10 +72,7 @@ interface AudioManagerProps {
   onProcessingChange?: (isProcessing: boolean) => void;
   onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
   onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
-  onCaptureHealthChange?: (health: {
-    microphone: CaptureHealth;
-    systemAudio: CaptureHealth;
-  }) => void;
+  onCaptureHealthChange?: (health: CaptureHealthState) => void;
   onLiveTranscriptIntegrityChange?: (state: LiveTranscriptIntegrity) => void;
   onRecordingStarted?: (startedAtMs: number) => void;
   userNotes?: string;
@@ -358,6 +356,11 @@ export const AudioManager = ({
   systemAudioStatus = 'unknown',
 }: AudioManagerProps) => {
   const [isRecording, setIsRecording] = useState(false);
+  const captureHealthRef = useRef<CaptureHealthState>({
+    microphone: 'healthy',
+    systemAudio: 'healthy',
+    captureDurability: 'healthy',
+  });
 
   useEffect(() => {
     onRecordingChange?.(isRecording);
@@ -497,6 +500,17 @@ export const AudioManager = ({
     onProcessingChange?.(isProcessing);
   }, [isProcessing, onProcessingChange]);
 
+  const publishCaptureHealth = (health: CaptureHealthState) => {
+    captureHealthRef.current = health;
+    onCaptureHealthChange?.(health);
+  };
+
+  const warnCaptureDurability = () => {
+    publishCaptureHealth(
+      withCaptureDurabilityWarning(captureHealthRef.current),
+    );
+  };
+
   // --- Native Capture Logic ---
   // Functions defined below, event listeners set up after
 
@@ -504,6 +518,7 @@ export const AudioManager = ({
     const next = captureJournalWriteQueueRef.current.then(task);
     captureJournalWriteQueueRef.current = next.catch((error) => {
       console.warn('[Pluto] Capture journal write failed:', error);
+      warnCaptureDurability();
     });
     return captureJournalWriteQueueRef.current;
   };
@@ -557,12 +572,13 @@ export const AudioManager = ({
       stopInFlightRef.current = false;
       isRecordingRef.current = true;
       setIsRecording(true);
-      onCaptureHealthChange?.({
+      publishCaptureHealth({
         microphone: 'healthy',
         systemAudio:
           systemAudioStatus === 'granted' || systemAudioStatus === 'authorized'
             ? 'healthy'
             : 'warning',
+        captureDurability: 'healthy',
       });
 
       console.log(
@@ -578,6 +594,7 @@ export const AudioManager = ({
           '[Pluto] Failed to initialize capture journal:',
           journalErr,
         );
+        warnCaptureDurability();
       }
 
       // 0. Acquire Microphone Stream (Critical Path)
@@ -3418,6 +3435,7 @@ export const AudioManager = ({
         });
       } catch (journalErr) {
         console.warn('[Pluto] Failed to seal capture journal:', journalErr);
+        warnCaptureDurability();
       }
 
       // Store a single full audio file for playback
