@@ -179,9 +179,80 @@ describe('computeLocalAttributionMetrics', () => {
     const first = computeLocalAttributionMetrics(input);
     const second = computeLocalAttributionMetrics(input);
     expect(second).toEqual(first);
-    expect(first.boundaryErrorSeconds).toBe(1);
+    expect(first.boundaryErrorSeconds).toBe(1.25);
     expect(first.overlapAccuracy).toBe(0);
     expect(first.shortLocalTurnRecall).toBe(0);
+  });
+
+  it('uses union duration for local-turn recall when generated Me intervals overlap', () => {
+    const metrics = computeLocalAttributionMetrics({
+      reference: [{ startTime: 0, endTime: 10, speaker: 'Me', text: 'local' }],
+      generated: [
+        { startTime: 0, endTime: 4, speaker: 'Me', text: 'duplicate one' },
+        { startTime: 2, endTime: 6, speaker: 'Me', text: 'duplicate two' },
+      ],
+    });
+
+    expect(metrics.shortLocalTurnRecall).toBe(0);
+    expect(metrics.me.predictedSeconds).toBe(6);
+    expect(metrics.missedMeSeconds).toBe(4);
+  });
+
+  it('scores active-set boundaries for silence gaps, overlap ends, and separated same-speaker turns', () => {
+    const separated = [
+      { startTime: 0, endTime: 1, speaker: 'Me' as const, text: 'one' },
+      { startTime: 2, endTime: 3, speaker: 'Me' as const, text: 'two' },
+    ];
+    expect(
+      computeLocalAttributionMetrics({
+        reference: separated,
+        generated: separated,
+      }).boundaryErrorSeconds,
+    ).toBe(0);
+    expect(
+      computeLocalAttributionMetrics({
+        reference: separated,
+        generated: [
+          { startTime: 0, endTime: 3, speaker: 'Me', text: 'continuous' },
+        ],
+      }).boundaryErrorSeconds,
+    ).toBe(1.5);
+
+    const overlap = [
+      { startTime: 0, endTime: 3, speaker: 'Them' as const, text: 'remote' },
+      { startTime: 1, endTime: 2, speaker: 'Me' as const, text: 'local' },
+    ];
+    expect(
+      computeLocalAttributionMetrics({ reference: overlap, generated: overlap })
+        .boundaryErrorSeconds,
+    ).toBe(0);
+  });
+
+  it('penalizes missing and extra boundaries and matches nearby boundaries one-to-one', () => {
+    const oneTurn = [
+      { startTime: 0, endTime: 2, speaker: 'Me' as const, text: 'local' },
+    ];
+    expect(
+      computeLocalAttributionMetrics({ reference: oneTurn, generated: [] })
+        .boundaryErrorSeconds,
+    ).toBe(2);
+    expect(
+      computeLocalAttributionMetrics({ reference: [], generated: oneTurn })
+        .boundaryErrorSeconds,
+    ).toBe(2);
+
+    const metrics = computeLocalAttributionMetrics({
+      reference: [
+        { startTime: 0, endTime: 1, speaker: 'Me', text: 'one' },
+        { startTime: 1, endTime: 2, speaker: 'Them', text: 'two' },
+        { startTime: 2, endTime: 3, speaker: 'Me', text: 'three' },
+      ],
+      generated: [
+        { startTime: 0, endTime: 1.1, speaker: 'Me', text: 'one' },
+        { startTime: 1.1, endTime: 3, speaker: 'Them', text: 'rest' },
+      ],
+    });
+    expect(metrics.boundaryErrorSeconds).toBeCloseTo(0.775, 10);
   });
 });
 

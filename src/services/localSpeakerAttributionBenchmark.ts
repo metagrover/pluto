@@ -551,16 +551,114 @@ const validateMetricTurns = (turns: BenchmarkTurn[], field: string): void => {
   });
 };
 
-const activeSpeakers = (
-  turns: BenchmarkTurn[],
+type SpeakerCounts = Record<BenchmarkSpeaker, number>;
+type SpeakerDelta = SpeakerCounts;
+
+const timelineEvents = (turns: BenchmarkTurn[]): Map<number, SpeakerDelta> => {
+  const events = new Map<number, SpeakerDelta>();
+  const add = (time: number, speaker: BenchmarkSpeaker, delta: number) => {
+    const event = events.get(time) ?? { Me: 0, Them: 0 };
+    event[speaker] += delta;
+    events.set(time, event);
+  };
+  for (const turn of turns) {
+    add(turn.startTime, turn.speaker, 1);
+    add(turn.endTime, turn.speaker, -1);
+  }
+  return events;
+};
+
+const applyEvent = (
+  counts: SpeakerCounts,
+  event: SpeakerDelta | undefined,
+): void => {
+  if (!event) return;
+  counts.Me += event.Me;
+  counts.Them += event.Them;
+};
+
+const activeSet = (counts: SpeakerCounts): Set<BenchmarkSpeaker> =>
+  new Set((['Me', 'Them'] as const).filter((speaker) => counts[speaker] > 0));
+
+const sameSpeakers = (
+  left: Set<BenchmarkSpeaker>,
+  right: Set<BenchmarkSpeaker>,
+): boolean =>
+  left.size === right.size && [...left].every((speaker) => right.has(speaker));
+
+const activeSetBoundaries = (events: Map<number, SpeakerDelta>): number[] => {
+  const counts: SpeakerCounts = { Me: 0, Them: 0 };
+  const boundaries: number[] = [];
+  for (const time of [...events.keys()].sort((left, right) => left - right)) {
+    const before = activeSet(counts);
+    applyEvent(counts, events.get(time));
+    if (!sameSpeakers(before, activeSet(counts))) boundaries.push(time);
+  }
+  return boundaries;
+};
+
+const alignedBoundaryError = (
+  reference: number[],
+  generated: number[],
+  unmatchedPenalty: number,
+): number => {
+  // Dynamic-programming alignment prevents one generated event from satisfying
+  // multiple reference events. An unmatched onset/offset costs one recording
+  // duration, and the aggregate is normalized by the larger event count.
+  if (reference.length === 0 && generated.length === 0) return 0;
+  let previous = Array.from(
+    { length: generated.length + 1 },
+    (_, index) => index * unmatchedPenalty,
+  );
+  for (let row = 1; row <= reference.length; row += 1) {
+    const current = [row * unmatchedPenalty];
+    for (let column = 1; column <= generated.length; column += 1) {
+      current[column] = Math.min(
+        previous[column] + unmatchedPenalty,
+        current[column - 1] + unmatchedPenalty,
+        previous[column - 1] +
+          Math.abs(reference[row - 1] - generated[column - 1]),
+      );
+    }
+    previous = current;
+  }
+  return (
+    previous[generated.length] / Math.max(reference.length, generated.length)
+  );
+};
+
+const unionIntersectionDuration = (
   startTime: number,
   endTime: number,
-): Set<BenchmarkSpeaker> =>
-  new Set(
-    turns
-      .filter((turn) => turn.startTime < endTime && turn.endTime > startTime)
-      .map((turn) => turn.speaker),
-  );
+  turns: BenchmarkTurn[],
+): number => {
+  const clipped = turns
+    .map((turn) => ({
+      startTime: Math.max(startTime, turn.startTime),
+      endTime: Math.min(endTime, turn.endTime),
+    }))
+    .filter((turn) => turn.endTime > turn.startTime)
+    .sort(
+      (left, right) =>
+        left.startTime - right.startTime || left.endTime - right.endTime,
+    );
+  let duration = 0;
+  let unionStart: number | undefined;
+  let unionEnd = 0;
+  for (const turn of clipped) {
+    if (unionStart === undefined) {
+      unionStart = turn.startTime;
+      unionEnd = turn.endTime;
+    } else if (turn.startTime > unionEnd) {
+      duration += unionEnd - unionStart;
+      unionStart = turn.startTime;
+      unionEnd = turn.endTime;
+    } else {
+      unionEnd = Math.max(unionEnd, turn.endTime);
+    }
+  }
+  return unionStart === undefined ? 0 : duration + unionEnd - unionStart;
+};
 
 const speakerMetrics = (
   truePositiveSeconds: number,
@@ -597,6 +695,9 @@ const speakerMetrics = (
  * boundary, active speakers form a set, so overlap contributes one
  * speaker-second per active label. Unmatched reference/hypothesis labels are
  * paired as confusion first; remaining labels are missed speech/false alarm.
+ * Counted start/end events preserve duplicate same-label intervals. Boundary
+ * error includes every change of active set: speech onset/offset, silence,
+ * overlap transitions, and separated turns from the same speaker.
  */
 export const computeLocalAttributionMetrics = (
   input: LocalAttributionMetricInput,
@@ -662,7 +763,9 @@ export const computeLocalAttributionMetrics = (
     ),
   };
 
-  const boundaries = [
+  const referenceEvents = timelineEvents(reference);
+  const generatedEvents = timelineEvents(generated);
+  const eventTimes = [
     ...new Set(
       [...reference, ...generated].flatMap((turn) => [
         turn.startTime,
@@ -680,12 +783,16 @@ export const computeLocalAttributionMetrics = (
     Me: { truePositive: 0, predicted: 0, reference: 0 },
     Them: { truePositive: 0, predicted: 0, reference: 0 },
   };
-  for (let index = 1; index < boundaries.length; index += 1) {
-    const startTime = boundaries[index - 1];
-    const endTime = boundaries[index];
+  const referenceCounts: SpeakerCounts = { Me: 0, Them: 0 };
+  const generatedCounts: SpeakerCounts = { Me: 0, Them: 0 };
+  for (let index = 0; index < eventTimes.length - 1; index += 1) {
+    const startTime = eventTimes[index];
+    const endTime = eventTimes[index + 1];
+    applyEvent(referenceCounts, referenceEvents.get(startTime));
+    applyEvent(generatedCounts, generatedEvents.get(startTime));
     const duration = endTime - startTime;
-    const expected = activeSpeakers(reference, startTime, endTime);
-    const actual = activeSpeakers(generated, startTime, endTime);
+    const expected = activeSet(referenceCounts);
+    const actual = activeSet(generatedCounts);
     const shared = [...expected].filter((speaker) =>
       actual.has(speaker),
     ).length;
@@ -720,44 +827,20 @@ export const computeLocalAttributionMetrics = (
   const speakerCountCorrect =
     referenceLabels.size === generatedLabels.size &&
     [...referenceLabels].every((speaker) => generatedLabels.has(speaker));
-  const referenceChanges = reference
-    .slice(1)
-    .filter((turn, index) => turn.speaker !== reference[index].speaker)
-    .map((turn) => turn.startTime);
-  const generatedChanges = generated
-    .slice(1)
-    .filter((turn, index) => turn.speaker !== generated[index].speaker)
-    .map((turn) => turn.startTime);
   const recordingDuration = input.audioDurationSeconds ?? maxTurnEnd;
-  const boundaryErrorSeconds =
-    referenceChanges.length === 0
-      ? 0
-      : referenceChanges.reduce(
-          (total, boundary) =>
-            total +
-            (generatedChanges.length === 0
-              ? recordingDuration
-              : Math.min(
-                  ...generatedChanges.map((candidate) =>
-                    Math.abs(candidate - boundary),
-                  ),
-                )),
-          0,
-        ) / referenceChanges.length;
+  const boundaryErrorSeconds = alignedBoundaryError(
+    activeSetBoundaries(referenceEvents),
+    activeSetBoundaries(generatedEvents),
+    recordingDuration,
+  );
   const localTurns = reference.filter((turn) => turn.speaker === 'Me');
+  const generatedLocalTurns = generated.filter((turn) => turn.speaker === 'Me');
   const recalledLocalTurns = localTurns.filter((turn) => {
-    const overlap = generated
-      .filter((candidate) => candidate.speaker === 'Me')
-      .reduce(
-        (total, candidate) =>
-          total +
-          Math.max(
-            0,
-            Math.min(turn.endTime, candidate.endTime) -
-              Math.max(turn.startTime, candidate.startTime),
-          ),
-        0,
-      );
+    const overlap = unionIntersectionDuration(
+      turn.startTime,
+      turn.endTime,
+      generatedLocalTurns,
+    );
     return overlap / (turn.endTime - turn.startTime) >= 0.65;
   }).length;
 
