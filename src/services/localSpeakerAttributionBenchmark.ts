@@ -714,6 +714,7 @@ export const runLocalAttributionCandidate = async (
     CandidateCaseSuccess | CandidateCaseFailure
   >();
   let stderrBytes = 0;
+  let stdoutBytes = 0;
   let stdoutBuffer = '';
   let terminalFailure:
     | { code: CandidateFailureCode; message: string }
@@ -750,14 +751,15 @@ export const runLocalAttributionCandidate = async (
     );
   });
   child.stdout.on('data', (chunk: Buffer | string) => {
-    stdoutBuffer += chunk.toString();
-    if (Buffer.byteLength(stdoutBuffer) > 10 * 1024 * 1024) {
+    stdoutBytes += Buffer.byteLength(chunk);
+    if (stdoutBytes > 10 * 1024 * 1024) {
       failProtocol(
         'candidate_output_too_large',
-        'Candidate response exceeded the maximum JSONL line size.',
+        'Candidate output exceeded the maximum cumulative size.',
       );
       return;
     }
+    stdoutBuffer += chunk.toString();
     while (stdoutBuffer.includes('\n')) {
       const newline = stdoutBuffer.indexOf('\n');
       const line = stdoutBuffer.slice(0, newline);

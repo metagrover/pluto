@@ -751,6 +751,19 @@ describe('runLocalAttributionCandidate', () => {
     });
   });
 
+  it('caps cumulative stdout even when every individual JSONL line is below the limit', async () => {
+    const script =
+      "for(let i=0;i<12;i+=1)process.stdout.write(' '.repeat(900*1024)+'\\n')";
+    const result = await runLocalAttributionCandidate(
+      candidate(script),
+      [benchmarkCase('cumulative-output')],
+      { timeoutMs: 2_000 },
+    );
+    expect(result.results[0]).toMatchObject({
+      error: { code: 'candidate_output_too_large' },
+    });
+  });
+
   it('rejects a bad envelope version and nonzero exit even after valid output', async () => {
     const badVersion = `${lineReader}r.on('line',line=>{const q=JSON.parse(line);process.stdout.write(JSON.stringify({schemaVersion:2,id:q.id,output:{}})+'\\n')})`;
     const versionResult = await runLocalAttributionCandidate(
