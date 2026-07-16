@@ -24,6 +24,7 @@
     "replay:meeting": "node scripts/replay_meeting_attribution.js",
     "benchmark:transcription": "node scripts/benchmark_transcription_backends.js",
     "benchmark:recording-quality": "node --experimental-strip-types scripts/run_recording_quality_benchmark.ts",
+    "benchmark:private-speaker-attribution:validate": "node --experimental-strip-types scripts/validate_private_speaker_attribution_manifest.ts",
     "benchmark:meeting-notes-quality": "node scripts/evaluate_meeting_notes_quality.js",
     "changelog:check": "node scripts/changelog.mjs check",
     "changelog:build": "node scripts/changelog.mjs build",

@@ -17,6 +17,24 @@ The report includes schema version, environment metadata, source commit, per-cas
 
 Each fixture must stay synthetic and content-safe. Do not commit private meeting text, audio paths, or raw recordings.
 
+## Private local speaker-attribution manifests
+
+`#465` also needs consented local-only evaluation without leaking paths or transcript text. Use a gitignored JSON manifest such as `scripts/recording-quality/private-speaker-attribution-manifest.json` and validate it with:
+
+`pnpm run benchmark:private-speaker-attribution:validate -- --manifest /absolute/path/to/private-speaker-attribution-manifest.json --out tmp/private-speaker-attribution-summary.json`
+
+Manifest contract:
+
+- `schemaVersion`: positive integer
+- `cases[]`: non-empty array of private benchmark cases
+- `cases[].id`: stable local case id used only for hashing/redaction
+- `cases[].title`: non-empty local-only label for the operator
+- `cases[].audio.mixedAudioPath`, `micAudioPath`, `systemAudioPath`: absolute local paths
+- `cases[].transcript.groundTruthTranscriptPath`: absolute local path to the consented `Me`/`Them` ground-truth transcript artifact
+- `cases[].transcript.speakers`: non-empty array containing only `Me` and `Them`
+
+The validation summary intentionally emits only redacted case identifiers plus source-availability flags and speaker-set metadata. It never writes raw paths or transcript text to the JSON output.
+
 ## Adding a case
 
 1. Add a new fixture JSON under `scripts/recording-quality/fixtures/`.
