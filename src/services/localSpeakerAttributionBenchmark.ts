@@ -110,7 +110,8 @@ export type CandidateFailureCode =
   | 'candidate_unsupported_hardware'
   | 'candidate_model_missing'
   | 'candidate_model_checksum_failed'
-  | 'candidate_out_of_memory';
+  | 'candidate_out_of_memory'
+  | 'candidate_distribution_ineligible';
 
 export type PublicCandidateResult = {
   caseHash: string;
@@ -138,6 +139,7 @@ const candidateFailureCodes = new Set<CandidateFailureCode>([
   'candidate_model_missing',
   'candidate_model_checksum_failed',
   'candidate_out_of_memory',
+  'candidate_distribution_ineligible',
 ]);
 
 /** Constructs a new public value; arbitrary input fields are never copied. */

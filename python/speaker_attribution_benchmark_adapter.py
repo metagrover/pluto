@@ -9,6 +9,7 @@ run in CI without a benchmark environment.
 from __future__ import annotations
 
 import contextlib
+import array
 import hashlib
 import importlib
 import importlib.metadata
@@ -19,6 +20,7 @@ import resource
 import sys
 import tempfile
 import time
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,7 @@ KNOWN_CANDIDATES = {
     "apple-silicon-asr",
     "pyannote-community-1",
     "nemo-local",
+    "sherpa-onnx",
 }
 
 
@@ -135,6 +138,36 @@ def _model_path(config: dict[str, Any]) -> str | None:
     return resolved
 
 
+def _verified_model_file(config: dict[str, Any], path_key: str, checksum_key: str) -> tuple[str, str]:
+    raw_path = config.get(path_key)
+    checksum = config.get(checksum_key)
+    if not isinstance(raw_path, str) or not raw_path or not isinstance(checksum, str):
+        raise CandidateError("candidate_model_missing", "Explicit checksum-pinned local models are required.")
+    path = Path(raw_path)
+    if not path.is_file() or len(checksum) != 64 or any(character not in "0123456789abcdefABCDEF" for character in checksum):
+        raise CandidateError("candidate_model_missing", "Explicit checksum-pinned local models are required.")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest.lower() != checksum.lower():
+        raise CandidateError("candidate_model_checksum_failed", "Local model verification failed.")
+    return str(path.resolve()), digest
+
+
+def _sherpa_models(config: dict[str, Any]) -> tuple[str, str, list[dict[str, str]]]:
+    distribution = config.get("distribution")
+    if not isinstance(distribution, dict) or distribution.get("userCredentialsRequired") is not False or distribution.get("redistributionReviewed") is not True:
+        raise CandidateError("candidate_distribution_ineligible", "Candidate distribution review is incomplete.")
+    license_ids = distribution.get("licenseIds")
+    if not isinstance(license_ids, list) or len(license_ids) < 2 or not all(isinstance(item, str) and item for item in license_ids):
+        raise CandidateError("candidate_distribution_ineligible", "Candidate distribution review is incomplete.")
+    segmentation_path, segmentation_sha = _verified_model_file(config, "segmentationModelPath", "segmentationSha256")
+    embedding_path, embedding_sha = _verified_model_file(config, "embeddingModelPath", "embeddingSha256")
+    return segmentation_path, embedding_path, [
+        _identity("sherpa-onnx", _package_version("sherpa-onnx")),
+        _identity("pyannote-segmentation-onnx", segmentation_sha),
+        _identity("speaker-embedding-onnx", embedding_sha),
+    ]
+
+
 def _identity(candidate_id: str, version: str) -> dict[str, str]:
     return {"id": candidate_id, "version": version}
 
@@ -161,6 +194,9 @@ def _probe(candidate_id: str, config: dict[str, Any]) -> tuple[list[dict[str, st
         if not _model_path(config):
             raise CandidateError("candidate_model_missing", "An explicit local model is required.")
         return [_identity("nvidia-nemo-diarizer", _package_version("nemo_toolkit"))], _hardware()
+    if candidate_id == "sherpa-onnx":
+        _, _, models = _sherpa_models(config)
+        return models, _hardware()
     raise CandidateError("candidate_unknown", "Unknown local candidate.")
 
 
@@ -336,6 +372,40 @@ def _synthetic_output(request: dict[str, Any], config: dict[str, Any]) -> tuple[
 
 
 def _diarize(candidate_id: str, request: dict[str, Any], config: dict[str, Any]) -> tuple[list[Any], list[Any], list[Any], str]:
+    if candidate_id == "sherpa-onnx":
+        segmentation_path, embedding_path, _ = _sherpa_models(config)
+        audio_path = _safe_audio_path(request)
+        sherpa = importlib.import_module("sherpa_onnx")
+        with wave.open(audio_path, "rb") as audio_file:
+            if audio_file.getnchannels() != 1 or audio_file.getsampwidth() != 2 or audio_file.getframerate() != 16000:
+                raise CandidateError("candidate_contract_mismatch", "Sherpa audio must be mono 16-bit PCM at 16 kHz.")
+            samples = array.array("h", audio_file.readframes(audio_file.getnframes()))
+            if sys.byteorder != "little":
+                samples.byteswap()
+        normalized_samples = [sample / 32768.0 for sample in samples]
+        runtime = sherpa.OfflineSpeakerDiarization(
+            sherpa.OfflineSpeakerDiarizationConfig(
+                segmentation=sherpa.OfflineSpeakerSegmentationModelConfig(
+                    pyannote=sherpa.OfflineSpeakerSegmentationPyannoteModelConfig(model=segmentation_path),
+                    num_threads=int(config.get("numThreads", 2)),
+                ),
+                embedding=sherpa.SpeakerEmbeddingExtractorConfig(
+                    model=embedding_path,
+                    num_threads=int(config.get("numThreads", 2)),
+                ),
+                clustering=sherpa.FastClusteringConfig(
+                    num_clusters=int(config.get("numSpeakers", -1)),
+                    threshold=float(config.get("clusterThreshold", 0.5)),
+                ),
+            )
+        )
+        result = runtime.process(normalized_samples)
+        turns = [
+            {"startTime": float(segment.start), "endTime": float(segment.end), "cluster": f"speaker_{segment.speaker}"}
+            for segment in result.sort_by_start_time()
+            if segment.end > segment.start
+        ]
+        return [], [], turns, _hardware()
     model_path = _model_path(config)
     if not model_path:
         raise CandidateError("candidate_model_missing", "An explicit local model is required.")
