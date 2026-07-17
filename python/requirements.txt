@@ -17,3 +17,4 @@ filelock
 tokenizers
 huggingface-hub
 scikit-learn
+sherpa-onnx==1.13.4

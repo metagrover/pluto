@@ -12,6 +12,7 @@ import {
   decodeFloat32PcmChunk,
 } from '../utils/audio';
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
+import { resolveProductionDiarizationProvider } from '../utils/diarizationProvider';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -420,7 +421,7 @@ export const AudioManager = ({
       ...overrides,
     };
   };
-  const diarizationEnabled = hfTokenValue.length > 0;
+  const diarizationEnabled = true;
 
   // Refs - Dual Recording for source-based speaker labeling
   const micRecorderRef = useRef<MediaRecorder | null>(null);
@@ -4140,6 +4141,8 @@ export const AudioManager = ({
               ...diarizationOptions,
               diarize: true,
               hfToken: hfTokenValue,
+              diarizationProvider:
+                resolveProductionDiarizationProvider(hfTokenValue),
               meetingId: currentMeetingIdRef.current,
             }),
           );
