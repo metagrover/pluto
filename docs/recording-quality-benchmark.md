@@ -46,6 +46,14 @@ Use this command when changing local speaker-attribution scoring or candidate-ru
 
 Candidate eligibility fixtures must also stay path-free and content-free. They should model only production-selection metadata such as distribution mode, checksum pinning, platform support, and credential requirements.
 
+The `sherpa-onnx` diarizer candidate is the credential-free local path for
+`#507`. Its manifest config must provide `segmentationModelPath`,
+`segmentationSha256`, `embeddingModelPath`, `embeddingSha256`, and a
+`distribution` object with reviewed license identifiers. The adapter refuses to
+probe or run when either checksum or the redistribution review is missing. This
+keeps the GitHub-hosted runtime and weights usable for local evaluation without
+mistaking a downloadable artifact for an approved production dependency.
+
 ## Private local speaker-attribution manifests
 
 `#465` also needs consented local-only evaluation without leaking paths or transcript text. Use a gitignored JSON manifest such as `scripts/recording-quality/private-speaker-attribution-manifest.json` and validate it with:

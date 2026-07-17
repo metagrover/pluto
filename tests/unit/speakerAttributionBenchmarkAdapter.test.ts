@@ -1,5 +1,12 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -269,6 +276,96 @@ describe('speaker attribution benchmark adapter', () => {
       expect(JSON.stringify(response)).not.toContain('Traceback');
     }
     expect(result.stdout).not.toContain(missingPath);
+  });
+
+  it('fails sherpa-onnx closed until both model licenses are reviewed', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'pluto-sherpa-license-'));
+    try {
+      const segmentation = path.join(root, 'segmentation.onnx');
+      const embedding = path.join(root, 'embedding.onnx');
+      writeFileSync(segmentation, 'segmentation');
+      writeFileSync(embedding, 'embedding');
+      const checksum = (filePath: string) =>
+        createHash('sha256').update(readFileSync(filePath)).digest('hex');
+      const result = await runAdapter([
+        request('sherpa-license', 'probe', 'sherpa-onnx', {
+          segmentationModelPath: segmentation,
+          segmentationSha256: checksum(segmentation),
+          embeddingModelPath: embedding,
+          embeddingSha256: checksum(embedding),
+          distribution: {
+            userCredentialsRequired: false,
+            redistributionReviewed: false,
+            licenseIds: ['MIT'],
+          },
+        }),
+      ]);
+
+      expect(result.responses[0]).toMatchObject({
+        error: { code: 'candidate_distribution_ineligible' },
+      });
+      expect(result.stdout).not.toContain(root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('probes and diarizes checksum-pinned sherpa-onnx artifacts', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'pluto-fake-sherpa-'));
+    try {
+      const segmentation = path.join(root, 'segmentation.onnx');
+      const embedding = path.join(root, 'embedding.onnx');
+      const audio = path.join(root, 'requested.wav');
+      writeFileSync(segmentation, 'segmentation');
+      writeFileSync(embedding, 'embedding');
+      writeFileSync(audio, 'synthetic');
+      writeFileSync(
+        path.join(root, 'sherpa_onnx.py'),
+        'class C:\n def __init__(self,**kwargs): self.__dict__.update(kwargs)\nOfflineSpeakerSegmentationPyannoteModelConfig=C\nOfflineSpeakerSegmentationModelConfig=C\nSpeakerEmbeddingExtractorConfig=C\nFastClusteringConfig=C\nclass OfflineSpeakerDiarizationConfig(C):\n def validate(self): return True\nclass S:\n start=0.25;end=1.5;speaker=3\nclass R:\n def sort_by_start_time(self): return [S()]\nclass OfflineSpeakerDiarization:\n def __init__(self,config): self.config=config\n def process(self,samples): return R()\n',
+      );
+      const metadata = path.join(root, 'sherpa_onnx-9.9.dist-info');
+      mkdirSync(metadata);
+      writeFileSync(
+        path.join(metadata, 'METADATA'),
+        'Metadata-Version: 2.1\nName: sherpa-onnx\nVersion: 9.9\n',
+      );
+      writeFileSync(
+        path.join(root, 'wave.py'),
+        "class W:\n def __enter__(self): return self\n def __exit__(self,*args): pass\n def getnchannels(self): return 1\n def getsampwidth(self): return 2\n def getframerate(self): return 16000\n def getnframes(self): return 2\n def readframes(self,n): return b'\\x00\\x00\\x00\\x00'\ndef open(*args,**kwargs): return W()\n",
+      );
+      const checksum = (filePath: string) =>
+        createHash('sha256').update(readFileSync(filePath)).digest('hex');
+      const config = {
+        segmentationModelPath: segmentation,
+        segmentationSha256: checksum(segmentation),
+        embeddingModelPath: embedding,
+        embeddingSha256: checksum(embedding),
+        distribution: {
+          userCredentialsRequired: false,
+          redistributionReviewed: true,
+          licenseIds: ['MIT', 'Apache-2.0'],
+        },
+      };
+      const probe = request('sherpa-probe', 'probe', 'sherpa-onnx', config);
+      const diarize = request('sherpa-run', 'diarize', 'sherpa-onnx', config);
+      diarize.case.audio.mixedPath = audio;
+
+      const result = await runAdapter([probe, diarize], {
+        ...process.env,
+        PYTHONPATH: root,
+      });
+
+      expect(result.responses[0].output.runtime.models).toEqual([
+        { id: 'sherpa-onnx', version: '9.9' },
+        { id: 'pyannote-segmentation-onnx', version: checksum(segmentation) },
+        { id: 'speaker-embedding-onnx', version: checksum(embedding) },
+      ]);
+      expect(result.responses[1].output.diarization.turns).toEqual([
+        { startTime: 0.25, endTime: 1.5, cluster: 'speaker_3' },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('rejects malformed optional ASR output without leaking its contents', async () => {
