@@ -94,6 +94,28 @@ export const transcribeWithBackend = async (
     language: options.language,
   });
   const start = Date.now();
+  if (options.diarize && options.diarizationProvider === 'sherpa_local') {
+    const diarization = await whisperX.diarize(audioPath, options.signal);
+    return {
+      segments: diarization.segments.map((segment) => ({
+        ...segment,
+        text: '',
+      })),
+      language: resolved.language || 'en',
+      duration: 0,
+      meta: {
+        backend: resolved.backend,
+        preset: resolved.preset,
+        model: resolved.model,
+        device: resolved.device,
+        computeType: resolved.computeType,
+        canonicalSource: options.canonicalSource,
+        diarization: true,
+        elapsedMs: Date.now() - start,
+        providerLabel: `sherpa-onnx ${diarization.version}`,
+      },
+    };
+  }
   const result = await whisperX.transcribe(
     audioPath,
     toWhisperOptions(resolved, options),

@@ -31,6 +31,7 @@ export interface TranscribeOptions {
   language?: string;
   diarize?: boolean;
   hfToken?: string;
+  diarizationProvider?: 'sherpa_local' | 'whisperx_hf';
   signal?: AbortSignal;
 }
 
@@ -50,6 +51,16 @@ export interface Transcript {
   segments: TranscriptSegment[];
   language: string;
   duration: number;
+}
+
+export interface DiarizationResult {
+  segments: Array<{ start: number; end: number; speaker: string }>;
+  provider: 'sherpa-onnx';
+  version: string;
+  modelProvenance: {
+    segmentationSha256: string;
+    embeddingSha256: string;
+  };
 }
 
 export interface HealthStatus {
@@ -329,6 +340,13 @@ class WhisperXManager {
         const env = {
           ...process.env,
           WHISPERX_PORT: this.port.toString(),
+          PLUTO_SPEAKER_MODELS_DIR: path.join(
+            app.getPath('userData'),
+            'models',
+            'speaker-attribution',
+            'sherpa-onnx-1.13.4',
+          ),
+          PLUTO_MEETINGS_DIR: path.join(app.getPath('userData'), 'meetings'),
           PATH: ffmpegPath
             ? `${path.dirname(ffmpegPath)}:${process.env.PATH}`
             : process.env.PATH,
@@ -495,6 +513,27 @@ class WhisperXManager {
     }
 
     return await response.json();
+  }
+
+  async diarize(
+    audioPath: string,
+    signal?: AbortSignal,
+  ): Promise<DiarizationResult> {
+    await this.start();
+    const response = await fetch(`${this.getBaseUrl()}/diarize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      dispatcher: WHISPERX_FETCH_AGENT,
+      signal,
+      body: JSON.stringify({ audio_path: audioPath }),
+    } as RequestInit & { dispatcher: typeof WHISPERX_FETCH_AGENT });
+    if (!response.ok) {
+      const error = (await response.json().catch(() => ({}))) as {
+        detail?: string;
+      };
+      throw new Error(error.detail || `Diarization failed: ${response.status}`);
+    }
+    return (await response.json()) as DiarizationResult;
   }
 
   /**

@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 datas = []
 datas += copy_metadata('whisperx')
@@ -12,13 +12,15 @@ datas += copy_metadata('filelock')
 datas += copy_metadata('numpy')
 datas += copy_metadata('tokenizers')
 datas += copy_metadata('huggingface_hub')
+sherpa_datas, sherpa_binaries, sherpa_hiddenimports = collect_all('sherpa_onnx')
+datas += sherpa_datas
 
 block_cipher = None
 
 a = Analysis(
     ['whisperx_server.py'],
     pathex=[],
-    binaries=[],
+    binaries=sherpa_binaries,
     datas=datas,
     hiddenimports=[
         'whisperx',
@@ -29,7 +31,7 @@ a = Analysis(
         'sklearn.neighbors._quad_tree',
         'sklearn.tree',
         'sklearn.tree._utils',
-    ],
+    ] + sherpa_hiddenimports,
     hookspath=['hooks'],
     hooksconfig={},
     runtime_hooks=[],

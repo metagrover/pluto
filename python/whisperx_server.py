@@ -8,9 +8,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List
+from pathlib import Path
 import json
 import logging
 import threading
+from sherpa_diarization_runtime import (
+    SherpaDiarizationError,
+    diarize as run_sherpa_diarization,
+    ensure_managed_audio_path,
+    ensure_model_artifacts,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -55,6 +62,9 @@ class ConfigRequest(BaseModel):
     device: Optional[str] = None
     compute_type: Optional[str] = None
     language: Optional[str] = None
+
+class DiarizeRequest(BaseModel):
+    audio_path: str
 
 def load_model_if_needed(new_config):
     global model, model_config
@@ -127,6 +137,25 @@ def update_config(request: ConfigRequest):
     load_model_if_needed(new_conf)
     
     return {"status": "updated", "config": model_config}
+
+@app.post("/diarize")
+def diarize(request: DiarizeRequest):
+    model_dir = Path(os.environ.get("PLUTO_SPEAKER_MODELS_DIR", ""))
+    meetings_dir = Path(os.environ.get("PLUTO_MEETINGS_DIR", ""))
+    if not str(model_dir) or str(model_dir) == ".":
+        raise HTTPException(status_code=503, detail="speaker_models_unavailable")
+    if not str(meetings_dir) or str(meetings_dir) == ".":
+        raise HTTPException(status_code=503, detail="meeting_storage_unavailable")
+    try:
+        audio_path = ensure_managed_audio_path(Path(request.audio_path), meetings_dir)
+        segmentation_path, embedding_path = ensure_model_artifacts(model_dir)
+        return run_sherpa_diarization(
+            audio_path,
+            segmentation_path,
+            embedding_path=embedding_path,
+        )
+    except SherpaDiarizationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 @app.post("/transcribe")
 def transcribe(request: TranscribeRequest):
