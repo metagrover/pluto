@@ -11,6 +11,7 @@ import {
 import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity.ts';
 import { buildTranscriptJsonPayload } from '../utils/transcriptSchema.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
+import { reprocessAttributedMeeting } from './safeAttributionReprocessing.ts';
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
@@ -224,15 +225,24 @@ export const retryMeetingTranscriptValidation = async (
     ) {
       integrity.reasons.push('remote_speech_unaccounted');
     }
-    await invoke('SAVE_MEETING', {
-      ...meeting,
-      transcript_status: 'needs_attention',
-      transcript_integrity_json: JSON.stringify(integrity),
-      transcript_validated_at: null,
-      enhanced_notes: null,
-      analysis_json: null,
-      value_signals_json: null,
-    });
+    const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
+    if (readRunId(latest) !== runId) return { status: 'superseded' };
+    const saved = await invoke(
+      'SAVE_MEETING',
+      {
+        ...latest,
+        transcript_status: 'needs_attention',
+        transcript_integrity_json: JSON.stringify(integrity),
+        transcript_validated_at: null,
+        enhanced_notes: null,
+        analysis_json: null,
+        value_signals_json: null,
+      },
+      {
+        expectedValidationRunId: runId,
+      },
+    );
+    if (saved === false) return { status: 'superseded' };
     return { status: 'needs_attention' };
   }
 
@@ -242,19 +252,20 @@ export const retryMeetingTranscriptValidation = async (
   const transcript = validation.segments
     .map((segment) => `${segment.speaker}: ${segment.text}`)
     .join('\n');
-  const title =
-    meeting.title === 'Meeting'
+  const generatedTitle =
+    current.title === 'Meeting'
       ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
-      : meeting.title;
+      : current.title;
   const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
     transcript,
-    userNotes: meeting.user_notes || '',
+    userNotes: current.user_notes || '',
   })) as { markdown?: string; analysis?: unknown; signals?: unknown };
   const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
   if (readRunId(latest) !== runId) return { status: 'superseded' };
+  const title = latest.title === current.title ? generatedTitle : latest.title;
 
-  await invoke('SAVE_MEETING', {
-    ...meeting,
+  const replacement = {
+    ...latest,
     title,
     transcript_status: 'validated',
     transcript_validated_at: new Date().toISOString(),
@@ -271,7 +282,25 @@ export const retryMeetingTranscriptValidation = async (
     enhanced_notes: artifacts.markdown || '',
     analysis_json: JSON.stringify(artifacts.analysis ?? null),
     value_signals_json: JSON.stringify(artifacts.signals ?? null),
+  };
+  const reprocessing = await reprocessAttributedMeeting({
+    previous: latest,
+    buildReplacement: async () => replacement,
+    validateReplacement: async (candidate) =>
+      candidate.transcript_status === 'validated' &&
+      parseSegments(candidate.transcript_json).length > 0,
+    saveReplacement: async (candidate) => {
+      return invoke('SAVE_MEETING', candidate, {
+        expectedValidationRunId: runId,
+      });
+    },
   });
+  if (reprocessing.status === 'save_conflict') {
+    return { status: 'superseded' };
+  }
+  if (reprocessing.status !== 'replaced') {
+    throw new Error(`Attribution reprocessing ${reprocessing.status}`);
+  }
   await invoke('EXTRACT_AND_PROCESS_ENTITIES', {
     transcript,
     meetingId: String(meeting.id),

@@ -43,6 +43,59 @@ const overlapSeconds = (
 
 const roundSeconds = (value: number): number => Math.round(value * 1000) / 1000;
 
+const coalesceNearEndWindows = (
+  windows: AttributionEvidenceWindow[],
+  minimumScore: number,
+): Array<
+  AttributionEvidenceWindow & {
+    activeSeconds: number;
+    activeIntervals: Array<{ startTime: number; endTime: number }>;
+  }
+> => {
+  const eligible = windows
+    .filter(
+      (window) =>
+        window.evidence === 'mic_exclusive' &&
+        window.nearEndScore >= minimumScore,
+    )
+    .sort((left, right) => left.startTime - right.startTime);
+  const coalesced: Array<
+    AttributionEvidenceWindow & {
+      activeSeconds: number;
+      activeIntervals: Array<{ startTime: number; endTime: number }>;
+    }
+  > = [];
+  for (const window of eligible) {
+    const previous = coalesced[coalesced.length - 1];
+    if (
+      previous &&
+      window.startTime <=
+        previous.endTime +
+          TRANSCRIPTION_TUNING.acousticAttribution.maxInjectedEvidenceGapSeconds
+    ) {
+      previous.endTime = Math.max(previous.endTime, window.endTime);
+      previous.activeSeconds += window.endTime - window.startTime;
+      previous.activeIntervals.push({
+        startTime: window.startTime,
+        endTime: window.endTime,
+      });
+      previous.nearEndScore = Math.min(
+        previous.nearEndScore,
+        window.nearEndScore,
+      );
+      continue;
+    }
+    coalesced.push({
+      ...window,
+      activeSeconds: window.endTime - window.startTime,
+      activeIntervals: [
+        { startTime: window.startTime, endTime: window.endTime },
+      ],
+    });
+  }
+  return coalesced;
+};
+
 export const deriveAttributionEvidence = (
   windows: AlignedEnergyWindow[],
 ): AttributionEvidenceWindow[] => {
@@ -100,63 +153,34 @@ export const injectLocalEvidenceWindows = <T extends AttributedTextSegment>(
     startTime: number;
     endTime: number;
     overlapsRemote: boolean;
+    activeIntervals?: Array<{ startTime: number; endTime: number }>;
   }>,
 ): T[] => {
+  const maximumTurnSeconds =
+    TRANSCRIPTION_TUNING.acousticAttribution.maxInjectedLocalSeconds;
+  const tuning = TRANSCRIPTION_TUNING.acousticAttribution;
   let result = segments.map((segment) => ({ ...segment }));
   for (const window of windows) {
     const next: T[] = [];
     for (const segment of result) {
+      const duration = segment.endTime - segment.startTime;
+      const evidenceOverlap = (window.activeIntervals ?? [window]).reduce(
+        (total, interval) => total + overlapSeconds(segment, interval),
+        0,
+      );
+      const minimumCoverageRatio =
+        duration <= tuning.maxSparseInjectedSegmentSeconds
+          ? tuning.minSparseInjectedSegmentCoverageRatio
+          : tuning.minInjectedSegmentCoverageRatio;
       if (
         segment.speaker !== 'Them' ||
-        window.startTime <= segment.startTime ||
-        window.endTime >= segment.endTime
+        duration > maximumTurnSeconds ||
+        evidenceOverlap / duration < minimumCoverageRatio
       ) {
         next.push(segment);
         continue;
       }
-      const tokens = segment.text.trim().split(/\s+/).filter(Boolean);
-      if (tokens.length < 3) {
-        next.push(segment);
-        continue;
-      }
-      const duration = segment.endTime - segment.startTime;
-      const startIndex = Math.max(
-        1,
-        Math.min(
-          tokens.length - 2,
-          Math.floor(
-            ((window.startTime - segment.startTime) / duration) * tokens.length,
-          ),
-        ),
-      );
-      const endIndex = Math.max(
-        startIndex + 1,
-        Math.min(
-          tokens.length - 1,
-          Math.ceil(
-            ((window.endTime - segment.startTime) / duration) * tokens.length,
-          ),
-        ),
-      );
-      next.push(
-        {
-          ...segment,
-          endTime: window.startTime,
-          text: tokens.slice(0, startIndex).join(' '),
-        },
-        {
-          ...segment,
-          startTime: window.startTime,
-          endTime: window.endTime,
-          speaker: 'Me',
-          text: tokens.slice(startIndex, endIndex).join(' '),
-        },
-        {
-          ...segment,
-          startTime: window.endTime,
-          text: tokens.slice(endIndex).join(' '),
-        },
-      );
+      next.push({ ...segment, speaker: 'Me' });
     }
     result = next;
   }
@@ -218,12 +242,14 @@ export const mapDiarizationFromAcousticEvidence = (params: {
     }
   }
 
-  const injectedLocalWindows = params.evidenceWindows
+  const injectedLocalWindows = coalesceNearEndWindows(
+    params.evidenceWindows,
+    tuning.minInjectedNearEndScore,
+  )
     .filter((evidence) => {
       const duration = evidence.endTime - evidence.startTime;
       if (
-        evidence.evidence !== 'mic_exclusive' ||
-        evidence.nearEndScore < tuning.minInjectedNearEndScore ||
+        evidence.activeSeconds < tuning.minInjectedLocalSeconds ||
         duration < tuning.minInjectedLocalSeconds ||
         duration > tuning.maxInjectedLocalSeconds
       ) {
@@ -238,6 +264,7 @@ export const mapDiarizationFromAcousticEvidence = (params: {
     .map((evidence) => ({
       startTime: evidence.startTime,
       endTime: evidence.endTime,
+      activeIntervals: evidence.activeIntervals,
       overlapsRemote: params.turns.some(
         (turn) =>
           mapping[turn.cluster] === 'Them' &&

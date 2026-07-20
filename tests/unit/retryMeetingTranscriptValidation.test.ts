@@ -109,6 +109,93 @@ describe('retryMeetingTranscriptValidation', () => {
     ).toHaveLength(1);
   });
 
+  it('preserves user edits made while validation is running', async () => {
+    let current: Record<string, unknown> = { ...meeting };
+    let meetingReads = 0;
+    let analysisUserNotes: unknown;
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') {
+        meetingReads += 1;
+        if (meetingReads >= 2) {
+          current = {
+            ...current,
+            title: 'User edited title',
+            user_notes: 'User edited notes',
+            is_favorite: true,
+          };
+        }
+        return current;
+      }
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        return {
+          segments: [rawSegment(5, 20, 'Synthetic attributed statement.')],
+        };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'GENERATE_TITLE') return 'Generated title';
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        analysisUserNotes = (payload as { userNotes?: unknown }).userNotes;
+        return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
+      }
+      if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('validated');
+    expect(current).toMatchObject({
+      title: 'User edited title',
+      user_notes: 'User edited notes',
+      is_favorite: true,
+      transcript_status: 'validated',
+    });
+    expect(analysisUserNotes).toBe('User edited notes');
+  });
+
+  it('returns superseded when another retry wins the final save race', async () => {
+    let current: Record<string, unknown> = { ...meeting };
+    const invoke = vi.fn(
+      async (channel: string, payload?: unknown, options?: unknown) => {
+        if (channel === 'GET_MEETING') return current;
+        if (channel === 'AUDIO_PROBE_DURATION') return 60;
+        if (channel === 'WHISPER_TRANSCRIBE') {
+          return {
+            segments: [rawSegment(5, 20, 'Synthetic attributed statement.')],
+          };
+        }
+        if (channel === 'SAVE_MEETING') {
+          if (options) return false;
+          current = { ...current, ...(payload as Record<string, unknown>) };
+          return true;
+        }
+        if (channel === 'GENERATE_TITLE') return 'Generated title';
+        if (channel === 'GENERATE_ANALYSIS_V2') {
+          return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
+        }
+        throw new Error(`Unexpected channel: ${channel}`);
+      },
+    );
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result).toEqual({ status: 'superseded' });
+    expect(invoke).not.toHaveBeenCalledWith(
+      'EXTRACT_AND_PROCESS_ENTITIES',
+      expect.anything(),
+    );
+  });
+
   it('does not clear prior missing-local-speech evidence when the mic retry stays empty', async () => {
     let current: Record<string, unknown> = {
       ...meeting,

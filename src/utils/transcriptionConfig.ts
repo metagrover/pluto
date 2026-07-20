@@ -93,6 +93,10 @@ export const TRANSCRIPTION_TUNING = {
     minInjectedLocalSeconds: 0.25,
     maxInjectedLocalSeconds: 1.5,
     minInjectedNearEndScore: 0.8,
+    maxInjectedEvidenceGapSeconds: 0.5,
+    minInjectedSegmentCoverageRatio: 0.5,
+    maxSparseInjectedSegmentSeconds: 0.75,
+    minSparseInjectedSegmentCoverageRatio: 0.15,
   },
   /**
    * When mix canonical ASR glues Me + Them, split using overlapping Them-channel text.

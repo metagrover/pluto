@@ -1293,7 +1293,7 @@ export const upsertWorkingMemorySnapshot = (input: {
 /**
  * Meeting Management
  */
-export const saveMeeting = (meeting: PersistedMeeting) => {
+const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
   // Ensure ID is a string
   const id = String(meeting.id);
 
@@ -1438,7 +1438,34 @@ export const saveMeeting = (meeting: PersistedMeeting) => {
 
   console.log(`[DB] Save successful for meeting: ${id}`);
   return result;
-};
+});
+
+export const saveMeeting = (meeting: PersistedMeeting) =>
+  saveMeetingTransaction(meeting);
+
+export const saveMeetingIfTranscriptRunCurrent = (
+  meeting: PersistedMeeting,
+  expectedValidationRunId: string,
+) =>
+  db.transaction(() => {
+    const current = getMeeting(meeting.id) as PersistedMeeting | undefined;
+    if (!current) return false;
+    let currentRunId: string | null = null;
+    try {
+      const integrity = JSON.parse(
+        current.transcript_integrity_json || '{}',
+      ) as { validation_run_id?: unknown };
+      currentRunId =
+        typeof integrity.validation_run_id === 'string'
+          ? integrity.validation_run_id
+          : null;
+    } catch {
+      currentRunId = null;
+    }
+    if (currentRunId !== expectedValidationRunId) return false;
+    saveMeetingTransaction(meeting);
+    return true;
+  })();
 
 export const getMeetings = () => {
   return db.prepare('SELECT * FROM meetings ORDER BY created_at DESC').all();

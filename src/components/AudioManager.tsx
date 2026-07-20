@@ -4263,13 +4263,21 @@ export const AudioManager = ({
             mapping,
           });
           updatedSegments = applied.segments as TranscriptionSegment[];
+          const meBeforeInjection = updatedSegments.filter(
+            (segment) => segment.speaker === 'Me',
+          ).length;
           updatedSegments = injectLocalEvidenceWindows(
             updatedSegments,
             acousticMapping.injectedLocalWindows,
           ) as TranscriptionSegment[];
+          const appliedLocalWindows = Math.max(
+            0,
+            updatedSegments.filter((segment) => segment.speaker === 'Me')
+              .length - meBeforeInjection,
+          );
           if (applied.relabeled > 0) {
             console.log(
-              `[Pluto] ${attemptLabel} acoustic diarization refinement applied: relabeled=${applied.relabeled}, injected=${acousticMapping.injectedLocalWindows.length}, confidence=${acousticMapping.confidence.toFixed(2)}`,
+              `[Pluto] ${attemptLabel} acoustic diarization refinement applied: relabeled=${applied.relabeled}, injected=${appliedLocalWindows}, confidence=${acousticMapping.confidence.toFixed(2)}`,
             );
           } else {
             console.log(
@@ -4284,7 +4292,7 @@ export const AudioManager = ({
             mappingConfidence: acousticMapping.confidence,
             splitsApplied: diarBoundary.splitsApplied,
             relabeled: applied.relabeled,
-            injectedLocalWindows: acousticMapping.injectedLocalWindows.length,
+            injectedLocalWindows: appliedLocalWindows,
             falseMeEvidenceSeconds: acousticMapping.falseMeEvidenceSeconds,
             missedMeEvidenceSeconds: acousticMapping.missedMeEvidenceSeconds,
             runtime: diarizationResult?.meta?.diarizationRuntime,
