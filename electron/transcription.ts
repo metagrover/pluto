@@ -33,6 +33,11 @@ export interface TranscriptionMeta {
   elapsedMs: number;
   providerLabel: string;
   warnings?: string[];
+  diarizationRuntime?: {
+    engine: 'sherpa-onnx';
+    engineVersion: string;
+    modelChecksums: string[];
+  };
 }
 
 export interface TranscriptionResult extends WhisperTranscript {
@@ -113,6 +118,14 @@ export const transcribeWithBackend = async (
         diarization: true,
         elapsedMs: Date.now() - start,
         providerLabel: `sherpa-onnx ${diarization.version}`,
+        diarizationRuntime: {
+          engine: 'sherpa-onnx',
+          engineVersion: diarization.version,
+          modelChecksums: [
+            diarization.modelProvenance.segmentationSha256,
+            diarization.modelProvenance.embeddingSha256,
+          ],
+        },
       },
     };
   }

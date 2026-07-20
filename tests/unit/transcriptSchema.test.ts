@@ -86,6 +86,31 @@ describe('transcriptSchema', () => {
     });
   });
 
+  it('records content-free local acoustic attribution evidence', () => {
+    const attribution = buildTranscriptSpeakerAttribution({
+      diarizationEnabled: true,
+      diarizationAttempted: true,
+      mappingApplied: true,
+      acousticEvidenceAttempted: true,
+      confidence: 0.9,
+      engineVersion: '1.13.4',
+      modelChecksums: ['segmentation', 'embedding'],
+      injectedLocalWindows: 1,
+      falseMeEvidenceSeconds: 0,
+      missedMeEvidenceSeconds: 0,
+    });
+
+    expect(attribution).toMatchObject({
+      source: 'local_diarization_acoustic',
+      nearEndEvidenceAttempted: true,
+      engineVersion: '1.13.4',
+      modelChecksums: ['segmentation', 'embedding'],
+      injectedLocalWindows: 1,
+      falseMeEvidenceSeconds: 0,
+      missedMeEvidenceSeconds: 0,
+    });
+  });
+
   it('records explicit fallback reason when diarization confidence is too low', () => {
     const attribution = buildTranscriptSpeakerAttribution({
       diarizationEnabled: true,

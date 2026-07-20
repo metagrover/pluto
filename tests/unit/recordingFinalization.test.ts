@@ -150,6 +150,25 @@ describe('recording finalization helpers', () => {
     });
   });
 
+  it('does not retry the pinned local diarizer with unrelated ASR settings', () => {
+    expect(
+      buildSpeakerAttributionRetryPlan({
+        diarizationEnabled: true,
+        mappingConfident: false,
+        retryAlreadyUsed: false,
+        providerHasStrongerPolicy: false,
+        settings: {
+          backend: 'whisperx_current',
+          preset: 'balanced',
+          model: 'small',
+          device: 'cpu',
+          computeType: 'int8',
+          language: 'en',
+        },
+      }),
+    ).toMatchObject({ shouldRetry: false, reason: 'no-stronger-policy' });
+  });
+
   it('skips the retry when mapping is already confident or the stronger pass already ran', () => {
     expect(
       buildSpeakerAttributionRetryPlan({

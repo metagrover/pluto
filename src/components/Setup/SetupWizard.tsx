@@ -16,6 +16,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [hfToken, setHfToken] = useState('');
   const [llmProvider, setLlmProvider] = useState('ollama');
   const [hydrated, setHydrated] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [finishError, setFinishError] = useState('');
 
   // Restore saved progress so user doesn't redo first screens
 
@@ -62,19 +64,39 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   };
 
   const handleFinish = async () => {
-    await window.ipcRenderer.invoke('SET_SETTING', {
-      key: 'setup_complete',
-      value: 'true',
-    });
-    await window.ipcRenderer.invoke('SET_SETTING', {
-      key: 'hf_token',
-      value: hfToken,
-    });
-    await window.ipcRenderer.invoke('SET_SETTING', {
-      key: 'llm_provider',
-      value: llmProvider,
-    });
-    onComplete();
+    setFinishing(true);
+    setFinishError('');
+    try {
+      try {
+        const readiness = await window.ipcRenderer.invoke(
+          'WHISPER_PREPARE_DIARIZATION_MODELS',
+        );
+        if (!readiness?.ready) {
+          setFinishError(
+            'Local speaker models are not ready yet. You can retry from Settings.',
+          );
+        }
+      } catch {
+        setFinishError(
+          'Local speaker models are not ready yet. You can retry from Settings.',
+        );
+      }
+      await window.ipcRenderer.invoke('SET_SETTING', {
+        key: 'setup_complete',
+        value: 'true',
+      });
+      await window.ipcRenderer.invoke('SET_SETTING', {
+        key: 'hf_token',
+        value: hfToken,
+      });
+      await window.ipcRenderer.invoke('SET_SETTING', {
+        key: 'llm_provider',
+        value: llmProvider,
+      });
+      onComplete();
+    } finally {
+      setFinishing(false);
+    }
   };
 
   if (!hydrated) {
@@ -205,7 +227,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 Speaker ID
               </h2>
               <p className="text-base text-pro-text-muted/60 font-bold uppercase tracking-widest leading-relaxed">
-                Optional diarization for identity tracking.
+                Local speaker attribution is included. A token is optional.
               </p>
             </div>
 
@@ -226,8 +248,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               />
               <div className="p-6 bg-pro-bg/50 rounded-2xl border border-pro-border">
                 <p className="text-[10px] text-pro-text-muted/50 font-medium leading-loose italic">
-                  You can skip this if you don't need speaker labels. To enable,
-                  enter a token from your HF Dashboard &gt; Tokens.
+                  Pluto uses verified local models by default. Add a token only
+                  if you want the optional Hugging Face-backed provider.
                 </p>
               </div>
             </div>
@@ -348,11 +370,15 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               <button
                 type="button"
                 onClick={handleFinish}
+                disabled={finishing}
                 className="flex-[2] h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
               >
-                Finish Setup
+                {finishing ? 'Preparing local models…' : 'Finish Setup'}
               </button>
             </div>
+            {finishError && (
+              <p className="text-xs font-bold text-red-500">{finishError}</p>
+            )}
           </div>
         )}
       </div>

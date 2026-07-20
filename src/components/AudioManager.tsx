@@ -1,7 +1,13 @@
 import { Loader2, Mic } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { persistAttributedTranscriptBeforeDownstream } from '../services/diarizationFirstFinalization';
 import { runRecordingTranscriptValidation } from '../services/recordingTranscriptValidation';
 import type { AnalysisDocumentV3 } from '../types';
+import {
+  deriveAttributionEvidence,
+  injectLocalEvidenceWindows,
+  mapDiarizationFromAcousticEvidence,
+} from '../utils/acousticSpeakerAttribution';
 import {
   analysisDocumentV3ToMarkdown,
   parseAnalysisDocumentV3Json,
@@ -28,7 +34,6 @@ import {
   assignSpeakersToCanonicalSegments,
   decideNextSpeaker,
   dropShortCrossSpeakerEchoes,
-  mapDiarizationSpeakers,
   resolveCrossChannelDuplicates,
   resolveCrossChannelNearDuplicates,
   shouldApplyFullSessionMeRecovery,
@@ -4096,18 +4101,23 @@ export const AudioManager = ({
             : 'diarization_disabled',
         });
       if (diarizationEnabled && diarizationAudioPath) {
-        const collectActivityWindowsForAttribution = () => {
-          const windows = [...speakerTimelineRef.current];
-          const activeWindow = activeSpeakerWindowRef.current;
-          if (activeWindow) {
-            windows.push({
-              startTime: activeWindow.startTime,
-              endTime: getMeetingElapsedSeconds(),
-              speaker: activeWindow.speaker,
-            });
+        let acousticEvidenceWindows: ReturnType<
+          typeof deriveAttributionEvidence
+        > = [];
+        if (primaryAudioPath && (rebuiltSystemAudioPath || systemAudioPath)) {
+          try {
+            const energyResult = await window.ipcRenderer.invoke(
+              'WHISPER_ALIGNED_ENERGY',
+              primaryAudioPath,
+              rebuiltSystemAudioPath || systemAudioPath,
+            );
+            acousticEvidenceWindows = deriveAttributionEvidence(
+              Array.isArray(energyResult?.windows) ? energyResult.windows : [],
+            );
+          } catch (error) {
+            console.warn('[Pluto] Acoustic evidence unavailable:', error);
           }
-          return windows;
-        };
+        }
 
         const runDiarizationRefinementAttempt = async ({
           attemptLabel,
@@ -4124,6 +4134,13 @@ export const AudioManager = ({
           mappingConfidence: number;
           splitsApplied: number;
           relabeled: number;
+          injectedLocalWindows: number;
+          falseMeEvidenceSeconds: number;
+          missedMeEvidenceSeconds: number;
+          runtime?: {
+            engineVersion: string;
+            modelChecksums: string[];
+          };
         }> => {
           const diarizationOptions = transcriptionOverrides
             ? {
@@ -4179,25 +4196,51 @@ export const AudioManager = ({
               mappingConfidence: 0,
               splitsApplied: 0,
               relabeled: 0,
+              injectedLocalWindows: 0,
+              falseMeEvidenceSeconds: 0,
+              missedMeEvidenceSeconds: 0,
             };
           }
 
-          const mapping = mapDiarizationSpeakers({
-            diarizationSegments,
-            referenceSegments: segments,
-            activityWindows: collectActivityWindowsForAttribution(),
+          const acousticMapping = mapDiarizationFromAcousticEvidence({
+            turns: diarizationSegments.map(
+              (segment: {
+                startTime: number;
+                endTime: number;
+                speaker: string;
+              }) => ({
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                cluster: String(segment.speaker),
+              }),
+            ),
+            evidenceWindows: acousticEvidenceWindows,
           });
-          if (Object.keys(mapping.mapping).length === 0) {
+          const mapping = Object.fromEntries(
+            Object.entries(acousticMapping.mapping).filter(
+              (entry): entry is [string, 'Me' | 'Them'] =>
+                entry[1] === 'Me' || entry[1] === 'Them',
+            ),
+          );
+          const mappingConfident = !Object.values(
+            acousticMapping.mapping,
+          ).includes('Unknown');
+          if (!mappingConfident || Object.keys(mapping).length === 0) {
             console.log(
-              `[Pluto] ${attemptLabel} diarization refinement skipped: ${mapping.reason || 'insufficient confidence'}`,
+              `[Pluto] ${attemptLabel} acoustic mapping skipped: ${acousticMapping.fallbackReason || 'insufficient confidence'}`,
             );
             return {
               segments,
               mappingConfident: false,
-              mappingReason: mapping.reason || 'insufficient confidence',
-              mappingConfidence: 0,
+              mappingReason:
+                acousticMapping.fallbackReason || 'insufficient confidence',
+              mappingConfidence: acousticMapping.confidence,
               splitsApplied: 0,
               relabeled: 0,
+              injectedLocalWindows: 0,
+              falseMeEvidenceSeconds: acousticMapping.falseMeEvidenceSeconds,
+              missedMeEvidenceSeconds: acousticMapping.missedMeEvidenceSeconds,
+              runtime: diarizationResult?.meta?.diarizationRuntime,
             };
           }
 
@@ -4205,7 +4248,7 @@ export const AudioManager = ({
           const diarBoundary = splitSegmentsAtDiarizationBoundaries(
             updatedSegments,
             diarizationSegments,
-            mapping.mapping,
+            mapping,
           );
           if (diarBoundary.splitsApplied > 0) {
             updatedSegments = diarBoundary.segments as TranscriptionSegment[];
@@ -4217,16 +4260,20 @@ export const AudioManager = ({
           const applied = applyDiarizationRefinement({
             segments: updatedSegments,
             diarizationSegments,
-            mapping: mapping.mapping,
+            mapping,
           });
           updatedSegments = applied.segments as TranscriptionSegment[];
+          updatedSegments = injectLocalEvidenceWindows(
+            updatedSegments,
+            acousticMapping.injectedLocalWindows,
+          ) as TranscriptionSegment[];
           if (applied.relabeled > 0) {
             console.log(
-              `[Pluto] ${attemptLabel} diarization refinement applied: relabeled=${applied.relabeled}, confidence=${mapping.confidence.toFixed(2)}`,
+              `[Pluto] ${attemptLabel} acoustic diarization refinement applied: relabeled=${applied.relabeled}, injected=${acousticMapping.injectedLocalWindows.length}, confidence=${acousticMapping.confidence.toFixed(2)}`,
             );
           } else {
             console.log(
-              `[Pluto] ${attemptLabel} diarization refinement kept existing labels: confidence=${mapping.confidence.toFixed(2)}`,
+              `[Pluto] ${attemptLabel} acoustic diarization refinement kept existing labels: confidence=${acousticMapping.confidence.toFixed(2)}`,
             );
           }
 
@@ -4234,9 +4281,13 @@ export const AudioManager = ({
             segments: updatedSegments,
             mappingConfident: true,
             mappingReason: null,
-            mappingConfidence: mapping.confidence,
+            mappingConfidence: acousticMapping.confidence,
             splitsApplied: diarBoundary.splitsApplied,
             relabeled: applied.relabeled,
+            injectedLocalWindows: acousticMapping.injectedLocalWindows.length,
+            falseMeEvidenceSeconds: acousticMapping.falseMeEvidenceSeconds,
+            missedMeEvidenceSeconds: acousticMapping.missedMeEvidenceSeconds,
+            runtime: diarizationResult?.meta?.diarizationRuntime,
           };
         };
 
@@ -4254,6 +4305,15 @@ export const AudioManager = ({
             confidence: initialDiarizationAttempt.mappingConfidence,
             fallbackReason:
               initialDiarizationAttempt.mappingReason ?? undefined,
+            acousticEvidenceAttempted: acousticEvidenceWindows.length > 0,
+            engineVersion: initialDiarizationAttempt.runtime?.engineVersion,
+            modelChecksums: initialDiarizationAttempt.runtime?.modelChecksums,
+            injectedLocalWindows:
+              initialDiarizationAttempt.injectedLocalWindows,
+            falseMeEvidenceSeconds:
+              initialDiarizationAttempt.falseMeEvidenceSeconds,
+            missedMeEvidenceSeconds:
+              initialDiarizationAttempt.missedMeEvidenceSeconds,
           });
           transcriptPipeline.diarizationBoundarySplits =
             initialDiarizationAttempt.splitsApplied;
@@ -4262,6 +4322,7 @@ export const AudioManager = ({
             diarizationEnabled,
             mappingConfident: initialDiarizationAttempt.mappingConfident,
             retryAlreadyUsed: false,
+            providerHasStrongerPolicy: hfTokenValue.length > 0,
             settings: resolvedTranscriptionSettings,
           });
           transcriptPipeline.speakerAttributionRetryPlan =
@@ -4297,6 +4358,15 @@ export const AudioManager = ({
               confidence: retryDiarizationAttempt.mappingConfidence,
               fallbackReason:
                 retryDiarizationAttempt.mappingReason ?? undefined,
+              acousticEvidenceAttempted: acousticEvidenceWindows.length > 0,
+              engineVersion: retryDiarizationAttempt.runtime?.engineVersion,
+              modelChecksums: retryDiarizationAttempt.runtime?.modelChecksums,
+              injectedLocalWindows:
+                retryDiarizationAttempt.injectedLocalWindows,
+              falseMeEvidenceSeconds:
+                retryDiarizationAttempt.falseMeEvidenceSeconds,
+              missedMeEvidenceSeconds:
+                retryDiarizationAttempt.missedMeEvidenceSeconds,
             });
 
             transcriptPipeline.speakerAttributionRetryUsed = 1;
@@ -4541,6 +4611,51 @@ export const AudioManager = ({
         console.warn('[Pluto] No transcription segments from either source');
       }
 
+      const attributionPersistenceRecord = {
+        id: stopSnapshot.meetingId,
+        title: userTitle || 'Meeting',
+        meeting_type: 'Recording',
+        started_at: meetingTiming.startedAtIso,
+        ended_at: meetingTiming.endedAtIso,
+        duration_seconds: meetingTiming.durationSeconds,
+        audio_path: primaryAudioPath,
+        system_audio_path: systemAudioPath,
+        mixed_audio_path: mixedAudioPath,
+        transcript_status: 'validated',
+        transcript_integrity_json: JSON.stringify({
+          ...integrityValidation.evidence,
+          reasons: integrityValidation.reasons,
+          attempts: integrityValidation.attempts,
+          activityEvidenceSource: storedActivityEvidence.source,
+          activityEvidence: storedActivityEvidence,
+        }),
+        transcript_validated_at: new Date().toISOString(),
+        transcript_json: JSON.stringify(
+          buildTranscriptJsonPayload(newTranscription, {
+            pipelineMode,
+            sessionFallbackUsed: sessionFallbackDecision.shouldRun,
+            sessionFallbackReasons: sessionFallbackDecision.reasons,
+            canonicalSource: sessionCanonicalSource,
+            postHydrationBleedPass,
+            postHydrationBleedDroppedMe,
+            speakerAttribution,
+            lifecycleStatus: 'validated',
+            integrity: {
+              ...integrityValidation.evidence,
+              reasons: integrityValidation.reasons,
+            },
+          }),
+        ),
+        user_notes: userNotes,
+        enhanced_notes: null,
+        analysis_json: null,
+        value_signals_json: null,
+        participants: [],
+        folder_id: null,
+        is_favorite: false,
+        end_reason: endReason || 'manual',
+      };
+
       // 3. Generate Analysis V3 (canonical markdown + hidden signals)
       const fullTranscript = newTranscription
         .map((s) => `${s.speaker}: ${s.text}`)
@@ -4550,15 +4665,29 @@ export const AudioManager = ({
       let analysisDocument: AnalysisDocument | AnalysisDocumentV3 =
         emptyAnalysisDocument();
 
-      try {
-        const rawArtifacts = (await window.ipcRenderer.invoke(
-          'GENERATE_ANALYSIS_V2',
-          {
-            transcript: fullTranscript,
-            userNotes: userNotes,
-          },
-        )) as AnalysisArtifacts;
+      const rawArtifacts = await persistAttributedTranscriptBeforeDownstream({
+        persistTranscript: async () =>
+          await window.ipcRenderer.invoke(
+            'SAVE_MEETING',
+            attributionPersistenceRecord,
+          ),
+        runDownstream: async () => {
+          try {
+            return (await window.ipcRenderer.invoke('GENERATE_ANALYSIS_V2', {
+              transcript: fullTranscript,
+              userNotes: userNotes,
+            })) as AnalysisArtifacts;
+          } catch (analysisErr) {
+            console.error(
+              '[Pluto] V3 analysis generation failed:',
+              analysisErr,
+            );
+            return null;
+          }
+        },
+      });
 
+      if (rawArtifacts) {
         analysisDocument = normalizeAnalysisDocument(rawArtifacts?.analysis);
         valueSignals = normalizeValueSignals(rawArtifacts?.signals);
         enhancedNotes = analysisDocumentToMarkdown(analysisDocument);
@@ -4572,8 +4701,7 @@ export const AudioManager = ({
           `accountability=${valueSignals.accountability_risks.length},`,
           `decisionImpact=${valueSignals.decision_impacts.length}`,
         );
-      } catch (analysisErr) {
-        console.error('[Pluto] V3 analysis generation failed:', analysisErr);
+      } else {
         analysisDocument = emptyAnalysisDocument();
         enhancedNotes = analysisDocumentToMarkdown(analysisDocument);
         valueSignals = emptyValueSignals();

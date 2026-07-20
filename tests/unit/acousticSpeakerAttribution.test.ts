@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   deriveAttributionEvidence,
+  injectLocalEvidenceWindows,
   mapDiarizationFromAcousticEvidence,
 } from '../../src/utils/acousticSpeakerAttribution';
 
@@ -14,6 +15,32 @@ describe('deriveAttributionEvidence', () => {
         { startTime: 1.2, endTime: 1.8, micRms: 0.002, systemRms: 0.001 },
       ]).map((window) => window.evidence),
     ).toEqual(['mic_exclusive', 'system_correlated', 'inconclusive']);
+  });
+});
+
+describe('injectLocalEvidenceWindows', () => {
+  it('splits a remote canonical segment around a short local interruption', () => {
+    const result = injectLocalEvidenceWindows(
+      [
+        {
+          startTime: 0,
+          endTime: 8,
+          speaker: 'Them',
+          text: 'one two three four five six seven eight',
+        },
+      ],
+      [{ startTime: 4, endTime: 4.541, overlapsRemote: true }],
+    );
+
+    expect(result.map((segment) => segment.speaker)).toEqual([
+      'Them',
+      'Me',
+      'Them',
+    ]);
+    expect(result[1]).toMatchObject({ startTime: 4, endTime: 4.541 });
+    expect(result.map((segment) => segment.text).join(' ')).toBe(
+      'one two three four five six seven eight',
+    );
   });
 });
 

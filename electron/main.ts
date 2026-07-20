@@ -275,6 +275,13 @@ app.whenReady().then(async () => {
     return await whisperX.prepareDiarizationModels();
   });
 
+  ipcMain.handle(
+    'WHISPER_ALIGNED_ENERGY',
+    async (_event, micAudioPath, systemAudioPath) => {
+      return await whisperX.getAlignedEnergy(micAudioPath, systemAudioPath);
+    },
+  );
+
   ipcMain.handle('WHISPER_LIST_BACKENDS', async () => {
     return listTranscriptionBackends();
   });

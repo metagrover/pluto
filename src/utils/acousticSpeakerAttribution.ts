@@ -23,6 +23,13 @@ export interface DiarizationTurn {
 
 export type AcousticSpeakerLabel = 'Me' | 'Them' | 'Unknown';
 
+export interface AttributedTextSegment {
+  startTime: number;
+  endTime: number;
+  speaker: string;
+  text: string;
+}
+
 const overlapSeconds = (
   left: { startTime: number; endTime: number },
   right: { startTime: number; endTime: number },
@@ -85,6 +92,75 @@ export const deriveAttributionEvidence = (
         evidence: 'inconclusive' as const,
       };
     });
+};
+
+export const injectLocalEvidenceWindows = <T extends AttributedTextSegment>(
+  segments: T[],
+  windows: Array<{
+    startTime: number;
+    endTime: number;
+    overlapsRemote: boolean;
+  }>,
+): T[] => {
+  let result = segments.map((segment) => ({ ...segment }));
+  for (const window of windows) {
+    const next: T[] = [];
+    for (const segment of result) {
+      if (
+        segment.speaker !== 'Them' ||
+        window.startTime <= segment.startTime ||
+        window.endTime >= segment.endTime
+      ) {
+        next.push(segment);
+        continue;
+      }
+      const tokens = segment.text.trim().split(/\s+/).filter(Boolean);
+      if (tokens.length < 3) {
+        next.push(segment);
+        continue;
+      }
+      const duration = segment.endTime - segment.startTime;
+      const startIndex = Math.max(
+        1,
+        Math.min(
+          tokens.length - 2,
+          Math.floor(
+            ((window.startTime - segment.startTime) / duration) * tokens.length,
+          ),
+        ),
+      );
+      const endIndex = Math.max(
+        startIndex + 1,
+        Math.min(
+          tokens.length - 1,
+          Math.ceil(
+            ((window.endTime - segment.startTime) / duration) * tokens.length,
+          ),
+        ),
+      );
+      next.push(
+        {
+          ...segment,
+          endTime: window.startTime,
+          text: tokens.slice(0, startIndex).join(' '),
+        },
+        {
+          ...segment,
+          startTime: window.startTime,
+          endTime: window.endTime,
+          speaker: 'Me',
+          text: tokens.slice(startIndex, endIndex).join(' '),
+        },
+        {
+          ...segment,
+          startTime: window.endTime,
+          text: tokens.slice(endIndex).join(' '),
+        },
+      );
+    }
+    result = next;
+  }
+  return result;
 };
 
 export const mapDiarizationFromAcousticEvidence = (params: {

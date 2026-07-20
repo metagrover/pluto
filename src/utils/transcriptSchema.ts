@@ -12,7 +12,7 @@ import type {
   TranscriptLifecycleStatus,
 } from './transcriptIntegrity.ts';
 
-export const TRANSCRIPT_PIPELINE_VERSION = '2.0.0';
+export const TRANSCRIPT_PIPELINE_VERSION = '3.0.0';
 
 export type CanonicalTranscriptSource = 'mic' | 'mix';
 export type TranscriptPipelineMode = 'legacy' | 'canonical_session_v2';
@@ -28,10 +28,16 @@ export type TranscriptTranscriptionMeta = {
   elapsedMs: number;
   providerLabel?: string;
   warnings?: string[];
+  diarizationRuntime?: {
+    engine: 'sherpa-onnx';
+    engineVersion: string;
+    modelChecksums: string[];
+  };
 };
 
 export type TranscriptSpeakerAttributionSource =
   | 'diarization'
+  | 'local_diarization_acoustic'
   | 'channel_fallback';
 
 export type TranscriptSpeakerAttributionFallbackReason =
@@ -45,6 +51,10 @@ export type TranscriptSpeakerAttributionFallbackReason =
   | 'low_them_overlap'
   | 'ambiguous_speaker'
   | 'low_confidence'
+  | 'missing_acoustic_evidence'
+  | 'inconclusive_acoustic_evidence'
+  | 'model_missing'
+  | 'model_checksum_mismatch'
   | 'unknown_diarization_fallback';
 
 export type StoredTranscriptSpeakerAttribution = {
@@ -53,6 +63,12 @@ export type StoredTranscriptSpeakerAttribution = {
   diarizationAttempted: boolean;
   mappingApplied: boolean;
   fallbackReason?: TranscriptSpeakerAttributionFallbackReason;
+  nearEndEvidenceAttempted?: boolean;
+  engineVersion?: string;
+  modelChecksums?: string[];
+  injectedLocalWindows?: number;
+  falseMeEvidenceSeconds?: number;
+  missedMeEvidenceSeconds?: number;
 };
 
 export type StoredTranscriptIntegrity = TranscriptIntegrityEvidence & {
@@ -97,6 +113,10 @@ const normalizeSpeakerAttributionFallbackReason = (
     case 'low_them_overlap':
     case 'ambiguous_speaker':
     case 'low_confidence':
+    case 'missing_acoustic_evidence':
+    case 'inconclusive_acoustic_evidence':
+    case 'model_missing':
+    case 'model_checksum_mismatch':
       return reason
         .trim()
         .toLowerCase()
@@ -112,19 +132,48 @@ export function buildTranscriptSpeakerAttribution(options: {
   mappingApplied?: boolean;
   confidence?: number;
   fallbackReason?: string;
+  acousticEvidenceAttempted?: boolean;
+  engineVersion?: string;
+  modelChecksums?: string[];
+  injectedLocalWindows?: number;
+  falseMeEvidenceSeconds?: number;
+  missedMeEvidenceSeconds?: number;
 }): StoredTranscriptSpeakerAttribution {
   const diarizationAttempted = options.diarizationAttempted === true;
   const mappingApplied = options.mappingApplied === true;
   const confidence = Number.isFinite(options.confidence)
     ? Math.max(0, Math.min(1, Number(options.confidence)))
     : 0;
+  const acousticMetadata = options.acousticEvidenceAttempted
+    ? {
+        nearEndEvidenceAttempted: true as const,
+        ...(options.engineVersion
+          ? { engineVersion: options.engineVersion }
+          : {}),
+        ...(options.modelChecksums
+          ? { modelChecksums: options.modelChecksums }
+          : {}),
+        ...(options.injectedLocalWindows !== undefined
+          ? { injectedLocalWindows: options.injectedLocalWindows }
+          : {}),
+        ...(options.falseMeEvidenceSeconds !== undefined
+          ? { falseMeEvidenceSeconds: options.falseMeEvidenceSeconds }
+          : {}),
+        ...(options.missedMeEvidenceSeconds !== undefined
+          ? { missedMeEvidenceSeconds: options.missedMeEvidenceSeconds }
+          : {}),
+      }
+    : {};
 
   if (mappingApplied) {
     return {
-      source: 'diarization',
+      source: options.acousticEvidenceAttempted
+        ? 'local_diarization_acoustic'
+        : 'diarization',
       confidence,
       diarizationAttempted,
       mappingApplied: true,
+      ...acousticMetadata,
     };
   }
 
@@ -142,6 +191,7 @@ export function buildTranscriptSpeakerAttribution(options: {
     diarizationAttempted,
     mappingApplied: false,
     fallbackReason,
+    ...acousticMetadata,
   };
 }
 
