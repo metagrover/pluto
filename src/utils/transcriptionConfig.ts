@@ -83,6 +83,17 @@ export const TRANSCRIPTION_TUNING = {
     minSegmentOverlapSeconds: 0.2,
     minSegmentCoverageRatio: 0.5,
   },
+  acousticAttribution: {
+    micActiveRms: 0.012,
+    systemActiveRms: 0.002,
+    nearEndDominanceRatio: 2.5,
+    minLocalClusterSeconds: 1.2,
+    minLocalToRemoteRatio: 1.5,
+    minRemoteEvidenceSeconds: 0.2,
+    minInjectedLocalSeconds: 0.25,
+    maxInjectedLocalSeconds: 1.5,
+    minInjectedNearEndScore: 0.8,
+  },
   /**
    * When mix canonical ASR glues Me + Them, split using overlapping Them-channel text.
    */
