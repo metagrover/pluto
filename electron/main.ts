@@ -1110,7 +1110,7 @@ app.whenReady().then(async () => {
     }
   };
 
-  ipcMain.handle('SAVE_MEETING', (_event, meeting) => {
+  ipcMain.handle('SAVE_MEETING', (_event, meeting, options) => {
     try {
       const shouldRunTranscriptCleanup =
         meeting?.run_transcript_cleanup === true;
@@ -1137,7 +1137,14 @@ app.whenReady().then(async () => {
       }
 
       console.log(`[Pluto] Saving meeting: ${meeting.id} - ${meeting.title}`);
-      const result = db.saveMeeting(meeting);
+      const expectedValidationRunId =
+        options && typeof options.expectedValidationRunId === 'string'
+          ? options.expectedValidationRunId
+          : null;
+      const result = expectedValidationRunId
+        ? db.saveMeetingIfTranscriptRunCurrent(meeting, expectedValidationRunId)
+        : db.saveMeeting(meeting);
+      if (result === false) return false;
 
       // Process manual participants as entities (Sprint 2 enhancement)
       if (meeting.participants && Array.isArray(meeting.participants)) {
