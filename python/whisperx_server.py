@@ -20,6 +20,7 @@ from sherpa_diarization_runtime import (
     model_readiness,
     require_model_artifacts,
 )
+from aligned_audio_energy import aligned_energy_windows
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -67,6 +68,10 @@ class ConfigRequest(BaseModel):
 
 class DiarizeRequest(BaseModel):
     audio_path: str
+
+class AlignedEnergyRequest(BaseModel):
+    mic_audio_path: str
+    system_audio_path: str
 
 def load_model_if_needed(new_config):
     global model, model_config
@@ -175,6 +180,18 @@ def prepare_diarization_models():
         ensure_model_artifacts(model_dir)
         return model_readiness(model_dir)
     except SherpaDiarizationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+@app.post("/attribution/aligned-energy")
+def attribution_aligned_energy(request: AlignedEnergyRequest):
+    meetings_dir = Path(os.environ.get("PLUTO_MEETINGS_DIR", ""))
+    if not str(meetings_dir) or str(meetings_dir) == ".":
+        raise HTTPException(status_code=503, detail="meeting_storage_unavailable")
+    try:
+        mic_path = ensure_managed_audio_path(Path(request.mic_audio_path), meetings_dir)
+        system_path = ensure_managed_audio_path(Path(request.system_audio_path), meetings_dir)
+        return {"schemaVersion": 1, "windows": aligned_energy_windows(mic_path, system_path)}
+    except (SherpaDiarizationError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 @app.post("/transcribe")

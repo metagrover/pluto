@@ -72,6 +72,16 @@ export type DiarizationModelReadiness =
     }
   | { ready: false; reason: string };
 
+export interface AlignedEnergyResult {
+  schemaVersion: 1;
+  windows: Array<{
+    startTime: number;
+    endTime: number;
+    micRms: number;
+    systemRms: number;
+  }>;
+}
+
 export interface HealthStatus {
   status: 'ok' | 'error';
   whisperx_version?: string;
@@ -572,6 +582,33 @@ class WhisperXManager {
       );
     }
     return (await response.json()) as DiarizationModelReadiness;
+  }
+
+  async getAlignedEnergy(
+    micAudioPath: string,
+    systemAudioPath: string,
+  ): Promise<AlignedEnergyResult> {
+    await this.start();
+    const response = await fetch(
+      `${this.getBaseUrl()}/attribution/aligned-energy`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mic_audio_path: micAudioPath,
+          system_audio_path: systemAudioPath,
+        }),
+      },
+    );
+    if (!response.ok) {
+      const error = (await response.json().catch(() => ({}))) as {
+        detail?: string;
+      };
+      throw new Error(
+        error.detail || `Aligned energy failed: ${response.status}`,
+      );
+    }
+    return (await response.json()) as AlignedEnergyResult;
   }
 
   /**

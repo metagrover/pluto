@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type {
   TranscriptionBackend,
   TranscriptionPreset,
@@ -121,6 +122,9 @@ export const SettingsOverlay = ({
   theme,
   setTheme,
 }: SettingsOverlayProps) => {
+  const [speakerModelsState, setSpeakerModelsState] = useState<
+    'idle' | 'preparing' | 'ready' | 'error'
+  >('idle');
   if (!settingsVisible) return null;
 
   const persistSetting = (key: string, value: string) => {
@@ -274,6 +278,42 @@ export const SettingsOverlay = ({
             <div className="flex items-center justify-between gap-6 rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
               <div className="space-y-1.5">
                 <div className="text-[14px] font-black tracking-tight text-pro-text-main">
+                  Local speaker attribution
+                </div>
+                <p className={helperClass}>
+                  Prepare the verified local models before recording
+                  finalization.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={speakerModelsState === 'preparing'}
+                onClick={async () => {
+                  setSpeakerModelsState('preparing');
+                  try {
+                    const result = await window.ipcRenderer.invoke(
+                      'WHISPER_PREPARE_DIARIZATION_MODELS',
+                    );
+                    setSpeakerModelsState(result?.ready ? 'ready' : 'error');
+                  } catch {
+                    setSpeakerModelsState('error');
+                  }
+                }}
+                className="shrink-0 rounded-xl bg-pro-text-main px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-50 dark:bg-pro-accent dark:text-[#1A2340]"
+              >
+                {speakerModelsState === 'preparing'
+                  ? 'Preparing…'
+                  : speakerModelsState === 'ready'
+                    ? 'Ready'
+                    : speakerModelsState === 'error'
+                      ? 'Retry setup'
+                      : 'Prepare'}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-6 rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
+              <div className="space-y-1.5">
+                <div className="text-[14px] font-black tracking-tight text-pro-text-main">
                   Auto-end when the call ends
                 </div>
                 <p className={helperClass}>
@@ -302,7 +342,7 @@ export const SettingsOverlay = ({
             <Field
               htmlFor="settings-hf-token"
               label="Speaker Diarization Token"
-              helper="Optional. Add a Hugging Face token if you want diarization support."
+              helper="Optional enhancement. Pluto's default speaker attribution is local and credential-free."
             >
               <input
                 id="settings-hf-token"

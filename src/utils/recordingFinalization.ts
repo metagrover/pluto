@@ -48,11 +48,13 @@ export const buildSpeakerAttributionRetryPlan = ({
   diarizationEnabled,
   mappingConfident,
   retryAlreadyUsed,
+  providerHasStrongerPolicy = true,
   settings,
 }: {
   diarizationEnabled: boolean;
   mappingConfident: boolean;
   retryAlreadyUsed: boolean;
+  providerHasStrongerPolicy?: boolean;
   settings: Required<TranscriptionSettings>;
 }): SpeakerAttributionRetryPlan => {
   if (!diarizationEnabled) {
@@ -75,6 +77,14 @@ export const buildSpeakerAttributionRetryPlan = ({
     return {
       shouldRetry: false,
       reason: 'retry-already-used',
+      strongerOptions: null,
+    };
+  }
+
+  if (!providerHasStrongerPolicy) {
+    return {
+      shouldRetry: false,
+      reason: 'no-stronger-policy',
       strongerOptions: null,
     };
   }
