@@ -88,9 +88,7 @@ describe('capture journal', () => {
     },
   );
 
-  it.each<
-    [string, (manifest: Record<string, unknown>) => void]
-  >([
+  it.each<[string, (manifest: Record<string, unknown>) => void]>([
     [
       'meeting identity',
       (manifest) => {
