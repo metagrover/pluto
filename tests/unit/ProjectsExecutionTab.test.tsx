@@ -268,7 +268,7 @@ describe('partitionProjectsForDisplay', () => {
           id: 'task-on-track-first',
           type: 'action_item',
           name: 'Prepare notes',
-          due_date: '2026-07-20T00:00:00.000Z',
+          due_date: '2099-07-20T00:00:00.000Z',
         }),
       ],
       'project-slipping': [
@@ -284,7 +284,7 @@ describe('partitionProjectsForDisplay', () => {
           id: 'task-on-track-second',
           type: 'action_item',
           name: 'Share agenda',
-          due_date: '2026-07-21T00:00:00.000Z',
+          due_date: '2099-07-21T00:00:00.000Z',
         }),
       ],
     };
