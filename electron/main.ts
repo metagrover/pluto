@@ -267,6 +267,14 @@ app.whenReady().then(async () => {
     return await whisperX.listModels();
   });
 
+  ipcMain.handle('WHISPER_DIARIZATION_MODEL_STATUS', async () => {
+    return await whisperX.getDiarizationModelReadiness();
+  });
+
+  ipcMain.handle('WHISPER_PREPARE_DIARIZATION_MODELS', async () => {
+    return await whisperX.prepareDiarizationModels();
+  });
+
   ipcMain.handle('WHISPER_LIST_BACKENDS', async () => {
     return listTranscriptionBackends();
   });

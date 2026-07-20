@@ -17,6 +17,8 @@ from sherpa_diarization_runtime import (
     diarize as run_sherpa_diarization,
     ensure_managed_audio_path,
     ensure_model_artifacts,
+    model_readiness,
+    require_model_artifacts,
 )
 
 # Configure logging
@@ -148,12 +150,30 @@ def diarize(request: DiarizeRequest):
         raise HTTPException(status_code=503, detail="meeting_storage_unavailable")
     try:
         audio_path = ensure_managed_audio_path(Path(request.audio_path), meetings_dir)
-        segmentation_path, embedding_path = ensure_model_artifacts(model_dir)
+        segmentation_path, embedding_path = require_model_artifacts(model_dir)
         return run_sherpa_diarization(
             audio_path,
             segmentation_path,
             embedding_path=embedding_path,
         )
+    except SherpaDiarizationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+@app.get("/diarization/models/status")
+def diarization_model_status():
+    model_dir = Path(os.environ.get("PLUTO_SPEAKER_MODELS_DIR", ""))
+    if not str(model_dir) or str(model_dir) == ".":
+        return {"ready": False, "reason": "speaker_models_unavailable"}
+    return model_readiness(model_dir)
+
+@app.post("/diarization/models/prepare")
+def prepare_diarization_models():
+    model_dir = Path(os.environ.get("PLUTO_SPEAKER_MODELS_DIR", ""))
+    if not str(model_dir) or str(model_dir) == ".":
+        raise HTTPException(status_code=503, detail="speaker_models_unavailable")
+    try:
+        ensure_model_artifacts(model_dir)
+        return model_readiness(model_dir)
     except SherpaDiarizationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

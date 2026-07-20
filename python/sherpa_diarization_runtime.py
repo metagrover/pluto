@@ -75,6 +75,27 @@ def ensure_model_artifacts(
     return verify_artifact(segmentation, segmentation_sha256), verify_artifact(embedding, embedding_sha256)
 
 
+def require_model_artifacts(model_dir: Path) -> tuple[Path, Path]:
+    segmentation, embedding = resolve_model_artifacts(model_dir)
+    return (
+        verify_artifact(segmentation, SEGMENTATION_SHA256),
+        verify_artifact(embedding, EMBEDDING_SHA256),
+    )
+
+
+def model_readiness(model_dir: Path) -> dict:
+    try:
+        require_model_artifacts(model_dir)
+    except SherpaDiarizationError as error:
+        return {"ready": False, "reason": str(error)}
+    return {
+        "ready": True,
+        "provider": "sherpa-onnx",
+        "version": SHERPA_ONNX_VERSION,
+        "modelChecksums": [SEGMENTATION_SHA256, EMBEDDING_SHA256],
+    }
+
+
 def ensure_managed_audio_path(audio_path: Path, meetings_dir: Path) -> Path:
     resolved_audio = audio_path.resolve()
     resolved_meetings = meetings_dir.resolve()

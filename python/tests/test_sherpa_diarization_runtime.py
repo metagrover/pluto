@@ -14,6 +14,8 @@ from python.sherpa_diarization_runtime import (
     diarize,
     ensure_managed_audio_path,
     ensure_model_artifacts,
+    model_readiness,
+    require_model_artifacts,
     resolve_model_artifacts,
     verify_artifact,
 )
@@ -141,6 +143,19 @@ class SherpaDiarizationRuntimeTest(unittest.TestCase):
 
             self.assertEqual(installed[0].read_bytes(), b"segmentation")
             self.assertEqual(installed[1].read_bytes(), b"embedding")
+
+    def test_reports_missing_models_without_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            readiness = model_readiness(Path(directory) / "models")
+            self.assertEqual(readiness, {"ready": False, "reason": "model_missing"})
+            self.assertNotIn(directory, str(readiness))
+
+    def test_finalization_requires_prepared_models_without_downloading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            with self.assertRaisesRegex(SherpaDiarizationError, "model_missing"):
+                require_model_artifacts(Path(directory) / "models")
+            self.assertEqual(calls, [])
 
 
 if __name__ == "__main__":

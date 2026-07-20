@@ -63,6 +63,15 @@ export interface DiarizationResult {
   };
 }
 
+export type DiarizationModelReadiness =
+  | {
+      ready: true;
+      provider: 'sherpa-onnx';
+      version: string;
+      modelChecksums: string[];
+    }
+  | { ready: false; reason: string };
+
 export interface HealthStatus {
   status: 'ok' | 'error';
   whisperx_version?: string;
@@ -534,6 +543,35 @@ class WhisperXManager {
       throw new Error(error.detail || `Diarization failed: ${response.status}`);
     }
     return (await response.json()) as DiarizationResult;
+  }
+
+  async getDiarizationModelReadiness(): Promise<DiarizationModelReadiness> {
+    await this.start();
+    const response = await fetch(
+      `${this.getBaseUrl()}/diarization/models/status`,
+    );
+    if (!response.ok) {
+      throw new Error(`Diarization readiness failed: ${response.status}`);
+    }
+    return (await response.json()) as DiarizationModelReadiness;
+  }
+
+  async prepareDiarizationModels(): Promise<DiarizationModelReadiness> {
+    await this.start();
+    const response = await fetch(
+      `${this.getBaseUrl()}/diarization/models/prepare`,
+      { method: 'POST' },
+    );
+    if (!response.ok) {
+      const error = (await response.json().catch(() => ({}))) as {
+        detail?: string;
+      };
+      throw new Error(
+        error.detail ||
+          `Diarization model preparation failed: ${response.status}`,
+      );
+    }
+    return (await response.json()) as DiarizationModelReadiness;
   }
 
   /**
