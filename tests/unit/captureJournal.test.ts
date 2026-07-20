@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -27,6 +34,23 @@ describe('capture journal', () => {
     return root;
   };
 
+  const mutateManifest = async (
+    root: string,
+    mutate: (manifest: Record<string, unknown>) => void,
+  ) => {
+    const manifest = await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    const manifestPath = join(root, manifest.manifestRelativePath);
+    const parsed = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    mutate(parsed);
+    await writeFile(manifestPath, JSON.stringify(parsed));
+  };
+
   it('creates a versioned per-meeting manifest', async () => {
     const root = await makeRoot();
 
@@ -42,6 +66,79 @@ describe('capture journal', () => {
     expect(manifest.artifactRootRelativePath).toBe(
       'meeting-123/capture-journal',
     );
+  });
+
+  it.each([
+    '..',
+    '.',
+    '../escaped',
+    'nested/meeting',
+    'nested\\meeting',
+    'bad\0id',
+  ])(
+    'rejects unsafe meeting ID %j before filesystem mutation',
+    async (meetingId) => {
+      const root = await makeRoot();
+
+      await expect(
+        createCaptureJournal(root, { meetingId, startedAtMs: 1_000 }),
+      ).rejects.toThrow(/invalid capture journal meeting id/i);
+
+      expect(await readdir(root)).toEqual([]);
+    },
+  );
+
+  it.each<
+    [string, (manifest: Record<string, unknown>) => void]
+  >([
+    [
+      'meeting identity',
+      (manifest) => {
+        manifest.meetingId = 'meeting-other';
+      },
+    ],
+    [
+      'artifact root',
+      (manifest) => {
+        manifest.artifactRootRelativePath = '../outside';
+      },
+    ],
+    [
+      'manifest path',
+      (manifest) => {
+        manifest.manifestRelativePath = '../manifest.json';
+      },
+    ],
+  ])('rejects a non-canonical manifest %s', async (_label, mutate) => {
+    const root = await makeRoot();
+    await mutateManifest(root, mutate);
+
+    await expect(
+      readCaptureJournalManifest(root, 'meeting-123'),
+    ).rejects.toThrow(/invalid capture journal manifest/i);
+  });
+
+  it('rejects a chunk entry whose path is not canonical for its metadata', async () => {
+    const root = await makeRoot();
+    const manifest = await appendCaptureJournalChunk(root, {
+      meetingId: 'meeting-123',
+      source: 'mic',
+      sequence: 2,
+      chunkStartSec: 0,
+      chunkEndSec: 1,
+      format: 'audio/wav',
+      data: Buffer.from('mic'),
+    });
+    const manifestPath = join(root, manifest.manifestRelativePath);
+    const parsed = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      entries: Array<{ relativePath: string }>;
+    };
+    parsed.entries[0].relativePath = '../sentinel.wav';
+    await writeFile(manifestPath, JSON.stringify(parsed));
+
+    await expect(
+      readCaptureJournalManifest(root, 'meeting-123'),
+    ).rejects.toThrow(/invalid capture journal manifest entry path/i);
   });
 
   it('appends chunks with stable relative paths and checksum metadata', async () => {

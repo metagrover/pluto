@@ -1,4 +1,11 @@
-import { mkdtemp, rm, stat, truncate, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  truncate,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -189,6 +196,61 @@ describe('capture journal recovery', () => {
       recoveredCount: 1,
       failedRecoveryCount: 1,
     });
+    expect(savedMeetingIds).toEqual(['meeting-b']);
+  });
+
+  it('rejects an escaped chunk path before reads and recovers later journals', async () => {
+    const root = await makeRoot();
+    for (const meetingId of ['meeting-a', 'meeting-b']) {
+      await createCaptureJournal(root, { meetingId, startedAtMs: 1_000 });
+      await appendCaptureJournalChunk(root, {
+        meetingId,
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 1,
+        format: 'wav',
+        data: Buffer.from(`${meetingId}-mic`),
+      });
+    }
+
+    const sentinelPath = join(root, 'sentinel.wav');
+    await writeFile(sentinelPath, Buffer.from('meeting-a-mic'));
+    const manifestPath = join(
+      root,
+      'meeting-a',
+      'capture-journal',
+      'manifest.json',
+    );
+    const parsed = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      entries: Array<{ relativePath: string }>;
+    };
+    parsed.entries[0].relativePath = 'sentinel.wav';
+    await writeFile(manifestPath, JSON.stringify(parsed));
+
+    const savedMeetingIds: string[] = [];
+    const stitchWavSegments = vi.fn(
+      async (_segments: Array<{ path: string }>, outputTag: string) =>
+        join(root, `${outputTag}.wav`),
+    );
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting: (meeting) => savedMeetingIds.push(meeting.id),
+      stitchWavSegments,
+      nowMs: 5_000,
+    });
+
+    expect(result).toMatchObject({
+      recoveredCount: 1,
+      skippedInvalidManifestCount: 1,
+    });
+    expect(stitchWavSegments).toHaveBeenCalledTimes(1);
+    const stitchedSegments = stitchWavSegments.mock.calls.flatMap(
+      ([segments]) => segments,
+    );
+    expect(stitchedSegments).not.toContainEqual(
+      expect.objectContaining({ path: sentinelPath }),
+    );
     expect(savedMeetingIds).toEqual(['meeting-b']);
   });
 

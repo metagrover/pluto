@@ -73,6 +73,17 @@ const getManifestPath = (rootDir: string, meetingId: string) =>
 const normalizeMeetingId = (meetingId: string) => {
   const normalized = String(meetingId || '').trim();
   if (!normalized) throw new Error('Capture journal requires a meeting ID');
+  if (
+    normalized === '.' ||
+    normalized === '..' ||
+    normalized.includes('/') ||
+    normalized.includes('\\') ||
+    normalized.includes('\0')
+  ) {
+    throw new Error(
+      `Invalid capture journal meeting ID: ${JSON.stringify(normalized)}`,
+    );
+  }
   return normalized;
 };
 
@@ -104,6 +115,70 @@ const padSequence = (sequence: number) => String(sequence).padStart(6, '0');
 
 const computeChecksum = (data: Buffer) =>
   createHash('sha256').update(data).digest('hex');
+
+const invalidManifest = (field: string): never => {
+  throw new Error(`Invalid capture journal manifest ${field}`);
+};
+
+const validateCaptureJournalManifest = (
+  value: unknown,
+  requestedMeetingId: string,
+): CaptureJournalManifest => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return invalidManifest('shape');
+  }
+  const manifest = value as Record<string, unknown>;
+  if (manifest.schemaVersion !== 1) {
+    throw new Error(
+      `Unsupported capture journal schema version: ${String(manifest.schemaVersion)}`,
+    );
+  }
+  const artifactRootRelativePath =
+    getArtifactRootRelativePath(requestedMeetingId);
+  if (manifest.meetingId !== requestedMeetingId) {
+    return invalidManifest('meeting ID');
+  }
+  if (manifest.artifactRootRelativePath !== artifactRootRelativePath) {
+    return invalidManifest('artifact root path');
+  }
+  if (
+    manifest.manifestRelativePath !==
+    `${artifactRootRelativePath}/${MANIFEST_FILE}`
+  ) {
+    return invalidManifest('manifest path');
+  }
+  if (!Array.isArray(manifest.entries)) {
+    return invalidManifest('entries');
+  }
+  for (const entryValue of manifest.entries) {
+    if (
+      !entryValue ||
+      typeof entryValue !== 'object' ||
+      Array.isArray(entryValue)
+    ) {
+      return invalidManifest('entry shape');
+    }
+    const entry = entryValue as Record<string, unknown>;
+    if (entry.source !== 'mic' && entry.source !== 'system') {
+      return invalidManifest('entry source');
+    }
+    if (
+      typeof entry.sequence !== 'number' ||
+      !Number.isInteger(entry.sequence) ||
+      entry.sequence < 0
+    ) {
+      return invalidManifest('entry sequence');
+    }
+    if (typeof entry.format !== 'string') {
+      return invalidManifest('entry format');
+    }
+    const expectedPath = `${artifactRootRelativePath}/chunks/${entry.source}-${padSequence(entry.sequence)}.${formatToExtension(entry.format)}`;
+    if (entry.relativePath !== expectedPath) {
+      return invalidManifest('entry path');
+    }
+  }
+  return value as CaptureJournalManifest;
+};
 
 const syncPath = async (path: string) => {
   const handle = await open(path, 'r');
@@ -141,13 +216,7 @@ export const readCaptureJournalManifest = async (
   const normalizedMeetingId = normalizeMeetingId(meetingId);
   const manifestPath = getManifestPath(rootDir, normalizedMeetingId);
   const raw = await readFile(manifestPath, 'utf8');
-  const parsed = JSON.parse(raw) as CaptureJournalManifest;
-  if (parsed.schemaVersion !== 1) {
-    throw new Error(
-      `Unsupported capture journal schema version: ${parsed.schemaVersion}`,
-    );
-  }
-  return parsed;
+  return validateCaptureJournalManifest(JSON.parse(raw), normalizedMeetingId);
 };
 
 export const createCaptureJournal = async (
