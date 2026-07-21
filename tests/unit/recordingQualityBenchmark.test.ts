@@ -579,6 +579,14 @@ describe('runCaptureRecoveryBenchmarkCase', () => {
     );
 
     expect(result.passed).toBe(true);
+    expect(result.measurements?.artifactBytes).toEqual({
+      status: 'available',
+      value: 51,
+      unit: 'bytes',
+      stability: 'stable',
+      method: 'case_artifact_sum',
+    });
+    expect(JSON.stringify(result)).not.toContain('pluto-recording-quality');
     expect(result.actual).toEqual({
       status: 'needs_attention',
       primaryMetric: {

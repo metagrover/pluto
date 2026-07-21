@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -69,10 +69,7 @@ export type RecordingQualityBenchmarkMeasurement =
     }
   | {
       status: 'unavailable';
-      reason:
-        | 'not_applicable'
-        | 'unsupported_runtime'
-        | 'collection_failed';
+      reason: 'not_applicable' | 'unsupported_runtime' | 'collection_failed';
     };
 
 export type RecordingQualityBenchmarkMeasurements = {
@@ -1053,8 +1050,14 @@ export const runCaptureRecoveryBenchmarkCase = async (
         savedMeeting = meeting;
         return meeting;
       },
-      stitchWavSegments: async (_segments, outputTag) =>
-        path.join(rootDir, `${outputTag}.wav`),
+      stitchWavSegments: async (segments, outputTag) => {
+        const outputPath = path.join(rootDir, `${outputTag}.wav`);
+        const segmentBytes = await Promise.all(
+          segments.map((segment) => readFile(segment.path)),
+        );
+        await writeFile(outputPath, Buffer.concat(segmentBytes));
+        return outputPath;
+      },
       nowMs: fixture.startedAtMs + 10_000,
     });
 
@@ -1097,6 +1100,23 @@ export const runCaptureRecoveryBenchmarkCase = async (
         .map((reason) => `missing required reason ${reason}`),
       ...missingSources,
     ];
+    let artifactBytes: RecordingQualityBenchmarkMeasurement;
+    try {
+      const recoveredPaths = Object.values(integrity.recovered_sources)
+        .map((source) => source.recoveredAudioPath)
+        .filter((artifactPath): artifactPath is string => Boolean(artifactPath));
+      const artifactStats = await Promise.all(
+        recoveredPaths.map((artifactPath) => stat(artifactPath)),
+      );
+      artifactBytes = availableMeasurement(
+        artifactStats.reduce((total, artifact) => total + artifact.size, 0),
+        'bytes',
+        'stable',
+        'case_artifact_sum',
+      );
+    } catch {
+      artifactBytes = unavailableMeasurement('collection_failed');
+    }
 
     return {
       id: meta.id,
@@ -1111,6 +1131,12 @@ export const runCaptureRecoveryBenchmarkCase = async (
         reasons,
       },
       expected: fixture.expected,
+      measurements: {
+        elapsedTime: unavailableMeasurement('unsupported_runtime'),
+        cpuTime: unavailableMeasurement('unsupported_runtime'),
+        peakRss: unavailableMeasurement('unsupported_runtime'),
+        artifactBytes,
+      },
       ...(failures.length > 0 ? { failures } : {}),
     };
   } finally {
