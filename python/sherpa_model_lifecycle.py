@@ -4,6 +4,9 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import tarfile
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -170,3 +173,132 @@ def next_activation(state: LifecycleState, version: str) -> LifecycleState:
     if not SAFE_VERSION.fullmatch(version):
         raise ModelLifecycleError("model_state_invalid")
     return LifecycleState(1, state.generation + 1, version, state.active_version)
+
+
+class UrlTransport:
+    def open(self, url: str, headers: dict[str, str]):
+        request = urllib.request.Request(url, headers=headers)
+        return urllib.request.urlopen(request, timeout=120)
+
+
+def _resume_metadata_path(partial: Path) -> Path:
+    return partial.with_suffix(partial.suffix + ".json")
+
+
+def _resume_identity(artifact: ModelArtifact) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "artifactId": artifact.id,
+        "url": artifact.url,
+        "size": artifact.size,
+        "sha256": artifact.transport_sha256,
+    }
+
+
+def _resume_details(partial: Path, artifact: ModelArtifact) -> tuple[int, str | None]:
+    metadata_path = _resume_metadata_path(partial)
+    if not partial.is_file() or not metadata_path.is_file():
+        return 0, None
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        identity = _resume_identity(artifact)
+        if any(metadata.get(key) != value for key, value in identity.items()):
+            return 0, None
+        size = partial.stat().st_size
+        if size <= 0 or size > artifact.size:
+            return 0, None
+        validator = metadata.get("validator")
+        if validator is not None and not isinstance(validator, str):
+            return 0, None
+        return size, validator
+    except (OSError, json.JSONDecodeError, TypeError):
+        return 0, None
+
+
+def _header(headers: Any, name: str) -> str | None:
+    if hasattr(headers, "get"):
+        return headers.get(name) or headers.get(name.lower())
+    return None
+
+
+def _valid_content_range(response: Any, offset: int, total: int) -> bool:
+    value = _header(response.headers, "Content-Range")
+    if not isinstance(value, str):
+        return False
+    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", value)
+    return bool(match and int(match.group(1)) == offset and int(match.group(3)) == total)
+
+
+def _stream_response(response: Any, output) -> None:
+    while True:
+        chunk = response.read(1024 * 1024)
+        if not chunk:
+            return
+        output.write(chunk)
+
+
+def _write_resume_metadata(partial: Path, artifact: ModelArtifact, validator: str | None) -> None:
+    payload = {**_resume_identity(artifact), "validator": validator}
+    _resume_metadata_path(partial).write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _download_once(artifact: ModelArtifact, partial: Path, transport: Any) -> bool:
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    offset, validator = _resume_details(partial, artifact)
+    headers: dict[str, str] = {}
+    if offset:
+        headers["Range"] = f"bytes={offset}-"
+        if validator:
+            headers["If-Range"] = validator
+    with transport.open(artifact.url, headers) as response:
+        append = offset > 0 and response.status == 206 and _valid_content_range(response, offset, artifact.size)
+        response_validator = _header(response.headers, "ETag") or _header(response.headers, "Last-Modified")
+        if append and validator and response_validator and response_validator != validator:
+            append = False
+        _write_resume_metadata(partial, artifact, response_validator)
+        with partial.open("ab" if append else "wb") as output:
+            _stream_response(response, output)
+    return append
+
+
+def _verify_size_digest(path: Path, size: int, expected_sha256: str, reason: str) -> Path:
+    if not path.is_file() or path.stat().st_size != size or _sha256(path) != expected_sha256:
+        raise ModelLifecycleError(reason)
+    return path
+
+
+def download_artifact(artifact: ModelArtifact, partial: Path, transport: Any | None = None) -> Path:
+    transport = transport or UrlTransport()
+    resumed = _download_once(artifact, partial, transport)
+    try:
+        return _verify_size_digest(partial, artifact.size, artifact.transport_sha256, "model_checksum_mismatch")
+    except ModelLifecycleError:
+        if not resumed:
+            raise
+        partial.unlink(missing_ok=True)
+        _resume_metadata_path(partial).unlink(missing_ok=True)
+        _download_once(artifact, partial, transport)
+        return _verify_size_digest(partial, artifact.size, artifact.transport_sha256, "model_checksum_mismatch")
+
+
+def materialize_artifact(artifact: ModelArtifact, transport_path: Path, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    destination = output_dir / artifact.destination
+    try:
+        if artifact.format == "raw":
+            shutil.copyfile(transport_path, destination)
+        elif artifact.format == "tar.bz2" and artifact.member:
+            with tarfile.open(transport_path, "r:bz2") as bundle:
+                member = bundle.getmember(artifact.member)
+                source = bundle.extractfile(member)
+                if source is None or not member.isfile():
+                    raise ModelLifecycleError("model_acquisition_failed")
+                with source, destination.open("wb") as output:
+                    shutil.copyfileobj(source, output)
+        else:
+            raise ModelLifecycleError("model_acquisition_failed")
+        return _verify_size_digest(destination, destination.stat().st_size, artifact.installed_sha256, "model_checksum_mismatch")
+    except ModelLifecycleError:
+        raise
+    except (OSError, KeyError, tarfile.TarError) as error:
+        raise ModelLifecycleError("model_acquisition_failed") from error
