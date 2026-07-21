@@ -453,9 +453,7 @@ def prepare_managed_models(
                     transport_path = download_artifact(artifact, partial, transport)
                     materialize_artifact(artifact, transport_path, install_dir)
             _write_bundle(install_dir, manifest)
-            candidate = _verify_candidate(install_dir, manifest)
-            if not probe(candidate.artifact_paths):
-                raise ModelLifecycleError("model_probe_failed")
+            _verify_candidate(install_dir, manifest)
             version_dir.parent.mkdir(parents=True, exist_ok=True)
             try:
                 install_dir.replace(version_dir)

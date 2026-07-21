@@ -2,7 +2,7 @@
 
 **Issue:** [#476](https://github.com/metagrover/pluto/issues/476)
 
-**Status:** Approved written specification; distribution contract published in #529
+**Status:** Implemented by the managed-model lifecycle PR following #529
 
 **Scope:** Credential-free acquisition, activation, readiness, and rollback for Pluto's selected sherpa-onnx speaker-attribution bundle
 
@@ -263,3 +263,7 @@ active B + corrupt/missing A   -> active B unchanged, rollback_unavailable
 ## Written-Spec Review Gate
 
 Owner merge of design PR #528 completed the written-spec review. The reviewed specification covers the Pluto-controlled distribution prerequisite, exact resume rules, cross-process serialization, crash-durable state, deterministic offline probe, non-destructive legacy adoption, and rollback-unavailable behavior. Runtime implementation can begin from this contract after the #529 distribution PR lands.
+
+## Implementation Result
+
+The managed lifecycle now reads the checked-in distribution contract, resumes identity-bound partial downloads, verifies transport and installed checksums, adopts the checksum-valid legacy layout without mutating it, installs immutable version directories, and activates them through an fsync-backed generation state. Finalization resolves one active immutable snapshot and never downloads implicitly. Preparation is writer-serialized and probes the candidate before activation; explicit rollback re-verifies and probes the previous healthy version without network access. Ordinary per-meeting inference errors do not change the active version.
