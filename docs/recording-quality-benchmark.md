@@ -9,7 +9,24 @@ Use `--tier manual` for explicitly opt-in long-running or hardware-sensitive cas
 - A versioned JSON report under `tmp/recording-quality-benchmark-*.json`
 - A concise terminal summary with pass counts, baseline drift status, and the artifact path
 
-The report includes schema version, selected tier, environment metadata, source commit, per-case results, candidate eligibility verdicts, baseline comparisons, and any failing assertions.
+The schema-version-3 report includes selected tier, content-safe environment metadata, source commit, per-case results, candidate eligibility verdicts, baseline comparisons, any failing assertions, and one performance/resource measurement envelope per case.
+
+## Performance and resource evidence
+
+Every selected case reports four measurements:
+
+- `elapsedTime`: monotonic wall-clock duration around case execution.
+- `cpuTime`: combined user and system process CPU delta.
+- `peakRss`: the highest process RSS sample observed before, during, or after the case at the report's declared sampling interval.
+- `artifactBytes`: the sum of explicit deterministic files produced by a case, when that case owns an artifact list.
+
+Elapsed time, CPU, and RSS are process-scoped and `hardware_dependent`. They appear in JSON plus one concise terminal `EVIDENCE` line per case, but they do not fail the default PR tier. The values are useful within a known environment; they are not claims that heterogeneous machines are directly comparable.
+
+Artifact bytes are `stable` only when a case deliberately produces deterministic files from committed synthetic input. The capture-recovery case measures only the summed reconstructed mic/system artifact bytes before cleanup. It never writes paths, filenames, audio content, or checksums to the report. Other cases report `not_applicable` until they own an equally explicit artifact contract.
+
+A measurement that cannot be collected is represented as `unavailable` with one finite reason: `not_applicable`, `unsupported_runtime`, or `collection_failed`. Missing evidence is never fabricated as zero. A collection failure does not replace a case's functional result.
+
+Version-2 manifests remain readable. Version-2 baselines continue to provide functional comparisons; measurement tracking against an older baseline is visibly `MISSING_BASELINE` until a version-3 measurement is deliberately recorded. Unknown manifest schema versions fail clearly.
 
 ## Corpus layout
 
@@ -33,6 +50,8 @@ Each manifest case can optionally declare `trackedMetrics`:
 - `name`: the metric exposed by the benchmark result's `actual.primaryMetric`
 - `tolerance`: the allowed numeric drift from the baseline
 - `stability`: `stable` to fail the run on drift outside tolerance, or `hardware_dependent` to report drift separately without failing
+
+Tracked names may reference the existing functional primary metric or `measurements.elapsedTime`, `measurements.cpuTime`, `measurements.peakRss`, and `measurements.artifactBytes`. Elapsed time, CPU, and RSS must remain `hardware_dependent`. Deterministic artifact bytes may be `stable`; the committed recovery case uses a zero tolerance so truncation or unexpected growth fails the gate.
 
 ## Local speaker-attribution benchmark
 

@@ -278,6 +278,8 @@ export type RecordingQualityBenchmarkReport = {
     nodeVersion: string;
     platform: string;
     arch: string;
+    measurementContractVersion?: number;
+    rssSamplingIntervalMs?: number;
   };
   summary: {
     totalCases: number;
@@ -1355,6 +1357,8 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     nodeVersion: string;
     platform: string;
     arch: string;
+    measurementContractVersion?: number;
+    rssSamplingIntervalMs?: number;
   };
   sourceCommit: string;
   results: RecordingQualityBenchmarkCaseResult[];

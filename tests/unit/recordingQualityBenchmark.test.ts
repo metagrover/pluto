@@ -1092,9 +1092,19 @@ describe('benchmark:recording-quality CLI', () => {
       status: 0,
       stdout: expect.stringContaining('tier=pr 8/8 cases passed'),
     });
+    expect(result.stdout).toContain(
+      'EVIDENCE issue-493-capture-recovery elapsed=',
+    );
+    expect(result.stdout).toContain('artifacts=51B');
     expect(fs.existsSync(outputPath)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(outputPath, 'utf8'))).toMatchObject({
+    const report = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+    expect(report).toMatchObject({
+      schemaVersion: 3,
       tier: 'pr',
+      environment: {
+        measurementContractVersion: 1,
+        rssSamplingIntervalMs: 10,
+      },
       summary: {
         totalCases: 8,
         issueCoverage: expect.arrayContaining([493]),
@@ -1103,6 +1113,42 @@ describe('benchmark:recording-quality CLI', () => {
         },
       },
     });
+    expect(report.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'issue-493-capture-recovery',
+          measurements: expect.objectContaining({
+            elapsedTime: expect.objectContaining({
+              status: 'available',
+              unit: 'milliseconds',
+            }),
+            cpuTime: expect.objectContaining({
+              status: 'available',
+              unit: 'microseconds',
+            }),
+            peakRss: expect.objectContaining({
+              status: 'available',
+              unit: 'bytes',
+            }),
+            artifactBytes: expect.objectContaining({
+              status: 'available',
+              value: 51,
+              unit: 'bytes',
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(
+      report.results.every(
+        (entry: RecordingQualityBenchmarkCaseResult) =>
+          entry.measurements &&
+          Object.keys(entry.measurements).length === 4,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(report)).not.toContain(
+      'pluto-recording-quality-recovery-',
+    );
   });
 
   it('runs all declared tiers and fails clearly when manual has no cases', () => {
