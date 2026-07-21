@@ -111,9 +111,7 @@ describe('buildFollowUpComposition', () => {
     expect(result.variants.internal).toContain(
       'Publish release notes — Maya (Head of Product) · due Friday',
     );
-    expect(result.variants.internal).not.toMatch(
-      /Owner:|Due:|Status:/,
-    );
+    expect(result.variants.internal).not.toMatch(/Owner:|Due:|Status:/);
   });
 
   it('changes the fingerprint when the rendered meeting title changes', () => {
