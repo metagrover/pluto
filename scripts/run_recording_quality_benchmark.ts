@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 
 import {
@@ -12,6 +13,7 @@ import {
   type TranscriptValidationFixture,
   buildRecordingQualityBenchmarkReport,
   loadRecordingQualityBenchmarkManifest,
+  measureRecordingQualityBenchmarkCase,
   parseRecordingQualityBenchmarkCliArgs,
   runCandidateEligibilityBenchmarkCase,
   runCaptureRecoveryBenchmarkCase,
@@ -54,57 +56,62 @@ const main = async () => {
     manifest.cases,
     options.tier,
   );
+  const rssSamplingIntervalMs = 10;
 
   for (const entry of selectedCases) {
     const fixturePath = resolveFixture(manifestPath, entry.fixture);
     const fixture = readJson<RecordingQualityBenchmarkFixture>(fixturePath);
+    let runCase: () =>
+      | ReturnType<typeof runRecordingFinalizationBenchmarkCase>
+      | ReturnType<typeof runCandidateEligibilityBenchmarkCase>
+      | ReturnType<typeof runCaptureRecoveryBenchmarkCase>
+      | ReturnType<typeof runTranscriptValidationBenchmarkCase>
+      | ReturnType<typeof runRetryValidationBenchmarkCase>;
     if (fixture.type === 'capture_recovery') {
-      results.push(
-        await runCaptureRecoveryBenchmarkCase(
+      runCase = () =>
+        runCaptureRecoveryBenchmarkCase(
           entry,
           fixture as CaptureRecoveryFixture,
-        ),
-      );
-      continue;
-    }
-    if (fixture.type === 'transcript_validation') {
-      results.push(
-        await runTranscriptValidationBenchmarkCase(
+        );
+    } else if (fixture.type === 'transcript_validation') {
+      runCase = () =>
+        runTranscriptValidationBenchmarkCase(
           entry,
           fixture as TranscriptValidationFixture,
-        ),
-      );
-      continue;
-    }
-    if (fixture.type === 'recording_finalization') {
-      results.push(
+        );
+    } else if (fixture.type === 'recording_finalization') {
+      runCase = () =>
         runRecordingFinalizationBenchmarkCase(
           entry,
           fixture as RecordingFinalizationFixture,
-        ),
-      );
-      continue;
-    }
-    if (fixture.type === 'retry_validation') {
-      results.push(
-        await runRetryValidationBenchmarkCase(
+        );
+    } else if (fixture.type === 'retry_validation') {
+      runCase = () =>
+        runRetryValidationBenchmarkCase(
           entry,
           fixture as RetryValidationFixture,
-        ),
-      );
-      continue;
-    }
-    if (fixture.type === 'candidate_eligibility') {
-      results.push(
+        );
+    } else if (fixture.type === 'candidate_eligibility') {
+      runCase = () =>
         runCandidateEligibilityBenchmarkCase(
           entry,
           fixture as CandidateEligibilityFixture,
           `${process.platform}-${process.arch}`,
-        ),
-      );
-      continue;
+        );
+    } else {
+      throw new Error(`Unsupported fixture type in ${fixturePath}`);
     }
-    throw new Error(`Unsupported fixture type in ${fixturePath}`);
+    results.push(
+      await measureRecordingQualityBenchmarkCase(runCase, {
+        monotonicNow: () => performance.now(),
+        cpuUsage: () => process.cpuUsage(),
+        rssBytes: () => process.memoryUsage().rss,
+        startInterval: (sample, intervalMs) => setInterval(sample, intervalMs),
+        clearInterval: (handle) =>
+          clearInterval(handle as ReturnType<typeof setInterval>),
+        samplingIntervalMs: rssSamplingIntervalMs,
+      }),
+    );
   }
 
   const baselineReportPath = path.resolve(
@@ -123,6 +130,8 @@ const main = async () => {
       nodeVersion: process.version,
       platform: process.platform,
       arch: process.arch,
+      measurementContractVersion: 1,
+      rssSamplingIntervalMs,
     },
     sourceCommit: getSourceCommit(),
     results,
@@ -136,6 +145,30 @@ const main = async () => {
   console.log(
     `[RecordingQualityBenchmark] tier=${report.tier} ${report.summary.passedCases}/${report.summary.totalCases} cases passed`,
   );
+  const formatMeasurement = (
+    measurement: (typeof report.results)[number]['measurements'] extends infer T
+      ? T extends Record<string, infer M>
+        ? M
+        : never
+      : never,
+  ) => {
+    if (!measurement || measurement.status === 'unavailable') {
+      return `unavailable:${measurement?.reason || 'collection_failed'}`;
+    }
+    const suffix =
+      measurement.unit === 'milliseconds'
+        ? 'ms'
+        : measurement.unit === 'microseconds'
+          ? 'us'
+          : 'B';
+    return `${measurement.value}${suffix}`;
+  };
+  for (const result of report.results) {
+    const measurements = result.measurements;
+    console.log(
+      `[RecordingQualityBenchmark] EVIDENCE ${result.id} elapsed=${formatMeasurement(measurements?.elapsedTime)} cpu=${formatMeasurement(measurements?.cpuTime)} peak_rss=${formatMeasurement(measurements?.peakRss)} artifacts=${formatMeasurement(measurements?.artifactBytes)}`,
+    );
+  }
   console.log(
     `[RecordingQualityBenchmark] capture_recovery=${report.summary.kinds.capture_recovery.passed}/${report.summary.kinds.capture_recovery.passed + report.summary.kinds.capture_recovery.failed} transcript_validation=${report.summary.kinds.transcript_validation.passed}/${report.summary.kinds.transcript_validation.passed + report.summary.kinds.transcript_validation.failed} retry_validation=${report.summary.kinds.retry_validation.passed}/${report.summary.kinds.retry_validation.passed + report.summary.kinds.retry_validation.failed} recording_finalization=${report.summary.kinds.recording_finalization.passed}/${report.summary.kinds.recording_finalization.passed + report.summary.kinds.recording_finalization.failed} candidate_eligibility=${report.summary.kinds.candidate_eligibility.passed}/${report.summary.kinds.candidate_eligibility.passed + report.summary.kinds.candidate_eligibility.failed}`,
   );

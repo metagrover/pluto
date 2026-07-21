@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -55,6 +55,30 @@ export type RecordingQualityBenchmarkMetric = {
   value: number | string | boolean;
 };
 
+export type RecordingQualityBenchmarkMeasurement =
+  | {
+      status: 'available';
+      value: number;
+      unit: 'milliseconds' | 'microseconds' | 'bytes';
+      stability: 'stable' | 'hardware_dependent';
+      method:
+        | 'monotonic_elapsed'
+        | 'process_cpu_delta'
+        | 'sampled_process_rss'
+        | 'case_artifact_sum';
+    }
+  | {
+      status: 'unavailable';
+      reason: 'not_applicable' | 'unsupported_runtime' | 'collection_failed';
+    };
+
+export type RecordingQualityBenchmarkMeasurements = {
+  elapsedTime: RecordingQualityBenchmarkMeasurement;
+  cpuTime: RecordingQualityBenchmarkMeasurement;
+  peakRss: RecordingQualityBenchmarkMeasurement;
+  artifactBytes: RecordingQualityBenchmarkMeasurement;
+};
+
 export type RecordingQualityBenchmarkTrackedMetric = {
   name: string;
   tolerance: number;
@@ -87,7 +111,160 @@ export type RecordingQualityBenchmarkCaseResult = {
     reasons?: string[];
   };
   expected: RecordingQualityBenchmarkExpectation;
+  measurements?: RecordingQualityBenchmarkMeasurements;
   failures?: string[];
+};
+
+export type RecordingQualityBenchmarkMeasurementAdapters = {
+  monotonicNow: () => number;
+  cpuUsage: () => { user: number; system: number };
+  rssBytes: () => number;
+  startInterval: (sample: () => void, intervalMs: number) => unknown;
+  clearInterval: (handle: unknown) => void;
+  samplingIntervalMs: number;
+};
+
+const unavailableMeasurement = (
+  reason: Extract<
+    RecordingQualityBenchmarkMeasurement,
+    { status: 'unavailable' }
+  >['reason'],
+): RecordingQualityBenchmarkMeasurement => ({ status: 'unavailable', reason });
+
+const availableMeasurement = (
+  value: number,
+  unit: Extract<
+    RecordingQualityBenchmarkMeasurement,
+    { status: 'available' }
+  >['unit'],
+  stability: Extract<
+    RecordingQualityBenchmarkMeasurement,
+    { status: 'available' }
+  >['stability'],
+  method: Extract<
+    RecordingQualityBenchmarkMeasurement,
+    { status: 'available' }
+  >['method'],
+): RecordingQualityBenchmarkMeasurement =>
+  Number.isFinite(value) && value >= 0
+    ? {
+        status: 'available',
+        value: Math.round(value),
+        unit,
+        stability,
+        method,
+      }
+    : unavailableMeasurement('collection_failed');
+
+export const measureRecordingQualityBenchmarkCase = async (
+  run: () =>
+    | RecordingQualityBenchmarkCaseResult
+    | Promise<RecordingQualityBenchmarkCaseResult>,
+  adapters: RecordingQualityBenchmarkMeasurementAdapters,
+): Promise<RecordingQualityBenchmarkCaseResult> => {
+  let startedAt: number | undefined;
+  let startedCpu: { user: number; system: number } | undefined;
+  const rssSamples: number[] = [];
+  let intervalHandle: unknown;
+
+  try {
+    startedAt = adapters.monotonicNow();
+  } catch {
+    startedAt = undefined;
+  }
+  try {
+    startedCpu = adapters.cpuUsage();
+  } catch {
+    startedCpu = undefined;
+  }
+  const sampleRss = () => {
+    try {
+      rssSamples.push(adapters.rssBytes());
+    } catch {
+      rssSamples.push(Number.NaN);
+    }
+  };
+  sampleRss();
+  try {
+    intervalHandle = adapters.startInterval(
+      sampleRss,
+      adapters.samplingIntervalMs,
+    );
+  } catch {
+    rssSamples.push(Number.NaN);
+  }
+
+  try {
+    const result = await run();
+    let endedAt: number | undefined;
+    let endedCpu: { user: number; system: number } | undefined;
+    try {
+      endedAt = adapters.monotonicNow();
+    } catch {
+      endedAt = undefined;
+    }
+    try {
+      endedCpu = adapters.cpuUsage();
+    } catch {
+      endedCpu = undefined;
+    }
+    sampleRss();
+
+    const elapsed =
+      startedAt !== undefined && endedAt !== undefined && endedAt >= startedAt
+        ? availableMeasurement(
+            Math.ceil(endedAt - startedAt),
+            'milliseconds',
+            'hardware_dependent',
+            'monotonic_elapsed',
+          )
+        : unavailableMeasurement('collection_failed');
+    const cpuDelta =
+      startedCpu &&
+      endedCpu &&
+      endedCpu.user >= startedCpu.user &&
+      endedCpu.system >= startedCpu.system
+        ? endedCpu.user -
+          startedCpu.user +
+          (endedCpu.system - startedCpu.system)
+        : undefined;
+    const cpu =
+      cpuDelta === undefined
+        ? unavailableMeasurement('collection_failed')
+        : availableMeasurement(
+            cpuDelta,
+            'microseconds',
+            'hardware_dependent',
+            'process_cpu_delta',
+          );
+    const validRss =
+      rssSamples.length > 0 &&
+      rssSamples.every((sample) => Number.isFinite(sample) && sample >= 0);
+    const peakRss = validRss
+      ? availableMeasurement(
+          Math.max(...rssSamples),
+          'bytes',
+          'hardware_dependent',
+          'sampled_process_rss',
+        )
+      : unavailableMeasurement('collection_failed');
+
+    return {
+      ...result,
+      measurements: {
+        elapsedTime: elapsed,
+        cpuTime: cpu,
+        peakRss,
+        artifactBytes:
+          result.measurements?.artifactBytes ||
+          unavailableMeasurement('not_applicable'),
+      },
+    };
+  } finally {
+    if (intervalHandle !== undefined) {
+      adapters.clearInterval(intervalHandle);
+    }
+  }
 };
 
 export type RecordingQualityBenchmarkReport = {
@@ -101,6 +278,8 @@ export type RecordingQualityBenchmarkReport = {
     nodeVersion: string;
     platform: string;
     arch: string;
+    measurementContractVersion?: number;
+    rssSamplingIntervalMs?: number;
   };
   summary: {
     totalCases: number;
@@ -372,6 +551,11 @@ export const loadRecordingQualityBenchmarkManifest = (
       'Recording quality benchmark manifest needs a schemaVersion.',
     );
   }
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3) {
+    throw new Error(
+      `Unsupported recording quality benchmark manifest schemaVersion ${schemaVersion}.`,
+    );
+  }
   if (!baselineReport) {
     throw new Error(
       'Recording quality benchmark manifest needs a baselineReport.',
@@ -430,6 +614,16 @@ export const loadRecordingQualityBenchmarkManifest = (
             if (stability !== 'stable' && stability !== 'hardware_dependent') {
               throw new Error(
                 `Tracked metric ${name} for ${id} has unsupported stability ${stability}.`,
+              );
+            }
+            if (
+              (name === 'measurements.elapsedTime' ||
+                name === 'measurements.cpuTime' ||
+                name === 'measurements.peakRss') &&
+              stability !== 'hardware_dependent'
+            ) {
+              throw new Error(
+                `Tracked measurement ${name} for ${id} must use hardware_dependent stability.`,
               );
             }
             return {
@@ -873,8 +1067,14 @@ export const runCaptureRecoveryBenchmarkCase = async (
         savedMeeting = meeting;
         return meeting;
       },
-      stitchWavSegments: async (_segments, outputTag) =>
-        path.join(rootDir, `${outputTag}.wav`),
+      stitchWavSegments: async (segments, outputTag) => {
+        const outputPath = path.join(rootDir, `${outputTag}.wav`);
+        const segmentBytes = await Promise.all(
+          segments.map((segment) => readFile(segment.path)),
+        );
+        await writeFile(outputPath, Buffer.concat(segmentBytes));
+        return outputPath;
+      },
       nowMs: fixture.startedAtMs + 10_000,
     });
 
@@ -917,6 +1117,25 @@ export const runCaptureRecoveryBenchmarkCase = async (
         .map((reason) => `missing required reason ${reason}`),
       ...missingSources,
     ];
+    let artifactBytes: RecordingQualityBenchmarkMeasurement;
+    try {
+      const recoveredPaths = Object.values(integrity.recovered_sources)
+        .map((source) => source.recoveredAudioPath)
+        .filter((artifactPath): artifactPath is string =>
+          Boolean(artifactPath),
+        );
+      const artifactStats = await Promise.all(
+        recoveredPaths.map((artifactPath) => stat(artifactPath)),
+      );
+      artifactBytes = availableMeasurement(
+        artifactStats.reduce((total, artifact) => total + artifact.size, 0),
+        'bytes',
+        'stable',
+        'case_artifact_sum',
+      );
+    } catch {
+      artifactBytes = unavailableMeasurement('collection_failed');
+    }
 
     return {
       id: meta.id,
@@ -931,6 +1150,12 @@ export const runCaptureRecoveryBenchmarkCase = async (
         reasons,
       },
       expected: fixture.expected,
+      measurements: {
+        elapsedTime: unavailableMeasurement('unsupported_runtime'),
+        cpuTime: unavailableMeasurement('unsupported_runtime'),
+        peakRss: unavailableMeasurement('unsupported_runtime'),
+        artifactBytes,
+      },
       ...(failures.length > 0 ? { failures } : {}),
     };
   } finally {
@@ -957,6 +1182,7 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
     actual?: {
       primaryMetric?: RecordingQualityBenchmarkMetric;
     };
+    measurements?: Partial<RecordingQualityBenchmarkMeasurements>;
   }>;
   results: RecordingQualityBenchmarkCaseResult[];
 }) => {
@@ -973,11 +1199,37 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
     missingBaseline: [] as RecordingQualityBenchmarkComparisonEntry[],
   };
 
+  const resolveTrackedMetric = (
+    result:
+      | {
+          actual?: { primaryMetric?: RecordingQualityBenchmarkMetric };
+          measurements?: Partial<RecordingQualityBenchmarkMeasurements>;
+        }
+      | undefined,
+    metricName: string,
+  ): RecordingQualityBenchmarkMetric | undefined => {
+    if (result?.actual?.primaryMetric?.name === metricName) {
+      return result.actual.primaryMetric;
+    }
+    if (!metricName.startsWith('measurements.')) return undefined;
+    const measurementName = metricName.slice(
+      'measurements.'.length,
+    ) as keyof RecordingQualityBenchmarkMeasurements;
+    const measurement = result?.measurements?.[measurementName];
+    return measurement?.status === 'available'
+      ? { name: metricName, value: measurement.value }
+      : undefined;
+  };
+
   for (const result of input.results) {
     for (const trackedMetric of result.trackedMetrics || []) {
-      const baselineMetric = baselineById.get(result.id)?.actual?.primaryMetric;
+      const baselineMetric = resolveTrackedMetric(
+        baselineById.get(result.id),
+        trackedMetric.name,
+      );
+      const currentMetric = resolveTrackedMetric(result, trackedMetric.name);
 
-      if (!baselineMetric || baselineMetric.name !== trackedMetric.name) {
+      if (!baselineMetric) {
         counts.missingBaselineMetrics += 1;
         comparisons.push({
           id: result.id,
@@ -987,19 +1239,11 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
           tolerance: trackedMetric.tolerance,
           stability: trackedMetric.stability,
           outcome: 'missing_baseline_metric',
-          currentValue:
-            result.actual.primaryMetric?.name === trackedMetric.name
-              ? result.actual.primaryMetric.value
-              : undefined,
+          currentValue: currentMetric?.value,
         });
         sections.missingBaseline.push(comparisons[comparisons.length - 1]);
         continue;
       }
-
-      const currentMetric =
-        result.actual.primaryMetric?.name === trackedMetric.name
-          ? result.actual.primaryMetric
-          : undefined;
 
       if (!currentMetric) {
         counts.missingBaselineMetrics += 1;
@@ -1113,6 +1357,8 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     nodeVersion: string;
     platform: string;
     arch: string;
+    measurementContractVersion?: number;
+    rssSamplingIntervalMs?: number;
   };
   sourceCommit: string;
   results: RecordingQualityBenchmarkCaseResult[];
@@ -1121,6 +1367,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     actual?: {
       primaryMetric?: RecordingQualityBenchmarkMetric;
     };
+    measurements?: Partial<RecordingQualityBenchmarkMeasurements>;
   }>;
 }): RecordingQualityBenchmarkReport => {
   const passedCases = input.results.filter((result) => result.passed).length;

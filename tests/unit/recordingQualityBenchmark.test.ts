@@ -11,12 +11,120 @@ import {
   buildRecordingQualityBenchmarkReport,
   evaluateCandidateDistributionEligibility,
   loadRecordingQualityBenchmarkManifest,
+  measureRecordingQualityBenchmarkCase,
   parseRecordingQualityBenchmarkCliArgs,
   runCandidateEligibilityBenchmarkCase,
   runCaptureRecoveryBenchmarkCase,
   runRetryValidationBenchmarkCase,
   selectRecordingQualityBenchmarkCases,
 } from '../../src/services/recordingQualityBenchmark';
+
+const passingBenchmarkResult = (): RecordingQualityBenchmarkCaseResult => ({
+  id: 'measurement-case',
+  issue: 532,
+  title: 'Measurement case',
+  kind: 'recording_finalization',
+  passed: true,
+  actual: { status: 'validated' },
+  expected: { status: 'validated' },
+});
+
+describe('measurement envelope', () => {
+  it('collects normalized process evidence and clears sampling', async () => {
+    const clock = [10.2, 12.1];
+    const cpu = [
+      { user: 100, system: 50 },
+      { user: 325, system: 75 },
+    ];
+    const rss = [100.2, 140.8, 120.1];
+    let cleared = false;
+
+    const result = await measureRecordingQualityBenchmarkCase(
+      async () => passingBenchmarkResult(),
+      {
+        monotonicNow: () => clock.shift() ?? 0,
+        cpuUsage: () => cpu.shift() ?? { user: 0, system: 0 },
+        rssBytes: () => rss.shift() ?? 0,
+        startInterval: (sample) => {
+          sample();
+          return 17;
+        },
+        clearInterval: (handle) => {
+          expect(handle).toBe(17);
+          cleared = true;
+        },
+        samplingIntervalMs: 10,
+      },
+    );
+
+    expect(cleared).toBe(true);
+    expect(result.measurements).toEqual({
+      elapsedTime: {
+        status: 'available',
+        value: 2,
+        unit: 'milliseconds',
+        stability: 'hardware_dependent',
+        method: 'monotonic_elapsed',
+      },
+      cpuTime: {
+        status: 'available',
+        value: 250,
+        unit: 'microseconds',
+        stability: 'hardware_dependent',
+        method: 'process_cpu_delta',
+      },
+      peakRss: {
+        status: 'available',
+        value: 141,
+        unit: 'bytes',
+        stability: 'hardware_dependent',
+        method: 'sampled_process_rss',
+      },
+      artifactBytes: {
+        status: 'unavailable',
+        reason: 'not_applicable',
+      },
+    });
+  });
+
+  it('keeps functional failures and marks invalid readings unavailable', async () => {
+    const functionalFailure = {
+      ...passingBenchmarkResult(),
+      passed: false,
+      failures: ['expected functional failure'],
+    };
+
+    const result = await measureRecordingQualityBenchmarkCase(
+      async () => functionalFailure,
+      {
+        monotonicNow: (() => {
+          const values = [5, 4];
+          return () => values.shift() ?? 0;
+        })(),
+        cpuUsage: (() => {
+          const values = [
+            { user: 20, system: 20 },
+            { user: 10, system: 10 },
+          ];
+          return () => values.shift() ?? { user: 0, system: 0 };
+        })(),
+        rssBytes: () => Number.NaN,
+        startInterval: () => 1,
+        clearInterval: () => undefined,
+        samplingIntervalMs: 10,
+      },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.failures).toEqual(['expected functional failure']);
+    expect(result.measurements).toEqual({
+      elapsedTime: { status: 'unavailable', reason: 'collection_failed' },
+      cpuTime: { status: 'unavailable', reason: 'collection_failed' },
+      peakRss: { status: 'unavailable', reason: 'collection_failed' },
+      artifactBytes: { status: 'unavailable', reason: 'not_applicable' },
+    });
+  });
+});
 
 describe('parseRecordingQualityBenchmarkCliArgs', () => {
   it('accepts pnpm passthrough separators and explicit output paths', () => {
@@ -53,6 +161,67 @@ describe('parseRecordingQualityBenchmarkCliArgs', () => {
 });
 
 describe('loadRecordingQualityBenchmarkManifest', () => {
+  it('accepts schema versions 2 and 3 and rejects unknown versions', () => {
+    const baseManifest = {
+      baselineReport: 'baselines/current-master.json',
+      cases: [
+        {
+          id: 'schema-case',
+          issue: 532,
+          title: 'Schema case',
+          kind: 'recording_finalization',
+          fixture: 'fixtures/schema.json',
+          tier: 'pr',
+        },
+      ],
+    };
+
+    expect(
+      loadRecordingQualityBenchmarkManifest({
+        ...baseManifest,
+        schemaVersion: 2,
+      }).schemaVersion,
+    ).toBe(2);
+    expect(
+      loadRecordingQualityBenchmarkManifest({
+        ...baseManifest,
+        schemaVersion: 3,
+      }).schemaVersion,
+    ).toBe(3);
+    expect(() =>
+      loadRecordingQualityBenchmarkManifest({
+        ...baseManifest,
+        schemaVersion: 4,
+      }),
+    ).toThrow(/unsupported.*schema.*4/i);
+  });
+
+  it('rejects stable machine-dependent measurement declarations', () => {
+    expect(() =>
+      loadRecordingQualityBenchmarkManifest({
+        schemaVersion: 3,
+        baselineReport: 'baselines/current-master.json',
+        cases: [
+          {
+            id: 'invalid-stability',
+            issue: 532,
+            title: 'Invalid stability',
+            kind: 'recording_finalization',
+            fixture: 'fixtures/invalid.json',
+            tier: 'pr',
+            trackedMetrics: [
+              {
+                name: 'measurements.elapsedTime',
+                tolerance: 1,
+                stability: 'stable',
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/elapsedTime.*hardware_dependent/i);
+  });
+
   it('loads committed benchmark cases and rejects duplicate ids', () => {
     const manifest = loadRecordingQualityBenchmarkManifest({
       schemaVersion: 1,
@@ -471,6 +640,14 @@ describe('runCaptureRecoveryBenchmarkCase', () => {
     );
 
     expect(result.passed).toBe(true);
+    expect(result.measurements?.artifactBytes).toEqual({
+      status: 'available',
+      value: 51,
+      unit: 'bytes',
+      stability: 'stable',
+      method: 'case_artifact_sum',
+    });
+    expect(JSON.stringify(result)).not.toContain('pluto-recording-quality');
     expect(result.actual).toEqual({
       status: 'needs_attention',
       primaryMetric: {
@@ -617,6 +794,66 @@ describe('buildRecordingQualityBenchmarkReport', () => {
 });
 
 describe('buildRecordingQualityBenchmarkComparisonSummary', () => {
+  it('compares stable artifact measurements and leaves missing v2 evidence visible', () => {
+    const measuredResult: RecordingQualityBenchmarkCaseResult = {
+      ...passingBenchmarkResult(),
+      trackedMetrics: [
+        {
+          name: 'measurements.artifactBytes',
+          tolerance: 0,
+          stability: 'stable',
+        },
+      ],
+      measurements: {
+        elapsedTime: { status: 'unavailable', reason: 'collection_failed' },
+        cpuTime: { status: 'unavailable', reason: 'collection_failed' },
+        peakRss: { status: 'unavailable', reason: 'collection_failed' },
+        artifactBytes: {
+          status: 'available',
+          value: 51,
+          unit: 'bytes',
+          stability: 'stable',
+          method: 'case_artifact_sum',
+        },
+      },
+    };
+
+    const compared = buildRecordingQualityBenchmarkComparisonSummary({
+      baselineResults: [
+        {
+          id: 'measurement-case',
+          actual: { status: 'validated' },
+          measurements: {
+            artifactBytes: {
+              status: 'available',
+              value: 50,
+              unit: 'bytes',
+              stability: 'stable',
+              method: 'case_artifact_sum',
+            },
+          },
+        },
+      ],
+      results: [measuredResult],
+    });
+    expect(compared.counts.stableImprovements).toBe(1);
+    expect(compared.comparisons[0]).toMatchObject({
+      metricName: 'measurements.artifactBytes',
+      baselineValue: 50,
+      currentValue: 51,
+      delta: 1,
+    });
+
+    const missing = buildRecordingQualityBenchmarkComparisonSummary({
+      baselineResults: [
+        { id: 'measurement-case', actual: { status: 'validated' } },
+      ],
+      results: [measuredResult],
+    });
+    expect(missing.comparisons[0].outcome).toBe('missing_baseline_metric');
+    expect(missing.comparisons[0].currentValue).toBe(51);
+  });
+
   it('flags stable regressions, tolerates small drift, reports hardware-dependent drift, and notes missing baselines', () => {
     const summary = buildRecordingQualityBenchmarkComparisonSummary({
       baselineResults: [
@@ -855,9 +1092,19 @@ describe('benchmark:recording-quality CLI', () => {
       status: 0,
       stdout: expect.stringContaining('tier=pr 8/8 cases passed'),
     });
+    expect(result.stdout).toContain(
+      'EVIDENCE issue-493-capture-recovery elapsed=',
+    );
+    expect(result.stdout).toContain('artifacts=51B');
     expect(fs.existsSync(outputPath)).toBe(true);
-    expect(JSON.parse(fs.readFileSync(outputPath, 'utf8'))).toMatchObject({
+    const report = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+    expect(report).toMatchObject({
+      schemaVersion: 3,
       tier: 'pr',
+      environment: {
+        measurementContractVersion: 1,
+        rssSamplingIntervalMs: 10,
+      },
       summary: {
         totalCases: 8,
         issueCoverage: expect.arrayContaining([493]),
@@ -866,6 +1113,41 @@ describe('benchmark:recording-quality CLI', () => {
         },
       },
     });
+    expect(report.results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'issue-493-capture-recovery',
+          measurements: expect.objectContaining({
+            elapsedTime: expect.objectContaining({
+              status: 'available',
+              unit: 'milliseconds',
+            }),
+            cpuTime: expect.objectContaining({
+              status: 'available',
+              unit: 'microseconds',
+            }),
+            peakRss: expect.objectContaining({
+              status: 'available',
+              unit: 'bytes',
+            }),
+            artifactBytes: expect.objectContaining({
+              status: 'available',
+              value: 51,
+              unit: 'bytes',
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(
+      report.results.every(
+        (entry: RecordingQualityBenchmarkCaseResult) =>
+          entry.measurements && Object.keys(entry.measurements).length === 4,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(report)).not.toContain(
+      'pluto-recording-quality-recovery-',
+    );
   });
 
   it('runs all declared tiers and fails clearly when manual has no cases', () => {
