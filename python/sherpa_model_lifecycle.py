@@ -6,7 +6,9 @@ import os
 import re
 import shutil
 import tarfile
+import tempfile
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -54,6 +56,17 @@ class LifecycleState:
     generation: int = 0
     active_version: str | None = None
     previous_healthy_version: str | None = None
+
+
+@dataclass(frozen=True)
+class ManagedModelSnapshot:
+    artifact_paths: tuple[Path, Path]
+    bundle_version: str
+    runtime_version: str
+    license_ids: tuple[str, ...]
+    generation: int
+    active_version: str
+    previous_healthy_version: str | None
 
 
 def _sha256(path: Path) -> str:
@@ -302,3 +315,181 @@ def materialize_artifact(artifact: ModelArtifact, transport_path: Path, output_d
         raise
     except (OSError, KeyError, tarfile.TarError) as error:
         raise ModelLifecycleError("model_acquisition_failed") from error
+
+
+@contextmanager
+def lifecycle_lock(root: Path):
+    root.mkdir(parents=True, exist_ok=True)
+    handle = (root / "lifecycle.lock").open("a+b")
+    try:
+        try:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ModelLifecycleError("model_operation_busy") from error
+        yield
+    finally:
+        try:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except (ImportError, OSError):
+            pass
+        handle.close()
+
+
+def _bundle_payload(manifest: ModelManifest) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "bundleVersion": manifest.bundle_version,
+        "provider": manifest.provider,
+        "runtimeVersion": manifest.runtime_version,
+        "licenseIds": list(manifest.license_ids),
+        "noticeSha256": manifest.notice_sha256,
+        "artifacts": [
+            {
+                "id": item.id,
+                "destination": item.destination,
+                "installedSha256": item.installed_sha256,
+            }
+            for item in manifest.artifacts
+        ],
+    }
+
+
+def _write_bundle(directory: Path, manifest: ModelManifest) -> None:
+    shutil.copyfile(manifest.notice_path, directory / "NOTICE.txt")
+    (directory / "bundle.json").write_text(
+        json.dumps(_bundle_payload(manifest), sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _verify_version(root: Path, version: str, generation: int = 0, previous: str | None = None) -> ManagedModelSnapshot:
+    directory = root / "versions" / version
+    try:
+        payload = json.loads((directory / "bundle.json").read_text(encoding="utf-8"))
+        if payload["schemaVersion"] != 1 or payload["bundleVersion"] != version or payload["provider"] != "sherpa-onnx":
+            raise ValueError
+        licenses = tuple(payload["licenseIds"])
+        if licenses != ("MIT", "Apache-2.0") or _sha256(directory / "NOTICE.txt") != payload["noticeSha256"]:
+            raise ValueError
+        paths: list[Path] = []
+        for expected_id, item in zip(("segmentation", "embedding"), payload["artifacts"], strict=True):
+            if item["id"] != expected_id or item["destination"] not in ("segmentation.int8.onnx", "embedding.onnx"):
+                raise ValueError
+            path = directory / item["destination"]
+            if not path.is_file() or _sha256(path) != item["installedSha256"]:
+                raise ValueError
+            paths.append(path.resolve())
+        return ManagedModelSnapshot((paths[0], paths[1]), version, payload["runtimeVersion"], licenses, generation, version, previous)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
+        raise ModelLifecycleError("model_missing") from error
+
+
+def resolve_active_artifacts(root: Path) -> ManagedModelSnapshot:
+    state = read_state(root)
+    if state.active_version is None:
+        raise ModelLifecycleError("model_missing")
+    return _verify_version(root, state.active_version, state.generation, state.previous_healthy_version)
+
+
+def _adopt_legacy(root: Path, install_dir: Path, manifest: ModelManifest) -> bool:
+    legacy = root / "sherpa-onnx-1.13.4"
+    sources = (legacy / "segmentation.int8.onnx", legacy / "embedding.onnx")
+    if not all(path.is_file() for path in sources):
+        return False
+    if any(_sha256(path) != artifact.installed_sha256 for path, artifact in zip(sources, manifest.artifacts, strict=True)):
+        return False
+    for source, artifact in zip(sources, manifest.artifacts, strict=True):
+        shutil.copyfile(source, install_dir / artifact.destination)
+    return True
+
+
+def prepare_managed_models(
+    root: Path,
+    *,
+    manifest: ModelManifest | None = None,
+    transport: Any | None = None,
+    probe=lambda _paths: True,
+) -> ManagedModelSnapshot:
+    manifest = manifest or load_shipped_manifest()
+    transport = transport or UrlTransport()
+    with lifecycle_lock(root):
+        state = read_state(root)
+        if state.active_version == manifest.bundle_version:
+            return _verify_version(root, state.active_version, state.generation, state.previous_healthy_version)
+        version_dir = root / "versions" / manifest.bundle_version
+        if version_dir.exists():
+            candidate = _verify_version(root, manifest.bundle_version, state.generation, state.previous_healthy_version)
+        else:
+            staging_root = root / "staging" / manifest.bundle_version
+            staging_root.mkdir(parents=True, exist_ok=True)
+            install_dir = Path(tempfile.mkdtemp(prefix="install-", dir=staging_root))
+            adopted = state.active_version is None and _adopt_legacy(root, install_dir, manifest)
+            if not adopted:
+                for artifact in manifest.artifacts:
+                    partial = staging_root / f"{artifact.id}.partial"
+                    transport_path = download_artifact(artifact, partial, transport)
+                    materialize_artifact(artifact, transport_path, install_dir)
+            _write_bundle(install_dir, manifest)
+            candidate = _verify_candidate(install_dir, manifest)
+            if not probe(candidate.artifact_paths):
+                raise ModelLifecycleError("model_probe_failed")
+            version_dir.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                install_dir.replace(version_dir)
+            except OSError as error:
+                raise ModelLifecycleError("model_acquisition_failed") from error
+            candidate = _verify_version(root, manifest.bundle_version, state.generation, state.previous_healthy_version)
+        if not probe(candidate.artifact_paths):
+            raise ModelLifecycleError("model_probe_failed")
+        new_state = next_activation(state, manifest.bundle_version)
+        write_state(root, new_state)
+        return _verify_version(root, new_state.active_version or manifest.bundle_version, new_state.generation, new_state.previous_healthy_version)
+
+
+def _verify_candidate(directory: Path, manifest: ModelManifest) -> ManagedModelSnapshot:
+    for artifact in manifest.artifacts:
+        if _sha256(directory / artifact.destination) != artifact.installed_sha256:
+            raise ModelLifecycleError("model_checksum_mismatch")
+    if _sha256(directory / "NOTICE.txt") != manifest.notice_sha256:
+        raise ModelLifecycleError("manifest_invalid")
+    paths = (
+        (directory / manifest.artifacts[0].destination).resolve(),
+        (directory / manifest.artifacts[1].destination).resolve(),
+    )
+    return ManagedModelSnapshot(paths, manifest.bundle_version, manifest.runtime_version, manifest.license_ids, 0, manifest.bundle_version, None)
+
+
+def rollback_managed_models(root: Path, *, probe=lambda _paths: True) -> LifecycleState:
+    with lifecycle_lock(root):
+        state = read_state(root)
+        if state.active_version is None or state.previous_healthy_version is None:
+            raise ModelLifecycleError("rollback_unavailable")
+        try:
+            candidate = _verify_version(root, state.previous_healthy_version, state.generation, state.active_version)
+            if not probe(candidate.artifact_paths):
+                raise ModelLifecycleError("rollback_unavailable")
+        except ModelLifecycleError as error:
+            raise ModelLifecycleError("rollback_unavailable") from error
+        next_state = LifecycleState(1, state.generation + 1, state.previous_healthy_version, state.active_version)
+        write_state(root, next_state)
+        return next_state
+
+
+def model_readiness(root: Path) -> dict[str, Any]:
+    try:
+        snapshot = resolve_active_artifacts(root)
+    except ModelLifecycleError as error:
+        return {"ready": False, "reason": str(error)}
+    return {
+        "ready": True,
+        "provider": "sherpa-onnx",
+        "runtimeVersion": snapshot.runtime_version,
+        "bundleVersion": snapshot.bundle_version,
+        "licenseIds": list(snapshot.license_ids),
+        "generation": snapshot.generation,
+        "modelChecksums": [_sha256(path) for path in snapshot.artifact_paths],
+    }

@@ -16,6 +16,11 @@ from python.sherpa_model_lifecycle import (
     download_artifact,
     materialize_artifact,
     ModelArtifact,
+    ModelManifest,
+    model_readiness,
+    prepare_managed_models,
+    resolve_active_artifacts,
+    rollback_managed_models,
 )
 
 
@@ -183,6 +188,87 @@ class AcquisitionTest(unittest.TestCase):
             with self.assertRaisesRegex(ModelLifecycleError, "model_acquisition_failed") as raised:
                 materialize_artifact(artifact, archive, root / "output")
             self.assertNotIn(directory, str(raised.exception))
+
+
+class ManagedLifecycleTest(unittest.TestCase):
+    def make_manifest(self, root, version="B"):
+        notice = root / "NOTICE-source.txt"
+        notice.write_bytes(b"notice")
+        segmentation_bytes = b"segmentation"
+        archive_source = root / "archive-source"
+        archive_source.write_bytes(segmentation_bytes)
+        archive = root / "segmentation.tar.bz2"
+        member = "sherpa-onnx-pyannote-segmentation-3-0/model.int8.onnx"
+        with tarfile.open(archive, "w:bz2") as bundle:
+            bundle.add(archive_source, arcname=member)
+        embedding = b"embedding"
+        artifacts = (
+            ModelArtifact("segmentation", "https://github.com/metagrover/pluto-models/releases/download/v/segmentation.tar.bz2", archive.stat().st_size, digest(archive.read_bytes()), digest(segmentation_bytes), "tar.bz2", "segmentation.int8.onnx", member),
+            ModelArtifact("embedding", "https://github.com/metagrover/pluto-models/releases/download/v/embedding.onnx", len(embedding), digest(embedding), digest(embedding), "raw", "embedding.onnx"),
+        )
+        manifest = ModelManifest(1, version, "sherpa-onnx", "1.13.4", ("MIT", "Apache-2.0"), notice, digest(b"notice"), artifacts)
+        return manifest, archive.read_bytes(), embedding
+
+    def install_version(self, root, version):
+        version_dir = root / "versions" / version
+        version_dir.mkdir(parents=True)
+        (version_dir / "segmentation.int8.onnx").write_bytes(b"segmentation")
+        (version_dir / "embedding.onnx").write_bytes(b"embedding")
+        (version_dir / "NOTICE.txt").write_bytes(b"notice")
+        (version_dir / "bundle.json").write_text(json.dumps({
+            "schemaVersion": 1, "bundleVersion": version, "provider": "sherpa-onnx", "runtimeVersion": "1.13.4",
+            "licenseIds": ["MIT", "Apache-2.0"], "noticeSha256": digest(b"notice"),
+            "artifacts": [
+                {"id": "segmentation", "destination": "segmentation.int8.onnx", "installedSha256": digest(b"segmentation")},
+                {"id": "embedding", "destination": "embedding.onnx", "installedSha256": digest(b"embedding")},
+            ]
+        }))
+
+    def test_failed_probe_leaves_current_active_version_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.install_version(root, "A")
+            write_state(root, LifecycleState(1, 1, "A", None))
+            manifest, archive, embedding = self.make_manifest(root)
+            transport = FakeTransport([FakeResponse(200, archive), FakeResponse(200, embedding)])
+            with self.assertRaisesRegex(ModelLifecycleError, "model_probe_failed"):
+                prepare_managed_models(root, manifest=manifest, transport=transport, probe=lambda _paths: False)
+            self.assertEqual(read_state(root).active_version, "A")
+
+    def test_prepare_activates_verified_immutable_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest, archive, embedding = self.make_manifest(root)
+            result = prepare_managed_models(root, manifest=manifest, transport=FakeTransport([FakeResponse(200, archive), FakeResponse(200, embedding)]), probe=lambda _paths: True)
+            self.assertEqual(result.bundle_version, "B")
+            self.assertEqual(read_state(root), LifecycleState(1, 1, "B", None))
+            self.assertEqual([path.read_bytes() for path in result.artifact_paths], [b"segmentation", b"embedding"])
+
+    def test_rollback_swaps_active_and_previous_without_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.install_version(root, "A")
+            self.install_version(root, "B")
+            write_state(root, LifecycleState(1, 2, "B", "A"))
+            result = rollback_managed_models(root, probe=lambda _paths: True)
+            self.assertEqual((result.active_version, result.previous_healthy_version), ("A", "B"))
+            self.assertEqual(read_state(root), LifecycleState(1, 3, "A", "B"))
+
+    def test_readiness_is_sanitized_and_names_generation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.install_version(root, "A")
+            write_state(root, LifecycleState(1, 7, "A", None))
+            readiness = model_readiness(root)
+            self.assertTrue(readiness["ready"])
+            self.assertEqual(readiness["generation"], 7)
+            self.assertEqual(readiness["bundleVersion"], "A")
+            self.assertNotIn(directory, str(readiness))
+
+    def test_resolve_missing_state_never_downloads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ModelLifecycleError, "model_missing"):
+                resolve_active_artifacts(Path(directory))
 
 
 if __name__ == "__main__":
