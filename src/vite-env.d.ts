@@ -11,9 +11,12 @@ interface ImportMeta {
 
 interface Window {
   __PLUTO_BROWSER_PREVIEW__?: boolean;
+  plutoRuntimePlatform?: Readonly<{
+    platform: 'darwin' | 'linux' | 'win32' | 'unknown';
+    arch: 'arm64' | 'x64' | 'unknown';
+  }>;
   webkitAudioContext?: typeof AudioContext;
   ipcRenderer: {
-
     invoke: <T = any>(channel: string, ...args: any[]) => Promise<T>;
 
     send: (channel: string, ...args: any[]) => void;

@@ -286,6 +286,19 @@ const createBrowserIpcFallback = (): IpcRendererLike => ({
 });
 
 export const installBrowserIpcFallback = () => {
+  if (!window.plutoRuntimePlatform) {
+    const browserPlatform = navigator.platform.toLowerCase();
+    window.plutoRuntimePlatform = Object.freeze({
+      platform: browserPlatform.includes('mac')
+        ? 'darwin'
+        : browserPlatform.includes('win')
+          ? 'win32'
+          : browserPlatform.includes('linux')
+            ? 'linux'
+            : 'unknown',
+      arch: 'unknown',
+    });
+  }
   if (window.ipcRenderer) return;
   window.__PLUTO_BROWSER_PREVIEW__ = true;
   window.ipcRenderer = createBrowserIpcFallback();

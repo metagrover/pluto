@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   listTranscriptionBackends,
+  normalizePlutoRuntimePlatform,
   resolveBackendOptions,
 } from '../../src/utils/transcriptionBackendConfig';
 
@@ -34,5 +35,47 @@ describe('transcription backend registry', () => {
     });
     expect(resolved.computeType).toBe('float32');
     expect(resolved.warnings).toHaveLength(1);
+  });
+
+  it('only enables the Apple Silicon backend with explicit matching runtime evidence', () => {
+    const appleSilicon = listTranscriptionBackends({
+      platform: 'darwin',
+      arch: 'arm64',
+    });
+    const unknownArchitecture = listTranscriptionBackends({
+      platform: 'darwin',
+      arch: 'unknown',
+    });
+
+    expect(
+      appleSilicon.find(
+        (backend) => backend.backend === 'local_alt_apple_silicon',
+      )?.available,
+    ).toBe(true);
+    expect(
+      unknownArchitecture.find(
+        (backend) => backend.backend === 'local_alt_apple_silicon',
+      )?.available,
+    ).toBe(false);
+  });
+
+  it('only exposes CUDA with an explicit supported operating system', () => {
+    const linux = listTranscriptionBackends({
+      platform: 'linux',
+      arch: 'x64',
+    });
+    const unknown = listTranscriptionBackends({
+      platform: 'unknown',
+      arch: 'unknown',
+    });
+
+    expect(linux[0].supportedDevices).toContain('cuda');
+    expect(unknown[0].supportedDevices).toEqual(['cpu']);
+  });
+
+  it('normalizes unexpected runtime values to unknown', () => {
+    expect(
+      normalizePlutoRuntimePlatform({ platform: 'freebsd', arch: 'riscv64' }),
+    ).toEqual({ platform: 'unknown', arch: 'unknown' });
   });
 });
