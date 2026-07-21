@@ -112,6 +112,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const lastPersistedDraftsRef = useRef(meeting.follow_up_drafts_json);
   const lastEvidenceFingerprintRef = useRef(composition.evidenceFingerprint);
   const refinementRequestRef = useRef(0);
+  const saveGenerationRef = useRef(0);
 
   useEffect(() => {
     const meetingId = String(meeting.id);
@@ -123,6 +124,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     if (!meetingChanged && !persistedDraftsChanged) return;
     if (meetingChanged) {
       refinementRequestRef.current += 1;
+      saveGenerationRef.current += 1;
       setRefining(false);
     }
     if (
@@ -162,6 +164,8 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
 
   const persistDocument = useCallback(
     async (nextDocument: SavedFollowUpDraftsV2, revision: number) => {
+      const saveMeetingId = String(meeting.id);
+      const saveGeneration = saveGenerationRef.current;
       if (saveTimeoutRef.current !== null) {
         window.clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
@@ -173,6 +177,12 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           meeting.id,
           JSON.stringify(nextDocument),
         );
+        if (
+          lastMeetingIdRef.current !== saveMeetingId ||
+          saveGenerationRef.current !== saveGeneration
+        ) {
+          return;
+        }
         if (updated !== true) throw new Error('Meeting no longer exists');
         lastSavedRevisionRef.current = Math.max(
           lastSavedRevisionRef.current,
@@ -189,6 +199,12 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           fetchMeetings();
         }
       } catch (error) {
+        if (
+          lastMeetingIdRef.current !== saveMeetingId ||
+          saveGenerationRef.current !== saveGeneration
+        ) {
+          return;
+        }
         console.error('Failed to save follow-up draft:', error);
         setSaveState(
           getSaveCompletionState(
