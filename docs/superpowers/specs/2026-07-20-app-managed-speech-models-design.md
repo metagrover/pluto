@@ -2,7 +2,7 @@
 
 **Issue:** [#476](https://github.com/metagrover/pluto/issues/476)
 
-**Status:** Approved detailed design; written specification awaiting review
+**Status:** Approved written specification; distribution contract published in #529
 
 **Scope:** Credential-free acquisition, activation, readiness, and rollback for Pluto's selected sherpa-onnx speaker-attribution bundle
 
@@ -262,4 +262,4 @@ active B + corrupt/missing A   -> active B unchanged, rollback_unavailable
 
 ## Written-Spec Review Gate
 
-Reviewers must confirm that this document faithfully captures the approved issue design, particularly the Pluto-controlled distribution prerequisite, exact resume rules, cross-process serialization, crash-durable state, deterministic offline probe, non-destructive legacy adoption, and rollback-unavailable behavior. Implementation planning and code begin only after that written-spec approval.
+Owner merge of design PR #528 completed the written-spec review. The reviewed specification covers the Pluto-controlled distribution prerequisite, exact resume rules, cross-process serialization, crash-durable state, deterministic offline probe, non-destructive legacy adoption, and rollback-unavailable behavior. Runtime implementation can begin from this contract after the #529 distribution PR lands.
