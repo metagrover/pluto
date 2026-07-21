@@ -23,5 +23,9 @@ declare namespace NodeJS {
 
 // Used in Renderer process, expose in `preload.ts`
 interface Window {
+  plutoRuntimePlatform?: Readonly<{
+    platform: 'darwin' | 'linux' | 'win32' | 'unknown';
+    arch: 'arm64' | 'x64' | 'unknown';
+  }>;
   ipcRenderer: import('electron').IpcRenderer;
 }
