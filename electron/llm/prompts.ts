@@ -726,7 +726,7 @@ export const getFollowUpDraftsPrompt = (params: {
       ? discussionContext.map((point) => `- ${point}`).join('\n')
       : '- None recorded';
 
-  return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
+  return `You are an expert communications assistant. Render one evidence-backed follow-up in three coordinated formats. Each format must communicate the same underlying facts while adapting length and tone.
 
 Meeting: ${meetingTitle}
 Overview:
@@ -746,24 +746,27 @@ ${openQuestionBullets}
 
 ${customPrompt ? `Additional Instruction: ${customPrompt}\n` : ''}
 
-Generate exactly three drafts:
-1. "Client Recap Email": Professional, polished, suitable for external stakeholders.
-2. "Internal Summary": Action-oriented, concise, suitable for the immediate team.
-3. "Slack Update": Casual but informative, using emoji and bolding where appropriate.
+Generate exactly three coordinated variants:
+1. "Email": A short subject, greeting, concise recap, and only supported sections.
+2. "Internal": A direct team update that emphasizes decisions and accountable execution.
+3. "Slack": The shortest variant, using restrained Markdown without decorative filler.
 
 Rules:
 - Output MUST be valid JSON only.
-- Do not include placeholders like "[Your Name]" if you can avoid it, or use "The Pluto Team".
-- Ensure the tone matches the specified audience for each draft.
+- Keep the content concise and omit unsupported or empty sections.
+- Use the same underlying facts in every format; change presentation, not evidence.
+- Clean the prose and never expose Pluto-internal metadata labels such as Linked Context, Topic, Status, Context, Why, Decided by, or Owner.
+- Do not invent recipients, owners, decisions, action items, or questions.
+- Do not include placeholders such as "[Your Name]" or add a fictional sender.
 - Use participant names only when they appear in the participant list or action/decision evidence.
 - If participant context is missing, keep the draft generic rather than inventing attendees or recipients.
 
 Return JSON in this exact shape:
 {
   "drafts": [
-    { "title": "Client Recap Email", "content": "string" },
-    { "title": "Internal Summary", "content": "string" },
-    { "title": "Slack Update", "content": "string" }
+    { "title": "Email", "content": "string" },
+    { "title": "Internal", "content": "string" },
+    { "title": "Slack", "content": "string" }
   ]
 }
 `;

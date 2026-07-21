@@ -195,6 +195,30 @@ describe('getEntitiesPrompt', () => {
 });
 
 describe('getFollowUpDraftsPrompt', () => {
+  it('coordinates the same evidence across concise send-ready formats', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'Launch Review',
+      overview: ['The staged launch remains on track.'],
+      participants: ['Avery'],
+      decisions: ['Ship Tuesday (Decided by: Avery)'],
+      actionItems: ['Publish the runbook (Owner: Avery)'],
+      openQuestions: [],
+    });
+
+    expect(prompt).toContain('same underlying facts');
+    expect(prompt).toContain('omit unsupported or empty sections');
+    expect(prompt).toContain('never expose Pluto-internal metadata labels');
+    expect(prompt).toContain(
+      'Do not invent recipients, owners, decisions, action items, or questions.',
+    );
+    expect(prompt).toContain('restrained Markdown');
+    expect(prompt).toContain('{ "title": "Email"');
+    expect(prompt).toContain('{ "title": "Internal"');
+    expect(prompt).toContain('{ "title": "Slack"');
+    expect(prompt).not.toContain('three distinct follow-up drafts');
+    expect(prompt).not.toContain('using emoji');
+  });
+
   it('includes overview context when provided', () => {
     const prompt = getFollowUpDraftsPrompt({
       meetingTitle: 'API Migration Review',
