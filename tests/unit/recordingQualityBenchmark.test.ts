@@ -1142,8 +1142,7 @@ describe('benchmark:recording-quality CLI', () => {
     expect(
       report.results.every(
         (entry: RecordingQualityBenchmarkCaseResult) =>
-          entry.measurements &&
-          Object.keys(entry.measurements).length === 4,
+          entry.measurements && Object.keys(entry.measurements).length === 4,
       ),
     ).toBe(true);
     expect(JSON.stringify(report)).not.toContain(

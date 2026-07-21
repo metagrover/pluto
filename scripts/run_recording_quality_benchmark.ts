@@ -106,8 +106,7 @@ const main = async () => {
         monotonicNow: () => performance.now(),
         cpuUsage: () => process.cpuUsage(),
         rssBytes: () => process.memoryUsage().rss,
-        startInterval: (sample, intervalMs) =>
-          setInterval(sample, intervalMs),
+        startInterval: (sample, intervalMs) => setInterval(sample, intervalMs),
         clearInterval: (handle) =>
           clearInterval(handle as ReturnType<typeof setInterval>),
         samplingIntervalMs: rssSamplingIntervalMs,
