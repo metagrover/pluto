@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "tier": "pr",
   "generatedAt": "2026-07-16T20:21:26.763Z",
   "manifestPath": "scripts/recording-quality/manifest.json",
@@ -91,6 +91,11 @@
           "name": "recoveredChunkRatio",
           "tolerance": 0,
           "stability": "stable"
+        },
+        {
+          "name": "measurements.artifactBytes",
+          "tolerance": 0,
+          "stability": "stable"
         }
       ],
       "actual": {
@@ -100,6 +105,27 @@
           "value": 0.75
         },
         "reasons": ["checksum_mismatch:mic:1"]
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "unavailable",
+          "reason": "unsupported_runtime"
+        },
+        "cpuTime": {
+          "status": "unavailable",
+          "reason": "unsupported_runtime"
+        },
+        "peakRss": {
+          "status": "unavailable",
+          "reason": "unsupported_runtime"
+        },
+        "artifactBytes": {
+          "status": "available",
+          "value": 51,
+          "unit": "bytes",
+          "stability": "stable",
+          "method": "case_artifact_sum"
+        }
       },
       "expected": {
         "status": "needs_attention",

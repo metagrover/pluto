@@ -161,6 +161,67 @@ describe('parseRecordingQualityBenchmarkCliArgs', () => {
 });
 
 describe('loadRecordingQualityBenchmarkManifest', () => {
+  it('accepts schema versions 2 and 3 and rejects unknown versions', () => {
+    const baseManifest = {
+      baselineReport: 'baselines/current-master.json',
+      cases: [
+        {
+          id: 'schema-case',
+          issue: 532,
+          title: 'Schema case',
+          kind: 'recording_finalization',
+          fixture: 'fixtures/schema.json',
+          tier: 'pr',
+        },
+      ],
+    };
+
+    expect(
+      loadRecordingQualityBenchmarkManifest({
+        ...baseManifest,
+        schemaVersion: 2,
+      }).schemaVersion,
+    ).toBe(2);
+    expect(
+      loadRecordingQualityBenchmarkManifest({
+        ...baseManifest,
+        schemaVersion: 3,
+      }).schemaVersion,
+    ).toBe(3);
+    expect(() =>
+      loadRecordingQualityBenchmarkManifest({
+        ...baseManifest,
+        schemaVersion: 4,
+      }),
+    ).toThrow(/unsupported.*schema.*4/i);
+  });
+
+  it('rejects stable machine-dependent measurement declarations', () => {
+    expect(() =>
+      loadRecordingQualityBenchmarkManifest({
+        schemaVersion: 3,
+        baselineReport: 'baselines/current-master.json',
+        cases: [
+          {
+            id: 'invalid-stability',
+            issue: 532,
+            title: 'Invalid stability',
+            kind: 'recording_finalization',
+            fixture: 'fixtures/invalid.json',
+            tier: 'pr',
+            trackedMetrics: [
+              {
+                name: 'measurements.elapsedTime',
+                tolerance: 1,
+                stability: 'stable',
+              },
+            ],
+          },
+        ],
+      }),
+    ).toThrow(/elapsedTime.*hardware_dependent/i);
+  });
+
   it('loads committed benchmark cases and rejects duplicate ids', () => {
     const manifest = loadRecordingQualityBenchmarkManifest({
       schemaVersion: 1,
@@ -733,6 +794,66 @@ describe('buildRecordingQualityBenchmarkReport', () => {
 });
 
 describe('buildRecordingQualityBenchmarkComparisonSummary', () => {
+  it('compares stable artifact measurements and leaves missing v2 evidence visible', () => {
+    const measuredResult: RecordingQualityBenchmarkCaseResult = {
+      ...passingBenchmarkResult(),
+      trackedMetrics: [
+        {
+          name: 'measurements.artifactBytes',
+          tolerance: 0,
+          stability: 'stable',
+        },
+      ],
+      measurements: {
+        elapsedTime: { status: 'unavailable', reason: 'collection_failed' },
+        cpuTime: { status: 'unavailable', reason: 'collection_failed' },
+        peakRss: { status: 'unavailable', reason: 'collection_failed' },
+        artifactBytes: {
+          status: 'available',
+          value: 51,
+          unit: 'bytes',
+          stability: 'stable',
+          method: 'case_artifact_sum',
+        },
+      },
+    };
+
+    const compared = buildRecordingQualityBenchmarkComparisonSummary({
+      baselineResults: [
+        {
+          id: 'measurement-case',
+          actual: { status: 'validated' },
+          measurements: {
+            artifactBytes: {
+              status: 'available',
+              value: 50,
+              unit: 'bytes',
+              stability: 'stable',
+              method: 'case_artifact_sum',
+            },
+          },
+        },
+      ],
+      results: [measuredResult],
+    });
+    expect(compared.counts.stableImprovements).toBe(1);
+    expect(compared.comparisons[0]).toMatchObject({
+      metricName: 'measurements.artifactBytes',
+      baselineValue: 50,
+      currentValue: 51,
+      delta: 1,
+    });
+
+    const missing = buildRecordingQualityBenchmarkComparisonSummary({
+      baselineResults: [
+        { id: 'measurement-case', actual: { status: 'validated' } },
+      ],
+      results: [measuredResult],
+    });
+    expect(missing.comparisons[0].outcome).toBe('missing_baseline_metric');
+    expect(missing.comparisons[0].currentValue).toBe(51);
+  });
+
   it('flags stable regressions, tolerates small drift, reports hardware-dependent drift, and notes missing baselines', () => {
     const summary = buildRecordingQualityBenchmarkComparisonSummary({
       baselineResults: [

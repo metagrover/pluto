@@ -549,6 +549,11 @@ export const loadRecordingQualityBenchmarkManifest = (
       'Recording quality benchmark manifest needs a schemaVersion.',
     );
   }
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3) {
+    throw new Error(
+      `Unsupported recording quality benchmark manifest schemaVersion ${schemaVersion}.`,
+    );
+  }
   if (!baselineReport) {
     throw new Error(
       'Recording quality benchmark manifest needs a baselineReport.',
@@ -607,6 +612,16 @@ export const loadRecordingQualityBenchmarkManifest = (
             if (stability !== 'stable' && stability !== 'hardware_dependent') {
               throw new Error(
                 `Tracked metric ${name} for ${id} has unsupported stability ${stability}.`,
+              );
+            }
+            if (
+              (name === 'measurements.elapsedTime' ||
+                name === 'measurements.cpuTime' ||
+                name === 'measurements.peakRss') &&
+              stability !== 'hardware_dependent'
+            ) {
+              throw new Error(
+                `Tracked measurement ${name} for ${id} must use hardware_dependent stability.`,
               );
             }
             return {
@@ -1104,7 +1119,9 @@ export const runCaptureRecoveryBenchmarkCase = async (
     try {
       const recoveredPaths = Object.values(integrity.recovered_sources)
         .map((source) => source.recoveredAudioPath)
-        .filter((artifactPath): artifactPath is string => Boolean(artifactPath));
+        .filter((artifactPath): artifactPath is string =>
+          Boolean(artifactPath),
+        );
       const artifactStats = await Promise.all(
         recoveredPaths.map((artifactPath) => stat(artifactPath)),
       );
@@ -1163,6 +1180,7 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
     actual?: {
       primaryMetric?: RecordingQualityBenchmarkMetric;
     };
+    measurements?: Partial<RecordingQualityBenchmarkMeasurements>;
   }>;
   results: RecordingQualityBenchmarkCaseResult[];
 }) => {
@@ -1179,11 +1197,37 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
     missingBaseline: [] as RecordingQualityBenchmarkComparisonEntry[],
   };
 
+  const resolveTrackedMetric = (
+    result:
+      | {
+          actual?: { primaryMetric?: RecordingQualityBenchmarkMetric };
+          measurements?: Partial<RecordingQualityBenchmarkMeasurements>;
+        }
+      | undefined,
+    metricName: string,
+  ): RecordingQualityBenchmarkMetric | undefined => {
+    if (result?.actual?.primaryMetric?.name === metricName) {
+      return result.actual.primaryMetric;
+    }
+    if (!metricName.startsWith('measurements.')) return undefined;
+    const measurementName = metricName.slice(
+      'measurements.'.length,
+    ) as keyof RecordingQualityBenchmarkMeasurements;
+    const measurement = result?.measurements?.[measurementName];
+    return measurement?.status === 'available'
+      ? { name: metricName, value: measurement.value }
+      : undefined;
+  };
+
   for (const result of input.results) {
     for (const trackedMetric of result.trackedMetrics || []) {
-      const baselineMetric = baselineById.get(result.id)?.actual?.primaryMetric;
+      const baselineMetric = resolveTrackedMetric(
+        baselineById.get(result.id),
+        trackedMetric.name,
+      );
+      const currentMetric = resolveTrackedMetric(result, trackedMetric.name);
 
-      if (!baselineMetric || baselineMetric.name !== trackedMetric.name) {
+      if (!baselineMetric) {
         counts.missingBaselineMetrics += 1;
         comparisons.push({
           id: result.id,
@@ -1193,19 +1237,11 @@ export const buildRecordingQualityBenchmarkComparisonSummary = (input: {
           tolerance: trackedMetric.tolerance,
           stability: trackedMetric.stability,
           outcome: 'missing_baseline_metric',
-          currentValue:
-            result.actual.primaryMetric?.name === trackedMetric.name
-              ? result.actual.primaryMetric.value
-              : undefined,
+          currentValue: currentMetric?.value,
         });
         sections.missingBaseline.push(comparisons[comparisons.length - 1]);
         continue;
       }
-
-      const currentMetric =
-        result.actual.primaryMetric?.name === trackedMetric.name
-          ? result.actual.primaryMetric
-          : undefined;
 
       if (!currentMetric) {
         counts.missingBaselineMetrics += 1;
@@ -1327,6 +1363,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     actual?: {
       primaryMetric?: RecordingQualityBenchmarkMetric;
     };
+    measurements?: Partial<RecordingQualityBenchmarkMeasurements>;
   }>;
 }): RecordingQualityBenchmarkReport => {
   const passedCases = input.results.filter((result) => result.passed).length;

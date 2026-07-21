@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "baselineReport": "baselines/current-master.json",
   "cases": [
     {
@@ -20,6 +20,11 @@
       "trackedMetrics": [
         {
           "name": "recoveredChunkRatio",
+          "tolerance": 0,
+          "stability": "stable"
+        },
+        {
+          "name": "measurements.artifactBytes",
           "tolerance": 0,
           "stability": "stable"
         }
