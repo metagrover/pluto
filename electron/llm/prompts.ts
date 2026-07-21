@@ -726,7 +726,7 @@ export const getFollowUpDraftsPrompt = (params: {
       ? discussionContext.map((point) => `- ${point}`).join('\n')
       : '- None recorded';
 
-  return `You are an expert communications assistant. Generate three distinct follow-up drafts based on the meeting details below.
+  return `You are an expert communications assistant. Render three coordinated formats of the same follow-up from the evidence below.
 
 Meeting: ${meetingTitle}
 Overview:
@@ -746,15 +746,18 @@ ${openQuestionBullets}
 
 ${customPrompt ? `Additional Instruction: ${customPrompt}\n` : ''}
 
-Generate exactly three drafts:
-1. "Client Recap Email": Professional, polished, suitable for external stakeholders.
-2. "Internal Summary": Action-oriented, concise, suitable for the immediate team.
-3. "Slack Update": Casual but informative, using emoji and bolding where appropriate.
+Generate exactly three coordinated formats with the same supported facts:
+1. "Client Recap Email": Concise and polished, with a greeting only when appropriate.
+2. "Internal Summary": Direct and action-oriented for the immediate team.
+3. "Slack Update": The shortest version, with restrained Markdown and no decorative emoji requirement.
 
 Rules:
 - Output MUST be valid JSON only.
-- Do not include placeholders like "[Your Name]" if you can avoid it, or use "The Pluto Team".
-- Ensure the tone matches the specified audience for each draft.
+- Omit unsupported or empty sections; never write "None recorded" in sendable prose.
+- Do not expose Pluto-internal labels such as "Linked Context", "Topic", "Status", "Context", "Why", "Decided by", "Owner", or "Due" verbatim in sendable prose.
+- Never invent recipients, owners, decisions, or questions.
+- Do not include placeholders or signatures that are not supported by the evidence.
+- Keep facts consistent across all formats; vary only tone, ceremony, and compression.
 - Use participant names only when they appear in the participant list or action/decision evidence.
 - If participant context is missing, keep the draft generic rather than inventing attendees or recipients.
 
