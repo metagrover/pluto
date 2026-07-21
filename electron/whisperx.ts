@@ -67,10 +67,22 @@ export type DiarizationModelReadiness =
   | {
       ready: true;
       provider: 'sherpa-onnx';
-      version: string;
+      runtimeVersion: string;
+      bundleVersion: string;
+      licenseIds: string[];
+      generation: number;
       modelChecksums: string[];
     }
-  | { ready: false; reason: string };
+  | {
+      ready: false;
+      reason: string;
+      operation?: 'idle' | 'preparing' | 'rolling_back';
+      progress?: Array<{
+        artifactId: string;
+        receivedBytes: number;
+        expectedBytes: number;
+      }>;
+    };
 
 export interface AlignedEnergyResult {
   schemaVersion: 1;
@@ -363,7 +375,6 @@ class WhisperXManager {
             app.getPath('userData'),
             'models',
             'speaker-attribution',
-            'sherpa-onnx-1.13.4',
           ),
           PLUTO_MEETINGS_DIR: path.join(app.getPath('userData'), 'meetings'),
           PATH: ffmpegPath
@@ -579,6 +590,24 @@ class WhisperXManager {
       throw new Error(
         error.detail ||
           `Diarization model preparation failed: ${response.status}`,
+      );
+    }
+    return (await response.json()) as DiarizationModelReadiness;
+  }
+
+  async rollbackDiarizationModels(): Promise<DiarizationModelReadiness> {
+    await this.start();
+    const response = await fetch(
+      `${this.getBaseUrl()}/diarization/models/rollback`,
+      { method: 'POST' },
+    );
+    if (!response.ok) {
+      const error = (await response.json().catch(() => ({}))) as {
+        detail?: string;
+      };
+      throw new Error(
+        error.detail ||
+          `Diarization model rollback failed: ${response.status}`,
       );
     }
     return (await response.json()) as DiarizationModelReadiness;

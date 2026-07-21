@@ -19,6 +19,7 @@ from sherpa_diarization_runtime import (
     ensure_model_artifacts,
     model_readiness,
     require_model_artifacts,
+    rollback_model_artifacts,
 )
 from aligned_audio_energy import aligned_energy_windows
 
@@ -179,6 +180,16 @@ def prepare_diarization_models():
     try:
         ensure_model_artifacts(model_dir)
         return model_readiness(model_dir)
+    except SherpaDiarizationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+@app.post("/diarization/models/rollback")
+def rollback_diarization_models():
+    model_dir = Path(os.environ.get("PLUTO_SPEAKER_MODELS_DIR", ""))
+    if not str(model_dir) or str(model_dir) == ".":
+        raise HTTPException(status_code=503, detail="speaker_models_unavailable")
+    try:
+        return rollback_model_artifacts(model_dir)
     except SherpaDiarizationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

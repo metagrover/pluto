@@ -275,6 +275,10 @@ app.whenReady().then(async () => {
     return await whisperX.prepareDiarizationModels();
   });
 
+  ipcMain.handle('WHISPER_ROLLBACK_DIARIZATION_MODELS', async () => {
+    return await whisperX.rollbackDiarizationModels();
+  });
+
   ipcMain.handle(
     'WHISPER_ALIGNED_ENERGY',
     async (_event, micAudioPath, systemAudioPath) => {
