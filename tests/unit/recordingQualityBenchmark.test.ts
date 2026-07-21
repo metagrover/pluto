@@ -11,12 +11,120 @@ import {
   buildRecordingQualityBenchmarkReport,
   evaluateCandidateDistributionEligibility,
   loadRecordingQualityBenchmarkManifest,
+  measureRecordingQualityBenchmarkCase,
   parseRecordingQualityBenchmarkCliArgs,
   runCandidateEligibilityBenchmarkCase,
   runCaptureRecoveryBenchmarkCase,
   runRetryValidationBenchmarkCase,
   selectRecordingQualityBenchmarkCases,
 } from '../../src/services/recordingQualityBenchmark';
+
+const passingBenchmarkResult = (): RecordingQualityBenchmarkCaseResult => ({
+  id: 'measurement-case',
+  issue: 532,
+  title: 'Measurement case',
+  kind: 'recording_finalization',
+  passed: true,
+  actual: { status: 'validated' },
+  expected: { status: 'validated' },
+});
+
+describe('measurement envelope', () => {
+  it('collects normalized process evidence and clears sampling', async () => {
+    const clock = [10.2, 12.1];
+    const cpu = [
+      { user: 100, system: 50 },
+      { user: 325, system: 75 },
+    ];
+    const rss = [100.2, 140.8, 120.1];
+    let cleared = false;
+
+    const result = await measureRecordingQualityBenchmarkCase(
+      async () => passingBenchmarkResult(),
+      {
+        monotonicNow: () => clock.shift() ?? 0,
+        cpuUsage: () => cpu.shift() ?? { user: 0, system: 0 },
+        rssBytes: () => rss.shift() ?? 0,
+        startInterval: (sample) => {
+          sample();
+          return 17;
+        },
+        clearInterval: (handle) => {
+          expect(handle).toBe(17);
+          cleared = true;
+        },
+        samplingIntervalMs: 10,
+      },
+    );
+
+    expect(cleared).toBe(true);
+    expect(result.measurements).toEqual({
+      elapsedTime: {
+        status: 'available',
+        value: 2,
+        unit: 'milliseconds',
+        stability: 'hardware_dependent',
+        method: 'monotonic_elapsed',
+      },
+      cpuTime: {
+        status: 'available',
+        value: 250,
+        unit: 'microseconds',
+        stability: 'hardware_dependent',
+        method: 'process_cpu_delta',
+      },
+      peakRss: {
+        status: 'available',
+        value: 141,
+        unit: 'bytes',
+        stability: 'hardware_dependent',
+        method: 'sampled_process_rss',
+      },
+      artifactBytes: {
+        status: 'unavailable',
+        reason: 'not_applicable',
+      },
+    });
+  });
+
+  it('keeps functional failures and marks invalid readings unavailable', async () => {
+    const functionalFailure = {
+      ...passingBenchmarkResult(),
+      passed: false,
+      failures: ['expected functional failure'],
+    };
+
+    const result = await measureRecordingQualityBenchmarkCase(
+      async () => functionalFailure,
+      {
+        monotonicNow: (() => {
+          const values = [5, 4];
+          return () => values.shift() ?? 0;
+        })(),
+        cpuUsage: (() => {
+          const values = [
+            { user: 20, system: 20 },
+            { user: 10, system: 10 },
+          ];
+          return () => values.shift() ?? { user: 0, system: 0 };
+        })(),
+        rssBytes: () => Number.NaN,
+        startInterval: () => 1,
+        clearInterval: () => undefined,
+        samplingIntervalMs: 10,
+      },
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.failures).toEqual(['expected functional failure']);
+    expect(result.measurements).toEqual({
+      elapsedTime: { status: 'unavailable', reason: 'collection_failed' },
+      cpuTime: { status: 'unavailable', reason: 'collection_failed' },
+      peakRss: { status: 'unavailable', reason: 'collection_failed' },
+      artifactBytes: { status: 'unavailable', reason: 'not_applicable' },
+    });
+  });
+});
 
 describe('parseRecordingQualityBenchmarkCliArgs', () => {
   it('accepts pnpm passthrough separators and explicit output paths', () => {

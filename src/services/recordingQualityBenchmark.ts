@@ -55,6 +55,33 @@ export type RecordingQualityBenchmarkMetric = {
   value: number | string | boolean;
 };
 
+export type RecordingQualityBenchmarkMeasurement =
+  | {
+      status: 'available';
+      value: number;
+      unit: 'milliseconds' | 'microseconds' | 'bytes';
+      stability: 'stable' | 'hardware_dependent';
+      method:
+        | 'monotonic_elapsed'
+        | 'process_cpu_delta'
+        | 'sampled_process_rss'
+        | 'case_artifact_sum';
+    }
+  | {
+      status: 'unavailable';
+      reason:
+        | 'not_applicable'
+        | 'unsupported_runtime'
+        | 'collection_failed';
+    };
+
+export type RecordingQualityBenchmarkMeasurements = {
+  elapsedTime: RecordingQualityBenchmarkMeasurement;
+  cpuTime: RecordingQualityBenchmarkMeasurement;
+  peakRss: RecordingQualityBenchmarkMeasurement;
+  artifactBytes: RecordingQualityBenchmarkMeasurement;
+};
+
 export type RecordingQualityBenchmarkTrackedMetric = {
   name: string;
   tolerance: number;
@@ -87,7 +114,160 @@ export type RecordingQualityBenchmarkCaseResult = {
     reasons?: string[];
   };
   expected: RecordingQualityBenchmarkExpectation;
+  measurements?: RecordingQualityBenchmarkMeasurements;
   failures?: string[];
+};
+
+export type RecordingQualityBenchmarkMeasurementAdapters = {
+  monotonicNow: () => number;
+  cpuUsage: () => { user: number; system: number };
+  rssBytes: () => number;
+  startInterval: (sample: () => void, intervalMs: number) => unknown;
+  clearInterval: (handle: unknown) => void;
+  samplingIntervalMs: number;
+};
+
+const unavailableMeasurement = (
+  reason: Extract<
+    RecordingQualityBenchmarkMeasurement,
+    { status: 'unavailable' }
+  >['reason'],
+): RecordingQualityBenchmarkMeasurement => ({ status: 'unavailable', reason });
+
+const availableMeasurement = (
+  value: number,
+  unit: Extract<
+    RecordingQualityBenchmarkMeasurement,
+    { status: 'available' }
+  >['unit'],
+  stability: Extract<
+    RecordingQualityBenchmarkMeasurement,
+    { status: 'available' }
+  >['stability'],
+  method: Extract<
+    RecordingQualityBenchmarkMeasurement,
+    { status: 'available' }
+  >['method'],
+): RecordingQualityBenchmarkMeasurement =>
+  Number.isFinite(value) && value >= 0
+    ? {
+        status: 'available',
+        value: Math.round(value),
+        unit,
+        stability,
+        method,
+      }
+    : unavailableMeasurement('collection_failed');
+
+export const measureRecordingQualityBenchmarkCase = async (
+  run: () =>
+    | RecordingQualityBenchmarkCaseResult
+    | Promise<RecordingQualityBenchmarkCaseResult>,
+  adapters: RecordingQualityBenchmarkMeasurementAdapters,
+): Promise<RecordingQualityBenchmarkCaseResult> => {
+  let startedAt: number | undefined;
+  let startedCpu: { user: number; system: number } | undefined;
+  const rssSamples: number[] = [];
+  let intervalHandle: unknown;
+
+  try {
+    startedAt = adapters.monotonicNow();
+  } catch {
+    startedAt = undefined;
+  }
+  try {
+    startedCpu = adapters.cpuUsage();
+  } catch {
+    startedCpu = undefined;
+  }
+  const sampleRss = () => {
+    try {
+      rssSamples.push(adapters.rssBytes());
+    } catch {
+      rssSamples.push(Number.NaN);
+    }
+  };
+  sampleRss();
+  try {
+    intervalHandle = adapters.startInterval(
+      sampleRss,
+      adapters.samplingIntervalMs,
+    );
+  } catch {
+    rssSamples.push(Number.NaN);
+  }
+
+  try {
+    const result = await run();
+    let endedAt: number | undefined;
+    let endedCpu: { user: number; system: number } | undefined;
+    try {
+      endedAt = adapters.monotonicNow();
+    } catch {
+      endedAt = undefined;
+    }
+    try {
+      endedCpu = adapters.cpuUsage();
+    } catch {
+      endedCpu = undefined;
+    }
+    sampleRss();
+
+    const elapsed =
+      startedAt !== undefined && endedAt !== undefined && endedAt >= startedAt
+        ? availableMeasurement(
+            Math.ceil(endedAt - startedAt),
+            'milliseconds',
+            'hardware_dependent',
+            'monotonic_elapsed',
+          )
+        : unavailableMeasurement('collection_failed');
+    const cpuDelta =
+      startedCpu &&
+      endedCpu &&
+      endedCpu.user >= startedCpu.user &&
+      endedCpu.system >= startedCpu.system
+        ? endedCpu.user -
+          startedCpu.user +
+          (endedCpu.system - startedCpu.system)
+        : undefined;
+    const cpu =
+      cpuDelta === undefined
+        ? unavailableMeasurement('collection_failed')
+        : availableMeasurement(
+            cpuDelta,
+            'microseconds',
+            'hardware_dependent',
+            'process_cpu_delta',
+          );
+    const validRss =
+      rssSamples.length > 0 &&
+      rssSamples.every((sample) => Number.isFinite(sample) && sample >= 0);
+    const peakRss = validRss
+      ? availableMeasurement(
+          Math.max(...rssSamples),
+          'bytes',
+          'hardware_dependent',
+          'sampled_process_rss',
+        )
+      : unavailableMeasurement('collection_failed');
+
+    return {
+      ...result,
+      measurements: {
+        elapsedTime: elapsed,
+        cpuTime: cpu,
+        peakRss,
+        artifactBytes:
+          result.measurements?.artifactBytes ||
+          unavailableMeasurement('not_applicable'),
+      },
+    };
+  } finally {
+    if (intervalHandle !== undefined) {
+      adapters.clearInterval(intervalHandle);
+    }
+  }
 };
 
 export type RecordingQualityBenchmarkReport = {
