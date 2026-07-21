@@ -40,12 +40,40 @@ export type ParsedSavedFollowUpDrafts = {
   document: SavedFollowUpDraftsV2 | null;
 };
 
+export const getSaveCompletionState = (
+  completedRevision: number,
+  currentRevision: number,
+  succeeded: boolean,
+  lastSavedRevision = -1,
+): 'saving' | 'saved' | 'error' => {
+  if (lastSavedRevision >= currentRevision) return 'saved';
+  if (completedRevision !== currentRevision) return 'saving';
+  return succeeded ? 'saved' : 'error';
+};
+
 const FORMATS: FollowUpFormat[] = ['email', 'internal', 'slack'];
-const INTERNAL_DETAIL =
-  /\s*\((?:[^()]*(?:Project|Topic|Linked Context|Status|Context|Why|Decided by|Owner|Due):[^()]*)\)\s*$/i;
+const INTERNAL_LABEL =
+  /(?:^|\|)\s*(?:Project|Topic|Linked Context|Status|Context|Why|Decided by|Owner|Due):/i;
+
+const stripTrailingInternalDetails = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed.endsWith(')')) return trimmed;
+  let depth = 0;
+  for (let index = trimmed.length - 1; index >= 0; index -= 1) {
+    if (trimmed[index] === ')') depth += 1;
+    if (trimmed[index] !== '(') continue;
+    depth -= 1;
+    if (depth !== 0) continue;
+    const details = trimmed.slice(index + 1, -1);
+    return INTERNAL_LABEL.test(details)
+      ? trimmed.slice(0, index).trim()
+      : trimmed;
+  }
+  return trimmed;
+};
 
 const normalizeLine = (value: string): string =>
-  value.replace(/\s+/g, ' ').replace(INTERNAL_DETAIL, '').trim();
+  stripTrailingInternalDetails(value.replace(/\s+/g, ' '));
 
 const normalizedLines = (values: string[], limit: number): string[] =>
   values.map(normalizeLine).filter(Boolean).slice(0, limit);
@@ -79,6 +107,7 @@ export const buildFollowUpComposition = (
   const currentRead = overview[0] || topicSummaries[0] || discussion[0] || '';
   const evidenceFingerprint = hashEvidence(
     JSON.stringify({
+      meetingTitle: normalizeLine(input.meetingTitle),
       currentRead,
       decisions,
       actions,
@@ -248,3 +277,24 @@ export const mergeRefinedVariants = (
     ]),
   ) as FollowUpVariants,
 });
+
+export const parseRefinedVariants = (
+  drafts: Array<{ title?: string; content?: string }> | undefined,
+): FollowUpVariants | null => {
+  if (!drafts) return null;
+  const variants: Partial<FollowUpVariants> = {};
+  for (const draft of drafts) {
+    const title = draft.title?.trim().toLowerCase() || '';
+    const content = draft.content?.trim() || '';
+    const format = title.includes('slack')
+      ? 'slack'
+      : title.includes('internal')
+        ? 'internal'
+        : title.includes('email') || title.includes('client')
+          ? 'email'
+          : null;
+    if (!format || !content || variants[format]) return null;
+    variants[format] = content;
+  }
+  return isVariants(variants) ? variants : null;
+};

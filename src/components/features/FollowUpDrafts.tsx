@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Meeting } from '../../types';
 import {
   type FollowUpFormat,
-  type FollowUpVariants,
   type SavedFollowUpDraftsV2,
   buildFollowUpComposition,
   createSavedFollowUpDrafts,
+  getSaveCompletionState,
   mergeRefinedVariants,
+  parseRefinedVariants,
   parseSavedFollowUpDrafts,
   resolveFollowUpDrafts,
 } from './followUpComposition';
@@ -95,15 +96,19 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const [customPrompt, setCustomPrompt] = useState('');
   const [showRefine, setShowRefine] = useState(false);
   const saveTimeoutRef = useRef<number | null>(null);
+  const documentRevisionRef = useRef(0);
+  const lastSavedRevisionRef = useRef(-1);
 
   useEffect(() => {
     setDocument(initialResolution?.document || null);
     setContextChanged(initialResolution?.contextChanged || false);
+    documentRevisionRef.current = 0;
+    lastSavedRevisionRef.current = -1;
     setSaveState('idle');
   }, [initialResolution]);
 
   const persistDocument = useCallback(
-    async (nextDocument: SavedFollowUpDraftsV2) => {
+    async (nextDocument: SavedFollowUpDraftsV2, revision: number) => {
       if (saveTimeoutRef.current !== null) {
         window.clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
@@ -114,11 +119,30 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           ...meeting,
           follow_up_drafts_json: JSON.stringify(nextDocument),
         });
-        setSaveState('saved');
-        fetchMeetings();
+        lastSavedRevisionRef.current = Math.max(
+          lastSavedRevisionRef.current,
+          revision,
+        );
+        const completionState = getSaveCompletionState(
+          revision,
+          documentRevisionRef.current,
+          true,
+          lastSavedRevisionRef.current,
+        );
+        setSaveState(completionState);
+        if (completionState === 'saved') {
+          fetchMeetings();
+        }
       } catch (error) {
         console.error('Failed to save follow-up draft:', error);
-        setSaveState('error');
+        setSaveState(
+          getSaveCompletionState(
+            revision,
+            documentRevisionRef.current,
+            false,
+            lastSavedRevisionRef.current,
+          ),
+        );
       }
     },
     [fetchMeetings, meeting],
@@ -127,7 +151,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   useEffect(() => {
     if (!document || saveState !== 'saving') return;
     saveTimeoutRef.current = window.setTimeout(
-      () => persistDocument(document),
+      () => persistDocument(document, documentRevisionRef.current),
       500,
     );
     return () => {
@@ -166,6 +190,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const activeText = activeDocument.variants[activeFormat];
 
   const updateDocument = (nextDocument: SavedFollowUpDraftsV2) => {
+    documentRevisionRef.current += 1;
     setDocument(nextDocument);
     setSaveState('saving');
   };
@@ -219,21 +244,10 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         discussionPoints,
         customPrompt: customPrompt.trim() || undefined,
       });
-      const values = response?.drafts?.map(
-        (draft: { content?: string }) => draft.content?.trim() || '',
-      );
-      if (
-        !values ||
-        values.length < 3 ||
-        values.some((value: string) => !value)
-      ) {
+      const refined = parseRefinedVariants(response?.drafts);
+      if (!refined) {
         throw new Error('Refinement returned incomplete drafts');
       }
-      const refined: FollowUpVariants = {
-        email: values[0],
-        internal: values[1],
-        slack: values[2],
-      };
       updateDocument(mergeRefinedVariants(activeDocument, refined));
     } catch (error) {
       console.error('Failed to refine follow-up draft:', error);
@@ -274,6 +288,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
               key={id}
               type="button"
               aria-pressed={activeFormat === id}
+              disabled={refining}
               onClick={() =>
                 updateDocument({ ...activeDocument, selectedFormat: id })
               }
@@ -307,9 +322,12 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       <textarea
         aria-label={`${FORMAT_LABELS.find(({ id }) => id === activeFormat)?.label} follow-up draft`}
         value={activeText}
+        disabled={refining}
         onChange={(event) => handleEdit(event.target.value)}
         onBlur={() => {
-          if (saveState === 'saving') void persistDocument(activeDocument);
+          if (saveState === 'saving') {
+            void persistDocument(activeDocument, documentRevisionRef.current);
+          }
         }}
         className="mt-5 min-h-[240px] w-full resize-y rounded-2xl border border-pro-border/50 bg-pro-bg/60 p-5 text-sm leading-7 text-pro-text-main outline-none transition focus:border-pro-accent/50 focus:ring-2 focus:ring-pro-accent/10"
       />
@@ -326,6 +344,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           <button
             type="button"
             onClick={resetToCurrentEvidence}
+            disabled={refining}
             className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-pro-text-muted hover:bg-pro-bg hover:text-pro-text-main"
           >
             <RotateCcw size={13} /> Reset
@@ -333,7 +352,12 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           {saveState === 'error' && (
             <button
               type="button"
-              onClick={() => void persistDocument(activeDocument)}
+              onClick={() =>
+                void persistDocument(
+                  activeDocument,
+                  documentRevisionRef.current,
+                )
+              }
               className="rounded-xl px-3 py-2 text-xs font-bold text-red-500"
             >
               Retry save

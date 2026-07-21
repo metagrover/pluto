@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildFollowUpComposition,
   createSavedFollowUpDrafts,
+  getSaveCompletionState,
   mergeRefinedVariants,
+  parseRefinedVariants,
   parseSavedFollowUpDrafts,
   resolveFollowUpDrafts,
 } from '../../src/components/features/followUpComposition';
@@ -95,9 +97,42 @@ describe('buildFollowUpComposition', () => {
     expect(first.evidenceFingerprint).toMatch(/^fup-[0-9a-f]{8}$/);
     expect(first.evidenceFingerprint).not.toContain('launch');
   });
+
+  it('strips metadata containing nested owner-role parentheses', () => {
+    const result = buildFollowUpComposition({
+      ...input,
+      actionItems: [
+        'Publish release notes (Owner: Maya (Head of Product) | Due: Friday | Status: Active)',
+      ],
+    });
+
+    expect(result.availability).toBe('ready');
+    if (result.availability !== 'ready') return;
+    expect(result.variants.internal).toContain('Publish release notes');
+    expect(result.variants.internal).not.toMatch(
+      /Owner:|Head of Product|Due:|Status:/,
+    );
+  });
+
+  it('changes the fingerprint when the rendered meeting title changes', () => {
+    const first = buildFollowUpComposition(input);
+    const second = buildFollowUpComposition({
+      ...input,
+      meetingTitle: 'Renamed launch review',
+    });
+
+    expect(first.evidenceFingerprint).not.toBe(second.evidenceFingerprint);
+  });
 });
 
 describe('saved follow-up drafts', () => {
+  it('keeps a newer dirty revision pending when an older save completes', () => {
+    expect(getSaveCompletionState(1, 2, true)).toBe('saving');
+    expect(getSaveCompletionState(2, 2, true)).toBe('saved');
+    expect(getSaveCompletionState(2, 2, false)).toBe('error');
+    expect(getSaveCompletionState(1, 2, false, 2)).toBe('saved');
+  });
+
   it('migrates legacy drafts in memory', () => {
     const parsed = parseSavedFollowUpDrafts(
       JSON.stringify({
@@ -188,5 +223,22 @@ describe('saved follow-up drafts', () => {
       internal: 'New internal',
       slack: 'New slack',
     });
+  });
+
+  it('maps refinement by title and rejects incomplete or duplicate formats', () => {
+    expect(
+      parseRefinedVariants([
+        { title: 'Slack Update', content: 'S' },
+        { title: 'Client Recap Email', content: 'E' },
+        { title: 'Internal Summary', content: 'I' },
+      ]),
+    ).toEqual({ email: 'E', internal: 'I', slack: 'S' });
+    expect(
+      parseRefinedVariants([
+        { title: 'Slack Update', content: 'S1' },
+        { title: 'Slack Update', content: 'S2' },
+        { title: 'Internal Summary', content: 'I' },
+      ]),
+    ).toBeNull();
   });
 });
