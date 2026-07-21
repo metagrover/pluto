@@ -1,7 +1,7 @@
 import hashlib
+import json
 import sys
 import tempfile
-import tarfile
 import types
 import unittest
 import wave
@@ -13,15 +13,33 @@ from python.sherpa_diarization_runtime import (
     SherpaDiarizationError,
     diarize,
     ensure_managed_audio_path,
-    ensure_model_artifacts,
     model_readiness,
     require_model_artifacts,
-    resolve_model_artifacts,
     verify_artifact,
 )
+from python.sherpa_model_lifecycle import LifecycleState, write_state
 
 
 class SherpaDiarizationRuntimeTest(unittest.TestCase):
+    def install_managed_bundle(self, root: Path) -> tuple[Path, Path]:
+        version = root / "versions" / "test-bundle"
+        version.mkdir(parents=True)
+        segmentation = version / "segmentation.int8.onnx"
+        embedding = version / "embedding.onnx"
+        notice = version / "NOTICE.txt"
+        segmentation.write_bytes(b"segmentation")
+        embedding.write_bytes(b"embedding")
+        notice.write_bytes(b"notice")
+        (version / "bundle.json").write_text(json.dumps({
+            "schemaVersion": 1, "bundleVersion": "test-bundle", "provider": "sherpa-onnx", "runtimeVersion": "1.13.4",
+            "licenseIds": ["MIT", "Apache-2.0"], "noticeSha256": hashlib.sha256(b"notice").hexdigest(),
+            "artifacts": [
+                {"id": "segmentation", "destination": segmentation.name, "installedSha256": hashlib.sha256(b"segmentation").hexdigest()},
+                {"id": "embedding", "destination": embedding.name, "installedSha256": hashlib.sha256(b"embedding").hexdigest()},
+            ],
+        }))
+        write_state(root, LifecycleState(1, 1, "test-bundle", None))
+        return segmentation.resolve(), embedding.resolve()
     def test_rejects_checksum_mismatch_without_exposing_path(self):
         with tempfile.TemporaryDirectory() as directory:
             model = Path(directory) / "private-model.onnx"
@@ -101,12 +119,11 @@ class SherpaDiarizationRuntimeTest(unittest.TestCase):
         self.assertEqual(SEGMENTATION_SHA256, "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d")
         self.assertEqual(EMBEDDING_SHA256, "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e")
 
-    def test_resolves_only_the_fixed_model_layout(self):
-        root = Path("/models")
-        self.assertEqual(
-            resolve_model_artifacts(root),
-            (root / "segmentation.int8.onnx", root / "embedding.onnx"),
-        )
+    def test_resolves_the_active_immutable_model_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            expected = self.install_managed_bundle(root)
+            self.assertEqual(require_model_artifacts(root), expected)
 
     def test_rejects_audio_outside_pluto_meeting_storage(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -117,32 +134,14 @@ class SherpaDiarizationRuntimeTest(unittest.TestCase):
             with self.assertRaisesRegex(SherpaDiarizationError, "audio_path_not_managed"):
                 ensure_managed_audio_path(outside, meetings)
 
-    def test_installs_models_from_fixed_artifacts_and_verifies_them(self):
+    def test_reports_managed_bundle_provenance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            archive = root / "segmentation.tar.bz2"
-            source = root / "model.int8.onnx"
-            source.write_bytes(b"segmentation")
-            with tarfile.open(archive, "w:bz2") as bundle:
-                bundle.add(source, arcname="sherpa-onnx-pyannote-segmentation-3-0/model.int8.onnx")
-            embedding = root / "source-embedding.onnx"
-            embedding.write_bytes(b"embedding")
-            payloads = {"segmentation": archive, "embedding": embedding}
-
-            def download(url, destination):
-                destination.write_bytes(payloads[url].read_bytes())
-
-            installed = ensure_model_artifacts(
-                root / "installed",
-                segmentation_url="segmentation",
-                embedding_url="embedding",
-                segmentation_sha256=hashlib.sha256(b"segmentation").hexdigest(),
-                embedding_sha256=hashlib.sha256(b"embedding").hexdigest(),
-                download=download,
-            )
-
-            self.assertEqual(installed[0].read_bytes(), b"segmentation")
-            self.assertEqual(installed[1].read_bytes(), b"embedding")
+            self.install_managed_bundle(root)
+            readiness = model_readiness(root)
+            self.assertEqual(readiness["bundleVersion"], "test-bundle")
+            self.assertEqual(readiness["generation"], 1)
+            self.assertEqual(readiness["licenseIds"], ["MIT", "Apache-2.0"])
 
     def test_reports_missing_models_without_paths(self):
         with tempfile.TemporaryDirectory() as directory:

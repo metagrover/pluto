@@ -1,21 +1,30 @@
 import array
 import hashlib
 import importlib
-import shutil
 import sys
-import tarfile
-import tempfile
-import urllib.error
-import urllib.request
 import wave
 from pathlib import Path
+
+try:
+    from python.sherpa_model_lifecycle import (
+        ModelLifecycleError,
+        model_readiness as managed_model_readiness,
+        prepare_managed_models,
+        resolve_active_artifacts,
+        rollback_managed_models,
+    )
+except ModuleNotFoundError:
+    from sherpa_model_lifecycle import (  # type: ignore[no-redef]
+        ModelLifecycleError,
+        model_readiness as managed_model_readiness,
+        prepare_managed_models,
+        resolve_active_artifacts,
+        rollback_managed_models,
+    )
 
 SHERPA_ONNX_VERSION = "1.13.4"
 SEGMENTATION_SHA256 = "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d"
 EMBEDDING_SHA256 = "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e"
-SEGMENTATION_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
-EMBEDDING_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx"
-SEGMENTATION_ARCHIVE_MEMBER = "sherpa-onnx-pyannote-segmentation-3-0/model.int8.onnx"
 
 
 class SherpaDiarizationError(RuntimeError):
@@ -26,74 +35,54 @@ def resolve_model_artifacts(model_dir: Path) -> tuple[Path, Path]:
     return model_dir / "segmentation.int8.onnx", model_dir / "embedding.onnx"
 
 
-def _download(url: str, destination: Path) -> None:
-    with urllib.request.urlopen(url, timeout=120) as response, destination.open("wb") as output:
-        shutil.copyfileobj(response, output)
-
-
 def ensure_model_artifacts(
     model_dir: Path,
-    *,
-    segmentation_url: str = SEGMENTATION_URL,
-    embedding_url: str = EMBEDDING_URL,
-    segmentation_sha256: str = SEGMENTATION_SHA256,
-    embedding_sha256: str = EMBEDDING_SHA256,
-    download=_download,
+    **dependencies,
 ) -> tuple[Path, Path]:
-    segmentation, embedding = resolve_model_artifacts(model_dir)
     try:
-        return (
-            verify_artifact(segmentation, segmentation_sha256),
-            verify_artifact(embedding, embedding_sha256),
-        )
-    except SherpaDiarizationError:
-        pass
-
-    model_dir.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        with tempfile.TemporaryDirectory(dir=model_dir.parent) as temporary:
-            staging = Path(temporary)
-            archive = staging / "segmentation.tar.bz2"
-            staged_segmentation = staging / "segmentation.int8.onnx"
-            staged_embedding = staging / "embedding.onnx"
-            download(segmentation_url, archive)
-            download(embedding_url, staged_embedding)
-            with tarfile.open(archive, "r:bz2") as bundle:
-                member = bundle.getmember(SEGMENTATION_ARCHIVE_MEMBER)
-                source = bundle.extractfile(member)
-                if source is None or not member.isfile():
-                    raise SherpaDiarizationError("model_acquisition_failed")
-                with source, staged_segmentation.open("wb") as output:
-                    shutil.copyfileobj(source, output)
-            verify_artifact(staged_segmentation, segmentation_sha256)
-            verify_artifact(staged_embedding, embedding_sha256)
-            model_dir.mkdir(parents=True, exist_ok=True)
-            staged_segmentation.replace(segmentation)
-            staged_embedding.replace(embedding)
-    except (OSError, KeyError, tarfile.TarError, urllib.error.URLError) as error:
-        raise SherpaDiarizationError("model_acquisition_failed") from error
-    return verify_artifact(segmentation, segmentation_sha256), verify_artifact(embedding, embedding_sha256)
+        dependencies.setdefault("probe", probe_model_artifacts)
+        return prepare_managed_models(model_dir, **dependencies).artifact_paths
+    except ModelLifecycleError as error:
+        raise SherpaDiarizationError(str(error)) from error
 
 
 def require_model_artifacts(model_dir: Path) -> tuple[Path, Path]:
-    segmentation, embedding = resolve_model_artifacts(model_dir)
-    return (
-        verify_artifact(segmentation, SEGMENTATION_SHA256),
-        verify_artifact(embedding, EMBEDDING_SHA256),
-    )
+    try:
+        return resolve_active_artifacts(model_dir).artifact_paths
+    except ModelLifecycleError as error:
+        raise SherpaDiarizationError(str(error)) from error
 
 
 def model_readiness(model_dir: Path) -> dict:
+    return managed_model_readiness(model_dir)
+
+
+def rollback_model_artifacts(model_dir: Path) -> dict:
     try:
-        require_model_artifacts(model_dir)
-    except SherpaDiarizationError as error:
-        return {"ready": False, "reason": str(error)}
-    return {
-        "ready": True,
-        "provider": "sherpa-onnx",
-        "version": SHERPA_ONNX_VERSION,
-        "modelChecksums": [SEGMENTATION_SHA256, EMBEDDING_SHA256],
-    }
+        rollback_managed_models(model_dir, probe=probe_model_artifacts)
+    except ModelLifecycleError as error:
+        raise SherpaDiarizationError(str(error)) from error
+    return model_readiness(model_dir)
+
+
+def probe_model_artifacts(paths: tuple[Path, Path]) -> bool:
+    segmentation, embedding = paths
+    try:
+        sherpa = importlib.import_module("sherpa_onnx")
+        runtime = sherpa.OfflineSpeakerDiarization(
+            sherpa.OfflineSpeakerDiarizationConfig(
+                segmentation=sherpa.OfflineSpeakerSegmentationModelConfig(
+                    pyannote=sherpa.OfflineSpeakerSegmentationPyannoteModelConfig(model=str(segmentation)),
+                    num_threads=1,
+                ),
+                embedding=sherpa.SpeakerEmbeddingExtractorConfig(model=str(embedding), num_threads=1),
+                clustering=sherpa.FastClusteringConfig(num_clusters=-1, threshold=0.5),
+            )
+        )
+        runtime.process([0.0] * 16000)
+        return True
+    except Exception:
+        return False
 
 
 def ensure_managed_audio_path(audio_path: Path, meetings_dir: Path) -> Path:
