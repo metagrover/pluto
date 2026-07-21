@@ -191,7 +191,7 @@ export const buildFollowUpComposition = (
     recommendedFormat: 'email',
     evidenceFingerprint,
     variants: {
-      email: `Subject: Follow-up: ${normalizeLine(input.meetingTitle)}\n\nHi team,\n\n${emailSections.join('\n\n')}`,
+      email: `Subject: Follow-up: ${normalizeLine(input.meetingTitle)}\n\n${emailSections.join('\n\n')}`,
       internal: internalSections.join('\n\n'),
       slack: slackSections.join('\n\n'),
     },

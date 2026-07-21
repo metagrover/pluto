@@ -37,6 +37,7 @@ describe('buildFollowUpComposition', () => {
     expect(Object.values(result.variants).join('\n')).not.toMatch(
       /Owner:|Status:|Decided by:|Why:|None recorded/,
     );
+    expect(result.variants.email).not.toContain('Hi team');
   });
 
   it('uses overview evidence even without actions or decisions', () => {

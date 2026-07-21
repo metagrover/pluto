@@ -111,6 +111,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const lastMeetingIdRef = useRef(String(meeting.id));
   const lastPersistedDraftsRef = useRef(meeting.follow_up_drafts_json);
   const lastEvidenceFingerprintRef = useRef(composition.evidenceFingerprint);
+  const refinementRequestRef = useRef(0);
 
   useEffect(() => {
     const meetingId = String(meeting.id);
@@ -120,6 +121,10 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     lastMeetingIdRef.current = meetingId;
     lastPersistedDraftsRef.current = meeting.follow_up_drafts_json;
     if (!meetingChanged && !persistedDraftsChanged) return;
+    if (meetingChanged) {
+      refinementRequestRef.current += 1;
+      setRefining(false);
+    }
     if (
       !meetingChanged &&
       documentRevisionRef.current > lastSavedRevisionRef.current
@@ -280,6 +285,8 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
 
   const handleRefine = async () => {
     const refinementMeetingId = String(meeting.id);
+    const refinementRequest = refinementRequestRef.current + 1;
+    refinementRequestRef.current = refinementRequest;
     setRefining(true);
     setRefineError(false);
     try {
@@ -306,7 +313,12 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       console.error('Failed to refine follow-up draft:', error);
       setRefineError(true);
     } finally {
-      setRefining(false);
+      if (
+        lastMeetingIdRef.current === refinementMeetingId &&
+        refinementRequestRef.current === refinementRequest
+      ) {
+        setRefining(false);
+      }
     }
   };
 
