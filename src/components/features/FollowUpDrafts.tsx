@@ -108,8 +108,25 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const saveTimeoutRef = useRef<number | null>(null);
   const documentRevisionRef = useRef(0);
   const lastSavedRevisionRef = useRef(-1);
+  const lastMeetingIdRef = useRef(String(meeting.id));
+  const lastPersistedDraftsRef = useRef(meeting.follow_up_drafts_json);
+  const lastEvidenceFingerprintRef = useRef(composition.evidenceFingerprint);
 
   useEffect(() => {
+    const meetingId = String(meeting.id);
+    const meetingChanged = lastMeetingIdRef.current !== meetingId;
+    const persistedDraftsChanged =
+      lastPersistedDraftsRef.current !== meeting.follow_up_drafts_json;
+    lastMeetingIdRef.current = meetingId;
+    lastPersistedDraftsRef.current = meeting.follow_up_drafts_json;
+    if (!meetingChanged && !persistedDraftsChanged) return;
+    if (
+      !meetingChanged &&
+      documentRevisionRef.current > lastSavedRevisionRef.current
+    ) {
+      return;
+    }
+
     const next = resolveInitialDocument(
       meeting.follow_up_drafts_json,
       compositionRef.current,
@@ -118,12 +135,25 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     setContextChanged(next?.contextChanged || false);
     documentRevisionRef.current = 0;
     lastSavedRevisionRef.current = -1;
+    lastEvidenceFingerprintRef.current =
+      compositionRef.current.evidenceFingerprint;
     setSaveState('idle');
-  }, [
-    meeting.id,
-    meeting.follow_up_drafts_json,
-    composition.evidenceFingerprint,
-  ]);
+  }, [meeting.id, meeting.follow_up_drafts_json]);
+
+  useEffect(() => {
+    if (
+      lastEvidenceFingerprintRef.current === composition.evidenceFingerprint
+    ) {
+      return;
+    }
+    lastEvidenceFingerprintRef.current = composition.evidenceFingerprint;
+    if (composition.availability !== 'ready') return;
+    setDocument((current) => {
+      const resolved = resolveFollowUpDrafts(composition, current);
+      setContextChanged(resolved.contextChanged);
+      return resolved.document;
+    });
+  }, [composition]);
 
   const persistDocument = useCallback(
     async (nextDocument: SavedFollowUpDraftsV2, revision: number) => {
@@ -133,10 +163,12 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
       }
       setSaveState('saving');
       try {
-        await window.ipcRenderer.invoke('SAVE_MEETING', {
-          ...meeting,
-          follow_up_drafts_json: JSON.stringify(nextDocument),
-        });
+        const updated = await window.ipcRenderer.invoke(
+          'UPDATE_MEETING_FOLLOW_UP_DRAFTS',
+          meeting.id,
+          JSON.stringify(nextDocument),
+        );
+        if (updated !== true) throw new Error('Meeting no longer exists');
         lastSavedRevisionRef.current = Math.max(
           lastSavedRevisionRef.current,
           revision,
@@ -163,7 +195,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         );
       }
     },
-    [fetchMeetings, meeting],
+    [fetchMeetings, meeting.id],
   );
 
   useEffect(() => {
