@@ -279,6 +279,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   };
 
   const handleRefine = async () => {
+    const refinementMeetingId = String(meeting.id);
     setRefining(true);
     setRefineError(false);
     try {
@@ -294,12 +295,14 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
         discussionPoints,
         customPrompt: customPrompt.trim() || undefined,
       });
+      if (lastMeetingIdRef.current !== refinementMeetingId) return;
       const refined = parseRefinedVariants(response?.drafts);
       if (!refined) {
         throw new Error('Refinement returned incomplete drafts');
       }
       updateDocument(mergeRefinedVariants(activeDocument, refined));
     } catch (error) {
+      if (lastMeetingIdRef.current !== refinementMeetingId) return;
       console.error('Failed to refine follow-up draft:', error);
       setRefineError(true);
     } finally {
