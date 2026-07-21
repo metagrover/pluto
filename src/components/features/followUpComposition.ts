@@ -75,8 +75,46 @@ const stripTrailingInternalDetails = (value: string): string => {
 const normalizeLine = (value: string): string =>
   stripTrailingInternalDetails(value.replace(/\s+/g, ' '));
 
+const normalizeActionLine = (value: string): string => {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized.endsWith(')')) return normalized;
+
+  let depth = 0;
+  for (let index = normalized.length - 1; index >= 0; index -= 1) {
+    if (normalized[index] === ')') depth += 1;
+    if (normalized[index] !== '(') continue;
+    depth -= 1;
+    if (depth !== 0) continue;
+
+    const action = normalized.slice(0, index).trim();
+    const details = normalized.slice(index + 1, -1);
+    if (!INTERNAL_LABEL.test(details)) return normalized;
+    const sendableDetails = details
+      .split('|')
+      .map((detail) => detail.trim())
+      .map((detail) => {
+        const separator = detail.indexOf(':');
+        if (separator === -1) return '';
+        const label = detail.slice(0, separator).trim().toLowerCase();
+        const content = detail.slice(separator + 1).trim();
+        if (!content) return '';
+        if (label === 'owner') return content;
+        if (label === 'due') return `due ${content}`;
+        return '';
+      })
+      .filter(Boolean);
+    return sendableDetails.length > 0
+      ? `${action} — ${sendableDetails.join(' · ')}`
+      : action;
+  }
+  return normalized;
+};
+
 const normalizedLines = (values: string[], limit: number): string[] =>
   values.map(normalizeLine).filter(Boolean).slice(0, limit);
+
+const normalizedActionLines = (values: string[], limit: number): string[] =>
+  values.map(normalizeActionLine).filter(Boolean).slice(0, limit);
 
 const bullets = (values: string[], markdown = false): string =>
   values.map((value) => `${markdown ? '-' : '•'} ${value}`).join('\n');
@@ -100,7 +138,7 @@ export const buildFollowUpComposition = (
 ): FollowUpComposition => {
   const overview = normalizedLines(input.overview, 1);
   const decisions = normalizedLines(input.decisions, 3);
-  const actions = normalizedLines(input.actionItems, 5);
+  const actions = normalizedActionLines(input.actionItems, 5);
   const questions = normalizedLines(input.openQuestions, 3);
   const topicSummaries = normalizedLines(input.topicSummaries, 1);
   const discussion = normalizedLines(input.discussionPoints, 1);

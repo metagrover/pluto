@@ -98,7 +98,7 @@ describe('buildFollowUpComposition', () => {
     expect(first.evidenceFingerprint).not.toContain('launch');
   });
 
-  it('strips metadata containing nested owner-role parentheses', () => {
+  it('keeps sendable accountability while stripping internal metadata labels', () => {
     const result = buildFollowUpComposition({
       ...input,
       actionItems: [
@@ -108,9 +108,11 @@ describe('buildFollowUpComposition', () => {
 
     expect(result.availability).toBe('ready');
     if (result.availability !== 'ready') return;
-    expect(result.variants.internal).toContain('Publish release notes');
+    expect(result.variants.internal).toContain(
+      'Publish release notes — Maya (Head of Product) · due Friday',
+    );
     expect(result.variants.internal).not.toMatch(
-      /Owner:|Head of Product|Due:|Status:/,
+      /Owner:|Due:|Status:/,
     );
   });
 

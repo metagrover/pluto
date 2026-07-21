@@ -36,6 +36,18 @@ const FORMAT_LABELS: Array<{ id: FollowUpFormat; label: string }> = [
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 type CopyState = 'idle' | 'copied' | 'error';
 
+const resolveInitialDocument = (
+  savedValue: string | undefined,
+  composition: ReturnType<typeof buildFollowUpComposition>,
+) => {
+  if (composition.availability !== 'ready') return null;
+  const parsed = parseSavedFollowUpDrafts(
+    savedValue,
+    composition.evidenceFingerprint,
+  );
+  return resolveFollowUpDrafts(composition, parsed.document);
+};
+
 export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   meeting,
   overview,
@@ -74,14 +86,12 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
     ],
   );
 
-  const initialResolution = useMemo(() => {
-    if (composition.availability !== 'ready') return null;
-    const parsed = parseSavedFollowUpDrafts(
-      meeting.follow_up_drafts_json,
-      composition.evidenceFingerprint,
-    );
-    return resolveFollowUpDrafts(composition, parsed.document);
-  }, [composition, meeting.follow_up_drafts_json]);
+  const compositionRef = useRef(composition);
+  compositionRef.current = composition;
+  const initialResolution = resolveInitialDocument(
+    meeting.follow_up_drafts_json,
+    composition,
+  );
 
   const [document, setDocument] = useState<SavedFollowUpDraftsV2 | null>(
     initialResolution?.document || null,
@@ -100,12 +110,20 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
   const lastSavedRevisionRef = useRef(-1);
 
   useEffect(() => {
-    setDocument(initialResolution?.document || null);
-    setContextChanged(initialResolution?.contextChanged || false);
+    const next = resolveInitialDocument(
+      meeting.follow_up_drafts_json,
+      compositionRef.current,
+    );
+    setDocument(next?.document || null);
+    setContextChanged(next?.contextChanged || false);
     documentRevisionRef.current = 0;
     lastSavedRevisionRef.current = -1;
     setSaveState('idle');
-  }, [initialResolution]);
+  }, [
+    meeting.id,
+    meeting.follow_up_drafts_json,
+    composition.evidenceFingerprint,
+  ]);
 
   const persistDocument = useCallback(
     async (nextDocument: SavedFollowUpDraftsV2, revision: number) => {
