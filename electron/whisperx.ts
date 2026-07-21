@@ -606,8 +606,7 @@ class WhisperXManager {
         detail?: string;
       };
       throw new Error(
-        error.detail ||
-          `Diarization model rollback failed: ${response.status}`,
+        error.detail || `Diarization model rollback failed: ${response.status}`,
       );
     }
     return (await response.json()) as DiarizationModelReadiness;

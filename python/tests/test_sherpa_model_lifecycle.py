@@ -21,6 +21,7 @@ from python.sherpa_model_lifecycle import (
     prepare_managed_models,
     resolve_active_artifacts,
     rollback_managed_models,
+    lifecycle_lock,
 )
 
 
@@ -163,6 +164,22 @@ class AcquisitionTest(unittest.TestCase):
             download_artifact(self.artifact(), partial, transport)
             self.assertEqual(partial.read_bytes(), b"abcdef")
 
+    def test_resumed_checksum_failure_retries_once_from_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            partial = Path(directory) / "embedding.onnx.partial"
+            partial.write_bytes(b"abc")
+            partial.with_suffix(partial.suffix + ".json").write_text(json.dumps({
+                "schemaVersion": 1, "artifactId": "embedding", "url": self.artifact().url,
+                "size": 6, "sha256": digest(b"abcdef"), "validator": None
+            }))
+            transport = FakeTransport([
+                FakeResponse(206, b"xxx", {"Content-Range": "bytes 3-5/6"}),
+                FakeResponse(200, b"abcdef"),
+            ])
+            download_artifact(self.artifact(), partial, transport)
+            self.assertEqual(partial.read_bytes(), b"abcdef")
+            self.assertEqual(transport.requests[1][1], {})
+
     def test_extracts_only_declared_archive_member(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -253,6 +270,36 @@ class ManagedLifecycleTest(unittest.TestCase):
             result = rollback_managed_models(root, probe=lambda _paths: True)
             self.assertEqual((result.active_version, result.previous_healthy_version), ("A", "B"))
             self.assertEqual(read_state(root), LifecycleState(1, 3, "A", "B"))
+
+    def test_rollback_failure_preserves_state_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.install_version(root, "B")
+            write_state(root, LifecycleState(1, 2, "B", "missing"))
+            before = (root / "state.json").read_bytes()
+            with self.assertRaisesRegex(ModelLifecycleError, "rollback_unavailable"):
+                rollback_managed_models(root, probe=lambda _paths: True)
+            self.assertEqual((root / "state.json").read_bytes(), before)
+
+    def test_adopts_valid_legacy_files_without_mutating_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest, _archive, _embedding = self.make_manifest(root)
+            legacy = root / "sherpa-onnx-1.13.4"
+            legacy.mkdir()
+            (legacy / "segmentation.int8.onnx").write_bytes(b"segmentation")
+            (legacy / "embedding.onnx").write_bytes(b"embedding")
+            result = prepare_managed_models(root, manifest=manifest, transport=FakeTransport([]), probe=lambda _paths: True)
+            self.assertEqual([path.read_bytes() for path in result.artifact_paths], [b"segmentation", b"embedding"])
+            self.assertEqual((legacy / "segmentation.int8.onnx").read_bytes(), b"segmentation")
+
+    def test_concurrent_writer_fails_fast(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with lifecycle_lock(root):
+                with self.assertRaisesRegex(ModelLifecycleError, "model_operation_busy"):
+                    with lifecycle_lock(root):
+                        self.fail("second writer acquired lock")
 
     def test_readiness_is_sanitized_and_names_generation(self):
         with tempfile.TemporaryDirectory() as directory:

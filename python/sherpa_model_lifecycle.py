@@ -7,6 +7,7 @@ import re
 import shutil
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -282,16 +283,21 @@ def _verify_size_digest(path: Path, size: int, expected_sha256: str, reason: str
 
 def download_artifact(artifact: ModelArtifact, partial: Path, transport: Any | None = None) -> Path:
     transport = transport or UrlTransport()
-    resumed = _download_once(artifact, partial, transport)
     try:
-        return _verify_size_digest(partial, artifact.size, artifact.transport_sha256, "model_checksum_mismatch")
+        resumed = _download_once(artifact, partial, transport)
+        try:
+            return _verify_size_digest(partial, artifact.size, artifact.transport_sha256, "model_checksum_mismatch")
+        except ModelLifecycleError:
+            if not resumed:
+                raise
+            partial.unlink(missing_ok=True)
+            _resume_metadata_path(partial).unlink(missing_ok=True)
+            _download_once(artifact, partial, transport)
+            return _verify_size_digest(partial, artifact.size, artifact.transport_sha256, "model_checksum_mismatch")
     except ModelLifecycleError:
-        if not resumed:
-            raise
-        partial.unlink(missing_ok=True)
-        _resume_metadata_path(partial).unlink(missing_ok=True)
-        _download_once(artifact, partial, transport)
-        return _verify_size_digest(partial, artifact.size, artifact.transport_sha256, "model_checksum_mismatch")
+        raise
+    except (OSError, urllib.error.URLError) as error:
+        raise ModelLifecycleError("model_acquisition_failed") from error
 
 
 def materialize_artifact(artifact: ModelArtifact, transport_path: Path, output_dir: Path) -> Path:
@@ -323,20 +329,33 @@ def lifecycle_lock(root: Path):
     handle = (root / "lifecycle.lock").open("a+b")
     try:
         try:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
+            _set_file_lock(handle, acquire=True)
+        except (BlockingIOError, OSError) as error:
             raise ModelLifecycleError("model_operation_busy") from error
         yield
     finally:
         try:
-            import fcntl
-
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        except (ImportError, OSError):
+            _set_file_lock(handle, acquire=False)
+        except OSError:
             pass
         handle.close()
+
+
+def _set_file_lock(handle, *, acquire: bool) -> None:
+    try:
+        import fcntl
+
+        operation = fcntl.LOCK_EX | fcntl.LOCK_NB if acquire else fcntl.LOCK_UN
+        fcntl.flock(handle.fileno(), operation)
+    except ImportError:
+        import msvcrt
+
+        if handle.tell() == 0 and handle.seek(0, os.SEEK_END) == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        mode = msvcrt.LK_NBLCK if acquire else msvcrt.LK_UNLCK
+        msvcrt.locking(handle.fileno(), mode, 1)
 
 
 def _bundle_payload(manifest: ModelManifest) -> dict[str, Any]:
