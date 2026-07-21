@@ -65,14 +65,14 @@ type SpeakerModelManifestV1 = {
   licenseId: string;
   notice: {
     source: "python/model_manifests/sherpa-onnx-1.13.4-NOTICE.txt";
-    sha256: string;
+    sha256: "5c679366fe937211ed45a72f6bdd7f83590b85dd9ad3eaff59d53708d0b389cf";
   };
   artifacts: [
     {
       id: "segmentation";
-      url: string;
-      size: number;
-      transportSha256: string;
+      url: "https://github.com/metagrover/pluto-models/releases/download/sherpa-onnx-1.13.4-pluto.1/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2";
+      size: 6958444;
+      transportSha256: "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488";
       installedSha256: "d582f4b4c6b48205de7e0643c57df0df5615a3c176189be3fc461e9d18827b5d";
       format: "tar.bz2";
       member: "sherpa-onnx-pyannote-segmentation-3-0/model.int8.onnx";
@@ -80,8 +80,8 @@ type SpeakerModelManifestV1 = {
     },
     {
       id: "embedding";
-      url: string;
-      size: number;
+      url: "https://github.com/metagrover/pluto-models/releases/download/sherpa-onnx-1.13.4-pluto.1/nemo_en_titanet_small.onnx";
+      size: 40257283;
       transportSha256: "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e";
       installedSha256: "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e";
       format: "raw";
@@ -91,7 +91,7 @@ type SpeakerModelManifestV1 = {
 };
 ```
 
-The manifest is not valid until every URL names a published immutable Pluto-controlled object and every positive size and digest is measured from that object. The repository currently has no Pluto release containing these assets, so publishing and reviewing the exact distribution objects is an explicit prerequisite to implementation rather than an unspecified value inside this spec. The two current upstream URLs are accepted only as legacy migration provenance; they are not the final managed-distribution contract.
+Issue #529 satisfied the distribution prerequisite by publishing the reviewed objects in the public `metagrover/pluto-models` release `sherpa-onnx-1.13.4-pluto.1`. Repository-level release immutability locked the release tag, metadata, and assets after publication. Anonymous clean downloads reproduced both transport sizes and SHA-256 digests, and an anonymous byte-range request returned the requested `206` response and matching bytes. The former upstream URLs remain only as recorded source and legacy-migration provenance; they are not the managed-distribution contract.
 
 Manifest validation rejects unknown schema versions, duplicate or missing required artifact ids, non-HTTPS or non-Pluto-controlled sources, invalid sizes or checksums, unsafe names, unsupported archive formats, missing notice files, notice checksum mismatch, and a runtime version incompatible with the installed sherpa-onnx package.
 
