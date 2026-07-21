@@ -1253,6 +1253,18 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('GET_MEETINGS', () => db.getMeetings());
   ipcMain.handle('GET_MEETING', (_event, id) => db.getMeeting(id));
+  ipcMain.handle(
+    'UPDATE_MEETING_FOLLOW_UP_DRAFTS',
+    (_event, meetingId, followUpDraftsJson) => {
+      if (
+        (typeof meetingId !== 'string' && typeof meetingId !== 'number') ||
+        (typeof followUpDraftsJson !== 'string' && followUpDraftsJson !== null)
+      ) {
+        throw new Error('Invalid follow-up draft update');
+      }
+      return db.updateMeetingFollowUpDrafts(meetingId, followUpDraftsJson);
+    },
+  );
   ipcMain.handle('SEARCH_MEETINGS', (_event, query) =>
     db.searchMeetings(query),
   );

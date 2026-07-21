@@ -1443,6 +1443,16 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
 export const saveMeeting = (meeting: PersistedMeeting) =>
   saveMeetingTransaction(meeting);
 
+export const updateMeetingFollowUpDrafts = (
+  meetingId: string | number,
+  followUpDraftsJson: string | null,
+): boolean => {
+  const result = db
+    .prepare('UPDATE meetings SET follow_up_drafts_json = ? WHERE id = ?')
+    .run(followUpDraftsJson, String(meetingId));
+  return result.changes === 1;
+};
+
 export const saveMeetingIfTranscriptRunCurrent = (
   meeting: PersistedMeeting,
   expectedValidationRunId: string,

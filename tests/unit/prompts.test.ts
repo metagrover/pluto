@@ -195,6 +195,27 @@ describe('getEntitiesPrompt', () => {
 });
 
 describe('getFollowUpDraftsPrompt', () => {
+  it('coordinates three formats around the same evidence without internal labels', () => {
+    const prompt = getFollowUpDraftsPrompt({
+      meetingTitle: 'Launch review',
+      overview: ['The launch remains on track.'],
+      participants: ['Maya'],
+      entityContext: ['Project: Atlas'],
+      decisions: ['Use a staged rollout (Why: lower risk)'],
+      actionItems: ['Publish release notes (Owner: Maya)'],
+      openQuestions: [],
+    });
+
+    expect(prompt).toContain('three coordinated formats of the same follow-up');
+    expect(prompt).toContain('Omit unsupported or empty sections');
+    expect(prompt).toContain('Do not expose Pluto-internal labels');
+    expect(prompt).toContain(
+      'Never invent recipients, owners, decisions, or questions',
+    );
+    expect(prompt).not.toContain('three distinct follow-up drafts');
+    expect(prompt).not.toContain('using emoji and bolding where appropriate');
+  });
+
   it('includes overview context when provided', () => {
     const prompt = getFollowUpDraftsPrompt({
       meetingTitle: 'API Migration Review',
