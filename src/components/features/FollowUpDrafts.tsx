@@ -292,7 +292,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
               onClick={() =>
                 updateDocument({ ...activeDocument, selectedFormat: id })
               }
-              className={`rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-colors ${
+              className={`rounded-lg px-3 py-1.5 text-[10px] font-black uppercase tracking-wider transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                 activeFormat === id
                   ? 'bg-pro-accent text-[#1A2340] shadow-sm'
                   : 'text-pro-text-muted hover:text-pro-text-main'
@@ -312,7 +312,8 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
           <button
             type="button"
             onClick={resetToCurrentEvidence}
-            className="font-bold text-pro-text-main"
+            disabled={refining}
+            className="font-bold text-pro-text-main disabled:cursor-not-allowed disabled:opacity-50"
           >
             Use current context
           </button>
@@ -329,7 +330,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
             void persistDocument(activeDocument, documentRevisionRef.current);
           }
         }}
-        className="mt-5 min-h-[240px] w-full resize-y rounded-2xl border border-pro-border/50 bg-pro-bg/60 p-5 text-sm leading-7 text-pro-text-main outline-none transition focus:border-pro-accent/50 focus:ring-2 focus:ring-pro-accent/10"
+        className="mt-5 min-h-[240px] w-full resize-y rounded-2xl border border-pro-border/50 bg-pro-bg/60 p-5 text-sm leading-7 text-pro-text-main outline-none transition focus:border-pro-accent/50 focus:ring-2 focus:ring-pro-accent/10 disabled:cursor-not-allowed disabled:opacity-60"
       />
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -345,7 +346,7 @@ export const FollowUpDrafts: React.FC<FollowUpDraftsProps> = ({
             type="button"
             onClick={resetToCurrentEvidence}
             disabled={refining}
-            className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-pro-text-muted hover:bg-pro-bg hover:text-pro-text-main"
+            className="flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-pro-text-muted hover:bg-pro-bg hover:text-pro-text-main disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RotateCcw size={13} /> Reset
           </button>
