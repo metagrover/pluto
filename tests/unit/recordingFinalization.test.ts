@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
+  buildRecoverableSealFailureMeeting,
   buildSpeakerAttributionRetryPlan,
   collectDisposableRecordingArtifactPaths,
   getStrongerSpeakerAttributionPolicy,
@@ -45,6 +46,52 @@ describe('recording finalization helpers', () => {
       endedAtIso: '2026-05-09T20:17:42.900Z',
       durationSeconds: 1062,
     });
+  });
+
+  it('builds a content-free recovery-required meeting after seal failure', () => {
+    const meeting = buildRecoverableSealFailureMeeting({
+      snapshot: {
+        meetingId: 'meeting-1',
+        recordingStartedAtMs: Date.parse('2026-07-22T20:00:00.000Z'),
+        recordingEndedAtMs: Date.parse('2026-07-22T20:05:30.000Z'),
+      },
+      title: 'Design review',
+      userNotes: 'Keep this note',
+      endReason: 'manual',
+    });
+
+    expect(meeting).toMatchObject({
+      id: 'meeting-1',
+      title: 'Design review',
+      meeting_type: 'Recording',
+      duration_seconds: 330,
+      transcript_status: 'needs_attention',
+      finalization_status: 'recovery_required',
+      finalization_error_category: 'journal_seal_failed',
+      transcript_json: '[]',
+      user_notes: 'Keep this note',
+      end_reason: 'manual',
+    });
+    expect(meeting.transcript_integrity_json).toBe(
+      JSON.stringify({ reasons: ['journal_seal_failed'] }),
+    );
+    expect(meeting.audio_path).toBeNull();
+    expect(meeting.system_audio_path).toBeNull();
+    expect(meeting.mixed_audio_path).toBeNull();
+  });
+
+  it('uses stable fallback metadata for seal failure', () => {
+    const meeting = buildRecoverableSealFailureMeeting({
+      snapshot: {
+        meetingId: 'meeting-2',
+        recordingStartedAtMs: 1_000,
+        recordingEndedAtMs: 2_000,
+      },
+    });
+
+    expect(meeting.title).toBe('Meeting');
+    expect(meeting.end_reason).toBe('journal_seal_failed');
+    expect(meeting).not.toHaveProperty('error');
   });
 
   it('cleans up superseded system audio artifacts after rebuild fallback', () => {

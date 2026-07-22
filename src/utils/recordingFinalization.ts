@@ -150,6 +150,46 @@ export const buildMeetingTiming = ({
   };
 };
 
+export const buildRecoverableSealFailureMeeting = ({
+  snapshot,
+  title,
+  userNotes,
+  endReason,
+}: {
+  snapshot: RecordingStopSnapshot;
+  title?: string;
+  userNotes?: string;
+  endReason?: string;
+}) => {
+  const timing = buildMeetingTiming(snapshot);
+  return {
+    id: snapshot.meetingId,
+    title: title?.trim() || 'Meeting',
+    meeting_type: 'Recording',
+    started_at: timing.startedAtIso,
+    ended_at: timing.endedAtIso,
+    duration_seconds: timing.durationSeconds,
+    audio_path: null,
+    system_audio_path: null,
+    mixed_audio_path: null,
+    transcript_status: 'needs_attention' as const,
+    transcript_integrity_json: JSON.stringify({
+      reasons: ['journal_seal_failed'],
+    }),
+    transcript_validated_at: null,
+    transcript_json: JSON.stringify([]),
+    user_notes: userNotes || '',
+    enhanced_notes: null,
+    analysis_json: null,
+    value_signals_json: null,
+    finalization_status: 'recovery_required' as const,
+    finalization_error_category: 'journal_seal_failed' as const,
+    folder_id: null,
+    is_favorite: false,
+    end_reason: endReason || 'journal_seal_failed',
+  };
+};
+
 type ResolveFinalizationCleanupPathsArgs = {
   primaryAudioPath: string;
   systemAudioPath: string;
