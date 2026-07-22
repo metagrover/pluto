@@ -25,4 +25,22 @@ describe('MeetingView transcript integrity', () => {
     expect(canGenerateMeetingIntelligence('validated')).toBe(true);
     expect(canGenerateMeetingIntelligence(undefined)).toBe(true);
   });
+
+  it('renders durable retry stage and recoverable timeout state', () => {
+    const validating = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="validating"
+        integrityJson={JSON.stringify({ retry: { stage: 'transcribing' } })}
+      />,
+    );
+    const timedOut = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({ retryFailure: 'retry_timeout' })}
+      />,
+    );
+
+    expect(validating).toContain('Transcribing the preserved recording.');
+    expect(timedOut).toContain('stopped after its safety deadline');
+  });
 });

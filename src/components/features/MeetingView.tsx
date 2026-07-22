@@ -85,14 +85,46 @@ interface MeetingViewProps {
 
 export const TranscriptIntegrityPanel = ({
   status,
+  integrityJson,
   onRetry,
   retrying = false,
 }: {
   status: Meeting['transcript_status'];
+  integrityJson?: string;
   onRetry?: () => void;
   retrying?: boolean;
 }) => {
   if (status !== 'validating' && status !== 'needs_attention') return null;
+  let retryStage: string | null = null;
+  let retryFailure: string | null = null;
+  try {
+    const integrity = JSON.parse(integrityJson || '{}') as {
+      retry?: { stage?: unknown };
+      retryFailure?: unknown;
+    };
+    retryStage =
+      typeof integrity.retry?.stage === 'string' ? integrity.retry.stage : null;
+    retryFailure =
+      typeof integrity.retryFailure === 'string'
+        ? integrity.retryFailure
+        : null;
+  } catch {
+    // Invalid content-free metadata falls back to the generic trust copy.
+  }
+  const validatingDetail =
+    retryStage === 'transcribing'
+      ? 'Transcribing the preserved recording.'
+      : retryStage === 'reviewing_evidence'
+        ? 'Reviewing captured-speech evidence.'
+        : retryStage === 'saving'
+          ? 'Saving the validated transcript.'
+          : 'Pluto is checking the complete recording before creating intelligence.';
+  const attentionDetail =
+    retryFailure === 'retry_timeout'
+      ? 'Validation stopped after its safety deadline. The recording and prior evidence are safe.'
+      : retryFailure === 'retry_failed' || retryFailure === 'retry_interrupted'
+        ? 'Validation stopped safely before completion. The recording and prior evidence are safe.'
+        : 'The recording is safe, but Pluto could not account for all captured speech.';
   return (
     <section
       aria-live="polite"
@@ -104,9 +136,7 @@ export const TranscriptIntegrityPanel = ({
           : 'Transcript needs attention'}
       </strong>
       <p className="mt-1 text-sm text-pro-text-muted">
-        {status === 'validating'
-          ? 'Pluto is checking the complete recording before creating intelligence.'
-          : 'The recording is safe, but Pluto could not account for all captured speech.'}
+        {status === 'validating' ? validatingDetail : attentionDetail}
       </p>
       {status === 'needs_attention' ? (
         <button
@@ -925,6 +955,7 @@ export const MeetingView = ({
     >
       <TranscriptIntegrityPanel
         status={selectedMeeting.transcript_status}
+        integrityJson={selectedMeeting.transcript_integrity_json}
         onRetry={onRetryTranscriptValidation}
         retrying={transcriptValidationRetrying}
       />

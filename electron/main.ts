@@ -170,6 +170,7 @@ import { whisperX } from './whisperx';
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
 let activeTranscriptionCount = 0;
+const activeTranscriptionMeetings = new Map<string, number>();
 
 function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
@@ -189,6 +190,21 @@ function endTranscriptionWork() {
     );
     setKnowledgeDocSynthesisPaused(false);
   }
+}
+
+function beginMeetingTranscription(meetingId: string | null) {
+  if (!meetingId) return;
+  activeTranscriptionMeetings.set(
+    meetingId,
+    (activeTranscriptionMeetings.get(meetingId) || 0) + 1,
+  );
+}
+
+function endMeetingTranscription(meetingId: string | null) {
+  if (!meetingId) return;
+  const next = (activeTranscriptionMeetings.get(meetingId) || 1) - 1;
+  if (next <= 0) activeTranscriptionMeetings.delete(meetingId);
+  else activeTranscriptionMeetings.set(meetingId, next);
 }
 
 function getAbortSignalForMeeting(meetingId: string): AbortSignal {
@@ -246,6 +262,19 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('WHISPERX_HEALTH', async () => {
     return await whisperX.health();
+  });
+
+  ipcMain.handle('CANCEL_MEETING_TRANSCRIPTION', async (_event, meetingId) => {
+    const normalizedMeetingId = String(meetingId);
+    abortMeetingTasks(normalizedMeetingId);
+    const meetingWorkCount =
+      activeTranscriptionMeetings.get(normalizedMeetingId) || 0;
+    const sidecarTerminated = await whisperX.recycleOwnedProcessIf(
+      () =>
+        activeTranscriptionCount > 0 &&
+        activeTranscriptionCount === meetingWorkCount,
+    );
+    return { cancelled: true, sidecarTerminated };
   });
 
   ipcMain.handle(
@@ -309,6 +338,7 @@ app.whenReady().then(async () => {
 
       const start = Date.now();
       beginTranscriptionWork();
+      beginMeetingTranscription(meetingId);
       try {
         const signal = meetingId
           ? getAbortSignalForMeeting(meetingId)
@@ -342,6 +372,7 @@ app.whenReady().then(async () => {
         }
         throw err;
       } finally {
+        endMeetingTranscription(meetingId);
         endTranscriptionWork();
       }
     },
@@ -1145,9 +1176,28 @@ app.whenReady().then(async () => {
         options && typeof options.expectedValidationRunId === 'string'
           ? options.expectedValidationRunId
           : null;
-      const result = expectedValidationRunId
-        ? db.saveMeetingIfTranscriptRunCurrent(meeting, expectedValidationRunId)
-        : db.saveMeeting(meeting);
+      const claimValidationLease = options?.claimValidationLease;
+      const transcriptOwnedFieldsOnly = options?.transcriptOwnedFieldsOnly;
+      const result = claimValidationLease
+        ? db.claimMeetingTranscriptValidationRetry(
+            meeting.id,
+            claimValidationLease,
+          )
+        : transcriptOwnedFieldsOnly && expectedValidationRunId
+          ? db.saveTranscriptValidationResultIfRunCurrent(
+              meeting.id,
+              expectedValidationRunId,
+              meeting,
+              typeof options.expectedTitle === 'string'
+                ? options.expectedTitle
+                : undefined,
+            )
+          : expectedValidationRunId
+            ? db.saveMeetingIfTranscriptRunCurrent(
+                meeting,
+                expectedValidationRunId,
+              )
+            : db.saveMeeting(meeting);
       if (result === false) return false;
 
       // Process manual participants as entities (Sprint 2 enhancement)
@@ -1188,6 +1238,22 @@ app.whenReady().then(async () => {
       throw e;
     }
   });
+
+  ipcMain.handle(
+    'CLAIM_TRANSCRIPT_VALIDATION_RETRY',
+    (_event, meetingId, lease) =>
+      db.claimMeetingTranscriptValidationRetry(meetingId, lease),
+  );
+  ipcMain.handle(
+    'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
+    (_event, meetingId, runId, stage) =>
+      db.updateMeetingTranscriptValidationRetryStage(meetingId, runId, stage),
+  );
+  ipcMain.handle(
+    'FAIL_TRANSCRIPT_VALIDATION_RETRY',
+    (_event, meetingId, runId, failure) =>
+      db.failMeetingTranscriptValidationRetry(meetingId, runId, failure),
+  );
 
   ipcMain.handle(
     'SAVE_USER_EDIT',
