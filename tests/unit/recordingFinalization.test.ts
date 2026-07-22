@@ -8,6 +8,7 @@ import {
   collectDisposableRecordingArtifactPaths,
   getStrongerSpeakerAttributionPolicy,
   resolveFinalizationCleanupPaths,
+  sealCaptureJournalBeforeFinalization,
 } from '../../src/utils/recordingFinalization';
 
 describe('recording finalization helpers', () => {
@@ -92,6 +93,32 @@ describe('recording finalization helpers', () => {
     expect(meeting.title).toBe('Meeting');
     expect(meeting.end_reason).toBe('journal_seal_failed');
     expect(meeting).not.toHaveProperty('error');
+  });
+
+  it('drains journal appends before requesting a seal', async () => {
+    const events: string[] = [];
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: async () => {
+        events.push('drain');
+      },
+      seal: async () => {
+        events.push('seal');
+      },
+    });
+
+    expect(events).toEqual(['drain', 'seal']);
+    expect(outcome).toBe('sealed');
+  });
+
+  it('reduces sensitive seal errors to a recovery-required outcome', async () => {
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: async () => {},
+      seal: async () => {
+        throw new Error('/private/audio: transcript words');
+      },
+    });
+
+    expect(outcome).toBe('recovery_required');
   });
 
   it('cleans up superseded system audio artifacts after rebuild fallback', () => {

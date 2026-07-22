@@ -190,6 +190,22 @@ export const buildRecoverableSealFailureMeeting = ({
   };
 };
 
+export const sealCaptureJournalBeforeFinalization = async ({
+  drainAppends,
+  seal,
+}: {
+  drainAppends: () => Promise<void>;
+  seal: () => Promise<void>;
+}): Promise<'sealed' | 'recovery_required'> => {
+  await drainAppends();
+  try {
+    await seal();
+    return 'sealed';
+  } catch {
+    return 'recovery_required';
+  }
+};
+
 type ResolveFinalizationCleanupPathsArgs = {
   primaryAudioPath: string;
   systemAudioPath: string;
