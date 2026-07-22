@@ -1,6 +1,19 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { waitForNativeAudioSpawn } from '../../electron/nativeAudioCapture';
+import {
+  canReuseRunningCaptureForProbe,
+  waitForNativeAudioSpawn,
+} from '../../electron/nativeAudioCapture';
+
+describe('canReuseRunningCaptureForProbe', () => {
+  it('requires a real probe when target meeting-app processes are provided', () => {
+    expect(canReuseRunningCaptureForProbe(true, [123])).toBe(false);
+  });
+
+  it('reuses a running capture for an untargeted readiness probe', () => {
+    expect(canReuseRunningCaptureForProbe(true)).toBe(true);
+  });
+});
 
 describe('waitForNativeAudioSpawn', () => {
   it('resolves true after the child confirms it spawned', async () => {
