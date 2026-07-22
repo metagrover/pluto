@@ -2,7 +2,7 @@
 
 **Issue:** [#535](https://github.com/metagrover/pluto/issues/535)
 
-**Status:** Approved direction; awaiting written-spec review
+**Status:** Written spec approved; implementation planned
 
 ## Outcome
 
