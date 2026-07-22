@@ -13,9 +13,9 @@ import {
   parseIntegrityRecord,
   readRetryLease,
 } from '../src/services/transcriptValidationRetryLease';
+import type { MeetingFinalizationStatus } from '../src/types';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import type { TrustStatus } from '../src/utils/trustStatus';
-import type { MeetingFinalizationStatus } from '../src/types';
 import type {
   AttentionEvidenceReference,
   AttentionItem,
@@ -563,9 +563,7 @@ const initDb = () => {
       console.log('[DB] Added meetings.finalization_status column');
     }
     if (
-      !meetingColumns.some(
-        (col) => col.name === 'finalization_error_category',
-      )
+      !meetingColumns.some((col) => col.name === 'finalization_error_category')
     ) {
       db.exec(
         'ALTER TABLE meetings ADD COLUMN finalization_error_category TEXT',

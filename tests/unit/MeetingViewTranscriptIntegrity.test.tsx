@@ -26,9 +26,7 @@ describe('MeetingView transcript integrity', () => {
     expect(canGenerateMeetingIntelligence('validating', 'finalized')).toBe(
       false,
     );
-    expect(canGenerateMeetingIntelligence('validated', 'finalized')).toBe(
-      true,
-    );
+    expect(canGenerateMeetingIntelligence('validated', 'finalized')).toBe(true);
     expect(canGenerateMeetingIntelligence(undefined, undefined)).toBe(true);
     expect(
       canGenerateMeetingIntelligence('validated', 'recovery_required'),
