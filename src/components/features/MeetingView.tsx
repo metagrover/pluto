@@ -85,15 +85,30 @@ interface MeetingViewProps {
 
 export const TranscriptIntegrityPanel = ({
   status,
+  finalizationStatus,
   integrityJson,
   onRetry,
   retrying = false,
 }: {
   status: Meeting['transcript_status'];
+  finalizationStatus?: Meeting['finalization_status'];
   integrityJson?: string;
   onRetry?: () => void;
   retrying?: boolean;
 }) => {
+  if (finalizationStatus === 'recovery_required') {
+    return (
+      <section
+        aria-live="polite"
+        className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5"
+      >
+        <strong className="text-sm text-pro-text">Recording saved</strong>
+        <p className="mt-1 text-sm text-pro-text-muted">
+          Processing needs recovery before this meeting is complete.
+        </p>
+      </section>
+    );
+  }
   if (status !== 'validating' && status !== 'needs_attention') return null;
   let retryStage: string | null = null;
   let retryFailure: string | null = null;
@@ -153,8 +168,11 @@ export const TranscriptIntegrityPanel = ({
 };
 
 export const canGenerateMeetingIntelligence = (
-  status: Meeting['transcript_status'],
-) => status == null || status === 'validated';
+  transcriptStatus: Meeting['transcript_status'],
+  finalizationStatus: Meeting['finalization_status'],
+) =>
+  finalizationStatus !== 'recovery_required' &&
+  (transcriptStatus == null || transcriptStatus === 'validated');
 
 interface MeetingActionCardsProps {
   items: MeetingActionItemCard[];
@@ -696,7 +714,12 @@ export const MeetingView = ({
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
-    if (!canGenerateMeetingIntelligence(selectedMeeting.transcript_status)) {
+    if (
+      !canGenerateMeetingIntelligence(
+        selectedMeeting.transcript_status,
+        selectedMeeting.finalization_status,
+      )
+    ) {
       setRegenerateNotesError(
         'Transcript validation must finish before Pluto creates intelligence.',
       );
@@ -955,6 +978,7 @@ export const MeetingView = ({
     >
       <TranscriptIntegrityPanel
         status={selectedMeeting.transcript_status}
+        finalizationStatus={selectedMeeting.finalization_status}
         integrityJson={selectedMeeting.transcript_integrity_json}
         onRetry={onRetryTranscriptValidation}
         retrying={transcriptValidationRetrying}
@@ -964,7 +988,9 @@ export const MeetingView = ({
         <div className="space-y-4 flex-1">
           <div className="flex items-center gap-4">
             <span className="text-[10px] font-bold text-pro-accent uppercase tracking-widest bg-pro-accent/5 px-2 py-1 rounded">
-              Synthesis Ready
+              {selectedMeeting.finalization_status === 'recovery_required'
+                ? 'Recovery required'
+                : 'Synthesis Ready'}
             </span>
             <span className="text-[10px] text-pro-text-muted/60 font-medium uppercase tracking-widest">
               {new Date(
@@ -1121,7 +1147,8 @@ export const MeetingView = ({
               />
             </svg>
           </button>
-          <button
+          {selectedMeeting.finalization_status !== 'recovery_required' ? (
+            <button
             type="button"
             onClick={() => handleDeleteMeeting(selectedMeeting.id)}
             className="w-10 h-10 rounded-xl bg-red-500/5 border border-red-500/20 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition-all active:scale-95"
@@ -1141,7 +1168,8 @@ export const MeetingView = ({
                 d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
               />
             </svg>
-          </button>
+            </button>
+          ) : null}
         </div>
       </div>
       {regenerateNotesError ? (
@@ -1152,7 +1180,10 @@ export const MeetingView = ({
 
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
       <div className="mb-12 space-y-6">
-        {canGenerateMeetingIntelligence(selectedMeeting.transcript_status) ? (
+        {canGenerateMeetingIntelligence(
+          selectedMeeting.transcript_status,
+          selectedMeeting.finalization_status,
+        ) ? (
           <FollowUpDrafts
             meeting={selectedMeeting}
             overview={followUpDraftOverview}

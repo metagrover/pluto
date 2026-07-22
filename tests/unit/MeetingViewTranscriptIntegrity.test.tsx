@@ -20,10 +20,35 @@ describe('MeetingView transcript integrity', () => {
   });
 
   it('blocks derived intelligence until validation succeeds', () => {
-    expect(canGenerateMeetingIntelligence('needs_attention')).toBe(false);
-    expect(canGenerateMeetingIntelligence('validating')).toBe(false);
-    expect(canGenerateMeetingIntelligence('validated')).toBe(true);
-    expect(canGenerateMeetingIntelligence(undefined)).toBe(true);
+    expect(canGenerateMeetingIntelligence('needs_attention', 'finalized')).toBe(
+      false,
+    );
+    expect(canGenerateMeetingIntelligence('validating', 'finalized')).toBe(
+      false,
+    );
+    expect(canGenerateMeetingIntelligence('validated', 'finalized')).toBe(
+      true,
+    );
+    expect(canGenerateMeetingIntelligence(undefined, undefined)).toBe(true);
+    expect(
+      canGenerateMeetingIntelligence('validated', 'recovery_required'),
+    ).toBe(false);
+  });
+
+  it('shows a recovery-required meeting without offering transcript retry', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        finalizationStatus="recovery_required"
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Recording saved');
+    expect(markup).toContain(
+      'Processing needs recovery before this meeting is complete.',
+    );
+    expect(markup).not.toContain('Retry transcript validation');
   });
 
   it('renders durable retry stage and recoverable timeout state', () => {
