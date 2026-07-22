@@ -120,6 +120,8 @@ export interface UserEditsMap {
   [path: string]: UserEdit;
 }
 
+export type MeetingFinalizationStatus = 'finalized' | 'recovery_required';
+
 export interface Meeting {
   id: string | number;
   title: string;
@@ -150,4 +152,6 @@ export interface Meeting {
   system_audio_path?: string;
   mixed_audio_path?: string;
   transcript_validated_at?: string;
+  finalization_status?: MeetingFinalizationStatus;
+  finalization_error_category?: 'journal_seal_failed' | null;
 }
