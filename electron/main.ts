@@ -23,7 +23,10 @@ import {
   sealCaptureJournal,
 } from './captureJournal';
 import { recoverInterruptedCaptureJournals } from './captureJournalRecovery';
-import { waitForNativeAudioSpawn } from './nativeAudioCapture';
+import {
+  canReuseRunningCaptureForProbe,
+  waitForNativeAudioSpawn,
+} from './nativeAudioCapture';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -526,7 +529,11 @@ app.whenReady().then(async () => {
     targetPids?: number[];
     silentProbe?: boolean;
   } = {}) => {
-    if (nativeAudioProcess) return true;
+    if (
+      canReuseRunningCaptureForProbe(Boolean(nativeAudioProcess), targetPids)
+    ) {
+      return true;
+    }
 
     const execPath = getAudioCapExecPath();
     if (!fs.existsSync(execPath)) {

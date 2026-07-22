@@ -5,6 +5,13 @@ export type SpawnEventSource = {
   off(event: 'error', listener: (error: Error) => void): unknown;
 };
 
+export const canReuseRunningCaptureForProbe = (
+  captureRunning: boolean,
+  targetPids?: number[],
+) =>
+  captureRunning &&
+  !targetPids?.some((pid) => Number.isInteger(pid) && pid > 0);
+
 export const waitForNativeAudioSpawn = (
   child: SpawnEventSource,
 ): Promise<boolean> =>
