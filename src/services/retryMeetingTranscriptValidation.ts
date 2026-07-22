@@ -12,6 +12,13 @@ import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity.ts'
 import { buildTranscriptJsonPayload } from '../utils/transcriptSchema.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
 import { reprocessAttributedMeeting } from './safeAttributionReprocessing.ts';
+import {
+  beginRetryLease,
+  buildRetryDeadline,
+  finishRetryLease,
+  parseIntegrityRecord,
+  readRetryLease,
+} from './transcriptValidationRetryLease.ts';
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
@@ -39,9 +46,12 @@ const readRunId = (meeting: Meeting): string | null => {
     const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       validation_run_id?: unknown;
     };
-    return typeof parsed.validation_run_id === 'string'
-      ? parsed.validation_run_id
-      : null;
+    return (
+      readRetryLease(parsed)?.runId ??
+      (typeof parsed.validation_run_id === 'string'
+        ? parsed.validation_run_id
+        : null)
+    );
   } catch {
     return null;
   }
@@ -137,6 +147,7 @@ const readStoredActivityWindows = (
 export const retryMeetingTranscriptValidation = async (
   meetingId: string | number,
   invoke: Invoke,
+  options: { now?: () => number; validationTimeoutMs?: number } = {},
 ): Promise<{ status: 'validated' | 'needs_attention' | 'superseded' }> => {
   const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
   if (!meeting) throw new Error('Meeting not found');
@@ -145,6 +156,17 @@ export const retryMeetingTranscriptValidation = async (
   }
 
   const runId = crypto.randomUUID();
+  const now = options.now?.() ?? Date.now();
+  const deadline =
+    now +
+    (options.validationTimeoutMs ??
+      buildRetryDeadline(now, meeting.duration_seconds || 0) - now);
+  const lease = {
+    runId,
+    startedAt: new Date(now).toISOString(),
+    deadlineAt: new Date(deadline).toISOString(),
+    stage: 'transcribing' as const,
+  };
   const sourcePaths = {
     mic: meeting.audio_path || '',
     system: meeting.system_audio_path || '',
@@ -155,28 +177,86 @@ export const retryMeetingTranscriptValidation = async (
     meeting,
     provisionalSegments,
   );
-  await invoke('SAVE_MEETING', {
-    ...meeting,
-    transcript_status: 'validating',
-    transcript_integrity_json: JSON.stringify({ validation_run_id: runId }),
-  });
+  const claimed = await invoke(
+    'SAVE_MEETING',
+    {
+      ...meeting,
+      transcript_status: 'validating',
+      transcript_integrity_json: JSON.stringify(
+        beginRetryLease(
+          parseIntegrityRecord(meeting.transcript_integrity_json),
+          lease,
+        ),
+      ),
+    },
+    { claimValidationLease: lease },
+  );
+  if (claimed === false) return { status: 'superseded' };
 
-  const validation = await runRecordingTranscriptValidation({
-    meetingId: String(meeting.id),
-    recordingDurationSeconds: meeting.duration_seconds || 0,
-    micAudioPath: sourcePaths.mic,
-    systemAudioPath: sourcePaths.system,
-    mixAudioPath: sourcePaths.mix,
-    provisionalSegments,
-    activityWindows: activityEvidence.windows,
-    transcribe: async (audioPath, options) =>
-      (await invoke('WHISPER_TRANSCRIBE', audioPath, options)) as {
-        segments?: Array<{ start: number; end: number; text: string }>;
-        meta?: Record<string, unknown>;
-      },
-    probeDuration: async (audioPath) =>
-      (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
-  });
+  const runBeforeDeadline = async <T>(operation: Promise<T>): Promise<T> => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('transcript_validation_retry_timeout')),
+            Math.max(0, deadline - (options.now?.() ?? Date.now())),
+          );
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  };
+  const failCurrentRetry = async (
+    failure: 'retry_timeout' | 'retry_failed',
+  ) => {
+    const failed = await invoke(
+      'FAIL_TRANSCRIPT_VALIDATION_RETRY',
+      meetingId,
+      runId,
+      failure,
+    );
+    await invoke('CANCEL_MEETING_TRANSCRIPTION', meetingId).catch(() => null);
+    return failed === false
+      ? ({ status: 'superseded' } as const)
+      : ({ status: 'needs_attention' } as const);
+  };
+  let validation: Awaited<ReturnType<typeof runRecordingTranscriptValidation>>;
+  try {
+    validation = await runBeforeDeadline(
+      runRecordingTranscriptValidation({
+        meetingId: String(meeting.id),
+        recordingDurationSeconds: meeting.duration_seconds || 0,
+        micAudioPath: sourcePaths.mic,
+        systemAudioPath: sourcePaths.system,
+        mixAudioPath: sourcePaths.mix,
+        provisionalSegments,
+        activityWindows: activityEvidence.windows,
+        transcribe: async (audioPath, options) =>
+          (await invoke('WHISPER_TRANSCRIBE', audioPath, options)) as {
+            segments?: Array<{ start: number; end: number; text: string }>;
+            meta?: Record<string, unknown>;
+          },
+        probeDuration: async (audioPath) =>
+          (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
+      }),
+    );
+  } catch (error) {
+    const failure =
+      error instanceof Error &&
+      error.message === 'transcript_validation_retry_timeout'
+        ? 'retry_timeout'
+        : 'retry_failed';
+    return await failCurrentRetry(failure);
+  }
+  await invoke(
+    'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
+    meetingId,
+    runId,
+    'reviewing_evidence',
+  ).catch(() => null);
   const integrity = {
     ...validation.evidence,
     reasons:
@@ -192,7 +272,7 @@ export const retryMeetingTranscriptValidation = async (
           ),
         }
       : {}),
-    validation_run_id: runId,
+    retry: { ...lease, stage: 'reviewing_evidence' as const },
   };
 
   const priorLocalSpeechStillMissing =
@@ -232,7 +312,7 @@ export const retryMeetingTranscriptValidation = async (
       {
         ...latest,
         transcript_status: 'needs_attention',
-        transcript_integrity_json: JSON.stringify(integrity),
+        transcript_integrity_json: JSON.stringify(finishRetryLease(integrity)),
         transcript_validated_at: null,
         enhanced_notes: null,
         analysis_json: null,
@@ -240,6 +320,7 @@ export const retryMeetingTranscriptValidation = async (
       },
       {
         expectedValidationRunId: runId,
+        transcriptOwnedFieldsOnly: true,
       },
     );
     if (saved === false) return { status: 'superseded' };
@@ -252,24 +333,14 @@ export const retryMeetingTranscriptValidation = async (
   const transcript = validation.segments
     .map((segment) => `${segment.speaker}: ${segment.text}`)
     .join('\n');
-  const generatedTitle =
-    current.title === 'Meeting'
-      ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
-      : current.title;
-  const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
-    transcript,
-    userNotes: current.user_notes || '',
-  })) as { markdown?: string; analysis?: unknown; signals?: unknown };
-  const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-  if (readRunId(latest) !== runId) return { status: 'superseded' };
-  const title = latest.title === current.title ? generatedTitle : latest.title;
-
-  const replacement = {
-    ...latest,
-    title,
+  const canonicalReplacement = {
+    ...current,
     transcript_status: 'validated',
     transcript_validated_at: new Date().toISOString(),
-    transcript_integrity_json: JSON.stringify(integrity),
+    transcript_integrity_json: JSON.stringify({
+      ...integrity,
+      retry: { ...lease, stage: 'saving' as const },
+    }),
     transcript_json: JSON.stringify(
       buildTranscriptJsonPayload(validation.segments, {
         pipelineMode: 'canonical_session_v2',
@@ -279,33 +350,102 @@ export const retryMeetingTranscriptValidation = async (
         integrity: { ...validation.evidence, reasons: validation.reasons },
       }),
     ),
-    enhanced_notes: artifacts.markdown || '',
-    analysis_json: JSON.stringify(artifacts.analysis ?? null),
-    value_signals_json: JSON.stringify(artifacts.signals ?? null),
+    enhanced_notes: null,
+    analysis_json: null,
+    value_signals_json: null,
   };
-  const reprocessing = await reprocessAttributedMeeting({
-    previous: latest,
-    buildReplacement: async () => replacement,
-    validateReplacement: async (candidate) =>
-      candidate.transcript_status === 'validated' &&
-      parseSegments(candidate.transcript_json).length > 0,
-    saveReplacement: async (candidate) => {
-      return invoke('SAVE_MEETING', candidate, {
-        expectedValidationRunId: runId,
-      });
-    },
-  });
+  await invoke(
+    'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
+    meetingId,
+    runId,
+    'saving',
+  ).catch(() => null);
+  let reprocessing: Awaited<ReturnType<typeof reprocessAttributedMeeting>>;
+  try {
+    reprocessing = await runBeforeDeadline(
+      reprocessAttributedMeeting({
+        previous: current,
+        buildReplacement: async () => canonicalReplacement,
+        validateReplacement: async (candidate) =>
+          candidate.transcript_status === 'validated' &&
+          parseSegments(candidate.transcript_json).length > 0,
+        saveReplacement: async (candidate) => {
+          return invoke('SAVE_MEETING', candidate, {
+            expectedValidationRunId: runId,
+            transcriptOwnedFieldsOnly: true,
+          });
+        },
+      }),
+    );
+  } catch (error) {
+    const failure =
+      error instanceof Error &&
+      error.message === 'transcript_validation_retry_timeout'
+        ? 'retry_timeout'
+        : 'retry_failed';
+    return await failCurrentRetry(failure);
+  }
   if (reprocessing.status === 'save_conflict') {
     return { status: 'superseded' };
   }
   if (reprocessing.status !== 'replaced') {
-    throw new Error(`Attribution reprocessing ${reprocessing.status}`);
+    return await failCurrentRetry('retry_failed');
   }
-  await invoke('EXTRACT_AND_PROCESS_ENTITIES', {
-    transcript,
-    meetingId: String(meeting.id),
-    summary: artifacts.markdown || '',
-    valueSignals: artifacts.signals ?? null,
-  });
+
+  try {
+    const generatedTitle =
+      current.title === 'Meeting'
+        ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
+        : current.title;
+    const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
+      transcript,
+      userNotes: current.user_notes || '',
+    })) as { markdown?: string; analysis?: unknown; signals?: unknown };
+    const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
+    if (readRunId(latest) !== runId) return { status: 'superseded' };
+    const saved = await invoke(
+      'SAVE_MEETING',
+      {
+        ...latest,
+        title: latest.title === current.title ? generatedTitle : latest.title,
+        transcript_integrity_json: JSON.stringify(finishRetryLease(integrity)),
+        enhanced_notes: artifacts.markdown || '',
+        analysis_json: JSON.stringify(artifacts.analysis ?? null),
+        value_signals_json: JSON.stringify(artifacts.signals ?? null),
+      },
+      {
+        expectedValidationRunId: runId,
+        transcriptOwnedFieldsOnly: true,
+        expectedTitle: current.title,
+      },
+    );
+    if (saved === false) return { status: 'superseded' };
+    await invoke('EXTRACT_AND_PROCESS_ENTITIES', {
+      transcript,
+      meetingId: String(meeting.id),
+      summary: artifacts.markdown || '',
+      valueSignals: artifacts.signals ?? null,
+    });
+  } catch (error) {
+    console.error('[Pluto] Post-validation intelligence failed', error);
+    const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
+    if (readRunId(latest) === runId) {
+      await invoke(
+        'SAVE_MEETING',
+        {
+          ...latest,
+          transcript_integrity_json: JSON.stringify(
+            finishRetryLease(
+              parseIntegrityRecord(latest.transcript_integrity_json),
+            ),
+          ),
+        },
+        {
+          expectedValidationRunId: runId,
+          transcriptOwnedFieldsOnly: true,
+        },
+      );
+    }
+  }
   return { status: 'validated' };
 };

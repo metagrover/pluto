@@ -500,4 +500,63 @@ describe('retryMeetingTranscriptValidation', () => {
       expect.anything(),
     );
   });
+
+  it('cancels timed-out work and restores preserved evidence to needs attention', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        reasons: ['remote_speech_unaccounted'],
+        systemActivitySeconds: 12,
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        return await new Promise(() => undefined);
+      }
+      if (channel === 'CANCEL_MEETING_TRANSCRIPTION')
+        return { cancelled: true };
+      if (channel === 'FAIL_TRANSCRIPT_VALIDATION_RETRY') {
+        const integrity = JSON.parse(
+          String(current.transcript_integrity_json),
+        ) as Record<string, unknown>;
+        const { retry: _retry, ...prior } = integrity;
+        current = {
+          ...current,
+          transcript_status: 'needs_attention',
+          transcript_integrity_json: JSON.stringify({
+            ...prior,
+            retryFailure: 'retry_timeout',
+          }),
+        };
+        return true;
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+      { validationTimeoutMs: 5 },
+    );
+
+    expect(result).toEqual({ status: 'needs_attention' });
+    expect(invoke).toHaveBeenCalledWith(
+      'CANCEL_MEETING_TRANSCRIPTION',
+      'synthetic-id',
+    );
+    expect(current.transcript_status).toBe('needs_attention');
+    expect(JSON.parse(String(current.transcript_integrity_json))).toMatchObject(
+      {
+        reasons: ['remote_speech_unaccounted'],
+        systemActivitySeconds: 12,
+        retryFailure: 'retry_timeout',
+      },
+    );
+  });
 });

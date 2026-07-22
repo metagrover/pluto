@@ -114,12 +114,13 @@ const WHISPERX_FETCH_AGENT = new Agent({
   bodyTimeout: 30 * 60 * 1000,
 });
 
-class WhisperXManager {
+export class WhisperXManager {
   private process: ChildProcess | null = null;
   private pythonPath = '';
   private port: number = WHISPERX_DEFAULT_PORT;
   private externalServer = false;
   private appliedConfig: Partial<WhisperXConfig> = {};
+  private recyclePromise: Promise<boolean> | null = null;
 
   constructor() {
     this.detectExecutable();
@@ -383,37 +384,42 @@ class WhisperXManager {
         };
 
         // Spawn the process
-        this.process = spawn(executable, spawnArgs, {
+        const child = spawn(executable, spawnArgs, {
           cwd,
           env,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
+        this.process = child;
 
         // Log stdout
-        this.process.stdout?.on('data', (data) => {
+        child.stdout?.on('data', (data) => {
           console.log(`[WhisperX] ${data.toString().trim()}`);
         });
 
         // Log stderr
-        this.process.stderr?.on('data', (data) => {
+        child.stderr?.on('data', (data) => {
           console.error(`[WhisperX] ${data.toString().trim()}`);
         });
 
         // Handle process exit
-        this.process.on('close', (code) => {
+        child.on('close', (code) => {
           console.log(`[WhisperX] Server exited with code ${code}`);
-          this.process = null;
-          this.startPromise = null; // Reset promise so it can be restarted
-          this.externalServer = false;
-          this.appliedConfig = {};
+          if (this.process === child) {
+            this.process = null;
+            this.startPromise = null; // Reset promise so it can be restarted
+            this.externalServer = false;
+            this.appliedConfig = {};
+          }
         });
 
-        this.process.on('error', (err) => {
+        child.on('error', (err) => {
           console.error(`[WhisperX] Failed to start server: ${err.message}`);
-          this.process = null;
-          this.startPromise = null;
-          this.externalServer = false;
-          this.appliedConfig = {};
+          if (this.process === child) {
+            this.process = null;
+            this.startPromise = null;
+            this.externalServer = false;
+            this.appliedConfig = {};
+          }
         });
 
         // Wait for server to be ready
@@ -459,18 +465,28 @@ class WhisperXManager {
     }
     if (this.process) {
       console.log('[WhisperX] Stopping server');
-      this.process.kill('SIGTERM');
+      const child = this.process;
+      const closed = new Promise<void>((resolve) => {
+        child.once('close', () => resolve());
+      });
+      child.kill('SIGTERM');
 
       // Wait for graceful shutdown
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await Promise.race([
+        closed,
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ]);
 
       // Force kill if still running
-      if (this.process) {
-        this.process.kill('SIGKILL');
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await closed;
       }
 
-      this.process = null;
-      this.appliedConfig = {};
+      if (this.process === child) {
+        this.process = null;
+        this.appliedConfig = {};
+      }
     }
   }
 
@@ -481,6 +497,27 @@ class WhisperXManager {
     return (
       (this.process !== null && !this.process.killed) || this.externalServer
     );
+  }
+
+  ownsRunningProcess(): boolean {
+    return (
+      this.process !== null && !this.process.killed && !this.externalServer
+    );
+  }
+
+  async recycleOwnedProcessIf(safeToRecycle: () => boolean): Promise<boolean> {
+    if (this.recyclePromise) return await this.recyclePromise;
+    if (!this.ownsRunningProcess()) return false;
+    this.recyclePromise = (async () => {
+      if (!safeToRecycle()) return false;
+      await this.stop();
+      return true;
+    })();
+    try {
+      return await this.recyclePromise;
+    } finally {
+      this.recyclePromise = null;
+    }
   }
 
   /**
@@ -516,6 +553,7 @@ class WhisperXManager {
     audioPath: string,
     options: TranscribeOptions = {},
   ): Promise<Transcript> {
+    if (this.recyclePromise) await this.recyclePromise;
     // Ensure server is running and ready
     await this.start();
     await this.applyConfigFromOptions(options);

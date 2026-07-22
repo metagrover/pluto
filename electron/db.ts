@@ -3,6 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { app } from 'electron';
+import {
+  type TranscriptValidationRetryFailure,
+  type TranscriptValidationRetryLease,
+  type TranscriptValidationRetryStage,
+  beginRetryLease,
+  finishRetryLease,
+  mergeTranscriptOwnedFields,
+  parseIntegrityRecord,
+  readRetryLease,
+} from '../src/services/transcriptValidationRetryLease';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import type { TrustStatus } from '../src/utils/trustStatus';
 import type {
@@ -1466,9 +1476,10 @@ export const saveMeetingIfTranscriptRunCurrent = (
         current.transcript_integrity_json || '{}',
       ) as { validation_run_id?: unknown };
       currentRunId =
-        typeof integrity.validation_run_id === 'string'
+        readRetryLease(integrity)?.runId ??
+        (typeof integrity.validation_run_id === 'string'
           ? integrity.validation_run_id
-          : null;
+          : null);
     } catch {
       currentRunId = null;
     }
@@ -1477,11 +1488,160 @@ export const saveMeetingIfTranscriptRunCurrent = (
     return true;
   })();
 
+export const saveTranscriptValidationResultIfRunCurrent = (
+  meetingId: string | number,
+  expectedValidationRunId: string,
+  transcriptFields: Partial<PersistedMeeting>,
+  expectedTitle?: string,
+) =>
+  db.transaction(() => {
+    const current = db
+      .prepare('SELECT * FROM meetings WHERE id = ?')
+      .get(String(meetingId)) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const integrity = parseIntegrityRecord(current.transcript_integrity_json);
+    if (readRetryLease(integrity)?.runId !== expectedValidationRunId) {
+      return false;
+    }
+    const merged = mergeTranscriptOwnedFields(
+      current as PersistedMeeting & Record<string, unknown>,
+      transcriptFields as Record<string, unknown>,
+    );
+    if (
+      expectedTitle !== undefined &&
+      current.title === expectedTitle &&
+      typeof transcriptFields.title === 'string'
+    ) {
+      merged.title = transcriptFields.title;
+    }
+    saveMeetingTransaction(merged);
+    return true;
+  })();
+
+export const claimMeetingTranscriptValidationRetry = (
+  meetingId: string | number,
+  lease: TranscriptValidationRetryLease,
+) =>
+  db.transaction(() => {
+    const current = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const integrity = parseIntegrityRecord(current.transcript_integrity_json);
+    const active = readRetryLease(integrity);
+    if (
+      current.transcript_status === 'validating' &&
+      active &&
+      Date.parse(active.deadlineAt) > Date.parse(lease.startedAt)
+    ) {
+      return false;
+    }
+    const nextIntegrity = beginRetryLease(integrity, lease);
+    return (
+      db
+        .prepare(
+          `UPDATE meetings
+           SET transcript_status = 'validating', transcript_integrity_json = ?
+           WHERE id = ?`,
+        )
+        .run(JSON.stringify(nextIntegrity), String(meetingId)).changes === 1
+    );
+  })();
+
+export const updateMeetingTranscriptValidationRetryStage = (
+  meetingId: string | number,
+  runId: string,
+  stage: TranscriptValidationRetryStage,
+) =>
+  db.transaction(() => {
+    const current = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const integrity = parseIntegrityRecord(current.transcript_integrity_json);
+    const lease = readRetryLease(integrity);
+    if (!lease || lease.runId !== runId) return false;
+    integrity.retry = { ...lease, stage };
+    return (
+      db
+        .prepare(
+          'UPDATE meetings SET transcript_integrity_json = ? WHERE id = ?',
+        )
+        .run(JSON.stringify(integrity), String(meetingId)).changes === 1
+    );
+  })();
+
+export const failMeetingTranscriptValidationRetry = (
+  meetingId: string | number,
+  runId: string,
+  failure: TranscriptValidationRetryFailure,
+) =>
+  db.transaction(() => {
+    const current = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const integrity = parseIntegrityRecord(current.transcript_integrity_json);
+    const lease = readRetryLease(integrity);
+    if (!lease || lease.runId !== runId) return false;
+    return (
+      db
+        .prepare(
+          `UPDATE meetings
+           SET transcript_status = 'needs_attention',
+               transcript_integrity_json = ?,
+               transcript_validated_at = NULL
+           WHERE id = ?`,
+        )
+        .run(
+          JSON.stringify(finishRetryLease(integrity, failure)),
+          String(meetingId),
+        ).changes === 1
+    );
+  })();
+
+export const recoverExpiredTranscriptValidationRetries = (nowMs = Date.now()) =>
+  db.transaction(() => {
+    const rows = db
+      .prepare(
+        "SELECT id, transcript_status, transcript_integrity_json FROM meetings WHERE transcript_status IN ('validating', 'validated')",
+      )
+      .all() as Array<{
+      id: string;
+      transcript_status: TranscriptLifecycleStatus;
+      transcript_integrity_json: string | null;
+    }>;
+    let recovered = 0;
+    for (const row of rows) {
+      const integrity = parseIntegrityRecord(row.transcript_integrity_json);
+      const lease = readRetryLease(integrity);
+      if (!lease || Date.parse(lease.deadlineAt) > nowMs) continue;
+      const nextStatus =
+        row.transcript_status === 'validated' ? 'validated' : 'needs_attention';
+      const result = db
+        .prepare(
+          `UPDATE meetings
+           SET transcript_status = ?,
+               transcript_integrity_json = ?,
+               transcript_validated_at = CASE
+                 WHEN ? = 'validated' THEN transcript_validated_at
+                 ELSE NULL
+               END
+           WHERE id = ? AND transcript_status = ?`,
+        )
+        .run(
+          nextStatus,
+          JSON.stringify(finishRetryLease(integrity, 'retry_interrupted')),
+          nextStatus,
+          row.id,
+          row.transcript_status,
+        );
+      recovered += result.changes;
+    }
+    return recovered;
+  })();
+
 export const getMeetings = () => {
+  recoverExpiredTranscriptValidationRetries();
   return db.prepare('SELECT * FROM meetings ORDER BY created_at DESC').all();
 };
 
 export const getMeeting = (id: string | number) => {
+  recoverExpiredTranscriptValidationRetries();
   return db.prepare('SELECT * FROM meetings WHERE id = ?').get(String(id));
 };
 

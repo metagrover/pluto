@@ -1,6 +1,6 @@
 # Bound Transcript-Validation Retry Design
 
-**Issue:** #539  
+**Issue:** #539
 **Parent:** #442
 
 ## Problem
@@ -31,7 +31,7 @@ type TranscriptValidationRetryLease = {
   runId: string;
   startedAt: string;
   deadlineAt: string;
-  stage: 'transcribing' | 'reconciling' | 'saving';
+  stage: 'transcribing' | 'reviewing_evidence' | 'saving';
 };
 ```
 
