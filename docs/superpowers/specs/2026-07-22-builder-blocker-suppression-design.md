@@ -33,7 +33,7 @@ Builder uses its existing automation memory file as the durable cross-run state 
 - whether one GitHub notification has been posted;
 - the exact human action that would unblock work.
 
-The fingerprint is derived from stable public issue state such as issue number, blocker class, approval or evidence requirement, and relevant issue-update timestamp. It must not contain credentials, local paths, private recording evidence, transcript content, or meeting identities.
+The fingerprint is derived from stable public issue state such as issue number, blocker class, approval or evidence requirement, and the material issue state that defines the unblock action. Issue timestamps are metadata only and never fingerprint inputs because unrelated activity must not manufacture a material change. The fingerprint must not contain credentials, local paths, private recording evidence, transcript content, or meeting identities.
 
 ## Run Algorithm
 
