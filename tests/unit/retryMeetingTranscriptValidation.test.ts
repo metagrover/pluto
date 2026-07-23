@@ -1,12 +1,43 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { retryMeetingTranscriptValidation } from '../../src/services/retryMeetingTranscriptValidation';
+import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
+
+const validationInputs = vi.hoisted(() => [] as unknown[]);
+
+vi.mock('../../src/services/recordingTranscriptValidation.ts', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../src/services/recordingTranscriptValidation.ts')
+  >('../../src/services/recordingTranscriptValidation.ts');
+  return {
+    ...actual,
+    runRecordingTranscriptValidation: async (
+      input: Parameters<typeof actual.runRecordingTranscriptValidation>[0],
+    ) => {
+      validationInputs.push(input);
+      return actual.runRecordingTranscriptValidation(input);
+    },
+  };
+});
 
 const rawSegment = (start: number, end: number, text: string) => ({
   start,
   end,
   text,
 });
+
+const activityProducer = {
+  clock: {
+    kind: 'meeting_relative_seconds' as const,
+    origin: 'recording_start' as const,
+  },
+  thresholds: {
+    rms: 0.012,
+    dominanceRatio: 1.25,
+    minimumSwitchIntervalMs: 200,
+  },
+  algorithmVersion: 'speaker_activity_v1' as const,
+};
 
 const meeting = {
   id: 'synthetic-id',
@@ -22,6 +53,10 @@ const meeting = {
 };
 
 describe('retryMeetingTranscriptValidation', () => {
+  beforeEach(() => {
+    validationInputs.length = 0;
+  });
+
   it('does not generate downstream intelligence while validation still needs attention', async () => {
     let current = { ...meeting };
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
@@ -498,6 +533,271 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(invoke).not.toHaveBeenCalledWith(
       'GENERATE_ANALYSIS_V2',
       expect.anything(),
+    );
+  });
+
+  it('verifies sealed v2 activity windows and preserves the exact envelope after validation', async () => {
+    const windows = [
+      { startTime: 4.25, endTime: 12.75, speaker: 'Me' as const },
+      { startTime: 18.5, endTime: 27.125, speaker: 'Them' as const },
+    ];
+    const sealedEvidence = await buildCaptureActivityEvidence(
+      windows,
+      activityProducer,
+    );
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        activityEvidenceSource: 'capture_activity_v2',
+        activityEvidence: sealedEvidence,
+        reasons: [],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        if (String(payload).includes('system')) {
+          return { segments: [rawSegment(18.5, 27.125, 'Remote statement.')] };
+        }
+        if (String(payload).includes('mic')) {
+          return { segments: [rawSegment(4.25, 12.75, 'Local statement.')] };
+        }
+        return {
+          segments: [
+            rawSegment(4.25, 12.75, 'Local statement.'),
+            rawSegment(18.5, 27.125, 'Remote statement.'),
+          ],
+        };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'GENERATE_TITLE') return 'Synthetic meeting';
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
+      }
+      if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('validated');
+    expect(validationInputs).toHaveLength(1);
+    expect(
+      (validationInputs[0] as { activityWindows: unknown }).activityWindows,
+    ).toEqual(windows);
+    const savedIntegrity = JSON.parse(
+      String(current.transcript_integrity_json),
+    ) as Record<string, unknown>;
+    expect(savedIntegrity.activityEvidenceSource).toBe('capture_activity_v2');
+    expect(savedIntegrity.activityEvidence).toEqual(sealedEvidence);
+  });
+
+  it.each([
+    {
+      name: 'missing',
+      evidence: undefined,
+      source: 'capture_activity_missing',
+      reason: 'capture_activity_missing',
+    },
+    {
+      name: 'malformed',
+      evidence: { source: 'capture_activity_v2' },
+      source: 'capture_activity_corrupt',
+      reason: 'capture_activity_corrupt',
+    },
+    {
+      name: 'unsupported',
+      evidence: {
+        schemaVersion: 3,
+        source: 'capture_activity_v2',
+        serializationVersion: 1,
+      },
+      source: 'capture_activity_unsupported',
+      reason: 'capture_activity_unsupported',
+    },
+    {
+      name: 'digest mismatch',
+      evidence: null,
+      source: 'capture_activity_corrupt',
+      reason: 'capture_activity_corrupt',
+    },
+  ])(
+    'fails closed for $name sealed v2 evidence without provisional fallback',
+    async ({ evidence, source, reason, name }) => {
+      const validEvidence = await buildCaptureActivityEvidence(
+        [{ startTime: 2, endTime: 8, speaker: 'Me' }],
+        activityProducer,
+      );
+      const storedEvidence =
+        name === 'digest mismatch'
+          ? { ...validEvidence, digestSha256: '0'.repeat(64) }
+          : evidence;
+      let current: Record<string, unknown> = {
+        ...meeting,
+        transcript_integrity_json: JSON.stringify({
+          activityEvidenceSource: 'capture_activity_v2',
+          ...(storedEvidence === undefined
+            ? {}
+            : { activityEvidence: storedEvidence }),
+          reasons: [],
+        }),
+        transcript_json: JSON.stringify({
+          segments: [
+            {
+              speaker: 'Me',
+              startTime: 0,
+              endTime: 20,
+              text: 'Provisional content must not become evidence.',
+            },
+          ],
+        }),
+      };
+      const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+        if (channel === 'GET_MEETING') return current;
+        if (channel === 'AUDIO_PROBE_DURATION') return 60;
+        if (channel === 'WHISPER_TRANSCRIBE') return { segments: [] };
+        if (channel === 'SAVE_MEETING') {
+          current = { ...current, ...(payload as Record<string, unknown>) };
+          return true;
+        }
+        throw new Error(`Unexpected channel: ${channel}`);
+      });
+
+      const result = await retryMeetingTranscriptValidation(
+        'synthetic-id',
+        invoke,
+      );
+
+      expect(result.status).toBe('needs_attention');
+      expect(validationInputs).toHaveLength(1);
+      expect(
+        (validationInputs[0] as { activityWindows: unknown }).activityWindows,
+      ).toEqual([]);
+      const savedIntegrity = JSON.parse(
+        String(current.transcript_integrity_json),
+      ) as { activityEvidenceSource: unknown; reasons: unknown[] };
+      expect(savedIntegrity.activityEvidenceSource).toBe(source);
+      expect(savedIntegrity.reasons).toContain(reason);
+      expect(JSON.stringify(savedIntegrity)).not.toContain(
+        'Provisional content must not become evidence.',
+      );
+    },
+  );
+
+  it.each(['capture_activity_unsupported', 'capture_activity_v3'])(
+    'fails closed for declared unsupported source %s without provisional fallback',
+    async (activityEvidenceSource) => {
+      let current: Record<string, unknown> = {
+        ...meeting,
+        transcript_integrity_json: JSON.stringify({
+          activityEvidenceSource,
+          reasons: [],
+        }),
+        transcript_json: JSON.stringify({
+          segments: [
+            {
+              speaker: 'Me',
+              startTime: 0,
+              endTime: 20,
+              text: 'Provisional content must not become evidence.',
+            },
+          ],
+        }),
+      };
+      const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+        if (channel === 'GET_MEETING') return current;
+        if (channel === 'AUDIO_PROBE_DURATION') return 60;
+        if (channel === 'WHISPER_TRANSCRIBE') return { segments: [] };
+        if (channel === 'SAVE_MEETING') {
+          current = { ...current, ...(payload as Record<string, unknown>) };
+          return true;
+        }
+        throw new Error(`Unexpected channel: ${channel}`);
+      });
+
+      const result = await retryMeetingTranscriptValidation(
+        'synthetic-id',
+        invoke,
+      );
+
+      expect(result.status).toBe('needs_attention');
+      expect(validationInputs).toHaveLength(1);
+      expect(
+        (validationInputs[0] as { activityWindows: unknown }).activityWindows,
+      ).toEqual([]);
+      const savedIntegrity = JSON.parse(
+        String(current.transcript_integrity_json),
+      ) as { activityEvidenceSource: unknown; reasons: unknown[] };
+      expect(savedIntegrity.activityEvidenceSource).toBe(
+        'capture_activity_unsupported',
+      );
+      expect(savedIntegrity.reasons).toContain('capture_activity_unsupported');
+      expect(JSON.stringify(savedIntegrity)).not.toContain(
+        'Provisional content must not become evidence.',
+      );
+    },
+  );
+
+  it('fails closed when an unsupported declaration wraps a valid v1 envelope', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        activityEvidenceSource: 'capture_activity_v3',
+        activityEvidence: {
+          schemaVersion: 1,
+          source: 'capture_activity_v1',
+          windows: [{ startTime: 2, endTime: 8, speaker: 'Me' }],
+        },
+        reasons: [],
+      }),
+      transcript_json: JSON.stringify({
+        segments: [
+          {
+            speaker: 'Them',
+            startTime: 10,
+            endTime: 20,
+            text: 'Provisional content must not become evidence.',
+          },
+        ],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') return { segments: [] };
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('needs_attention');
+    expect(validationInputs).toHaveLength(1);
+    expect(
+      (validationInputs[0] as { activityWindows: unknown }).activityWindows,
+    ).toEqual([]);
+    const savedIntegrity = JSON.parse(
+      String(current.transcript_integrity_json),
+    ) as { activityEvidenceSource: unknown; reasons: unknown[] };
+    expect(savedIntegrity.activityEvidenceSource).toBe(
+      'capture_activity_unsupported',
+    );
+    expect(savedIntegrity.reasons).toContain('capture_activity_unsupported');
+    expect(JSON.stringify(savedIntegrity)).not.toContain(
+      'Provisional content must not become evidence.',
     );
   });
 
