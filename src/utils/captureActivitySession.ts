@@ -75,7 +75,7 @@ export const createCaptureActivitySession = ({
     return true;
   };
 
-  const transitionSpeaker = (next: CaptureSpeaker, seconds: number) => {
+  const transitionSpeaker = (next: CaptureSpeaker | null, seconds: number) => {
     if (
       closed ||
       !Number.isFinite(seconds) ||
@@ -92,7 +92,9 @@ export const createCaptureActivitySession = ({
     if (activeWindow?.speaker === next) return;
 
     closeActiveWindow(seconds);
-    activeWindow = { speaker: next, startTime: seconds };
+    if (next !== null) {
+      activeWindow = { speaker: next, startTime: seconds };
+    }
   };
 
   const closeAt = (seconds: number): Promise<void> => {

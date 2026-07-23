@@ -18,6 +18,7 @@ import {
   decodeFloat32PcmChunk,
 } from '../utils/audio';
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
+import { createCaptureActivitySession } from '../utils/captureActivitySession';
 import { resolveProductionDiarizationProvider } from '../utils/diarizationProvider';
 import {
   beginRecordingFinalization,
@@ -48,7 +49,7 @@ import {
   type TimedAudioChunk,
   shouldUseSystemAudioReconstructionFallback,
 } from '../utils/systemAudioReconstruction';
-import { buildStoredTranscriptActivityEvidence } from '../utils/transcriptActivityEvidence';
+import type { CaptureActivityEvidence } from '../utils/transcriptActivityEvidence';
 import { evaluateLiveTranscriptCoverage } from '../utils/transcriptIntegrity';
 import {
   type CanonicalTranscriptSource,
@@ -465,6 +466,9 @@ export const AudioManager = ({
   const lastSpeakerRef = useRef<'Me' | 'Them' | null>(null);
   const lastSpeakerTsRef = useRef<number>(0);
   const speakerTimelineRef = useRef<SpeakerActivityWindow[]>([]);
+  const captureActivitySessionRef = useRef<ReturnType<
+    typeof createCaptureActivitySession
+  > | null>(null);
   const activeSpeakerWindowRef = useRef<{
     speaker: 'Me' | 'Them';
     startTime: number;
@@ -483,7 +487,6 @@ export const AudioManager = ({
     new Map(),
   );
   const processingQueueRef = useRef(Promise.resolve());
-  const captureJournalWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const processedMicSegmentsRef = useRef<TranscriptionSegment[]>([]);
   const zeroMicChunkStreakRef = useRef(0);
   const micChunkConversionFailuresRef = useRef(0);
@@ -526,15 +529,6 @@ export const AudioManager = ({
 
   // --- Native Capture Logic ---
   // Functions defined below, event listeners set up after
-
-  const enqueueCaptureJournalWrite = (task: () => Promise<void>) => {
-    const next = captureJournalWriteQueueRef.current.then(task);
-    captureJournalWriteQueueRef.current = next.catch((error) => {
-      console.warn('[Pluto] Capture journal write failed:', error);
-      warnCaptureDurability();
-    });
-    return captureJournalWriteQueueRef.current;
-  };
 
   const appendCaptureJournalBlob = async ({
     meetingId,
@@ -579,7 +573,27 @@ export const AudioManager = ({
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
       startTimeRef.current = Date.now();
-      captureJournalWriteQueueRef.current = Promise.resolve();
+      captureActivitySessionRef.current = createCaptureActivitySession({
+        producer: {
+          clock: {
+            kind: 'meeting_relative_seconds',
+            origin: 'recording_start',
+          },
+          thresholds: {
+            rms: TRANSCRIPTION_TUNING.speaking.rmsThreshold,
+            dominanceRatio: TRANSCRIPTION_TUNING.speaking.ratio,
+            minimumSwitchIntervalMs:
+              TRANSCRIPTION_TUNING.speaking.minIntervalMs,
+          },
+          algorithmVersion: 'speaker_activity_v1',
+        },
+        persistSnapshot: async (activityEvidence) => {
+          await window.ipcRenderer.invoke(
+            'AUDIO_CAPTURE_JOURNAL_ACTIVITY_UPDATE',
+            { meetingId, activityEvidence },
+          );
+        },
+      });
       onRecordingStarted?.(startTimeRef.current);
       recordingEndedAtRef.current = 0;
       stopInFlightRef.current = false;
@@ -950,7 +964,7 @@ export const AudioManager = ({
             }
 
             const meetingIdForChunk = currentMeetingIdRef.current;
-            void enqueueCaptureJournalWrite(async () => {
+            void captureActivitySessionRef.current?.enqueue(async () => {
               if (meetingIdForChunk) {
                 await appendCaptureJournalBlob({
                   meetingId: meetingIdForChunk,
@@ -1034,47 +1048,23 @@ export const AudioManager = ({
     return Math.max(0, (effectiveEndAt - startTimeRef.current) / 1000);
   };
 
-  const flushActiveSpeakerWindow = (endTime: number) => {
-    const active = activeSpeakerWindowRef.current;
-    if (!active) return;
-    if (endTime <= active.startTime) {
-      activeSpeakerWindowRef.current = null;
-      return;
-    }
-    speakerTimelineRef.current.push({
-      startTime: active.startTime,
-      endTime,
-      speaker: active.speaker,
-    });
-    activeSpeakerWindowRef.current = null;
-  };
-
   const recordSpeakerActivity = (
     nextSpeaker: 'Me' | 'Them' | null,
     nowTime: number,
   ) => {
-    const active = activeSpeakerWindowRef.current;
-    if (!active) {
-      if (nextSpeaker) {
+    captureActivitySessionRef.current?.transitionSpeaker(nextSpeaker, nowTime);
+    if (nextSpeaker) {
+      if (activeSpeakerWindowRef.current?.speaker !== nextSpeaker) {
         activeSpeakerWindowRef.current = {
           speaker: nextSpeaker,
           startTime: nowTime,
         };
       }
-      return;
+    } else {
+      activeSpeakerWindowRef.current = null;
     }
-
-    if (nextSpeaker === active.speaker) {
-      return;
-    }
-
-    flushActiveSpeakerWindow(nowTime);
-    if (nextSpeaker) {
-      activeSpeakerWindowRef.current = {
-        speaker: nextSpeaker,
-        startTime: nowTime,
-      };
-    }
+    speakerTimelineRef.current =
+      captureActivitySessionRef.current?.windows() ?? [];
   };
 
   const startSpeakingMonitor = (
@@ -2544,8 +2534,8 @@ export const AudioManager = ({
       cancelAnimationFrame(speakingLoopRef.current);
       speakingLoopRef.current = null;
     }
-    flushActiveSpeakerWindow(getMeetingElapsedSeconds());
     micAnalyserRef.current = null;
+    activeSpeakerWindowRef.current = null;
     lastSpeakerRef.current = null;
     lastSpeakerTsRef.current = 0;
     onSpeakingChange?.(null);
@@ -3347,6 +3337,7 @@ export const AudioManager = ({
     let systemAudioPath = '';
     let mixedAudioPath = '';
     let rebuiltSystemAudioPath = '';
+    let sealedActivityEvidence: CaptureActivityEvidence | null = null;
 
     try {
       // Helper to stop a recorder and get its blob
@@ -3442,6 +3433,14 @@ export const AudioManager = ({
 
       // Cleanup visualization
       stopSpeakingMonitor();
+      const frozenDurationSeconds = Math.max(
+        0,
+        (stopSnapshot.recordingEndedAtMs - stopSnapshot.recordingStartedAtMs) /
+          1000,
+      );
+      await captureActivitySessionRef.current?.closeAt(frozenDurationSeconds);
+      speakerTimelineRef.current =
+        captureActivitySessionRef.current?.windows() ?? [];
       if (audioContextRef.current) {
         audioContextRef.current.close();
         audioContextRef.current = null;
@@ -3457,16 +3456,19 @@ export const AudioManager = ({
       setIsRecording(false);
 
       const journalSealOutcome = await sealCaptureJournalBeforeFinalization({
-        drainAppends: async () => captureJournalWriteQueueRef.current,
+        drainAppends: async () =>
+          await captureActivitySessionRef.current?.drain(),
+        hasWriteFailure: () =>
+          captureActivitySessionRef.current?.hasDurabilityFailure() ?? true,
         seal: async () => {
-          await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_SEAL', {
+          return await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_SEAL', {
             meetingId: stopSnapshot.meetingId,
             endedAtMs: stopSnapshot.recordingEndedAtMs,
           });
         },
       });
 
-      if (journalSealOutcome === 'recovery_required') {
+      if (journalSealOutcome.status === 'recovery_required') {
         console.warn(
           '[Pluto] Capture journal seal failed; preserving recovery state',
         );
@@ -3492,6 +3494,7 @@ export const AudioManager = ({
         alert('Recording saved - processing needs recovery');
         return;
       }
+      sealedActivityEvidence = journalSealOutcome.activityEvidence;
 
       // Process final chunks only after the journal is durably sealed.
       for (const [
@@ -4566,7 +4569,7 @@ export const AudioManager = ({
         mixAudioPath: mixedAudioPath,
         systemAudioPath,
         provisionalSegments: newTranscription,
-        activityWindows: speakerTimelineRef.current,
+        activityWindows: journalSealOutcome.activityEvidence.windows,
         transcribe: async (audioPath, options) =>
           await window.ipcRenderer.invoke(
             'WHISPER_TRANSCRIBE',
@@ -4587,10 +4590,6 @@ export const AudioManager = ({
         ...(integrityValidation.segments as TranscriptionSegment[]),
       );
 
-      const storedActivityEvidence = buildStoredTranscriptActivityEvidence(
-        speakerTimelineRef.current,
-      );
-
       if (integrityValidation.status === 'needs_attention') {
         const recoverableMeeting = {
           id: stopSnapshot.meetingId,
@@ -4607,8 +4606,8 @@ export const AudioManager = ({
             ...integrityValidation.evidence,
             reasons: integrityValidation.reasons,
             attempts: integrityValidation.attempts,
-            activityEvidenceSource: storedActivityEvidence.source,
-            activityEvidence: storedActivityEvidence,
+            activityEvidenceSource: 'capture_activity_v2',
+            activityEvidence: journalSealOutcome.activityEvidence,
           }),
           transcript_validated_at: null,
           transcript_json: JSON.stringify(
@@ -4663,8 +4662,8 @@ export const AudioManager = ({
           ...integrityValidation.evidence,
           reasons: integrityValidation.reasons,
           attempts: integrityValidation.attempts,
-          activityEvidenceSource: storedActivityEvidence.source,
-          activityEvidence: storedActivityEvidence,
+          activityEvidenceSource: 'capture_activity_v2',
+          activityEvidence: journalSealOutcome.activityEvidence,
         }),
         transcript_validated_at: new Date().toISOString(),
         transcript_json: JSON.stringify(
@@ -4821,8 +4820,8 @@ export const AudioManager = ({
           ...integrityValidation.evidence,
           reasons: integrityValidation.reasons,
           attempts: integrityValidation.attempts,
-          activityEvidenceSource: storedActivityEvidence.source,
-          activityEvidence: storedActivityEvidence,
+          activityEvidenceSource: 'capture_activity_v2',
+          activityEvidence: journalSealOutcome.activityEvidence,
         }),
         transcript_validated_at:
           integrityValidation.status === 'validated'
@@ -4972,6 +4971,12 @@ export const AudioManager = ({
             transcript_status: 'needs_attention',
             transcript_integrity_json: JSON.stringify({
               reasons: ['required_source_failed'],
+              ...(sealedActivityEvidence
+                ? {
+                    activityEvidenceSource: 'capture_activity_v2',
+                    activityEvidence: sealedActivityEvidence,
+                  }
+                : {}),
             }),
             transcript_validated_at: null,
             transcript_json: JSON.stringify([]),

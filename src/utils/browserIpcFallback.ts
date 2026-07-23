@@ -191,6 +191,9 @@ const invokeFallback: IpcRendererLike['invoke'] = async <T = unknown>(
   let result: unknown;
 
   switch (channel) {
+    case 'AUDIO_CAPTURE_JOURNAL_ACTIVITY_UPDATE':
+      result = args[0];
+      break;
     case 'GET_SETTING':
       result = getSetting(args[0]);
       break;

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createCaptureActivitySession } from '../../src/utils/captureActivitySession';
 import { sealCaptureJournalBeforeFinalization } from '../../src/utils/recordingFinalization';
 import type { CaptureActivityProducer } from '../../src/utils/transcriptActivityEvidence';
+import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 const producer: CaptureActivityProducer = {
   clock: {
@@ -103,6 +104,25 @@ describe('capture activity session', () => {
     expect(persistSnapshot).toHaveBeenLastCalledWith(
       expect.objectContaining({
         windows: [{ startTime: 5, endTime: 8.25, speaker: 'Them' }],
+      }),
+    );
+    expect(session.hasDurabilityFailure()).toBe(false);
+  });
+
+  it('closes activity at a null transition without extending it to stop', async () => {
+    const persistSnapshot = vi.fn(async () => {});
+    const session = createCaptureActivitySession({ producer, persistSnapshot });
+
+    session.transitionSpeaker('Me', 1);
+    session.transitionSpeaker(null, 2);
+    await session.closeAt(10);
+
+    expect(session.windows()).toEqual([
+      { startTime: 1, endTime: 2, speaker: 'Me' },
+    ]);
+    expect(persistSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        windows: [{ startTime: 1, endTime: 2, speaker: 'Me' }],
       }),
     );
     expect(session.hasDurabilityFailure()).toBe(false);
@@ -276,5 +296,61 @@ describe('capture activity session', () => {
       status: 'recovery_required',
       reason: 'capture_journal_write_failed',
     });
+  });
+
+  it('hands the exact sealed evidence to validation and persistence after mutable windows change', async () => {
+    const mutableWindows = [
+      { startTime: 1, endTime: 2, speaker: 'Me' as const },
+    ];
+    const sealedActivityEvidence = await buildCaptureActivityEvidence(
+      mutableWindows,
+      producer,
+    );
+    const validate = vi.fn(async () => {});
+    const persistIntegrity = vi.fn(async () => {});
+    const persistProcessingError = vi.fn(async () => {});
+
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: async () => {},
+      hasWriteFailure: () => false,
+      seal: async () => ({ activityEvidence: sealedActivityEvidence }),
+    });
+    expect(outcome.status).toBe('sealed');
+    if (outcome.status !== 'sealed') return;
+    const finalActivityEvidence = outcome.activityEvidence;
+
+    mutableWindows.push({ startTime: 3, endTime: 4, speaker: 'Them' });
+    await validate(finalActivityEvidence.windows);
+    await persistIntegrity({
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: finalActivityEvidence,
+    });
+    await persistProcessingError({
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: finalActivityEvidence,
+    });
+
+    expect(validate).toHaveBeenCalledWith(finalActivityEvidence.windows);
+    expect(validate.mock.calls[0]?.[0]).toBe(finalActivityEvidence.windows);
+    expect(persistIntegrity).toHaveBeenCalledWith({
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: finalActivityEvidence,
+    });
+    expect(persistIntegrity.mock.calls[0]?.[0].activityEvidence).toBe(
+      finalActivityEvidence,
+    );
+    expect(persistProcessingError.mock.calls[0]?.[0]).toEqual({
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: finalActivityEvidence,
+    });
+    expect(persistProcessingError.mock.calls[0]?.[0].activityEvidence).toBe(
+      finalActivityEvidence,
+    );
+    expect(finalActivityEvidence.digestSha256).toBe(
+      sealedActivityEvidence.digestSha256,
+    );
+    expect(finalActivityEvidence.windows).toEqual([
+      { startTime: 1, endTime: 2, speaker: 'Me' },
+    ]);
   });
 });
