@@ -10,6 +10,9 @@ export type RecordingStopSnapshot = {
   recordingEndedAtMs: number;
 };
 
+export const canDeleteMeeting = (finalizationStatus?: string) =>
+  finalizationStatus !== 'recovery_required';
+
 export type SpeakerAttributionRetryPlan = {
   shouldRetry: boolean;
   reason:
@@ -148,6 +151,62 @@ export const buildMeetingTiming = ({
     endedAtIso: new Date(safeEnd).toISOString(),
     durationSeconds: Math.floor((safeEnd - safeStart) / 1000),
   };
+};
+
+export const buildRecoverableSealFailureMeeting = ({
+  snapshot,
+  title,
+  userNotes,
+  endReason,
+}: {
+  snapshot: RecordingStopSnapshot;
+  title?: string;
+  userNotes?: string;
+  endReason?: string;
+}) => {
+  const timing = buildMeetingTiming(snapshot);
+  return {
+    id: snapshot.meetingId,
+    title: title?.trim() || 'Meeting',
+    meeting_type: 'Recording',
+    started_at: timing.startedAtIso,
+    ended_at: timing.endedAtIso,
+    duration_seconds: timing.durationSeconds,
+    audio_path: null,
+    system_audio_path: null,
+    mixed_audio_path: null,
+    transcript_status: 'needs_attention' as const,
+    transcript_integrity_json: JSON.stringify({
+      reasons: ['journal_seal_failed'],
+    }),
+    transcript_validated_at: null,
+    transcript_json: JSON.stringify([]),
+    user_notes: userNotes || '',
+    enhanced_notes: null,
+    analysis_json: null,
+    value_signals_json: null,
+    finalization_status: 'recovery_required' as const,
+    finalization_error_category: 'journal_seal_failed' as const,
+    folder_id: null,
+    is_favorite: false,
+    end_reason: endReason || 'journal_seal_failed',
+  };
+};
+
+export const sealCaptureJournalBeforeFinalization = async ({
+  drainAppends,
+  seal,
+}: {
+  drainAppends: () => Promise<void>;
+  seal: () => Promise<void>;
+}): Promise<'sealed' | 'recovery_required'> => {
+  await drainAppends();
+  try {
+    await seal();
+    return 'sealed';
+  } catch {
+    return 'recovery_required';
+  }
 };
 
 type ResolveFinalizationCleanupPathsArgs = {

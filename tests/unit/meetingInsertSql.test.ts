@@ -24,6 +24,8 @@ describe('MEETING_INSERT_SQL', () => {
     expect(columns).toContain('system_audio_path');
     expect(columns).toContain('mixed_audio_path');
     expect(columns).toContain('transcript_validated_at');
+    expect(columns).toContain('finalization_status');
+    expect(columns).toContain('finalization_error_category');
     expect(MEETING_INSERT_SQL).toContain('COALESCE(?, CURRENT_TIMESTAMP)');
   });
 });

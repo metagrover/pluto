@@ -13,6 +13,8 @@ import {
   parseIntegrityRecord,
   readRetryLease,
 } from '../src/services/transcriptValidationRetryLease';
+import type { MeetingFinalizationStatus } from '../src/types';
+import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import type { TrustStatus } from '../src/utils/trustStatus';
 import type {
@@ -110,6 +112,8 @@ export interface PersistedMeeting {
   system_audio_path?: string | null;
   mixed_audio_path?: string | null;
   transcript_validated_at?: string | null;
+  finalization_status?: MeetingFinalizationStatus | null;
+  finalization_error_category?: 'journal_seal_failed' | null;
   created_at?: string | null;
 }
 
@@ -192,6 +196,8 @@ const initDb = () => {
         system_audio_path TEXT,
         mixed_audio_path TEXT,
         transcript_validated_at DATETIME,
+        finalization_status TEXT NOT NULL DEFAULT 'finalized',
+        finalization_error_category TEXT,
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -550,6 +556,20 @@ const initDb = () => {
         'ALTER TABLE meetings ADD COLUMN transcript_validated_at DATETIME',
       );
       console.log('[DB] Added meetings.transcript_validated_at column');
+    }
+    if (!meetingColumns.some((col) => col.name === 'finalization_status')) {
+      db.exec(
+        "ALTER TABLE meetings ADD COLUMN finalization_status TEXT NOT NULL DEFAULT 'finalized'",
+      );
+      console.log('[DB] Added meetings.finalization_status column');
+    }
+    if (
+      !meetingColumns.some((col) => col.name === 'finalization_error_category')
+    ) {
+      db.exec(
+        'ALTER TABLE meetings ADD COLUMN finalization_error_category TEXT',
+      );
+      console.log('[DB] Added meetings.finalization_error_category column');
     }
   } catch (e) {
     console.warn('[DB] Optional column migration failed:', e);
@@ -1385,6 +1405,8 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
     meeting.system_audio_path || null,
     meeting.mixed_audio_path || null,
     meeting.transcript_validated_at || null,
+    meeting.finalization_status || 'finalized',
+    meeting.finalization_error_category || null,
     meeting.created_at,
   );
 
@@ -1727,6 +1749,10 @@ export const deleteMeeting = (id: string | number) => {
   if (!meeting) {
     console.warn(`[DB] deleteMeeting: Meeting not found for id: ${safeId}`);
     return;
+  }
+
+  if (!canDeleteMeeting(meeting.finalization_status ?? undefined)) {
+    throw new Error('Meeting recovery must complete before deletion');
   }
 
   // 1. Delete audio file if it exists

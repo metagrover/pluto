@@ -22,8 +22,10 @@ import { resolveProductionDiarizationProvider } from '../utils/diarizationProvid
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
+  buildRecoverableSealFailureMeeting,
   buildSpeakerAttributionRetryPlan,
   resolveFinalizationCleanupPaths,
+  sealCaptureJournalBeforeFinalization,
 } from '../utils/recordingFinalization';
 import { getSessionFallbackDecision } from '../utils/sessionTranscriptionFallback';
 import {
@@ -3454,7 +3456,44 @@ export const AudioManager = ({
       isRecordingRef.current = false;
       setIsRecording(false);
 
-      // Process final chunks
+      const journalSealOutcome = await sealCaptureJournalBeforeFinalization({
+        drainAppends: async () => captureJournalWriteQueueRef.current,
+        seal: async () => {
+          await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_SEAL', {
+            meetingId: stopSnapshot.meetingId,
+            endedAtMs: stopSnapshot.recordingEndedAtMs,
+          });
+        },
+      });
+
+      if (journalSealOutcome === 'recovery_required') {
+        console.warn(
+          '[Pluto] Capture journal seal failed; preserving recovery state',
+        );
+        warnCaptureDurability();
+        pendingMicChunksRef.current.clear();
+        pendingSystemChunksRef.current.clear();
+        zeroMicChunkStreakRef.current = 0;
+        const degradedMeeting = buildRecoverableSealFailureMeeting({
+          snapshot: stopSnapshot,
+          title: userTitle,
+          userNotes,
+          endReason,
+        });
+        try {
+          await window.ipcRenderer.invoke('SAVE_MEETING', {
+            ...degradedMeeting,
+            participants,
+          });
+        } catch {
+          throw new Error('Failed to preserve recording recovery state');
+        }
+        onSessionComplete?.(degradedMeeting.id);
+        alert('Recording saved - processing needs recovery');
+        return;
+      }
+
+      // Process final chunks only after the journal is durably sealed.
       for (const [
         chunkIndex,
         micPending,
@@ -3475,21 +3514,9 @@ export const AudioManager = ({
       pendingSystemChunksRef.current.clear();
       zeroMicChunkStreakRef.current = 0;
 
-      await captureJournalWriteQueueRef.current;
-
       // Wait for queue
       await processingQueueRef.current;
       if (!currentMeetingIdRef.current) return; // Session aborted or never started
-
-      try {
-        await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_SEAL', {
-          meetingId: currentMeetingIdRef.current,
-          endedAtMs: stopSnapshot.recordingEndedAtMs,
-        });
-      } catch (journalErr) {
-        console.warn('[Pluto] Failed to seal capture journal:', journalErr);
-        warnCaptureDurability();
-      }
 
       // Store a single full audio file for playback
       const primaryBlob = micBlob; // Default to mic
@@ -4605,6 +4632,8 @@ export const AudioManager = ({
           folder_id: null,
           is_favorite: false,
           end_reason: endReason || 'manual',
+          finalization_status: 'finalized',
+          finalization_error_category: null,
         };
         await window.ipcRenderer.invoke('SAVE_MEETING', recoverableMeeting);
         onSessionComplete?.(recoverableMeeting.id);
@@ -4829,6 +4858,8 @@ export const AudioManager = ({
         folder_id: null,
         is_favorite: false,
         end_reason: endReason || 'manual',
+        finalization_status: 'finalized',
+        finalization_error_category: null,
       };
 
       await window.ipcRenderer.invoke('SAVE_MEETING', meetingData);
@@ -4952,6 +4983,8 @@ export const AudioManager = ({
             folder_id: null,
             is_favorite: false,
             end_reason: endReason || 'processing_error',
+            finalization_status: 'finalized',
+            finalization_error_category: null,
           });
           onSessionComplete?.(currentMeetingIdRef.current);
         } catch {
