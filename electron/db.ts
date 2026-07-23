@@ -14,6 +14,7 @@ import {
   readRetryLease,
 } from '../src/services/transcriptValidationRetryLease';
 import type { MeetingFinalizationStatus } from '../src/types';
+import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import type { TrustStatus } from '../src/utils/trustStatus';
 import type {
@@ -1748,6 +1749,10 @@ export const deleteMeeting = (id: string | number) => {
   if (!meeting) {
     console.warn(`[DB] deleteMeeting: Meeting not found for id: ${safeId}`);
     return;
+  }
+
+  if (!canDeleteMeeting(meeting.finalization_status ?? undefined)) {
+    throw new Error('Meeting recovery must complete before deletion');
   }
 
   // 1. Delete audio file if it exists

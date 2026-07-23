@@ -10,6 +10,9 @@ export type RecordingStopSnapshot = {
   recordingEndedAtMs: number;
 };
 
+export const canDeleteMeeting = (finalizationStatus?: string) =>
+  finalizationStatus !== 'recovery_required';
+
 export type SpeakerAttributionRetryPlan = {
   shouldRetry: boolean;
   reason:
