@@ -3,6 +3,11 @@ import { constants as fsConstants } from 'node:fs';
 import { access, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import {
+  type CaptureActivityEvidence,
+  parseCaptureActivityEvidence,
+} from '../src/utils/transcriptActivityEvidence.ts';
+import type { TranscriptIntegrityReason } from '../src/utils/transcriptIntegrity.ts';
 import { buildTranscriptJsonPayload } from '../src/utils/transcriptSchema.ts';
 import type {
   CaptureJournalEntry,
@@ -37,7 +42,20 @@ type RecoveryMeetingIntegrity = {
   recovered_at: string;
   recovered_sources: Record<CaptureJournalSource, RecoverySourceSummary>;
   recovery_gaps: RecoveryGap[];
+  activityEvidenceSource:
+    | 'capture_activity_v2'
+    | 'legacy_provisional_segments'
+    | 'capture_activity_missing'
+    | 'capture_activity_corrupt'
+    | 'capture_activity_unsupported';
+  activityEvidence?: CaptureActivityEvidence;
+  reasons: TranscriptIntegrityReason[];
 };
+
+type RecoveryActivityEvidence = Pick<
+  RecoveryMeetingIntegrity,
+  'activityEvidenceSource' | 'activityEvidence' | 'reasons'
+>;
 
 type TimedSegment = {
   path: string;
@@ -88,6 +106,74 @@ const listCaptureJournalMeetingIds = async (rootDir: string) => {
 
 const computeChecksum = (data: Buffer) =>
   createHash('sha256').update(data).digest('hex');
+
+const readManifestForRecovery = async (rootDir: string, meetingId: string) => {
+  const manifestPath = join(
+    rootDir,
+    meetingId,
+    'capture-journal',
+    'manifest.json',
+  );
+  const rawManifest = JSON.parse(
+    await readFile(manifestPath, 'utf8'),
+  ) as CaptureJournalManifest;
+
+  try {
+    return await readCaptureJournalManifest(rootDir, meetingId);
+  } catch (error) {
+    if (
+      rawManifest.schemaVersion !== 2 ||
+      rawManifest.activityEvidence === undefined
+    ) {
+      throw error;
+    }
+    const parsed = await parseCaptureActivityEvidence(
+      rawManifest.activityEvidence,
+    );
+    if (parsed.ok || (error as Error).message !== parsed.reason) throw error;
+
+    // Manifest validation reaches activity evidence only after validating the
+    // journal identity, paths, and entry structure. Recovery may therefore
+    // salvage audio while classifying an invalid evidence envelope below.
+    return rawManifest;
+  }
+};
+
+const getRecoveryActivityEvidence = async (
+  manifest: CaptureJournalManifest,
+): Promise<RecoveryActivityEvidence> => {
+  if (manifest.schemaVersion === 1) {
+    return {
+      activityEvidenceSource: 'legacy_provisional_segments',
+      reasons: ['capture_activity_missing'],
+    };
+  }
+  if (manifest.activityEvidence === undefined) {
+    return {
+      activityEvidenceSource: 'capture_activity_missing',
+      reasons: ['capture_activity_missing'],
+    };
+  }
+
+  const parsed = await parseCaptureActivityEvidence(manifest.activityEvidence);
+  if (parsed.ok) {
+    return {
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: parsed.evidence,
+      reasons: [],
+    };
+  }
+  if (parsed.reason === 'unsupported') {
+    return {
+      activityEvidenceSource: 'capture_activity_unsupported',
+      reasons: ['capture_activity_unsupported'],
+    };
+  }
+  return {
+    activityEvidenceSource: 'capture_activity_corrupt',
+    reasons: ['capture_activity_corrupt'],
+  };
+};
 
 const buildSourceSegments = async (
   rootDir: string,
@@ -208,7 +294,7 @@ export const recoverInterruptedCaptureJournals = async (
   for (const meetingId of meetingIds) {
     let manifest: CaptureJournalManifest;
     try {
-      manifest = await readCaptureJournalManifest(rootDir, meetingId);
+      manifest = await readManifestForRecovery(rootDir, meetingId);
     } catch {
       result.skippedInvalidManifestCount += 1;
       continue;
@@ -236,6 +322,7 @@ export const recoverInterruptedCaptureJournals = async (
         buildSourceSegments(rootDir, micEntries),
         buildSourceSegments(rootDir, systemEntries),
       ]);
+      const activityEvidence = await getRecoveryActivityEvidence(manifest);
 
       const micAudioPath =
         micRecovery.segments.length > 0
@@ -278,6 +365,7 @@ export const recoverInterruptedCaptureJournals = async (
           },
         },
         recovery_gaps: [...micRecovery.gaps, ...systemRecovery.gaps],
+        ...activityEvidence,
       };
 
       await deps.saveMeeting(
