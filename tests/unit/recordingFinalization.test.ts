@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
+
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -97,28 +99,85 @@ describe('recording finalization helpers', () => {
 
   it('drains journal appends before requesting a seal', async () => {
     const events: string[] = [];
+    const activityEvidence = await buildCaptureActivityEvidence([], {
+      clock: {
+        kind: 'meeting_relative_seconds',
+        origin: 'recording_start',
+      },
+      thresholds: {
+        rms: 0.01,
+        dominanceRatio: 1.5,
+        minimumSwitchIntervalMs: 250,
+      },
+      algorithmVersion: 'speaker_activity_v1',
+    });
     const outcome = await sealCaptureJournalBeforeFinalization({
       drainAppends: async () => {
         events.push('drain');
       },
+      hasWriteFailure: () => false,
       seal: async () => {
         events.push('seal');
+        return { activityEvidence };
       },
     });
 
     expect(events).toEqual(['drain', 'seal']);
-    expect(outcome).toBe('sealed');
+    expect(outcome).toEqual({ status: 'sealed', activityEvidence });
   });
 
-  it('reduces sensitive seal errors to a recovery-required outcome', async () => {
+  it('does not seal after a prior write failure', async () => {
+    let sealCalls = 0;
     const outcome = await sealCaptureJournalBeforeFinalization({
       drainAppends: async () => {},
+      hasWriteFailure: () => true,
       seal: async () => {
+        sealCalls += 1;
+        return {};
+      },
+    });
+
+    expect(sealCalls).toBe(0);
+    expect(outcome).toEqual({
+      status: 'recovery_required',
+      reason: 'capture_journal_write_failed',
+    });
+  });
+
+  it('reduces sensitive seal errors to a content-free recovery category', async () => {
+    let sealCalls = 0;
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: async () => {},
+      hasWriteFailure: () => false,
+      seal: async () => {
+        sealCalls += 1;
         throw new Error('/private/audio: transcript words');
       },
     });
 
-    expect(outcome).toBe('recovery_required');
+    expect(sealCalls).toBe(1);
+    expect(outcome).toEqual({
+      status: 'recovery_required',
+      reason: 'capture_journal_seal_failed',
+    });
+  });
+
+  it('rejects a sealed response without verified activity evidence', async () => {
+    let sealCalls = 0;
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: async () => {},
+      hasWriteFailure: () => false,
+      seal: async () => {
+        sealCalls += 1;
+        return {};
+      },
+    });
+
+    expect(sealCalls).toBe(1);
+    expect(outcome).toEqual({
+      status: 'recovery_required',
+      reason: 'capture_journal_seal_failed',
+    });
   });
 
   it('cleans up superseded system audio artifacts after rebuild fallback', () => {

@@ -1,4 +1,8 @@
 import {
+  type CaptureActivityEvidence,
+  verifyCaptureActivityEvidence,
+} from './transcriptActivityEvidence.ts';
+import {
   type ResolvedBackendOptions,
   resolveBackendOptions,
 } from './transcriptionBackendConfig.ts';
@@ -193,19 +197,49 @@ export const buildRecoverableSealFailureMeeting = ({
   };
 };
 
+export type JournalSealResult =
+  | { status: 'sealed'; activityEvidence: CaptureActivityEvidence }
+  | {
+      status: 'recovery_required';
+      reason: 'capture_journal_write_failed' | 'capture_journal_seal_failed';
+    };
+
 export const sealCaptureJournalBeforeFinalization = async ({
   drainAppends,
+  hasWriteFailure,
   seal,
 }: {
   drainAppends: () => Promise<void>;
-  seal: () => Promise<void>;
-}): Promise<'sealed' | 'recovery_required'> => {
-  await drainAppends();
+  hasWriteFailure: () => boolean;
+  seal: () => Promise<{ activityEvidence?: CaptureActivityEvidence }>;
+}): Promise<JournalSealResult> => {
   try {
-    await seal();
-    return 'sealed';
+    await drainAppends();
   } catch {
-    return 'recovery_required';
+    return {
+      status: 'recovery_required',
+      reason: 'capture_journal_write_failed',
+    };
+  }
+
+  if (hasWriteFailure()) {
+    return {
+      status: 'recovery_required',
+      reason: 'capture_journal_write_failed',
+    };
+  }
+
+  try {
+    const sealed = await seal();
+    const activityEvidence = await verifyCaptureActivityEvidence(
+      sealed.activityEvidence,
+    );
+    return { status: 'sealed', activityEvidence };
+  } catch {
+    return {
+      status: 'recovery_required',
+      reason: 'capture_journal_seal_failed',
+    };
   }
 };
 
