@@ -8,6 +8,10 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import {
+  type CaptureActivityEvidence,
+  parseCaptureActivityEvidence,
+} from '../src/utils/transcriptActivityEvidence.ts';
 
 export type CaptureJournalSource = 'mic' | 'system';
 export type CaptureJournalLifecycleState = 'recording' | 'sealed';
@@ -23,8 +27,7 @@ export type CaptureJournalEntry = {
   relativePath: string;
 };
 
-export type CaptureJournalManifest = {
-  schemaVersion: 1;
+type CaptureJournalManifestBase = {
   meetingId: string;
   artifactRootRelativePath: string;
   manifestRelativePath: string;
@@ -33,6 +36,19 @@ export type CaptureJournalManifest = {
   endedAtMs: number | null;
   entries: CaptureJournalEntry[];
 };
+
+export type CaptureJournalManifestV1 = CaptureJournalManifestBase & {
+  schemaVersion: 1;
+};
+
+export type CaptureJournalManifestV2 = CaptureJournalManifestBase & {
+  schemaVersion: 2;
+  activityEvidence?: CaptureActivityEvidence;
+};
+
+export type CaptureJournalManifest =
+  | CaptureJournalManifestV1
+  | CaptureJournalManifestV2;
 
 type CreateCaptureJournalArgs = {
   meetingId: string;
@@ -52,6 +68,11 @@ type AppendCaptureJournalChunkArgs = {
 type SealCaptureJournalArgs = {
   meetingId: string;
   endedAtMs: number;
+};
+
+type UpdateCaptureJournalActivityEvidenceArgs = {
+  meetingId: string;
+  activityEvidence: CaptureActivityEvidence;
 };
 
 export type CaptureJournalDurability = {
@@ -120,15 +141,15 @@ const invalidManifest = (field: string): never => {
   throw new Error(`Invalid capture journal manifest ${field}`);
 };
 
-const validateCaptureJournalManifest = (
+const validateCaptureJournalManifest = async (
   value: unknown,
   requestedMeetingId: string,
-): CaptureJournalManifest => {
+): Promise<CaptureJournalManifest> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return invalidManifest('shape');
   }
   const manifest = value as Record<string, unknown>;
-  if (manifest.schemaVersion !== 1) {
+  if (manifest.schemaVersion !== 1 && manifest.schemaVersion !== 2) {
     throw new Error(
       `Unsupported capture journal schema version: ${String(manifest.schemaVersion)}`,
     );
@@ -177,6 +198,20 @@ const validateCaptureJournalManifest = (
       return invalidManifest('entry path');
     }
   }
+
+  if (manifest.schemaVersion === 2) {
+    if (manifest.activityEvidence === undefined) {
+      if (manifest.lifecycleState === 'sealed') {
+        throw new Error('capture_activity_missing');
+      }
+    } else {
+      const parsed = await parseCaptureActivityEvidence(
+        manifest.activityEvidence,
+      );
+      if (!parsed.ok) throw new Error(parsed.reason);
+      manifest.activityEvidence = parsed.evidence;
+    }
+  }
   return value as CaptureJournalManifest;
 };
 
@@ -216,7 +251,10 @@ export const readCaptureJournalManifest = async (
   const normalizedMeetingId = normalizeMeetingId(meetingId);
   const manifestPath = getManifestPath(rootDir, normalizedMeetingId);
   const raw = await readFile(manifestPath, 'utf8');
-  return validateCaptureJournalManifest(JSON.parse(raw), normalizedMeetingId);
+  return await validateCaptureJournalManifest(
+    JSON.parse(raw),
+    normalizedMeetingId,
+  );
 };
 
 export const createCaptureJournal = async (
@@ -228,7 +266,6 @@ export const createCaptureJournal = async (
   const artifactRootRelativePath =
     getArtifactRootRelativePath(normalizedMeetingId);
   const artifactRootPath = getArtifactRootPath(rootDir, normalizedMeetingId);
-  await mkdir(join(artifactRootPath, 'chunks'), { recursive: true });
 
   try {
     return await readCaptureJournalManifest(rootDir, normalizedMeetingId);
@@ -236,8 +273,10 @@ export const createCaptureJournal = async (
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 
-  const manifest: CaptureJournalManifest = {
-    schemaVersion: 1,
+  await mkdir(join(artifactRootPath, 'chunks'), { recursive: true });
+
+  const manifest: CaptureJournalManifestV2 = {
+    schemaVersion: 2,
     meetingId: normalizedMeetingId,
     artifactRootRelativePath,
     manifestRelativePath: `${artifactRootRelativePath}/${MANIFEST_FILE}`,
@@ -251,7 +290,34 @@ export const createCaptureJournal = async (
   return manifest;
 };
 
-export const appendCaptureJournalChunk = async (
+const journalMutationTails = new Map<string, Promise<void>>();
+
+const serializeJournalMutation = async <T>(
+  rootDir: string,
+  meetingId: string,
+  mutation: () => Promise<T>,
+): Promise<T> => {
+  const key = getManifestPath(rootDir, normalizeMeetingId(meetingId));
+  const previous = journalMutationTails.get(key) ?? Promise.resolve();
+  let release: () => void = () => {};
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  journalMutationTails.set(key, tail);
+
+  await previous;
+  try {
+    return await mutation();
+  } finally {
+    release();
+    if (journalMutationTails.get(key) === tail) {
+      journalMutationTails.delete(key);
+    }
+  }
+};
+
+const appendCaptureJournalChunkUnlocked = async (
   rootDir: string,
   args: AppendCaptureJournalChunkArgs,
   durability: CaptureJournalDurability = defaultDurability,
@@ -265,6 +331,10 @@ export const appendCaptureJournalChunk = async (
     },
     durability,
   );
+
+  if (manifest.schemaVersion === 1) {
+    throw new Error('Cannot mutate legacy capture journal');
+  }
 
   if (manifest.lifecycleState === 'sealed') {
     throw new Error(`Capture journal for ${meetingId} is already sealed`);
@@ -341,11 +411,79 @@ export const appendCaptureJournalChunk = async (
   return nextManifest;
 };
 
-export const sealCaptureJournal = async (
+export const appendCaptureJournalChunk = async (
+  rootDir: string,
+  args: AppendCaptureJournalChunkArgs,
+  durability: CaptureJournalDurability = defaultDurability,
+): Promise<CaptureJournalManifest> =>
+  serializeJournalMutation(rootDir, args.meetingId, () =>
+    appendCaptureJournalChunkUnlocked(rootDir, args, durability),
+  );
+
+const getFinalActivityWindowEnd = (evidence: CaptureActivityEvidence) =>
+  evidence.windows.reduce(
+    (latest, window) => Math.max(latest, window.endTime),
+    0,
+  );
+
+const updateCaptureJournalActivityEvidenceUnlocked = async (
+  rootDir: string,
+  args: UpdateCaptureJournalActivityEvidenceArgs,
+  durability: CaptureJournalDurability = defaultDurability,
+): Promise<CaptureJournalManifestV2> => {
+  const meetingId = normalizeMeetingId(args.meetingId);
+  const manifest = await createCaptureJournal(
+    rootDir,
+    { meetingId, startedAtMs: 0 },
+    durability,
+  );
+  if (manifest.schemaVersion === 1) {
+    throw new Error('Cannot mutate legacy capture journal');
+  }
+  if (manifest.lifecycleState === 'sealed') {
+    throw new Error(`Capture journal for ${meetingId} is already sealed`);
+  }
+
+  const parsed = await parseCaptureActivityEvidence(args.activityEvidence);
+  if (!parsed.ok) throw new Error(parsed.reason);
+  const activityEvidence = parsed.evidence;
+  const stored = manifest.activityEvidence;
+  if (stored) {
+    if (stored.digestSha256 === activityEvidence.digestSha256) return manifest;
+    if (
+      getFinalActivityWindowEnd(activityEvidence) <
+        getFinalActivityWindowEnd(stored) ||
+      activityEvidence.windows.length < stored.windows.length
+    ) {
+      throw new Error('Older activity evidence snapshot');
+    }
+    if (activityEvidence.windows.length === stored.windows.length) {
+      throw new Error('Conflicting activity evidence snapshot');
+    }
+  }
+
+  const nextManifest: CaptureJournalManifestV2 = {
+    ...manifest,
+    activityEvidence,
+  };
+  await writeManifest(rootDir, nextManifest, durability);
+  return nextManifest;
+};
+
+export const updateCaptureJournalActivityEvidence = async (
+  rootDir: string,
+  args: UpdateCaptureJournalActivityEvidenceArgs,
+  durability: CaptureJournalDurability = defaultDurability,
+): Promise<CaptureJournalManifestV2> =>
+  serializeJournalMutation(rootDir, args.meetingId, () =>
+    updateCaptureJournalActivityEvidenceUnlocked(rootDir, args, durability),
+  );
+
+const sealCaptureJournalUnlocked = async (
   rootDir: string,
   { meetingId, endedAtMs }: SealCaptureJournalArgs,
   durability: CaptureJournalDurability = defaultDurability,
-): Promise<CaptureJournalManifest> => {
+): Promise<CaptureJournalManifestV2> => {
   const manifest = await createCaptureJournal(
     rootDir,
     {
@@ -359,6 +497,15 @@ export const sealCaptureJournal = async (
     normalizeTimestampMs(endedAtMs),
   );
 
+  if (manifest.schemaVersion === 1) {
+    throw new Error('Cannot seal legacy capture journal');
+  }
+  if (!manifest.activityEvidence) throw new Error('capture_activity_missing');
+  const parsedEvidence = await parseCaptureActivityEvidence(
+    manifest.activityEvidence,
+  );
+  if (!parsedEvidence.ok) throw new Error(parsedEvidence.reason);
+
   if (
     manifest.lifecycleState === 'sealed' &&
     manifest.endedAtMs === normalizedEndedAtMs
@@ -366,11 +513,25 @@ export const sealCaptureJournal = async (
     return manifest;
   }
 
-  const nextManifest: CaptureJournalManifest = {
+  const nextManifest: CaptureJournalManifestV2 = {
     ...manifest,
+    activityEvidence: parsedEvidence.evidence,
     lifecycleState: 'sealed',
     endedAtMs: normalizedEndedAtMs,
   };
   await writeManifest(rootDir, nextManifest, durability);
-  return nextManifest;
+  const durableManifest = await readCaptureJournalManifest(rootDir, meetingId);
+  if (durableManifest.schemaVersion !== 2) {
+    throw new Error('Cannot seal legacy capture journal');
+  }
+  return durableManifest;
 };
+
+export const sealCaptureJournal = async (
+  rootDir: string,
+  args: SealCaptureJournalArgs,
+  durability: CaptureJournalDurability = defaultDurability,
+): Promise<CaptureJournalManifestV2> =>
+  serializeJournalMutation(rootDir, args.meetingId, () =>
+    sealCaptureJournalUnlocked(rootDir, args, durability),
+  );

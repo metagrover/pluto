@@ -1,4 +1,5 @@
 import {
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
@@ -15,7 +16,9 @@ import {
   createCaptureJournal,
   readCaptureJournalManifest,
   sealCaptureJournal,
+  updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
+import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('capture journal', () => {
   const tempRoots: string[] = [];
@@ -51,6 +54,20 @@ describe('capture journal', () => {
     await writeFile(manifestPath, JSON.stringify(parsed));
   };
 
+  const buildEvidence = (endTime = 5) =>
+    buildCaptureActivityEvidence([{ startTime: 0, endTime, speaker: 'Me' }], {
+      clock: {
+        kind: 'meeting_relative_seconds',
+        origin: 'recording_start',
+      },
+      thresholds: {
+        rms: 0.01,
+        dominanceRatio: 1.5,
+        minimumSwitchIntervalMs: 250,
+      },
+      algorithmVersion: 'speaker_activity_v1',
+    });
+
   it('creates a versioned per-meeting manifest', async () => {
     const root = await makeRoot();
 
@@ -59,13 +76,290 @@ describe('capture journal', () => {
       startedAtMs: 1_000,
     });
 
-    expect(manifest.schemaVersion).toBe(1);
+    expect(manifest.schemaVersion).toBe(2);
     expect(manifest.meetingId).toBe('meeting-123');
     expect(manifest.lifecycleState).toBe('recording');
     expect(manifest.entries).toEqual([]);
     expect(manifest.artifactRootRelativePath).toBe(
       'meeting-123/capture-journal',
     );
+    expect(manifest.activityEvidence).toBeUndefined();
+  });
+
+  it('reads a legacy v1 manifest as uncertain evidence', async () => {
+    const root = await makeRoot();
+    const artifactRoot = join(root, 'meeting-123', 'capture-journal');
+    await mkdir(artifactRoot, { recursive: true });
+    const legacy = {
+      schemaVersion: 1,
+      meetingId: 'meeting-123',
+      artifactRootRelativePath: 'meeting-123/capture-journal',
+      manifestRelativePath: 'meeting-123/capture-journal/manifest.json',
+      lifecycleState: 'recording',
+      startedAtMs: 1_000,
+      endedAtMs: null,
+      entries: [],
+    };
+    await writeFile(
+      join(artifactRoot, 'manifest.json'),
+      JSON.stringify(legacy),
+    );
+
+    expect(await readCaptureJournalManifest(root, 'meeting-123')).toEqual(
+      legacy,
+    );
+  });
+
+  it('rejects appending to a legacy v1 journal without changing disk state', async () => {
+    const root = await makeRoot();
+    const artifactRoot = join(root, 'meeting-123', 'capture-journal');
+    await mkdir(artifactRoot, { recursive: true });
+    const manifestPath = join(artifactRoot, 'manifest.json');
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        meetingId: 'meeting-123',
+        artifactRootRelativePath: 'meeting-123/capture-journal',
+        manifestRelativePath: 'meeting-123/capture-journal/manifest.json',
+        lifecycleState: 'recording',
+        startedAtMs: 1_000,
+        endedAtMs: null,
+        entries: [],
+      }),
+    );
+    const before = await readFile(manifestPath, 'utf8');
+
+    await expect(
+      appendCaptureJournalChunk(root, {
+        meetingId: 'meeting-123',
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        format: 'wav',
+        data: Buffer.from('mic-bytes'),
+      }),
+    ).rejects.toThrow(/legacy capture journal/i);
+
+    expect(await readFile(manifestPath, 'utf8')).toBe(before);
+    expect(await readdir(artifactRoot)).toEqual(['manifest.json']);
+  });
+
+  it('rejects activity evidence updates to v1 without changing disk state', async () => {
+    const root = await makeRoot();
+    const artifactRoot = join(root, 'meeting-123', 'capture-journal');
+    await mkdir(artifactRoot, { recursive: true });
+    const manifestPath = join(artifactRoot, 'manifest.json');
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        meetingId: 'meeting-123',
+        artifactRootRelativePath: 'meeting-123/capture-journal',
+        manifestRelativePath: 'meeting-123/capture-journal/manifest.json',
+        lifecycleState: 'recording',
+        startedAtMs: 1_000,
+        endedAtMs: null,
+        entries: [],
+      }),
+    );
+    const before = await readFile(manifestPath, 'utf8');
+
+    await expect(
+      updateCaptureJournalActivityEvidence(root, {
+        meetingId: 'meeting-123',
+        activityEvidence: await buildEvidence(),
+      }),
+    ).rejects.toThrow(/legacy capture journal/i);
+
+    expect(await readFile(manifestPath, 'utf8')).toBe(before);
+    expect(await readdir(artifactRoot)).toEqual(['manifest.json']);
+  });
+
+  it('durably persists canonical activity evidence', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    const activityEvidence = await buildEvidence();
+    const events: string[] = [];
+    const durability = {
+      syncFile: vi.fn(async (path: string) => events.push(`file:${path}`)),
+      syncDirectory: vi.fn(async (path: string) =>
+        events.push(`directory:${path}`),
+      ),
+    };
+
+    const updated = await updateCaptureJournalActivityEvidence(
+      root,
+      { meetingId: 'meeting-123', activityEvidence },
+      durability,
+    );
+
+    expect(updated.activityEvidence).toEqual(activityEvidence);
+    expect(
+      (await readCaptureJournalManifest(root, 'meeting-123')).activityEvidence,
+    ).toEqual(activityEvidence);
+    expect(events.map((event) => event.split(':')[0])).toEqual([
+      'file',
+      'directory',
+    ]);
+  });
+
+  it('preserves both chunk and activity evidence across overlapping updates', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    let releaseChunkSync = () => undefined;
+    const chunkSyncBlocked = new Promise<void>((resolve) => {
+      releaseChunkSync = resolve;
+    });
+    let markChunkSyncStarted = () => undefined;
+    const chunkSyncStarted = new Promise<void>((resolve) => {
+      markChunkSyncStarted = resolve;
+    });
+    let markEvidenceWritten = () => undefined;
+    const evidenceWritten = new Promise<void>((resolve) => {
+      markEvidenceWritten = resolve;
+    });
+    const appendDurability = {
+      syncFile: vi.fn(async (path: string) => {
+        if (path.endsWith('mic-000000.wav.tmp')) {
+          markChunkSyncStarted();
+          await chunkSyncBlocked;
+        }
+      }),
+      syncDirectory: vi.fn(async () => undefined),
+    };
+    const updateDurability = {
+      syncFile: vi.fn(async () => undefined),
+      syncDirectory: vi.fn(async () => markEvidenceWritten()),
+    };
+
+    const append = appendCaptureJournalChunk(
+      root,
+      {
+        meetingId: 'meeting-123',
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        format: 'wav',
+        data: Buffer.from('mic-bytes'),
+      },
+      appendDurability,
+    );
+    await chunkSyncStarted;
+    const activityEvidence = await buildEvidence();
+    const update = updateCaptureJournalActivityEvidence(
+      root,
+      { meetingId: 'meeting-123', activityEvidence },
+      updateDurability,
+    );
+
+    await Promise.race([
+      evidenceWritten,
+      new Promise<void>((resolve) => setTimeout(resolve, 25)),
+    ]);
+    releaseChunkSync();
+    await Promise.all([append, update]);
+
+    const manifest = await readCaptureJournalManifest(root, 'meeting-123');
+    expect(manifest.entries).toHaveLength(1);
+    expect(manifest.schemaVersion).toBe(2);
+    expect(manifest.activityEvidence).toEqual(activityEvidence);
+  });
+
+  it('treats identical activity evidence snapshots as idempotent', async () => {
+    const root = await makeRoot();
+    const activityEvidence = await buildEvidence();
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence,
+    });
+    const durability = {
+      syncFile: vi.fn(async () => undefined),
+      syncDirectory: vi.fn(async () => undefined),
+    };
+
+    const duplicate = await updateCaptureJournalActivityEvidence(
+      root,
+      { meetingId: 'meeting-123', activityEvidence },
+      durability,
+    );
+
+    expect(duplicate.activityEvidence).toEqual(activityEvidence);
+    expect(durability.syncFile).not.toHaveBeenCalled();
+  });
+
+  it('rejects activity evidence snapshots older than the persisted final window', async () => {
+    const root = await makeRoot();
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence: await buildEvidence(10),
+    });
+
+    await expect(
+      updateCaptureJournalActivityEvidence(root, {
+        meetingId: 'meeting-123',
+        activityEvidence: await buildEvidence(5),
+      }),
+    ).rejects.toThrow(/older activity evidence snapshot/i);
+  });
+
+  it('rejects conflicting activity evidence with the same window count', async () => {
+    const root = await makeRoot();
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence: await buildEvidence(5),
+    });
+
+    await expect(
+      updateCaptureJournalActivityEvidence(root, {
+        meetingId: 'meeting-123',
+        activityEvidence: await buildEvidence(6),
+      }),
+    ).rejects.toThrow(/conflicting activity evidence snapshot/i);
+  });
+
+  it('rejects activity evidence snapshots with fewer windows even when they end later', async () => {
+    const root = await makeRoot();
+    const producer = {
+      clock: {
+        kind: 'meeting_relative_seconds' as const,
+        origin: 'recording_start' as const,
+      },
+      thresholds: {
+        rms: 0.01,
+        dominanceRatio: 1.5,
+        minimumSwitchIntervalMs: 250,
+      },
+      algorithmVersion: 'speaker_activity_v1' as const,
+    };
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence: await buildCaptureActivityEvidence(
+        [
+          { startTime: 0, endTime: 5, speaker: 'Me' },
+          { startTime: 5, endTime: 10, speaker: 'Me' },
+        ],
+        producer,
+      ),
+    });
+
+    await expect(
+      updateCaptureJournalActivityEvidence(root, {
+        meetingId: 'meeting-123',
+        activityEvidence: await buildCaptureActivityEvidence(
+          [{ startTime: 0, endTime: 12, speaker: 'Me' }],
+          producer,
+        ),
+      }),
+    ).rejects.toThrow(/older activity evidence snapshot/i);
   });
 
   it.each([
@@ -327,6 +621,11 @@ describe('capture journal', () => {
       format: 'wav',
       data: Buffer.from('mic-bytes'),
     });
+    const activityEvidence = await buildEvidence();
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence,
+    });
 
     const sealed = await sealCaptureJournal(root, {
       meetingId: 'meeting-123',
@@ -335,6 +634,11 @@ describe('capture journal', () => {
 
     expect(sealed.lifecycleState).toBe('sealed');
     expect(sealed.endedAtMs).toBe(6_000);
+    expect(sealed.schemaVersion).toBe(2);
+    expect(sealed.activityEvidence).toEqual(activityEvidence);
+    expect(await readCaptureJournalManifest(root, 'meeting-123')).toEqual(
+      sealed,
+    );
 
     await expect(
       appendCaptureJournalChunk(root, {
@@ -347,6 +651,94 @@ describe('capture journal', () => {
         data: Buffer.from('later-bytes'),
       }),
     ).rejects.toThrow(/sealed/i);
+  });
+
+  it('rejects sealing a legacy v1 journal', async () => {
+    const root = await makeRoot();
+    const artifactRoot = join(root, 'meeting-123', 'capture-journal');
+    await mkdir(artifactRoot, { recursive: true });
+    await writeFile(
+      join(artifactRoot, 'manifest.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        meetingId: 'meeting-123',
+        artifactRootRelativePath: 'meeting-123/capture-journal',
+        manifestRelativePath: 'meeting-123/capture-journal/manifest.json',
+        lifecycleState: 'recording',
+        startedAtMs: 1_000,
+        endedAtMs: null,
+        entries: [],
+      }),
+    );
+
+    await expect(
+      sealCaptureJournal(root, {
+        meetingId: 'meeting-123',
+        endedAtMs: 6_000,
+      }),
+    ).rejects.toThrow(/legacy capture journal/i);
+  });
+
+  it('rejects a sealed v2 manifest without activity evidence', async () => {
+    const root = await makeRoot();
+    await mutateManifest(root, (manifest) => {
+      manifest.lifecycleState = 'sealed';
+      manifest.endedAtMs = 6_000;
+    });
+
+    await expect(
+      readCaptureJournalManifest(root, 'meeting-123'),
+    ).rejects.toThrow('capture_activity_missing');
+  });
+
+  it('rejects sealing a recording v2 journal without activity evidence', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+
+    await expect(
+      sealCaptureJournal(root, {
+        meetingId: 'meeting-123',
+        endedAtMs: 6_000,
+      }),
+    ).rejects.toThrow('capture_activity_missing');
+  });
+
+  it.each([
+    [
+      'malformed',
+      (evidence: Record<string, unknown>) => {
+        evidence.clock = undefined;
+      },
+    ],
+    [
+      'unsupported',
+      (evidence: Record<string, unknown>) => {
+        evidence.schemaVersion = 999;
+      },
+    ],
+    [
+      'digest_mismatch',
+      (evidence: Record<string, unknown>) => {
+        evidence.digestSha256 = '0'.repeat(64);
+      },
+    ],
+  ])('rejects v2 activity evidence with %s reason', async (reason, mutate) => {
+    const root = await makeRoot();
+    const evidence = (await buildEvidence()) as unknown as Record<
+      string,
+      unknown
+    >;
+    mutate(evidence);
+    await mutateManifest(root, (manifest) => {
+      manifest.activityEvidence = evidence;
+    });
+
+    await expect(
+      readCaptureJournalManifest(root, 'meeting-123'),
+    ).rejects.toThrow(String(reason));
   });
 
   it('persists the manifest as JSON for later recovery work', async () => {
