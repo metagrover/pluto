@@ -4979,28 +4979,40 @@ export const AudioManager = ({
       };
 
       if (
-        metricPatchOutcome === 'updated' ||
-        metricPatchOutcome === 'already_current'
+        metricPatchOutcome !== 'updated' &&
+        metricPatchOutcome !== 'already_current'
       ) {
-        await window.ipcRenderer.invoke(
-          'SAVE_DERIVED_MEETING_FIELDS_IF_TRANSCRIPT_CURRENT',
-          {
-            meetingId: meetingData.id,
-            expectedTranscriptJson: transcriptWithLatency,
-            expectedTranscriptIntegrityJson: attributionIntegrityJson,
-            expectedTranscriptValidatedAt:
-              attributionPersistenceRecord.transcript_validated_at,
-            expectedTitle: attributionPersistenceRecord.title,
-            title: meetingData.title,
-            enhancedNotes: meetingData.enhanced_notes,
-            analysisJson: meetingData.analysis_json,
-            analysisSchemaVersion: meetingData.analysis_schema_version,
-            analysisFormatPass: meetingData.analysis_format_pass,
-            analysisRetryCount: meetingData.analysis_retry_count,
-            analysisFallbackUsed: meetingData.analysis_fallback_used,
-            valueSignalsJson: meetingData.value_signals_json,
-          },
+        console.warn(
+          `[Pluto] Latency reconciliation ${String(metricPatchOutcome)}; suppressing derived persistence`,
         );
+        onSessionComplete?.(meetingData.id);
+        return;
+      }
+      const derivedPersistenceOutcome = await window.ipcRenderer.invoke(
+        'SAVE_DERIVED_MEETING_FIELDS_IF_TRANSCRIPT_CURRENT',
+        {
+          meetingId: meetingData.id,
+          expectedTranscriptJson: transcriptWithLatency,
+          expectedTranscriptIntegrityJson: attributionIntegrityJson,
+          expectedTranscriptValidatedAt:
+            attributionPersistenceRecord.transcript_validated_at,
+          expectedTitle: attributionPersistenceRecord.title,
+          title: meetingData.title,
+          enhancedNotes: meetingData.enhanced_notes,
+          analysisJson: meetingData.analysis_json,
+          analysisSchemaVersion: meetingData.analysis_schema_version,
+          analysisFormatPass: meetingData.analysis_format_pass,
+          analysisRetryCount: meetingData.analysis_retry_count,
+          analysisFallbackUsed: meetingData.analysis_fallback_used,
+          valueSignalsJson: meetingData.value_signals_json,
+        },
+      );
+      if (derivedPersistenceOutcome !== 'updated') {
+        console.warn(
+          `[Pluto] Derived persistence ${String(derivedPersistenceOutcome)}; preserving current transcript generation`,
+        );
+        onSessionComplete?.(meetingData.id);
+        return;
       }
       console.log(
         '[Pluto] Session saved to DB with transcript segments:',

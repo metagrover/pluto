@@ -1545,10 +1545,11 @@ export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
   analysisRetryCount: number;
   analysisFallbackUsed: boolean;
   valueSignalsJson: string;
-}): Exclude<ConditionalMeetingUpdateOutcome, 'already_current'> => {
-  const result = db
-    .prepare(
-      `UPDATE meetings SET
+}): Exclude<ConditionalMeetingUpdateOutcome, 'already_current'> =>
+  db.transaction(() => {
+    const result = db
+      .prepare(
+        `UPDATE meetings SET
          title = CASE WHEN title = ? THEN ? ELSE title END,
          enhanced_notes = ?,
          analysis_json = ?,
@@ -1561,25 +1562,32 @@ export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
          AND transcript_integrity_json = ?
          AND transcript_validated_at = ?
          AND transcript_status = 'validated'`,
-    )
-    .run(
-      input.expectedTitle,
-      input.title,
-      input.enhancedNotes,
-      input.analysisJson,
-      input.analysisSchemaVersion,
-      input.analysisFormatPass ? 1 : 0,
-      input.analysisRetryCount,
-      input.analysisFallbackUsed ? 1 : 0,
-      input.valueSignalsJson,
-      String(input.meetingId),
-      input.expectedTranscriptJson,
-      input.expectedTranscriptIntegrityJson,
-      input.expectedTranscriptValidatedAt,
-    );
-  if (result.changes === 1) return 'updated';
-  return getMeeting(input.meetingId) ? 'conflict' : 'missing';
-};
+      )
+      .run(
+        input.expectedTitle,
+        input.title,
+        input.enhancedNotes,
+        input.analysisJson,
+        input.analysisSchemaVersion,
+        input.analysisFormatPass ? 1 : 0,
+        input.analysisRetryCount,
+        input.analysisFallbackUsed ? 1 : 0,
+        input.valueSignalsJson,
+        String(input.meetingId),
+        input.expectedTranscriptJson,
+        input.expectedTranscriptIntegrityJson,
+        input.expectedTranscriptValidatedAt,
+      );
+    if (result.changes !== 1) {
+      return getMeeting(input.meetingId) ? 'conflict' : 'missing';
+    }
+    const updated = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+    if (!updated) return 'missing';
+    // Reuse the canonical save boundary inside the same SQLite transaction so
+    // analysis provenance inference and the meetings_fts refresh stay in sync.
+    saveMeetingTransaction(updated);
+    return 'updated';
+  })();
 
 export const updateMeetingFollowUpDrafts = (
   meetingId: string | number,
