@@ -120,6 +120,7 @@ describe('recording finalization helpers', () => {
       title: 'Design review',
       userNotes: 'Keep this note',
       endReason: 'manual',
+      failureReason: 'capture_journal_seal_failed',
     });
 
     expect(meeting).toMatchObject({
@@ -149,11 +150,31 @@ describe('recording finalization helpers', () => {
         recordingStartedAtMs: 1_000,
         recordingEndedAtMs: 2_000,
       },
+      failureReason: 'capture_journal_seal_failed',
     });
 
     expect(meeting.title).toBe('Meeting');
     expect(meeting.end_reason).toBe('journal_seal_failed');
     expect(meeting).not.toHaveProperty('error');
+  });
+
+  it('preserves a content-free journal write failure category', () => {
+    const meeting = buildRecoverableSealFailureMeeting({
+      snapshot: {
+        meetingId: 'meeting-3',
+        recordingStartedAtMs: 1_000,
+        recordingEndedAtMs: 2_000,
+      },
+      failureReason: 'capture_journal_write_failed',
+    });
+
+    expect(meeting.finalization_error_category).toBe(
+      'capture_journal_write_failed',
+    );
+    expect(meeting.end_reason).toBe('capture_journal_write_failed');
+    expect(meeting.transcript_integrity_json).toBe(
+      JSON.stringify({ reasons: ['capture_journal_write_failed'] }),
+    );
   });
 
   it('drains journal appends before requesting a seal', async () => {

@@ -239,6 +239,7 @@ const buildRecoveredMeeting = (params: {
   micAudioPath: string | null;
   systemAudioPath: string | null;
   integrity: RecoveryMeetingIntegrity;
+  existingMeeting?: PersistedMeeting | null;
 }): PersistedMeeting => {
   const recoveredDurationSeconds = getRecoveredDurationSeconds(params.manifest);
   const startedAtMs = params.manifest.startedAtMs;
@@ -246,7 +247,7 @@ const buildRecoveredMeeting = (params: {
     params.manifest.endedAtMs ??
     startedAtMs + Math.round(recoveredDurationSeconds * 1000);
 
-  return {
+  const recoveredMeeting: PersistedMeeting = {
     id: params.manifest.meetingId,
     title: 'Recovered recording',
     meeting_type: 'Recording',
@@ -274,6 +275,23 @@ const buildRecoveredMeeting = (params: {
     is_favorite: false,
     end_reason: 'interrupted',
     created_at: new Date(params.nowMs).toISOString(),
+    finalization_status: 'finalized',
+    finalization_error_category: null,
+  };
+  if (!params.existingMeeting) return recoveredMeeting;
+
+  return {
+    ...params.existingMeeting,
+    ...recoveredMeeting,
+    title: params.existingMeeting.title || recoveredMeeting.title,
+    user_notes:
+      params.existingMeeting.user_notes ?? recoveredMeeting.user_notes,
+    end_reason:
+      params.existingMeeting.end_reason || recoveredMeeting.end_reason,
+    created_at:
+      params.existingMeeting.created_at ?? recoveredMeeting.created_at,
+    folder_id: params.existingMeeting.folder_id,
+    is_favorite: params.existingMeeting.is_favorite,
   };
 };
 
@@ -303,12 +321,18 @@ export const recoverInterruptedCaptureJournals = async (
     }
 
     const existingMeeting = deps.getMeeting(manifest.meetingId);
-    if (manifest.lifecycleState === 'sealed' && existingMeeting) {
+    const isRecoveryRequiredMeeting =
+      existingMeeting?.finalization_status === 'recovery_required';
+    if (
+      manifest.lifecycleState === 'sealed' &&
+      existingMeeting &&
+      !isRecoveryRequiredMeeting
+    ) {
       result.skippedSealedCount += 1;
       continue;
     }
 
-    if (existingMeeting) {
+    if (existingMeeting && !isRecoveryRequiredMeeting) {
       result.skippedExistingCount += 1;
       continue;
     }
@@ -378,6 +402,7 @@ export const recoverInterruptedCaptureJournals = async (
           micAudioPath,
           systemAudioPath,
           integrity,
+          existingMeeting,
         }),
       );
       result.recoveredCount += 1;

@@ -28,6 +28,7 @@ export const createCaptureActivitySession = ({
   let closed = false;
   let latestSeconds = Number.NEGATIVE_INFINITY;
   let queue = Promise.resolve();
+  let snapshotPending = false;
 
   const latchDurabilityFailure = () => {
     durabilityFailure = true;
@@ -39,15 +40,9 @@ export const createCaptureActivitySession = ({
     return queue;
   };
 
-  const enqueue = (task: () => Promise<unknown>): Promise<void> => {
-    if (closed) {
-      latchDurabilityFailure();
-      return queue;
-    }
-    return appendTask(task);
-  };
-
-  const enqueueSnapshot = () => {
+  const flushPendingSnapshot = () => {
+    if (!snapshotPending) return queue;
+    snapshotPending = false;
     const snapshotWindows = completedWindows.map((window) => ({ ...window }));
     appendTask(async () => {
       const snapshot = await buildCaptureActivityEvidence(
@@ -56,6 +51,20 @@ export const createCaptureActivitySession = ({
       );
       await persistSnapshot(snapshot);
     });
+    return queue;
+  };
+
+  const enqueue = (task: () => Promise<unknown>): Promise<void> => {
+    if (closed) {
+      latchDurabilityFailure();
+      return queue;
+    }
+    flushPendingSnapshot();
+    return appendTask(task);
+  };
+
+  const enqueueSnapshot = () => {
+    snapshotPending = true;
   };
 
   const closeActiveWindow = (seconds: number): boolean => {
@@ -111,7 +120,7 @@ export const createCaptureActivitySession = ({
     latestSeconds = seconds;
     const persistedFinalWindow = closeActiveWindow(seconds);
     if (!persistedFinalWindow) enqueueSnapshot();
-    return queue;
+    return flushPendingSnapshot();
   };
 
   return {

@@ -52,6 +52,21 @@ describe('capture activity session', () => {
     expect(snapshotWindowCounts).toEqual([1, 2]);
   });
 
+  it('coalesces transition snapshots until the next audio checkpoint and final close', async () => {
+    const persistSnapshot = vi.fn(async () => {});
+    const session = createCaptureActivitySession({ producer, persistSnapshot });
+
+    for (let index = 0; index < 100; index++) {
+      session.transitionSpeaker(index % 2 === 0 ? 'Me' : 'Them', index + 1);
+    }
+    session.enqueue(async () => {});
+    await session.closeAt(101);
+
+    expect(persistSnapshot).toHaveBeenCalledTimes(2);
+    expect(persistSnapshot.mock.calls[0]?.[0].windows).toHaveLength(99);
+    expect(persistSnapshot.mock.calls[1]?.[0].windows).toHaveLength(100);
+  });
+
   it('keeps an audio append failure latched after later work succeeds', async () => {
     const events: string[] = [];
     const session = createCaptureActivitySession({

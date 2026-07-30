@@ -157,18 +157,28 @@ export const buildMeetingTiming = ({
   };
 };
 
+export type CaptureJournalFinalizationFailure =
+  | 'capture_journal_write_failed'
+  | 'capture_journal_seal_failed';
+
 export const buildRecoverableSealFailureMeeting = ({
   snapshot,
   title,
   userNotes,
   endReason,
+  failureReason,
 }: {
   snapshot: RecordingStopSnapshot;
   title?: string;
   userNotes?: string;
   endReason?: string;
+  failureReason: CaptureJournalFinalizationFailure;
 }) => {
   const timing = buildMeetingTiming(snapshot);
+  const failureCategory =
+    failureReason === 'capture_journal_write_failed'
+      ? failureReason
+      : 'journal_seal_failed';
   return {
     id: snapshot.meetingId,
     title: title?.trim() || 'Meeting',
@@ -181,7 +191,7 @@ export const buildRecoverableSealFailureMeeting = ({
     mixed_audio_path: null,
     transcript_status: 'needs_attention' as const,
     transcript_integrity_json: JSON.stringify({
-      reasons: ['journal_seal_failed'],
+      reasons: [failureCategory],
     }),
     transcript_validated_at: null,
     transcript_json: JSON.stringify([]),
@@ -190,10 +200,10 @@ export const buildRecoverableSealFailureMeeting = ({
     analysis_json: null,
     value_signals_json: null,
     finalization_status: 'recovery_required' as const,
-    finalization_error_category: 'journal_seal_failed' as const,
+    finalization_error_category: failureCategory,
     folder_id: null,
     is_favorite: false,
-    end_reason: endReason || 'journal_seal_failed',
+    end_reason: endReason || failureCategory,
   };
 };
 
@@ -201,7 +211,7 @@ export type JournalSealResult =
   | { status: 'sealed'; activityEvidence: CaptureActivityEvidence }
   | {
       status: 'recovery_required';
-      reason: 'capture_journal_write_failed' | 'capture_journal_seal_failed';
+      reason: CaptureJournalFinalizationFailure;
     };
 
 export const createSealedCaptureActivityHandoff = (

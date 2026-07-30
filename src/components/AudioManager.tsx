@@ -732,9 +732,10 @@ export const AudioManager = ({
           nativeStarted: nativeStarted === true,
           validPcmSeen: false,
         });
-        onCaptureHealthChange?.({
+        publishCaptureHealth({
           microphone: 'healthy',
           systemAudio: systemAudioHealthRef.current,
+          captureDurability: captureHealthRef.current.captureDurability,
         });
         if (!nativeStarted) {
           throw new Error('Native system audio capture did not start');
@@ -746,9 +747,10 @@ export const AudioManager = ({
               validPcmSeen: false,
               timedOut: true,
             });
-            onCaptureHealthChange?.({
+            publishCaptureHealth({
               microphone: 'healthy',
               systemAudio: systemAudioHealthRef.current,
+              captureDurability: captureHealthRef.current.captureDurability,
             });
           }, 3_000);
 
@@ -799,9 +801,10 @@ export const AudioManager = ({
                 nativeStarted: true,
                 validPcmSeen: true,
               });
-              onCaptureHealthChange?.({
+              publishCaptureHealth({
                 microphone: 'healthy',
                 systemAudio: systemAudioHealthRef.current,
+                captureDurability: captureHealthRef.current.captureDurability,
               });
             }
             systemPcmChunksRef.current.push(decoded.samples);
@@ -817,9 +820,10 @@ export const AudioManager = ({
       } catch (sysErr) {
         hasSystemRecorderRef.current = false;
         systemAudioHealthRef.current = 'unavailable';
-        onCaptureHealthChange?.({
+        publishCaptureHealth({
           microphone: 'healthy',
           systemAudio: systemAudioHealthRef.current,
+          captureDurability: captureHealthRef.current.captureDurability,
         });
         console.warn('[Pluto] System audio failed:', sysErr);
       }
@@ -3472,7 +3476,7 @@ export const AudioManager = ({
 
       if (journalSealOutcome.status === 'recovery_required') {
         console.warn(
-          '[Pluto] Capture journal seal failed; preserving recovery state',
+          `[Pluto] ${journalSealOutcome.reason}; preserving recovery state`,
         );
         warnCaptureDurability();
         pendingMicChunksRef.current.clear();
@@ -3483,6 +3487,7 @@ export const AudioManager = ({
           title: userTitle,
           userNotes,
           endReason,
+          failureReason: journalSealOutcome.reason,
         });
         try {
           await window.ipcRenderer.invoke('SAVE_MEETING', {

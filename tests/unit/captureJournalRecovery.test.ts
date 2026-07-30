@@ -18,6 +18,7 @@ import {
 } from '../../electron/captureJournal';
 import { recoverInterruptedCaptureJournals } from '../../electron/captureJournalRecovery';
 import type { PersistedMeeting } from '../../electron/db';
+import { buildRecoverableSealFailureMeeting } from '../../src/utils/recordingFinalization';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('capture journal recovery', () => {
@@ -366,6 +367,64 @@ describe('capture journal recovery', () => {
         digestSha256: (await buildEvidence()).digestSha256,
       },
     });
+  });
+
+  it('updates an existing recovery-required meeting with recovered audio', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    await appendCaptureJournalChunk(root, {
+      meetingId: 'meeting-123',
+      source: 'mic',
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 1,
+      format: 'wav',
+      data: Buffer.from('mic-0'),
+    });
+    const degraded = buildRecoverableSealFailureMeeting({
+      snapshot: {
+        meetingId: 'meeting-123',
+        recordingStartedAtMs: 1_000,
+        recordingEndedAtMs: 2_000,
+      },
+      title: 'Keep my title',
+      userNotes: 'Keep my notes',
+      endReason: 'manual',
+      failureReason: 'capture_journal_write_failed',
+    }) as PersistedMeeting;
+    degraded.folder_id = 'folder-keep';
+    degraded.is_favorite = true;
+    const saveMeeting = vi.fn();
+
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => degraded,
+      saveMeeting,
+      stitchWavSegments: async (_segments, outputTag) =>
+        join(root, `${outputTag}.wav`),
+      nowMs: 3_000,
+    });
+
+    expect(result).toMatchObject({
+      recoveredCount: 1,
+      skippedExistingCount: 0,
+    });
+    expect(saveMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'meeting-123',
+        title: 'Keep my title',
+        user_notes: 'Keep my notes',
+        end_reason: 'manual',
+        folder_id: 'folder-keep',
+        is_favorite: true,
+        audio_path: join(root, 'meeting-123-mic-recovered.wav'),
+        transcript_status: 'needs_attention',
+        finalization_status: 'finalized',
+        finalization_error_category: null,
+      }),
+    );
   });
 
   it('skips a sealed journal after its meeting was saved', async () => {
