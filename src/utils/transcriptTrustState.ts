@@ -348,7 +348,9 @@ export const parseTranscriptTrustEnvelope = (
     return { ok: false, failure: 'invalid_shape' };
   }
   const recovery = raw.recovery as TranscriptTrustEnvelopeV2['recovery'];
-  const gapCause = causes.find((cause) => cause.code === 'capture_gap_detected');
+  const gapCause = causes.find(
+    (cause) => cause.code === 'capture_gap_detected',
+  );
   if (
     recovery?.gapDetected &&
     (!gapCause || gapCause.sourceScope !== recovery.sourceScope)
@@ -472,9 +474,7 @@ export const resolveTranscriptTrustState = (
   if (envelope.state === 'validating') {
     const interrupted = Date.parse(envelope.retry?.deadlineAt || '') <= nowMs;
     return resolved({
-      kind: interrupted
-        ? 'validation_retry_failed'
-        : 'validation_in_progress',
+      kind: interrupted ? 'validation_retry_failed' : 'validation_in_progress',
       copyKey: interrupted
         ? 'validation_retry_failed'
         : 'validation_in_progress',

@@ -86,6 +86,22 @@ const readStopToValidatedLatency = (transcriptJson?: string | null) => {
   }
 };
 
+const withTranscriptLifecycleStatus = (
+  transcriptJson: string | null | undefined,
+  lifecycleStatus: 'validating' | 'needs_attention',
+) => {
+  try {
+    const parsed = JSON.parse(transcriptJson || '{}') as unknown;
+    return JSON.stringify(
+      Array.isArray(parsed)
+        ? { segments: parsed, lifecycleStatus }
+        : { ...(parsed as Record<string, unknown>), lifecycleStatus },
+    );
+  } catch {
+    return JSON.stringify({ segments: [], lifecycleStatus });
+  }
+};
+
 const hadUnaccountedSpeech = (
   meeting: Meeting,
   reason: 'local_speech_unaccounted' | 'remote_speech_unaccounted',
@@ -126,9 +142,13 @@ const readStoredActivityWindows = async (
     const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       activityEvidence?: unknown;
       activityEvidenceSource?: unknown;
+      evidenceProvenance?: { kind?: unknown };
     };
 
-    if (parsed.activityEvidenceSource === 'capture_activity_v2') {
+    if (
+      parsed.activityEvidenceSource === 'capture_activity_v2' ||
+      parsed.evidenceProvenance?.kind === 'sealed_capture_activity_v2'
+    ) {
       if (parsed.activityEvidence === undefined) {
         return {
           windows: [],
@@ -259,16 +279,33 @@ export const retryMeetingTranscriptValidation = async (
     meeting,
     provisionalSegments,
   );
+  const priorIntegrity = parseIntegrityRecord(
+    meeting.transcript_integrity_json,
+  );
+  const usesV2Trust = priorIntegrity.schemaVersion === 2;
+  const recovery = usesV2Trust
+    ? (priorIntegrity.recovery as
+        | { source?: unknown; gapDetected?: unknown }
+        | undefined)
+    : undefined;
+  if (recovery?.gapDetected === true) {
+    return { status: 'needs_attention' };
+  }
+  const canonicalMode =
+    recovery?.source === 'capture_journal'
+      ? ('recovered_channels' as const)
+      : ('full_mix' as const);
   const claimed = await invoke(
     'SAVE_MEETING',
     {
       ...meeting,
       transcript_status: 'validating',
+      transcript_json: withTranscriptLifecycleStatus(
+        meeting.transcript_json,
+        'validating',
+      ),
       transcript_integrity_json: JSON.stringify(
-        beginRetryLease(
-          parseIntegrityRecord(meeting.transcript_integrity_json),
-          lease,
-        ),
+        beginRetryLease(priorIntegrity, lease),
       ),
     },
     { claimValidationLease: lease },
@@ -316,6 +353,7 @@ export const retryMeetingTranscriptValidation = async (
         mixAudioPath: sourcePaths.mix,
         provisionalSegments,
         activityWindows: activityEvidence.windows,
+        canonicalMode,
         transcribe: async (audioPath, options) =>
           (await invoke('WHISPER_TRANSCRIBE', audioPath, options)) as {
             segments?: Array<{ start: number; end: number; text: string }>;
@@ -339,25 +377,56 @@ export const retryMeetingTranscriptValidation = async (
     runId,
     'reviewing_evidence',
   ).catch(() => null);
-  const integrity = {
-    ...validation.evidence,
-    reasons:
-      activityEvidence.failureReason == null
-        ? [...validation.reasons]
-        : [...new Set([activityEvidence.failureReason, ...validation.reasons])],
-    attempts: validation.attempts,
-    activityEvidenceSource: activityEvidence.source,
-    ...(activityEvidence.source === 'capture_activity_v1'
-      ? {
-          activityEvidence: buildStoredTranscriptActivityEvidence(
-            activityEvidence.windows,
-          ),
-        }
+  const reasons =
+    activityEvidence.failureReason == null
+      ? [...validation.reasons]
+      : [...new Set([activityEvidence.failureReason, ...validation.reasons])];
+  const storedActivityEvidence =
+    activityEvidence.source === 'capture_activity_v1'
+      ? buildStoredTranscriptActivityEvidence(activityEvidence.windows)
       : activityEvidence.source === 'capture_activity_v2'
-        ? { activityEvidence: activityEvidence.evidence }
-        : {}),
-    retry: { ...lease, stage: 'reviewing_evidence' as const },
-  };
+        ? activityEvidence.evidence
+        : undefined;
+  const evidenceProvenance =
+    activityEvidence.source === 'capture_activity_v2'
+      ? {
+          kind: 'sealed_capture_activity_v2',
+          digestSha256: (
+            activityEvidence.evidence as { digestSha256?: string } | undefined
+          )?.digestSha256,
+        }
+      : activityEvidence.source === 'capture_activity_v1'
+        ? { kind: 'stored_capture_activity_v1' }
+        : activityEvidence.source === 'legacy_provisional_segments'
+          ? { kind: 'legacy_provisional_segments' }
+          : activityEvidence.source === 'capture_activity_missing'
+            ? { kind: 'missing' }
+            : activityEvidence.source === 'capture_activity_corrupt'
+              ? { kind: 'corrupt' }
+              : { kind: 'unsupported', sourceVersion: 'unknown' };
+  const integrity = usesV2Trust
+    ? {
+        ...priorIntegrity,
+        schemaVersion: 2,
+        state: 'validating',
+        causes: [],
+        evidenceProvenance,
+        ...(storedActivityEvidence
+          ? { activityEvidence: storedActivityEvidence }
+          : {}),
+        evidence: validation.evidence,
+        retry: { ...lease, stage: 'reviewing_evidence' as const },
+      }
+    : {
+        ...validation.evidence,
+        reasons,
+        attempts: validation.attempts,
+        activityEvidenceSource: activityEvidence.source,
+        ...(storedActivityEvidence
+          ? { activityEvidence: storedActivityEvidence }
+          : {}),
+        retry: { ...lease, stage: 'reviewing_evidence' as const },
+      };
 
   const priorLocalSpeechStillMissing =
     hadUnaccountedSpeech(
@@ -379,15 +448,15 @@ export const retryMeetingTranscriptValidation = async (
   ) {
     if (
       priorLocalSpeechStillMissing &&
-      !integrity.reasons.includes('local_speech_unaccounted')
+      !reasons.includes('local_speech_unaccounted')
     ) {
-      integrity.reasons.push('local_speech_unaccounted');
+      reasons.push('local_speech_unaccounted');
     }
     if (
       priorRemoteSpeechStillMissing &&
-      !integrity.reasons.includes('remote_speech_unaccounted')
+      !reasons.includes('remote_speech_unaccounted')
     ) {
-      integrity.reasons.push('remote_speech_unaccounted');
+      reasons.push('remote_speech_unaccounted');
     }
     const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
     if (readRunId(latest) !== runId) return { status: 'superseded' };
@@ -396,7 +465,20 @@ export const retryMeetingTranscriptValidation = async (
       {
         ...latest,
         transcript_status: 'needs_attention',
-        transcript_integrity_json: JSON.stringify(finishRetryLease(integrity)),
+        transcript_json: withTranscriptLifecycleStatus(
+          latest.transcript_json,
+          'needs_attention',
+        ),
+        transcript_integrity_json: JSON.stringify(
+          usesV2Trust
+            ? {
+                ...finishRetryLease(integrity),
+                state: 'needs_attention',
+                causes: reasons.map((code) => ({ code })),
+                validationProof: undefined,
+              }
+            : finishRetryLease(integrity),
+        ),
         transcript_validated_at: null,
         enhanced_notes: null,
         analysis_json: null,
@@ -417,18 +499,31 @@ export const retryMeetingTranscriptValidation = async (
   const transcript = validation.segments
     .map((segment) => `${segment.speaker}: ${segment.text}`)
     .join('\n');
+  const validatedAt = new Date().toISOString();
+  const validatedIntegrity = usesV2Trust
+    ? {
+        ...finishRetryLease(integrity),
+        state: 'validated',
+        causes: [],
+        validationProof: {
+          gateVersion: 'canonical_integrity_v1',
+          validatedAt,
+        },
+      }
+    : {
+        ...integrity,
+        retry: { ...lease, stage: 'saving' as const },
+      };
   const canonicalReplacement = {
     ...current,
     transcript_status: 'validated',
-    transcript_validated_at: new Date().toISOString(),
-    transcript_integrity_json: JSON.stringify({
-      ...integrity,
-      retry: { ...lease, stage: 'saving' as const },
-    }),
+    transcript_validated_at: validatedAt,
+    transcript_integrity_json: JSON.stringify(validatedIntegrity),
     transcript_json: JSON.stringify(
       buildTranscriptJsonPayload(validation.segments, {
         pipelineMode: 'canonical_session_v2',
-        canonicalSource: 'mix',
+        canonicalSource:
+          canonicalMode === 'recovered_channels' ? 'recovered_channels' : 'mix',
         postHydrationBleedPass: false,
         liveTranscriptResponsiveness:
           readLiveTranscriptResponsiveness(current.transcript_json) ??
@@ -491,19 +586,27 @@ export const retryMeetingTranscriptValidation = async (
       userNotes: current.user_notes || '',
     })) as { markdown?: string; analysis?: unknown; signals?: unknown };
     const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-    if (readRunId(latest) !== runId) return { status: 'superseded' };
+    if (
+      usesV2Trust
+        ? latest.transcript_validated_at !== validatedAt
+        : readRunId(latest) !== runId
+    ) {
+      return { status: 'superseded' };
+    }
     const saved = await invoke(
       'SAVE_MEETING',
       {
         ...latest,
         title: latest.title === current.title ? generatedTitle : latest.title,
-        transcript_integrity_json: JSON.stringify(finishRetryLease(integrity)),
+        transcript_integrity_json: usesV2Trust
+          ? latest.transcript_integrity_json
+          : JSON.stringify(finishRetryLease(integrity)),
         enhanced_notes: artifacts.markdown || '',
         analysis_json: JSON.stringify(artifacts.analysis ?? null),
         value_signals_json: JSON.stringify(artifacts.signals ?? null),
       },
       {
-        expectedValidationRunId: runId,
+        ...(usesV2Trust ? {} : { expectedValidationRunId: runId }),
         transcriptOwnedFieldsOnly: true,
         expectedTitle: current.title,
       },
@@ -518,19 +621,25 @@ export const retryMeetingTranscriptValidation = async (
   } catch (error) {
     console.error('[Pluto] Post-validation intelligence failed', error);
     const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-    if (readRunId(latest) === runId) {
+    if (
+      usesV2Trust
+        ? latest.transcript_validated_at === validatedAt
+        : readRunId(latest) === runId
+    ) {
       await invoke(
         'SAVE_MEETING',
         {
           ...latest,
-          transcript_integrity_json: JSON.stringify(
-            finishRetryLease(
-              parseIntegrityRecord(latest.transcript_integrity_json),
-            ),
-          ),
+          transcript_integrity_json: usesV2Trust
+            ? latest.transcript_integrity_json
+            : JSON.stringify(
+                finishRetryLease(
+                  parseIntegrityRecord(latest.transcript_integrity_json),
+                ),
+              ),
         },
         {
-          expectedValidationRunId: runId,
+          ...(usesV2Trust ? {} : { expectedValidationRunId: runId }),
           transcriptOwnedFieldsOnly: true,
         },
       );

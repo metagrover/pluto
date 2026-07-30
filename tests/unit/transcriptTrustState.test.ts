@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  type TranscriptTrustMeetingFields,
   buildTranscriptTrustCapabilities,
   canUseTranscriptTrustState,
   parseTranscriptTrustEnvelope,
   resolveTranscriptTrustState,
-  type TranscriptTrustMeetingFields,
 } from '../../src/utils/transcriptTrustState';
 
 const projections = {

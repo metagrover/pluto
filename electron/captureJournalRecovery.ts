@@ -7,8 +7,11 @@ import {
   type CaptureActivityEvidence,
   parseCaptureActivityEvidence,
 } from '../src/utils/transcriptActivityEvidence.ts';
-import type { TranscriptIntegrityReason } from '../src/utils/transcriptIntegrity.ts';
 import { buildTranscriptJsonPayload } from '../src/utils/transcriptSchema.ts';
+import type {
+  TranscriptTrustCauseCode,
+  TranscriptTrustEnvelopeV2,
+} from '../src/utils/transcriptTrustState.ts';
 import type {
   CaptureJournalEntry,
   CaptureJournalManifest,
@@ -35,27 +38,13 @@ type RecoverySourceSummary = {
   recoveredAudioPath: string | null;
 };
 
-type RecoveryMeetingIntegrity = {
-  recovery_source: 'capture_journal';
-  journal_lifecycle_state: CaptureJournalManifest['lifecycleState'];
-  gap_detected: boolean;
-  recovered_at: string;
-  recovered_sources: Record<CaptureJournalSource, RecoverySourceSummary>;
-  recovery_gaps: RecoveryGap[];
-  activityEvidenceSource:
-    | 'capture_activity_v2'
-    | 'legacy_provisional_segments'
-    | 'capture_activity_missing'
-    | 'capture_activity_corrupt'
-    | 'capture_activity_unsupported';
-  activityEvidence?: CaptureActivityEvidence;
-  reasons: TranscriptIntegrityReason[];
-};
+type RecoveryMeetingIntegrity = TranscriptTrustEnvelopeV2;
 
-type RecoveryActivityEvidence = Pick<
-  RecoveryMeetingIntegrity,
-  'activityEvidenceSource' | 'activityEvidence' | 'reasons'
->;
+type RecoveryActivityEvidence = {
+  evidenceProvenance: TranscriptTrustEnvelopeV2['evidenceProvenance'];
+  activityEvidence?: CaptureActivityEvidence;
+  causes: Array<{ code: TranscriptTrustCauseCode }>;
+};
 
 type TimedSegment = {
   path: string;
@@ -146,34 +135,37 @@ const getRecoveryActivityEvidence = async (
 ): Promise<RecoveryActivityEvidence> => {
   if (manifest.schemaVersion === 1) {
     return {
-      activityEvidenceSource: 'legacy_provisional_segments',
-      reasons: ['capture_activity_missing'],
+      evidenceProvenance: { kind: 'legacy_provisional_segments' },
+      causes: [{ code: 'capture_activity_missing' }],
     };
   }
   if (manifest.activityEvidence === undefined) {
     return {
-      activityEvidenceSource: 'capture_activity_missing',
-      reasons: ['capture_activity_missing'],
+      evidenceProvenance: { kind: 'missing' },
+      causes: [{ code: 'capture_activity_missing' }],
     };
   }
 
   const parsed = await parseCaptureActivityEvidence(manifest.activityEvidence);
   if (parsed.ok) {
     return {
-      activityEvidenceSource: 'capture_activity_v2',
+      evidenceProvenance: {
+        kind: 'sealed_capture_activity_v2',
+        digestSha256: parsed.evidence.digestSha256,
+      },
       activityEvidence: parsed.evidence,
-      reasons: [],
+      causes: [],
     };
   }
   if (parsed.reason === 'unsupported') {
     return {
-      activityEvidenceSource: 'capture_activity_unsupported',
-      reasons: ['capture_activity_unsupported'],
+      evidenceProvenance: { kind: 'unsupported', sourceVersion: 'unknown' },
+      causes: [{ code: 'capture_activity_unsupported' }],
     };
   }
   return {
-    activityEvidenceSource: 'capture_activity_corrupt',
-    reasons: ['capture_activity_corrupt'],
+    evidenceProvenance: { kind: 'corrupt' },
+    causes: [{ code: 'capture_activity_corrupt' }],
   };
 };
 
@@ -371,28 +363,38 @@ export const recoverInterruptedCaptureJournals = async (
         continue;
       }
 
+      const micHasGap = micRecovery.gaps.length > 0;
+      const systemHasGap = systemRecovery.gaps.length > 0;
+      const gapDetected = micHasGap || systemHasGap;
+      const sourceScope =
+        micHasGap && systemHasGap
+          ? ('multiple' as const)
+          : micHasGap
+            ? ('mic' as const)
+            : systemHasGap
+              ? ('system' as const)
+              : ('multiple' as const);
       const integrity: RecoveryMeetingIntegrity = {
-        recovery_source: 'capture_journal',
-        journal_lifecycle_state: manifest.lifecycleState,
-        gap_detected:
-          micRecovery.gaps.length > 0 || systemRecovery.gaps.length > 0,
-        recovered_at: new Date(nowMs).toISOString(),
-        recovered_sources: {
-          mic: {
-            acknowledgedChunkCount: micEntries.length,
-            recoveredChunkCount: micRecovery.segments.length,
-            gapCount: micRecovery.gaps.length,
-            recoveredAudioPath: micAudioPath,
-          },
-          system: {
-            acknowledgedChunkCount: systemEntries.length,
-            recoveredChunkCount: systemRecovery.segments.length,
-            gapCount: systemRecovery.gaps.length,
-            recoveredAudioPath: systemAudioPath,
-          },
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [
+          ...(gapDetected
+            ? [{ code: 'capture_gap_detected' as const, sourceScope }]
+            : [{ code: 'recovered_awaiting_validation' as const }]),
+          ...activityEvidence.causes,
+        ],
+        evidenceProvenance: activityEvidence.evidenceProvenance,
+        ...(activityEvidence.activityEvidence
+          ? { activityEvidence: activityEvidence.activityEvidence }
+          : {}),
+        recovery: {
+          source: 'capture_journal',
+          gapDetected,
+          sourceScope,
+          acknowledgedChunkCount: micEntries.length + systemEntries.length,
+          recoveredChunkCount:
+            micRecovery.segments.length + systemRecovery.segments.length,
         },
-        recovery_gaps: [...micRecovery.gaps, ...systemRecovery.gaps],
-        ...activityEvidence,
       };
 
       await deps.saveMeeting(
