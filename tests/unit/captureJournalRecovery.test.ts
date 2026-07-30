@@ -14,8 +14,12 @@ import {
   appendCaptureJournalChunk,
   createCaptureJournal,
   sealCaptureJournal,
+  updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
 import { recoverInterruptedCaptureJournals } from '../../electron/captureJournalRecovery';
+import type { PersistedMeeting } from '../../electron/db';
+import { buildRecoverableSealFailureMeeting } from '../../src/utils/recordingFinalization';
+import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('capture journal recovery', () => {
   const tempRoots: string[] = [];
@@ -32,6 +36,43 @@ describe('capture journal recovery', () => {
     const root = await mkdtemp(join(tmpdir(), 'pluto-capture-recovery-'));
     tempRoots.push(root);
     return root;
+  };
+
+  const buildEvidence = () =>
+    buildCaptureActivityEvidence(
+      [{ startTime: 0.25, endTime: 1.75, speaker: 'Me' }],
+      {
+        clock: {
+          kind: 'meeting_relative_seconds',
+          origin: 'recording_start',
+        },
+        thresholds: {
+          rms: 0.02,
+          dominanceRatio: 1.4,
+          minimumSwitchIntervalMs: 250,
+        },
+        algorithmVersion: 'speaker_activity_v1',
+      },
+    );
+
+  const recoverSingleMeeting = async (root: string) => {
+    const saveMeeting = vi.fn();
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting,
+      stitchWavSegments: async (_segments, outputTag) =>
+        join(root, `${outputTag}.wav`),
+      nowMs: 5_000,
+    });
+    const recovered = saveMeeting.mock.calls[0]?.[0] as Record<string, unknown>;
+    return {
+      result,
+      integrity: JSON.parse(String(recovered.transcript_integrity_json)) as {
+        activityEvidenceSource: string;
+        activityEvidence?: unknown;
+        reasons: string[];
+      },
+    };
   };
 
   it('recovers one unsealed journal into a needs-attention meeting exactly once', async () => {
@@ -57,6 +98,11 @@ describe('capture journal recovery', () => {
       chunkEndSec: 2,
       format: 'wav',
       data: Buffer.from('system-0'),
+    });
+    const activityEvidence = await buildEvidence();
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence,
     });
 
     const savedMeetings = new Map<string, Record<string, unknown>>();
@@ -96,12 +142,15 @@ describe('capture journal recovery', () => {
       duration_seconds: 2,
     });
 
-    expect(
-      JSON.parse(String(recoveredMeeting?.transcript_integrity_json)),
-    ).toMatchObject({
+    const integrity = JSON.parse(
+      String(recoveredMeeting?.transcript_integrity_json),
+    );
+    expect(integrity).toMatchObject({
       recovery_source: 'capture_journal',
       journal_lifecycle_state: 'recording',
       gap_detected: false,
+      activityEvidenceSource: 'capture_activity_v2',
+      reasons: [],
       recovered_sources: {
         mic: {
           acknowledgedChunkCount: 1,
@@ -113,6 +162,10 @@ describe('capture journal recovery', () => {
         },
       },
     });
+    expect(integrity.activityEvidence).toEqual(activityEvidence);
+    expect(integrity.activityEvidence.digestSha256).toBe(
+      activityEvidence.digestSha256,
+    );
 
     const second = await recoverInterruptedCaptureJournals(root, {
       getMeeting: (meetingId) => savedMeetings.get(meetingId) ?? null,
@@ -254,7 +307,7 @@ describe('capture journal recovery', () => {
     expect(savedMeetingIds).toEqual(['meeting-b']);
   });
 
-  it('ignores sealed journals during startup recovery', async () => {
+  it('recovers a sealed journal when its meeting was not saved', async () => {
     const root = await makeRoot();
     await createCaptureJournal(root, {
       meetingId: 'meeting-123',
@@ -269,13 +322,128 @@ describe('capture journal recovery', () => {
       format: 'wav',
       data: Buffer.from('mic-0'),
     });
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence: await buildEvidence(),
+    });
+    await sealCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      endedAtMs: 2_000,
+    });
+
+    const saveMeeting = vi.fn();
+    const stitchWavSegments = vi.fn(
+      async (_segments: Array<{ path: string }>, outputTag: string) =>
+        join(root, `${outputTag}.wav`),
+    );
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting,
+      stitchWavSegments,
+      nowMs: 3_000,
+    });
+
+    expect(result).toMatchObject({
+      recoveredCount: 1,
+      skippedSealedCount: 0,
+    });
+    expect(saveMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'meeting-123',
+        transcript_status: 'needs_attention',
+        transcript_integrity_json: expect.any(String),
+      }),
+    );
+    const recovered = saveMeeting.mock.calls[0]?.[0];
+    const integrity = JSON.parse(recovered.transcript_integrity_json) as {
+      journal_lifecycle_state: string;
+      activityEvidenceSource: string;
+      activityEvidence?: { digestSha256: string };
+    };
+    expect(integrity).toMatchObject({
+      journal_lifecycle_state: 'sealed',
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: {
+        digestSha256: (await buildEvidence()).digestSha256,
+      },
+    });
+  });
+
+  it('updates an existing recovery-required meeting with recovered audio', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    await appendCaptureJournalChunk(root, {
+      meetingId: 'meeting-123',
+      source: 'mic',
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 1,
+      format: 'wav',
+      data: Buffer.from('mic-0'),
+    });
+    const degraded = buildRecoverableSealFailureMeeting({
+      snapshot: {
+        meetingId: 'meeting-123',
+        recordingStartedAtMs: 1_000,
+        recordingEndedAtMs: 2_000,
+      },
+      title: 'Keep my title',
+      userNotes: 'Keep my notes',
+      endReason: 'manual',
+      failureReason: 'capture_journal_write_failed',
+    }) as PersistedMeeting;
+    degraded.folder_id = 'folder-keep';
+    degraded.is_favorite = true;
+    const saveMeeting = vi.fn();
+
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => degraded,
+      saveMeeting,
+      stitchWavSegments: async (_segments, outputTag) =>
+        join(root, `${outputTag}.wav`),
+      nowMs: 3_000,
+    });
+
+    expect(result).toMatchObject({
+      recoveredCount: 1,
+      skippedExistingCount: 0,
+    });
+    expect(saveMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'meeting-123',
+        title: 'Keep my title',
+        user_notes: 'Keep my notes',
+        end_reason: 'manual',
+        folder_id: 'folder-keep',
+        is_favorite: true,
+        audio_path: join(root, 'meeting-123-mic-recovered.wav'),
+        transcript_status: 'needs_attention',
+        finalization_status: 'finalized',
+        finalization_error_category: null,
+      }),
+    );
+  });
+
+  it('skips a sealed journal after its meeting was saved', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence: await buildEvidence(),
+    });
     await sealCaptureJournal(root, {
       meetingId: 'meeting-123',
       endedAtMs: 2_000,
     });
 
     const result = await recoverInterruptedCaptureJournals(root, {
-      getMeeting: () => null,
+      getMeeting: () => ({ id: 'meeting-123' }) as PersistedMeeting,
       saveMeeting: vi.fn(),
       stitchWavSegments: vi.fn(),
       nowMs: 3_000,
@@ -286,6 +454,109 @@ describe('capture journal recovery', () => {
       skippedSealedCount: 1,
     });
   });
+
+  it.each([
+    {
+      name: 'legacy v1',
+      mutate: (manifest: Record<string, unknown>) => {
+        manifest.schemaVersion = 1;
+        Reflect.deleteProperty(manifest, 'activityEvidence');
+      },
+      source: 'legacy_provisional_segments',
+      reason: 'capture_activity_missing',
+    },
+    {
+      name: 'sealed missing v2 evidence',
+      mutate: (manifest: Record<string, unknown>) => {
+        manifest.lifecycleState = 'sealed';
+        Reflect.deleteProperty(manifest, 'activityEvidence');
+      },
+      source: 'capture_activity_missing',
+      reason: 'capture_activity_missing',
+    },
+    {
+      name: 'malformed v2 evidence',
+      mutate: (manifest: Record<string, unknown>) => {
+        manifest.activityEvidence = { source: 'capture_activity_v2' };
+      },
+      source: 'capture_activity_corrupt',
+      reason: 'capture_activity_corrupt',
+    },
+    {
+      name: 'null v2 evidence',
+      mutate: (manifest: Record<string, unknown>) => {
+        manifest.activityEvidence = null;
+      },
+      source: 'capture_activity_corrupt',
+      reason: 'capture_activity_corrupt',
+    },
+    {
+      name: 'unsupported v2 evidence',
+      mutate: (manifest: Record<string, unknown>) => {
+        manifest.activityEvidence = {
+          schemaVersion: 3,
+          source: 'capture_activity_v3',
+          serializationVersion: 2,
+        };
+      },
+      source: 'capture_activity_unsupported',
+      reason: 'capture_activity_unsupported',
+    },
+    {
+      name: 'digest-mismatched v2 evidence',
+      mutate: (manifest: Record<string, unknown>) => {
+        const evidence = manifest.activityEvidence as Record<string, unknown>;
+        evidence.digestSha256 = '0'.repeat(64);
+      },
+      source: 'capture_activity_corrupt',
+      reason: 'capture_activity_corrupt',
+    },
+  ])(
+    'recovers audio with content-free uncertainty for $name',
+    async ({ mutate, source, reason }) => {
+      const root = await makeRoot();
+      await createCaptureJournal(root, {
+        meetingId: 'meeting-evidence',
+        startedAtMs: 1_000,
+      });
+      await appendCaptureJournalChunk(root, {
+        meetingId: 'meeting-evidence',
+        source: 'mic',
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec: 2,
+        format: 'wav',
+        data: Buffer.from('synthetic-audio'),
+      });
+      await updateCaptureJournalActivityEvidence(root, {
+        meetingId: 'meeting-evidence',
+        activityEvidence: await buildEvidence(),
+      });
+      const manifestPath = join(
+        root,
+        'meeting-evidence',
+        'capture-journal',
+        'manifest.json',
+      );
+      const manifest = JSON.parse(
+        await readFile(manifestPath, 'utf8'),
+      ) as Record<string, unknown>;
+      mutate(manifest);
+      await writeFile(manifestPath, JSON.stringify(manifest));
+
+      const { result, integrity } = await recoverSingleMeeting(root);
+
+      expect(result.recoveredCount).toBe(1);
+      expect(integrity).toEqual(
+        expect.objectContaining({
+          activityEvidenceSource: source,
+          reasons: [reason],
+        }),
+      );
+      expect(integrity.activityEvidence).toBeUndefined();
+      expect(JSON.stringify(integrity)).not.toContain('provisionalSegments');
+    },
+  );
 
   it('skips invalid chunk artifacts and records recovery gaps', async () => {
     const root = await makeRoot();

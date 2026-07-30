@@ -7,6 +7,9 @@ import type {
 import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 
 type IpcRendererLike = Window['ipcRenderer'];
+type BrowserCaptureJournal = {
+  activityEvidence?: unknown;
+};
 
 const now = new Date().toISOString();
 
@@ -184,106 +187,144 @@ const getSetting = (key: unknown) => {
   }
 };
 
-const invokeFallback: IpcRendererLike['invoke'] = async <T = unknown>(
-  channel: string,
-  ...args: unknown[]
-): Promise<T> => {
-  let result: unknown;
+const createInvokeFallback =
+  (
+    captureJournals: Map<string, BrowserCaptureJournal>,
+  ): IpcRendererLike['invoke'] =>
+  async <T = unknown>(channel: string, ...args: unknown[]): Promise<T> => {
+    let result: unknown;
 
-  switch (channel) {
-    case 'GET_SETTING':
-      result = getSetting(args[0]);
-      break;
-    case 'WHISPERX_HEALTH':
-    case 'WHISPERX_CHECK_PYTHON':
-      result = { status: 'ok' };
-      break;
-    case 'GET_MEETINGS':
-    case 'GET_KNOWLEDGE_DOC_SOURCES':
-    case 'GET_KNOWLEDGE_CORRECTIONS':
-      result = [];
-      break;
-    case 'BOOT_PROBE_STATUS':
-      result = true;
-      break;
-    case 'CHECK_MICROPHONE_PERMISSION':
-      result = 'granted';
-      break;
-    case 'SYSTEM_AUDIO_PROBE':
-      result = true;
-      break;
-    case 'DETECT_ACTIVE_CALL':
-      result = { active: false };
-      break;
-    case 'GET_KNOWLEDGE_WORKSPACE': {
-      const params = args[0] as { docId?: string } | undefined;
-      result = workspaceFor(params?.docId);
-      break;
+    switch (channel) {
+      case 'AUDIO_CAPTURE_JOURNAL_START': {
+        const request = args[0] as { meetingId?: unknown } | undefined;
+        if (typeof request?.meetingId === 'string') {
+          captureJournals.set(request.meetingId, {});
+        }
+        result = null;
+        break;
+      }
+      case 'AUDIO_CAPTURE_JOURNAL_ACTIVITY_UPDATE': {
+        const request = args[0] as
+          | { meetingId?: unknown; activityEvidence?: unknown }
+          | undefined;
+        if (
+          typeof request?.meetingId === 'string' &&
+          captureJournals.has(request.meetingId)
+        ) {
+          captureJournals.set(request.meetingId, {
+            activityEvidence: request.activityEvidence,
+          });
+        }
+        result = args[0];
+        break;
+      }
+      case 'AUDIO_CAPTURE_JOURNAL_SEAL': {
+        const request = args[0] as { meetingId?: unknown } | undefined;
+        const meetingId =
+          typeof request?.meetingId === 'string' ? request.meetingId : null;
+        const journal = meetingId ? captureJournals.get(meetingId) : undefined;
+        if (meetingId) captureJournals.delete(meetingId);
+        result = journal?.activityEvidence
+          ? { activityEvidence: journal.activityEvidence }
+          : null;
+        break;
+      }
+      case 'GET_SETTING':
+        result = getSetting(args[0]);
+        break;
+      case 'WHISPERX_HEALTH':
+      case 'WHISPERX_CHECK_PYTHON':
+        result = { status: 'ok' };
+        break;
+      case 'GET_MEETINGS':
+      case 'GET_KNOWLEDGE_DOC_SOURCES':
+      case 'GET_KNOWLEDGE_CORRECTIONS':
+        result = [];
+        break;
+      case 'BOOT_PROBE_STATUS':
+        result = true;
+        break;
+      case 'CHECK_MICROPHONE_PERMISSION':
+        result = 'granted';
+        break;
+      case 'SYSTEM_AUDIO_PROBE':
+        result = true;
+        break;
+      case 'DETECT_ACTIVE_CALL':
+        result = { active: false };
+        break;
+      case 'GET_KNOWLEDGE_WORKSPACE': {
+        const params = args[0] as { docId?: string } | undefined;
+        result = workspaceFor(params?.docId);
+        break;
+      }
+      case 'GET_KNOWLEDGE_DOCS':
+        result = docs;
+        break;
+      case 'GET_KNOWLEDGE_DOC': {
+        const id = String(args[0] || '');
+        result = docs.find((doc) => doc.id === id);
+        break;
+      }
+      case 'REFRESH_KNOWLEDGE_DOC': {
+        const id = String(args[0] || '');
+        result = docs.find((doc) => doc.id === id);
+        break;
+      }
+      case 'GET_KNOWLEDGE_GRAPH':
+        result = workspaceFor().graph;
+        break;
+      case 'GET_OVERDUE_ACTION_ITEMS':
+      case 'GET_STALE_ACTION_ITEMS':
+      case 'GET_ACTION_ITEMS_BY_STATUS':
+        result = [];
+        break;
+      case 'GET_KNOWLEDGE_GRAPH_STATS':
+        result = emptyGraphStats;
+        break;
+      case 'GET_ENTITIES_BY_TYPE':
+        result = args[0] === 'person' ? previewPeople : [];
+        break;
+      case 'GET_ENTITY_MEETINGS':
+        result = previewMeetings[String(args[0])] || [];
+        break;
+      case 'GET_KNOWLEDGE_TIMELINE':
+        result = workspaceFor().timeline;
+        break;
+      case 'GET_KNOWLEDGE_BACKLINKS':
+        result = workspaceFor().backlinks;
+        break;
+      case 'GET_KNOWLEDGE_DOC_NOTES':
+        result = null;
+        break;
+      case 'SAVE_KNOWLEDGE_CORRECTION':
+        result = {
+          id: 'preview-correction',
+          doc_id: 'preview',
+          target_kind: 'item',
+          target_id: 'preview',
+          action: 'promote_item',
+          payload_json: null,
+          created_at: new Date().toISOString(),
+        };
+        break;
+      default:
+        result = null;
+        break;
     }
-    case 'GET_KNOWLEDGE_DOCS':
-      result = docs;
-      break;
-    case 'GET_KNOWLEDGE_DOC': {
-      const id = String(args[0] || '');
-      result = docs.find((doc) => doc.id === id);
-      break;
-    }
-    case 'REFRESH_KNOWLEDGE_DOC': {
-      const id = String(args[0] || '');
-      result = docs.find((doc) => doc.id === id);
-      break;
-    }
-    case 'GET_KNOWLEDGE_GRAPH':
-      result = workspaceFor().graph;
-      break;
-    case 'GET_OVERDUE_ACTION_ITEMS':
-    case 'GET_STALE_ACTION_ITEMS':
-    case 'GET_ACTION_ITEMS_BY_STATUS':
-      result = [];
-      break;
-    case 'GET_KNOWLEDGE_GRAPH_STATS':
-      result = emptyGraphStats;
-      break;
-    case 'GET_ENTITIES_BY_TYPE':
-      result = args[0] === 'person' ? previewPeople : [];
-      break;
-    case 'GET_ENTITY_MEETINGS':
-      result = previewMeetings[String(args[0])] || [];
-      break;
-    case 'GET_KNOWLEDGE_TIMELINE':
-      result = workspaceFor().timeline;
-      break;
-    case 'GET_KNOWLEDGE_BACKLINKS':
-      result = workspaceFor().backlinks;
-      break;
-    case 'GET_KNOWLEDGE_DOC_NOTES':
-      result = null;
-      break;
-    case 'SAVE_KNOWLEDGE_CORRECTION':
-      result = {
-        id: 'preview-correction',
-        doc_id: 'preview',
-        target_kind: 'item',
-        target_id: 'preview',
-        action: 'promote_item',
-        payload_json: null,
-        created_at: new Date().toISOString(),
-      };
-      break;
-    default:
-      result = null;
-      break;
-  }
 
-  return result as T;
+    return result as T;
+  };
+
+export const createBrowserIpcFallback = (): IpcRendererLike => {
+  const captureJournals = new Map<string, BrowserCaptureJournal>();
+  return {
+    invoke: createInvokeFallback(captureJournals),
+    send: () => {},
+    on: () => {},
+    off: () => {},
+  };
 };
-
-const createBrowserIpcFallback = (): IpcRendererLike => ({
-  invoke: invokeFallback,
-  send: () => {},
-  on: () => {},
-  off: () => {},
-});
 
 export const installBrowserIpcFallback = () => {
   if (!window.plutoRuntimePlatform) {

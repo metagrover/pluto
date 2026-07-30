@@ -21,6 +21,7 @@ import {
   appendCaptureJournalChunk,
   createCaptureJournal,
   sealCaptureJournal,
+  updateCaptureJournalActivityEvidence,
 } from './captureJournal';
 import { recoverInterruptedCaptureJournals } from './captureJournalRecovery';
 import {
@@ -487,6 +488,16 @@ app.whenReady().then(async () => {
         format: typeof format === 'string' ? format : 'bin',
         data: Buffer.from(data ?? []),
       });
+    },
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_ACTIVITY_UPDATE',
+    async (_event, { meetingId, activityEvidence } = {}) => {
+      return await updateCaptureJournalActivityEvidence(
+        getMeetingArtifactsRootDir(),
+        { meetingId, activityEvidence },
+      );
     },
   );
 

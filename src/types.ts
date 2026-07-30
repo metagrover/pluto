@@ -153,5 +153,8 @@ export interface Meeting {
   mixed_audio_path?: string;
   transcript_validated_at?: string;
   finalization_status?: MeetingFinalizationStatus;
-  finalization_error_category?: 'journal_seal_failed' | null;
+  finalization_error_category?:
+    | 'journal_seal_failed'
+    | 'capture_journal_write_failed'
+    | null;
 }

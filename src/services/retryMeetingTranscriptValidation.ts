@@ -7,6 +7,7 @@ import type {
 import {
   type TranscriptActivityEvidenceFallbackSource,
   buildStoredTranscriptActivityEvidence,
+  parseCaptureActivityEvidence,
   parseStoredTranscriptActivityEvidence,
 } from '../utils/transcriptActivityEvidence.ts';
 import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity.ts';
@@ -94,27 +95,54 @@ const hadUnaccountedSpeech = (
   }
 };
 
-const readStoredActivityWindows = (
+type RetryActivityEvidenceSource =
+  | TranscriptActivityEvidenceFallbackSource
+  | 'capture_activity_v2'
+  | 'capture_activity_unsupported';
+
+const readStoredActivityWindows = async (
   meeting: Meeting,
   provisionalSegments: AttributionSegment[],
-): {
+): Promise<{
   windows: SpeakerActivityWindow[];
-  source: TranscriptActivityEvidenceFallbackSource;
+  source: RetryActivityEvidenceSource;
   failureReason: TranscriptIntegrityReason | null;
-} => {
+  evidence?: unknown;
+}> => {
   try {
     const parsed = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       activityEvidence?: unknown;
       activityEvidenceSource?: unknown;
     };
-    const stored = parseStoredTranscriptActivityEvidence(
-      parsed.activityEvidence,
-    );
-    if (stored) {
+
+    if (parsed.activityEvidenceSource === 'capture_activity_v2') {
+      if (parsed.activityEvidence === undefined) {
+        return {
+          windows: [],
+          source: 'capture_activity_missing',
+          failureReason: 'capture_activity_missing',
+        };
+      }
+      const verified = await parseCaptureActivityEvidence(
+        parsed.activityEvidence,
+      );
+      if (!verified.ok) {
+        const unsupported = verified.reason === 'unsupported';
+        return {
+          windows: [],
+          source: unsupported
+            ? 'capture_activity_unsupported'
+            : 'capture_activity_corrupt',
+          failureReason: unsupported
+            ? 'capture_activity_unsupported'
+            : 'capture_activity_corrupt',
+        };
+      }
       return {
-        windows: stored.windows,
-        source: stored.source,
+        windows: verified.evidence.windows,
+        source: 'capture_activity_v2',
         failureReason: null,
+        evidence: verified.evidence,
       };
     }
 
@@ -124,6 +152,32 @@ const readStoredActivityWindows = (
         : parsed.activityEvidenceSource === 'legacy_provisional_segments'
           ? 'legacy_provisional_segments'
           : null;
+
+    if (parsed.activityEvidenceSource !== undefined && priorSource === null) {
+      const unsupported = typeof parsed.activityEvidenceSource === 'string';
+      return {
+        windows: [],
+        source: unsupported
+          ? 'capture_activity_unsupported'
+          : 'capture_activity_corrupt',
+        failureReason: unsupported
+          ? 'capture_activity_unsupported'
+          : 'capture_activity_corrupt',
+      };
+    }
+
+    if (priorSource !== 'legacy_provisional_segments') {
+      const stored = parseStoredTranscriptActivityEvidence(
+        parsed.activityEvidence,
+      );
+      if (stored) {
+        return {
+          windows: stored.windows,
+          source: stored.source,
+          failureReason: null,
+        };
+      }
+    }
 
     if (parsed.activityEvidence !== undefined) {
       return {
@@ -188,7 +242,7 @@ export const retryMeetingTranscriptValidation = async (
     mix: meeting.mixed_audio_path || '',
   };
   const provisionalSegments = parseSegments(meeting.transcript_json);
-  const activityEvidence = readStoredActivityWindows(
+  const activityEvidence = await readStoredActivityWindows(
     meeting,
     provisionalSegments,
   );
@@ -286,7 +340,9 @@ export const retryMeetingTranscriptValidation = async (
             activityEvidence.windows,
           ),
         }
-      : {}),
+      : activityEvidence.source === 'capture_activity_v2'
+        ? { activityEvidence: activityEvidence.evidence }
+        : {}),
     retry: { ...lease, stage: 'reviewing_evidence' as const },
   };
 

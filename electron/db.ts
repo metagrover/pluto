@@ -113,7 +113,10 @@ export interface PersistedMeeting {
   mixed_audio_path?: string | null;
   transcript_validated_at?: string | null;
   finalization_status?: MeetingFinalizationStatus | null;
-  finalization_error_category?: 'journal_seal_failed' | null;
+  finalization_error_category?:
+    | 'journal_seal_failed'
+    | 'capture_journal_write_failed'
+    | null;
   created_at?: string | null;
 }
 

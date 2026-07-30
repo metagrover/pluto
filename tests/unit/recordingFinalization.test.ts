@@ -1,17 +1,78 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
+
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
   buildRecoverableSealFailureMeeting,
   buildSpeakerAttributionRetryPlan,
   collectDisposableRecordingArtifactPaths,
+  createSealedCaptureActivityHandoff,
   getStrongerSpeakerAttributionPolicy,
   resolveFinalizationCleanupPaths,
   sealCaptureJournalBeforeFinalization,
 } from '../../src/utils/recordingFinalization';
 
 describe('recording finalization helpers', () => {
+  it('invokes validation and every integrity save with the exact sealed evidence', async () => {
+    const sealed = await buildCaptureActivityEvidence(
+      [{ startTime: 0, endTime: 1, speaker: 'Me' }],
+      {
+        clock: {
+          kind: 'meeting_relative_seconds',
+          origin: 'recording_start',
+        },
+        thresholds: {
+          rms: 0.01,
+          dominanceRatio: 1.5,
+          minimumSwitchIntervalMs: 250,
+        },
+        algorithmVersion: 'speaker_activity_v1',
+      },
+    );
+
+    const handoff = createSealedCaptureActivityHandoff(sealed);
+    const validate = vi.fn(async () => 'validated');
+    const persist = vi.fn(
+      async (meeting: Record<string, unknown>) => meeting.id,
+    );
+
+    expect(handoff.activityWindows).toBe(sealed.windows);
+    expect(handoff.integrity.activityEvidence).toBe(sealed);
+    expect(handoff.integrity.activityEvidence.digestSha256).toBe(
+      sealed.digestSha256,
+    );
+    expect(handoff.integrity).toEqual({
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: sealed,
+    });
+
+    await expect(handoff.runValidation(validate)).resolves.toBe('validated');
+    expect(validate).toHaveBeenCalledWith(sealed.windows);
+    expect(validate.mock.calls[0]?.[0]).toBe(sealed.windows);
+
+    for (const id of ['needs-attention', 'pre-analysis', 'final']) {
+      await expect(
+        handoff.persistMeeting({ id }, { reasons: [] }, persist),
+      ).resolves.toBe(id);
+    }
+    expect(persist).toHaveBeenCalledTimes(3);
+    for (const [meeting] of persist.mock.calls) {
+      const integrity = JSON.parse(
+        String(meeting.transcript_integrity_json),
+      ) as {
+        activityEvidence: unknown;
+        activityEvidenceSource: unknown;
+      };
+      expect(integrity.activityEvidenceSource).toBe('capture_activity_v2');
+      expect(integrity.activityEvidence).toEqual(sealed);
+      expect((integrity.activityEvidence as typeof sealed).digestSha256).toBe(
+        sealed.digestSha256,
+      );
+    }
+  });
+
   it('starts finalization only once per active meeting', () => {
     const first = beginRecordingFinalization({
       meetingId: 'meeting-1',
@@ -59,6 +120,7 @@ describe('recording finalization helpers', () => {
       title: 'Design review',
       userNotes: 'Keep this note',
       endReason: 'manual',
+      failureReason: 'capture_journal_seal_failed',
     });
 
     expect(meeting).toMatchObject({
@@ -88,6 +150,7 @@ describe('recording finalization helpers', () => {
         recordingStartedAtMs: 1_000,
         recordingEndedAtMs: 2_000,
       },
+      failureReason: 'capture_journal_seal_failed',
     });
 
     expect(meeting.title).toBe('Meeting');
@@ -95,30 +158,106 @@ describe('recording finalization helpers', () => {
     expect(meeting).not.toHaveProperty('error');
   });
 
+  it('preserves a content-free journal write failure category', () => {
+    const meeting = buildRecoverableSealFailureMeeting({
+      snapshot: {
+        meetingId: 'meeting-3',
+        recordingStartedAtMs: 1_000,
+        recordingEndedAtMs: 2_000,
+      },
+      failureReason: 'capture_journal_write_failed',
+    });
+
+    expect(meeting.finalization_error_category).toBe(
+      'capture_journal_write_failed',
+    );
+    expect(meeting.end_reason).toBe('capture_journal_write_failed');
+    expect(meeting.transcript_integrity_json).toBe(
+      JSON.stringify({ reasons: ['capture_journal_write_failed'] }),
+    );
+  });
+
   it('drains journal appends before requesting a seal', async () => {
     const events: string[] = [];
+    const activityEvidence = await buildCaptureActivityEvidence([], {
+      clock: {
+        kind: 'meeting_relative_seconds',
+        origin: 'recording_start',
+      },
+      thresholds: {
+        rms: 0.01,
+        dominanceRatio: 1.5,
+        minimumSwitchIntervalMs: 250,
+      },
+      algorithmVersion: 'speaker_activity_v1',
+    });
     const outcome = await sealCaptureJournalBeforeFinalization({
       drainAppends: async () => {
         events.push('drain');
       },
+      hasWriteFailure: () => false,
       seal: async () => {
         events.push('seal');
+        return { activityEvidence };
       },
     });
 
     expect(events).toEqual(['drain', 'seal']);
-    expect(outcome).toBe('sealed');
+    expect(outcome).toEqual({ status: 'sealed', activityEvidence });
   });
 
-  it('reduces sensitive seal errors to a recovery-required outcome', async () => {
+  it('does not seal after a prior write failure', async () => {
+    let sealCalls = 0;
     const outcome = await sealCaptureJournalBeforeFinalization({
       drainAppends: async () => {},
+      hasWriteFailure: () => true,
       seal: async () => {
+        sealCalls += 1;
+        return {};
+      },
+    });
+
+    expect(sealCalls).toBe(0);
+    expect(outcome).toEqual({
+      status: 'recovery_required',
+      reason: 'capture_journal_write_failed',
+    });
+  });
+
+  it('reduces sensitive seal errors to a content-free recovery category', async () => {
+    let sealCalls = 0;
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: async () => {},
+      hasWriteFailure: () => false,
+      seal: async () => {
+        sealCalls += 1;
         throw new Error('/private/audio: transcript words');
       },
     });
 
-    expect(outcome).toBe('recovery_required');
+    expect(sealCalls).toBe(1);
+    expect(outcome).toEqual({
+      status: 'recovery_required',
+      reason: 'capture_journal_seal_failed',
+    });
+  });
+
+  it('rejects a sealed response without verified activity evidence', async () => {
+    let sealCalls = 0;
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: async () => {},
+      hasWriteFailure: () => false,
+      seal: async () => {
+        sealCalls += 1;
+        return {};
+      },
+    });
+
+    expect(sealCalls).toBe(1);
+    expect(outcome).toEqual({
+      status: 'recovery_required',
+      reason: 'capture_journal_seal_failed',
+    });
   });
 
   it('cleans up superseded system audio artifacts after rebuild fallback', () => {
