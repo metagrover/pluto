@@ -78,8 +78,7 @@ export const useAutoEndMonitor = ({
 
         const pollResult: PollInput = {
           active: Boolean(result?.active),
-          appName:
-            typeof result?.appName === 'string' ? result.appName : null,
+          appName: typeof result?.appName === 'string' ? result.appName : null,
           confidence:
             result?.confidence === 'high' ||
             result?.confidence === 'medium' ||

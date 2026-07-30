@@ -61,7 +61,6 @@ export const useActiveCallMonitor = ({
     return true;
   };
 
-
   useEffect(() => {
     let cancelled = false;
     let intervalId: number | null = null;
