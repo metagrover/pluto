@@ -7,7 +7,11 @@
         { "type": "accept_stop", "atMs": 100 },
         { "type": "complete_validated_save", "atMs": 145 }
       ],
-      "expected": { "schemaVersion": 1, "status": "available", "durationMs": 45 }
+      "expected": {
+        "schemaVersion": 1,
+        "status": "available",
+        "durationMs": 45
+      }
     },
     {
       "id": "delayed",
@@ -15,7 +19,11 @@
         { "type": "accept_stop", "atMs": 100 },
         { "type": "complete_validated_save", "atMs": 1100 }
       ],
-      "expected": { "schemaVersion": 1, "status": "available", "durationMs": 1000 }
+      "expected": {
+        "schemaVersion": 1,
+        "status": "available",
+        "durationMs": 1000
+      }
     },
     {
       "id": "not-validated",
@@ -23,7 +31,11 @@
         { "type": "accept_stop", "atMs": 100 },
         { "type": "mark_unavailable", "reason": "not_validated" }
       ],
-      "expected": { "schemaVersion": 1, "status": "unavailable", "reason": "not_validated" }
+      "expected": {
+        "schemaVersion": 1,
+        "status": "unavailable",
+        "reason": "not_validated"
+      }
     },
     {
       "id": "decreasing",
@@ -31,12 +43,20 @@
         { "type": "accept_stop", "atMs": 100 },
         { "type": "complete_validated_save", "atMs": 99 }
       ],
-      "expected": { "schemaVersion": 1, "status": "unavailable", "reason": "timestamp_regression" }
+      "expected": {
+        "schemaVersion": 1,
+        "status": "unavailable",
+        "reason": "timestamp_regression"
+      }
     },
     {
       "id": "completion-before-start",
       "events": [{ "type": "complete_validated_save", "atMs": 100 }],
-      "expected": { "schemaVersion": 1, "status": "unavailable", "reason": "not_started" }
+      "expected": {
+        "schemaVersion": 1,
+        "status": "unavailable",
+        "reason": "not_started"
+      }
     },
     {
       "id": "duplicate-completion",
@@ -45,7 +65,11 @@
         { "type": "complete_validated_save", "atMs": 145 },
         { "type": "complete_validated_save", "atMs": 200 }
       ],
-      "expected": { "schemaVersion": 1, "status": "available", "durationMs": 45 }
+      "expected": {
+        "schemaVersion": 1,
+        "status": "available",
+        "durationMs": 45
+      }
     }
   ],
   "expected": {
