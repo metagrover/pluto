@@ -5,6 +5,7 @@
 
 export const TRANSCRIPT_JSON_SCHEMA_VERSION = 2;
 
+import type { LiveTranscriptResponsivenessSummary } from './liveTranscriptResponsiveness.ts';
 /** Bump when attribution / merge / ASR routing logic changes materially. */
 import type {
   TranscriptIntegrityEvidence,
@@ -92,6 +93,7 @@ export type StoredTranscriptV2 = {
   /** Optional full-session fallback metadata when session recovery ran. */
   sessionFallbackTranscription?: TranscriptTranscriptionMeta;
   speakerAttribution?: StoredTranscriptSpeakerAttribution;
+  liveTranscriptResponsiveness?: LiveTranscriptResponsivenessSummary;
   lifecycleStatus?: TranscriptLifecycleStatus;
   integrity?: StoredTranscriptIntegrity;
   segments: unknown[];
@@ -207,6 +209,7 @@ export function buildTranscriptJsonPayload(
     transcription?: TranscriptTranscriptionMeta;
     sessionFallbackTranscription?: TranscriptTranscriptionMeta;
     speakerAttribution?: StoredTranscriptSpeakerAttribution;
+    liveTranscriptResponsiveness?: LiveTranscriptResponsivenessSummary;
     lifecycleStatus?: TranscriptLifecycleStatus;
     integrity?: StoredTranscriptIntegrity;
   },
@@ -223,6 +226,11 @@ export function buildTranscriptJsonPayload(
     transcription: options.transcription,
     sessionFallbackTranscription: options.sessionFallbackTranscription,
     speakerAttribution: options.speakerAttribution,
+    ...(options.liveTranscriptResponsiveness
+      ? {
+          liveTranscriptResponsiveness: options.liveTranscriptResponsiveness,
+        }
+      : {}),
     lifecycleStatus: options.lifecycleStatus,
     integrity: options.integrity,
     segments,

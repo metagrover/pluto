@@ -15,6 +15,7 @@ import {
   parseRecordingQualityBenchmarkCliArgs,
   runCandidateEligibilityBenchmarkCase,
   runCaptureRecoveryBenchmarkCase,
+  runLiveTranscriptResponsivenessBenchmarkCase,
   runRetryValidationBenchmarkCase,
   selectRecordingQualityBenchmarkCases,
 } from '../../src/services/recordingQualityBenchmark';
@@ -333,6 +334,30 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
     });
   });
 
+  it('accepts live-transcript-responsiveness benchmark cases', () => {
+    const manifest = loadRecordingQualityBenchmarkManifest({
+      schemaVersion: 3,
+      baselineReport: 'baselines/current-master.json',
+      cases: [
+        {
+          id: 'issue-549-live-transcript-responsiveness',
+          issue: 549,
+          title: 'Live transcript responsiveness',
+          kind: 'live_transcript_responsiveness',
+          fixture: 'fixtures/issue-549-live-transcript-responsiveness.json',
+          tier: 'pr',
+        },
+      ],
+    });
+
+    expect(manifest.cases[0]).toMatchObject({
+      id: 'issue-549-live-transcript-responsiveness',
+      issue: 549,
+      kind: 'live_transcript_responsiveness',
+      tier: 'pr',
+    });
+  });
+
   it('loads tracked metrics with tolerance and stability rules', () => {
     const manifest = loadRecordingQualityBenchmarkManifest({
       schemaVersion: 1,
@@ -388,6 +413,132 @@ describe('loadRecordingQualityBenchmarkManifest', () => {
         cases: [{ ...baseCase, tier: 'nightly' }],
       }),
     ).toThrow(/unsupported benchmark tier: nightly/i);
+  });
+});
+
+describe('runLiveTranscriptResponsivenessBenchmarkCase', () => {
+  const meta = {
+    id: 'issue-549-live-transcript-responsiveness',
+    issue: 549,
+    title: 'Live transcript responsiveness',
+    kind: 'live_transcript_responsiveness' as const,
+    fixture: 'fixtures/issue-549-live-transcript-responsiveness.json',
+    tier: 'pr' as const,
+    trackedMetrics: [
+      {
+        name: 'firstTextLatencyMs',
+        tolerance: 0,
+        stability: 'stable' as const,
+      },
+    ],
+  };
+
+  it('measures a healthy deterministic publication trace', () => {
+    const summary = {
+      schemaVersion: 1 as const,
+      status: 'available' as const,
+      firstTextLatencyMs: 250,
+      acceptedPublicationCount: 3,
+      cadenceSampleCount: 2,
+      maximumUpdateGapMs: 450,
+    };
+
+    const result = runLiveTranscriptResponsivenessBenchmarkCase(meta, {
+      type: 'live_transcript_responsiveness',
+      startAtMs: 100,
+      events: [
+        { type: 'publish', atMs: 350, acceptedSegmentCount: 2 },
+        { type: 'publish', atMs: 800, acceptedSegmentCount: 1 },
+        { type: 'publish', atMs: 1_100, acceptedSegmentCount: 1 },
+        { type: 'stop', atMs: 1_300 },
+      ],
+      expected: {
+        status: 'validated',
+        primaryMetric: { name: 'firstTextLatencyMs', value: 250 },
+        summary,
+      },
+    });
+
+    expect(result).toMatchObject({
+      passed: true,
+      actual: {
+        status: 'validated',
+        primaryMetric: { name: 'firstTextLatencyMs', value: 250 },
+        responsiveness: summary,
+      },
+    });
+  });
+
+  it('keeps no-text evidence explicitly unavailable', () => {
+    const result = runLiveTranscriptResponsivenessBenchmarkCase(meta, {
+      type: 'live_transcript_responsiveness',
+      startAtMs: 100,
+      events: [{ type: 'stop', atMs: 500 }],
+      expected: {
+        status: 'needs_attention',
+        primaryMetric: {
+          name: 'responsivenessReason',
+          value: 'no_accepted_live_text',
+        },
+        summary: {
+          schemaVersion: 1,
+          status: 'unavailable',
+          reason: 'no_accepted_live_text',
+          acceptedPublicationCount: 0,
+          cadenceSampleCount: 0,
+          maximumUpdateGapMs: null,
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      passed: true,
+      actual: {
+        status: 'needs_attention',
+        primaryMetric: {
+          name: 'responsivenessReason',
+          value: 'no_accepted_live_text',
+        },
+        responsiveness: { status: 'unavailable' },
+      },
+    });
+  });
+
+  it('fails closed for a malformed deterministic trace', () => {
+    const result = runLiveTranscriptResponsivenessBenchmarkCase(meta, {
+      type: 'live_transcript_responsiveness',
+      startAtMs: 100,
+      events: [
+        { type: 'publish', atMs: 350, acceptedSegmentCount: 1 },
+        { type: 'publish', atMs: 300, acceptedSegmentCount: 1 },
+      ],
+      expected: {
+        status: 'needs_attention',
+        primaryMetric: {
+          name: 'responsivenessReason',
+          value: 'non_monotonic_time',
+        },
+        summary: {
+          schemaVersion: 1,
+          status: 'invalid',
+          reason: 'non_monotonic_time',
+          acceptedPublicationCount: 1,
+          cadenceSampleCount: 0,
+          maximumUpdateGapMs: null,
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      passed: true,
+      actual: {
+        status: 'needs_attention',
+        responsiveness: {
+          status: 'invalid',
+          reason: 'non_monotonic_time',
+        },
+      },
+    });
   });
 });
 
@@ -770,6 +921,7 @@ describe('buildRecordingQualityBenchmarkReport', () => {
     expect(report.summary.kinds).toEqual({
       candidate_eligibility: { passed: 1, failed: 0 },
       capture_recovery: { passed: 0, failed: 0 },
+      live_transcript_responsiveness: { passed: 0, failed: 0 },
       recording_finalization: { passed: 1, failed: 0 },
       retry_validation: { passed: 0, failed: 0 },
       transcript_validation: { passed: 1, failed: 1 },
@@ -1090,7 +1242,7 @@ describe('benchmark:recording-quality CLI', () => {
       stdout: result.stdout,
     }).toMatchObject({
       status: 0,
-      stdout: expect.stringContaining('tier=pr 8/8 cases passed'),
+      stdout: expect.stringContaining('tier=pr 9/9 cases passed'),
     });
     expect(result.stdout).toContain(
       'EVIDENCE issue-493-capture-recovery elapsed=',
@@ -1106,10 +1258,11 @@ describe('benchmark:recording-quality CLI', () => {
         rssSamplingIntervalMs: 10,
       },
       summary: {
-        totalCases: 8,
-        issueCoverage: expect.arrayContaining([493]),
+        totalCases: 9,
+        issueCoverage: expect.arrayContaining([493, 549]),
         kinds: {
           capture_recovery: { passed: 1, failed: 0 },
+          live_transcript_responsiveness: { passed: 1, failed: 0 },
         },
       },
     });
@@ -1135,6 +1288,19 @@ describe('benchmark:recording-quality CLI', () => {
               value: 51,
               unit: 'bytes',
             }),
+          }),
+        }),
+        expect.objectContaining({
+          id: 'issue-549-live-transcript-responsiveness',
+          actual: expect.objectContaining({
+            responsiveness: {
+              schemaVersion: 1,
+              status: 'available',
+              firstTextLatencyMs: 250,
+              acceptedPublicationCount: 3,
+              cadenceSampleCount: 2,
+              maximumUpdateGapMs: 450,
+            },
           }),
         }),
       ]),
@@ -1169,7 +1335,7 @@ describe('benchmark:recording-quality CLI', () => {
 
     const all = run('all');
     expect(all.status).toBe(0);
-    expect(all.stdout).toContain('tier=all 8/8 cases passed');
+    expect(all.stdout).toContain('tier=all 9/9 cases passed');
 
     const manual = run('manual');
     expect(manual.status).toBe(1);

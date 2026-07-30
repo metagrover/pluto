@@ -46,6 +46,14 @@ describe('transcriptSchema', () => {
           mappingApplied: true,
           confidence: 0.82,
         }),
+        liveTranscriptResponsiveness: {
+          schemaVersion: 1,
+          status: 'available',
+          firstTextLatencyMs: 250,
+          acceptedPublicationCount: 3,
+          cadenceSampleCount: 2,
+          maximumUpdateGapMs: 450,
+        },
       },
     );
     expect(payload.schemaVersion).toBe(TRANSCRIPT_JSON_SCHEMA_VERSION);
@@ -67,7 +75,24 @@ describe('transcriptSchema', () => {
       diarizationAttempted: true,
       mappingApplied: true,
     });
+    expect(payload.liveTranscriptResponsiveness).toEqual({
+      schemaVersion: 1,
+      status: 'available',
+      firstTextLatencyMs: 250,
+      acceptedPublicationCount: 3,
+      cadenceSampleCount: 2,
+      maximumUpdateGapMs: 450,
+    });
     expect(payload.segments).toHaveLength(1);
+  });
+
+  it('keeps responsiveness evidence optional for existing payload callers', () => {
+    const payload = buildTranscriptJsonPayload([], {
+      canonicalSource: 'mic',
+      postHydrationBleedPass: false,
+    });
+
+    expect(payload).not.toHaveProperty('liveTranscriptResponsiveness');
   });
 
   it('records diarization-backed speaker attribution trust metadata', () => {
