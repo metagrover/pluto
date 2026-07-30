@@ -5043,7 +5043,8 @@ export const AudioManager = ({
         );
         onSessionComplete?.(meetingData.id);
         return;
-      } else if (derivedPersistence.result !== 'updated') {
+      }
+      if (derivedPersistence.result !== 'updated') {
         console.warn(
           `[Pluto] Derived persistence ${String(derivedPersistence.result)}; preserving current transcript generation`,
         );
