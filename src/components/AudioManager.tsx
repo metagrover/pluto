@@ -4715,6 +4715,8 @@ export const AudioManager = ({
             postHydrationBleedPass,
             postHydrationBleedDroppedMe,
             speakerAttribution,
+            liveTranscriptResponsiveness:
+              frozenLiveTranscriptResponsivenessRef.current ?? undefined,
             lifecycleStatus: 'validated',
             integrity: {
               ...integrityValidation.evidence,
