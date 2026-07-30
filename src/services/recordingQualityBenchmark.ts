@@ -8,6 +8,10 @@ import {
 import { recoverInterruptedCaptureJournals } from '../../electron/captureJournalRecovery.ts';
 import type { Meeting } from '../types.ts';
 import {
+  type LiveTranscriptResponsivenessSummary,
+  createLiveTranscriptResponsivenessAccumulator,
+} from '../utils/liveTranscriptResponsiveness.ts';
+import {
   beginRecordingFinalization,
   buildMeetingTiming,
   resolveFinalizationCleanupPaths,
@@ -27,6 +31,7 @@ export type RecordingQualityBenchmarkCaseKind =
   | 'transcript_validation'
   | 'recording_finalization'
   | 'retry_validation'
+  | 'live_transcript_responsiveness'
   | 'candidate_eligibility';
 
 export type RecordingQualityBenchmarkTier = 'pr' | 'manual';
@@ -108,6 +113,7 @@ export type RecordingQualityBenchmarkCaseResult = {
       eligible: boolean;
       reasons: string[];
     };
+    responsiveness?: LiveTranscriptResponsivenessSummary;
     reasons?: string[];
   };
   expected: RecordingQualityBenchmarkExpectation;
@@ -427,7 +433,20 @@ export type RecordingQualityBenchmarkFixture =
   | TranscriptValidationFixture
   | RecordingFinalizationFixture
   | RetryValidationFixture
+  | LiveTranscriptResponsivenessFixture
   | CandidateEligibilityFixture;
+
+export type LiveTranscriptResponsivenessFixture = {
+  type: 'live_transcript_responsiveness';
+  startAtMs: number;
+  events: Array<
+    | { type: 'publish'; atMs: number; acceptedSegmentCount: number }
+    | { type: 'stop'; atMs: number }
+  >;
+  expected: RecordingQualityBenchmarkExpectation & {
+    summary: LiveTranscriptResponsivenessSummary;
+  };
+};
 
 type RetryValidationFixtureTranscription = {
   segments: Array<{
@@ -479,6 +498,7 @@ const isSupportedBenchmarkCaseKind = (
   kind === 'transcript_validation' ||
   kind === 'recording_finalization' ||
   kind === 'retry_validation' ||
+  kind === 'live_transcript_responsiveness' ||
   kind === 'candidate_eligibility';
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -849,6 +869,85 @@ export const runRecordingFinalizationBenchmarkCase = (
       status: failures.length === 0 ? 'validated' : 'needs_attention',
       primaryMetric: actualMetric,
       reasons: failures,
+    },
+    expected: fixture.expected,
+    ...(failures.length > 0 ? { failures } : {}),
+  };
+};
+
+const makeLiveTranscriptResponsivenessMetric = (
+  summary: LiveTranscriptResponsivenessSummary | null,
+  metricName?: string,
+): RecordingQualityBenchmarkMetric | undefined => {
+  if (!summary || !metricName) return undefined;
+
+  switch (metricName) {
+    case 'firstTextLatencyMs':
+      return summary.status === 'available'
+        ? { name: metricName, value: summary.firstTextLatencyMs }
+        : undefined;
+    case 'acceptedPublicationCount':
+    case 'cadenceSampleCount':
+      return { name: metricName, value: summary[metricName] };
+    case 'maximumUpdateGapMs':
+      return summary.maximumUpdateGapMs === null
+        ? undefined
+        : { name: metricName, value: summary.maximumUpdateGapMs };
+    case 'responsivenessStatus':
+      return { name: metricName, value: summary.status };
+    case 'responsivenessReason':
+      return summary.status === 'available'
+        ? undefined
+        : { name: metricName, value: summary.reason };
+    default:
+      return undefined;
+  }
+};
+
+export const runLiveTranscriptResponsivenessBenchmarkCase = (
+  meta: RecordingQualityBenchmarkManifestCase,
+  fixture: LiveTranscriptResponsivenessFixture,
+): RecordingQualityBenchmarkCaseResult => {
+  const accumulator = createLiveTranscriptResponsivenessAccumulator();
+  accumulator.start(fixture.startAtMs);
+  for (const event of fixture.events) {
+    if (event.type === 'publish') {
+      accumulator.publish(event.atMs, event.acceptedSegmentCount);
+    } else {
+      accumulator.stop(event.atMs);
+    }
+  }
+
+  const summary = accumulator.snapshot();
+  const actualStatus =
+    summary?.status === 'available' ? 'validated' : 'needs_attention';
+  const actualMetric = makeLiveTranscriptResponsivenessMetric(
+    summary,
+    fixture.expected.primaryMetric?.name,
+  );
+  const failures = [
+    ...(actualStatus === fixture.expected.status ? [] : ['status mismatch']),
+    ...compareMetric(actualMetric, fixture.expected.primaryMetric),
+    ...(JSON.stringify(summary) === JSON.stringify(fixture.expected.summary)
+      ? []
+      : ['responsiveness summary mismatch']),
+  ];
+
+  return {
+    id: meta.id,
+    issue: meta.issue,
+    title: meta.title,
+    kind: meta.kind,
+    passed: failures.length === 0,
+    trackedMetrics: meta.trackedMetrics,
+    actual: {
+      status: actualStatus,
+      primaryMetric: actualMetric,
+      ...(summary ? { responsiveness: summary } : {}),
+      reasons:
+        summary?.status === 'available'
+          ? []
+          : [summary?.reason || 'no_summary'],
     },
     expected: fixture.expected,
     ...(failures.length > 0 ? { failures } : {}),
@@ -1378,6 +1477,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
   > = {
     candidate_eligibility: { passed: 0, failed: 0 },
     capture_recovery: { passed: 0, failed: 0 },
+    live_transcript_responsiveness: { passed: 0, failed: 0 },
     recording_finalization: { passed: 0, failed: 0 },
     transcript_validation: { passed: 0, failed: 0 },
     retry_validation: { passed: 0, failed: 0 },

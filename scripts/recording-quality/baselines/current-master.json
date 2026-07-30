@@ -11,17 +11,21 @@
     "arch": "arm64"
   },
   "summary": {
-    "totalCases": 8,
-    "passedCases": 8,
+    "totalCases": 9,
+    "passedCases": 9,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434, 458, 476, 493],
+    "issueCoverage": [25, 75, 428, 434, 458, 476, 493, 549],
     "kinds": {
       "candidate_eligibility": {
         "passed": 1,
         "failed": 0
       },
       "capture_recovery": {
+        "passed": 1,
+        "failed": 0
+      },
+      "live_transcript_responsiveness": {
         "passed": 1,
         "failed": 0
       },
@@ -134,6 +138,51 @@
         "primaryMetric": {
           "name": "recoveredChunkRatio",
           "value": 0.75
+        }
+      }
+    },
+    {
+      "id": "issue-549-live-transcript-responsiveness",
+      "issue": 549,
+      "title": "Live transcript responsiveness follows accepted publication timing",
+      "kind": "live_transcript_responsiveness",
+      "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "firstTextLatencyMs",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
+      "actual": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "firstTextLatencyMs",
+          "value": 250
+        },
+        "responsiveness": {
+          "schemaVersion": 1,
+          "status": "available",
+          "firstTextLatencyMs": 250,
+          "acceptedPublicationCount": 3,
+          "cadenceSampleCount": 2,
+          "maximumUpdateGapMs": 450
+        },
+        "reasons": []
+      },
+      "expected": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "firstTextLatencyMs",
+          "value": 250
+        },
+        "summary": {
+          "schemaVersion": 1,
+          "status": "available",
+          "firstTextLatencyMs": 250,
+          "acceptedPublicationCount": 3,
+          "cadenceSampleCount": 2,
+          "maximumUpdateGapMs": 450
         }
       }
     },
@@ -321,7 +370,7 @@
   "comparisonSummary": {
     "stableRegressions": 0,
     "stableImprovements": 0,
-    "stableWithinTolerance": 6,
+    "stableWithinTolerance": 7,
     "hardwareDependentDrift": 0,
     "missingBaselineMetrics": 1
   },
@@ -335,6 +384,18 @@
       "stability": "stable",
       "outcome": "missing_baseline_metric",
       "currentValue": 0.75
+    },
+    {
+      "id": "issue-549-live-transcript-responsiveness",
+      "issue": 549,
+      "title": "Live transcript responsiveness follows accepted publication timing",
+      "metricName": "firstTextLatencyMs",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": 250,
+      "currentValue": 250,
+      "delta": 0
     },
     {
       "id": "issue-25-opening-audio",

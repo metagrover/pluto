@@ -1,0 +1,40 @@
+{
+  "type": "live_transcript_responsiveness",
+  "startAtMs": 100,
+  "events": [
+    {
+      "type": "publish",
+      "atMs": 350,
+      "acceptedSegmentCount": 2
+    },
+    {
+      "type": "publish",
+      "atMs": 800,
+      "acceptedSegmentCount": 1
+    },
+    {
+      "type": "publish",
+      "atMs": 1100,
+      "acceptedSegmentCount": 1
+    },
+    {
+      "type": "stop",
+      "atMs": 1300
+    }
+  ],
+  "expected": {
+    "status": "validated",
+    "primaryMetric": {
+      "name": "firstTextLatencyMs",
+      "value": 250
+    },
+    "summary": {
+      "schemaVersion": 1,
+      "status": "available",
+      "firstTextLatencyMs": 250,
+      "acceptedPublicationCount": 3,
+      "cadenceSampleCount": 2,
+      "maximumUpdateGapMs": 450
+    }
+  }
+}
