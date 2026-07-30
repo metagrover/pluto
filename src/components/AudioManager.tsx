@@ -20,6 +20,10 @@ import {
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import { resolveProductionDiarizationProvider } from '../utils/diarizationProvider';
 import {
+  type LiveTranscriptResponsivenessSummary,
+  createLiveTranscriptResponsivenessRuntime,
+} from '../utils/liveTranscriptResponsiveness';
+import {
   beginRecordingFinalization,
   buildMeetingTiming,
   buildRecoverableSealFailureMeeting,
@@ -483,6 +487,13 @@ export const AudioManager = ({
     new Map(),
   );
   const processingQueueRef = useRef(Promise.resolve());
+  const liveTranscriptResponsivenessRef = useRef(
+    createLiveTranscriptResponsivenessRuntime({
+      now: () => performance.now(),
+    }),
+  );
+  const frozenLiveTranscriptResponsivenessRef =
+    useRef<LiveTranscriptResponsivenessSummary | null>(null);
   const captureJournalWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const processedMicSegmentsRef = useRef<TranscriptionSegment[]>([]);
   const zeroMicChunkStreakRef = useRef(0);
@@ -579,6 +590,8 @@ export const AudioManager = ({
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
       startTimeRef.current = Date.now();
+      liveTranscriptResponsivenessRef.current.start();
+      frozenLiveTranscriptResponsivenessRef.current = null;
       captureJournalWriteQueueRef.current = Promise.resolve();
       onRecordingStarted?.(startTimeRef.current);
       recordingEndedAtRef.current = 0;
@@ -638,6 +651,8 @@ export const AudioManager = ({
           }),
         );
         currentMeetingIdRef.current = null;
+        liveTranscriptResponsivenessRef.current.discard();
+        frozenLiveTranscriptResponsivenessRef.current = null;
         startTimeRef.current = 0;
         recordingEndedAtRef.current = 0;
         stopInFlightRef.current = false;
@@ -1015,6 +1030,8 @@ export const AudioManager = ({
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
       currentMeetingIdRef.current = null;
+      liveTranscriptResponsivenessRef.current.discard();
+      frozenLiveTranscriptResponsivenessRef.current = null;
       startTimeRef.current = 0;
       recordingEndedAtRef.current = 0;
       stopInFlightRef.current = false;
@@ -3200,6 +3217,11 @@ export const AudioManager = ({
         endTime: s.endTime + chunkStartSec,
       })),
     );
+    const acceptedSegmentCount = [
+      ...filteredMicSegments,
+      ...filteredSystemSegments,
+    ].filter((segment) => segment.text.trim().length > 0).length;
+    liveTranscriptResponsivenessRef.current.publish(acceptedSegmentCount);
     onLiveTranscript?.(
       [...processedMicSegmentsRef.current]
         .sort((a, b) => a.startTime - b.startTime)
@@ -3333,6 +3355,8 @@ export const AudioManager = ({
       console.warn('[Pluto] Ignoring duplicate or orphaned stop request');
       return;
     }
+    frozenLiveTranscriptResponsivenessRef.current =
+      liveTranscriptResponsivenessRef.current.stop();
 
     stopInFlightRef.current = true;
     recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
@@ -4617,6 +4641,8 @@ export const AudioManager = ({
               canonicalSource: mixedAudioPath ? 'mix' : 'mic',
               postHydrationBleedPass: false,
               speakerAttribution,
+              liveTranscriptResponsiveness:
+                frozenLiveTranscriptResponsivenessRef.current ?? undefined,
               lifecycleStatus: 'needs_attention',
               integrity: {
                 ...integrityValidation.evidence,
@@ -4839,6 +4865,8 @@ export const AudioManager = ({
             transcription: transcriptMeta,
             sessionFallbackTranscription: sessionFallbackTranscriptMeta,
             speakerAttribution,
+            liveTranscriptResponsiveness:
+              frozenLiveTranscriptResponsivenessRef.current ?? undefined,
             lifecycleStatus: integrityValidation.status,
             integrity: {
               ...integrityValidation.evidence,
@@ -5032,6 +5060,8 @@ export const AudioManager = ({
         // Note: we don't call stopSession because that would try to save.
         // We just reset local state. The main process handles task cancellation.
         currentMeetingIdRef.current = null;
+        liveTranscriptResponsivenessRef.current.discard();
+        frozenLiveTranscriptResponsivenessRef.current = null;
         stopInFlightRef.current = false;
         startTimeRef.current = 0;
         recordingEndedAtRef.current = 0;

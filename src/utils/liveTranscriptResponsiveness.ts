@@ -33,6 +33,77 @@ export type LiveTranscriptResponsivenessAccumulator = {
   snapshot(): LiveTranscriptResponsivenessSummary | null;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  Number.isFinite(value) &&
+  value >= 0;
+
+const isNonNegativeFinite = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+export const parseLiveTranscriptResponsivenessSummary = (
+  value: unknown,
+): LiveTranscriptResponsivenessSummary | null => {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    !isNonNegativeInteger(value.acceptedPublicationCount) ||
+    !isNonNegativeInteger(value.cadenceSampleCount) ||
+    !(
+      value.maximumUpdateGapMs === null ||
+      isNonNegativeFinite(value.maximumUpdateGapMs)
+    )
+  ) {
+    return null;
+  }
+
+  const base = {
+    schemaVersion: 1 as const,
+    acceptedPublicationCount: value.acceptedPublicationCount,
+    cadenceSampleCount: value.cadenceSampleCount,
+    maximumUpdateGapMs: value.maximumUpdateGapMs,
+  };
+  if (
+    value.status === 'available' &&
+    isNonNegativeFinite(value.firstTextLatencyMs)
+  ) {
+    return {
+      ...base,
+      status: 'available',
+      firstTextLatencyMs: value.firstTextLatencyMs,
+    };
+  }
+  if (
+    value.status === 'unavailable' &&
+    value.reason === 'no_accepted_live_text'
+  ) {
+    return { ...base, status: 'unavailable', reason: value.reason };
+  }
+  const invalidReasons: LiveTranscriptResponsivenessInvalidReason[] = [
+    'event_before_start',
+    'non_monotonic_time',
+    'duplicate_stop',
+    'publication_after_stop',
+  ];
+  if (
+    value.status === 'invalid' &&
+    invalidReasons.includes(
+      value.reason as LiveTranscriptResponsivenessInvalidReason,
+    )
+  ) {
+    return {
+      ...base,
+      status: 'invalid',
+      reason: value.reason as LiveTranscriptResponsivenessInvalidReason,
+    };
+  }
+  return null;
+};
+
 export const createLiveTranscriptResponsivenessAccumulator =
   (): LiveTranscriptResponsivenessAccumulator => {
     let startedAtMs: number | null = null;
@@ -62,8 +133,7 @@ export const createLiveTranscriptResponsivenessAccumulator =
       };
     };
 
-    const invalidTime = (atMs: number) =>
-      !Number.isFinite(atMs) || atMs < 0;
+    const invalidTime = (atMs: number) => !Number.isFinite(atMs) || atMs < 0;
 
     const start = (atMs: number) => {
       if (invalidTime(atMs)) {
@@ -159,3 +229,20 @@ export const createLiveTranscriptResponsivenessAccumulator =
       snapshot: () => summary,
     };
   };
+
+export const createLiveTranscriptResponsivenessRuntime = ({
+  now,
+}: {
+  now: () => number;
+}) => {
+  const accumulator = createLiveTranscriptResponsivenessAccumulator();
+
+  return {
+    start: () => accumulator.start(now()),
+    publish: (acceptedSegmentCount: number) =>
+      accumulator.publish(now(), acceptedSegmentCount),
+    stop: () => accumulator.stop(now()),
+    discard: () => accumulator.discard(),
+    snapshot: () => accumulator.snapshot(),
+  };
+};

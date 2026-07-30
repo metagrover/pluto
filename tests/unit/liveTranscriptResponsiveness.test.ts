@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createLiveTranscriptResponsivenessAccumulator } from '../../src/utils/liveTranscriptResponsiveness';
+import {
+  createLiveTranscriptResponsivenessAccumulator,
+  parseLiveTranscriptResponsivenessSummary,
+} from '../../src/utils/liveTranscriptResponsiveness';
 
 describe('live transcript responsiveness accumulator', () => {
   it('measures first text and accepted publication cadence', () => {
@@ -131,5 +134,36 @@ describe('live transcript responsiveness accumulator', () => {
     });
     accumulator.publish(Number.NaN, 1);
     expect(accumulator.snapshot()).toMatchObject({ reason });
+  });
+
+  it('parses only the finite content-free summary schema', () => {
+    expect(
+      parseLiveTranscriptResponsivenessSummary({
+        schemaVersion: 1,
+        status: 'available',
+        firstTextLatencyMs: 250,
+        acceptedPublicationCount: 3,
+        cadenceSampleCount: 2,
+        maximumUpdateGapMs: 450,
+        transcript: 'must not survive',
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      status: 'available',
+      firstTextLatencyMs: 250,
+      acceptedPublicationCount: 3,
+      cadenceSampleCount: 2,
+      maximumUpdateGapMs: 450,
+    });
+    expect(
+      parseLiveTranscriptResponsivenessSummary({
+        schemaVersion: 1,
+        status: 'available',
+        firstTextLatencyMs: Number.NaN,
+        acceptedPublicationCount: 3,
+        cadenceSampleCount: 2,
+        maximumUpdateGapMs: 450,
+      }),
+    ).toBeNull();
   });
 });

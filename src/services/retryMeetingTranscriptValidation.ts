@@ -1,4 +1,5 @@
 import type { Meeting } from '../types.ts';
+import { parseLiveTranscriptResponsivenessSummary } from '../utils/liveTranscriptResponsiveness.ts';
 import type {
   AttributionSegment,
   SpeakerActivityWindow,
@@ -51,6 +52,20 @@ const readRunId = (meeting: Meeting): string | null => {
       (typeof parsed.validation_run_id === 'string'
         ? parsed.validation_run_id
         : null)
+    );
+  } catch {
+    return null;
+  }
+};
+
+const readLiveTranscriptResponsiveness = (transcriptJson?: string | null) => {
+  try {
+    const parsed = JSON.parse(transcriptJson || '{}') as Record<
+      string,
+      unknown
+    >;
+    return parseLiveTranscriptResponsivenessSummary(
+      parsed.liveTranscriptResponsiveness,
     );
   } catch {
     return null;
@@ -346,6 +361,9 @@ export const retryMeetingTranscriptValidation = async (
         pipelineMode: 'canonical_session_v2',
         canonicalSource: 'mix',
         postHydrationBleedPass: false,
+        liveTranscriptResponsiveness:
+          readLiveTranscriptResponsiveness(current.transcript_json) ??
+          undefined,
         lifecycleStatus: 'validated',
         integrity: { ...validation.evidence, reasons: validation.reasons },
       }),

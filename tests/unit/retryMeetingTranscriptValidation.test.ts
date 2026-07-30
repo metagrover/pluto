@@ -52,7 +52,22 @@ describe('retryMeetingTranscriptValidation', () => {
   });
 
   it('generates downstream artifacts exactly once after validation succeeds', async () => {
-    let current: Record<string, unknown> = { ...meeting };
+    const responsiveness = {
+      schemaVersion: 1,
+      status: 'available',
+      firstTextLatencyMs: 250,
+      acceptedPublicationCount: 3,
+      cadenceSampleCount: 2,
+      maximumUpdateGapMs: 450,
+    };
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_json: JSON.stringify({
+        schemaVersion: 2,
+        segments: [],
+        liveTranscriptResponsiveness: responsiveness,
+      }),
+    };
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
@@ -107,6 +122,9 @@ describe('retryMeetingTranscriptValidation', () => {
         ([channel]) => channel === 'EXTRACT_AND_PROCESS_ENTITIES',
       ),
     ).toHaveLength(1);
+    expect(
+      JSON.parse(String(current.transcript_json)).liveTranscriptResponsiveness,
+    ).toEqual(responsiveness);
   });
 
   it('preserves user edits made while validation is running', async () => {
