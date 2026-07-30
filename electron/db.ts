@@ -1544,6 +1544,12 @@ export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
   analysisFormatPass: boolean;
   analysisRetryCount: number;
   analysisFallbackUsed: boolean;
+  analysisProvider?: string | null;
+  analysisModel?: string | null;
+  analysisGenerationPath?: string | null;
+  analysisPromptVersion?: string | null;
+  analysisGeneratedAt?: string | null;
+  analysisErrorCategoriesJson?: string | null;
   valueSignalsJson: string;
 }): Exclude<ConditionalMeetingUpdateOutcome, 'already_current'> =>
   db.transaction(() => {
@@ -1583,6 +1589,15 @@ export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
     }
     const updated = getMeeting(input.meetingId) as PersistedMeeting | undefined;
     if (!updated) return 'missing';
+    updated.analysis_format_pass = input.analysisFormatPass;
+    updated.analysis_retry_count = input.analysisRetryCount;
+    updated.analysis_fallback_used = input.analysisFallbackUsed;
+    updated.analysis_provider = input.analysisProvider;
+    updated.analysis_model = input.analysisModel;
+    updated.analysis_generation_path = input.analysisGenerationPath;
+    updated.analysis_prompt_version = input.analysisPromptVersion;
+    updated.analysis_generated_at = input.analysisGeneratedAt;
+    updated.analysis_error_categories_json = input.analysisErrorCategoriesJson;
     // Reuse the canonical save boundary inside the same SQLite transaction so
     // analysis provenance inference and the meetings_fts refresh stay in sync.
     saveMeetingTransaction(updated);
