@@ -49,9 +49,9 @@ boundary.
 4. Start a transcript-owned conditional patch concurrently with downstream
    analysis. It succeeds only while the complete previously saved transcript
    generation is still current.
-5. Before the later full meeting save, await the patch result, read the current
-   transcript generation, and carry forward any accepted summary. Patch failure
-   never cancels or weakens downstream work.
+5. Before the later derived-intelligence save, await the patch result and use
+   one atomic transcript-generation guard to update downstream-owned fields
+   only. Patch failure never cancels or weakens downstream work.
 
 The update is idempotent: replaying the identical summary against the identical
 transcript generation is a no-op success. A newer transcript, acquired retry
@@ -149,21 +149,32 @@ downstream work. After it acknowledges:
 7. never overwrite title, notes, analysis, attention, folder, favorite, audio,
    finalization, or newer retry state.
 
-The database operation is one conditional `UPDATE`. The renderer starts it
-without awaiting before `runDownstream` begins. Before constructing the later
-full meeting save, the renderer awaits the patch promise and fetches the
-current meeting. It copies a valid stored latency summary from that current
-transcript generation into the later payload. If the current transcript
-generation or retry lease no longer matches the initially saved generation,
-the later unconditional full meeting save is suppressed rather than
-overwriting newer transcript state.
+The database metric operation is one conditional `UPDATE`. The renderer starts
+it without awaiting before `runDownstream` begins. When downstream work and the
+metric patch have both completed, the renderer invokes a separate conditional
+derived-intelligence update. That operation:
+
+- atomically requires the same expected transcript JSON, transcript integrity
+  JSON, validation timestamp, and `validated` status used by the metric patch;
+- updates only derived-owned columns such as title (under its existing expected
+  title guard), enhanced notes, analysis fields, and value signals;
+- never writes transcript JSON, transcript integrity, transcript status,
+  validation timestamp, retry lease, audio paths, folder, favorite,
+  finalization, or user notes;
+- returns `updated`, `conflict`, or `missing`.
+
+There is no read-then-unconditional-save sequence. A retry lease acquired after
+metric reconciliation but before the derived update changes the guarded
+generation and atomically produces `conflict`.
 
 This ordering lets downstream analysis run concurrently with the narrow local
-patch while preventing the later save from erasing it. A conflict, missing row,
-or patch failure does not roll back the durable validated transcript and does
-not cancel downstream work. Retry code preserves a valid stored summary and
-does not recompute clean-stop latency from retry wall-clock time. A malformed
-stored summary is omitted rather than normalized into healthy evidence.
+patch while preventing a later save from erasing it or a newer retry lease. A
+conflict, missing row, or patch failure does not roll back the durable validated
+transcript and does not cancel already completed downstream computation; it
+only suppresses stale derived persistence. Retry code preserves a valid stored
+summary and does not recompute clean-stop latency from retry wall-clock time. A
+malformed stored summary is omitted rather than normalized into healthy
+evidence.
 
 ## Non-Validated Lifecycles
 
@@ -199,8 +210,8 @@ device performance.
 
 - Invalid event ordering fails closed into a finite content-free reason.
 - Validation and recovery outcomes cannot be promoted by the metric.
-- The observational patch runs concurrently with downstream work; only the
-  later full-save reconciliation awaits it.
+- The observational patch runs concurrently with downstream work; the later
+  atomic derived-owned update waits for both.
 - Conditional-update conflicts preserve newer state.
 - Missing or malformed stored evidence is never interpreted as zero latency.
 - No caught error payload or private value enters the summary or benchmark
@@ -221,8 +232,10 @@ TDD must prove:
 - retry lease acquisition between initial save and metric patch produces an
   atomic conflict and cannot be overwritten;
 - downstream work starts before the metric patch resolves;
-- later full-save reconciliation waits for the patch, preserves valid evidence,
-  and suppresses stale writes after a generation conflict;
+- later derived-owned persistence waits for the patch and atomically suppresses
+  stale writes when a retry lease is acquired between reconciliation and
+  commit;
+- derived persistence cannot overwrite any transcript or user-owned field;
 - retry paths preserve valid evidence;
 - malformed evidence is omitted rather than normalized;
 - benchmark manifest, fixture, executor, schema, baseline, report, and privacy
