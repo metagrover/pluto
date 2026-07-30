@@ -46,6 +46,21 @@
       ]
     },
     {
+      "id": "issue-551-stop-to-validated-latency",
+      "issue": 551,
+      "title": "Stop-to-validated latency follows durable save timing",
+      "kind": "stop_to_validated_latency",
+      "fixture": "fixtures/issue-551-stop-to-validated-latency.json",
+      "tier": "pr",
+      "trackedMetrics": [
+        {
+          "name": "durationMs",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
+    },
+    {
       "id": "issue-25-opening-audio",
       "issue": 25,
       "title": "Opening local speech is preserved",

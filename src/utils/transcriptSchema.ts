@@ -6,6 +6,7 @@
 export const TRANSCRIPT_JSON_SCHEMA_VERSION = 2;
 
 import type { LiveTranscriptResponsivenessSummary } from './liveTranscriptResponsiveness.ts';
+import type { StopToValidatedLatencySummary } from './stopToValidatedLatency.ts';
 /** Bump when attribution / merge / ASR routing logic changes materially. */
 import type {
   TranscriptIntegrityEvidence,
@@ -94,6 +95,7 @@ export type StoredTranscriptV2 = {
   sessionFallbackTranscription?: TranscriptTranscriptionMeta;
   speakerAttribution?: StoredTranscriptSpeakerAttribution;
   liveTranscriptResponsiveness?: LiveTranscriptResponsivenessSummary;
+  stopToValidatedLatency?: StopToValidatedLatencySummary;
   lifecycleStatus?: TranscriptLifecycleStatus;
   integrity?: StoredTranscriptIntegrity;
   segments: unknown[];
@@ -210,6 +212,7 @@ export function buildTranscriptJsonPayload(
     sessionFallbackTranscription?: TranscriptTranscriptionMeta;
     speakerAttribution?: StoredTranscriptSpeakerAttribution;
     liveTranscriptResponsiveness?: LiveTranscriptResponsivenessSummary;
+    stopToValidatedLatency?: StopToValidatedLatencySummary;
     lifecycleStatus?: TranscriptLifecycleStatus;
     integrity?: StoredTranscriptIntegrity;
   },
@@ -230,6 +233,9 @@ export function buildTranscriptJsonPayload(
       ? {
           liveTranscriptResponsiveness: options.liveTranscriptResponsiveness,
         }
+      : {}),
+    ...(options.stopToValidatedLatency
+      ? { stopToValidatedLatency: options.stopToValidatedLatency }
       : {}),
     lifecycleStatus: options.lifecycleStatus,
     integrity: options.integrity,

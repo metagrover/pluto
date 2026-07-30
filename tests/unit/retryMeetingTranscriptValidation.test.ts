@@ -95,12 +95,18 @@ describe('retryMeetingTranscriptValidation', () => {
       cadenceSampleCount: 2,
       maximumUpdateGapMs: 450,
     };
+    const stopToValidatedLatency = {
+      schemaVersion: 1,
+      status: 'available',
+      durationMs: 840,
+    };
     let current: Record<string, unknown> = {
       ...meeting,
       transcript_json: JSON.stringify({
         schemaVersion: 2,
         segments: [],
         liveTranscriptResponsiveness: responsiveness,
+        stopToValidatedLatency,
       }),
     };
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
@@ -160,6 +166,9 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(
       JSON.parse(String(current.transcript_json)).liveTranscriptResponsiveness,
     ).toEqual(responsiveness);
+    expect(
+      JSON.parse(String(current.transcript_json)).stopToValidatedLatency,
+    ).toEqual(stopToValidatedLatency);
   });
 
   it('preserves user edits made while validation is running', async () => {

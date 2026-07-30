@@ -48,6 +48,26 @@ The summary contains numeric durations/counts plus finite status and reason
 enums only. It contains no event timestamps, transcript text, participant or
 meeting labels, file paths, audio, or credentials.
 
+## Stop-to-validated latency evidence
+
+The `stop_to_validated_latency` case drives the same strict monotonic
+accumulator used by recording finalization. The interval starts only after
+Pluto accepts a non-duplicate stop request and ends only after the first
+validated transcript save acknowledges durable persistence. Analysis, entity
+extraction, and other derived intelligence are outside the interval.
+
+The committed fixture declares synthetic healthy, delayed, non-validated,
+decreasing-time, completion-before-start, and duplicate-completion traces.
+Their exact summaries are stable deterministic gates. Real meeting durations
+remain local observational evidence; Pluto does not set a product threshold or
+compare raw device timing across heterogeneous machines.
+
+Persisted summaries contain only schema version, a finite status or reason,
+and an integer duration when available. They never contain absolute event
+timestamps, transcript content, identities, labels, paths, audio, credentials,
+or telemetry identifiers. Recovery and retry preserve valid stored evidence
+without reconstructing a clean-stop duration across process restart.
+
 ## Corpus layout
 
 - Manifest: `scripts/recording-quality/manifest.json`

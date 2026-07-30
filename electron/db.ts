@@ -1326,6 +1326,65 @@ export const upsertWorkingMemorySnapshot = (input: {
 /**
  * Meeting Management
  */
+const refreshMeetingFts = (meeting: PersistedMeeting) => {
+  const id = String(meeting.id);
+  let transcriptText = '';
+  try {
+    if (meeting.transcript_json) {
+      const transcript = JSON.parse(meeting.transcript_json);
+      const segments = Array.isArray(transcript)
+        ? transcript
+        : Array.isArray(transcript?.segments)
+          ? transcript.segments
+          : [];
+      transcriptText = segments
+        .map((segment: { text?: string }) =>
+          typeof segment?.text === 'string' ? segment.text.trim() : '',
+        )
+        .filter((text: string) => text.length > 0)
+        .join(' ');
+    }
+  } catch (e) {
+    console.warn('Failed to parse transcript_json for FTS', e);
+  }
+
+  let midParticipants = '';
+  let midTopics = '';
+  let midDecisions = '';
+  let midActionItems = '';
+  const midJsonRaw = (meeting as unknown as Record<string, unknown>).mid_json;
+  if (typeof midJsonRaw === 'string' && midJsonRaw.trim()) {
+    try {
+      const mid = JSON.parse(midJsonRaw) as MidFrontmatter;
+      midParticipants = (mid.participants || []).map((p) => p.name).join(', ');
+      midTopics = (mid.topics || []).map((t) => t.name).join(', ');
+      midDecisions = (mid.decisions || []).map((d) => d.description).join(', ');
+      midActionItems = (mid.action_items || [])
+        .map((a) => a.description)
+        .join(', ');
+    } catch {
+      // Ignore MID parse errors during FTS update.
+    }
+  }
+
+  console.log(`[DB] Updating FTS index for meeting: ${id}`);
+  db.prepare(`
+    INSERT OR REPLACE INTO meetings_fts (title, transcript_text, enhanced_notes, user_notes,
+      mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    meeting.title,
+    transcriptText,
+    meeting.enhanced_notes || '',
+    meeting.user_notes || '',
+    midParticipants,
+    midTopics,
+    midDecisions,
+    midActionItems,
+    id,
+  );
+};
+
 const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
   // Ensure ID is a string
   const id = String(meeting.id);
@@ -1413,63 +1472,7 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
     meeting.created_at,
   );
 
-  // Update FTS index
-  let transcriptText = '';
-  try {
-    if (meeting.transcript_json) {
-      const transcript = JSON.parse(meeting.transcript_json);
-      const segments = Array.isArray(transcript)
-        ? transcript
-        : Array.isArray(transcript?.segments)
-          ? transcript.segments
-          : [];
-      transcriptText = segments
-        .map((segment: { text?: string }) =>
-          typeof segment?.text === 'string' ? segment.text.trim() : '',
-        )
-        .filter((text: string) => text.length > 0)
-        .join(' ');
-    }
-  } catch (e) {
-    console.warn('Failed to parse transcript_json for FTS', e);
-  }
-
-  // Extract MID fields for FTS if mid_json is present
-  let midParticipants = '';
-  let midTopics = '';
-  let midDecisions = '';
-  let midActionItems = '';
-  const midJsonRaw = (meeting as unknown as Record<string, unknown>).mid_json;
-  if (typeof midJsonRaw === 'string' && midJsonRaw.trim()) {
-    try {
-      const mid = JSON.parse(midJsonRaw) as MidFrontmatter;
-      midParticipants = (mid.participants || []).map((p) => p.name).join(', ');
-      midTopics = (mid.topics || []).map((t) => t.name).join(', ');
-      midDecisions = (mid.decisions || []).map((d) => d.description).join(', ');
-      midActionItems = (mid.action_items || [])
-        .map((a) => a.description)
-        .join(', ');
-    } catch {
-      // Ignore MID parse errors during FTS update
-    }
-  }
-
-  console.log(`[DB] Updating FTS index for meeting: ${id}`);
-  db.prepare(`
-    INSERT OR REPLACE INTO meetings_fts (title, transcript_text, enhanced_notes, user_notes,
-      mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    meeting.title,
-    transcriptText,
-    meeting.enhanced_notes || '',
-    meeting.user_notes || '',
-    midParticipants,
-    midTopics,
-    midDecisions,
-    midActionItems,
-    id,
-  );
+  refreshMeetingFts(meeting);
 
   console.log(`[DB] Save successful for meeting: ${id}`);
   return result;
@@ -1477,6 +1480,139 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
 
 export const saveMeeting = (meeting: PersistedMeeting) =>
   saveMeetingTransaction(meeting);
+
+export type ConditionalMeetingUpdateOutcome =
+  | 'updated'
+  | 'already_current'
+  | 'conflict'
+  | 'missing';
+
+export const patchStopToValidatedLatency = (input: {
+  meetingId: string | number;
+  expectedTranscriptJson: string;
+  expectedTranscriptIntegrityJson: string;
+  expectedTranscriptValidatedAt: string;
+  replacementTranscriptJson: string;
+}): ConditionalMeetingUpdateOutcome =>
+  db.transaction(() => {
+    const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+    if (!current) return 'missing';
+    const generationMatches =
+      current.transcript_json === input.expectedTranscriptJson &&
+      current.transcript_integrity_json ===
+        input.expectedTranscriptIntegrityJson &&
+      current.transcript_validated_at === input.expectedTranscriptValidatedAt &&
+      current.transcript_status === 'validated';
+    if (!generationMatches) {
+      const alreadyCurrent =
+        current.transcript_json === input.replacementTranscriptJson &&
+        current.transcript_integrity_json ===
+          input.expectedTranscriptIntegrityJson &&
+        current.transcript_validated_at ===
+          input.expectedTranscriptValidatedAt &&
+        current.transcript_status === 'validated';
+      return alreadyCurrent ? 'already_current' : 'conflict';
+    }
+    if (input.expectedTranscriptJson === input.replacementTranscriptJson) {
+      return 'already_current';
+    }
+    const result = db
+      .prepare(
+        `UPDATE meetings SET transcript_json = ?
+         WHERE id = ? AND transcript_json = ?
+           AND transcript_integrity_json = ?
+           AND transcript_validated_at = ?
+           AND transcript_status = 'validated'`,
+      )
+      .run(
+        input.replacementTranscriptJson,
+        String(input.meetingId),
+        input.expectedTranscriptJson,
+        input.expectedTranscriptIntegrityJson,
+        input.expectedTranscriptValidatedAt,
+      );
+    return result.changes === 1 ? 'updated' : 'conflict';
+  })();
+
+export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
+  meetingId: string | number;
+  expectedTranscriptJson: string;
+  expectedTranscriptIntegrityJson: string;
+  expectedTranscriptValidatedAt: string;
+  expectedTitle: string;
+  title: string;
+  enhancedNotes: string;
+  analysisJson: string;
+  analysisSchemaVersion: number;
+  analysisFormatPass: boolean;
+  analysisRetryCount: number;
+  analysisFallbackUsed: boolean;
+  analysisProvider?: string | null;
+  analysisModel?: string | null;
+  analysisGenerationPath?: string | null;
+  analysisPromptVersion?: string | null;
+  analysisGeneratedAt?: string | null;
+  analysisErrorCategoriesJson?: string | null;
+  valueSignalsJson: string;
+}): Exclude<ConditionalMeetingUpdateOutcome, 'already_current'> =>
+  db.transaction(() => {
+    const result = db
+      .prepare(
+        `UPDATE meetings SET
+           title = CASE WHEN title = ? THEN ? ELSE title END,
+           enhanced_notes = ?,
+           analysis_json = ?,
+           analysis_schema_version = ?,
+           analysis_format_pass = ?,
+           analysis_retry_count = ?,
+           analysis_fallback_used = ?,
+           analysis_provider = ?,
+           analysis_model = ?,
+           analysis_generation_path = ?,
+           analysis_prompt_version = ?,
+           analysis_generated_at = ?,
+           analysis_error_categories_json = ?,
+           value_signals_json = ?
+         WHERE id = ? AND transcript_json = ?
+           AND transcript_integrity_json = ?
+           AND transcript_validated_at = ?
+           AND transcript_status = 'validated'`,
+      )
+      .run(
+        input.expectedTitle,
+        input.title,
+        input.enhancedNotes,
+        input.analysisJson,
+        input.analysisSchemaVersion,
+        input.analysisFormatPass ? 1 : 0,
+        input.analysisRetryCount,
+        input.analysisFallbackUsed ? 1 : 0,
+        input.analysisProvider ?? null,
+        input.analysisModel ?? null,
+        input.analysisGenerationPath ?? null,
+        input.analysisPromptVersion ?? null,
+        input.analysisGeneratedAt ?? null,
+        input.analysisErrorCategoriesJson ?? null,
+        input.valueSignalsJson,
+        String(input.meetingId),
+        input.expectedTranscriptJson,
+        input.expectedTranscriptIntegrityJson,
+        input.expectedTranscriptValidatedAt,
+      );
+    if (result.changes !== 1) {
+      return db
+        .prepare('SELECT 1 FROM meetings WHERE id = ?')
+        .get(String(input.meetingId))
+        ? 'conflict'
+        : 'missing';
+    }
+    const updated = db
+      .prepare('SELECT * FROM meetings WHERE id = ?')
+      .get(String(input.meetingId)) as PersistedMeeting | undefined;
+    if (!updated) return 'missing';
+    refreshMeetingFts(updated);
+    return 'updated';
+  })();
 
 export const updateMeetingFollowUpDrafts = (
   meetingId: string | number,

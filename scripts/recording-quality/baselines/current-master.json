@@ -11,11 +11,11 @@
     "arch": "arm64"
   },
   "summary": {
-    "totalCases": 9,
-    "passedCases": 9,
+    "totalCases": 10,
+    "passedCases": 10,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434, 458, 476, 493, 549],
+    "issueCoverage": [25, 75, 428, 434, 458, 476, 493, 549, 551],
     "kinds": {
       "candidate_eligibility": {
         "passed": 1,
@@ -26,6 +26,10 @@
         "failed": 0
       },
       "live_transcript_responsiveness": {
+        "passed": 1,
+        "failed": 0
+      },
+      "stop_to_validated_latency": {
         "passed": 1,
         "failed": 0
       },
@@ -183,6 +187,40 @@
           "acceptedPublicationCount": 3,
           "cadenceSampleCount": 2,
           "maximumUpdateGapMs": 450
+        }
+      }
+    },
+    {
+      "id": "issue-551-stop-to-validated-latency",
+      "issue": 551,
+      "title": "Stop-to-validated latency follows durable save timing",
+      "kind": "stop_to_validated_latency",
+      "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "durationMs",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
+      "actual": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "durationMs",
+          "value": 45
+        },
+        "stopToValidatedLatency": {
+          "schemaVersion": 1,
+          "status": "available",
+          "durationMs": 45
+        },
+        "reasons": []
+      },
+      "expected": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "durationMs",
+          "value": 45
         }
       }
     },
