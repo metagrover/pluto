@@ -15,6 +15,10 @@ export type TranscriptIntegrityReason =
   | 'remote_speech_unaccounted'
   | 'deterministic_retry_evidence_missing'
   | 'deterministic_retry_evidence_corrupt'
+  | 'capture_activity_missing'
+  | 'capture_activity_corrupt'
+  | 'capture_activity_unsupported'
+  | 'capture_journal_write_failed'
   | 'required_source_failed'
   | 'channel_duration_mismatch'
   | 'ambiguous_pass_through';

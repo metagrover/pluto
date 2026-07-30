@@ -1,4 +1,8 @@
 import {
+  type CaptureActivityEvidence,
+  verifyCaptureActivityEvidence,
+} from './transcriptActivityEvidence.ts';
+import {
   type ResolvedBackendOptions,
   resolveBackendOptions,
 } from './transcriptionBackendConfig.ts';
@@ -153,18 +157,28 @@ export const buildMeetingTiming = ({
   };
 };
 
+export type CaptureJournalFinalizationFailure =
+  | 'capture_journal_write_failed'
+  | 'capture_journal_seal_failed';
+
 export const buildRecoverableSealFailureMeeting = ({
   snapshot,
   title,
   userNotes,
   endReason,
+  failureReason,
 }: {
   snapshot: RecordingStopSnapshot;
   title?: string;
   userNotes?: string;
   endReason?: string;
+  failureReason: CaptureJournalFinalizationFailure;
 }) => {
   const timing = buildMeetingTiming(snapshot);
+  const failureCategory =
+    failureReason === 'capture_journal_write_failed'
+      ? failureReason
+      : 'journal_seal_failed';
   return {
     id: snapshot.meetingId,
     title: title?.trim() || 'Meeting',
@@ -177,7 +191,7 @@ export const buildRecoverableSealFailureMeeting = ({
     mixed_audio_path: null,
     transcript_status: 'needs_attention' as const,
     transcript_integrity_json: JSON.stringify({
-      reasons: ['journal_seal_failed'],
+      reasons: [failureCategory],
     }),
     transcript_validated_at: null,
     transcript_json: JSON.stringify([]),
@@ -186,26 +200,84 @@ export const buildRecoverableSealFailureMeeting = ({
     analysis_json: null,
     value_signals_json: null,
     finalization_status: 'recovery_required' as const,
-    finalization_error_category: 'journal_seal_failed' as const,
+    finalization_error_category: failureCategory,
     folder_id: null,
     is_favorite: false,
-    end_reason: endReason || 'journal_seal_failed',
+    end_reason: endReason || failureCategory,
   };
 };
 
+export type JournalSealResult =
+  | { status: 'sealed'; activityEvidence: CaptureActivityEvidence }
+  | {
+      status: 'recovery_required';
+      reason: CaptureJournalFinalizationFailure;
+    };
+
+export const createSealedCaptureActivityHandoff = (
+  activityEvidence: CaptureActivityEvidence,
+) => ({
+  activityWindows: activityEvidence.windows,
+  integrity: {
+    activityEvidenceSource: 'capture_activity_v2' as const,
+    activityEvidence,
+  },
+  runValidation: async <Result>(
+    validate: (windows: CaptureActivityEvidence['windows']) => Promise<Result>,
+  ) => await validate(activityEvidence.windows),
+  persistMeeting: async <Meeting extends Record<string, unknown>, Result>(
+    meeting: Meeting,
+    integrity: Record<string, unknown>,
+    persist: (
+      meeting: Meeting & { transcript_integrity_json: string },
+    ) => Promise<Result>,
+  ) =>
+    await persist({
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        ...integrity,
+        activityEvidenceSource: 'capture_activity_v2',
+        activityEvidence,
+      }),
+    }),
+});
+
 export const sealCaptureJournalBeforeFinalization = async ({
   drainAppends,
+  hasWriteFailure,
   seal,
 }: {
   drainAppends: () => Promise<void>;
-  seal: () => Promise<void>;
-}): Promise<'sealed' | 'recovery_required'> => {
-  await drainAppends();
+  hasWriteFailure: () => boolean;
+  seal: () => Promise<{ activityEvidence?: CaptureActivityEvidence }>;
+}): Promise<JournalSealResult> => {
   try {
-    await seal();
-    return 'sealed';
+    await drainAppends();
   } catch {
-    return 'recovery_required';
+    return {
+      status: 'recovery_required',
+      reason: 'capture_journal_write_failed',
+    };
+  }
+
+  if (hasWriteFailure()) {
+    return {
+      status: 'recovery_required',
+      reason: 'capture_journal_write_failed',
+    };
+  }
+
+  try {
+    const sealed = await seal();
+    const activityEvidence = await verifyCaptureActivityEvidence(
+      sealed.activityEvidence,
+    );
+    return { status: 'sealed', activityEvidence };
+  } catch {
+    return {
+      status: 'recovery_required',
+      reason: 'capture_journal_seal_failed',
+    };
   }
 };
 
