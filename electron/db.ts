@@ -1593,6 +1593,7 @@ export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
   analysisGeneratedAt?: string | null;
   analysisErrorCategoriesJson?: string | null;
   valueSignalsJson: string;
+  downstreamProcessingJson?: string | null;
 }): Exclude<ConditionalMeetingUpdateOutcome, 'already_current'> =>
   db.transaction(() => {
     const result = db
@@ -1611,7 +1612,8 @@ export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
            analysis_prompt_version = ?,
            analysis_generated_at = ?,
            analysis_error_categories_json = ?,
-           value_signals_json = ?
+           value_signals_json = ?,
+           downstream_processing_json = COALESCE(?, downstream_processing_json)
          WHERE id = ? AND transcript_json = ?
            AND transcript_integrity_json = ?
            AND transcript_validated_at = ?
@@ -1633,6 +1635,7 @@ export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
         input.analysisGeneratedAt ?? null,
         input.analysisErrorCategoriesJson ?? null,
         input.valueSignalsJson,
+        input.downstreamProcessingJson ?? null,
         String(input.meetingId),
         input.expectedTranscriptJson,
         input.expectedTranscriptIntegrityJson,

@@ -457,6 +457,48 @@ export const resolveTranscriptTrustState = (
     },
   );
   if (!parsed.ok && parsed.failure === 'legacy') {
+    let legacyRetry:
+      | {
+          retry?: { deadlineAt?: unknown };
+          retryFailure?: unknown;
+        }
+      | undefined;
+    try {
+      legacyRetry = JSON.parse(meeting.transcript_integrity_json || '{}');
+    } catch {
+      legacyRetry = undefined;
+    }
+    if (meeting.transcript_status === 'validating' && legacyRetry?.retry) {
+      const interrupted =
+        typeof legacyRetry.retry.deadlineAt === 'string' &&
+        Date.parse(legacyRetry.retry.deadlineAt) <= nowMs;
+      return resolved({
+        kind: interrupted
+          ? 'validation_retry_failed'
+          : 'validation_in_progress',
+        copyKey: interrupted
+          ? 'validation_retry_failed'
+          : 'validation_in_progress',
+        action:
+          interrupted && capabilities.canRunValidation
+            ? 'retry_validation'
+            : 'none',
+        permitsExistingRead: capabilities.hasExistingTranscript,
+        permitsDerivedGeneration: false,
+      });
+    }
+    if (
+      meeting.transcript_status === 'needs_attention' &&
+      typeof legacyRetry?.retryFailure === 'string'
+    ) {
+      return resolved({
+        kind: 'validation_retry_failed',
+        copyKey: 'validation_retry_failed',
+        action: capabilities.canRunValidation ? 'retry_validation' : 'none',
+        permitsExistingRead: capabilities.hasExistingTranscript,
+        permitsDerivedGeneration: false,
+      });
+    }
     const complete =
       (meeting.transcript_status == null ||
         meeting.transcript_status === 'validated') &&

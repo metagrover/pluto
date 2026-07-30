@@ -500,6 +500,7 @@ export const retryMeetingTranscriptValidation = async (
     .map((segment) => `${segment.speaker}: ${segment.text}`)
     .join('\n');
   const validatedAt = new Date().toISOString();
+  const downstreamRunId = crypto.randomUUID();
   const validatedIntegrity = usesV2Trust
     ? {
         ...finishRetryLease(integrity),
@@ -537,6 +538,13 @@ export const retryMeetingTranscriptValidation = async (
     enhanced_notes: null,
     analysis_json: null,
     value_signals_json: null,
+    downstream_processing_json: JSON.stringify({
+      schemaVersion: 1,
+      state: 'processing',
+      transcriptValidatedAt: validatedAt,
+      runId: downstreamRunId,
+      stage: 'analysis',
+    }),
   };
   await invoke(
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
@@ -604,6 +612,11 @@ export const retryMeetingTranscriptValidation = async (
         enhanced_notes: artifacts.markdown || '',
         analysis_json: JSON.stringify(artifacts.analysis ?? null),
         value_signals_json: JSON.stringify(artifacts.signals ?? null),
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'complete',
+          transcriptValidatedAt: validatedAt,
+        }),
       },
       {
         ...(usesV2Trust ? {} : { expectedValidationRunId: runId }),
@@ -637,6 +650,13 @@ export const retryMeetingTranscriptValidation = async (
                   parseIntegrityRecord(latest.transcript_integrity_json),
                 ),
               ),
+          downstream_processing_json: JSON.stringify({
+            schemaVersion: 1,
+            state: 'failed',
+            transcriptValidatedAt: validatedAt,
+            stage: 'analysis',
+            failure: 'generation_failed',
+          }),
         },
         {
           ...(usesV2Trust ? {} : { expectedValidationRunId: runId }),
