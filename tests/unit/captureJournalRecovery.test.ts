@@ -17,6 +17,7 @@ import {
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
 import { recoverInterruptedCaptureJournals } from '../../electron/captureJournalRecovery';
+import type { PersistedMeeting } from '../../electron/db';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('capture journal recovery', () => {
@@ -305,7 +306,7 @@ describe('capture journal recovery', () => {
     expect(savedMeetingIds).toEqual(['meeting-b']);
   });
 
-  it('ignores sealed journals during startup recovery', async () => {
+  it('recovers a sealed journal when its meeting was not saved', async () => {
     const root = await makeRoot();
     await createCaptureJournal(root, {
       meetingId: 'meeting-123',
@@ -329,8 +330,61 @@ describe('capture journal recovery', () => {
       endedAtMs: 2_000,
     });
 
+    const saveMeeting = vi.fn();
+    const stitchWavSegments = vi.fn(
+      async (_segments: Array<{ path: string }>, outputTag: string) =>
+        join(root, `${outputTag}.wav`),
+    );
     const result = await recoverInterruptedCaptureJournals(root, {
       getMeeting: () => null,
+      saveMeeting,
+      stitchWavSegments,
+      nowMs: 3_000,
+    });
+
+    expect(result).toMatchObject({
+      recoveredCount: 1,
+      skippedSealedCount: 0,
+    });
+    expect(saveMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'meeting-123',
+        transcript_status: 'needs_attention',
+        transcript_integrity_json: expect.any(String),
+      }),
+    );
+    const recovered = saveMeeting.mock.calls[0]?.[0];
+    const integrity = JSON.parse(recovered.transcript_integrity_json) as {
+      journal_lifecycle_state: string;
+      activityEvidenceSource: string;
+      activityEvidence?: { digestSha256: string };
+    };
+    expect(integrity).toMatchObject({
+      journal_lifecycle_state: 'sealed',
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: {
+        digestSha256: (await buildEvidence()).digestSha256,
+      },
+    });
+  });
+
+  it('skips a sealed journal after its meeting was saved', async () => {
+    const root = await makeRoot();
+    await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+    });
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence: await buildEvidence(),
+    });
+    await sealCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      endedAtMs: 2_000,
+    });
+
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => ({ id: 'meeting-123' }) as PersistedMeeting,
       saveMeeting: vi.fn(),
       stitchWavSegments: vi.fn(),
       nowMs: 3_000,

@@ -300,12 +300,13 @@ export const recoverInterruptedCaptureJournals = async (
       continue;
     }
 
-    if (manifest.lifecycleState === 'sealed') {
+    const existingMeeting = deps.getMeeting(manifest.meetingId);
+    if (manifest.lifecycleState === 'sealed' && existingMeeting) {
       result.skippedSealedCount += 1;
       continue;
     }
 
-    if (deps.getMeeting(manifest.meetingId)) {
+    if (existingMeeting) {
       result.skippedExistingCount += 1;
       continue;
     }
