@@ -5,7 +5,16 @@
 ## Outcome
 
 Pluto shows the call-detected alert only after confirming active meeting audio and
-automatically ends a recording after that confirmed call becomes silent.
+preserves the existing conservative auto-end confidence boundary.
+
+## Review Outcome
+
+Pre-landing review narrowed this delivery to the proven false-alert fix. The
+reported auto-end failure is not changed or claimed as fixed because current
+evidence does not show why a live Zoom call failed to produce a high-confidence
+observation. Proposed transition logging was removed because ordinary
+speech/silence oscillation could create unbounded local rows without resolving
+the underlying detector question.
 
 ## Evidence
 
@@ -35,13 +44,12 @@ to distinguish an open silent call app from an exited call app and select the
 existing grace period. Rejected because the detector evidence remains useful
 when consumers apply the confidence policy correctly.
 
-### 3. Enforce confidence at each consumer and log lifecycle transitions
+### 3. Enforce confidence at the alert consumer
 
-High confidence establishes a call and can show the alert. Medium confidence is
-retained only as fallback after establishment. Privacy-safe observation
-transitions make runtime failures diagnosable without recording or persisting
-audio. Approved because it preserves the existing detector contract and fixes
-the trust-boundary violation at the consumer.
+High confidence can show the alert. Medium confidence is retained as fallback
+evidence for the existing auto-end state machine. Approved because it preserves
+the detector contract and fixes the confirmed trust-boundary violation without
+speculating about the unverified auto-end failure.
 
 ## Design
 
@@ -64,32 +72,16 @@ Keep `autoEndDecision` unchanged:
 
 Changing these rules without live evidence would weaken recording safety.
 
-### Runtime diagnostics
-
-Persist only detector state transitions observed by the auto-end monitor:
-
-- `call_observation_high`
-- `call_observation_medium`
-- `call_observation_low`
-
-Reuse `auto_end_log` with app name and no audio payload. Do not write repeated
-rows while confidence, app, and reason are unchanged. These events identify
-whether the detector failed to produce high confidence or the auto-end consumer
-failed after receiving it.
-
 ### Testing
 
 - Pure alert-policy tests cover silent Zoom suppression and medium-to-high alert
   eligibility.
 - Auto-end decision tests continue to cover high-confidence establishment,
   medium-confidence grace, and resumed-audio cancellation.
-- A transition helper test proves duplicate observations are not logged and
-  confidence/app/reason changes are logged.
 - Focused tests, the full test suite, Biome, changelog validation, and diff checks
   form the verification set.
 
 ## Durable Records
 
 Add a changelog fragment for #554. No decision-log or ADR entry is needed because
-the confidence hierarchy already exists; this change applies it consistently and
-adds diagnostics.
+the confidence hierarchy already exists; this change applies it consistently.

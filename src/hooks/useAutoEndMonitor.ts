@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import { autoEndDecision } from '../autoEnd/decision';
-import type { PollInput } from '../autoEnd/decision';
-import { toObservationEvent } from '../autoEnd/observation';
 
 const AUTO_END_POLL_INTERVAL_MS = 10_000;
 const TOAST_AUTO_DISMISS_MS = 30_000;
@@ -34,7 +32,6 @@ export const useAutoEndMonitor = ({
   const graceActiveRef = useRef(false);
   const trackedAppRef = useRef<string | null>(null);
   const pollInFlightRef = useRef(false);
-  const lastObservationSignatureRef = useRef<string | null>(null);
   const dismissTimeoutRef = useRef<number | null>(null);
 
   const clearGraceTimer = useCallback(() => {
@@ -62,7 +59,6 @@ export const useAutoEndMonitor = ({
       clearGraceTimer();
       trackedAppRef.current = null;
       pollInFlightRef.current = false;
-      lastObservationSignatureRef.current = null;
       return;
     }
 
@@ -76,31 +72,19 @@ export const useAutoEndMonitor = ({
         const result = await window.ipcRenderer.invoke('DETECT_ACTIVE_CALL');
         if (cancelled) return;
 
-        const pollResult: PollInput = {
-          active: Boolean(result?.active),
-          appName: typeof result?.appName === 'string' ? result.appName : null,
-          confidence:
-            result?.confidence === 'high' ||
-            result?.confidence === 'medium' ||
-            result?.confidence === 'low'
-              ? result.confidence
-              : 'low',
-          reason: typeof result?.reason === 'string' ? result.reason : '',
-        };
-        const observation = toObservationEvent(
-          lastObservationSignatureRef.current,
-          pollResult,
-        );
-        if (observation) {
-          lastObservationSignatureRef.current = observation.signature;
-          void window.ipcRenderer.invoke('LOG_AUTO_END_EVENT', {
-            reason_code: observation.reasonCode,
-            app_name: observation.appName,
-          });
-        }
-
         const action = autoEndDecision({
-          poll: pollResult,
+          poll: {
+            active: Boolean(result?.active),
+            appName:
+              typeof result?.appName === 'string' ? result.appName : null,
+            confidence:
+              result?.confidence === 'high' ||
+              result?.confidence === 'medium' ||
+              result?.confidence === 'low'
+                ? result.confidence
+                : 'low',
+            reason: typeof result?.reason === 'string' ? result.reason : '',
+          },
           trackedApp: trackedAppRef.current,
           graceActive: graceActiveRef.current,
         });
@@ -186,7 +170,6 @@ export const useAutoEndMonitor = ({
       window.clearInterval(intervalId);
       clearGraceTimer();
       trackedAppRef.current = null;
-      lastObservationSignatureRef.current = null;
     };
   }, [isRecording, autoEndEnabled]);
 
