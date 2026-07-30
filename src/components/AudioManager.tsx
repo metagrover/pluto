@@ -5041,10 +5041,15 @@ export const AudioManager = ({
         console.warn(
           `[Pluto] Latency reconciliation ${String(metricPatchOutcome)}; suppressing derived persistence`,
         );
-      } else if (derivedPersistence.result !== 'updated') {
+        onSessionComplete?.(meetingData.id);
+        return;
+      }
+      if (derivedPersistence.result !== 'updated') {
         console.warn(
           `[Pluto] Derived persistence ${String(derivedPersistence.result)}; preserving current transcript generation`,
         );
+        onSessionComplete?.(meetingData.id);
+        return;
       }
       console.log(
         '[Pluto] Session saved to DB with transcript segments:',

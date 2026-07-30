@@ -52,7 +52,7 @@ describe('stop-to-validated persistence boundary', () => {
     }
   });
 
-  it('suppresses only derived persistence on reconciliation conflicts', () => {
+  it('suppresses cleanup and entity work on reconciliation conflicts', () => {
     const audioManager = readFileSync(
       'src/components/AudioManager.tsx',
       'utf8',
@@ -66,8 +66,8 @@ describe('stop-to-validated persistence boundary', () => {
 
     expect(boundary).toContain('persistDerivedAfterLatencyPatch');
     expect(boundary).toContain("derivedPersistence.outcome === 'suppressed'");
-    expect(boundary).not.toMatch(
-      /onSessionComplete\?\.\(meetingData\.id\);\s*return;/,
-    );
+    expect(
+      boundary.match(/onSessionComplete\?\.\(meetingData\.id\);\s*return;/g),
+    ).toHaveLength(2);
   });
 });
