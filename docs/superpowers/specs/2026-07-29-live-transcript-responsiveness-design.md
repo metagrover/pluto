@@ -1,6 +1,6 @@
 # Live Transcript Responsiveness Evidence
 
-Issue: [#549 — Measure live transcript responsiveness](https://github.com/metagrover/pluto/issues/549)  
+Issue: [#549 — Measure live transcript responsiveness](https://github.com/metagrover/pluto/issues/549)
 Parent: [#443 — Establish a meeting recording quality benchmark](https://github.com/metagrover/pluto/issues/443)
 
 ## Outcome
