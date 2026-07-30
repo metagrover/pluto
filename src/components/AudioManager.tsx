@@ -1,8 +1,11 @@
 import { Loader2, Mic } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
+  buildInitialValidatedMeetingPayload,
+  markStopToValidatedLatencyUnavailable,
   persistDerivedAfterLatencyPatch,
   persistTranscriptThenRunLatencyPatchAndDownstream,
+  startStopToValidatedLatencyAfterAcceptedStop,
 } from '../services/diarizationFirstFinalization';
 import { runRecordingTranscriptValidation } from '../services/recordingTranscriptValidation';
 import type { AnalysisDocumentV3 } from '../types';
@@ -3368,7 +3371,11 @@ export const AudioManager = ({
     }
     frozenLiveTranscriptResponsivenessRef.current =
       liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
-    stopToValidatedLatencyRef.current.acceptStop(performance.now());
+    startStopToValidatedLatencyAfterAcceptedStop({
+      acceptedStop: stopSnapshot,
+      accumulator: stopToValidatedLatencyRef.current,
+      nowMs: performance.now(),
+    });
 
     stopInFlightRef.current = true;
     recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
@@ -3529,9 +3536,10 @@ export const AudioManager = ({
           endReason,
           failureReason: journalSealOutcome.reason,
         });
-        const stopToValidatedLatency =
-          stopToValidatedLatencyRef.current.markUnavailable('recovery_required')
-            .summary as StopToValidatedLatencySummary;
+        const stopToValidatedLatency = markStopToValidatedLatencyUnavailable(
+          stopToValidatedLatencyRef.current,
+          'recovery_required',
+        );
         try {
           await window.ipcRenderer.invoke('SAVE_MEETING', {
             ...degradedMeeting,
@@ -4658,9 +4666,10 @@ export const AudioManager = ({
       );
 
       if (integrityValidation.status === 'needs_attention') {
-        const stopToValidatedLatency =
-          stopToValidatedLatencyRef.current.markUnavailable('not_validated')
-            .summary as StopToValidatedLatencySummary;
+        const stopToValidatedLatency = markStopToValidatedLatencyUnavailable(
+          stopToValidatedLatencyRef.current,
+          'needs_attention',
+        );
         const recoverableMeeting = {
           id: stopSnapshot.meetingId,
           title: userTitle || 'Meeting',
@@ -4722,70 +4731,66 @@ export const AudioManager = ({
         console.warn('[Pluto] No transcription segments from either source');
       }
 
-      const attributionPersistenceRecord = {
-        id: stopSnapshot.meetingId,
-        title: userTitle || 'Meeting',
-        meeting_type: 'Recording',
-        started_at: meetingTiming.startedAtIso,
-        ended_at: meetingTiming.endedAtIso,
-        duration_seconds: meetingTiming.durationSeconds,
-        audio_path: primaryAudioPath,
-        system_audio_path: systemAudioPath,
-        mixed_audio_path: mixedAudioPath,
-        transcript_status: 'validated',
-        transcript_validated_at: new Date().toISOString(),
-        transcript_json: JSON.stringify(
-          buildTranscriptJsonPayload(newTranscription, {
-            pipelineMode,
-            sessionFallbackUsed: sessionFallbackDecision.shouldRun,
-            sessionFallbackReasons: sessionFallbackDecision.reasons,
-            canonicalSource: sessionCanonicalSource,
-            postHydrationBleedPass,
-            postHydrationBleedDroppedMe,
-            transcription: {
-              backend: String(resolvedTranscriptionSettings.backend),
-              preset: String(resolvedTranscriptionSettings.preset),
-              model: String(resolvedChunkModel),
-              device: String(resolvedTranscriptionSettings.device),
-              computeType: String(resolvedChunkComputeType),
-              diarization: false,
-              elapsedMs: 0,
-            },
-            sessionFallbackTranscription: sessionTranscriptionMeta
-              ? {
-                  backend: String(sessionTranscriptionMeta.backend),
-                  preset: String(sessionTranscriptionMeta.preset),
-                  model: String(sessionTranscriptionMeta.model),
-                  device: String(sessionTranscriptionMeta.device),
-                  computeType: String(sessionTranscriptionMeta.computeType),
-                  canonicalSource: sessionCanonicalSource,
-                  diarization: diarizationEnabled,
-                  elapsedMs: sessionTranscriptionMeta.elapsedMs || 0,
-                  providerLabel: sessionTranscriptionMeta.providerLabel,
-                  warnings: sessionTranscriptionMeta.warnings,
-                }
-              : undefined,
-            speakerAttribution,
-            liveTranscriptResponsiveness:
-              frozenLiveTranscriptResponsivenessRef.current ?? undefined,
-            lifecycleStatus: 'validated',
-            integrity: {
-              ...integrityValidation.evidence,
-              reasons: integrityValidation.reasons,
-            },
-          }),
-        ),
-        user_notes: userNotes,
-        enhanced_notes: null,
-        analysis_json: null,
-        value_signals_json: null,
+      const attributionPersistenceRecord = buildInitialValidatedMeetingPayload({
+        meeting: {
+          id: stopSnapshot.meetingId,
+          title: userTitle || 'Meeting',
+          meeting_type: 'Recording',
+          started_at: meetingTiming.startedAtIso,
+          ended_at: meetingTiming.endedAtIso,
+          duration_seconds: meetingTiming.durationSeconds,
+          audio_path: primaryAudioPath,
+          system_audio_path: systemAudioPath,
+          mixed_audio_path: mixedAudioPath,
+          transcript_status: 'validated',
+          transcript_validated_at: new Date().toISOString(),
+          user_notes: userNotes,
+          folder_id: null,
+          is_favorite: false,
+          end_reason: endReason || 'manual',
+        },
+        segments: newTranscription,
+        transcriptMetadata: {
+          pipelineMode,
+          sessionFallbackUsed: sessionFallbackDecision.shouldRun,
+          sessionFallbackReasons: sessionFallbackDecision.reasons,
+          canonicalSource: sessionCanonicalSource,
+          postHydrationBleedPass,
+          postHydrationBleedDroppedMe,
+          transcription: {
+            backend: String(resolvedTranscriptionSettings.backend),
+            preset: String(resolvedTranscriptionSettings.preset),
+            model: String(resolvedChunkModel),
+            device: String(resolvedTranscriptionSettings.device),
+            computeType: String(resolvedChunkComputeType),
+            diarization: false,
+            elapsedMs: 0,
+          },
+          sessionFallbackTranscription: sessionTranscriptionMeta
+            ? {
+                backend: String(sessionTranscriptionMeta.backend),
+                preset: String(sessionTranscriptionMeta.preset),
+                model: String(sessionTranscriptionMeta.model),
+                device: String(sessionTranscriptionMeta.device),
+                computeType: String(sessionTranscriptionMeta.computeType),
+                canonicalSource: sessionCanonicalSource,
+                diarization: diarizationEnabled,
+                elapsedMs: sessionTranscriptionMeta.elapsedMs || 0,
+                providerLabel: sessionTranscriptionMeta.providerLabel,
+                warnings: sessionTranscriptionMeta.warnings,
+              }
+            : undefined,
+          speakerAttribution,
+          liveTranscriptResponsiveness:
+            frozenLiveTranscriptResponsivenessRef.current ?? undefined,
+          lifecycleStatus: 'validated',
+          integrity: {
+            ...integrityValidation.evidence,
+            reasons: integrityValidation.reasons,
+          },
+        },
         participants,
-        folder_id: null,
-        is_favorite: false,
-        end_reason: endReason || 'manual',
-        finalization_status: 'finalized',
-        finalization_error_category: null,
-      };
+      });
       const attributionIntegrity = {
         ...integrityValidation.evidence,
         reasons: integrityValidation.reasons,
@@ -5146,10 +5151,10 @@ export const AudioManager = ({
       ) {
         try {
           const meetingTiming = buildMeetingTiming(stopSnapshot);
-          const stopToValidatedLatency =
-            stopToValidatedLatencyRef.current.markUnavailable(
-              'validated_save_failed',
-            ).summary as StopToValidatedLatencySummary;
+          const stopToValidatedLatency = markStopToValidatedLatencyUnavailable(
+            stopToValidatedLatencyRef.current,
+            'validated_save_failed',
+          );
           await window.ipcRenderer.invoke('SAVE_MEETING', {
             id: currentMeetingIdRef.current,
             title: userTitle || 'Meeting',

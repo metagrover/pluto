@@ -54,6 +54,73 @@ const createValidatedMeeting = (id: string) => {
 };
 
 describe('stop-to-validated database persistence', () => {
+  it('returns missing when the metric patch row does not exist', () => {
+    expect(
+      patchStopToValidatedLatency({
+        meetingId: 'missing-metric',
+        expectedTranscriptJson: '{}',
+        expectedTranscriptIntegrityJson: '{}',
+        expectedTranscriptValidatedAt: '2026-07-30T08:00:00.000Z',
+        replacementTranscriptJson: '{"stopToValidatedLatency":{}}',
+      }),
+    ).toBe('missing');
+  });
+
+  it.each([
+    ['transcript JSON', 'wrong-transcript', undefined, undefined],
+    ['integrity JSON', undefined, 'wrong-integrity', undefined],
+    ['validation timestamp', undefined, undefined, 'wrong-timestamp'],
+  ] as const)(
+    'rejects an independent %s mismatch',
+    (_label, transcriptJson, integrityJson, validatedAt) => {
+      const id = `metric-mismatch-${_label.replaceAll(' ', '-')}`;
+      const generation = createValidatedMeeting(id);
+      expect(
+        patchStopToValidatedLatency({
+          meetingId: id,
+          expectedTranscriptJson: transcriptJson ?? generation.transcriptJson,
+          expectedTranscriptIntegrityJson:
+            integrityJson ?? generation.transcriptIntegrityJson,
+          expectedTranscriptValidatedAt:
+            validatedAt ?? generation.transcriptValidatedAt,
+          replacementTranscriptJson: JSON.stringify({
+            schemaVersion: 2,
+            segments: [],
+            stopToValidatedLatency: {
+              schemaVersion: 1,
+              status: 'available',
+              durationMs: 45,
+            },
+          }),
+        }),
+      ).toBe('conflict');
+    },
+  );
+
+  it('rejects an independent validation-status mismatch', () => {
+    const generation = createValidatedMeeting('metric-status-mismatch');
+    const current = getMeeting('metric-status-mismatch') as Record<
+      string,
+      unknown
+    >;
+    saveMeeting({
+      ...current,
+      id: 'metric-status-mismatch',
+      title: String(current.title),
+      transcript_status: 'needs_attention',
+    });
+
+    expect(
+      patchStopToValidatedLatency({
+        meetingId: 'metric-status-mismatch',
+        expectedTranscriptJson: generation.transcriptJson,
+        expectedTranscriptIntegrityJson: generation.transcriptIntegrityJson,
+        expectedTranscriptValidatedAt: generation.transcriptValidatedAt,
+        replacementTranscriptJson: '{"replacement":true}',
+      }),
+    ).toBe('conflict');
+  });
+
   it('patches only the expected validated transcript generation and preserves retry leases', () => {
     const generation = createValidatedMeeting('metric-generation');
     const replacementTranscriptJson = JSON.stringify({
@@ -202,5 +269,31 @@ describe('stop-to-validated database persistence', () => {
       enhanced_notes: '',
       transcript_status: 'validating',
     });
+  });
+
+  it('returns missing when the derived update row does not exist', () => {
+    expect(
+      saveDerivedMeetingFieldsIfTranscriptCurrent({
+        meetingId: 'missing-derived',
+        expectedTranscriptJson: '{}',
+        expectedTranscriptIntegrityJson: '{}',
+        expectedTranscriptValidatedAt: '2026-07-30T08:00:00.000Z',
+        expectedTitle: 'Missing',
+        title: 'Missing',
+        enhancedNotes: '',
+        analysisJson: '{}',
+        analysisSchemaVersion: 3,
+        analysisFormatPass: false,
+        analysisRetryCount: 0,
+        analysisFallbackUsed: false,
+        analysisProvider: null,
+        analysisModel: null,
+        analysisGenerationPath: null,
+        analysisPromptVersion: null,
+        analysisGeneratedAt: null,
+        analysisErrorCategoriesJson: null,
+        valueSignalsJson: '{}',
+      }),
+    ).toBe('missing');
   });
 });

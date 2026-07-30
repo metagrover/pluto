@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildInitialValidatedMeetingPayload,
+  markStopToValidatedLatencyUnavailable,
   persistAttributedTranscriptBeforeDownstream,
   persistDerivedAfterLatencyPatch,
   persistTranscriptThenRunLatencyPatchAndDownstream,
+  startStopToValidatedLatencyAfterAcceptedStop,
 } from '../../src/services/diarizationFirstFinalization';
+import { createStopToValidatedLatencyAccumulator } from '../../src/utils/stopToValidatedLatency';
 
 describe('persistAttributedTranscriptBeforeDownstream', () => {
   it('persists the attributed transcript before downstream intelligence', async () => {
@@ -37,8 +41,36 @@ describe('persistAttributedTranscriptBeforeDownstream', () => {
 });
 
 describe('stop-to-validated persistence orchestration', () => {
+  it('starts latency only for an accepted stop', () => {
+    const rejected = createStopToValidatedLatencyAccumulator();
+    const accepted = createStopToValidatedLatencyAccumulator();
+
+    expect(
+      startStopToValidatedLatencyAfterAcceptedStop({
+        acceptedStop: null,
+        accumulator: rejected,
+        nowMs: 100,
+      }),
+    ).toBe(false);
+    expect(rejected.snapshot()).toBeNull();
+
+    expect(
+      startStopToValidatedLatencyAfterAcceptedStop({
+        acceptedStop: { meetingId: 'meeting-1' },
+        accumulator: accepted,
+        nowMs: 100,
+      }),
+    ).toBe(true);
+    expect(accepted.completeValidatedSave(145).summary).toMatchObject({
+      status: 'available',
+      durationMs: 45,
+    });
+  });
+
   it('waits for transcript durability before starting patch and downstream concurrently', async () => {
     const order: string[] = [];
+    const accumulator = createStopToValidatedLatencyAccumulator();
+    accumulator.acceptStop(100);
     let acknowledgeTranscript!: () => void;
     let acknowledgePatch!: () => void;
     const transcriptGate = new Promise<void>((resolve) => {
@@ -55,6 +87,7 @@ describe('stop-to-validated persistence orchestration', () => {
         order.push('transcript:ack');
       },
       patchLatency: async () => {
+        accumulator.completeValidatedSave(145);
         order.push('patch:start');
         await patchGate;
         return 'updated';
@@ -67,6 +100,7 @@ describe('stop-to-validated persistence orchestration', () => {
 
     await Promise.resolve();
     expect(order).toEqual(['transcript:start']);
+    expect(accumulator.snapshot()).toBeNull();
     acknowledgeTranscript();
     await Promise.resolve();
     await Promise.resolve();
@@ -76,6 +110,10 @@ describe('stop-to-validated persistence orchestration', () => {
       'patch:start',
       'downstream:start',
     ]);
+    expect(accumulator.snapshot()).toMatchObject({
+      status: 'available',
+      durationMs: 45,
+    });
     acknowledgePatch();
     await expect(resultPromise).resolves.toEqual({
       patchOutcome: 'updated',
@@ -111,4 +149,123 @@ describe('stop-to-validated persistence orchestration', () => {
       ).resolves.toEqual({ outcome: 'persisted', result: 'updated' });
     },
   );
+
+  it.each([
+    ['needs_attention', 'not_validated'],
+    ['recovery_required', 'recovery_required'],
+    ['validated_save_failed', 'validated_save_failed'],
+  ] as const)('maps %s to unavailable reason %s', (outcome, reason) => {
+    const accumulator = createStopToValidatedLatencyAccumulator();
+    accumulator.acceptStop(100);
+
+    expect(markStopToValidatedLatencyUnavailable(accumulator, outcome)).toEqual(
+      {
+        schemaVersion: 1,
+        status: 'unavailable',
+        reason,
+      },
+    );
+  });
+
+  it('builds the participant-bearing first save with complete non-derived provenance', async () => {
+    const firstSave = buildInitialValidatedMeetingPayload({
+      meeting: {
+        id: 'meeting-first-save',
+        title: 'Meeting',
+        transcript_status: 'validated',
+        transcript_validated_at: '2026-07-30T08:00:00.000Z',
+        user_notes: 'User note',
+        audio_path: '/audio/mic.wav',
+        system_audio_path: '/audio/system.wav',
+        mixed_audio_path: '/audio/mix.wav',
+      },
+      segments: [{ speaker: 'Me', text: 'Hello', start: 0, end: 1 }],
+      transcriptMetadata: {
+        pipelineMode: 'canonical_session_v2',
+        sessionFallbackUsed: true,
+        sessionFallbackReasons: ['required_source_failed'],
+        canonicalSource: 'mix',
+        postHydrationBleedPass: true,
+        postHydrationBleedDroppedMe: 1,
+        transcription: {
+          backend: 'whisperx',
+          preset: 'balanced',
+          model: 'large-v3-turbo',
+          device: 'cpu',
+          computeType: 'int8',
+          diarization: false,
+          elapsedMs: 12,
+        },
+        sessionFallbackTranscription: {
+          backend: 'whisperx',
+          preset: 'balanced',
+          model: 'large-v3-turbo',
+          device: 'cpu',
+          computeType: 'int8',
+          diarization: true,
+          elapsedMs: 25,
+          canonicalSource: 'mix',
+        },
+        speakerAttribution: {
+          source: 'local_diarization_acoustic',
+          confidence: 0.98,
+          diarizationAttempted: true,
+          mappingApplied: true,
+        },
+        liveTranscriptResponsiveness: {
+          schemaVersion: 1,
+          status: 'available',
+          firstTextLatencyMs: 10,
+          acceptedPublicationCount: 1,
+          cadenceSampleCount: 0,
+          maximumUpdateGapMs: 0,
+        },
+        lifecycleStatus: 'validated',
+        integrity: { reasons: [] },
+      },
+      participants: ['Ada', 'Grace'],
+    });
+    const persisted: Array<Record<string, unknown>> = [];
+
+    await persistTranscriptThenRunLatencyPatchAndDownstream({
+      persistTranscript: async () => {
+        persisted.push(firstSave);
+      },
+      patchLatency: async () => 'updated',
+      runDownstream: async () => 'analysis',
+    });
+
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({
+      participants: ['Ada', 'Grace'],
+      enhanced_notes: null,
+      analysis_json: null,
+      value_signals_json: null,
+      finalization_status: 'finalized',
+      finalization_error_category: null,
+    });
+    expect(JSON.parse(String(persisted[0]?.transcript_json))).toMatchObject({
+      schemaVersion: 2,
+      pipelineMode: 'canonical_session_v2',
+      sessionFallbackUsed: true,
+      sessionFallbackReasons: ['required_source_failed'],
+      canonicalSource: 'mix',
+      transcription: {
+        backend: 'whisperx',
+        preset: 'balanced',
+        model: 'large-v3-turbo',
+      },
+      sessionFallbackTranscription: {
+        backend: 'whisperx',
+        canonicalSource: 'mix',
+      },
+      speakerAttribution: {
+        source: 'local_diarization_acoustic',
+        mappingApplied: true,
+      },
+      liveTranscriptResponsiveness: { status: 'available' },
+      lifecycleStatus: 'validated',
+      segments: [{ speaker: 'Me', text: 'Hello' }],
+    });
+  });
 });

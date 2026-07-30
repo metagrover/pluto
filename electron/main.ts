@@ -24,6 +24,7 @@ import {
   updateCaptureJournalActivityEvidence,
 } from './captureJournal';
 import { recoverInterruptedCaptureJournals } from './captureJournalRecovery';
+import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioSpawn,
@@ -1267,22 +1268,17 @@ app.whenReady().then(async () => {
     (_event, meetingId, runId, stage) =>
       db.updateMeetingTranscriptValidationRetryStage(meetingId, runId, stage),
   );
-  ipcMain.handle('PATCH_STOP_TO_VALIDATED_LATENCY', (_event, input) => {
-    try {
-      return db.patchStopToValidatedLatency(input);
-    } catch {
-      return 'failed';
-    }
-  });
+  ipcMain.handle('PATCH_STOP_TO_VALIDATED_LATENCY', (_event, input) =>
+    runConditionalMeetingUpdateForIpc(() =>
+      db.patchStopToValidatedLatency(input),
+    ),
+  );
   ipcMain.handle(
     'SAVE_DERIVED_MEETING_FIELDS_IF_TRANSCRIPT_CURRENT',
-    (_event, input) => {
-      try {
-        return db.saveDerivedMeetingFieldsIfTranscriptCurrent(input);
-      } catch {
-        return 'failed';
-      }
-    },
+    (_event, input) =>
+      runConditionalMeetingUpdateForIpc(() =>
+        db.saveDerivedMeetingFieldsIfTranscriptCurrent(input),
+      ),
   );
   ipcMain.handle(
     'FAIL_TRANSCRIPT_VALIDATION_RETRY',

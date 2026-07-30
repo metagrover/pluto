@@ -1,3 +1,66 @@
+import type {
+  StopToValidatedLatencySummary,
+  createStopToValidatedLatencyAccumulator,
+} from '../utils/stopToValidatedLatency';
+import { buildTranscriptJsonPayload } from '../utils/transcriptSchema';
+
+type StopToValidatedLatencyAccumulator = ReturnType<
+  typeof createStopToValidatedLatencyAccumulator
+>;
+
+export const startStopToValidatedLatencyAfterAcceptedStop = (params: {
+  acceptedStop: unknown | null;
+  accumulator: StopToValidatedLatencyAccumulator;
+  nowMs: number;
+}): boolean => {
+  if (!params.acceptedStop) return false;
+  params.accumulator.acceptStop(params.nowMs);
+  return true;
+};
+
+export type StopToValidatedUnavailableOutcome =
+  | 'needs_attention'
+  | 'recovery_required'
+  | 'validated_save_failed';
+
+export const markStopToValidatedLatencyUnavailable = (
+  accumulator: StopToValidatedLatencyAccumulator,
+  outcome: StopToValidatedUnavailableOutcome,
+): StopToValidatedLatencySummary => {
+  const reason =
+    outcome === 'needs_attention'
+      ? 'not_validated'
+      : outcome === 'recovery_required'
+        ? 'recovery_required'
+        : 'validated_save_failed';
+  return accumulator.markUnavailable(reason)
+    .summary as StopToValidatedLatencySummary;
+};
+
+export const buildInitialValidatedMeetingPayload = <
+  Meeting extends Record<string, unknown>,
+>(params: {
+  meeting: Meeting;
+  segments: unknown[];
+  transcriptMetadata: Parameters<typeof buildTranscriptJsonPayload>[1];
+  participants: string[];
+}) => ({
+  ...params.meeting,
+  transcript_json: JSON.stringify(
+    buildTranscriptJsonPayload(params.segments, params.transcriptMetadata),
+  ),
+  user_notes:
+    typeof params.meeting.user_notes === 'string'
+      ? params.meeting.user_notes
+      : '',
+  enhanced_notes: null,
+  analysis_json: null,
+  value_signals_json: null,
+  participants: [...params.participants],
+  finalization_status: 'finalized' as const,
+  finalization_error_category: null,
+});
+
 export const persistAttributedTranscriptBeforeDownstream = async <T>(params: {
   persistTranscript: () => Promise<unknown>;
   runDownstream: () => Promise<T>;
