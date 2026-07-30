@@ -157,8 +157,8 @@ describe('stop-to-validated database persistence', () => {
     expect(
       claimMeetingTranscriptValidationRetry('metric-generation', {
         runId: 'retry-after-metric',
-        startedAt: '2026-07-30T08:01:00.000Z',
-        deadlineAt: '2026-07-30T08:11:00.000Z',
+        startedAt: '2099-07-30T08:01:00.000Z',
+        deadlineAt: '2099-07-30T08:11:00.000Z',
         stage: 'transcribing',
       }),
     ).toBe(true);
@@ -235,8 +235,8 @@ describe('stop-to-validated database persistence', () => {
     expect(
       claimMeetingTranscriptValidationRetry('derived-race', {
         runId: 'retry-before-derived',
-        startedAt: '2026-07-30T08:03:00.000Z',
-        deadlineAt: '2026-07-30T08:13:00.000Z',
+        startedAt: '2099-07-30T08:03:00.000Z',
+        deadlineAt: '2099-07-30T08:13:00.000Z',
         stage: 'transcribing',
       }),
     ).toBe(true);
