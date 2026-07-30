@@ -149,6 +149,22 @@ downstream work. After it acknowledges:
 7. never overwrite title, notes, analysis, attention, folder, favorite, audio,
    finalization, or newer retry state.
 
+Before that initial durable save, `AudioManager` constructs the complete final
+non-derived meeting payload. It must include:
+
+- the final attributed transcript segments;
+- pipeline mode, canonical source, session-fallback decision/reasons and
+  transcription provenance;
+- speaker-attribution evidence;
+- live-transcript responsiveness evidence;
+- capture-activity integrity evidence;
+- participants and all recording/finalization fields already known before
+  analysis.
+
+No transcript/session provenance or participant data is deferred to the later
+derived update. The existing participant entity-link side effect therefore
+runs from this initial `SAVE_MEETING` boundary exactly as it does today.
+
 The database metric operation is one conditional `UPDATE`. The renderer starts
 it without awaiting before `runDownstream` begins. When downstream work and the
 metric patch have both completed, the renderer invokes a separate conditional
@@ -159,11 +175,20 @@ derived-intelligence update only if the metric patch returned `updated` or
   accepted summary, plus the same transcript integrity JSON, validation
   timestamp, and `validated` status used by the metric patch;
 - updates only derived-owned columns such as title (under its existing expected
-  title guard), enhanced notes, analysis fields, and value signals;
+  title guard), enhanced notes, every analysis metadata column, and value
+  signals;
 - never writes transcript JSON, transcript integrity, transcript status,
   validation timestamp, retry lease, audio paths, folder, favorite,
   finalization, or user notes;
 - returns `updated`, `conflict`, or `missing`.
+
+On `updated`, the database refreshes the meeting FTS row from the resulting
+title, transcript, enhanced notes, and user notes using the same indexing
+semantics as the existing full save. The conditional derived update therefore
+preserves search visibility and all analysis provenance fields:
+`analysis_json`, schema version, format pass, retry count, fallback-used flag,
+provider, model, generation path, prompt version, generated timestamp, error
+categories, and `value_signals_json`.
 
 There is no read-then-unconditional-save sequence. A retry lease acquired after
 metric reconciliation but before the derived update changes the guarded
@@ -233,6 +258,11 @@ TDD must prove:
 - strict parser rejection of unknown or contradictory fields;
 - runtime start at accepted stop, unavailable outcome mapping, and completion
   only after the validated save promise resolves;
+- the initial durable validated payload contains final transcript segments,
+  session/transcription provenance, participants, and every other non-derived
+  field currently supplied only by the later full save;
+- participant entity-link processing remains attached to the initial durable
+  save;
 - the first validated transcript is durable before the metric update;
 - compare-and-save success, identical replay, conflict, missing-row, and failed
   behavior;
@@ -245,6 +275,8 @@ TDD must prove:
 - later derived-owned persistence atomically suppresses stale writes when a
   retry lease is acquired immediately before its conditional update;
 - derived persistence cannot overwrite any transcript or user-owned field;
+- derived persistence updates every analysis provenance field and refreshes FTS
+  with the same resulting searchable content as the existing full save;
 - retry paths preserve valid evidence;
 - malformed evidence is omitted rather than normalized;
 - benchmark manifest, fixture, executor, schema, baseline, report, and privacy
