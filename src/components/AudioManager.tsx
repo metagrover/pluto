@@ -1,6 +1,5 @@
 import { Loader2, Mic } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { persistAttributedTranscriptBeforeDownstream } from '../services/diarizationFirstFinalization';
 import { runRecordingTranscriptValidation } from '../services/recordingTranscriptValidation';
 import type { AnalysisDocumentV3 } from '../types';
 import {
@@ -50,6 +49,10 @@ import {
   splitSegmentsAtDiarizationBoundaries,
   stripLikelyMeBleedSegments,
 } from '../utils/speakerAttribution';
+import {
+  type StopToValidatedLatencySummary,
+  createStopToValidatedLatencyAccumulator,
+} from '../utils/stopToValidatedLatency';
 import {
   type TimedAudioChunk,
   shouldUseSystemAudioReconstructionFallback,
@@ -499,6 +502,9 @@ export const AudioManager = ({
   );
   const frozenLiveTranscriptResponsivenessRef =
     useRef<LiveTranscriptResponsivenessSummary | null>(null);
+  const stopToValidatedLatencyRef = useRef(
+    createStopToValidatedLatencyAccumulator(),
+  );
   const processedMicSegmentsRef = useRef<TranscriptionSegment[]>([]);
   const zeroMicChunkStreakRef = useRef(0);
   const micChunkConversionFailuresRef = useRef(0);
@@ -585,6 +591,8 @@ export const AudioManager = ({
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
       startTimeRef.current = Date.now();
+      stopToValidatedLatencyRef.current =
+        createStopToValidatedLatencyAccumulator();
       liveTranscriptResponsivenessRef.current.acceptStart();
       frozenLiveTranscriptResponsivenessRef.current = null;
       captureActivitySessionRef.current = createCaptureActivitySession({
@@ -3356,6 +3364,7 @@ export const AudioManager = ({
     }
     frozenLiveTranscriptResponsivenessRef.current =
       liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
+    stopToValidatedLatencyRef.current.acceptStop(performance.now());
 
     stopInFlightRef.current = true;
     recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
@@ -3516,10 +3525,21 @@ export const AudioManager = ({
           endReason,
           failureReason: journalSealOutcome.reason,
         });
+        const stopToValidatedLatency =
+          stopToValidatedLatencyRef.current.markUnavailable('recovery_required')
+            .summary as StopToValidatedLatencySummary;
         try {
           await window.ipcRenderer.invoke('SAVE_MEETING', {
             ...degradedMeeting,
             participants,
+            transcript_json: JSON.stringify(
+              buildTranscriptJsonPayload([], {
+                canonicalSource: 'mic',
+                postHydrationBleedPass: false,
+                stopToValidatedLatency,
+                lifecycleStatus: 'needs_attention',
+              }),
+            ),
           });
         } catch {
           throw new Error('Failed to preserve recording recovery state');
@@ -4634,6 +4654,9 @@ export const AudioManager = ({
       );
 
       if (integrityValidation.status === 'needs_attention') {
+        const stopToValidatedLatency =
+          stopToValidatedLatencyRef.current.markUnavailable('not_validated')
+            .summary as StopToValidatedLatencySummary;
         const recoverableMeeting = {
           id: stopSnapshot.meetingId,
           title: userTitle || 'Meeting',
@@ -4654,6 +4677,7 @@ export const AudioManager = ({
               speakerAttribution,
               liveTranscriptResponsiveness:
                 frozenLiveTranscriptResponsivenessRef.current ?? undefined,
+              stopToValidatedLatency,
               lifecycleStatus: 'needs_attention',
               integrity: {
                 ...integrityValidation.evidence,
@@ -4714,6 +4738,29 @@ export const AudioManager = ({
             canonicalSource: sessionCanonicalSource,
             postHydrationBleedPass,
             postHydrationBleedDroppedMe,
+            transcription: {
+              backend: String(resolvedTranscriptionSettings.backend),
+              preset: String(resolvedTranscriptionSettings.preset),
+              model: String(resolvedChunkModel),
+              device: String(resolvedTranscriptionSettings.device),
+              computeType: String(resolvedChunkComputeType),
+              diarization: false,
+              elapsedMs: 0,
+            },
+            sessionFallbackTranscription: sessionTranscriptionMeta
+              ? {
+                  backend: String(sessionTranscriptionMeta.backend),
+                  preset: String(sessionTranscriptionMeta.preset),
+                  model: String(sessionTranscriptionMeta.model),
+                  device: String(sessionTranscriptionMeta.device),
+                  computeType: String(sessionTranscriptionMeta.computeType),
+                  canonicalSource: sessionCanonicalSource,
+                  diarization: diarizationEnabled,
+                  elapsedMs: sessionTranscriptionMeta.elapsedMs || 0,
+                  providerLabel: sessionTranscriptionMeta.providerLabel,
+                  warnings: sessionTranscriptionMeta.warnings,
+                }
+              : undefined,
             speakerAttribution,
             liveTranscriptResponsiveness:
               frozenLiveTranscriptResponsivenessRef.current ?? undefined,
@@ -4728,11 +4775,21 @@ export const AudioManager = ({
         enhanced_notes: null,
         analysis_json: null,
         value_signals_json: null,
-        participants: [],
+        participants,
         folder_id: null,
         is_favorite: false,
         end_reason: endReason || 'manual',
+        finalization_status: 'finalized',
+        finalization_error_category: null,
       };
+      const attributionIntegrity = {
+        ...integrityValidation.evidence,
+        reasons: integrityValidation.reasons,
+        attempts: integrityValidation.attempts,
+        activityEvidenceSource: 'capture_activity_v2',
+        activityEvidence: sealedActivityEvidence,
+      };
+      const attributionIntegrityJson = JSON.stringify(attributionIntegrity);
 
       // 3. Generate Analysis V3 (canonical markdown + hidden signals)
       const fullTranscript = newTranscription
@@ -4743,33 +4800,49 @@ export const AudioManager = ({
       let analysisDocument: AnalysisDocument | AnalysisDocumentV3 =
         emptyAnalysisDocument();
 
-      const rawArtifacts = await persistAttributedTranscriptBeforeDownstream({
-        persistTranscript: async () =>
-          await sealedActivityHandoff.persistMeeting(
-            attributionPersistenceRecord,
-            {
-              ...integrityValidation.evidence,
-              reasons: integrityValidation.reasons,
-              attempts: integrityValidation.attempts,
-            },
-            async (meeting) =>
-              await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
-          ),
-        runDownstream: async () => {
-          try {
-            return (await window.ipcRenderer.invoke('GENERATE_ANALYSIS_V2', {
-              transcript: fullTranscript,
-              userNotes: userNotes,
-            })) as AnalysisArtifacts;
-          } catch (analysisErr) {
-            console.error(
-              '[Pluto] V3 analysis generation failed:',
-              analysisErr,
-            );
-            return null;
-          }
-        },
+      await sealedActivityHandoff.persistMeeting(
+        attributionPersistenceRecord,
+        attributionIntegrity,
+        async (meeting) =>
+          await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
+      );
+      const stopToValidatedLatency =
+        stopToValidatedLatencyRef.current.completeValidatedSave(
+          performance.now(),
+        ).summary as StopToValidatedLatencySummary;
+      const transcriptWithLatency = JSON.stringify({
+        ...(JSON.parse(attributionPersistenceRecord.transcript_json) as Record<
+          string,
+          unknown
+        >),
+        stopToValidatedLatency,
       });
+      const metricPatchPromise = window.ipcRenderer.invoke(
+        'PATCH_STOP_TO_VALIDATED_LATENCY',
+        {
+          meetingId: attributionPersistenceRecord.id,
+          expectedTranscriptJson: attributionPersistenceRecord.transcript_json,
+          expectedTranscriptIntegrityJson: attributionIntegrityJson,
+          expectedTranscriptValidatedAt:
+            attributionPersistenceRecord.transcript_validated_at,
+          replacementTranscriptJson: transcriptWithLatency,
+        },
+      );
+      const downstreamPromise = (async () => {
+        try {
+          return (await window.ipcRenderer.invoke('GENERATE_ANALYSIS_V2', {
+            transcript: fullTranscript,
+            userNotes: userNotes,
+          })) as AnalysisArtifacts;
+        } catch (analysisErr) {
+          console.error('[Pluto] V3 analysis generation failed:', analysisErr);
+          return null;
+        }
+      })();
+      const [metricPatchOutcome, rawArtifacts] = await Promise.all([
+        metricPatchPromise,
+        downstreamPromise,
+      ]);
 
       if (rawArtifacts) {
         analysisDocument = normalizeAnalysisDocument(rawArtifacts?.analysis);
@@ -4881,6 +4954,7 @@ export const AudioManager = ({
             speakerAttribution,
             liveTranscriptResponsiveness:
               frozenLiveTranscriptResponsivenessRef.current ?? undefined,
+            stopToValidatedLatency,
             lifecycleStatus: integrityValidation.status,
             integrity: {
               ...integrityValidation.evidence,
@@ -4904,16 +4978,30 @@ export const AudioManager = ({
         finalization_error_category: null,
       };
 
-      await sealedActivityHandoff.persistMeeting(
-        meetingData,
-        {
-          ...integrityValidation.evidence,
-          reasons: integrityValidation.reasons,
-          attempts: integrityValidation.attempts,
-        },
-        async (meeting) =>
-          await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
-      );
+      if (
+        metricPatchOutcome === 'updated' ||
+        metricPatchOutcome === 'already_current'
+      ) {
+        await window.ipcRenderer.invoke(
+          'SAVE_DERIVED_MEETING_FIELDS_IF_TRANSCRIPT_CURRENT',
+          {
+            meetingId: meetingData.id,
+            expectedTranscriptJson: transcriptWithLatency,
+            expectedTranscriptIntegrityJson: attributionIntegrityJson,
+            expectedTranscriptValidatedAt:
+              attributionPersistenceRecord.transcript_validated_at,
+            expectedTitle: attributionPersistenceRecord.title,
+            title: meetingData.title,
+            enhancedNotes: meetingData.enhanced_notes,
+            analysisJson: meetingData.analysis_json,
+            analysisSchemaVersion: meetingData.analysis_schema_version,
+            analysisFormatPass: meetingData.analysis_format_pass,
+            analysisRetryCount: meetingData.analysis_retry_count,
+            analysisFallbackUsed: meetingData.analysis_fallback_used,
+            valueSignalsJson: meetingData.value_signals_json,
+          },
+        );
+      }
       console.log(
         '[Pluto] Session saved to DB with transcript segments:',
         labeledTranscription.length,
@@ -5009,6 +5097,10 @@ export const AudioManager = ({
       ) {
         try {
           const meetingTiming = buildMeetingTiming(stopSnapshot);
+          const stopToValidatedLatency =
+            stopToValidatedLatencyRef.current.markUnavailable(
+              'validated_save_failed',
+            ).summary as StopToValidatedLatencySummary;
           await window.ipcRenderer.invoke('SAVE_MEETING', {
             id: currentMeetingIdRef.current,
             title: userTitle || 'Meeting',
@@ -5031,7 +5123,14 @@ export const AudioManager = ({
                 : {}),
             }),
             transcript_validated_at: null,
-            transcript_json: JSON.stringify([]),
+            transcript_json: JSON.stringify(
+              buildTranscriptJsonPayload([], {
+                canonicalSource: mixedAudioPath ? 'mix' : 'mic',
+                postHydrationBleedPass: false,
+                stopToValidatedLatency,
+                lifecycleStatus: 'needs_attention',
+              }),
+            ),
             user_notes: userNotes,
             enhanced_notes: null,
             analysis_json: null,
@@ -5053,6 +5152,8 @@ export const AudioManager = ({
       setIsRecording(false);
     } finally {
       stopInFlightRef.current = false;
+      stopToValidatedLatencyRef.current =
+        createStopToValidatedLatencyAccumulator();
       startTimeRef.current = 0;
       recordingEndedAtRef.current = 0;
       isProcessingRef.current = false;

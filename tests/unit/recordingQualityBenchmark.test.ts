@@ -922,6 +922,7 @@ describe('buildRecordingQualityBenchmarkReport', () => {
       candidate_eligibility: { passed: 1, failed: 0 },
       capture_recovery: { passed: 0, failed: 0 },
       live_transcript_responsiveness: { passed: 0, failed: 0 },
+      stop_to_validated_latency: { passed: 0, failed: 0 },
       recording_finalization: { passed: 1, failed: 0 },
       retry_validation: { passed: 0, failed: 0 },
       transcript_validation: { passed: 1, failed: 1 },
@@ -1242,7 +1243,7 @@ describe('benchmark:recording-quality CLI', () => {
       stdout: result.stdout,
     }).toMatchObject({
       status: 0,
-      stdout: expect.stringContaining('tier=pr 9/9 cases passed'),
+      stdout: expect.stringContaining('tier=pr 10/10 cases passed'),
     });
     expect(result.stdout).toContain(
       'EVIDENCE issue-493-capture-recovery elapsed=',
@@ -1258,11 +1259,12 @@ describe('benchmark:recording-quality CLI', () => {
         rssSamplingIntervalMs: 10,
       },
       summary: {
-        totalCases: 9,
-        issueCoverage: expect.arrayContaining([493, 549]),
+        totalCases: 10,
+        issueCoverage: expect.arrayContaining([493, 549, 551]),
         kinds: {
           capture_recovery: { passed: 1, failed: 0 },
           live_transcript_responsiveness: { passed: 1, failed: 0 },
+          stop_to_validated_latency: { passed: 1, failed: 0 },
         },
       },
     });
@@ -1335,7 +1337,7 @@ describe('benchmark:recording-quality CLI', () => {
 
     const all = run('all');
     expect(all.status).toBe(0);
-    expect(all.stdout).toContain('tier=all 9/9 cases passed');
+    expect(all.stdout).toContain('tier=all 10/10 cases passed');
 
     const manual = run('manual');
     expect(manual.status).toBe(1);

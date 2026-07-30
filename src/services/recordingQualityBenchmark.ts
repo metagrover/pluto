@@ -21,6 +21,11 @@ import type {
   SpeakerActivityWindow,
 } from '../utils/speakerAttribution.ts';
 import {
+  type StopToValidatedLatencySummary,
+  type StopToValidatedLatencyUnavailableReason,
+  createStopToValidatedLatencyAccumulator,
+} from '../utils/stopToValidatedLatency.ts';
+import {
   type RecordingTranscriptValidationResult,
   runRecordingTranscriptValidation,
 } from './recordingTranscriptValidation.ts';
@@ -32,6 +37,7 @@ export type RecordingQualityBenchmarkCaseKind =
   | 'recording_finalization'
   | 'retry_validation'
   | 'live_transcript_responsiveness'
+  | 'stop_to_validated_latency'
   | 'candidate_eligibility';
 
 export type RecordingQualityBenchmarkTier = 'pr' | 'manual';
@@ -114,6 +120,7 @@ export type RecordingQualityBenchmarkCaseResult = {
       reasons: string[];
     };
     responsiveness?: LiveTranscriptResponsivenessSummary;
+    stopToValidatedLatency?: StopToValidatedLatencySummary;
     reasons?: string[];
   };
   expected: RecordingQualityBenchmarkExpectation;
@@ -434,7 +441,28 @@ export type RecordingQualityBenchmarkFixture =
   | RecordingFinalizationFixture
   | RetryValidationFixture
   | LiveTranscriptResponsivenessFixture
+  | StopToValidatedLatencyFixture
   | CandidateEligibilityFixture;
+
+export type StopToValidatedLatencyFixture = {
+  type: 'stop_to_validated_latency';
+  scenarios: Array<{
+    id: string;
+    events: Array<
+      | { type: 'accept_stop'; atMs: number }
+      | { type: 'complete_validated_save'; atMs: number }
+      | {
+          type: 'mark_unavailable';
+          reason: Extract<
+            StopToValidatedLatencyUnavailableReason,
+            'not_validated' | 'recovery_required' | 'validated_save_failed'
+          >;
+        }
+    >;
+    expected: StopToValidatedLatencySummary;
+  }>;
+  expected: RecordingQualityBenchmarkExpectation;
+};
 
 export type LiveTranscriptResponsivenessFixture = {
   type: 'live_transcript_responsiveness';
@@ -499,6 +527,7 @@ const isSupportedBenchmarkCaseKind = (
   kind === 'recording_finalization' ||
   kind === 'retry_validation' ||
   kind === 'live_transcript_responsiveness' ||
+  kind === 'stop_to_validated_latency' ||
   kind === 'candidate_eligibility';
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -948,6 +977,60 @@ export const runLiveTranscriptResponsivenessBenchmarkCase = (
         summary?.status === 'available'
           ? []
           : [summary?.reason || 'no_summary'],
+    },
+    expected: fixture.expected,
+    ...(failures.length > 0 ? { failures } : {}),
+  };
+};
+
+export const runStopToValidatedLatencyBenchmarkCase = (
+  meta: RecordingQualityBenchmarkManifestCase,
+  fixture: StopToValidatedLatencyFixture,
+): RecordingQualityBenchmarkCaseResult => {
+  const summaries = fixture.scenarios.map((scenario) => {
+    const accumulator = createStopToValidatedLatencyAccumulator();
+    for (const event of scenario.events) {
+      if (event.type === 'accept_stop') accumulator.acceptStop(event.atMs);
+      else if (event.type === 'complete_validated_save') {
+        accumulator.completeValidatedSave(event.atMs);
+      } else {
+        accumulator.markUnavailable(event.reason);
+      }
+    }
+    return { id: scenario.id, summary: accumulator.snapshot() };
+  });
+  const failures = summaries.flatMap((actual, index) =>
+    JSON.stringify(actual.summary) ===
+    JSON.stringify(fixture.scenarios[index]?.expected)
+      ? []
+      : [`${actual.id} summary mismatch`],
+  );
+  const firstAvailable = summaries.find(
+    (
+      entry,
+    ): entry is {
+      id: string;
+      summary: Extract<StopToValidatedLatencySummary, { status: 'available' }>;
+    } => entry.summary?.status === 'available',
+  )?.summary;
+  const primaryMetric = firstAvailable
+    ? { name: 'durationMs', value: firstAvailable.durationMs }
+    : undefined;
+  failures.push(
+    ...compareMetric(primaryMetric, fixture.expected.primaryMetric),
+  );
+  return {
+    id: meta.id,
+    issue: meta.issue,
+    title: meta.title,
+    kind: meta.kind,
+    passed: failures.length === 0,
+    trackedMetrics: meta.trackedMetrics,
+    actual: {
+      status: failures.length === 0 ? 'validated' : 'needs_attention',
+      primaryMetric,
+      ...(firstAvailable ? { stopToValidatedLatency: firstAvailable } : {}),
+      reasons: failures,
     },
     expected: fixture.expected,
     ...(failures.length > 0 ? { failures } : {}),
@@ -1478,6 +1561,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     candidate_eligibility: { passed: 0, failed: 0 },
     capture_recovery: { passed: 0, failed: 0 },
     live_transcript_responsiveness: { passed: 0, failed: 0 },
+    stop_to_validated_latency: { passed: 0, failed: 0 },
     recording_finalization: { passed: 0, failed: 0 },
     transcript_validation: { passed: 0, failed: 0 },
     retry_validation: { passed: 0, failed: 0 },

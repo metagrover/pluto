@@ -1478,6 +1478,109 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
 export const saveMeeting = (meeting: PersistedMeeting) =>
   saveMeetingTransaction(meeting);
 
+export type ConditionalMeetingUpdateOutcome =
+  | 'updated'
+  | 'already_current'
+  | 'conflict'
+  | 'missing';
+
+export const patchStopToValidatedLatency = (input: {
+  meetingId: string | number;
+  expectedTranscriptJson: string;
+  expectedTranscriptIntegrityJson: string;
+  expectedTranscriptValidatedAt: string;
+  replacementTranscriptJson: string;
+}): ConditionalMeetingUpdateOutcome =>
+  db.transaction(() => {
+    const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+    if (!current) return 'missing';
+    const generationMatches =
+      current.transcript_json === input.expectedTranscriptJson &&
+      current.transcript_integrity_json ===
+        input.expectedTranscriptIntegrityJson &&
+      current.transcript_validated_at === input.expectedTranscriptValidatedAt &&
+      current.transcript_status === 'validated';
+    if (!generationMatches) {
+      const alreadyCurrent =
+        current.transcript_json === input.replacementTranscriptJson &&
+        current.transcript_integrity_json ===
+          input.expectedTranscriptIntegrityJson &&
+        current.transcript_validated_at ===
+          input.expectedTranscriptValidatedAt &&
+        current.transcript_status === 'validated';
+      return alreadyCurrent ? 'already_current' : 'conflict';
+    }
+    if (input.expectedTranscriptJson === input.replacementTranscriptJson) {
+      return 'already_current';
+    }
+    const result = db
+      .prepare(
+        `UPDATE meetings SET transcript_json = ?
+         WHERE id = ? AND transcript_json = ?
+           AND transcript_integrity_json = ?
+           AND transcript_validated_at = ?
+           AND transcript_status = 'validated'`,
+      )
+      .run(
+        input.replacementTranscriptJson,
+        String(input.meetingId),
+        input.expectedTranscriptJson,
+        input.expectedTranscriptIntegrityJson,
+        input.expectedTranscriptValidatedAt,
+      );
+    return result.changes === 1 ? 'updated' : 'conflict';
+  })();
+
+export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
+  meetingId: string | number;
+  expectedTranscriptJson: string;
+  expectedTranscriptIntegrityJson: string;
+  expectedTranscriptValidatedAt: string;
+  expectedTitle: string;
+  title: string;
+  enhancedNotes: string;
+  analysisJson: string;
+  analysisSchemaVersion: number;
+  analysisFormatPass: boolean;
+  analysisRetryCount: number;
+  analysisFallbackUsed: boolean;
+  valueSignalsJson: string;
+}): Exclude<ConditionalMeetingUpdateOutcome, 'already_current'> => {
+  const result = db
+    .prepare(
+      `UPDATE meetings SET
+         title = CASE WHEN title = ? THEN ? ELSE title END,
+         enhanced_notes = ?,
+         analysis_json = ?,
+         analysis_schema_version = ?,
+         analysis_format_pass = ?,
+         analysis_retry_count = ?,
+         analysis_fallback_used = ?,
+         value_signals_json = ?
+       WHERE id = ? AND transcript_json = ?
+         AND transcript_integrity_json = ?
+         AND transcript_validated_at = ?
+         AND transcript_status = 'validated'`,
+    )
+    .run(
+      input.expectedTitle,
+      input.title,
+      input.enhancedNotes,
+      input.analysisJson,
+      input.analysisSchemaVersion,
+      input.analysisFormatPass ? 1 : 0,
+      input.analysisRetryCount,
+      input.analysisFallbackUsed ? 1 : 0,
+      input.valueSignalsJson,
+      String(input.meetingId),
+      input.expectedTranscriptJson,
+      input.expectedTranscriptIntegrityJson,
+      input.expectedTranscriptValidatedAt,
+    );
+  if (result.changes === 1) return 'updated';
+  return getMeeting(input.meetingId) ? 'conflict' : 'missing';
+};
+
 export const updateMeetingFollowUpDrafts = (
   meetingId: string | number,
   followUpDraftsJson: string | null,
