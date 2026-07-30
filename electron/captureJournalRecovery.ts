@@ -31,13 +31,6 @@ type RecoveryGap = {
   reason: RecoveryGapReason;
 };
 
-type RecoverySourceSummary = {
-  acknowledgedChunkCount: number;
-  recoveredChunkCount: number;
-  gapCount: number;
-  recoveredAudioPath: string | null;
-};
-
 type RecoveryMeetingIntegrity = TranscriptTrustEnvelopeV2;
 
 type RecoveryActivityEvidence = {

@@ -40,7 +40,7 @@
   "expected": {
     "status": "needs_attention",
     "requiredRecoveredSources": ["mic", "system"],
-    "requiredReasons": ["checksum_mismatch:mic:1"],
+    "requiredCauseCodes": ["capture_gap_detected"],
     "primaryMetric": {
       "name": "recoveredChunkRatio",
       "value": 0.75

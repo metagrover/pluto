@@ -26,6 +26,10 @@ import {
   createStopToValidatedLatencyAccumulator,
 } from '../utils/stopToValidatedLatency.ts';
 import {
+  type TranscriptTrustCauseCode,
+  parseTranscriptTrustEnvelope,
+} from '../utils/transcriptTrustState.ts';
+import {
   type RecordingTranscriptValidationResult,
   runRecordingTranscriptValidation,
 } from './recordingTranscriptValidation.ts';
@@ -515,7 +519,7 @@ export type CaptureRecoveryFixture = {
   };
   expected: RecordingQualityBenchmarkExpectation & {
     requiredRecoveredSources?: Array<'mic' | 'system'>;
-    requiredReasons?: string[];
+    requiredCauseCodes?: TranscriptTrustCauseCode[];
   };
 };
 
@@ -1183,20 +1187,15 @@ export const runCandidateEligibilityBenchmarkCase = (
 };
 
 type CaptureRecoveryIntegrity = {
-  gap_detected: boolean;
-  recovered_sources: Record<
-    'mic' | 'system',
-    {
-      acknowledgedChunkCount: number;
-      recoveredChunkCount: number;
-      recoveredAudioPath: string | null;
-    }
-  >;
-  recovery_gaps: Array<{
-    source: 'mic' | 'system';
-    sequence: number;
-    reason: string;
-  }>;
+  schemaVersion: 2;
+  state: 'needs_attention';
+  causes: Array<{ code: TranscriptTrustCauseCode }>;
+  recovery: {
+    source: 'capture_journal';
+    gapDetected: boolean;
+    acknowledgedChunkCount: number;
+    recoveredChunkCount: number;
+  };
 };
 
 export const runCaptureRecoveryBenchmarkCase = async (
@@ -1241,12 +1240,15 @@ export const runCaptureRecoveryBenchmarkCase = async (
       );
     }
 
-    let savedMeeting: { transcript_integrity_json?: string | null } | null =
-      null;
+    const savedMeetings: Array<{
+      transcript_integrity_json?: string | null;
+      audio_path?: string | null;
+      system_audio_path?: string | null;
+    }> = [];
     await recoverInterruptedCaptureJournals(rootDir, {
       getMeeting: () => null,
       saveMeeting: (meeting) => {
-        savedMeeting = meeting;
+        savedMeetings.push(meeting);
         return meeting;
       },
       stitchWavSegments: async (segments, outputTag) => {
@@ -1260,19 +1262,24 @@ export const runCaptureRecoveryBenchmarkCase = async (
       nowMs: fixture.startedAtMs + 10_000,
     });
 
+    const savedMeeting = savedMeetings[0];
     if (!savedMeeting) {
       throw new Error('Capture recovery benchmark did not save a meeting');
     }
-    const integrity = JSON.parse(
-      savedMeeting.transcript_integrity_json || '{}',
-    ) as CaptureRecoveryIntegrity;
-    const acknowledgedChunks = Object.values(
-      integrity.recovered_sources,
-    ).reduce((total, source) => total + source.acknowledgedChunkCount, 0);
-    const recoveredChunks = Object.values(integrity.recovered_sources).reduce(
-      (total, source) => total + source.recoveredChunkCount,
-      0,
+    const parsedIntegrity = parseTranscriptTrustEnvelope(
+      savedMeeting.transcript_integrity_json,
+      {
+        transcriptStatus: 'needs_attention',
+        transcriptValidatedAt: null,
+        payloadLifecycleStatus: 'needs_attention',
+      },
     );
+    if (!parsedIntegrity.ok || !parsedIntegrity.envelope.recovery) {
+      throw new Error('Capture recovery benchmark saved invalid trust state');
+    }
+    const integrity = parsedIntegrity.envelope as CaptureRecoveryIntegrity;
+    const acknowledgedChunks = integrity.recovery.acknowledgedChunkCount;
+    const recoveredChunks = integrity.recovery.recoveredChunkCount;
     const actualMetric: RecordingQualityBenchmarkMetric = {
       name: 'recoveredChunkRatio',
       value:
@@ -1280,32 +1287,30 @@ export const runCaptureRecoveryBenchmarkCase = async (
           ? 0
           : Number((recoveredChunks / acknowledgedChunks).toFixed(4)),
     };
-    const reasons = integrity.recovery_gaps.map(
-      (gap) => `${gap.reason}:${gap.source}:${gap.sequence}`,
-    );
-    const actualStatus = integrity.gap_detected
+    const reasons = integrity.causes.map((cause) => cause.code);
+    const actualStatus = integrity.recovery.gapDetected
       ? 'needs_attention'
       : 'validated';
     const missingSources = (fixture.expected.requiredRecoveredSources || [])
       .filter(
-        (source) => !integrity.recovered_sources[source].recoveredAudioPath,
+        (source) =>
+          !savedMeeting[source === 'mic' ? 'audio_path' : 'system_audio_path'],
       )
       .map((source) => `missing recovered source ${source}`);
     const failures = [
       ...(actualStatus === fixture.expected.status ? [] : ['status mismatch']),
       ...compareMetric(actualMetric, fixture.expected.primaryMetric),
-      ...(fixture.expected.requiredReasons || [])
+      ...(fixture.expected.requiredCauseCodes || [])
         .filter((reason) => !reasons.includes(reason))
-        .map((reason) => `missing required reason ${reason}`),
+        .map((reason) => `missing required cause ${reason}`),
       ...missingSources,
     ];
     let artifactBytes: RecordingQualityBenchmarkMeasurement;
     try {
-      const recoveredPaths = Object.values(integrity.recovered_sources)
-        .map((source) => source.recoveredAudioPath)
-        .filter((artifactPath): artifactPath is string =>
-          Boolean(artifactPath),
-        );
+      const recoveredPaths = [
+        savedMeeting.audio_path,
+        savedMeeting.system_audio_path,
+      ].filter((artifactPath): artifactPath is string => Boolean(artifactPath));
       const artifactStats = await Promise.all(
         recoveredPaths.map((artifactPath) => stat(artifactPath)),
       );
