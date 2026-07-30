@@ -127,7 +127,7 @@ const readStoredActivityWindows = async (
         windows: verified.evidence.windows,
         source: 'capture_activity_v2',
         failureReason: null,
-        evidence: parsed.activityEvidence,
+        evidence: verified.evidence,
       };
     }
 

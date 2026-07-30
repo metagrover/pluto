@@ -326,6 +326,58 @@ describe('capture journal', () => {
     ).rejects.toThrow(/conflicting activity evidence snapshot/i);
   });
 
+  it('rejects a longer snapshot that rewrites persisted windows', async () => {
+    const root = await makeRoot();
+    const stored = await buildEvidence(5);
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence: stored,
+    });
+
+    await expect(
+      updateCaptureJournalActivityEvidence(root, {
+        meetingId: 'meeting-123',
+        activityEvidence: await buildCaptureActivityEvidence(
+          [
+            { startTime: 0, endTime: 4, speaker: 'Them' },
+            { startTime: 4, endTime: 8, speaker: 'Me' },
+          ],
+          {
+            clock: stored.clock,
+            thresholds: stored.thresholds,
+            algorithmVersion: stored.algorithmVersion,
+          },
+        ),
+      }),
+    ).rejects.toThrow(/conflicting activity evidence snapshot/i);
+  });
+
+  it('rejects a longer snapshot that changes producer metadata', async () => {
+    const root = await makeRoot();
+    const stored = await buildEvidence(5);
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId: 'meeting-123',
+      activityEvidence: stored,
+    });
+
+    await expect(
+      updateCaptureJournalActivityEvidence(root, {
+        meetingId: 'meeting-123',
+        activityEvidence: await buildCaptureActivityEvidence(
+          [...stored.windows, { startTime: 5, endTime: 8, speaker: 'Them' }],
+          {
+            clock: stored.clock,
+            thresholds: {
+              ...stored.thresholds,
+              rms: stored.thresholds.rms + 1,
+            },
+            algorithmVersion: stored.algorithmVersion,
+          },
+        ),
+      }),
+    ).rejects.toThrow(/conflicting activity evidence snapshot/i);
+  });
+
   it('rejects activity evidence snapshots with fewer windows even when they end later', async () => {
     const root = await makeRoot();
     const producer = {

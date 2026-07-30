@@ -75,6 +75,15 @@ const malformed = (): CaptureActivityParseResult => ({
 const isFiniteNonNegative = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
+const hasExactKeys = (value: object, expected: readonly string[]) => {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return (
+    actual.length === sortedExpected.length &&
+    actual.every((key, index) => key === sortedExpected[index])
+  );
+};
+
 const normalizeCaptureWindows = (
   value: unknown,
 ): StoredTranscriptActivityWindow[] | null => {
@@ -83,6 +92,8 @@ const normalizeCaptureWindows = (
   const windows: StoredTranscriptActivityWindow[] = [];
   for (const candidate of value) {
     if (!candidate || typeof candidate !== 'object') return null;
+    if (!hasExactKeys(candidate, ['startTime', 'endTime', 'speaker']))
+      return null;
     const window = candidate as Partial<StoredTranscriptActivityWindow>;
     if (
       !isFiniteNonNegative(window.startTime) ||
@@ -124,9 +135,15 @@ const normalizeProducer = (value: unknown): CaptureActivityProducer | null => {
   const thresholds = producer.thresholds;
   if (
     !clock ||
+    !hasExactKeys(clock, ['kind', 'origin']) ||
     clock.kind !== 'meeting_relative_seconds' ||
     clock.origin !== 'recording_start' ||
     !thresholds ||
+    !hasExactKeys(thresholds, [
+      'rms',
+      'dominanceRatio',
+      'minimumSwitchIntervalMs',
+    ]) ||
     !isFiniteNonNegative(thresholds.rms) ||
     !isFiniteNonNegative(thresholds.dominanceRatio) ||
     !isFiniteNonNegative(thresholds.minimumSwitchIntervalMs) ||
@@ -163,6 +180,13 @@ export const buildCaptureActivityEvidence = async (
   windows: SpeakerActivityWindow[],
   producer: CaptureActivityProducer,
 ): Promise<CaptureActivityEvidence> => {
+  if (
+    !producer ||
+    typeof producer !== 'object' ||
+    !hasExactKeys(producer, ['clock', 'thresholds', 'algorithmVersion'])
+  ) {
+    throw new Error('malformed');
+  }
   const normalizedProducer = normalizeProducer(producer);
   const normalizedWindows = normalizeCaptureWindows(windows);
   if (!normalizedProducer || !normalizedWindows) throw new Error('malformed');
@@ -201,6 +225,21 @@ export const parseCaptureActivityEvidence = async (
     ) {
       return { ok: false, reason: 'unsupported' };
     }
+    return malformed();
+  }
+
+  if (
+    !hasExactKeys(value, [
+      'schemaVersion',
+      'source',
+      'clock',
+      'thresholds',
+      'algorithmVersion',
+      'serializationVersion',
+      'windows',
+      'digestSha256',
+    ])
+  ) {
     return malformed();
   }
 

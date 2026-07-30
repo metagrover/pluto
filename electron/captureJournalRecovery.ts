@@ -121,12 +121,14 @@ const readManifestForRecovery = async (rootDir: string, meetingId: string) => {
   try {
     return await readCaptureJournalManifest(rootDir, meetingId);
   } catch (error) {
+    if (rawManifest.schemaVersion !== 2) throw error;
     if (
-      rawManifest.schemaVersion !== 2 ||
-      rawManifest.activityEvidence === undefined
+      rawManifest.activityEvidence === undefined &&
+      (error as Error).message === 'capture_activity_missing'
     ) {
-      throw error;
+      return rawManifest;
     }
+    if (rawManifest.activityEvidence === undefined) throw error;
     const parsed = await parseCaptureActivityEvidence(
       rawManifest.activityEvidence,
     );

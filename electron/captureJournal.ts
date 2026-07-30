@@ -426,6 +426,32 @@ const getFinalActivityWindowEnd = (evidence: CaptureActivityEvidence) =>
     0,
   );
 
+const hasSameActivityProducer = (
+  left: CaptureActivityEvidence,
+  right: CaptureActivityEvidence,
+) =>
+  left.clock.kind === right.clock.kind &&
+  left.clock.origin === right.clock.origin &&
+  left.thresholds.rms === right.thresholds.rms &&
+  left.thresholds.dominanceRatio === right.thresholds.dominanceRatio &&
+  left.thresholds.minimumSwitchIntervalMs ===
+    right.thresholds.minimumSwitchIntervalMs &&
+  left.algorithmVersion === right.algorithmVersion &&
+  left.serializationVersion === right.serializationVersion;
+
+const hasExactWindowPrefix = (
+  stored: CaptureActivityEvidence,
+  candidate: CaptureActivityEvidence,
+) =>
+  stored.windows.every((window, index) => {
+    const next = candidate.windows[index];
+    return (
+      next?.startTime === window.startTime &&
+      next.endTime === window.endTime &&
+      next.speaker === window.speaker
+    );
+  });
+
 const updateCaptureJournalActivityEvidenceUnlocked = async (
   rootDir: string,
   args: UpdateCaptureJournalActivityEvidenceArgs,
@@ -458,6 +484,12 @@ const updateCaptureJournalActivityEvidenceUnlocked = async (
       throw new Error('Older activity evidence snapshot');
     }
     if (activityEvidence.windows.length === stored.windows.length) {
+      throw new Error('Conflicting activity evidence snapshot');
+    }
+    if (
+      !hasSameActivityProducer(stored, activityEvidence) ||
+      !hasExactWindowPrefix(stored, activityEvidence)
+    ) {
       throw new Error('Conflicting activity evidence snapshot');
     }
   }

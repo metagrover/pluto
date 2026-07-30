@@ -25,6 +25,7 @@ import {
   buildMeetingTiming,
   buildRecoverableSealFailureMeeting,
   buildSpeakerAttributionRetryPlan,
+  createSealedCaptureActivityHandoff,
   resolveFinalizationCleanupPaths,
   sealCaptureJournalBeforeFinalization,
 } from '../utils/recordingFinalization';
@@ -3496,6 +3497,9 @@ export const AudioManager = ({
         return;
       }
       sealedActivityEvidence = journalSealOutcome.activityEvidence;
+      const sealedActivityHandoff = createSealedCaptureActivityHandoff(
+        journalSealOutcome.activityEvidence,
+      );
 
       // Process final chunks only after the journal is durably sealed.
       for (const [
@@ -4563,28 +4567,34 @@ export const AudioManager = ({
       }
 
       const meetingTiming = buildMeetingTiming(stopSnapshot);
-      const integrityValidation = await runRecordingTranscriptValidation({
-        meetingId: stopSnapshot.meetingId,
-        recordingDurationSeconds: meetingTiming.durationSeconds,
-        micAudioPath: primaryAudioPath,
-        mixAudioPath: mixedAudioPath,
-        systemAudioPath,
-        provisionalSegments: newTranscription,
-        activityWindows: journalSealOutcome.activityEvidence.windows,
-        transcribe: async (audioPath, options) =>
-          await window.ipcRenderer.invoke(
-            'WHISPER_TRANSCRIBE',
-            audioPath,
-            buildTranscriptionOptions({
-              diarize: false,
-              meetingId: stopSnapshot.meetingId,
-              canonicalSource:
-                options.canonicalSource === 'mix' ? 'mix' : 'mic',
-            }),
-          ),
-        probeDuration: async (audioPath) =>
-          await window.ipcRenderer.invoke('AUDIO_PROBE_DURATION', audioPath),
-      });
+      const integrityValidation = await sealedActivityHandoff.runValidation(
+        async (activityWindows) =>
+          await runRecordingTranscriptValidation({
+            meetingId: stopSnapshot.meetingId,
+            recordingDurationSeconds: meetingTiming.durationSeconds,
+            micAudioPath: primaryAudioPath,
+            mixAudioPath: mixedAudioPath,
+            systemAudioPath,
+            provisionalSegments: newTranscription,
+            activityWindows,
+            transcribe: async (audioPath, options) =>
+              await window.ipcRenderer.invoke(
+                'WHISPER_TRANSCRIBE',
+                audioPath,
+                buildTranscriptionOptions({
+                  diarize: false,
+                  meetingId: stopSnapshot.meetingId,
+                  canonicalSource:
+                    options.canonicalSource === 'mix' ? 'mix' : 'mic',
+                }),
+              ),
+            probeDuration: async (audioPath) =>
+              await window.ipcRenderer.invoke(
+                'AUDIO_PROBE_DURATION',
+                audioPath,
+              ),
+          }),
+      );
       newTranscription.splice(
         0,
         newTranscription.length,
@@ -4603,13 +4613,6 @@ export const AudioManager = ({
           system_audio_path: systemAudioPath || null,
           mixed_audio_path: mixedAudioPath || null,
           transcript_status: 'needs_attention',
-          transcript_integrity_json: JSON.stringify({
-            ...integrityValidation.evidence,
-            reasons: integrityValidation.reasons,
-            attempts: integrityValidation.attempts,
-            activityEvidenceSource: 'capture_activity_v2',
-            activityEvidence: journalSealOutcome.activityEvidence,
-          }),
           transcript_validated_at: null,
           transcript_json: JSON.stringify(
             buildTranscriptJsonPayload(newTranscription, {
@@ -4635,7 +4638,16 @@ export const AudioManager = ({
           finalization_status: 'finalized',
           finalization_error_category: null,
         };
-        await window.ipcRenderer.invoke('SAVE_MEETING', recoverableMeeting);
+        await sealedActivityHandoff.persistMeeting(
+          recoverableMeeting,
+          {
+            ...integrityValidation.evidence,
+            reasons: integrityValidation.reasons,
+            attempts: integrityValidation.attempts,
+          },
+          async (meeting) =>
+            await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
+        );
         onSessionComplete?.(recoverableMeeting.id);
         return;
       }
@@ -4659,13 +4671,6 @@ export const AudioManager = ({
         system_audio_path: systemAudioPath,
         mixed_audio_path: mixedAudioPath,
         transcript_status: 'validated',
-        transcript_integrity_json: JSON.stringify({
-          ...integrityValidation.evidence,
-          reasons: integrityValidation.reasons,
-          attempts: integrityValidation.attempts,
-          activityEvidenceSource: 'capture_activity_v2',
-          activityEvidence: journalSealOutcome.activityEvidence,
-        }),
         transcript_validated_at: new Date().toISOString(),
         transcript_json: JSON.stringify(
           buildTranscriptJsonPayload(newTranscription, {
@@ -4704,9 +4709,15 @@ export const AudioManager = ({
 
       const rawArtifacts = await persistAttributedTranscriptBeforeDownstream({
         persistTranscript: async () =>
-          await window.ipcRenderer.invoke(
-            'SAVE_MEETING',
+          await sealedActivityHandoff.persistMeeting(
             attributionPersistenceRecord,
+            {
+              ...integrityValidation.evidence,
+              reasons: integrityValidation.reasons,
+              attempts: integrityValidation.attempts,
+            },
+            async (meeting) =>
+              await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
           ),
         runDownstream: async () => {
           try {
@@ -4817,13 +4828,6 @@ export const AudioManager = ({
         system_audio_path: systemAudioPath,
         mixed_audio_path: mixedAudioPath,
         transcript_status: integrityValidation.status,
-        transcript_integrity_json: JSON.stringify({
-          ...integrityValidation.evidence,
-          reasons: integrityValidation.reasons,
-          attempts: integrityValidation.attempts,
-          activityEvidenceSource: 'capture_activity_v2',
-          activityEvidence: journalSealOutcome.activityEvidence,
-        }),
         transcript_validated_at:
           integrityValidation.status === 'validated'
             ? new Date().toISOString()
@@ -4862,7 +4866,16 @@ export const AudioManager = ({
         finalization_error_category: null,
       };
 
-      await window.ipcRenderer.invoke('SAVE_MEETING', meetingData);
+      await sealedActivityHandoff.persistMeeting(
+        meetingData,
+        {
+          ...integrityValidation.evidence,
+          reasons: integrityValidation.reasons,
+          attempts: integrityValidation.attempts,
+        },
+        async (meeting) =>
+          await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
+      );
       console.log(
         '[Pluto] Session saved to DB with transcript segments:',
         labeledTranscription.length,

@@ -204,6 +204,34 @@ export type JournalSealResult =
       reason: 'capture_journal_write_failed' | 'capture_journal_seal_failed';
     };
 
+export const createSealedCaptureActivityHandoff = (
+  activityEvidence: CaptureActivityEvidence,
+) => ({
+  activityWindows: activityEvidence.windows,
+  integrity: {
+    activityEvidenceSource: 'capture_activity_v2' as const,
+    activityEvidence,
+  },
+  runValidation: async <Result>(
+    validate: (windows: CaptureActivityEvidence['windows']) => Promise<Result>,
+  ) => await validate(activityEvidence.windows),
+  persistMeeting: async <Meeting extends Record<string, unknown>, Result>(
+    meeting: Meeting,
+    integrity: Record<string, unknown>,
+    persist: (
+      meeting: Meeting & { transcript_integrity_json: string },
+    ) => Promise<Result>,
+  ) =>
+    await persist({
+      ...meeting,
+      transcript_integrity_json: JSON.stringify({
+        ...integrity,
+        activityEvidenceSource: 'capture_activity_v2',
+        activityEvidence,
+      }),
+    }),
+});
+
 export const sealCaptureJournalBeforeFinalization = async ({
   drainAppends,
   hasWriteFailure,

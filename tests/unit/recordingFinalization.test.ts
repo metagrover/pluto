@@ -8,12 +8,71 @@ import {
   buildRecoverableSealFailureMeeting,
   buildSpeakerAttributionRetryPlan,
   collectDisposableRecordingArtifactPaths,
+  createSealedCaptureActivityHandoff,
   getStrongerSpeakerAttributionPolicy,
   resolveFinalizationCleanupPaths,
   sealCaptureJournalBeforeFinalization,
 } from '../../src/utils/recordingFinalization';
 
 describe('recording finalization helpers', () => {
+  it('invokes validation and every integrity save with the exact sealed evidence', async () => {
+    const sealed = await buildCaptureActivityEvidence(
+      [{ startTime: 0, endTime: 1, speaker: 'Me' }],
+      {
+        clock: {
+          kind: 'meeting_relative_seconds',
+          origin: 'recording_start',
+        },
+        thresholds: {
+          rms: 0.01,
+          dominanceRatio: 1.5,
+          minimumSwitchIntervalMs: 250,
+        },
+        algorithmVersion: 'speaker_activity_v1',
+      },
+    );
+
+    const handoff = createSealedCaptureActivityHandoff(sealed);
+    const validate = vi.fn(async () => 'validated');
+    const persist = vi.fn(
+      async (meeting: Record<string, unknown>) => meeting.id,
+    );
+
+    expect(handoff.activityWindows).toBe(sealed.windows);
+    expect(handoff.integrity.activityEvidence).toBe(sealed);
+    expect(handoff.integrity.activityEvidence.digestSha256).toBe(
+      sealed.digestSha256,
+    );
+    expect(handoff.integrity).toEqual({
+      activityEvidenceSource: 'capture_activity_v2',
+      activityEvidence: sealed,
+    });
+
+    await expect(handoff.runValidation(validate)).resolves.toBe('validated');
+    expect(validate).toHaveBeenCalledWith(sealed.windows);
+    expect(validate.mock.calls[0]?.[0]).toBe(sealed.windows);
+
+    for (const id of ['needs-attention', 'pre-analysis', 'final']) {
+      await expect(
+        handoff.persistMeeting({ id }, { reasons: [] }, persist),
+      ).resolves.toBe(id);
+    }
+    expect(persist).toHaveBeenCalledTimes(3);
+    for (const [meeting] of persist.mock.calls) {
+      const integrity = JSON.parse(
+        String(meeting.transcript_integrity_json),
+      ) as {
+        activityEvidence: unknown;
+        activityEvidenceSource: unknown;
+      };
+      expect(integrity.activityEvidenceSource).toBe('capture_activity_v2');
+      expect(integrity.activityEvidence).toEqual(sealed);
+      expect((integrity.activityEvidence as typeof sealed).digestSha256).toBe(
+        sealed.digestSha256,
+      );
+    }
+  });
+
   it('starts finalization only once per active meeting', () => {
     const first = beginRecordingFinalization({
       meetingId: 'meeting-1',

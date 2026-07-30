@@ -90,6 +90,49 @@ describe('capture activity evidence v2', () => {
     );
   });
 
+  it.each([
+    [
+      'envelope',
+      (evidence: Record<string, unknown>) => {
+        evidence.transcriptText = 'must not survive';
+      },
+    ],
+    [
+      'clock',
+      (evidence: Record<string, unknown>) => {
+        (evidence.clock as Record<string, unknown>).participant = 'private';
+      },
+    ],
+    [
+      'thresholds',
+      (evidence: Record<string, unknown>) => {
+        (evidence.thresholds as Record<string, unknown>).audioPath = '/private';
+      },
+    ],
+    [
+      'window',
+      (evidence: Record<string, unknown>) => {
+        const windows = evidence.windows as Array<Record<string, unknown>>;
+        windows[0].participant = 'private';
+      },
+    ],
+  ])('rejects unsigned extra fields in the %s', async (_name, mutate) => {
+    const valid = await buildCaptureActivityEvidence(
+      [{ startTime: 0, endTime: 1, speaker: 'Me' }],
+      producer,
+    );
+    const changed = structuredClone(valid) as unknown as Record<
+      string,
+      unknown
+    >;
+    mutate(changed);
+
+    await expect(parseCaptureActivityEvidence(changed)).resolves.toEqual({
+      ok: false,
+      reason: 'malformed',
+    });
+  });
+
   it('rejects invalid producer inputs and windows while building', async () => {
     await expect(
       buildCaptureActivityEvidence(

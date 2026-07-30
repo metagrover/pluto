@@ -407,8 +407,9 @@ describe('capture journal recovery', () => {
       reason: 'capture_activity_missing',
     },
     {
-      name: 'missing v2 evidence',
+      name: 'sealed missing v2 evidence',
       mutate: (manifest: Record<string, unknown>) => {
+        manifest.lifecycleState = 'sealed';
         Reflect.deleteProperty(manifest, 'activityEvidence');
       },
       source: 'capture_activity_missing',
