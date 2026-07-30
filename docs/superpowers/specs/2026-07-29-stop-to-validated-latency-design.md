@@ -46,15 +46,17 @@ boundary.
    failures.
 3. When the first validated transcript save acknowledges, freeze the elapsed
    duration.
-4. Add the summary to that exact transcript payload and persist it through a
-   transcript-owned conditional update that succeeds only while the previously
-   saved transcript identity is still current.
-5. Continue downstream analysis regardless of whether this observational
-   follow-up update wins or loses the comparison.
+4. Start a transcript-owned conditional patch concurrently with downstream
+   analysis. It succeeds only while the complete previously saved transcript
+   generation is still current.
+5. Before the later full meeting save, await the patch result, read the current
+   transcript generation, and carry forward any accepted summary. Patch failure
+   never cancels or weakens downstream work.
 
 The update is idempotent: replaying the identical summary against the identical
-transcript is a no-op success. A newer transcript, validation retry, or changed
-transcript identity causes a conflict result and remains untouched.
+transcript generation is a no-op success. A newer transcript, acquired retry
+lease, changed validation status, or changed transcript identity causes a
+conflict result and remains untouched.
 
 Rejected alternatives:
 
@@ -86,11 +88,9 @@ type StopToValidatedLatencySummary =
         | 'not_started'
         | 'invalid_timestamp'
         | 'timestamp_regression'
-        | 'duplicate_completion'
         | 'not_validated'
         | 'recovery_required'
-        | 'validated_save_failed'
-        | 'persistence_conflict';
+        | 'validated_save_failed';
     };
 ```
 
@@ -104,17 +104,24 @@ credentials, private evidence, or telemetry identifiers.
 
 ## Accumulator State Machine
 
-The pure accumulator receives injected monotonic milliseconds.
+The pure accumulator receives injected monotonic milliseconds. Its operation
+result is separate from the summary:
+
+```ts
+type StopToValidatedLatencyOperation =
+  | { outcome: 'recorded'; summary: StopToValidatedLatencySummary }
+  | { outcome: 'already_terminal'; summary: StopToValidatedLatencySummary }
+  | { outcome: 'invalid'; summary: StopToValidatedLatencySummary };
+```
 
 - `acceptStop()` starts exactly once.
 - `markUnavailable(reason)` freezes a terminal unavailable summary.
 - `completeValidatedSave()` requires a prior stop and a nondecreasing timestamp,
   then freezes the available duration.
-- Calls after any terminal state return the existing summary and cannot rewrite
-  history.
-- A duplicate completion attempt is reported as
-  `duplicate_completion` only when no valid terminal summary has already been
-  emitted to a caller; it never changes a persisted available measurement.
+- Calls after any terminal state return `already_terminal` with the existing
+  summary and cannot rewrite history.
+- Completion before start or with invalid/decreasing time returns `invalid`
+  with the corresponding unavailable summary.
 - `snapshot()` returns a cloned summary or `null` before a terminal state.
 
 Runtime orchestration maps lifecycle outcomes to the finite reasons. It never
@@ -127,22 +134,34 @@ downstream work. After it acknowledges:
 
 1. freeze the available latency summary;
 2. rebuild only the transcript JSON metadata with the summary;
-3. invoke a dedicated transcript-owned conditional update with:
+3. immediately start a dedicated transcript-owned conditional update with:
    - meeting ID;
    - the exact previously acknowledged transcript JSON as the expected value;
+   - the exact previously acknowledged transcript integrity JSON;
+   - the exact validation timestamp;
+   - expected transcript status `validated`;
    - the replacement transcript JSON;
 4. treat unchanged identical replacement as success;
-5. treat a mismatched current transcript as `persistence_conflict`;
-6. never overwrite title, notes, analysis, attention, folder, favorite, audio,
+5. atomically require every expected field to match so retry lease acquisition
+   or any newer transcript generation returns `conflict`;
+6. classify the patch separately as `updated`, `already_current`, `conflict`,
+   `missing`, or `failed`;
+7. never overwrite title, notes, analysis, attention, folder, favorite, audio,
    finalization, or newer retry state.
 
-The database operation is one conditional `UPDATE` and reports `updated`,
-`already_current`, `conflict`, or `missing`. A conflict or missing row does not
-roll back the already durable validated transcript and does not block
-downstream intelligence.
+The database operation is one conditional `UPDATE`. The renderer starts it
+without awaiting before `runDownstream` begins. Before constructing the later
+full meeting save, the renderer awaits the patch promise and fetches the
+current meeting. It copies a valid stored latency summary from that current
+transcript generation into the later payload. If the current transcript
+generation or retry lease no longer matches the initially saved generation,
+the later unconditional full meeting save is suppressed rather than
+overwriting newer transcript state.
 
-The later full meeting save reads or carries forward the accepted summary so it
-cannot accidentally erase it. Retry code preserves a valid stored summary and
+This ordering lets downstream analysis run concurrently with the narrow local
+patch while preventing the later save from erasing it. A conflict, missing row,
+or patch failure does not roll back the durable validated transcript and does
+not cancel downstream work. Retry code preserves a valid stored summary and
 does not recompute clean-stop latency from retry wall-clock time. A malformed
 stored summary is omitted rather than normalized into healthy evidence.
 
@@ -180,8 +199,8 @@ device performance.
 
 - Invalid event ordering fails closed into a finite content-free reason.
 - Validation and recovery outcomes cannot be promoted by the metric.
-- The observational follow-up update cannot delay downstream work after an
-  acknowledged validated transcript.
+- The observational patch runs concurrently with downstream work; only the
+  later full-save reconciliation awaits it.
 - Conditional-update conflicts preserve newer state.
 - Missing or malformed stored evidence is never interpreted as zero latency.
 - No caught error payload or private value enters the summary or benchmark
@@ -191,15 +210,20 @@ device performance.
 
 TDD must prove:
 
-- accumulator start, completion, delayed completion, invalid ordering, timestamp
-  regression, and terminal idempotency;
+- accumulator start, completion, delayed completion, invalid ordering,
+  timestamp regression, operation outcomes, and terminal idempotency;
 - strict parser rejection of unknown or contradictory fields;
 - runtime start at accepted stop, unavailable outcome mapping, and completion
   only after the validated save promise resolves;
 - the first validated transcript is durable before the metric update;
-- compare-and-save success, identical replay, conflict, and missing-row behavior;
-- conflict cannot overwrite a newer transcript or retry lease;
-- later full-save and retry paths preserve valid evidence;
+- compare-and-save success, identical replay, conflict, missing-row, and failed
+  behavior;
+- retry lease acquisition between initial save and metric patch produces an
+  atomic conflict and cannot be overwritten;
+- downstream work starts before the metric patch resolves;
+- later full-save reconciliation waits for the patch, preserves valid evidence,
+  and suppresses stale writes after a generation conflict;
+- retry paths preserve valid evidence;
 - malformed evidence is omitted rather than normalized;
 - benchmark manifest, fixture, executor, schema, baseline, report, and privacy
   coverage;
@@ -213,8 +237,9 @@ audit, and diff/privacy checks.
 ## Scope
 
 In scope: in-session stop-to-durable-validated duration, strict content-free
-metadata, conflict-safe transcript-owned persistence, retry preservation, and
-deterministic synthetic benchmark coverage.
+metadata, conflict-safe transcript-generation persistence, later-save
+reconciliation, retry preservation, and deterministic synthetic benchmark
+coverage.
 
 Out of scope: product thresholds, UI changes, stop-to-analysis latency,
 cross-restart wall-clock timing, private/device corpus automation, model policy,
