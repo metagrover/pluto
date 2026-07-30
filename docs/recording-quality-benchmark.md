@@ -28,6 +28,26 @@ A measurement that cannot be collected is represented as `unavailable` with one 
 
 Version-2 manifests remain readable. Version-2 baselines continue to provide functional comparisons; measurement tracking against an older baseline is visibly `MISSING_BASELINE` until a version-3 measurement is deliberately recorded. Unknown manifest schema versions fail clearly.
 
+## Live transcript responsiveness evidence
+
+The `live_transcript_responsiveness` case executes a declared content-free
+event trace through the same monotonic accumulator used by `AudioManager`.
+That contract reports first accepted live-text latency, accepted publication
+count, cadence sample count, and the maximum gap between accepted
+publications. A stopped trace with no accepted live text reports
+`no_accepted_live_text`; malformed event ordering reports a finite invalid
+reason instead of fabricating zero latency.
+
+Committed trace values are deterministic expectations, not measurements of
+device, model, or end-to-end application performance. They may be stable PR
+gates because the fixture supplies the offsets. Values recorded during a real
+meeting remain local observational metadata and hardware-dependent evidence;
+this benchmark does not set a product latency threshold.
+
+The summary contains numeric durations/counts plus finite status and reason
+enums only. It contains no event timestamps, transcript text, participant or
+meeting labels, file paths, audio, or credentials.
+
 ## Corpus layout
 
 - Manifest: `scripts/recording-quality/manifest.json`
