@@ -54,6 +54,11 @@ describe('transcriptSchema', () => {
           cadenceSampleCount: 2,
           maximumUpdateGapMs: 450,
         },
+        stopToValidatedLatency: {
+          schemaVersion: 1,
+          status: 'available',
+          durationMs: 840,
+        },
       },
     );
     expect(payload.schemaVersion).toBe(TRANSCRIPT_JSON_SCHEMA_VERSION);
@@ -83,6 +88,11 @@ describe('transcriptSchema', () => {
       cadenceSampleCount: 2,
       maximumUpdateGapMs: 450,
     });
+    expect(payload.stopToValidatedLatency).toEqual({
+      schemaVersion: 1,
+      status: 'available',
+      durationMs: 840,
+    });
     expect(payload.segments).toHaveLength(1);
   });
 
@@ -93,6 +103,7 @@ describe('transcriptSchema', () => {
     });
 
     expect(payload).not.toHaveProperty('liveTranscriptResponsiveness');
+    expect(payload).not.toHaveProperty('stopToValidatedLatency');
   });
 
   it('records diarization-backed speaker attribution trust metadata', () => {

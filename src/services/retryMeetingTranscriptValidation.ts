@@ -4,6 +4,7 @@ import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from '../utils/speakerAttribution.ts';
+import { parseStopToValidatedLatencySummary } from '../utils/stopToValidatedLatency.ts';
 import {
   type TranscriptActivityEvidenceFallbackSource,
   buildStoredTranscriptActivityEvidence,
@@ -68,6 +69,18 @@ const readLiveTranscriptResponsiveness = (transcriptJson?: string | null) => {
     return parseLiveTranscriptResponsivenessSummary(
       parsed.liveTranscriptResponsiveness,
     );
+  } catch {
+    return null;
+  }
+};
+
+const readStopToValidatedLatency = (transcriptJson?: string | null) => {
+  try {
+    const parsed = JSON.parse(transcriptJson || '{}') as Record<
+      string,
+      unknown
+    >;
+    return parseStopToValidatedLatencySummary(parsed.stopToValidatedLatency);
   } catch {
     return null;
   }
@@ -420,6 +433,8 @@ export const retryMeetingTranscriptValidation = async (
         liveTranscriptResponsiveness:
           readLiveTranscriptResponsiveness(current.transcript_json) ??
           undefined,
+        stopToValidatedLatency:
+          readStopToValidatedLatency(current.transcript_json) ?? undefined,
         lifecycleStatus: 'validated',
         integrity: { ...validation.evidence, reasons: validation.reasons },
       }),
