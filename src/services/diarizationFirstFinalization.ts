@@ -76,6 +76,20 @@ export type LatencyPatchOutcome =
   | 'missing'
   | 'failed';
 
+export const persistLatencyAndDerivedIntelligence = async <Downstream>(params: {
+  patchLatency: () => Promise<LatencyPatchOutcome>;
+  runDownstream: () => Promise<Downstream>;
+}): Promise<{
+  patchOutcome: LatencyPatchOutcome;
+  downstream: Downstream;
+}> => {
+  const [patchOutcome, downstream] = await Promise.all([
+    params.patchLatency().catch(() => 'failed' as const),
+    params.runDownstream(),
+  ]);
+  return { patchOutcome, downstream };
+};
+
 export const persistTranscriptThenRunLatencyPatchAndDownstream = async <
   Downstream,
 >(params: {
@@ -87,11 +101,7 @@ export const persistTranscriptThenRunLatencyPatchAndDownstream = async <
   downstream: Downstream;
 }> => {
   await params.persistTranscript();
-  const [patchOutcome, downstream] = await Promise.all([
-    params.patchLatency(),
-    params.runDownstream(),
-  ]);
-  return { patchOutcome, downstream };
+  return await persistLatencyAndDerivedIntelligence(params);
 };
 
 export const persistDerivedAfterLatencyPatch = async <Result>(params: {

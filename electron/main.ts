@@ -29,6 +29,7 @@ import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
+import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -1197,61 +1198,32 @@ app.whenReady().then(async () => {
           : null;
       const claimValidationLease = options?.claimValidationLease;
       const transcriptOwnedFieldsOnly = options?.transcriptOwnedFieldsOnly;
-      const result = claimValidationLease
-        ? db.claimMeetingTranscriptValidationRetry(
-            meeting.id,
-            claimValidationLease,
-          )
-        : transcriptOwnedFieldsOnly && expectedValidationRunId
-          ? db.saveTranscriptValidationResultIfRunCurrent(
-              meeting.id,
-              expectedValidationRunId,
-              meeting,
-              typeof options.expectedTitle === 'string'
-                ? options.expectedTitle
-                : undefined,
-            )
-          : expectedValidationRunId
-            ? db.saveMeetingIfTranscriptRunCurrent(
-                meeting,
-                expectedValidationRunId,
+      return saveMeetingWithParticipantSideEffects({
+        meeting,
+        saveMeeting: () =>
+          claimValidationLease
+            ? db.claimMeetingTranscriptValidationRetry(
+                meeting.id,
+                claimValidationLease,
               )
-            : db.saveMeeting(meeting);
-      if (result === false) return false;
-
-      // Process manual participants as entities (Sprint 2 enhancement)
-      if (meeting.participants && Array.isArray(meeting.participants)) {
-        console.log(
-          `[Pluto] Processing ${meeting.participants.length} manual participants...`,
-        );
-        for (const name of meeting.participants) {
-          if (!name || !name.trim()) continue;
-
-          try {
-            // 1. Create/Get Person Entity
-            const entity = db.upsertEntity({
-              type: 'person',
-              name: name.trim(),
-              status: 'active',
-            });
-
-            // 2. Link to Meeting
-            db.addMeetingEntity({
-              meeting_id: String(meeting.id),
-              entity_id: entity.id,
-              mention_count: 1, // Default weight for manual addition
-              context: 'Manual participant',
-            });
-          } catch (err) {
-            console.error(
-              `[Pluto] Failed to process participant: ${name}`,
-              err,
-            );
-          }
-        }
-      }
-
-      return result;
+            : transcriptOwnedFieldsOnly && expectedValidationRunId
+              ? db.saveTranscriptValidationResultIfRunCurrent(
+                  meeting.id,
+                  expectedValidationRunId,
+                  meeting,
+                  typeof options.expectedTitle === 'string'
+                    ? options.expectedTitle
+                    : undefined,
+                )
+              : expectedValidationRunId
+                ? db.saveMeetingIfTranscriptRunCurrent(
+                    meeting,
+                    expectedValidationRunId,
+                  )
+                : db.saveMeeting(meeting),
+        upsertEntity: db.upsertEntity,
+        addMeetingEntity: db.addMeetingEntity,
+      });
     } catch (e) {
       console.error('[Pluto] SAVE_MEETING failed:', e);
       throw e;

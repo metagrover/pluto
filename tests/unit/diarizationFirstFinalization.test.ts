@@ -5,6 +5,7 @@ import {
   markStopToValidatedLatencyUnavailable,
   persistAttributedTranscriptBeforeDownstream,
   persistDerivedAfterLatencyPatch,
+  persistLatencyAndDerivedIntelligence,
   persistTranscriptThenRunLatencyPatchAndDownstream,
   startStopToValidatedLatencyAfterAcceptedStop,
 } from '../../src/services/diarizationFirstFinalization';
@@ -119,6 +120,80 @@ describe('stop-to-validated persistence orchestration', () => {
       patchOutcome: 'updated',
       downstream: 'analysis',
     });
+  });
+
+  it('maps a rejected latency patch to failed and awaits downstream intelligence', async () => {
+    let finishDownstream!: () => void;
+    const downstreamGate = new Promise<void>((resolve) => {
+      finishDownstream = resolve;
+    });
+    let settled = false;
+
+    const resultPromise = persistLatencyAndDerivedIntelligence({
+      patchLatency: async () => {
+        throw new Error('metric IPC rejected');
+      },
+      runDownstream: async () => {
+        await downstreamGate;
+        return 'analysis';
+      },
+    });
+    void resultPromise.finally(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    finishDownstream();
+    await expect(resultPromise).resolves.toEqual({
+      patchOutcome: 'failed',
+      downstream: 'analysis',
+    });
+  });
+
+  it('preserves the validated generation when the metric IPC rejects', async () => {
+    const savedGenerations: Array<{ status: string; segments: unknown[] }> = [];
+    let recoverySaveRan = false;
+    let derivedSaveRan = false;
+    let patchOutcome: 'failed' | undefined;
+
+    try {
+      const result = await persistTranscriptThenRunLatencyPatchAndDownstream({
+        persistTranscript: async () => {
+          savedGenerations.push({
+            status: 'validated',
+            segments: [{ speaker: 'Me', text: 'Preserve me' }],
+          });
+        },
+        patchLatency: async () => {
+          throw new Error('metric IPC rejected');
+        },
+        runDownstream: async () => 'analysis',
+      });
+      patchOutcome =
+        result.patchOutcome === 'failed' ? result.patchOutcome : undefined;
+      await persistDerivedAfterLatencyPatch({
+        patchOutcome: result.patchOutcome,
+        persistDerived: async () => {
+          derivedSaveRan = true;
+        },
+      });
+    } catch {
+      recoverySaveRan = true;
+      savedGenerations.push({ status: 'needs_attention', segments: [] });
+    }
+
+    expect(patchOutcome).toBe('failed');
+    expect(derivedSaveRan).toBe(false);
+    expect(recoverySaveRan).toBe(false);
+    expect(savedGenerations).toEqual([
+      {
+        status: 'validated',
+        segments: [{ speaker: 'Me', text: 'Preserve me' }],
+      },
+    ]);
   });
 
   it.each(['conflict', 'missing', 'failed'] as const)(
