@@ -8,11 +8,14 @@ describe('live transcript responsiveness runtime wiring', () => {
       now: () => times.shift() ?? Number.NaN,
     });
 
-    runtime.start();
-    runtime.publish(2);
-    runtime.publish(1);
+    runtime.acceptStart();
+    runtime.publishAcceptedSegments(
+      [{ text: 'first' }, { text: 'second' }],
+      () => {},
+    );
+    runtime.publishAcceptedSegments([{ text: 'third' }], () => {});
 
-    expect(runtime.stop()).toEqual({
+    expect(runtime.freezeBeforeFinalization()).toEqual({
       schemaVersion: 1,
       status: 'available',
       firstTextLatencyMs: 250,
@@ -28,10 +31,32 @@ describe('live transcript responsiveness runtime wiring', () => {
       now: () => times.shift() ?? Number.NaN,
     });
 
-    runtime.start();
-    runtime.publish(0);
-    runtime.discard();
+    runtime.acceptStart();
+    runtime.publishAcceptedSegments([{ text: '   ' }], () => {});
+    runtime.abortStart();
 
     expect(runtime.snapshot()).toBeNull();
+  });
+
+  it('records newly accepted non-empty segments before forwarding the unchanged payload', () => {
+    const times = [100, 350, 500];
+    const runtime = createLiveTranscriptResponsivenessRuntime({
+      now: () => times.shift() ?? Number.NaN,
+    });
+    const aggregate = [{ text: 'existing' }, { text: 'new' }];
+    let forwarded: typeof aggregate | null = null;
+
+    runtime.acceptStart();
+    runtime.publishAcceptedSegments([{ text: '' }, { text: 'new' }], () => {
+      forwarded = aggregate;
+    });
+    const summary = runtime.freezeBeforeFinalization();
+
+    expect(forwarded).toBe(aggregate);
+    expect(summary).toMatchObject({
+      status: 'available',
+      acceptedPublicationCount: 1,
+      firstTextLatencyMs: 250,
+    });
   });
 });

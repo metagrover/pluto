@@ -166,4 +166,65 @@ describe('live transcript responsiveness accumulator', () => {
       }),
     ).toBeNull();
   });
+
+  it.each([
+    {
+      label: 'available evidence without a publication',
+      value: {
+        schemaVersion: 1,
+        status: 'available',
+        firstTextLatencyMs: 250,
+        acceptedPublicationCount: 0,
+        cadenceSampleCount: 0,
+        maximumUpdateGapMs: null,
+      },
+    },
+    {
+      label: 'cadence count unrelated to publication count',
+      value: {
+        schemaVersion: 1,
+        status: 'available',
+        firstTextLatencyMs: 250,
+        acceptedPublicationCount: 3,
+        cadenceSampleCount: 1,
+        maximumUpdateGapMs: 450,
+      },
+    },
+    {
+      label: 'a maximum gap without a cadence sample',
+      value: {
+        schemaVersion: 1,
+        status: 'available',
+        firstTextLatencyMs: 250,
+        acceptedPublicationCount: 1,
+        cadenceSampleCount: 0,
+        maximumUpdateGapMs: 450,
+      },
+    },
+    {
+      label: 'unavailable evidence with accepted publications',
+      value: {
+        schemaVersion: 1,
+        status: 'unavailable',
+        reason: 'no_accepted_live_text',
+        acceptedPublicationCount: 1,
+        cadenceSampleCount: 0,
+        maximumUpdateGapMs: null,
+      },
+    },
+  ])('rejects contradictory persisted $label', ({ value }) => {
+    expect(parseLiveTranscriptResponsivenessSummary(value)).toBeNull();
+  });
+
+  it('rejects a fractional accepted segment count', () => {
+    const accumulator = createLiveTranscriptResponsivenessAccumulator();
+
+    accumulator.start(100);
+    accumulator.publish(200, 1.5);
+
+    expect(accumulator.snapshot()).toMatchObject({
+      status: 'invalid',
+      reason: 'non_monotonic_time',
+    });
+  });
 });

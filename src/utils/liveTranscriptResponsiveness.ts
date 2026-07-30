@@ -67,8 +67,20 @@ export const parseLiveTranscriptResponsivenessSummary = (
     cadenceSampleCount: value.cadenceSampleCount,
     maximumUpdateGapMs: value.maximumUpdateGapMs,
   };
+  const expectedCadenceSampleCount = Math.max(
+    value.acceptedPublicationCount - 1,
+    0,
+  );
+  const cadenceIsConsistent =
+    value.cadenceSampleCount === expectedCadenceSampleCount &&
+    (value.cadenceSampleCount === 0
+      ? value.maximumUpdateGapMs === null
+      : value.maximumUpdateGapMs !== null);
+  if (!cadenceIsConsistent) return null;
+
   if (
     value.status === 'available' &&
+    value.acceptedPublicationCount > 0 &&
     isNonNegativeFinite(value.firstTextLatencyMs)
   ) {
     return {
@@ -79,7 +91,8 @@ export const parseLiveTranscriptResponsivenessSummary = (
   }
   if (
     value.status === 'unavailable' &&
-    value.reason === 'no_accepted_live_text'
+    value.reason === 'no_accepted_live_text' &&
+    value.acceptedPublicationCount === 0
   ) {
     return { ...base, status: 'unavailable', reason: value.reason };
   }
@@ -152,6 +165,7 @@ export const createLiveTranscriptResponsivenessAccumulator =
       if (
         invalidTime(atMs) ||
         !Number.isFinite(acceptedSegmentCount) ||
+        !Number.isInteger(acceptedSegmentCount) ||
         acceptedSegmentCount < 0
       ) {
         invalidate('non_monotonic_time');
@@ -238,11 +252,19 @@ export const createLiveTranscriptResponsivenessRuntime = ({
   const accumulator = createLiveTranscriptResponsivenessAccumulator();
 
   return {
-    start: () => accumulator.start(now()),
-    publish: (acceptedSegmentCount: number) =>
-      accumulator.publish(now(), acceptedSegmentCount),
-    stop: () => accumulator.stop(now()),
-    discard: () => accumulator.discard(),
+    acceptStart: () => accumulator.start(now()),
+    publishAcceptedSegments: <T extends { text: string }>(
+      acceptedSegments: T[],
+      publish: () => void,
+    ) => {
+      const acceptedSegmentCount = acceptedSegments.filter(
+        (segment) => segment.text.trim().length > 0,
+      ).length;
+      accumulator.publish(now(), acceptedSegmentCount);
+      publish();
+    },
+    freezeBeforeFinalization: () => accumulator.stop(now()),
+    abortStart: () => accumulator.discard(),
     snapshot: () => accumulator.snapshot(),
   };
 };

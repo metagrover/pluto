@@ -590,7 +590,7 @@ export const AudioManager = ({
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
       startTimeRef.current = Date.now();
-      liveTranscriptResponsivenessRef.current.start();
+      liveTranscriptResponsivenessRef.current.acceptStart();
       frozenLiveTranscriptResponsivenessRef.current = null;
       captureJournalWriteQueueRef.current = Promise.resolve();
       onRecordingStarted?.(startTimeRef.current);
@@ -651,7 +651,7 @@ export const AudioManager = ({
           }),
         );
         currentMeetingIdRef.current = null;
-        liveTranscriptResponsivenessRef.current.discard();
+        liveTranscriptResponsivenessRef.current.abortStart();
         frozenLiveTranscriptResponsivenessRef.current = null;
         startTimeRef.current = 0;
         recordingEndedAtRef.current = 0;
@@ -1030,7 +1030,7 @@ export const AudioManager = ({
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
       currentMeetingIdRef.current = null;
-      liveTranscriptResponsivenessRef.current.discard();
+      liveTranscriptResponsivenessRef.current.abortStart();
       frozenLiveTranscriptResponsivenessRef.current = null;
       startTimeRef.current = 0;
       recordingEndedAtRef.current = 0;
@@ -3217,24 +3217,27 @@ export const AudioManager = ({
         endTime: s.endTime + chunkStartSec,
       })),
     );
-    const acceptedSegmentCount = [
+    const acceptedSegments = [
       ...filteredMicSegments,
       ...filteredSystemSegments,
-    ].filter((segment) => segment.text.trim().length > 0).length;
-    liveTranscriptResponsivenessRef.current.publish(acceptedSegmentCount);
-    onLiveTranscript?.(
-      [...processedMicSegmentsRef.current]
-        .sort((a, b) => a.startTime - b.startTime)
-        .map((segment) => ({
-          id: segment.id,
-          speaker:
-            segment.speaker === 'Me' || segment.speaker === 'Them'
-              ? segment.speaker
-              : 'Unknown',
-          text: segment.text,
-          timestampMs: segment.startTime * 1_000,
-          confirmed: true,
-        })),
+    ];
+    const liveTranscript: LiveTranscriptSegment[] = [
+      ...processedMicSegmentsRef.current,
+    ]
+      .sort((a, b) => a.startTime - b.startTime)
+      .map((segment) => ({
+        id: segment.id,
+        speaker:
+          segment.speaker === 'Me' || segment.speaker === 'Them'
+            ? segment.speaker
+            : 'Unknown',
+        text: segment.text,
+        timestampMs: segment.startTime * 1_000,
+        confirmed: true,
+      }));
+    liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
+      acceptedSegments,
+      () => onLiveTranscript?.(liveTranscript),
     );
   };
 
@@ -3356,7 +3359,7 @@ export const AudioManager = ({
       return;
     }
     frozenLiveTranscriptResponsivenessRef.current =
-      liveTranscriptResponsivenessRef.current.stop();
+      liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
 
     stopInFlightRef.current = true;
     recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
@@ -5060,7 +5063,7 @@ export const AudioManager = ({
         // Note: we don't call stopSession because that would try to save.
         // We just reset local state. The main process handles task cancellation.
         currentMeetingIdRef.current = null;
-        liveTranscriptResponsivenessRef.current.discard();
+        liveTranscriptResponsivenessRef.current.abortStart();
         frozenLiveTranscriptResponsivenessRef.current = null;
         stopInFlightRef.current = false;
         startTimeRef.current = 0;
