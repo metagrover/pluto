@@ -152,10 +152,12 @@ downstream work. After it acknowledges:
 The database metric operation is one conditional `UPDATE`. The renderer starts
 it without awaiting before `runDownstream` begins. When downstream work and the
 metric patch have both completed, the renderer invokes a separate conditional
-derived-intelligence update. That operation:
+derived-intelligence update only if the metric patch returned `updated` or
+`already_current`. That operation:
 
-- atomically requires the same expected transcript JSON, transcript integrity
-  JSON, validation timestamp, and `validated` status used by the metric patch;
+- atomically requires the post-patch replacement transcript JSON containing the
+  accepted summary, plus the same transcript integrity JSON, validation
+  timestamp, and `validated` status used by the metric patch;
 - updates only derived-owned columns such as title (under its existing expected
   title guard), enhanced notes, analysis fields, and value signals;
 - never writes transcript JSON, transcript integrity, transcript status,
@@ -166,6 +168,11 @@ derived-intelligence update. That operation:
 There is no read-then-unconditional-save sequence. A retry lease acquired after
 metric reconciliation but before the derived update changes the guarded
 generation and atomically produces `conflict`.
+
+If the metric patch returns `conflict`, `missing`, or `failed`, derived
+persistence is suppressed without attempting a second write. The already
+computed downstream result may be discarded; it cannot justify writing against
+an unverified transcript generation.
 
 This ordering lets downstream analysis run concurrently with the narrow local
 patch while preventing a later save from erasing it or a newer retry lease. A
@@ -232,9 +239,11 @@ TDD must prove:
 - retry lease acquisition between initial save and metric patch produces an
   atomic conflict and cannot be overwritten;
 - downstream work starts before the metric patch resolves;
-- later derived-owned persistence waits for the patch and atomically suppresses
-  stale writes when a retry lease is acquired between reconciliation and
-  commit;
+- successful metric reconciliation makes the post-patch transcript JSON the
+  expected identity for derived persistence;
+- metric `conflict`, `missing`, or `failed` suppresses derived persistence;
+- later derived-owned persistence atomically suppresses stale writes when a
+  retry lease is acquired immediately before its conditional update;
 - derived persistence cannot overwrite any transcript or user-owned field;
 - retry paths preserve valid evidence;
 - malformed evidence is omitted rather than normalized;
