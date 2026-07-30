@@ -39,25 +39,33 @@ describe('stop-to-validated persistence boundary', () => {
     );
 
     expect(derivedBoundary).toContain('db.transaction');
-    expect(derivedBoundary).toContain('saveMeetingTransaction(updated)');
+    expect(derivedBoundary).toContain('refreshMeetingFts(updated)');
+    for (const field of [
+      'analysis_provider = ?',
+      'analysis_model = ?',
+      'analysis_generation_path = ?',
+      'analysis_prompt_version = ?',
+      'analysis_generated_at = ?',
+      'analysis_error_categories_json = ?',
+    ]) {
+      expect(derivedBoundary).toContain(field);
+    }
   });
 
-  it('suppresses cleanup and downstream persistence on reconciliation conflicts', () => {
+  it('suppresses cleanup and entity work on reconciliation conflicts', () => {
     const audioManager = readFileSync(
       'src/components/AudioManager.tsx',
       'utf8',
     );
     const boundary = audioManager.slice(
-      audioManager.indexOf(
-        'const metricPatchPromise = window.ipcRenderer.invoke',
-      ),
+      audioManager.indexOf('const derivedPersistence ='),
       audioManager.indexOf(
         "console.log(\n        '[Pluto] Session saved to DB with transcript segments:'",
       ),
     );
 
-    expect(boundary).toContain("metricPatchOutcome !== 'updated'");
-    expect(boundary).toContain("derivedPersistenceOutcome !== 'updated'");
+    expect(boundary).toContain('persistDerivedAfterLatencyPatch');
+    expect(boundary).toContain("derivedPersistence.outcome === 'suppressed'");
     expect(
       boundary.match(/onSessionComplete\?\.\(meetingData\.id\);\s*return;/g),
     ).toHaveLength(2);

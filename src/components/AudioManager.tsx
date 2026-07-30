@@ -1,5 +1,9 @@
 import { Loader2, Mic } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import {
+  persistDerivedAfterLatencyPatch,
+  persistTranscriptThenRunLatencyPatchAndDownstream,
+} from '../services/diarizationFirstFinalization';
 import { runRecordingTranscriptValidation } from '../services/recordingTranscriptValidation';
 import type { AnalysisDocumentV3 } from '../types';
 import {
@@ -4800,49 +4804,59 @@ export const AudioManager = ({
       let analysisDocument: AnalysisDocument | AnalysisDocumentV3 =
         emptyAnalysisDocument();
 
-      await sealedActivityHandoff.persistMeeting(
-        attributionPersistenceRecord,
-        attributionIntegrity,
-        async (meeting) =>
-          await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
-      );
-      const stopToValidatedLatency =
-        stopToValidatedLatencyRef.current.completeValidatedSave(
-          performance.now(),
-        ).summary as StopToValidatedLatencySummary;
-      const transcriptWithLatency = JSON.stringify({
-        ...(JSON.parse(attributionPersistenceRecord.transcript_json) as Record<
-          string,
-          unknown
-        >),
-        stopToValidatedLatency,
-      });
-      const metricPatchPromise = window.ipcRenderer.invoke(
-        'PATCH_STOP_TO_VALIDATED_LATENCY',
-        {
-          meetingId: attributionPersistenceRecord.id,
-          expectedTranscriptJson: attributionPersistenceRecord.transcript_json,
-          expectedTranscriptIntegrityJson: attributionIntegrityJson,
-          expectedTranscriptValidatedAt:
-            attributionPersistenceRecord.transcript_validated_at,
-          replacementTranscriptJson: transcriptWithLatency,
-        },
-      );
-      const downstreamPromise = (async () => {
-        try {
-          return (await window.ipcRenderer.invoke('GENERATE_ANALYSIS_V2', {
-            transcript: fullTranscript,
-            userNotes: userNotes,
-          })) as AnalysisArtifacts;
-        } catch (analysisErr) {
-          console.error('[Pluto] V3 analysis generation failed:', analysisErr);
-          return null;
-        }
-      })();
-      const [metricPatchOutcome, rawArtifacts] = await Promise.all([
-        metricPatchPromise,
-        downstreamPromise,
-      ]);
+      let stopToValidatedLatency: StopToValidatedLatencySummary | null = null;
+      let transcriptWithLatency = '';
+      const { patchOutcome: metricPatchOutcome, downstream: rawArtifacts } =
+        await persistTranscriptThenRunLatencyPatchAndDownstream({
+          persistTranscript: async () =>
+            await sealedActivityHandoff.persistMeeting(
+              attributionPersistenceRecord,
+              attributionIntegrity,
+              async (meeting) =>
+                await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
+            ),
+          patchLatency: async () => {
+            stopToValidatedLatency =
+              stopToValidatedLatencyRef.current.completeValidatedSave(
+                performance.now(),
+              ).summary as StopToValidatedLatencySummary;
+            transcriptWithLatency = JSON.stringify({
+              ...(JSON.parse(
+                attributionPersistenceRecord.transcript_json,
+              ) as Record<string, unknown>),
+              stopToValidatedLatency,
+            });
+            return await window.ipcRenderer.invoke(
+              'PATCH_STOP_TO_VALIDATED_LATENCY',
+              {
+                meetingId: attributionPersistenceRecord.id,
+                expectedTranscriptJson:
+                  attributionPersistenceRecord.transcript_json,
+                expectedTranscriptIntegrityJson: attributionIntegrityJson,
+                expectedTranscriptValidatedAt:
+                  attributionPersistenceRecord.transcript_validated_at,
+                replacementTranscriptJson: transcriptWithLatency,
+              },
+            );
+          },
+          runDownstream: async () => {
+            try {
+              return (await window.ipcRenderer.invoke('GENERATE_ANALYSIS_V2', {
+                transcript: fullTranscript,
+                userNotes: userNotes,
+              })) as AnalysisArtifacts;
+            } catch (analysisErr) {
+              console.error(
+                '[Pluto] V3 analysis generation failed:',
+                analysisErr,
+              );
+              return null;
+            }
+          },
+        });
+      if (!stopToValidatedLatency) {
+        throw new Error('Validated latency summary was not finalized');
+      }
 
       if (rawArtifacts) {
         analysisDocument = normalizeAnalysisDocument(rawArtifacts?.analysis);
@@ -4926,6 +4940,9 @@ export const AudioManager = ({
       if (!currentMeetingId) {
         throw new Error('No active meeting ID while finalizing recording');
       }
+      const analysisGenerationMetadata = (
+        analysisDocument as AnalysisDocumentV3
+      ).generation_metadata;
       const meetingData = {
         id: currentMeetingId,
         title: title,
@@ -4969,6 +4986,16 @@ export const AudioManager = ({
         analysis_format_pass: analysisDocument.quality.format_pass,
         analysis_retry_count: analysisDocument.quality.retry_count,
         analysis_fallback_used: analysisDocument.quality.fallback_used,
+        analysis_provider: analysisGenerationMetadata?.provider ?? null,
+        analysis_model: analysisGenerationMetadata?.model ?? null,
+        analysis_generation_path:
+          analysisGenerationMetadata?.generation_path ?? null,
+        analysis_prompt_version:
+          analysisGenerationMetadata?.prompt_version ?? null,
+        analysis_generated_at: analysisGenerationMetadata?.generated_at ?? null,
+        analysis_error_categories_json: analysisGenerationMetadata
+          ? JSON.stringify(analysisGenerationMetadata.error_categories)
+          : null,
         value_signals_json: JSON.stringify(valueSignals),
         participants: participants,
         folder_id: null,
@@ -4978,38 +5005,47 @@ export const AudioManager = ({
         finalization_error_category: null,
       };
 
-      if (
-        metricPatchOutcome !== 'updated' &&
-        metricPatchOutcome !== 'already_current'
-      ) {
+      const derivedPersistence = await persistDerivedAfterLatencyPatch<unknown>(
+        {
+          patchOutcome: metricPatchOutcome,
+          persistDerived: async () =>
+            await window.ipcRenderer.invoke(
+              'SAVE_DERIVED_MEETING_FIELDS_IF_TRANSCRIPT_CURRENT',
+              {
+                meetingId: meetingData.id,
+                expectedTranscriptJson: transcriptWithLatency,
+                expectedTranscriptIntegrityJson: attributionIntegrityJson,
+                expectedTranscriptValidatedAt:
+                  attributionPersistenceRecord.transcript_validated_at,
+                expectedTitle: attributionPersistenceRecord.title,
+                title: meetingData.title,
+                enhancedNotes: meetingData.enhanced_notes,
+                analysisJson: meetingData.analysis_json,
+                analysisSchemaVersion: meetingData.analysis_schema_version,
+                analysisFormatPass: meetingData.analysis_format_pass,
+                analysisRetryCount: meetingData.analysis_retry_count,
+                analysisFallbackUsed: meetingData.analysis_fallback_used,
+                analysisProvider: meetingData.analysis_provider,
+                analysisModel: meetingData.analysis_model,
+                analysisGenerationPath: meetingData.analysis_generation_path,
+                analysisPromptVersion: meetingData.analysis_prompt_version,
+                analysisGeneratedAt: meetingData.analysis_generated_at,
+                analysisErrorCategoriesJson:
+                  meetingData.analysis_error_categories_json,
+                valueSignalsJson: meetingData.value_signals_json,
+              },
+            ),
+        },
+      );
+      if (derivedPersistence.outcome === 'suppressed') {
         console.warn(
           `[Pluto] Latency reconciliation ${String(metricPatchOutcome)}; suppressing derived persistence`,
         );
         onSessionComplete?.(meetingData.id);
         return;
-      }
-      const derivedPersistenceOutcome = await window.ipcRenderer.invoke(
-        'SAVE_DERIVED_MEETING_FIELDS_IF_TRANSCRIPT_CURRENT',
-        {
-          meetingId: meetingData.id,
-          expectedTranscriptJson: transcriptWithLatency,
-          expectedTranscriptIntegrityJson: attributionIntegrityJson,
-          expectedTranscriptValidatedAt:
-            attributionPersistenceRecord.transcript_validated_at,
-          expectedTitle: attributionPersistenceRecord.title,
-          title: meetingData.title,
-          enhancedNotes: meetingData.enhanced_notes,
-          analysisJson: meetingData.analysis_json,
-          analysisSchemaVersion: meetingData.analysis_schema_version,
-          analysisFormatPass: meetingData.analysis_format_pass,
-          analysisRetryCount: meetingData.analysis_retry_count,
-          analysisFallbackUsed: meetingData.analysis_fallback_used,
-          valueSignalsJson: meetingData.value_signals_json,
-        },
-      );
-      if (derivedPersistenceOutcome !== 'updated') {
+      } else if (derivedPersistence.result !== 'updated') {
         console.warn(
-          `[Pluto] Derived persistence ${String(derivedPersistenceOutcome)}; preserving current transcript generation`,
+          `[Pluto] Derived persistence ${String(derivedPersistence.result)}; preserving current transcript generation`,
         );
         onSessionComplete?.(meetingData.id);
         return;
