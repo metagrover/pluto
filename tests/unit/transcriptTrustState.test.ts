@@ -4,6 +4,7 @@ import {
   type TranscriptTrustMeetingFields,
   buildTranscriptTrustCapabilities,
   canUseTranscriptTrustState,
+  parseMeetingDownstreamProcessing,
   parseTranscriptTrustEnvelope,
   resolveTranscriptTrustState,
 } from '../../src/utils/transcriptTrustState';
@@ -199,5 +200,32 @@ describe('transcriptTrustState', () => {
     expect(resolved.kind).toBe('legacy_complete');
     expect(canUseTranscriptTrustState(resolved, 'read_existing')).toBe(true);
     expect(canUseTranscriptTrustState(resolved, 'generate_new')).toBe(false);
+  });
+
+  it('binds downstream state to the current validation proof', () => {
+    const validatedAt = '2026-07-30T20:00:00.000Z';
+    expect(
+      parseMeetingDownstreamProcessing(
+        JSON.stringify({
+          schemaVersion: 1,
+          state: 'processing',
+          transcriptValidatedAt: validatedAt,
+          runId: 'run-1',
+          stage: 'analysis',
+        }),
+        validatedAt,
+      ),
+    ).toMatchObject({ ok: true });
+
+    expect(
+      parseMeetingDownstreamProcessing(
+        JSON.stringify({
+          schemaVersion: 1,
+          state: 'complete',
+          transcriptValidatedAt: '2026-07-30T19:00:00.000Z',
+        }),
+        validatedAt,
+      ),
+    ).toMatchObject({ ok: false, failure: 'proof_mismatch' });
   });
 });

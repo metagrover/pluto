@@ -157,4 +157,5 @@ export interface Meeting {
     | 'journal_seal_failed'
     | 'capture_journal_write_failed'
     | null;
+  downstream_processing_json?: string | null;
 }

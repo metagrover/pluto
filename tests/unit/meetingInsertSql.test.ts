@@ -26,6 +26,7 @@ describe('MEETING_INSERT_SQL', () => {
     expect(columns).toContain('transcript_validated_at');
     expect(columns).toContain('finalization_status');
     expect(columns).toContain('finalization_error_category');
+    expect(columns).toContain('downstream_processing_json');
     expect(MEETING_INSERT_SQL).toContain('COALESCE(?, CURRENT_TIMESTAMP)');
   });
 });

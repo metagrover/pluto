@@ -16,6 +16,7 @@ import {
 import type { MeetingFinalizationStatus } from '../src/types';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
+import { parseTranscriptTrustEnvelope } from '../src/utils/transcriptTrustState';
 import type { TrustStatus } from '../src/utils/trustStatus';
 import type {
   AttentionEvidenceReference,
@@ -117,6 +118,7 @@ export interface PersistedMeeting {
     | 'journal_seal_failed'
     | 'capture_journal_write_failed'
     | null;
+  downstream_processing_json?: string | null;
   created_at?: string | null;
 }
 
@@ -194,13 +196,14 @@ const initDb = () => {
         analysis_error_categories_json TEXT,
         value_signals_json TEXT,
         follow_up_drafts_json TEXT,
-        transcript_status TEXT DEFAULT 'validated',
+        transcript_status TEXT DEFAULT 'provisional',
         transcript_integrity_json TEXT,
         system_audio_path TEXT,
         mixed_audio_path TEXT,
         transcript_validated_at DATETIME,
         finalization_status TEXT NOT NULL DEFAULT 'finalized',
         finalization_error_category TEXT,
+        downstream_processing_json TEXT,
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -573,6 +576,14 @@ const initDb = () => {
         'ALTER TABLE meetings ADD COLUMN finalization_error_category TEXT',
       );
       console.log('[DB] Added meetings.finalization_error_category column');
+    }
+    if (
+      !meetingColumns.some((col) => col.name === 'downstream_processing_json')
+    ) {
+      db.exec(
+        'ALTER TABLE meetings ADD COLUMN downstream_processing_json TEXT',
+      );
+      console.log('[DB] Added meetings.downstream_processing_json column');
     }
   } catch (e) {
     console.warn('[DB] Optional column migration failed:', e);
@@ -1389,6 +1400,33 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
   // Ensure ID is a string
   const id = String(meeting.id);
 
+  let payloadLifecycleStatus: TranscriptLifecycleStatus | null = null;
+  try {
+    const payload = JSON.parse(meeting.transcript_json || '{}') as {
+      lifecycleStatus?: unknown;
+    };
+    payloadLifecycleStatus =
+      typeof payload.lifecycleStatus === 'string'
+        ? (payload.lifecycleStatus as TranscriptLifecycleStatus)
+        : null;
+  } catch {
+    payloadLifecycleStatus = null;
+  }
+  const trustRecord = parseIntegrityRecord(meeting.transcript_integrity_json);
+  if (trustRecord.schemaVersion === 2) {
+    const parsedTrust = parseTranscriptTrustEnvelope(
+      meeting.transcript_integrity_json,
+      {
+        transcriptStatus: meeting.transcript_status,
+        transcriptValidatedAt: meeting.transcript_validated_at,
+        payloadLifecycleStatus,
+      },
+    );
+    if (!parsedTrust.ok) {
+      throw new Error(`invalid_transcript_trust_state:${parsedTrust.failure}`);
+    }
+  }
+
   const stmt = db.prepare(MEETING_INSERT_SQL);
 
   let metadataRecord: Record<string, unknown> = {};
@@ -1462,13 +1500,14 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
     meeting.is_favorite ? 1 : 0,
     meeting.end_reason || 'manual',
     meeting.user_edits_json || null,
-    meeting.transcript_status || 'validated',
+    meeting.transcript_status || 'provisional',
     meeting.transcript_integrity_json || null,
     meeting.system_audio_path || null,
     meeting.mixed_audio_path || null,
     meeting.transcript_validated_at || null,
     meeting.finalization_status || 'finalized',
     meeting.finalization_error_category || null,
+    meeting.downstream_processing_json || null,
     meeting.created_at,
   );
 

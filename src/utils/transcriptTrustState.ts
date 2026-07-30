@@ -153,6 +153,15 @@ export type ResolvedTranscriptTrustState = {
   envelope: TranscriptTrustEnvelopeV2 | null;
 };
 
+export type MeetingDownstreamProcessingV1 = {
+  schemaVersion: 1;
+  state: 'not_started' | 'processing' | 'complete' | 'failed';
+  transcriptValidatedAt: string;
+  runId?: string;
+  stage?: 'analysis' | 'value_signals' | 'knowledge_extraction' | 'final_save';
+  failure?: 'generation_failed' | 'save_failed' | 'interrupted';
+};
+
 const STATES = new Set<TranscriptLifecycleStatus>([
   'provisional',
   'validating',
@@ -568,3 +577,74 @@ export const canUseTranscriptTrustState = (
   operation === 'read_existing'
     ? state.permitsExistingRead
     : state.permitsDerivedGeneration;
+
+export const parseMeetingDownstreamProcessing = (
+  value: string | null | undefined,
+  transcriptValidatedAt: string | null | undefined,
+):
+  | { ok: true; state: MeetingDownstreamProcessingV1 }
+  | {
+      ok: false;
+      failure: 'invalid_json' | 'invalid_shape' | 'proof_mismatch';
+    } => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value || '{}');
+  } catch {
+    return { ok: false, failure: 'invalid_json' };
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { ok: false, failure: 'invalid_shape' };
+  }
+  const raw = parsed as Record<string, unknown>;
+  if (
+    !exactKeys(
+      raw,
+      ['schemaVersion', 'state', 'transcriptValidatedAt'],
+      ['runId', 'stage', 'failure'],
+    ) ||
+    raw.schemaVersion !== 1 ||
+    !['not_started', 'processing', 'complete', 'failed'].includes(
+      String(raw.state),
+    ) ||
+    !isoTimestamp(raw.transcriptValidatedAt)
+  ) {
+    return { ok: false, failure: 'invalid_shape' };
+  }
+  if (raw.transcriptValidatedAt !== transcriptValidatedAt) {
+    return { ok: false, failure: 'proof_mismatch' };
+  }
+  const hasRunId =
+    typeof raw.runId === 'string' && /^[A-Za-z0-9-]{1,128}$/.test(raw.runId);
+  const hasStage = [
+    'analysis',
+    'value_signals',
+    'knowledge_extraction',
+    'final_save',
+  ].includes(String(raw.stage));
+  const hasFailure = [
+    'generation_failed',
+    'save_failed',
+    'interrupted',
+  ].includes(String(raw.failure));
+  const validByState =
+    (raw.state === 'not_started' &&
+      raw.runId === undefined &&
+      raw.stage === undefined &&
+      raw.failure === undefined) ||
+    (raw.state === 'processing' &&
+      hasRunId &&
+      hasStage &&
+      raw.failure === undefined) ||
+    (raw.state === 'complete' &&
+      raw.runId === undefined &&
+      raw.stage === undefined &&
+      raw.failure === undefined) ||
+    (raw.state === 'failed' &&
+      raw.runId === undefined &&
+      hasStage &&
+      hasFailure);
+  return validByState
+    ? { ok: true, state: raw as MeetingDownstreamProcessingV1 }
+    : { ok: false, failure: 'invalid_shape' };
+};
