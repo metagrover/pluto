@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { MutableRefObject } from 'react';
+import { isAlertEligible } from '../activeCall/alertDecision';
 
 const ACTIVE_CALL_ALERT_COOLDOWN_MS = 30_000;
 const ACTIVE_CALL_POLL_INTERVAL_MS = 6_000;
@@ -92,9 +93,11 @@ export const useActiveCallMonitor = ({
           result?.confidence === 'high' || result?.confidence === 'medium'
             ? result.confidence
             : 'low';
-        // DETECT_ACTIVE_CALL already applies app-specific fallback rules.
-        // Treat active=true as eligible here and handle transition gating below.
-        const isActive = Boolean(result?.active) && Boolean(appName);
+        const isActive = isAlertEligible({
+          active: Boolean(result?.active),
+          appName,
+          confidence,
+        });
 
         // Establish startup baseline: do not alert for calls that were already active
         // before monitoring began.
