@@ -619,6 +619,7 @@ export const AudioManager = ({
           '[Pluto] Failed to initialize capture journal:',
           journalErr,
         );
+        captureActivitySessionRef.current.markDurabilityFailure();
         warnCaptureDurability();
       }
 

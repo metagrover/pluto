@@ -116,6 +116,7 @@ export const createCaptureActivitySession = ({
 
   return {
     enqueue,
+    markDurabilityFailure: latchDurabilityFailure,
     transitionSpeaker,
     closeAt,
     drain: () => queue,

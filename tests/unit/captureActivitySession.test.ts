@@ -72,6 +72,36 @@ describe('capture activity session', () => {
     expect(session.hasDurabilityFailure()).toBe(true);
   });
 
+  it('keeps a journal start failure latched after later writes succeed', async () => {
+    const events: string[] = [];
+    const session = createCaptureActivitySession({
+      producer,
+      persistSnapshot: async () => {
+        events.push('snapshot');
+      },
+    });
+    session.markDurabilityFailure();
+    session.enqueue(async () => {
+      events.push('audio');
+    });
+    session.transitionSpeaker('Me', 1);
+    await session.closeAt(2);
+    const seal = vi.fn(async () => ({}));
+
+    const outcome = await sealCaptureJournalBeforeFinalization({
+      drainAppends: session.drain,
+      hasWriteFailure: session.hasDurabilityFailure,
+      seal,
+    });
+
+    expect(events).toEqual(['audio', 'snapshot']);
+    expect(seal).not.toHaveBeenCalled();
+    expect(outcome).toEqual({
+      status: 'recovery_required',
+      reason: 'capture_journal_write_failed',
+    });
+  });
+
   it('latches a rejected activity snapshot', async () => {
     const session = createCaptureActivitySession({
       producer,
