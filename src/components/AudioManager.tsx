@@ -5049,6 +5049,13 @@ export const AudioManager = ({
         onSessionComplete?.(meetingData.id);
         return;
       }
+      if (derivedPersistence.outcome === 'failed') {
+        console.warn(
+          '[Pluto] Derived persistence failed; preserving current transcript generation',
+        );
+        onSessionComplete?.(meetingData.id);
+        return;
+      }
       if (derivedPersistence.result !== 'updated') {
         console.warn(
           `[Pluto] Derived persistence ${String(derivedPersistence.result)}; preserving current transcript generation`,

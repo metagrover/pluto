@@ -225,6 +225,48 @@ describe('stop-to-validated persistence orchestration', () => {
     },
   );
 
+  it('classifies a rejected derived IPC as failed and preserves the validated generation', async () => {
+    const savedGenerations: Array<{
+      status: string;
+      segments: unknown[];
+      integrity: { reasons: string[] };
+    }> = [];
+    let recoverySaveRan = false;
+    let derivedOutcome: 'failed' | undefined;
+
+    try {
+      savedGenerations.push({
+        status: 'validated',
+        segments: [{ speaker: 'Me', text: 'Validated evidence' }],
+        integrity: { reasons: [] },
+      });
+      const result = await persistDerivedAfterLatencyPatch({
+        patchOutcome: 'updated',
+        persistDerived: async () => {
+          throw new Error('derived IPC rejected');
+        },
+      });
+      derivedOutcome = result.outcome === 'failed' ? result.outcome : undefined;
+    } catch {
+      recoverySaveRan = true;
+      savedGenerations.push({
+        status: 'needs_attention',
+        segments: [],
+        integrity: { reasons: ['required_source_failed'] },
+      });
+    }
+
+    expect(derivedOutcome).toBe('failed');
+    expect(recoverySaveRan).toBe(false);
+    expect(savedGenerations).toEqual([
+      {
+        status: 'validated',
+        segments: [{ speaker: 'Me', text: 'Validated evidence' }],
+        integrity: { reasons: [] },
+      },
+    ]);
+  });
+
   it.each([
     ['needs_attention', 'not_validated'],
     ['recovery_required', 'recovery_required'],

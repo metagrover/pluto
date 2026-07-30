@@ -108,7 +108,9 @@ export const persistDerivedAfterLatencyPatch = async <Result>(params: {
   patchOutcome: LatencyPatchOutcome;
   persistDerived: () => Promise<Result>;
 }): Promise<
-  { outcome: 'persisted'; result: Result } | { outcome: 'suppressed' }
+  | { outcome: 'persisted'; result: Result }
+  | { outcome: 'suppressed' }
+  | { outcome: 'failed' }
 > => {
   if (
     params.patchOutcome !== 'updated' &&
@@ -116,5 +118,9 @@ export const persistDerivedAfterLatencyPatch = async <Result>(params: {
   ) {
     return { outcome: 'suppressed' };
   }
-  return { outcome: 'persisted', result: await params.persistDerived() };
+  try {
+    return { outcome: 'persisted', result: await params.persistDerived() };
+  } catch {
+    return { outcome: 'failed' };
+  }
 };
