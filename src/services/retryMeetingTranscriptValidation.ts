@@ -12,7 +12,10 @@ import {
   parseStoredTranscriptActivityEvidence,
 } from '../utils/transcriptActivityEvidence.ts';
 import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity.ts';
-import { buildTranscriptJsonPayload } from '../utils/transcriptSchema.ts';
+import {
+  buildTranscriptJsonPayload,
+  withTranscriptLifecycleStatus,
+} from '../utils/transcriptSchema.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
 import { reprocessAttributedMeeting } from './safeAttributionReprocessing.ts';
 import {
@@ -112,22 +115,6 @@ const readStopToValidatedLatency = (transcriptJson?: string | null) => {
     return parseStopToValidatedLatencySummary(parsed.stopToValidatedLatency);
   } catch {
     return null;
-  }
-};
-
-const withTranscriptLifecycleStatus = (
-  transcriptJson: string | null | undefined,
-  lifecycleStatus: 'validating' | 'needs_attention',
-) => {
-  try {
-    const parsed = JSON.parse(transcriptJson || '{}') as unknown;
-    return JSON.stringify(
-      Array.isArray(parsed)
-        ? { segments: parsed, lifecycleStatus }
-        : { ...(parsed as Record<string, unknown>), lifecycleStatus },
-    );
-  } catch {
-    return JSON.stringify({ segments: [], lifecycleStatus });
   }
 };
 

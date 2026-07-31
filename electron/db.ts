@@ -16,6 +16,7 @@ import {
 import type { MeetingFinalizationStatus } from '../src/types';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
+import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
 import { parseTranscriptTrustEnvelope } from '../src/utils/transcriptTrustState';
 import type { TrustStatus } from '../src/utils/trustStatus';
 import type {
@@ -1738,14 +1739,24 @@ export const claimMeetingTranscriptValidationRetry = (
       return false;
     }
     const nextIntegrity = beginRetryLease(integrity, lease);
+    const nextTranscriptJson = withTranscriptLifecycleStatus(
+      current.transcript_json,
+      'validating',
+    );
     return (
       db
         .prepare(
           `UPDATE meetings
-           SET transcript_status = 'validating', transcript_integrity_json = ?
+           SET transcript_status = 'validating',
+               transcript_integrity_json = ?,
+               transcript_json = ?
            WHERE id = ?`,
         )
-        .run(JSON.stringify(nextIntegrity), String(meetingId)).changes === 1
+        .run(
+          JSON.stringify(nextIntegrity),
+          nextTranscriptJson,
+          String(meetingId),
+        ).changes === 1
     );
   })();
 
@@ -1781,17 +1792,23 @@ export const failMeetingTranscriptValidationRetry = (
     const integrity = parseIntegrityRecord(current.transcript_integrity_json);
     const lease = readRetryLease(integrity);
     if (!lease || lease.runId !== runId) return false;
+    const nextTranscriptJson = withTranscriptLifecycleStatus(
+      current.transcript_json,
+      'needs_attention',
+    );
     return (
       db
         .prepare(
           `UPDATE meetings
            SET transcript_status = 'needs_attention',
                transcript_integrity_json = ?,
+               transcript_json = ?,
                transcript_validated_at = NULL
            WHERE id = ?`,
         )
         .run(
           JSON.stringify(finishRetryLease(integrity, failure)),
+          nextTranscriptJson,
           String(meetingId),
         ).changes === 1
     );
@@ -1801,25 +1818,52 @@ export const recoverExpiredTranscriptValidationRetries = (nowMs = Date.now()) =>
   db.transaction(() => {
     const rows = db
       .prepare(
-        "SELECT id, transcript_status, transcript_integrity_json FROM meetings WHERE transcript_status IN ('validating', 'validated')",
+        "SELECT id, transcript_status, transcript_integrity_json, transcript_json FROM meetings WHERE transcript_status IN ('validating', 'validated')",
       )
       .all() as Array<{
       id: string;
       transcript_status: TranscriptLifecycleStatus;
       transcript_integrity_json: string | null;
+      transcript_json: string | null;
     }>;
     let recovered = 0;
     for (const row of rows) {
       const integrity = parseIntegrityRecord(row.transcript_integrity_json);
       const lease = readRetryLease(integrity);
-      if (!lease || Date.parse(lease.deadlineAt) > nowMs) continue;
+      if (!lease) continue;
+      if (Date.parse(lease.deadlineAt) > nowMs) {
+        if (row.transcript_status === 'validating') {
+          const nextTranscriptJson = withTranscriptLifecycleStatus(
+            row.transcript_json,
+            'validating',
+          );
+          if (nextTranscriptJson !== row.transcript_json) {
+            recovered += db
+              .prepare(
+                `UPDATE meetings
+                 SET transcript_json = ?
+                 WHERE id = ? AND transcript_status = 'validating'`,
+              )
+              .run(nextTranscriptJson, row.id).changes;
+          }
+        }
+        continue;
+      }
       const nextStatus =
         row.transcript_status === 'validated' ? 'validated' : 'needs_attention';
+      const nextTranscriptJson =
+        nextStatus === 'validated'
+          ? row.transcript_json
+          : withTranscriptLifecycleStatus(
+              row.transcript_json,
+              'needs_attention',
+            );
       const result = db
         .prepare(
           `UPDATE meetings
            SET transcript_status = ?,
                transcript_integrity_json = ?,
+               transcript_json = ?,
                transcript_validated_at = CASE
                  WHEN ? = 'validated' THEN transcript_validated_at
                  ELSE NULL
@@ -1829,6 +1873,7 @@ export const recoverExpiredTranscriptValidationRetries = (nowMs = Date.now()) =>
         .run(
           nextStatus,
           JSON.stringify(finishRetryLease(integrity, 'retry_interrupted')),
+          nextTranscriptJson,
           nextStatus,
           row.id,
           row.transcript_status,

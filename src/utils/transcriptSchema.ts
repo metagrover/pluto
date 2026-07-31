@@ -242,3 +242,19 @@ export function buildTranscriptJsonPayload(
     segments,
   };
 }
+
+export const withTranscriptLifecycleStatus = (
+  transcriptJson: string | null | undefined,
+  lifecycleStatus: 'validating' | 'needs_attention',
+) => {
+  try {
+    const parsed = JSON.parse(transcriptJson || '{}') as unknown;
+    return JSON.stringify(
+      Array.isArray(parsed)
+        ? { segments: parsed, lifecycleStatus }
+        : { ...(parsed as Record<string, unknown>), lifecycleStatus },
+    );
+  } catch {
+    return JSON.stringify({ segments: [], lifecycleStatus });
+  }
+};

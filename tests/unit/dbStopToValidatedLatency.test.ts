@@ -171,10 +171,60 @@ describe('stop-to-validated database persistence', () => {
         replacementTranscriptJson,
       }),
     ).toBe('conflict');
-    expect(getMeeting('metric-generation')).toMatchObject({
-      transcript_json: replacementTranscriptJson,
-      transcript_status: 'validating',
+    const claimed = getMeeting('metric-generation') as {
+      transcript_json: string;
+      transcript_status: string;
+    };
+    expect(claimed.transcript_status).toBe('validating');
+    expect(JSON.parse(claimed.transcript_json)).toMatchObject({
+      lifecycleStatus: 'validating',
     });
+  });
+
+  it('claims a v2 retry without creating conflicting transcript projections', () => {
+    const id = 'v2-retry-projections';
+    saveMeeting({
+      id,
+      title: 'Recovered recording',
+      transcript_status: 'needs_attention',
+      transcript_validated_at: null,
+      transcript_json: JSON.stringify({
+        schemaVersion: 2,
+        lifecycleStatus: 'needs_attention',
+        segments: [],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [{ code: 'recovered_awaiting_validation' }],
+        evidenceProvenance: { kind: 'stored_capture_activity_v1' },
+      }),
+      audio_path: '/private/recovered-mic.wav',
+      system_audio_path: '/private/recovered-system.wav',
+      finalization_status: 'finalized',
+    });
+
+    expect(
+      claimMeetingTranscriptValidationRetry(id, {
+        runId: 'v2-projection-run',
+        startedAt: '2099-07-30T08:01:00.000Z',
+        deadlineAt: '2099-07-30T08:11:00.000Z',
+        stage: 'transcribing',
+      }),
+    ).toBe(true);
+
+    const claimed = getMeeting(id) as {
+      transcript_status: string;
+      transcript_json: string;
+      transcript_integrity_json: string;
+    };
+    expect(claimed.transcript_status).toBe('validating');
+    expect(JSON.parse(claimed.transcript_json).lifecycleStatus).toBe(
+      'validating',
+    );
+    expect(JSON.parse(claimed.transcript_integrity_json).state).toBe(
+      'validating',
+    );
   });
 
   it('updates every derived analysis field and refreshes FTS without touching owned fields', () => {
