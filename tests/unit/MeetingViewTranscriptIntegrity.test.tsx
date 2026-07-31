@@ -183,7 +183,10 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(validating).toContain('Transcribing the preserved recording.');
+    expect(validating).toContain('Preparing meeting analysis');
+    expect(validating).toContain(
+      'Pluto is validating the preserved recording, then it will build the standard meeting analysis.',
+    );
     expect(timedOut).toContain('stopped after its safety deadline');
   });
 });

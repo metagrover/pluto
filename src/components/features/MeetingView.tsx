@@ -225,7 +225,8 @@ export const TranscriptIntegrityPanel = ({
   } as const;
   const showValidationAction =
     trust.action === 'start_validation' || trust.action === 'retry_validation';
-  const title = retrying
+  const preparingAnalysis = retrying || trust.kind === 'validation_in_progress';
+  const title = preparingAnalysis
     ? 'Preparing meeting analysis'
     : trust.kind === 'capture_recovery_required'
       ? 'Recording saved'
@@ -239,7 +240,7 @@ export const TranscriptIntegrityPanel = ({
     >
       <strong className="text-sm text-pro-text">{title}</strong>
       <p className="mt-1 text-sm text-pro-text-muted">
-        {retrying
+        {preparingAnalysis
           ? 'Pluto is validating the preserved recording, then it will build the standard meeting analysis.'
           : copy[trust.copyKey]}
       </p>
