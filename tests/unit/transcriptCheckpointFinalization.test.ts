@@ -229,6 +229,7 @@ describe('transcript checkpoint finalization', () => {
       { source: 'mic', sequence: 0, speechDetected: true },
     ];
     input.checkpoints[0].sidecar.segments = [];
+    input.acceptanceFrames[0].segments = [];
 
     const first = finalizeTranscriptCheckpoints(input);
     expect(first.transcriptionRequests).toEqual([
@@ -238,11 +239,23 @@ describe('transcript checkpoint finalization', () => {
     input.checkpoints[0].repairAttempted = true;
     const exhausted = finalizeTranscriptCheckpoints(input);
     expect(exhausted.transcriptionRequests).toEqual([]);
-    expect(exhausted.failures).toContainEqual({
-      source: 'mic',
-      sequence: 0,
-      reason: 'coverage_repair_exhausted',
-    });
+    expect(exhausted.failures).toEqual([]);
+  });
+
+  it('accepts correlated speech when the other captured source accounts for the activity', () => {
+    const input = baseInput();
+    input.speechActivity = [
+      { source: 'mic', sequence: 0, speechDetected: true },
+    ];
+    input.checkpoints[0].sidecar.segments = [];
+    input.acceptanceFrames[0].segments = [
+      { source: 'system', start: 2, end: 3, text: 'world' },
+    ];
+
+    const result = finalizeTranscriptCheckpoints(input);
+
+    expect(result.transcriptionRequests).toEqual([]);
+    expect(result.failures).toEqual([]);
   });
 
   it('rejects duplicate tuple references without issuing duplicate repair work', () => {

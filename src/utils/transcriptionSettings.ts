@@ -90,3 +90,10 @@ export const resolveTranscriptionSettings = (
     language: resolveTranscriptionLanguage(settings?.language),
   };
 };
+
+export const resolveLiveChunkModel = (model: WhisperModel): WhisperModel =>
+  model === 'large-v2' || model === 'large-v3' ? 'medium' : model;
+
+export const resolveLiveChunkComputeType = (
+  computeType: WhisperComputeType,
+): WhisperComputeType => (computeType === 'float32' ? 'int8' : computeType);

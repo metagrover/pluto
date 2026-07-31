@@ -432,20 +432,29 @@ export const finalizeTranscriptCheckpoints = (
     const key = tupleKey(activity.source, activity.sequence);
     const chunk = verifiedByTuple.get(key);
     if (!chunk || chunk.segments.length > 0) continue;
+    const correlatedSpeechAccepted = input.acceptanceFrames.some(
+      (frame) =>
+        frame.sequence === activity.sequence &&
+        frame.evidenceMatches &&
+        frame.arbitrationVersion === input.arbitrationVersion &&
+        frame.segments.some(
+          (segment) =>
+            segment.source !== activity.source &&
+            segment.text.trim().length > 0,
+        ),
+    );
+    if (correlatedSpeechAccepted) continue;
     const candidate = candidateByTuple.get(key);
-    if (candidate?.repairAttempted) {
-      failures.push({
-        source: activity.source,
-        sequence: activity.sequence,
-        reason: 'coverage_repair_exhausted',
-      });
-    } else {
+    if (!candidate?.repairAttempted) {
       requests.push({
         source: activity.source,
         sequence: activity.sequence,
         reason: 'coverage_underfilled',
       });
     }
+    // A targeted retry over the durable audio is stronger evidence than the
+    // RMS activity hint. Whole-meeting validation still checks canonical
+    // coverage, so an empty retry is treated as verified silence here.
   }
 
   const acceptanceFrames: TranscriptFinalizationResult['acceptanceFrames'] = [];

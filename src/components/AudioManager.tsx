@@ -8,6 +8,10 @@ import {
   startStopToValidatedLatencyAfterAcceptedStop,
 } from '../services/diarizationFirstFinalization';
 import { runRecordingTranscriptValidation } from '../services/recordingTranscriptValidation';
+import {
+  beginRetryLease,
+  buildRetryDeadline,
+} from '../services/transcriptValidationRetryLease';
 import type { AnalysisDocumentV3 } from '../types';
 import {
   deriveAttributionEvidence,
@@ -22,6 +26,9 @@ import {
   computeRms,
   createWavBlob,
   decodeFloat32PcmChunk,
+  isCaptureChunkPairReady,
+  resolvePcmTimelineSampleRate,
+  trimPcmLeadingOverflow,
 } from '../utils/audio';
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
@@ -80,8 +87,8 @@ import {
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
   type TranscriptionSettings,
-  type WhisperComputeType,
-  type WhisperModel,
+  resolveLiveChunkComputeType,
+  resolveLiveChunkModel,
   resolveTranscriptionLanguage,
   resolveTranscriptionSettings,
 } from '../utils/transcriptionSettings';
@@ -432,22 +439,10 @@ export const AudioManager = ({
     transcriptionSettings?.language,
   );
   const hfTokenValue = typeof hfToken === 'string' ? hfToken.trim() : '';
-  const resolveChunkModel = (model: WhisperModel | null): WhisperModel => {
-    const safeModel = model ?? 'small';
-    return safeModel === 'large-v2' || safeModel === 'large-v3'
-      ? 'medium'
-      : safeModel;
-  };
-  const resolveChunkComputeType = (
-    computeType: WhisperComputeType | null,
-  ): WhisperComputeType => {
-    const safeComputeType = computeType ?? 'int8';
-    return safeComputeType === 'float32' ? 'int8' : safeComputeType;
-  };
-  const resolvedChunkModel = resolveChunkModel(
+  const resolvedChunkModel = resolveLiveChunkModel(
     resolvedTranscriptionSettings.model,
   );
-  const resolvedChunkComputeType = resolveChunkComputeType(
+  const resolvedChunkComputeType = resolveLiveChunkComputeType(
     resolvedTranscriptionSettings.computeType,
   );
   const buildTranscriptionOptions = (
@@ -1446,10 +1441,12 @@ export const AudioManager = ({
               const rawSampleRateEstimate = totalLen / chunkDurationSec;
               if (
                 rawSampleRateEstimate >= 8000 &&
-                rawSampleRateEstimate <= 192000
+                rawSampleRateEstimate <= 768000
               ) {
-                systemPcmSampleRateRef.current = snapSampleRate(
-                  rawSampleRateEstimate,
+                systemPcmSampleRateRef.current = resolvePcmTimelineSampleRate(
+                  totalLen,
+                  chunkDurationSec,
+                  systemPcmSampleRateRef.current,
                 );
               }
               if (index < 3) {
@@ -1458,8 +1455,13 @@ export const AudioManager = ({
                     `using=${systemPcmSampleRateRef.current}Hz, samples=${totalLen}, duration=${chunkDurationSec.toFixed(2)}s`,
                 );
               }
-              systemBlob = createWavBlob(
+              const intervalPcm = trimPcmLeadingOverflow(
                 merged,
+                systemPcmSampleRateRef.current,
+                chunkDurationSec,
+              );
+              systemBlob = createWavBlob(
+                intervalPcm,
                 systemPcmSampleRateRef.current,
                 1,
               );
@@ -1499,6 +1501,7 @@ export const AudioManager = ({
                 micChunkFormat,
                 chunkStartSec,
                 chunkEndSec,
+                true,
               );
               if (systemBlob) {
                 handleChunkBlob(
@@ -1525,6 +1528,12 @@ export const AudioManager = ({
           }
         };
 
+        // AudioCap starts before MediaRecorder so the native tap can become
+        // healthy. Discard that setup pre-roll at the synchronization point;
+        // otherwise system timestamps can extend beyond the journal interval.
+        systemPcmChunksRef.current = [];
+        fullSessionSystemPcmChunksRef.current = [];
+        systemPcmCarryoverBytesRef.current = new Uint8Array(0);
         micRecorder.start(CHUNK_SECONDS * 1000);
         console.log('[Pluto] Microphone recording started.');
       }
@@ -1679,10 +1688,6 @@ export const AudioManager = ({
   const CHUNK_SECONDS = 30;
   const ENABLE_CHUNK_ARBITRATION = true;
   const ENABLE_CHUNK_FLUSH = true;
-  const COMMON_SAMPLE_RATES = [
-    16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000,
-  ];
-
   const getRecorderOptions = (): MediaRecorderOptions | undefined => {
     const candidates = [
       'audio/webm;codecs=opus',
@@ -1702,21 +1707,6 @@ export const AudioManager = ({
       micMimeTypeRef.current || micRecorderRef.current?.mimeType || '';
     if (mimeType.includes('ogg')) return 'ogg';
     return 'webm';
-  };
-
-  const snapSampleRate = (estimate: number): number => {
-    if (!Number.isFinite(estimate) || estimate <= 0)
-      return systemPcmSampleRateRef.current;
-    let best = COMMON_SAMPLE_RATES[0];
-    let bestDelta = Math.abs(estimate - best);
-    for (const candidate of COMMON_SAMPLE_RATES) {
-      const delta = Math.abs(estimate - candidate);
-      if (delta < bestDelta) {
-        best = candidate;
-        bestDelta = delta;
-      }
-    }
-    return best;
   };
 
   const WEBM_CLUSTER_MAGIC = [0x1f, 0x43, 0xb6, 0x75] as const;
@@ -3062,6 +3052,7 @@ export const AudioManager = ({
     micFormat: MicChunkFormat = 'webm',
     chunkStartSec?: number,
     chunkEndSec?: number,
+    systemExpected = false,
   ) => {
     if (type === 'mic') {
       const fallbackStartSec = chunkIndex * CHUNK_SECONDS;
@@ -3082,7 +3073,13 @@ export const AudioManager = ({
     const micFormatForChunk = micPending?.format ?? 'webm';
     const systemBlob = pendingSystemChunksRef.current.get(chunkIndex);
 
-    if (micBlob && (systemBlob || !hasSystemRecorderRef.current)) {
+    if (
+      isCaptureChunkPairReady({
+        micReady: Boolean(micBlob),
+        systemReady: Boolean(systemBlob),
+        systemExpected,
+      })
+    ) {
       pendingMicChunksRef.current.delete(chunkIndex);
       if (systemBlob) pendingSystemChunksRef.current.delete(chunkIndex);
 
@@ -5302,6 +5299,7 @@ export const AudioManager = ({
       }
 
       const downstreamRunId = crypto.randomUUID();
+      const checkpointValidationRunId = crypto.randomUUID();
       const attributionPersistenceRecord = buildInitialValidatedMeetingPayload({
         meeting: {
           id: stopSnapshot.meetingId,
@@ -5416,11 +5414,23 @@ export const AudioManager = ({
               checkpointEvidenceVerified &&
               attributionPersistenceRecord.capture_journal_generation
             ) {
-              const validatingIntegrity = {
-                ...attributionIntegrity,
-                state: 'validating',
-                validationProof: undefined,
-              };
+              const checkpointValidationStartedAt = Date.now();
+              const validatingIntegrity = beginRetryLease(
+                attributionIntegrity,
+                {
+                  runId: checkpointValidationRunId,
+                  startedAt: new Date(
+                    checkpointValidationStartedAt,
+                  ).toISOString(),
+                  deadlineAt: new Date(
+                    buildRetryDeadline(
+                      checkpointValidationStartedAt,
+                      meetingTiming.durationSeconds,
+                    ),
+                  ).toISOString(),
+                  stage: 'saving',
+                },
+              );
               const inserted = await sealedActivityHandoff.persistMeeting(
                 {
                   ...attributionPersistenceRecord,
@@ -5444,7 +5454,7 @@ export const AudioManager = ({
                   journalGeneration:
                     attributionPersistenceRecord.capture_journal_generation,
                   expectedTranscriptStatus: 'validating',
-                  expectedValidationRunId: null,
+                  expectedValidationRunId: checkpointValidationRunId,
                   canonicalTranscriptJson:
                     attributionPersistenceRecord.transcript_json,
                   transcriptIntegrityJson: attributionIntegrityJson,

@@ -2,11 +2,22 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_TRANSCRIPTION_SETTINGS,
+  resolveLiveChunkComputeType,
+  resolveLiveChunkModel,
   resolveTranscriptionBackend,
   resolveTranscriptionLanguage,
   resolveTranscriptionPreset,
   resolveTranscriptionSettings,
 } from '../../src/utils/transcriptionSettings';
+
+describe('live chunk transcription settings', () => {
+  it('uses bounded settings consistently for live and repair transcription', () => {
+    expect(resolveLiveChunkModel('large-v3')).toBe('medium');
+    expect(resolveLiveChunkModel('small')).toBe('small');
+    expect(resolveLiveChunkComputeType('float32')).toBe('int8');
+    expect(resolveLiveChunkComputeType('float16')).toBe('float16');
+  });
+});
 
 describe('transcription settings', () => {
   it('defaults language to English when unset', () => {

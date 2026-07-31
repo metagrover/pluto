@@ -374,19 +374,19 @@ const repairV3TranscriptGaps = async (
 ): Promise<CaptureJournalManifestV3> => {
   let manifest = initialManifest;
   const templateRef = manifest.transcriptCheckpoints[0];
-  const templateSidecar = fallbackConfig
-    ? { transcriptionConfig: fallbackConfig }
-    : templateRef
-      ? (JSON.parse(
-          (
-            await readCaptureJournalSidecar(
-              rootDir,
-              manifest.meetingId,
-              templateRef.relativePath,
-              templateRef.transcriptChecksumSha256,
-            )
-          ).toString('utf8'),
-        ) as { transcriptionConfig: NonNullable<typeof fallbackConfig> })
+  const templateSidecar = templateRef
+    ? (JSON.parse(
+        (
+          await readCaptureJournalSidecar(
+            rootDir,
+            manifest.meetingId,
+            templateRef.relativePath,
+            templateRef.transcriptChecksumSha256,
+          )
+        ).toString('utf8'),
+      ) as { transcriptionConfig: NonNullable<typeof fallbackConfig> })
+    : fallbackConfig
+      ? { transcriptionConfig: fallbackConfig }
       : null;
   if (!templateSidecar) return manifest;
   const configKey = computeChecksum(
@@ -678,6 +678,28 @@ const repairV3TranscriptGaps = async (
   return manifest;
 };
 
+export const repairStoppingCaptureJournalTranscript = async (
+  rootDir: string,
+  args: {
+    meetingId: string;
+    transcribeChunk: NonNullable<RecoveryDependencies['transcribeChunk']>;
+    transcriptionConfig: NonNullable<
+      RecoveryDependencies['transcriptionConfig']
+    >;
+  },
+) => {
+  const manifest = await readCaptureJournalManifest(rootDir, args.meetingId);
+  if (manifest.schemaVersion !== 3 || manifest.lifecycleState !== 'stopping') {
+    throw new Error('capture_journal_not_stopping');
+  }
+  return await repairV3TranscriptGaps(
+    rootDir,
+    manifest,
+    args.transcribeChunk,
+    args.transcriptionConfig,
+  );
+};
+
 const acceptanceEvidenceMatchesSealedManifest = (
   activityInputs: unknown,
   manifest: CaptureJournalManifestV3,
@@ -784,6 +806,7 @@ const readV3AcceptedSegments = async (
     }
     checkpoints.push({
       reference,
+      repairAttempted: reference.repairAttempted,
       evidence: {
         audioChecksumVerified,
         sidecarChecksumVerified: true,
@@ -1192,19 +1215,10 @@ export const recoverInterruptedCaptureJournals = async (
           ? await Promise.all([
               buildV3SourceSegments(rootDir, manifest, 'mic'),
               buildV3SourceSegments(rootDir, manifest, 'system'),
-              readV3AcceptedSegments(
-                rootDir,
-                manifest,
-                deps.transcriptionConfig
-                  ? computeChecksum(
-                      Buffer.from(
-                        canonicalizeTranscriptCheckpointConfig(
-                          deps.transcriptionConfig,
-                        ),
-                      ),
-                    )
-                  : undefined,
-              ),
+              // Checkpoints are authoritative for an interrupted recording.
+              // readV3AcceptedSegments still enforces that every accepted
+              // checkpoint uses one internally consistent configuration.
+              readV3AcceptedSegments(rootDir, manifest),
             ])
           : await Promise.all([
               buildSourceSegments(rootDir, micEntries),
