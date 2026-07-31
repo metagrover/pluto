@@ -91,6 +91,7 @@ type CaptureJournalManifestV3 = CaptureJournalManifestBase & {
     'mic' | 'system',
     'available' | 'unavailable_at_start' | 'failed_during_capture'
   >;
+  intervals: CaptureIntervalLedgerEntry[];
   activityEvidence?: CaptureActivityEvidence;
   transcriptCheckpoints: CaptureTranscriptCheckpointRef[];
   acceptanceFrames: CaptureTranscriptAcceptanceFrame[];
@@ -123,19 +124,57 @@ type CaptureTranscriptAcceptanceFrame = {
   acceptedChecksumSha256: string;
   relativePath: string;
 };
+
+type CaptureIntervalLedgerEntry = {
+  sequence: number;
+  chunkStartSec: number;
+  chunkEndSec: number;
+  sources: Record<
+    'mic' | 'system',
+    | { disposition: 'pending' }
+    | {
+        disposition: 'raw_durable';
+        rawChecksumSha256: string;
+        rawRelativePath: string;
+        decodeDependency?: {
+          anchorSequence: number;
+          initializationChecksumSha256: string;
+        };
+      }
+    | {
+        disposition: 'captured';
+        rawChecksumSha256: string;
+        rawRelativePath: string;
+        repairChecksumSha256: string;
+        repairRelativePath: string;
+      }
+    | {
+        disposition:
+          | 'verified_silence'
+          | 'source_unavailable'
+          | 'missing';
+        reason: string;
+      }
+  >;
+};
 ```
 
-The tuple `(source, sequence)` is unique. A checkpoint may be appended only after
+The interval ledger is authoritative for expected work. One interval is created
+before either source append for a paired sequence, with exact shared boundaries
+and both source dispositions `pending`. The tuple `(source, sequence)` is unique.
+A checkpoint may be appended only after
 the matching audio entry exists. The checkpoint must copy the audio entry's
 checksum and exact time interval. A manifest also contains an explicit expected
-source inventory. For every expected `(source, sequence)` tuple, the audio entry
+source inventory. For every expected `(source, sequence)` tuple, the ledger
 must have one of these content-free dispositions: `captured`,
 `verified_silence`, `source_unavailable`, or `missing`. Absence is never treated
 as silence. `missing` is a capture gap; `source_unavailable` is legal only when
 the source-availability state was durably established before that interval.
-Each v3 audio entry therefore adds `disposition`, `repairRelativePath`,
-`repairChecksumSha256`, and optional
-`decodeDependency: { anchorSequence; initializationChecksumSha256 }`.
+Only `raw_durable` and `captured` dispositions link artifacts. Missing, silence,
+and unavailable dispositions exist solely in the ledger and never fabricate a
+checksum, path, or receipt. At the `stopping` watermark, any remaining `pending`
+tuple becomes `missing` unless that source was durably unavailable before the
+interval began.
 
 ### Transcript sidecar
 
@@ -157,8 +196,13 @@ type CaptureTranscriptCheckpointV1 = {
     model: string;
     device: string;
     computeType: string;
-    language: string;
+    languageMode: 'fixed' | 'detected';
+    requestedLanguage: string | null;
     pipelineVersion: 'live_chunk_v1';
+  };
+  backendResult: {
+    detectedLanguage: string | null;
+    providerLabel: string;
   };
   segments: Array<{
     start: number;
@@ -187,6 +231,17 @@ rehydrate what the user saw. Raw source checkpoints remain the reusable input fo
 rerunning deterministic arbitration when one source is repaired or the
 arbitration version changes.
 
+The acceptance-frame sidecar embeds the exact interval-scoped, content-free
+activity windows and RMS/arbitration inputs used for that decision.
+`activityEvidenceDigestSha256` covers those canonical embedded bytes, not the
+evolving meeting-wide activity snapshot. Once referenced, these inputs are
+immutable. Later activity updates may extend evidence outside the interval but
+cannot change the frame digest. Verification requires the embedded evidence to
+be a byte-equivalent subset of the final sealed activity evidence for the same
+interval and producer version. A mismatch invalidates only the acceptance frame
+and reruns arbitration from verified raw checkpoints plus sealed interval
+evidence; it does not force transcription.
+
 Acceptance-frame timestamps are meeting-relative and clipped to the half-open
 interval `[chunkStartSec, chunkEndSec)`. A segment crossing the right boundary is
 owned by the earlier sequence and clipped there; the next sequence may contain
@@ -200,19 +255,22 @@ normalizer, so boundary behavior cannot diverge.
 
 ### Canonical transcription configuration
 
-The configuration key is calculated from UTF-8 bytes of RFC 8785 JSON
-canonicalization over exactly these fully resolved runtime keys, in lexical key
-order:
+The pre-transcription configuration key is calculated from UTF-8 bytes of RFC
+8785 JSON canonicalization over exactly these fully resolved compatibility keys,
+in lexical key order:
 
-`backend`, `computeType`, `device`, `languageMode`, `languageValue`, `model`,
+`backend`, `computeType`, `device`, `languageMode`, `requestedLanguage`, `model`,
 `pipelineVersion`, and `preset`.
 
-`languageMode` is `fixed` or `detected`. A detected language is not reusable
-across a later request for a fixed language. `languageValue` is the normalized
-lowercase BCP-47 tag actually used or returned by the backend, never `auto`.
-Device, model, preset, and compute type are the resolved runtime values recorded
-by the backend, not requested aliases. Unknown or absent resolved values make the
-checkpoint non-reusable.
+`languageMode` is `fixed` or `detected`. `requestedLanguage` is the normalized
+lowercase BCP-47 tag for fixed mode and `null` for detected mode. A detected-mode
+checkpoint is reusable under the same detected-mode compatibility key without
+rerunning Whisper. The backend's normalized lowercase BCP-47 result is stored per
+checkpoint as `backendResult.detectedLanguage`; it is output metadata, not an
+input to the key. A later fixed-language request uses a different key and
+invalidates the checkpoint. Device, model, preset, and compute type are resolved
+before dispatch, not requested aliases. Unknown or absent compatibility values
+make the checkpoint non-reusable.
 
 ### Recording generation and manifest revision
 
@@ -259,22 +317,42 @@ range is missing or corrupt, the affected interval is a capture-repair failure
 and cannot be hidden by transcript checkpoints. Full-session transcription is
 not the fallback for a new v3 decode failure.
 
+The raw/WAV transition is itself durable:
+
+1. CAS a shared interval into the ledger with both sources `pending`.
+2. Write and sync one source's raw artifact.
+3. CAS that tuple to `raw_durable`, including raw checksum/path and any decode
+   dependency. Recovery now owns the artifact.
+4. Write and sync the interval repair WAV.
+5. CAS the tuple from `raw_durable` to `captured`, adding repair checksum/path.
+6. Return the immutable audio receipt. Only `captured` tuples are eligible for
+   transcription.
+
+A crash before step 3 leaves an ignored raw orphan. A crash after step 3 resumes
+conversion from the referenced raw artifact. A crash after WAV sync but before
+step 5 leaves a WAV orphan and retries conversion/CAS idempotently. Every
+transition requires current generation, expected manifest revision, and exact
+prior tuple disposition. Seal is illegal while any tuple remains `pending` or
+`raw_durable`.
+
 ### Write ordering and atomicity
 
 For each source chunk:
 
-1. Append and durably sync the raw audio artifact.
-2. Produce, sync, and reference the interval-scoped repair WAV, then return the
-   immutable audio receipt.
-3. Transcribe the repair WAV under the receipt's generation.
-4. Write the sidecar to a temporary file in the checkpoint directory.
-5. Sync the temporary file.
-6. Rename it to its deterministic final path.
-7. Sync the checkpoint directory.
-8. Compare-and-swap the checkpoint reference into a newly written manifest.
-9. After both source dispositions resolve, persist the acceptance frame through
+1. CAS the interval ledger entry with both expected source tuples `pending`.
+2. Append and durably sync each raw artifact, then CAS its tuple to
+   `raw_durable`.
+3. Produce and sync each interval repair WAV, CAS its tuple to `captured`, then
+   return the immutable audio receipt.
+4. Transcribe the repair WAV under the receipt's generation.
+5. Write the sidecar to a temporary file in the checkpoint directory.
+6. Sync the temporary file.
+7. Rename it to its deterministic final path.
+8. Sync the checkpoint directory.
+9. Compare-and-swap the checkpoint reference into a newly written manifest.
+10. After both source dispositions resolve, persist the acceptance frame through
    the same sidecar/fsync/rename/manifest-CAS protocol.
-10. Sync the manifest and journal directory using the existing atomic manifest
+11. Sync the manifest and journal directory using the existing atomic manifest
    replacement protocol.
 
 A crash before manifest CAS leaves an unreferenced sidecar, which recovery ignores and
