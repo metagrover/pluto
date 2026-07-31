@@ -174,6 +174,132 @@ describe('retryMeetingTranscriptValidation', () => {
     ).toEqual(stopToValidatedLatency);
   });
 
+  it('reuses verified recovered checkpoints without invoking Whisper', async () => {
+    const activityEvidence = await buildCaptureActivityEvidence(
+      [
+        { speaker: 'Me', startTime: 0, endTime: 4 },
+        { speaker: 'Them', startTime: 5, endTime: 9 },
+      ],
+      activityProducer,
+    );
+    let current: Record<string, unknown> = {
+      ...meeting,
+      mixed_audio_path: null,
+      transcript_json: JSON.stringify({
+        schemaVersion: 2,
+        lifecycleStatus: 'needs_attention',
+        segments: [
+          {
+            id: 'mic-0',
+            startTime: 0,
+            endTime: 4,
+            text: 'Synthetic local statement.',
+            speaker: 'Me',
+          },
+          {
+            id: 'system-0',
+            startTime: 5,
+            endTime: 9,
+            text: 'Synthetic remote statement.',
+            speaker: 'Them',
+          },
+        ],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [{ code: 'recovered_awaiting_validation' }],
+        evidenceProvenance: {
+          kind: 'sealed_capture_activity_v2',
+          digestSha256: activityEvidence.digestSha256,
+        },
+        activityEvidence,
+        recovery: {
+          source: 'capture_journal',
+          journalSchemaVersion: 3,
+          checkpointEvidenceVerified: true,
+          gapDetected: false,
+          sourceScope: 'multiple',
+          acknowledgedChunkCount: 2,
+          recoveredChunkCount: 2,
+        },
+      }),
+      capture_journal_generation: 'checkpoint-generation-1',
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'FINALIZE_CHECKPOINT_TRANSCRIPT') {
+        const finalization = payload as {
+          journalGeneration: string;
+          canonicalTranscriptJson: string;
+          transcriptIntegrityJson: string;
+          transcriptValidatedAt: string;
+          downstreamRunId: string;
+        };
+        expect(finalization.journalGeneration).toBe('checkpoint-generation-1');
+        current = {
+          ...current,
+          transcript_status: 'validated',
+          transcript_json: finalization.canonicalTranscriptJson,
+          transcript_integrity_json: finalization.transcriptIntegrityJson,
+          transcript_validated_at: finalization.transcriptValidatedAt,
+          downstream_processing_json: JSON.stringify({
+            schemaVersion: 1,
+            state: 'processing',
+            transcriptValidatedAt: finalization.transcriptValidatedAt,
+            runId: finalization.downstreamRunId,
+            stage: 'analysis',
+          }),
+        };
+        return 'committed_and_claimed';
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'GENERATE_TITLE') return 'Recovered meeting';
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
+      }
+      if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        throw new Error('full-session transcription is forbidden');
+      }
+      if (channel === 'AUDIO_PROBE_DURATION') {
+        throw new Error('full-session probing is forbidden');
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('validated');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'WHISPER_TRANSCRIBE',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'AUDIO_PROBE_DURATION',
+      expect.anything(),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'FINALIZE_CHECKPOINT_TRANSCRIPT',
+      expect.objectContaining({
+        journalGeneration: 'checkpoint-generation-1',
+      }),
+    );
+    expect(validationInputs.at(-1) as { canonicalMode?: string }).toMatchObject(
+      {
+        canonicalMode: 'checkpointed',
+        checkpointEvidenceVerified: true,
+      },
+    );
+  });
+
   it('preserves user edits made while validation is running', async () => {
     let current: Record<string, unknown> = { ...meeting };
     let meetingReads = 0;

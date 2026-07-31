@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { createWavBlob, decodeFloat32PcmChunk } from '../../src/utils/audio';
+import {
+  createWavBlob,
+  decodeFloat32PcmChunk,
+  isCaptureChunkPairReady,
+  resolvePcmTimelineSampleRate,
+  trimPcmLeadingOverflow,
+} from '../../src/utils/audio';
 
 const readWavChannelCount = async (blob: Blob): Promise<number> => {
   const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -58,5 +64,62 @@ describe('decodeFloat32PcmChunk', () => {
     expect(result.samples[0]).toBeCloseTo(1, 6);
     expect(result.carryoverBytes.length).toBe(1);
     expect(result.carryoverBytes[0]).toBe(255);
+  });
+});
+
+describe('resolvePcmTimelineSampleRate', () => {
+  it('preserves wall-clock duration for a four-channel native float stream', () => {
+    const durationSeconds = 16.5;
+    const interleavedSampleCount = 48_000 * 4 * durationSeconds;
+
+    expect(
+      resolvePcmTimelineSampleRate(
+        interleavedSampleCount,
+        durationSeconds,
+        48_000,
+      ),
+    ).toBe(192_000);
+  });
+
+  it('preserves wall-clock duration for a six-channel native float stream', () => {
+    const durationSeconds = 13.5;
+    const interleavedSampleCount = 48_000 * 6 * durationSeconds;
+
+    expect(
+      resolvePcmTimelineSampleRate(
+        interleavedSampleCount,
+        durationSeconds,
+        48_000,
+      ),
+    ).toBe(288_000);
+  });
+});
+
+describe('isCaptureChunkPairReady', () => {
+  it('waits for an expected system tail after recorder state resets', () => {
+    expect(
+      isCaptureChunkPairReady({
+        micReady: true,
+        systemReady: false,
+        systemExpected: true,
+      }),
+    ).toBe(false);
+    expect(
+      isCaptureChunkPairReady({
+        micReady: true,
+        systemReady: true,
+        systemExpected: true,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('trimPcmLeadingOverflow', () => {
+  it('drops buffered native pre-roll from the leading edge', () => {
+    const samples = Float32Array.from([1, 2, 3, 4, 5, 6]);
+
+    expect(Array.from(trimPcmLeadingOverflow(samples, 2, 2))).toEqual([
+      3, 4, 5, 6,
+    ]);
   });
 });

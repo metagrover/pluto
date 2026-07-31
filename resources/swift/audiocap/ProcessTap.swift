@@ -74,6 +74,7 @@ enum ProcessTapError: Error {
     case deviceStartError(OSStatus)
     case tapStreamDescriptionUnavailable
     case failedToCreatePCMBuffer
+    case unsupportedTapFormat
 }
 
 final class ProcessTap {

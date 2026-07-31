@@ -19,11 +19,23 @@ import ffmpeg from 'fluent-ffmpeg';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   appendCaptureJournalChunk,
+  appendCaptureTranscriptAcceptanceFrame,
+  appendCaptureTranscriptCheckpoint,
+  authorizeCaptureJournalInterval,
+  completeCaptureJournalCapturedChunk,
   createCaptureJournal,
+  deleteCaptureJournal,
+  persistCaptureJournalRawChunk,
+  readCaptureJournalManifest,
   sealCaptureJournal,
+  stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from './captureJournal';
-import { recoverInterruptedCaptureJournals } from './captureJournalRecovery';
+import {
+  recoverInterruptedCaptureJournals,
+  repairStoppingCaptureJournalTranscript,
+  verifySealedCaptureJournalTranscriptEvidence,
+} from './captureJournalRecovery';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import {
   canReuseRunningCaptureForProbe,
@@ -111,6 +123,62 @@ const getMeetingArtifactsRootDir = () => {
   return meetingsDir;
 };
 
+const getTranscriptCheckpointRepairConfig = () => {
+  const resolved = resolveTranscriptionSettings({
+    backend: db.getSetting('transcription_backend'),
+    preset: db.getSetting('transcription_preset'),
+    model: db.getSetting('whisper_model'),
+    device: db.getSetting('whisper_device'),
+    computeType: db.getSetting('whisper_compute_type'),
+    language: db.getSetting('whisper_language'),
+  } as TranscriptionSettings);
+  return {
+    backend: resolved.backend,
+    preset: resolved.preset,
+    model: resolveLiveChunkModel(resolved.model),
+    device: resolved.device,
+    computeType: resolveLiveChunkComputeType(resolved.computeType),
+    languageMode: resolved.language
+      ? ('fixed' as const)
+      : ('detected' as const),
+    requestedLanguage: resolved.language?.toLowerCase() || null,
+    pipelineVersion: 'live_chunk_v1' as const,
+  };
+};
+
+const transcribeTranscriptCheckpointChunk = async (
+  inputPath: string,
+  config: ReturnType<typeof getTranscriptCheckpointRepairConfig>,
+) => {
+  const result = await transcribeWithBackend(inputPath, {
+    backend: config.backend,
+    preset: config.preset,
+    model: config.model,
+    device: config.device,
+    computeType: config.computeType,
+    language:
+      config.languageMode === 'fixed'
+        ? (config.requestedLanguage ?? undefined)
+        : undefined,
+    diarize: false,
+  } as Parameters<typeof transcribeWithBackend>[1]);
+  return {
+    detectedLanguage: result.language ?? null,
+    providerLabel:
+      typeof result.meta?.providerLabel === 'string'
+        ? result.meta.providerLabel
+        : 'local',
+    segments: Array.isArray(result.segments)
+      ? result.segments.map((segment) => ({
+          start: segment.start,
+          end: segment.end,
+          text: segment.text,
+          ...(segment.words ? { words: segment.words } : {}),
+        }))
+      : [],
+  };
+};
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
@@ -124,6 +192,12 @@ app.on('activate', () => {
   }
 });
 
+import {
+  type TranscriptionSettings,
+  resolveLiveChunkComputeType,
+  resolveLiveChunkModel,
+  resolveTranscriptionSettings,
+} from '../src/utils/transcriptionSettings';
 // Module imports
 import * as db from './db';
 import {
@@ -458,12 +532,86 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_START',
-    async (_event, { meetingId, startedAtMs } = {}) => {
+    async (
+      _event,
+      { meetingId, startedAtMs, expectedSources, sourceAvailability } = {},
+    ) => {
       return await createCaptureJournal(getMeetingArtifactsRootDir(), {
         meetingId: String(meetingId || ''),
         startedAtMs: typeof startedAtMs === 'number' ? startedAtMs : Date.now(),
+        schemaVersion: 3,
+        expectedSources,
+        sourceAvailability,
       });
     },
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_READ',
+    async (_event, { meetingId } = {}) =>
+      await readCaptureJournalManifest(
+        getMeetingArtifactsRootDir(),
+        String(meetingId || ''),
+      ),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
+    async (_event, { meetingId, expectedConfigKey } = {}) =>
+      await verifySealedCaptureJournalTranscriptEvidence(
+        getMeetingArtifactsRootDir(),
+        String(meetingId || ''),
+        typeof expectedConfigKey === 'string' ? expectedConfigKey : undefined,
+      ),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_INTERVAL_AUTHORIZE',
+    async (_event, request = {}) =>
+      await authorizeCaptureJournalInterval(getMeetingArtifactsRootDir(), {
+        ...request,
+        meetingId: String(request.meetingId || ''),
+      }),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_RAW_APPEND',
+    async (_event, request = {}) =>
+      await persistCaptureJournalRawChunk(getMeetingArtifactsRootDir(), {
+        ...request,
+        meetingId: String(request.meetingId || ''),
+        data: Buffer.from(request.data ?? []),
+      }),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
+    async (_event, request = {}) =>
+      await completeCaptureJournalCapturedChunk(getMeetingArtifactsRootDir(), {
+        ...request,
+        meetingId: String(request.meetingId || ''),
+        ...(request.repairData
+          ? { repairData: Buffer.from(request.repairData) }
+          : {}),
+      }),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND',
+    async (_event, request = {}) =>
+      await appendCaptureTranscriptCheckpoint(
+        getMeetingArtifactsRootDir(),
+        request,
+      ),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_ACCEPTANCE_APPEND',
+    async (_event, request = {}) =>
+      await appendCaptureTranscriptAcceptanceFrame(
+        getMeetingArtifactsRootDir(),
+        request,
+      ),
   );
 
   ipcMain.handle(
@@ -504,10 +652,38 @@ app.whenReady().then(async () => {
   );
 
   ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_STOP',
+    async (_event, request = {}) =>
+      await stopCaptureJournal(getMeetingArtifactsRootDir(), {
+        ...request,
+        meetingId: String(request.meetingId || ''),
+      }),
+  );
+
+  ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_SEAL',
     async (_event, { meetingId, endedAtMs } = {}) => {
+      const normalizedMeetingId = String(meetingId || '');
+      const manifest = await readCaptureJournalManifest(
+        getMeetingArtifactsRootDir(),
+        normalizedMeetingId,
+      );
+      if (
+        manifest.schemaVersion === 3 &&
+        manifest.lifecycleState === 'stopping'
+      ) {
+        const transcriptionConfig = getTranscriptCheckpointRepairConfig();
+        await repairStoppingCaptureJournalTranscript(
+          getMeetingArtifactsRootDir(),
+          {
+            meetingId: normalizedMeetingId,
+            transcribeChunk: transcribeTranscriptCheckpointChunk,
+            transcriptionConfig,
+          },
+        );
+      }
       return await sealCaptureJournal(getMeetingArtifactsRootDir(), {
-        meetingId: String(meetingId || ''),
+        meetingId: normalizedMeetingId,
         endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
       });
     },
@@ -1240,6 +1416,9 @@ app.whenReady().then(async () => {
     (_event, meetingId, runId, stage) =>
       db.updateMeetingTranscriptValidationRetryStage(meetingId, runId, stage),
   );
+  ipcMain.handle('FINALIZE_CHECKPOINT_TRANSCRIPT', (_event, input) =>
+    db.finalizeCheckpointTranscript(input),
+  );
   ipcMain.handle('PATCH_STOP_TO_VALIDATED_LATENCY', (_event, input) =>
     runConditionalMeetingUpdateForIpc(() =>
       db.patchStopToValidatedLatency(input),
@@ -1344,7 +1523,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_ANALYSIS_QUALITY_STATS', () =>
     db.getAnalysisQualityStats(),
   );
-  ipcMain.handle('DELETE_MEETING', (_event, id) => {
+  ipcMain.handle('DELETE_MEETING', async (_event, id) => {
     try {
       const meetingId = String(id);
 
@@ -1352,6 +1531,11 @@ app.whenReady().then(async () => {
       abortMeetingTasks(meetingId);
 
       const result = db.deleteMeeting(id);
+      await deleteCaptureJournal(getMeetingArtifactsRootDir(), meetingId).catch(
+        (error) => {
+          console.warn('[Pluto] Failed to delete capture journal:', error);
+        },
+      );
 
       // Broadcast to renderer that a meeting has been deleted
       if (win && !win.isDestroyed()) {
@@ -2254,6 +2438,14 @@ app.whenReady().then(async () => {
   }
 
   try {
+    const recoveryTranscriptionSettings = resolveTranscriptionSettings({
+      backend: db.getSetting('transcription_backend'),
+      preset: db.getSetting('transcription_preset'),
+      model: db.getSetting('whisper_model'),
+      device: db.getSetting('whisper_device'),
+      computeType: db.getSetting('whisper_compute_type'),
+      language: db.getSetting('whisper_language'),
+    } as TranscriptionSettings);
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),
       {
@@ -2262,6 +2454,75 @@ app.whenReady().then(async () => {
         saveMeeting: (meeting) => db.saveMeeting(meeting),
         stitchWavSegments: async (segments, outputTag) =>
           await stitchWavSegments({ segments, outputTag }),
+        repairRawChunk: async (inputPath) => {
+          const outputPath = path.join(
+            app.getPath('temp'),
+            `capture-repair-${randomUUID()}.wav`,
+          );
+          const converted = await new Promise<boolean>((resolve) => {
+            ffmpeg(inputPath)
+              .audioChannels(1)
+              .audioFrequency(16000)
+              .toFormat('wav')
+              .on('end', () => resolve(true))
+              .on('error', () => resolve(false))
+              .save(outputPath);
+          });
+          if (!converted || !fs.existsSync(outputPath)) {
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+            return null;
+          }
+          try {
+            return fs.readFileSync(outputPath);
+          } finally {
+            fs.unlinkSync(outputPath);
+          }
+        },
+        transcribeChunk: async (inputPath, config) => {
+          const options = {
+            backend: config.backend,
+            preset: config.preset,
+            model: config.model,
+            device: config.device,
+            computeType: config.computeType,
+            language:
+              config.languageMode === 'fixed'
+                ? (config.requestedLanguage ?? undefined)
+                : undefined,
+            diarize: false,
+          } as Parameters<typeof transcribeWithBackend>[1];
+          const result = await transcribeWithBackend(inputPath, options);
+          return {
+            detectedLanguage: result.language ?? null,
+            providerLabel:
+              typeof result.meta?.providerLabel === 'string'
+                ? result.meta.providerLabel
+                : 'local',
+            segments: Array.isArray(result.segments)
+              ? result.segments.map((segment) => ({
+                  start: segment.start,
+                  end: segment.end,
+                  text: segment.text,
+                  ...(segment.words ? { words: segment.words } : {}),
+                }))
+              : [],
+          };
+        },
+        transcriptionConfig: {
+          backend: recoveryTranscriptionSettings.backend,
+          preset: recoveryTranscriptionSettings.preset,
+          model: resolveLiveChunkModel(recoveryTranscriptionSettings.model),
+          device: recoveryTranscriptionSettings.device,
+          computeType: resolveLiveChunkComputeType(
+            recoveryTranscriptionSettings.computeType,
+          ),
+          languageMode: recoveryTranscriptionSettings.language
+            ? 'fixed'
+            : 'detected',
+          requestedLanguage:
+            recoveryTranscriptionSettings.language?.toLowerCase() || null,
+          pipelineVersion: 'live_chunk_v1',
+        },
       },
     );
     if (

@@ -40,6 +40,70 @@ export function createWavBlob(
   return new Blob([buffer], { type: 'audio/wav' });
 }
 
+const PCM_CHANNEL_SAMPLE_RATES = [
+  16_000, 22_050, 24_000, 32_000, 44_100, 48_000, 88_200, 96_000,
+] as const;
+const PCM_TIMELINE_SAMPLE_RATES = Array.from(
+  new Set(
+    PCM_CHANNEL_SAMPLE_RATES.flatMap((sampleRate) =>
+      Array.from({ length: 8 }, (_, index) => sampleRate * (index + 1)),
+    ),
+  ),
+).sort((left, right) => left - right);
+
+export function resolvePcmTimelineSampleRate(
+  sampleCount: number,
+  durationSeconds: number,
+  fallbackSampleRate: number,
+): number {
+  if (
+    !Number.isFinite(sampleCount) ||
+    sampleCount <= 0 ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds <= 0
+  ) {
+    return fallbackSampleRate;
+  }
+  const estimate = sampleCount / durationSeconds;
+  return PCM_TIMELINE_SAMPLE_RATES.reduce((best, candidate) =>
+    Math.abs(candidate - estimate) < Math.abs(best - estimate)
+      ? candidate
+      : best,
+  );
+}
+
+export const isCaptureChunkPairReady = ({
+  micReady,
+  systemReady,
+  systemExpected,
+}: {
+  micReady: boolean;
+  systemReady: boolean;
+  systemExpected: boolean;
+}): boolean => micReady && (systemReady || !systemExpected);
+
+export const trimPcmLeadingOverflow = (
+  samples: Float32Array,
+  sampleRate: number,
+  durationSeconds: number,
+): Float32Array => {
+  if (
+    !Number.isFinite(sampleRate) ||
+    sampleRate <= 0 ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds <= 0
+  ) {
+    return samples;
+  }
+  const targetSampleCount = Math.max(
+    1,
+    Math.round(sampleRate * durationSeconds),
+  );
+  return samples.length > targetSampleCount
+    ? samples.slice(samples.length - targetSampleCount)
+    : samples;
+};
+
 export function decodeFloat32PcmChunk(
   chunkBytes: Uint8Array,
   carryoverBytes: Uint8Array = new Uint8Array(0),

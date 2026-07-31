@@ -109,32 +109,45 @@ class AudioCapCLI {
                             "nonInterleaved=\(nonInterleaved)\n",
                             stderr
                         )
-                    }
-
-                    // Standard Output Handle
-                    let stdout = FileHandle.standardOutput
-
-                    try tap.start(on: queue) { (inNow, inInputData, inInputTime, outOutputData, inOutputTime) in
-                        // Callback is on a realtime thread. Keep it light.
-                        // inInputData is AudioBufferList.
-                        // inInputData is UnsafePointer<AudioBufferList>
-                        let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
-                        let bufferList = UnsafeMutableAudioBufferListPointer(mutableInputData)
-                        if bufferList.count > 1 && !self.loggedMultiBufferWarning {
-                            self.loggedMultiBufferWarning = true
-                            fputs("[AudioCap] Multiple channel buffers detected (\(bufferList.count)); streaming first buffer only.\n", stderr)
+                        guard desc.mBitsPerChannel == 32,
+                              (flags & UInt32(kAudioFormatFlagIsFloat)) != 0 else {
+                            throw ProcessTapError.unsupportedTapFormat
                         }
-                        if let buffer = bufferList.first(where: { $0.mData != nil && $0.mDataByteSize > 0 }),
-                           let data = buffer.mData {
-                            let size = Int(buffer.mDataByteSize)
-                            if size > 0 {
-                                let pcmData = Data(bytes: data, count: size)
-                                // Writing to FileHandle might block?
-                                // In high-perf, we use a ring buffer. For CLI, explicit write is 'okay' usually.
-                                try? stdout.write(contentsOf: pcmData)
+
+                        let stdout = FileHandle.standardOutput
+                        try tap.start(on: queue) { (_, inInputData, _, _, _) in
+                            let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
+                            let buffers = UnsafeMutableAudioBufferListPointer(mutableInputData).filter {
+                                $0.mData != nil && $0.mDataByteSize >= MemoryLayout<Float>.size
+                            }
+                            guard !buffers.isEmpty else { return }
+
+                            let frameCount = buffers.map { buffer in
+                                let channels = max(1, Int(buffer.mNumberChannels))
+                                return Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / channels
+                            }.min() ?? 0
+                            guard frameCount > 0 else { return }
+
+                            var mono = [Float](repeating: 0, count: frameCount)
+                            var contributingChannels = 0
+                            for buffer in buffers {
+                                guard let data = buffer.mData else { continue }
+                                let channels = max(1, Int(buffer.mNumberChannels))
+                                let samples = data.assumingMemoryBound(to: Float.self)
+                                for frame in 0..<frameCount {
+                                    for channel in 0..<channels {
+                                        mono[frame] += samples[(frame * channels) + channel]
+                                    }
+                                }
+                                contributingChannels += channels
+                            }
+                            guard contributingChannels > 0 else { return }
+                            let scale = 1.0 / Float(contributingChannels)
+                            for frame in 0..<frameCount { mono[frame] *= scale }
+                            mono.withUnsafeBytes { bytes in
+                                try? stdout.write(contentsOf: Data(bytes))
                             }
                         }
-                        return
                     }
 
                     break
