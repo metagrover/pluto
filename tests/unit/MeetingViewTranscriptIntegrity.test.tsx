@@ -9,6 +9,27 @@ import { Sidebar } from '../../src/components/layout/Sidebar';
 import { canDeleteMeeting } from '../../src/utils/recordingFinalization';
 
 describe('MeetingView transcript integrity', () => {
+  it('keeps the standard analysis page primary when analysis already exists', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          causes: [{ code: 'recovered_awaiting_validation' }],
+          evidenceProvenance: { kind: 'stored_capture_activity_v1' },
+        })}
+        transcriptJson={JSON.stringify({
+          lifecycleStatus: 'needs_attention',
+          segments: [],
+        })}
+        hasExistingAnalysis
+      />,
+    );
+
+    expect(markup).toBe('');
+  });
+
   it('shows recovered recordings without claiming speech loss', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel

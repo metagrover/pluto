@@ -28,7 +28,10 @@ import type {
   LiveTranscriptSegment,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
-import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
+import {
+  retryMeetingTranscriptValidation,
+  shouldAutoProcessMeetingAnalysis,
+} from './services/retryMeetingTranscriptValidation';
 
 import { updateEntityStatus } from './api/knowledgeGraph';
 // Knowledge Graph
@@ -62,6 +65,7 @@ function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
     useState(false);
+  const autoAnalysisAttemptsRef = useRef(new Set<string>());
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingParticipants, setMeetingParticipants] = useState<string[]>([]);
   const [participantInput, setParticipantInput] = useState('');
@@ -459,6 +463,19 @@ function App() {
   const selectedMeeting = safeMeetings.find(
     (m) => String(m.id) === String(selectedMeetingId),
   );
+
+  useEffect(() => {
+    if (
+      transcriptValidationRetrying ||
+      !shouldAutoProcessMeetingAnalysis(selectedMeeting)
+    ) {
+      return;
+    }
+    const meetingKey = String(selectedMeeting?.id);
+    if (autoAnalysisAttemptsRef.current.has(meetingKey)) return;
+    autoAnalysisAttemptsRef.current.add(meetingKey);
+    void handleRetryTranscriptValidation();
+  }, [selectedMeeting, selectedMeetingId, transcriptValidationRetrying]);
 
   const filteredMeetings = safeMeetings.filter(
     (m) =>

@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { retryMeetingTranscriptValidation } from '../../src/services/retryMeetingTranscriptValidation';
+import {
+  retryMeetingTranscriptValidation,
+  shouldAutoProcessMeetingAnalysis,
+} from '../../src/services/retryMeetingTranscriptValidation';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 const validationInputs = vi.hoisted(() => [] as unknown[]);
@@ -885,5 +888,26 @@ describe('retryMeetingTranscriptValidation', () => {
         retryFailure: 'retry_timeout',
       },
     );
+  });
+});
+
+describe('shouldAutoProcessMeetingAnalysis', () => {
+  it('starts background processing for an unanalyzed preserved recording', () => {
+    expect(shouldAutoProcessMeetingAnalysis(meeting)).toBe(true);
+  });
+
+  it('does not replace existing analysis or retry recovery-required meetings', () => {
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...meeting,
+        analysis_json: JSON.stringify({ overview: 'existing' }),
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...meeting,
+        finalization_status: 'recovery_required',
+      }),
+    ).toBe(false);
   });
 });

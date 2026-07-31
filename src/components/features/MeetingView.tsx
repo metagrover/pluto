@@ -98,6 +98,7 @@ export const TranscriptIntegrityPanel = ({
   systemAudioPath,
   mixedAudioPath,
   activityEvidenceAvailable = false,
+  hasExistingAnalysis = false,
   onRetry,
   retrying = false,
 }: {
@@ -110,9 +111,11 @@ export const TranscriptIntegrityPanel = ({
   systemAudioPath?: string;
   mixedAudioPath?: string;
   activityEvidenceAvailable?: boolean;
+  hasExistingAnalysis?: boolean;
   onRetry?: () => void;
   retrying?: boolean;
 }) => {
+  if (hasExistingAnalysis) return null;
   let micActivitySeconds = 0;
   let systemActivitySeconds = 0;
   let retryStage: string | null = null;
@@ -222,8 +225,9 @@ export const TranscriptIntegrityPanel = ({
   } as const;
   const showValidationAction =
     trust.action === 'start_validation' || trust.action === 'retry_validation';
-  const title =
-    trust.kind === 'capture_recovery_required'
+  const title = retrying
+    ? 'Preparing meeting analysis'
+    : trust.kind === 'capture_recovery_required'
       ? 'Recording saved'
       : trust.kind === 'validation_in_progress'
         ? 'Validating transcript'
@@ -234,7 +238,11 @@ export const TranscriptIntegrityPanel = ({
       className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5"
     >
       <strong className="text-sm text-pro-text">{title}</strong>
-      <p className="mt-1 text-sm text-pro-text-muted">{copy[trust.copyKey]}</p>
+      <p className="mt-1 text-sm text-pro-text-muted">
+        {retrying
+          ? 'Pluto is validating the preserved recording, then it will build the standard meeting analysis.'
+          : copy[trust.copyKey]}
+      </p>
       {showValidationAction ? (
         <button
           type="button"
@@ -1089,6 +1097,9 @@ export const MeetingView = ({
           selectedMeeting.transcript_integrity_json?.includes(
             '"activityEvidence"',
           ),
+        )}
+        hasExistingAnalysis={Boolean(
+          selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
         )}
         onRetry={onRetryTranscriptValidation}
         retrying={transcriptValidationRetrying}

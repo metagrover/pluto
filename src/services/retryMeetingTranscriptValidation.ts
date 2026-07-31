@@ -25,6 +25,35 @@ import {
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
+export const shouldAutoProcessMeetingAnalysis = (
+  meeting: Partial<Meeting> | null | undefined,
+) => {
+  if (
+    !meeting ||
+    meeting.transcript_status !== 'needs_attention' ||
+    meeting.finalization_status === 'recovery_required' ||
+    Boolean(meeting.analysis_json || meeting.enhanced_notes) ||
+    !meeting.transcript_json ||
+    !(
+      meeting.audio_path ||
+      meeting.system_audio_path ||
+      meeting.mixed_audio_path
+    )
+  ) {
+    return false;
+  }
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      causes?: Array<{ code?: unknown }>;
+    };
+    return !integrity.causes?.some(
+      (cause) => cause.code === 'capture_gap_detected',
+    );
+  } catch {
+    return false;
+  }
+};
+
 const parseSegments = (value?: string): AttributionSegment[] => {
   if (!value) return [];
   try {
