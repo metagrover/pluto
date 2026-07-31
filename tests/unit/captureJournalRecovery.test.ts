@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   mkdtemp,
   readFile,
@@ -12,11 +13,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   appendCaptureJournalChunk,
+  appendCaptureTranscriptAcceptanceFrame,
+  appendCaptureTranscriptCheckpoint,
+  authorizeCaptureJournalInterval,
+  completeCaptureJournalCapturedChunk,
   createCaptureJournal,
+  persistCaptureJournalRawChunk,
+  readCaptureJournalManifest,
   sealCaptureJournal,
+  stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
-import { recoverInterruptedCaptureJournals } from '../../electron/captureJournalRecovery';
+import {
+  recoverInterruptedCaptureJournals,
+  verifySealedCaptureJournalTranscriptEvidence,
+} from '../../electron/captureJournalRecovery';
 import type { PersistedMeeting } from '../../electron/db';
 import { buildRecoverableSealFailureMeeting } from '../../src/utils/recordingFinalization';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
@@ -178,6 +189,115 @@ describe('capture journal recovery', () => {
       skippedExistingCount: 1,
     });
     expect(saveMeeting).toHaveBeenCalledTimes(1);
+  });
+
+  it('repairs a v3 journal interrupted before its first transcript checkpoint', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-v3';
+    let manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    if (manifest.schemaVersion !== 3) throw new Error('expected v3 journal');
+    manifest = await authorizeCaptureJournalInterval(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 2,
+    });
+    const receipts: Record<
+      'mic' | 'system',
+      Awaited<ReturnType<typeof completeCaptureJournalCapturedChunk>>['receipt']
+    > = {} as never;
+    for (const source of ['mic', 'system'] as const) {
+      manifest = await persistCaptureJournalRawChunk(root, {
+        meetingId,
+        generation: manifest.generation,
+        expectedRevision: manifest.revision,
+        source,
+        sequence: 0,
+        format: 'wav',
+        data: Buffer.from(`${source}-raw`),
+      });
+      const raw = manifest.intervals[0].sources[source];
+      if (raw.disposition !== 'raw_durable') {
+        throw new Error('expected raw durable tuple');
+      }
+      const completed = await completeCaptureJournalCapturedChunk(root, {
+        meetingId,
+        generation: manifest.generation,
+        expectedRevision: manifest.revision,
+        source,
+        sequence: 0,
+        rawChecksumSha256: raw.rawChecksumSha256,
+        repairData: Buffer.from(`${source}-repair`),
+      });
+      manifest = completed.manifest;
+      receipts[source] = completed.receipt;
+    }
+    const transcriptionConfig = {
+      backend: 'whisperx_current',
+      preset: 'balanced',
+      model: 'small',
+      device: 'cpu',
+      computeType: 'int8',
+      languageMode: 'detected' as const,
+      requestedLanguage: null,
+      pipelineVersion: 'live_chunk_v1' as const,
+    };
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId,
+      activityEvidence: await buildEvidence(),
+    });
+    const saveMeeting = vi.fn();
+    const transcribeChunk = vi.fn(async (inputPath: string) => ({
+      detectedLanguage: 'en',
+      providerLabel: 'local',
+      segments: [
+        {
+          start: inputPath.includes('mic') ? 0.2 : 1,
+          end: inputPath.includes('mic') ? 0.8 : 1.6,
+          text: inputPath.includes('mic')
+            ? 'Synthetic mic statement'
+            : 'Synthetic system statement',
+        },
+      ],
+    }));
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting,
+      stitchWavSegments: async (_segments, outputTag) =>
+        join(root, `${outputTag}.wav`),
+      transcribeChunk,
+      transcriptionConfig,
+      nowMs: 4_000,
+    });
+
+    expect(result.recoveredCount).toBe(1);
+    expect(transcribeChunk).toHaveBeenCalledTimes(2);
+    expect(
+      (await readCaptureJournalManifest(root, meetingId)).lifecycleState,
+    ).toBe('sealed');
+    await expect(
+      verifySealedCaptureJournalTranscriptEvidence(root, meetingId),
+    ).resolves.toMatchObject({ segmentCount: 2 });
+    const recovered = saveMeeting.mock.calls[0][0];
+    const transcript = JSON.parse(recovered.transcript_json) as {
+      segments: Array<{ speaker: string; text: string }>;
+    };
+    expect(transcript.segments).toEqual([
+      expect.objectContaining({
+        speaker: 'Me',
+        text: 'Synthetic mic statement',
+      }),
+      expect.objectContaining({
+        speaker: 'Them',
+        text: 'Synthetic system statement',
+      }),
+    ]);
   });
 
   it('continues recovering later journals after one stitch operation fails', async () => {

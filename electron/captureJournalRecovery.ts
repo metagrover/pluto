@@ -4,9 +4,16 @@ import { access, readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
+  type TranscriptAcceptanceFrame,
+  type TranscriptCheckpointCandidate,
+  finalizeTranscriptCheckpoints,
+} from '../src/services/transcriptCheckpointFinalization.ts';
+import { resolveCrossChannelDuplicates } from '../src/utils/speakerAttribution.ts';
+import {
   type CaptureActivityEvidence,
   parseCaptureActivityEvidence,
 } from '../src/utils/transcriptActivityEvidence.ts';
+import { canonicalizeTranscriptCheckpointConfig } from '../src/utils/transcriptCheckpointConfig.ts';
 import { buildTranscriptJsonPayload } from '../src/utils/transcriptSchema.ts';
 import type {
   TranscriptTrustCauseCode,
@@ -15,9 +22,19 @@ import type {
 import type {
   CaptureJournalEntry,
   CaptureJournalManifest,
+  CaptureJournalManifestV3,
   CaptureJournalSource,
 } from './captureJournal.ts';
-import { readCaptureJournalManifest } from './captureJournal.ts';
+import {
+  appendCaptureTranscriptAcceptanceFrame,
+  appendCaptureTranscriptCheckpoint,
+  completeCaptureJournalCapturedChunk,
+  readCaptureJournalManifest,
+  readCaptureJournalSidecar,
+  replaceCaptureTranscriptCheckpoint,
+  sealCaptureJournal,
+  stopCaptureJournal,
+} from './captureJournal.ts';
 import type { PersistedMeeting } from './db.ts';
 
 type RecoveryGapReason =
@@ -54,6 +71,38 @@ type RecoveryDependencies = {
     outputTag: string,
   ) => Promise<string | null>;
   nowMs?: number;
+  repairRawChunk?: (inputPath: string) => Promise<Buffer | null>;
+  transcribeChunk?: (
+    inputPath: string,
+    config: {
+      backend: string;
+      preset: string;
+      model: string;
+      device: string;
+      computeType: string;
+      languageMode: 'fixed' | 'detected';
+      requestedLanguage: string | null;
+    },
+  ) => Promise<{
+    detectedLanguage?: string | null;
+    providerLabel?: string;
+    segments: Array<{
+      start: number;
+      end: number;
+      text: string;
+      words?: Array<{ word: string; start: number; end: number }>;
+    }>;
+  }>;
+  transcriptionConfig?: {
+    backend: string;
+    preset: string;
+    model: string;
+    device: string;
+    computeType: string;
+    languageMode: 'fixed' | 'detected';
+    requestedLanguage: string | null;
+    pipelineVersion: 'live_chunk_v1';
+  };
 };
 
 export type CaptureJournalRecoveryResult = {
@@ -88,6 +137,48 @@ const listCaptureJournalMeetingIds = async (rootDir: string) => {
 
 const computeChecksum = (data: Buffer) =>
   createHash('sha256').update(data).digest('hex');
+
+const measureCoveredActivitySeconds = (
+  segments: unknown[],
+  activityWindows: Array<{ startTime: number; endTime: number }>,
+  chunkStartSec: number,
+  chunkEndSec: number,
+) => {
+  const intersections: Array<{ start: number; end: number }> = [];
+  for (const segment of segments) {
+    if (!segment || typeof segment !== 'object') continue;
+    const relativeStart = Number((segment as { start?: unknown }).start);
+    const relativeEnd = Number((segment as { end?: unknown }).end);
+    if (
+      !Number.isFinite(relativeStart) ||
+      !Number.isFinite(relativeEnd) ||
+      relativeEnd <= relativeStart
+    ) {
+      continue;
+    }
+    const segmentStart = Math.max(chunkStartSec, chunkStartSec + relativeStart);
+    const segmentEnd = Math.min(chunkEndSec, chunkStartSec + relativeEnd);
+    for (const window of activityWindows) {
+      const start = Math.max(segmentStart, window.startTime);
+      const end = Math.min(segmentEnd, window.endTime);
+      if (end > start) intersections.push({ start, end });
+    }
+  }
+  intersections.sort((left, right) => left.start - right.start);
+  let coveredSeconds = 0;
+  let unionStart = 0;
+  let unionEnd = 0;
+  for (const intersection of intersections) {
+    if (intersection.start > unionEnd) {
+      coveredSeconds += Math.max(0, unionEnd - unionStart);
+      unionStart = intersection.start;
+      unionEnd = intersection.end;
+    } else {
+      unionEnd = Math.max(unionEnd, intersection.end);
+    }
+  }
+  return coveredSeconds + Math.max(0, unionEnd - unionStart);
+};
 
 const readManifestForRecovery = async (rootDir: string, meetingId: string) => {
   const manifestPath = join(
@@ -212,10 +303,727 @@ const buildSourceSegments = async (
 };
 
 const getRecoveredDurationSeconds = (manifest: CaptureJournalManifest) => {
+  if (manifest.schemaVersion === 3) {
+    return manifest.intervals.reduce(
+      (maxSeconds, interval) => Math.max(maxSeconds, interval.chunkEndSec),
+      0,
+    );
+  }
   return manifest.entries.reduce(
     (maxSeconds, entry) => Math.max(maxSeconds, entry.chunkEndSec),
     0,
   );
+};
+
+const buildV3SourceSegments = async (
+  rootDir: string,
+  manifest: CaptureJournalManifestV3,
+  source: CaptureJournalSource,
+): Promise<{ segments: TimedSegment[]; gaps: RecoveryGap[] }> => {
+  const segments: TimedSegment[] = [];
+  const gaps: RecoveryGap[] = [];
+  for (const interval of manifest.intervals) {
+    const disposition = interval.sources[source];
+    if (
+      disposition.disposition === 'verified_silence' ||
+      disposition.disposition === 'source_unavailable'
+    ) {
+      continue;
+    }
+    if (disposition.disposition !== 'captured') {
+      gaps.push({
+        source,
+        sequence: interval.sequence,
+        reason: 'missing_artifact',
+      });
+      continue;
+    }
+    const absolutePath = join(rootDir, disposition.repairRelativePath);
+    try {
+      const fileData = await readFile(absolutePath);
+      if (computeChecksum(fileData) !== disposition.repairChecksumSha256) {
+        gaps.push({
+          source,
+          sequence: interval.sequence,
+          reason: 'checksum_mismatch',
+        });
+        continue;
+      }
+      segments.push({
+        path: absolutePath,
+        startSec: interval.chunkStartSec,
+        endSec: interval.chunkEndSec,
+        chunkIndex: interval.sequence,
+      });
+    } catch {
+      gaps.push({
+        source,
+        sequence: interval.sequence,
+        reason: 'missing_artifact',
+      });
+    }
+  }
+  return { segments, gaps };
+};
+
+const repairV3TranscriptGaps = async (
+  rootDir: string,
+  initialManifest: CaptureJournalManifestV3,
+  transcribeChunk: NonNullable<RecoveryDependencies['transcribeChunk']>,
+  fallbackConfig?: RecoveryDependencies['transcriptionConfig'],
+): Promise<CaptureJournalManifestV3> => {
+  let manifest = initialManifest;
+  const templateRef = manifest.transcriptCheckpoints[0];
+  const templateSidecar = fallbackConfig
+    ? { transcriptionConfig: fallbackConfig }
+    : templateRef
+      ? (JSON.parse(
+          (
+            await readCaptureJournalSidecar(
+              rootDir,
+              manifest.meetingId,
+              templateRef.relativePath,
+              templateRef.transcriptChecksumSha256,
+            )
+          ).toString('utf8'),
+        ) as { transcriptionConfig: NonNullable<typeof fallbackConfig> })
+      : null;
+  if (!templateSidecar) return manifest;
+  const configKey = computeChecksum(
+    Buffer.from(
+      canonicalizeTranscriptCheckpointConfig(
+        templateSidecar.transcriptionConfig,
+      ),
+    ),
+  );
+  for (const interval of manifest.intervals) {
+    for (const source of ['mic', 'system'] as const) {
+      const disposition = interval.sources[source];
+      if (disposition.disposition !== 'captured') {
+        continue;
+      }
+      const existing = manifest.transcriptCheckpoints.find(
+        (checkpoint) =>
+          checkpoint.source === source &&
+          checkpoint.sequence === interval.sequence,
+      );
+      let reusable = false;
+      if (existing && !existing.repairAttempted) {
+        try {
+          const bytes = await readCaptureJournalSidecar(
+            rootDir,
+            manifest.meetingId,
+            existing.relativePath,
+            existing.transcriptChecksumSha256,
+          );
+          const sidecar = JSON.parse(bytes.toString('utf8')) as {
+            transcriptionConfig: Record<string, unknown>;
+            segments: unknown[];
+          };
+          const sourceActivityWindows =
+            manifest.activityEvidence?.windows.filter(
+              (window) =>
+                window.speaker === (source === 'mic' ? 'Me' : 'Them') &&
+                window.endTime > interval.chunkStartSec &&
+                window.startTime < interval.chunkEndSec,
+            ) ?? [];
+          const activeSeconds = sourceActivityWindows.reduce(
+            (total, window) =>
+              total +
+              Math.max(
+                0,
+                Math.min(window.endTime, interval.chunkEndSec) -
+                  Math.max(window.startTime, interval.chunkStartSec),
+              ),
+            0,
+          );
+          const coveredSeconds = measureCoveredActivitySeconds(
+            sidecar.segments,
+            sourceActivityWindows,
+            interval.chunkStartSec,
+            interval.chunkEndSec,
+          );
+          const underCovered =
+            activeSeconds >= 3 &&
+            coveredSeconds / Math.max(activeSeconds, 0.001) < 0.35;
+          reusable =
+            existing.transcriptionConfigKey === configKey &&
+            computeChecksum(
+              Buffer.from(
+                canonicalizeTranscriptCheckpointConfig(
+                  sidecar.transcriptionConfig,
+                ),
+              ),
+            ) === configKey &&
+            !underCovered;
+        } catch {
+          reusable = false;
+        }
+      }
+      if (reusable || existing?.repairAttempted) continue;
+      const result = await transcribeChunk(
+        join(rootDir, disposition.repairRelativePath),
+        templateSidecar.transcriptionConfig,
+      );
+      const receipt = {
+        meetingId: manifest.meetingId,
+        generation: manifest.generation,
+        manifestRevision: manifest.revision,
+        source,
+        sequence: interval.sequence,
+        checksumSha256: disposition.repairChecksumSha256,
+        chunkStartSec: interval.chunkStartSec,
+        chunkEndSec: interval.chunkEndSec,
+        repairAudioRelativePath: disposition.repairRelativePath,
+      };
+      const checkpointArgs = {
+        receipt,
+        expectedManifestRevision: manifest.revision,
+        transcriptionConfigKey: configKey,
+        sidecar: {
+          schemaVersion: 1 as const,
+          meetingId: manifest.meetingId,
+          source,
+          sequence: interval.sequence,
+          chunkChecksumSha256: disposition.repairChecksumSha256,
+          chunkStartSec: interval.chunkStartSec,
+          chunkEndSec: interval.chunkEndSec,
+          transcriptionConfig: templateSidecar.transcriptionConfig,
+          backendResult: {
+            detectedLanguage: result.detectedLanguage ?? null,
+            providerLabel: result.providerLabel ?? 'local',
+          },
+          segments: result.segments,
+        },
+      };
+      const saved = existing
+        ? await replaceCaptureTranscriptCheckpoint(rootDir, {
+            ...checkpointArgs,
+            expectedPriorTranscriptChecksumSha256:
+              existing.transcriptChecksumSha256,
+          })
+        : await appendCaptureTranscriptCheckpoint(rootDir, checkpointArgs);
+      manifest = saved.manifest;
+    }
+  }
+
+  for (const interval of manifest.intervals) {
+    const existingFrame = manifest.acceptanceFrames.find(
+      (frame) => frame.sequence === interval.sequence,
+    );
+    const activityInputs = {
+      chunkStartSec: interval.chunkStartSec,
+      chunkEndSec: interval.chunkEndSec,
+      evidence: manifest.activityEvidence
+        ? {
+            clock: manifest.activityEvidence.clock,
+            thresholds: manifest.activityEvidence.thresholds,
+            algorithmVersion: manifest.activityEvidence.algorithmVersion,
+            serializationVersion:
+              manifest.activityEvidence.serializationVersion,
+            windows: manifest.activityEvidence.windows.filter(
+              (window) =>
+                window.endTime > interval.chunkStartSec &&
+                window.startTime < interval.chunkEndSec,
+            ),
+          }
+        : null,
+    };
+    const currentMicDigest =
+      manifest.transcriptCheckpoints.find(
+        (checkpoint) =>
+          checkpoint.source === 'mic' &&
+          checkpoint.sequence === interval.sequence,
+      )?.transcriptChecksumSha256 ?? null;
+    const currentSystemDigest =
+      manifest.transcriptCheckpoints.find(
+        (checkpoint) =>
+          checkpoint.source === 'system' &&
+          checkpoint.sequence === interval.sequence,
+      )?.transcriptChecksumSha256 ?? null;
+    let existingFrameEvidenceValid = false;
+    if (existingFrame) {
+      try {
+        const existingFrameBytes = await readCaptureJournalSidecar(
+          rootDir,
+          manifest.meetingId,
+          existingFrame.relativePath,
+          existingFrame.acceptedChecksumSha256,
+        );
+        const existingFrameSidecar = JSON.parse(
+          existingFrameBytes.toString('utf8'),
+        ) as { arbitrationVersion?: unknown; activityInputs?: unknown };
+        existingFrameEvidenceValid =
+          existingFrame.arbitrationVersion === 'chunk_arbitration_v1' &&
+          existingFrameSidecar.arbitrationVersion === 'chunk_arbitration_v1' &&
+          computeChecksum(
+            Buffer.from(JSON.stringify(existingFrameSidecar.activityInputs)),
+          ) === existingFrame.activityEvidenceDigestSha256 &&
+          acceptanceEvidenceMatchesSealedManifest(
+            existingFrameSidecar.activityInputs,
+            manifest,
+            interval,
+          );
+      } catch {
+        existingFrameEvidenceValid = false;
+      }
+    }
+    if (
+      existingFrame?.micCheckpointChecksumSha256 === currentMicDigest &&
+      existingFrame?.systemCheckpointChecksumSha256 === currentSystemDigest &&
+      existingFrameEvidenceValid
+    ) {
+      continue;
+    }
+    const frameSegments: Array<{
+      source: CaptureJournalSource;
+      start: number;
+      end: number;
+      text: string;
+      words?: Array<{ word: string; start: number; end: number }>;
+    }> = [];
+    const checkpointDigests: Record<CaptureJournalSource, string | null> = {
+      mic: null,
+      system: null,
+    };
+    for (const source of ['mic', 'system'] as const) {
+      const checkpoint = manifest.transcriptCheckpoints.find(
+        (candidate) =>
+          candidate.source === source &&
+          candidate.sequence === interval.sequence,
+      );
+      if (!checkpoint) continue;
+      checkpointDigests[source] = checkpoint.transcriptChecksumSha256;
+      const bytes = await readCaptureJournalSidecar(
+        rootDir,
+        manifest.meetingId,
+        checkpoint.relativePath,
+        checkpoint.transcriptChecksumSha256,
+      );
+      const sidecar = JSON.parse(bytes.toString('utf8')) as {
+        segments: Array<{
+          start: number;
+          end: number;
+          text: string;
+          words?: Array<{ word: string; start: number; end: number }>;
+        }>;
+      };
+      frameSegments.push(
+        ...sidecar.segments.map((segment) => ({
+          source,
+          start: segment.start + interval.chunkStartSec,
+          end: segment.end + interval.chunkStartSec,
+          text: segment.text,
+          ...(segment.words
+            ? {
+                words: segment.words.map((word) => ({
+                  word: word.word,
+                  start: word.start + interval.chunkStartSec,
+                  end: word.end + interval.chunkStartSec,
+                })),
+              }
+            : {}),
+        })),
+      );
+    }
+    const reconciled = resolveCrossChannelDuplicates(
+      frameSegments.map((segment, index) => ({
+        id: `${segment.source}-${interval.sequence}-${index}`,
+        startTime: segment.start,
+        endTime: segment.end,
+        text: segment.text,
+        speaker: segment.source === 'mic' ? 'Me' : 'Them',
+        ...(segment.words ? { words: segment.words } : {}),
+      })),
+    ).segments;
+    frameSegments.splice(
+      0,
+      frameSegments.length,
+      ...reconciled.map((segment) => ({
+        source: segment.speaker === 'Me' ? 'mic' : 'system',
+        start: segment.startTime,
+        end: segment.endTime,
+        text: segment.text,
+        ...(segment.words ? { words: segment.words } : {}),
+      })),
+    );
+    const activityEvidenceDigestSha256 = computeChecksum(
+      Buffer.from(JSON.stringify(activityInputs)),
+    );
+    const saved = await appendCaptureTranscriptAcceptanceFrame(rootDir, {
+      meetingId: manifest.meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: interval.sequence,
+      micCheckpointChecksumSha256: checkpointDigests.mic,
+      systemCheckpointChecksumSha256: checkpointDigests.system,
+      activityEvidenceDigestSha256,
+      sidecar: {
+        schemaVersion: 1,
+        meetingId: manifest.meetingId,
+        sequence: interval.sequence,
+        arbitrationVersion: 'chunk_arbitration_v1',
+        activityInputs,
+        segments: frameSegments,
+      },
+      ...(existingFrame
+        ? {
+            expectedPriorAcceptedChecksumSha256:
+              existingFrame.acceptedChecksumSha256,
+          }
+        : {}),
+    });
+    manifest = saved.manifest;
+  }
+  return manifest;
+};
+
+const acceptanceEvidenceMatchesSealedManifest = (
+  activityInputs: unknown,
+  manifest: CaptureJournalManifestV3,
+  interval: CaptureJournalManifestV3['intervals'][number],
+) => {
+  if (
+    !manifest.activityEvidence ||
+    !activityInputs ||
+    typeof activityInputs !== 'object'
+  ) {
+    return false;
+  }
+  const evidence = (activityInputs as { evidence?: unknown }).evidence;
+  if (!evidence || typeof evidence !== 'object') return false;
+  const embedded = evidence as {
+    clock?: unknown;
+    thresholds?: unknown;
+    algorithmVersion?: unknown;
+    serializationVersion?: unknown;
+    windows?: unknown;
+  };
+  if (
+    JSON.stringify(embedded.clock) !==
+      JSON.stringify(manifest.activityEvidence.clock) ||
+    JSON.stringify(embedded.thresholds) !==
+      JSON.stringify(manifest.activityEvidence.thresholds) ||
+    embedded.algorithmVersion !== manifest.activityEvidence.algorithmVersion ||
+    embedded.serializationVersion !==
+      manifest.activityEvidence.serializationVersion ||
+    !Array.isArray(embedded.windows)
+  ) {
+    return false;
+  }
+  return embedded.windows.every(
+    (window) =>
+      window !== null &&
+      typeof window === 'object' &&
+      Number((window as { endTime?: unknown }).endTime) >
+        interval.chunkStartSec &&
+      Number((window as { startTime?: unknown }).startTime) <
+        interval.chunkEndSec &&
+      manifest.activityEvidence?.windows.some(
+        (sealed) => JSON.stringify(sealed) === JSON.stringify(window),
+      ),
+  );
+};
+
+const readV3AcceptedSegments = async (
+  rootDir: string,
+  manifest: CaptureJournalManifestV3,
+  expectedConfigKey?: string,
+) => {
+  const configKeys = new Set(
+    manifest.transcriptCheckpoints.map(
+      (checkpoint) => checkpoint.transcriptionConfigKey,
+    ),
+  );
+  const checkpoints: TranscriptCheckpointCandidate[] = [];
+  for (const reference of manifest.transcriptCheckpoints) {
+    const interval = manifest.intervals.find(
+      (candidate) => candidate.sequence === reference.sequence,
+    );
+    const disposition = interval?.sources[reference.source];
+    const bytes = await readCaptureJournalSidecar(
+      rootDir,
+      manifest.meetingId,
+      reference.relativePath,
+      reference.transcriptChecksumSha256,
+    );
+    const sidecar = JSON.parse(bytes.toString('utf8')) as {
+      schemaVersion: number;
+      meetingId: string;
+      source: CaptureJournalSource;
+      sequence: number;
+      chunkChecksumSha256: string;
+      chunkStartSec: number;
+      chunkEndSec: number;
+      transcriptionConfig?: unknown;
+      segments: Array<{
+        start: number;
+        end: number;
+        text: string;
+        words?: Array<{ word: string; start: number; end: number }>;
+      }>;
+    };
+    const recomputedConfigKey = computeChecksum(
+      Buffer.from(
+        canonicalizeTranscriptCheckpointConfig(
+          sidecar.transcriptionConfig as Record<string, unknown>,
+        ),
+      ),
+    );
+    let audioChecksumVerified = false;
+    if (disposition?.disposition === 'captured') {
+      try {
+        const audioBytes = await readFile(
+          join(rootDir, disposition.repairRelativePath),
+        );
+        audioChecksumVerified =
+          computeChecksum(audioBytes) === disposition.repairChecksumSha256;
+      } catch {
+        audioChecksumVerified = false;
+      }
+    }
+    checkpoints.push({
+      reference,
+      evidence: {
+        audioChecksumVerified,
+        sidecarChecksumVerified: true,
+        pathSafe: true,
+      },
+      sidecar: {
+        ...sidecar,
+        transcriptionConfigKey: recomputedConfigKey,
+      },
+    });
+  }
+  const acceptanceFrames: TranscriptAcceptanceFrame[] = [];
+  for (const frame of [...manifest.acceptanceFrames].sort(
+    (left, right) => left.sequence - right.sequence,
+  )) {
+    const interval = manifest.intervals.find(
+      (candidate) => candidate.sequence === frame.sequence,
+    );
+    if (!interval) throw new Error('Transcript acceptance interval missing');
+    for (const source of ['mic', 'system'] as const) {
+      const disposition = interval.sources[source];
+      const supplied =
+        source === 'mic'
+          ? frame.micCheckpointChecksumSha256
+          : frame.systemCheckpointChecksumSha256;
+      if (disposition.disposition === 'captured') {
+        const checkpoint = manifest.transcriptCheckpoints.find(
+          (candidate) =>
+            candidate.source === source &&
+            candidate.sequence === frame.sequence &&
+            candidate.transcriptChecksumSha256 === supplied,
+        );
+        if (!checkpoint) {
+          throw new Error('Transcript acceptance checkpoint mismatch');
+        }
+      } else if (supplied !== null) {
+        throw new Error('Unexpected transcript acceptance checkpoint');
+      }
+    }
+    const bytes = await readCaptureJournalSidecar(
+      rootDir,
+      manifest.meetingId,
+      frame.relativePath,
+      frame.acceptedChecksumSha256,
+    );
+    const sidecar = JSON.parse(bytes.toString('utf8')) as {
+      meetingId?: unknown;
+      sequence?: unknown;
+      activityInputs?: unknown;
+      segments?: Array<{
+        source?: unknown;
+        start?: unknown;
+        end?: unknown;
+        text?: unknown;
+        words?: Array<{ word: string; start: number; end: number }>;
+      }>;
+    };
+    if (
+      sidecar.meetingId !== manifest.meetingId ||
+      sidecar.sequence !== frame.sequence ||
+      !Array.isArray(sidecar.segments)
+    ) {
+      throw new Error('Invalid transcript acceptance frame');
+    }
+    for (const segment of sidecar.segments) {
+      if (
+        (segment.source !== 'mic' && segment.source !== 'system') ||
+        typeof segment.start !== 'number' ||
+        typeof segment.end !== 'number' ||
+        !Number.isFinite(segment.start) ||
+        !Number.isFinite(segment.end) ||
+        segment.start < interval.chunkStartSec ||
+        segment.end <= segment.start ||
+        segment.end > interval.chunkEndSec + 0.25 ||
+        typeof segment.text !== 'string' ||
+        !segment.text.trim()
+      ) {
+        throw new Error('Invalid transcript acceptance segment');
+      }
+      for (const word of segment.words ?? []) {
+        if (
+          typeof word.word !== 'string' ||
+          !word.word.trim() ||
+          !Number.isFinite(word.start) ||
+          !Number.isFinite(word.end) ||
+          word.start < segment.start ||
+          word.end <= word.start ||
+          word.end > segment.end
+        ) {
+          throw new Error('Invalid transcript acceptance word');
+        }
+      }
+    }
+    acceptanceFrames.push({
+      sequence: frame.sequence,
+      micCheckpointChecksumSha256: frame.micCheckpointChecksumSha256,
+      systemCheckpointChecksumSha256: frame.systemCheckpointChecksumSha256,
+      arbitrationVersion: frame.arbitrationVersion,
+      activityEvidenceDigestSha256: frame.activityEvidenceDigestSha256,
+      evidenceMatches:
+        computeChecksum(Buffer.from(JSON.stringify(sidecar.activityInputs))) ===
+          frame.activityEvidenceDigestSha256 &&
+        acceptanceEvidenceMatchesSealedManifest(
+          sidecar.activityInputs,
+          manifest,
+          interval,
+        ),
+      segments: sidecar.segments.map((segment) => ({
+        source: segment.source as CaptureJournalSource,
+        start: segment.start as number,
+        end: segment.end as number,
+        text: String(segment.text),
+        ...(segment.words ? { words: segment.words } : {}),
+      })),
+    });
+  }
+  if (manifest.acceptanceFrames.length !== manifest.intervals.length) {
+    throw new Error('Transcript acceptance frame missing');
+  }
+  if (!expectedConfigKey && configKeys.size !== 1) {
+    throw new Error('Transcript checkpoint configuration mismatch');
+  }
+  const finalized = finalizeTranscriptCheckpoints({
+    meetingId: manifest.meetingId,
+    expectedConfigKey: expectedConfigKey ?? [...configKeys][0] ?? '',
+    intervals: manifest.intervals.map((interval) => ({
+      sequence: interval.sequence,
+      start: interval.chunkStartSec,
+      end: interval.chunkEndSec,
+      sources: Object.fromEntries(
+        (['mic', 'system'] as const).map((source) => {
+          const disposition = interval.sources[source];
+          if (disposition.disposition === 'captured') {
+            return [
+              source,
+              {
+                disposition: 'captured' as const,
+                checksumSha256: disposition.repairChecksumSha256,
+              },
+            ];
+          }
+          if (disposition.disposition === 'source_unavailable') {
+            return [
+              source,
+              {
+                disposition: 'source_unavailable' as const,
+                reason: disposition.reason,
+              },
+            ];
+          }
+          if (disposition.disposition === 'verified_silence') {
+            return [source, disposition];
+          }
+          if (disposition.disposition === 'raw_durable') {
+            return [
+              source,
+              {
+                disposition: 'conversion_failed' as const,
+                reason: 'repair_audio_unavailable',
+              },
+            ];
+          }
+          return [
+            source,
+            {
+              disposition: 'missing' as const,
+              reason:
+                'reason' in disposition
+                  ? disposition.reason
+                  : 'capture_incomplete',
+            },
+          ];
+        }),
+      ) as {
+        mic:
+          | { disposition: 'captured'; checksumSha256: string }
+          | { disposition: 'verified_silence' }
+          | { disposition: 'source_unavailable'; reason: string }
+          | { disposition: 'missing'; reason: string }
+          | { disposition: 'conversion_failed'; reason: string };
+        system:
+          | { disposition: 'captured'; checksumSha256: string }
+          | { disposition: 'verified_silence' }
+          | { disposition: 'source_unavailable'; reason: string }
+          | { disposition: 'missing'; reason: string }
+          | { disposition: 'conversion_failed'; reason: string };
+      },
+    })),
+    checkpoints,
+    acceptanceFrames,
+    arbitrationVersion: 'chunk_arbitration_v1',
+    speechActivity: manifest.intervals.flatMap((interval) =>
+      (['mic', 'system'] as const).map((source) => ({
+        source,
+        sequence: interval.sequence,
+        speechDetected:
+          manifest.activityEvidence?.windows.some(
+            (window) =>
+              window.speaker === (source === 'mic' ? 'Me' : 'Them') &&
+              window.endTime > interval.chunkStartSec &&
+              window.startTime < interval.chunkEndSec,
+          ) ?? false,
+      })),
+    ),
+  });
+  if (
+    finalized.transcriptionRequests.length > 0 ||
+    finalized.failures.length > 0
+  ) {
+    throw new Error('Transcript checkpoint repair required');
+  }
+  return finalized.segments.map((segment) => ({
+    id: segment.id,
+    startTime: segment.start,
+    endTime: segment.end,
+    text: segment.text,
+    speaker: segment.speaker,
+    ...(segment.words ? { words: segment.words } : {}),
+  }));
+};
+
+export const verifySealedCaptureJournalTranscriptEvidence = async (
+  rootDir: string,
+  meetingId: string,
+  expectedConfigKey?: string,
+): Promise<{ generation: string; revision: number; segmentCount: number }> => {
+  const manifest = await readCaptureJournalManifest(rootDir, meetingId);
+  if (manifest.schemaVersion !== 3 || manifest.lifecycleState !== 'sealed') {
+    throw new Error('Capture journal transcript evidence is not sealed v3');
+  }
+  const segments = await readV3AcceptedSegments(
+    rootDir,
+    manifest,
+    expectedConfigKey,
+  );
+  return {
+    generation: manifest.generation,
+    revision: manifest.revision,
+    segmentCount: segments.length,
+  };
 };
 
 const buildRecoveredMeeting = (params: {
@@ -224,6 +1032,7 @@ const buildRecoveredMeeting = (params: {
   micAudioPath: string | null;
   systemAudioPath: string | null;
   integrity: RecoveryMeetingIntegrity;
+  acceptedSegments?: Awaited<ReturnType<typeof readV3AcceptedSegments>>;
   existingMeeting?: PersistedMeeting | null;
 }): PersistedMeeting => {
   const recoveredDurationSeconds = getRecoveredDurationSeconds(params.manifest);
@@ -246,8 +1055,9 @@ const buildRecoveredMeeting = (params: {
     transcript_integrity_json: JSON.stringify(params.integrity),
     transcript_validated_at: null,
     transcript_json: JSON.stringify(
-      buildTranscriptJsonPayload([], {
-        canonicalSource: 'mic',
+      buildTranscriptJsonPayload(params.acceptedSegments ?? [], {
+        canonicalSource:
+          params.manifest.schemaVersion === 3 ? 'recovered_channels' : 'mic',
         postHydrationBleedPass: false,
         lifecycleStatus: 'needs_attention',
       }),
@@ -256,6 +1066,8 @@ const buildRecoveredMeeting = (params: {
     enhanced_notes: null,
     analysis_json: null,
     value_signals_json: null,
+    capture_journal_generation:
+      params.manifest.schemaVersion === 3 ? params.manifest.generation : null,
     folder_id: null,
     is_favorite: false,
     end_reason: 'interrupted',
@@ -323,6 +1135,51 @@ export const recoverInterruptedCaptureJournals = async (
     }
 
     try {
+      if (manifest.schemaVersion === 3) {
+        if (manifest.lifecycleState === 'recording' && deps.repairRawChunk) {
+          for (const interval of manifest.intervals) {
+            for (const source of ['mic', 'system'] as const) {
+              const disposition = interval.sources[source];
+              if (disposition.disposition !== 'raw_durable') continue;
+              const rawPath = join(rootDir, disposition.rawRelativePath);
+              const rawBytes = await readFile(rawPath);
+              if (computeChecksum(rawBytes) !== disposition.rawChecksumSha256) {
+                continue;
+              }
+              const repairData = await deps.repairRawChunk(rawPath);
+              if (!repairData) continue;
+              const completed = await completeCaptureJournalCapturedChunk(
+                rootDir,
+                {
+                  meetingId: manifest.meetingId,
+                  generation: manifest.generation,
+                  expectedRevision: manifest.revision,
+                  source,
+                  sequence: interval.sequence,
+                  rawChecksumSha256: disposition.rawChecksumSha256,
+                  repairData,
+                },
+              );
+              manifest = completed.manifest;
+            }
+          }
+        }
+        if (manifest.lifecycleState === 'recording') {
+          manifest = await stopCaptureJournal(rootDir, {
+            meetingId: manifest.meetingId,
+            generation: manifest.generation,
+            expectedRevision: manifest.revision,
+          });
+        }
+        if (manifest.lifecycleState === 'stopping' && deps.transcribeChunk) {
+          manifest = await repairV3TranscriptGaps(
+            rootDir,
+            manifest,
+            deps.transcribeChunk,
+            deps.transcriptionConfig,
+          );
+        }
+      }
       const micEntries = manifest.entries.filter(
         (entry) => entry.source === 'mic',
       );
@@ -330,10 +1187,42 @@ export const recoverInterruptedCaptureJournals = async (
         (entry) => entry.source === 'system',
       );
 
-      const [micRecovery, systemRecovery] = await Promise.all([
-        buildSourceSegments(rootDir, micEntries),
-        buildSourceSegments(rootDir, systemEntries),
-      ]);
+      const [micRecovery, systemRecovery, acceptedSegments] =
+        manifest.schemaVersion === 3
+          ? await Promise.all([
+              buildV3SourceSegments(rootDir, manifest, 'mic'),
+              buildV3SourceSegments(rootDir, manifest, 'system'),
+              readV3AcceptedSegments(
+                rootDir,
+                manifest,
+                deps.transcriptionConfig
+                  ? computeChecksum(
+                      Buffer.from(
+                        canonicalizeTranscriptCheckpointConfig(
+                          deps.transcriptionConfig,
+                        ),
+                      ),
+                    )
+                  : undefined,
+              ),
+            ])
+          : await Promise.all([
+              buildSourceSegments(rootDir, micEntries),
+              buildSourceSegments(rootDir, systemEntries),
+              Promise.resolve([]),
+            ]);
+      if (
+        manifest.schemaVersion === 3 &&
+        manifest.lifecycleState === 'stopping'
+      ) {
+        manifest = await sealCaptureJournal(rootDir, {
+          meetingId: manifest.meetingId,
+          endedAtMs:
+            manifest.endedAtMs ??
+            manifest.startedAtMs +
+              Math.round(getRecoveredDurationSeconds(manifest) * 1000),
+        });
+      }
       const activityEvidence = await getRecoveryActivityEvidence(manifest);
 
       const micAudioPath =
@@ -382,9 +1271,14 @@ export const recoverInterruptedCaptureJournals = async (
           : {}),
         recovery: {
           source: 'capture_journal',
+          journalSchemaVersion: manifest.schemaVersion,
+          checkpointEvidenceVerified: manifest.schemaVersion === 3,
           gapDetected,
           sourceScope,
-          acknowledgedChunkCount: micEntries.length + systemEntries.length,
+          acknowledgedChunkCount:
+            manifest.schemaVersion === 3
+              ? manifest.intervals.length * manifest.expectedSources.length
+              : micEntries.length + systemEntries.length,
           recoveredChunkCount:
             micRecovery.segments.length + systemRecovery.segments.length,
         },
@@ -397,11 +1291,16 @@ export const recoverInterruptedCaptureJournals = async (
           micAudioPath,
           systemAudioPath,
           integrity,
+          acceptedSegments,
           existingMeeting,
         }),
       );
       result.recoveredCount += 1;
-    } catch {
+    } catch (error) {
+      console.warn('[Pluto] Capture-journal recovery failed', {
+        meetingId,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
       result.failedRecoveryCount += 1;
     }
   }

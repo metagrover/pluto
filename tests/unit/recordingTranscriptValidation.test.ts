@@ -8,6 +8,48 @@ const rawSegment = (start: number, end: number, text: string) => ({
 });
 
 describe('runRecordingTranscriptValidation', () => {
+  it('validates verified checkpoint segments without full-session transcription', async () => {
+    const transcribe = vi.fn();
+    const probeDuration = vi.fn();
+
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'checkpointed-meeting',
+      recordingDurationSeconds: 60,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [
+        {
+          id: 'mic-0',
+          startTime: 0,
+          endTime: 4,
+          text: 'Synthetic local statement',
+          speaker: 'Me',
+        },
+        {
+          id: 'system-0',
+          startTime: 5,
+          endTime: 9,
+          text: 'Synthetic remote statement',
+          speaker: 'Them',
+        },
+      ],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0, endTime: 4 },
+        { speaker: 'Them', startTime: 5, endTime: 9 },
+      ],
+      canonicalMode: 'checkpointed',
+      checkpointEvidenceVerified: true,
+      transcribe,
+      probeDuration,
+    });
+
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(probeDuration).not.toHaveBeenCalled();
+    expect(result.status).toBe('validated');
+    expect(result.segments).toHaveLength(2);
+  });
+
   it('always transcribes mic, mix, and system sources', async () => {
     const transcribe = vi.fn(async (path: string) => ({
       segments: path.includes('mix')

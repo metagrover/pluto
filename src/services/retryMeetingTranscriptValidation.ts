@@ -301,14 +301,30 @@ export const retryMeetingTranscriptValidation = async (
   const usesV2Trust = priorIntegrity.schemaVersion === 2;
   const recovery = usesV2Trust
     ? (priorIntegrity.recovery as
-        | { source?: unknown; gapDetected?: unknown }
+        | {
+            source?: unknown;
+            gapDetected?: unknown;
+            journalSchemaVersion?: unknown;
+            checkpointEvidenceVerified?: unknown;
+          }
         | undefined)
     : undefined;
   if (recovery?.gapDetected === true) {
     return { status: 'needs_attention' };
   }
-  const canonicalMode =
-    recovery?.source === 'capture_journal'
+  const checkpointEvidenceProvenance = priorIntegrity.evidenceProvenance as
+    | { kind?: unknown }
+    | undefined;
+  const checkpointEvidenceVerified =
+    recovery?.source === 'capture_journal' &&
+    recovery.journalSchemaVersion === 3 &&
+    recovery.checkpointEvidenceVerified === true &&
+    recovery.gapDetected === false &&
+    provisionalSegments.length > 0 &&
+    checkpointEvidenceProvenance?.kind === 'sealed_capture_activity_v2';
+  const canonicalMode = checkpointEvidenceVerified
+    ? ('checkpointed' as const)
+    : recovery?.source === 'capture_journal'
       ? ('recovered_channels' as const)
       : ('full_mix' as const);
   const claimed = await invoke(
@@ -370,6 +386,7 @@ export const retryMeetingTranscriptValidation = async (
         provisionalSegments,
         activityWindows: activityEvidence.windows,
         canonicalMode,
+        checkpointEvidenceVerified,
         transcribe: async (audioPath, options) =>
           (await invoke('WHISPER_TRANSCRIBE', audioPath, options)) as {
             segments?: Array<{ start: number; end: number; text: string }>;
@@ -540,7 +557,10 @@ export const retryMeetingTranscriptValidation = async (
       buildTranscriptJsonPayload(validation.segments, {
         pipelineMode: 'canonical_session_v2',
         canonicalSource:
-          canonicalMode === 'recovered_channels' ? 'recovered_channels' : 'mix',
+          canonicalMode === 'recovered_channels' ||
+          canonicalMode === 'checkpointed'
+            ? 'recovered_channels'
+            : 'mix',
         postHydrationBleedPass: false,
         liveTranscriptResponsiveness:
           readLiveTranscriptResponsiveness(current.transcript_json) ??
@@ -578,6 +598,25 @@ export const retryMeetingTranscriptValidation = async (
           candidate.transcript_status === 'validated' &&
           parseSegments(candidate.transcript_json).length > 0,
         saveReplacement: async (candidate) => {
+          if (
+            canonicalMode === 'checkpointed' &&
+            current.capture_journal_generation
+          ) {
+            const outcome = await invoke('FINALIZE_CHECKPOINT_TRANSCRIPT', {
+              meetingId,
+              journalGeneration: current.capture_journal_generation,
+              expectedTranscriptStatus: 'validating',
+              expectedValidationRunId: runId,
+              canonicalTranscriptJson: candidate.transcript_json,
+              transcriptIntegrityJson: candidate.transcript_integrity_json,
+              transcriptValidatedAt: validatedAt,
+              downstreamRunId,
+            });
+            return (
+              outcome === 'committed_and_claimed' ||
+              outcome === 'already_committed'
+            );
+          }
           return invoke('SAVE_MEETING', candidate, {
             expectedValidationRunId: runId,
             transcriptOwnedFieldsOnly: true,

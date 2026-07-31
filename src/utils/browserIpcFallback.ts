@@ -228,6 +228,7 @@ const createInvokeFallback =
       case 'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE':
       case 'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND':
       case 'AUDIO_CAPTURE_JOURNAL_ACCEPTANCE_APPEND':
+      case 'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT':
       case 'AUDIO_CAPTURE_JOURNAL_STOP': {
         const request = args[0] as { meetingId?: unknown } | undefined;
         const journal =

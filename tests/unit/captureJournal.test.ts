@@ -23,11 +23,13 @@ import {
   persistCaptureJournalRawChunk,
   readCaptureJournalManifest,
   readCaptureJournalSidecar,
+  replaceCaptureTranscriptCheckpoint,
   sealCaptureJournal,
   stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
+import { canonicalizeTranscriptCheckpointConfig } from '../../src/utils/transcriptCheckpointConfig';
 
 describe('capture journal', () => {
   const tempRoots: string[] = [];
@@ -205,7 +207,6 @@ describe('capture journal', () => {
       rawChecksumSha256: rawDisposition.rawChecksumSha256,
       repairData: Buffer.from('wav'),
     });
-    const configKey = createHash('sha256').update('config').digest('hex');
     const sidecar = {
       schemaVersion: 1 as const,
       meetingId: created.meetingId,
@@ -227,6 +228,19 @@ describe('capture journal', () => {
       backendResult: { detectedLanguage: 'en', providerLabel: 'local' },
       segments: [],
     };
+    const configKey = createHash('sha256')
+      .update(
+        canonicalizeTranscriptCheckpointConfig(sidecar.transcriptionConfig),
+      )
+      .digest('hex');
+    await expect(
+      appendCaptureTranscriptCheckpoint(root, {
+        receipt: completed.receipt,
+        expectedManifestRevision: completed.manifest.revision + 1,
+        transcriptionConfigKey: configKey,
+        sidecar,
+      }),
+    ).rejects.toThrow(/revision conflict/i);
     const checkpoint = await appendCaptureTranscriptCheckpoint(root, {
       receipt: completed.receipt,
       expectedManifestRevision: completed.manifest.revision,
@@ -241,7 +255,10 @@ describe('capture journal', () => {
     );
     expect(JSON.parse(checkpointBytes.toString())).toEqual(sidecar);
 
-    const digest = createHash('sha256').update('activity').digest('hex');
+    const activityInputs = { chunkStartSec: 0, chunkEndSec: 5 };
+    const digest = createHash('sha256')
+      .update(JSON.stringify(activityInputs))
+      .digest('hex');
     const frame = await appendCaptureTranscriptAcceptanceFrame(root, {
       meetingId: created.meetingId,
       generation: created.generation,
@@ -251,9 +268,157 @@ describe('capture journal', () => {
         checkpoint.checkpoint.transcriptChecksumSha256,
       systemCheckpointChecksumSha256: null,
       activityEvidenceDigestSha256: digest,
-      sidecar: { schemaVersion: 1, sequence: 0, acceptedSegments: [] },
+      sidecar: {
+        schemaVersion: 1,
+        meetingId: created.meetingId,
+        sequence: 0,
+        arbitrationVersion: 'chunk_arbitration_v1',
+        activityInputs,
+        segments: [],
+      },
     });
     expect(frame.manifest.acceptanceFrames).toEqual([frame.frame]);
+    const stopping = await stopCaptureJournal(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: frame.manifest.revision,
+    });
+    const replacement = await replaceCaptureTranscriptCheckpoint(root, {
+      receipt: completed.receipt,
+      expectedManifestRevision: stopping.revision,
+      expectedPriorTranscriptChecksumSha256:
+        checkpoint.checkpoint.transcriptChecksumSha256,
+      transcriptionConfigKey: configKey,
+      sidecar: {
+        ...sidecar,
+        segments: [{ start: 0.1, end: 0.2, text: 'synthetic repair' }],
+      },
+    });
+    expect(replacement.checkpoint).toMatchObject({
+      revision: 1,
+      repairAttempted: true,
+    });
+  });
+
+  it('rejects acceptance frames that are not linked to the current checkpoints or interval', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-invalid-acceptance';
+    const created = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    if (created.schemaVersion !== 3) throw new Error('expected v3');
+    const authorized = await authorizeCaptureJournalInterval(root, {
+      meetingId,
+      generation: created.generation,
+      expectedRevision: created.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+    });
+    const raw = await persistCaptureJournalRawChunk(root, {
+      meetingId,
+      generation: created.generation,
+      expectedRevision: authorized.revision,
+      source: 'mic',
+      sequence: 0,
+      format: 'wav',
+      data: Buffer.from('raw'),
+    });
+    const rawDisposition = raw.intervals[0].sources.mic;
+    if (rawDisposition.disposition !== 'raw_durable') throw new Error();
+    const completed = await completeCaptureJournalCapturedChunk(root, {
+      meetingId,
+      generation: created.generation,
+      expectedRevision: raw.revision,
+      source: 'mic',
+      sequence: 0,
+      rawChecksumSha256: rawDisposition.rawChecksumSha256,
+      repairData: Buffer.from('wav'),
+    });
+    const { receipt } = completed;
+    const checkpointConfig = {
+      backend: 'whisperx',
+      preset: 'balanced',
+      model: 'small',
+      device: 'cpu',
+      computeType: 'int8',
+      languageMode: 'detected' as const,
+      requestedLanguage: null,
+      pipelineVersion: 'live_chunk_v1' as const,
+    };
+    const checkpoint = await appendCaptureTranscriptCheckpoint(root, {
+      receipt,
+      expectedManifestRevision: completed.manifest.revision,
+      transcriptionConfigKey: createHash('sha256')
+        .update(canonicalizeTranscriptCheckpointConfig(checkpointConfig))
+        .digest('hex'),
+      sidecar: {
+        schemaVersion: 1,
+        meetingId,
+        source: 'mic',
+        sequence: 0,
+        chunkChecksumSha256: receipt.checksumSha256,
+        chunkStartSec: 0,
+        chunkEndSec: 5,
+        transcriptionConfig: checkpointConfig,
+        backendResult: { detectedLanguage: 'en', providerLabel: 'local' },
+        segments: [],
+      },
+    });
+    const activityInputs = { chunkStartSec: 0, chunkEndSec: 5 };
+    const activityEvidenceDigestSha256 = createHash('sha256')
+      .update(JSON.stringify(activityInputs))
+      .digest('hex');
+
+    await expect(
+      appendCaptureTranscriptAcceptanceFrame(root, {
+        meetingId,
+        generation: checkpoint.manifest.generation,
+        expectedRevision: checkpoint.manifest.revision,
+        sequence: receipt.sequence,
+        micCheckpointChecksumSha256: 'b'.repeat(64),
+        systemCheckpointChecksumSha256: null,
+        activityEvidenceDigestSha256,
+        sidecar: {
+          schemaVersion: 1,
+          meetingId,
+          sequence: receipt.sequence,
+          arbitrationVersion: 'chunk_arbitration_v1',
+          activityInputs,
+          segments: [],
+        },
+      }),
+    ).rejects.toThrow('checkpoint');
+
+    await expect(
+      appendCaptureTranscriptAcceptanceFrame(root, {
+        meetingId,
+        generation: checkpoint.manifest.generation,
+        expectedRevision: checkpoint.manifest.revision,
+        sequence: receipt.sequence,
+        micCheckpointChecksumSha256:
+          checkpoint.checkpoint.transcriptChecksumSha256,
+        systemCheckpointChecksumSha256: null,
+        activityEvidenceDigestSha256,
+        sidecar: {
+          schemaVersion: 1,
+          meetingId,
+          sequence: receipt.sequence,
+          arbitrationVersion: 'chunk_arbitration_v1',
+          activityInputs,
+          segments: [
+            {
+              source: 'mic',
+              start: receipt.chunkEndSec + 1,
+              end: receipt.chunkEndSec + 2,
+              text: 'outside interval',
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow('segment');
   });
 
   it('resolves pending tuples at stopping and removes all artifacts on deletion', async () => {

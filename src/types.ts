@@ -158,4 +158,5 @@ export interface Meeting {
     | 'capture_journal_write_failed'
     | null;
   downstream_processing_json?: string | null;
+  capture_journal_generation?: string | null;
 }

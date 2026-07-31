@@ -13,6 +13,7 @@ import {
   type CaptureActivityEvidence,
   parseCaptureActivityEvidence,
 } from '../src/utils/transcriptActivityEvidence.ts';
+import { canonicalizeTranscriptCheckpointConfig } from '../src/utils/transcriptCheckpointConfig.ts';
 
 export type CaptureJournalSource = 'mic' | 'system';
 export type CaptureJournalLifecycleState = 'recording' | 'sealed';
@@ -102,6 +103,7 @@ export type CaptureTranscriptCheckpointRef = {
   transcriptionConfigKey: string;
   transcriptChecksumSha256: string;
   revision: number;
+  repairAttempted?: boolean;
   disposition:
     | 'transcribed'
     | 'verified_silence'
@@ -119,6 +121,7 @@ export type CaptureTranscriptAcceptanceFrame = {
   activityEvidenceDigestSha256: string;
   acceptedChecksumSha256: string;
   relativePath: string;
+  revision?: number;
 };
 
 export type CaptureJournalManifestV3 = CaptureJournalManifestBase & {
@@ -242,12 +245,33 @@ export type AppendCaptureTranscriptCheckpointArgs = {
   disposition?: CaptureTranscriptCheckpointRef['disposition'];
 };
 
+export type ReplaceCaptureTranscriptCheckpointArgs =
+  AppendCaptureTranscriptCheckpointArgs & {
+    expectedPriorTranscriptChecksumSha256: string;
+  };
+
 export type AppendCaptureTranscriptAcceptanceFrameArgs = V3MutationIdentity & {
   sequence: number;
   micCheckpointChecksumSha256: string | null;
   systemCheckpointChecksumSha256: string | null;
   activityEvidenceDigestSha256: string;
-  sidecar: unknown;
+  sidecar: CaptureTranscriptAcceptanceFrameV1;
+  expectedPriorAcceptedChecksumSha256?: string;
+};
+
+export type CaptureTranscriptAcceptanceFrameV1 = {
+  schemaVersion: 1;
+  meetingId: string;
+  sequence: number;
+  arbitrationVersion: 'chunk_arbitration_v1';
+  activityInputs: unknown;
+  segments: Array<{
+    source: CaptureJournalSource;
+    start: number;
+    end: number;
+    text: string;
+    words?: Array<{ word: string; start: number; end: number }>;
+  }>;
 };
 
 export type CaptureJournalDurability = {
@@ -991,12 +1015,29 @@ export const appendCaptureTranscriptCheckpoint = async (
     ) {
       throw new Error('Capture journal generation mismatch');
     }
+    if (
+      args.expectedManifestRevision > current.revision ||
+      args.expectedManifestRevision < args.receipt.manifestRevision
+    ) {
+      throw new Error('Capture journal revision conflict');
+    }
     if (current.lifecycleState === 'sealed') {
       throw new Error('Capture journal is already sealed');
     }
     const manifest = current;
     validateTranscriptCheckpointSidecar(args.sidecar, args.receipt);
     assertChecksum(args.transcriptionConfigKey, 'config key');
+    if (
+      computeChecksum(
+        Buffer.from(
+          canonicalizeTranscriptCheckpointConfig(
+            args.sidecar.transcriptionConfig,
+          ),
+        ),
+      ) !== args.transcriptionConfigKey
+    ) {
+      throw new Error('Transcript checkpoint configuration mismatch');
+    }
     const interval = manifest.intervals.find(
       (candidate) => candidate.sequence === args.receipt.sequence,
     );
@@ -1050,6 +1091,89 @@ export const appendCaptureTranscriptCheckpoint = async (
     return { manifest: next, checkpoint };
   });
 
+export const replaceCaptureTranscriptCheckpoint = async (
+  rootDir: string,
+  args: ReplaceCaptureTranscriptCheckpointArgs,
+  durability: CaptureJournalDurability = defaultDurability,
+): Promise<{
+  manifest: CaptureJournalManifestV3;
+  checkpoint: CaptureTranscriptCheckpointRef;
+}> =>
+  serializeJournalMutation(rootDir, args.receipt.meetingId, async () => {
+    const manifest = await readCaptureJournalManifest(
+      rootDir,
+      args.receipt.meetingId,
+    );
+    if (
+      manifest.schemaVersion !== 3 ||
+      manifest.generation !== args.receipt.generation ||
+      manifest.lifecycleState === 'sealed'
+    ) {
+      throw new Error('Capture journal checkpoint replacement superseded');
+    }
+    if (manifest.revision !== args.expectedManifestRevision) {
+      throw new Error('Capture journal revision conflict');
+    }
+    const index = manifest.transcriptCheckpoints.findIndex(
+      (checkpoint) =>
+        checkpoint.source === args.receipt.source &&
+        checkpoint.sequence === args.receipt.sequence,
+    );
+    const prior = manifest.transcriptCheckpoints[index];
+    if (
+      !prior ||
+      prior.transcriptChecksumSha256 !==
+        args.expectedPriorTranscriptChecksumSha256 ||
+      prior.repairAttempted
+    ) {
+      throw new Error('Transcript checkpoint replacement conflict');
+    }
+    validateTranscriptCheckpointSidecar(args.sidecar, args.receipt);
+    const configKey = computeChecksum(
+      Buffer.from(
+        canonicalizeTranscriptCheckpointConfig(
+          args.sidecar.transcriptionConfig,
+        ),
+      ),
+    );
+    if (configKey !== args.transcriptionConfigKey) {
+      throw new Error('Transcript checkpoint configuration mismatch');
+    }
+    const interval = manifest.intervals.find(
+      (candidate) => candidate.sequence === args.receipt.sequence,
+    );
+    const captured = interval?.sources[args.receipt.source];
+    if (
+      captured?.disposition !== 'captured' ||
+      captured.repairChecksumSha256 !== args.receipt.checksumSha256
+    ) {
+      throw new Error('Transcript checkpoint audio receipt is stale');
+    }
+    const revision = prior.revision + 1;
+    const relativePath = `${manifest.artifactRootRelativePath}/transcript-checkpoints/${args.receipt.source}-${padSequence(args.receipt.sequence)}-r${revision}.json`;
+    const sidecarBytes = Buffer.from(JSON.stringify(args.sidecar));
+    const transcriptChecksumSha256 = computeChecksum(sidecarBytes);
+    await writeSidecar(rootDir, relativePath, args.sidecar, durability);
+    const checkpoint: CaptureTranscriptCheckpointRef = {
+      ...prior,
+      transcriptionConfigKey: args.transcriptionConfigKey,
+      transcriptChecksumSha256,
+      revision,
+      repairAttempted: true,
+      disposition: args.disposition ?? 'transcribed',
+      relativePath,
+    };
+    const transcriptCheckpoints = [...manifest.transcriptCheckpoints];
+    transcriptCheckpoints[index] = checkpoint;
+    const next: CaptureJournalManifestV3 = {
+      ...manifest,
+      revision: manifest.revision + 1,
+      transcriptCheckpoints,
+    };
+    await writeManifest(rootDir, next, durability);
+    return { manifest: next, checkpoint };
+  });
+
 export const appendCaptureTranscriptAcceptanceFrame = async (
   rootDir: string,
   args: AppendCaptureTranscriptAcceptanceFrameArgs,
@@ -1067,18 +1191,99 @@ export const appendCaptureTranscriptAcceptanceFrame = async (
       args.activityEvidenceDigestSha256,
       'activity evidence checksum',
     );
-    const relativePath = `${manifest.artifactRootRelativePath}/acceptance-frames/${padSequence(args.sequence)}.json`;
-    const checksumSha256 = computeChecksum(
-      Buffer.from(JSON.stringify(args.sidecar)),
+    const interval = manifest.intervals.find(
+      (candidate) => candidate.sequence === args.sequence,
     );
+    if (!interval) throw new Error('Transcript acceptance interval missing');
+    if (
+      args.sidecar.schemaVersion !== 1 ||
+      args.sidecar.meetingId !== manifest.meetingId ||
+      args.sidecar.sequence !== args.sequence ||
+      args.sidecar.arbitrationVersion !== 'chunk_arbitration_v1' ||
+      !Array.isArray(args.sidecar.segments)
+    ) {
+      throw new Error('Invalid transcript acceptance frame');
+    }
+    if (
+      computeChecksum(
+        Buffer.from(JSON.stringify(args.sidecar.activityInputs)),
+      ) !== args.activityEvidenceDigestSha256
+    ) {
+      throw new Error('Transcript acceptance activity evidence mismatch');
+    }
+    for (const source of ['mic', 'system'] as const) {
+      const supplied =
+        source === 'mic'
+          ? args.micCheckpointChecksumSha256
+          : args.systemCheckpointChecksumSha256;
+      const sourceDisposition = interval.sources[source].disposition;
+      if (supplied === null) {
+        if (sourceDisposition === 'captured') {
+          throw new Error('Transcript acceptance checkpoint missing');
+        }
+        continue;
+      }
+      if (sourceDisposition !== 'captured') {
+        throw new Error('Unexpected transcript acceptance checkpoint');
+      }
+      assertChecksum(supplied, 'acceptance checkpoint checksum');
+      const linked = manifest.transcriptCheckpoints.some(
+        (checkpoint) =>
+          checkpoint.source === source &&
+          checkpoint.sequence === args.sequence &&
+          checkpoint.transcriptChecksumSha256 === supplied,
+      );
+      if (!linked) {
+        throw new Error('Transcript acceptance checkpoint mismatch');
+      }
+    }
+    for (const segment of args.sidecar.segments) {
+      if (
+        (segment.source !== 'mic' && segment.source !== 'system') ||
+        !Number.isFinite(segment.start) ||
+        !Number.isFinite(segment.end) ||
+        segment.start < interval.chunkStartSec ||
+        segment.end <= segment.start ||
+        segment.end > interval.chunkEndSec + 0.25 ||
+        typeof segment.text !== 'string' ||
+        !segment.text.trim()
+      ) {
+        throw new Error('Invalid transcript acceptance segment');
+      }
+      for (const word of segment.words ?? []) {
+        if (
+          typeof word.word !== 'string' ||
+          !word.word.trim() ||
+          !Number.isFinite(word.start) ||
+          !Number.isFinite(word.end) ||
+          word.start < segment.start ||
+          word.end <= word.start ||
+          word.end > segment.end
+        ) {
+          throw new Error('Invalid transcript acceptance segment word');
+        }
+      }
+    }
     const existing = manifest.acceptanceFrames.find(
       (frame) => frame.sequence === args.sequence,
+    );
+    const replacementRevision = existing ? (existing.revision ?? 0) + 1 : 0;
+    const relativePath = `${manifest.artifactRootRelativePath}/acceptance-frames/${padSequence(args.sequence)}${replacementRevision > 0 ? `-r${replacementRevision}` : ''}.json`;
+    const checksumSha256 = computeChecksum(
+      Buffer.from(JSON.stringify(args.sidecar)),
     );
     if (existing) {
       if (existing.acceptedChecksumSha256 === checksumSha256) {
         return { manifest, frame: existing };
       }
-      throw new Error('Transcript acceptance frame conflict');
+      if (
+        manifest.lifecycleState !== 'stopping' ||
+        existing.acceptedChecksumSha256 !==
+          args.expectedPriorAcceptedChecksumSha256 ||
+        (existing.revision ?? 0) > 0
+      ) {
+        throw new Error('Transcript acceptance frame conflict');
+      }
     }
     await writeSidecar(rootDir, relativePath, args.sidecar, durability);
     const frame: CaptureTranscriptAcceptanceFrame = {
@@ -1089,11 +1294,17 @@ export const appendCaptureTranscriptAcceptanceFrame = async (
       activityEvidenceDigestSha256: args.activityEvidenceDigestSha256,
       acceptedChecksumSha256: checksumSha256,
       relativePath,
+      revision: replacementRevision,
     };
+    const acceptanceFrames = existing
+      ? manifest.acceptanceFrames.map((candidate) =>
+          candidate.sequence === frame.sequence ? frame : candidate,
+        )
+      : [...manifest.acceptanceFrames, frame];
     const next: CaptureJournalManifestV3 = {
       ...manifest,
       revision: manifest.revision + 1,
-      acceptanceFrames: [...manifest.acceptanceFrames, frame],
+      acceptanceFrames,
     };
     await writeManifest(rootDir, next, durability);
     return { manifest: next, frame };

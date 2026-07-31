@@ -54,6 +54,8 @@ export type TranscriptTrustEnvelopeV2 = {
   };
   recovery?: {
     source: 'capture_journal';
+    journalSchemaVersion?: 1 | 2 | 3;
+    checkpointEvidenceVerified?: boolean;
     gapDetected: boolean;
     sourceScope: 'mic' | 'system' | 'multiple' | 'unknown';
     acknowledgedChunkCount: number;
@@ -157,6 +159,7 @@ export type MeetingDownstreamProcessingV1 = {
   schemaVersion: 1;
   state: 'not_started' | 'processing' | 'complete' | 'failed';
   transcriptValidatedAt: string;
+  validationRunId?: string | null;
   runId?: string;
   stage?: 'analysis' | 'value_signals' | 'knowledge_extraction' | 'final_save';
   failure?: 'generation_failed' | 'save_failed' | 'interrupted';
@@ -276,13 +279,17 @@ const validRecovery = (
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const recovery = value as Record<string, unknown>;
   return (
-    exactKeys(recovery, [
-      'source',
-      'gapDetected',
-      'sourceScope',
-      'acknowledgedChunkCount',
-      'recoveredChunkCount',
-    ]) &&
+    exactKeys(
+      recovery,
+      [
+        'source',
+        'gapDetected',
+        'sourceScope',
+        'acknowledgedChunkCount',
+        'recoveredChunkCount',
+      ],
+      ['journalSchemaVersion', 'checkpointEvidenceVerified'],
+    ) &&
     recovery.source === 'capture_journal' &&
     typeof recovery.gapDetected === 'boolean' &&
     ['mic', 'system', 'multiple', 'unknown'].includes(
@@ -293,7 +300,11 @@ const validRecovery = (
     Number.isInteger(recovery.recoveredChunkCount) &&
     Number(recovery.recoveredChunkCount) >= 0 &&
     Number(recovery.recoveredChunkCount) <=
-      Number(recovery.acknowledgedChunkCount)
+      Number(recovery.acknowledgedChunkCount) &&
+    (recovery.journalSchemaVersion === undefined ||
+      [1, 2, 3].includes(Number(recovery.journalSchemaVersion))) &&
+    (recovery.checkpointEvidenceVerified === undefined ||
+      typeof recovery.checkpointEvidenceVerified === 'boolean')
   );
 };
 

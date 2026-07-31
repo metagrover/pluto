@@ -30,6 +30,7 @@ import {
   type LiveTranscriptResponsivenessSummary,
   createLiveTranscriptResponsivenessRuntime,
 } from '../utils/liveTranscriptResponsiveness';
+import { isGrantedStatus } from '../utils/permissions';
 import {
   beginRecordingFinalization,
   buildMeetingTiming,
@@ -65,6 +66,7 @@ import {
   shouldUseSystemAudioReconstructionFallback,
 } from '../utils/systemAudioReconstruction';
 import type { CaptureActivityEvidence } from '../utils/transcriptActivityEvidence';
+import { canonicalizeTranscriptCheckpointConfig } from '../utils/transcriptCheckpointConfig';
 import { evaluateLiveTranscriptCoverage } from '../utils/transcriptIntegrity';
 import {
   type CanonicalTranscriptSource,
@@ -73,6 +75,7 @@ import {
   type TranscriptTranscriptionMeta,
   buildTranscriptJsonPayload,
   buildTranscriptSpeakerAttribution,
+  withTranscriptLifecycleStatus,
 } from '../utils/transcriptSchema';
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
@@ -150,6 +153,33 @@ interface PendingMicChunk {
   chunkStartSec: number;
   chunkEndSec: number;
 }
+
+type JournalManifestState = {
+  schemaVersion: 3;
+  generation: string;
+  revision: number;
+};
+
+type JournalAudioReceipt = {
+  meetingId: string;
+  generation: string;
+  manifestRevision: number;
+  source: 'mic' | 'system';
+  sequence: number;
+  checksumSha256: string;
+  chunkStartSec: number;
+  chunkEndSec: number;
+  repairAudioRelativePath: string | null;
+};
+
+type JournalRawChunkState = {
+  checksumSha256: string;
+  format: MicChunkFormat;
+};
+
+type JournalCheckpointState = {
+  transcriptChecksumSha256: string;
+};
 
 interface InternalSignalTag {
   tag: string;
@@ -527,6 +557,16 @@ export const AudioManager = ({
   const isProcessingRef = useRef(false);
   const stopInFlightRef = useRef(false);
   const currentMeetingIdRef = useRef<string | null>(null);
+  const captureJournalStateRef = useRef<JournalManifestState | null>(null);
+  const captureJournalRawChunksRef = useRef(
+    new Map<string, JournalRawChunkState>(),
+  );
+  const captureJournalReceiptsRef = useRef(
+    new Map<string, JournalAudioReceipt>(),
+  );
+  const captureJournalCheckpointsRef = useRef(
+    new Map<string, JournalCheckpointState>(),
+  );
 
   // Keep state refs in sync
   useEffect(() => {
@@ -555,6 +595,29 @@ export const AudioManager = ({
   // --- Native Capture Logic ---
   // Functions defined below, event listeners set up after
 
+  const journalTupleKey = (source: 'mic' | 'system', sequence: number) =>
+    `${source}:${sequence}`;
+
+  const sha256Hex = async (value: string) => {
+    const digest = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(value),
+    );
+    return Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  };
+
+  const refreshCaptureJournalState = async (meetingId: string) => {
+    const manifest = (await window.ipcRenderer.invoke(
+      'AUDIO_CAPTURE_JOURNAL_READ',
+      { meetingId },
+    )) as JournalManifestState;
+    if (manifest?.schemaVersion !== 3) return null;
+    captureJournalStateRef.current = manifest;
+    return manifest;
+  };
+
   const appendCaptureJournalBlob = async ({
     meetingId,
     source,
@@ -569,19 +632,411 @@ export const AudioManager = ({
     sequence: number;
     chunkStartSec: number;
     chunkEndSec: number;
-    format: string;
+    format: MicChunkFormat;
     blob: Blob;
-  }) => {
+  }): Promise<JournalAudioReceipt | null> => {
+    const state =
+      captureJournalStateRef.current ??
+      (await refreshCaptureJournalState(meetingId));
+    if (!state) return null;
+    if (source === 'mic') {
+      const current = await refreshCaptureJournalState(meetingId);
+      if (!current) return null;
+      const authorized = (await window.ipcRenderer.invoke(
+        'AUDIO_CAPTURE_JOURNAL_INTERVAL_AUTHORIZE',
+        {
+          meetingId,
+          generation: current.generation,
+          expectedRevision: current.revision,
+          sequence,
+          chunkStartSec,
+          chunkEndSec,
+        },
+      )) as JournalManifestState;
+      captureJournalStateRef.current = authorized;
+    }
     const data = await blob.arrayBuffer();
-    await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_APPEND', {
+    const journalData =
+      source === 'mic' &&
+      format === 'webm' &&
+      sequence > 0 &&
+      micWebmInitSegmentRef.current
+        ? prependWebmInitSegment(micWebmInitSegmentRef.current, data)
+        : data;
+    const current = await refreshCaptureJournalState(meetingId);
+    if (!current) return null;
+    const rawManifest = (await window.ipcRenderer.invoke(
+      'AUDIO_CAPTURE_JOURNAL_RAW_APPEND',
+      {
+        meetingId,
+        generation: current.generation,
+        expectedRevision: current.revision,
+        source,
+        sequence,
+        format,
+        data: journalData,
+      },
+    )) as JournalManifestState & {
+      intervals?: Array<{
+        sequence: number;
+        sources: Record<
+          'mic' | 'system',
+          { disposition: string; rawChecksumSha256?: string }
+        >;
+      }>;
+    };
+    captureJournalStateRef.current = rawManifest;
+    const rawChecksumSha256 = rawManifest.intervals?.find(
+      (interval) => interval.sequence === sequence,
+    )?.sources[source]?.rawChecksumSha256;
+    if (!rawChecksumSha256) return null;
+    captureJournalRawChunksRef.current.set(journalTupleKey(source, sequence), {
+      checksumSha256: rawChecksumSha256,
+      format,
+    });
+    if (format !== 'wav') return null;
+    const complete = (await window.ipcRenderer.invoke(
+      'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
+      {
+        meetingId,
+        generation: rawManifest.generation,
+        expectedRevision: rawManifest.revision,
+        source,
+        sequence,
+        rawChecksumSha256,
+        repairData: data,
+      },
+    )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
+    captureJournalStateRef.current = complete.manifest;
+    captureJournalReceiptsRef.current.set(
+      journalTupleKey(source, sequence),
+      complete.receipt,
+    );
+    return complete.receipt;
+  };
+
+  const completeCaptureJournalChunkFromPath = async ({
+    meetingId,
+    source,
+    sequence,
+    repairPath,
+  }: {
+    meetingId: string;
+    source: 'mic' | 'system';
+    sequence: number;
+    repairPath: string;
+  }) => {
+    const tuple = journalTupleKey(source, sequence);
+    const existing = captureJournalReceiptsRef.current.get(tuple);
+    if (existing) return existing;
+    const raw = captureJournalRawChunksRef.current.get(tuple);
+    const current = await refreshCaptureJournalState(meetingId);
+    if (!raw || !current) return null;
+    const complete = (await window.ipcRenderer.invoke(
+      'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
+      {
+        meetingId,
+        generation: current.generation,
+        expectedRevision: current.revision,
+        source,
+        sequence,
+        rawChecksumSha256: raw.checksumSha256,
+        repairPath,
+      },
+    )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
+    captureJournalStateRef.current = complete.manifest;
+    captureJournalReceiptsRef.current.set(tuple, complete.receipt);
+    return complete.receipt;
+  };
+
+  const buildTranscriptCheckpointConfig = () => {
+    const resolved = resolveTranscriptionSettings(transcriptionSettings);
+    const language = resolveTranscriptionLanguage(resolved.language);
+    return {
+      backend: resolved.backend,
+      computeType: resolvedChunkComputeType,
+      device: resolved.device,
+      languageMode: language ? ('fixed' as const) : ('detected' as const),
+      requestedLanguage: language?.toLowerCase() || null,
+      model: resolvedChunkModel,
+      pipelineVersion: 'live_chunk_v1' as const,
+      preset: resolved.preset,
+    };
+  };
+
+  const persistTranscriptCheckpoint = async ({
+    meetingId,
+    source,
+    sequence,
+    segments,
+    backendResult,
+    disposition = 'transcribed',
+  }: {
+    meetingId: string;
+    source: 'mic' | 'system';
+    sequence: number;
+    segments: TranscriptionSegment[];
+    backendResult?: { language?: string; meta?: Record<string, unknown> };
+    disposition?:
+      | 'transcribed'
+      | 'verified_silence'
+      | 'conversion_failed'
+      | 'transcription_failed'
+      | 'cancelled';
+  }) => {
+    const tuple = journalTupleKey(source, sequence);
+    const receipt = captureJournalReceiptsRef.current.get(tuple);
+    if (!receipt) return null;
+    const config = buildTranscriptCheckpointConfig();
+    const configKey = await sha256Hex(
+      canonicalizeTranscriptCheckpointConfig(config),
+    );
+    const sidecar = {
+      schemaVersion: 1 as const,
       meetingId,
-      source,
+      source: source,
       sequence,
+      chunkChecksumSha256: receipt.checksumSha256,
+      chunkStartSec: receipt.chunkStartSec,
+      chunkEndSec: receipt.chunkEndSec,
+      transcriptionConfig: config,
+      backendResult: {
+        detectedLanguage:
+          typeof backendResult?.language === 'string'
+            ? backendResult.language.toLowerCase()
+            : null,
+        providerLabel:
+          typeof backendResult?.meta?.providerLabel === 'string'
+            ? backendResult.meta.providerLabel
+            : 'local',
+      },
+      segments: segments.map((segment) => ({
+        start: Math.max(0, segment.startTime - receipt.chunkStartSec),
+        end: Math.max(0, segment.endTime - receipt.chunkStartSec),
+        text: segment.text,
+        ...(segment.words
+          ? {
+              words: segment.words.map((word) => ({
+                word: word.word,
+                start: Math.max(0, word.start - receipt.chunkStartSec),
+                end: Math.max(0, word.end - receipt.chunkStartSec),
+              })),
+            }
+          : {}),
+      })),
+    };
+    const current = await refreshCaptureJournalState(meetingId);
+    if (!current) return null;
+    const saved = (await window.ipcRenderer.invoke(
+      'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND',
+      {
+        receipt,
+        expectedManifestRevision: current.revision,
+        transcriptionConfigKey: configKey,
+        sidecar,
+        disposition,
+      },
+    )) as {
+      manifest: JournalManifestState;
+      checkpoint: JournalCheckpointState;
+    };
+    captureJournalStateRef.current = saved.manifest;
+    captureJournalCheckpointsRef.current.set(tuple, saved.checkpoint);
+    return saved.checkpoint;
+  };
+
+  const persistTranscriptAcceptanceFrame = async ({
+    meetingId,
+    sequence,
+    chunkStartSec,
+    chunkEndSec,
+    micSegments,
+    systemSegments,
+    micMeanRms,
+    systemMeanRms,
+    systemExpected,
+  }: {
+    meetingId: string;
+    sequence: number;
+    chunkStartSec: number;
+    chunkEndSec: number;
+    micSegments: TranscriptionSegment[];
+    systemSegments: TranscriptionSegment[];
+    micMeanRms: number | null;
+    systemMeanRms: number | null;
+    systemExpected: boolean;
+  }) => {
+    const micCheckpoint = captureJournalCheckpointsRef.current.get(
+      journalTupleKey('mic', sequence),
+    );
+    const systemCheckpoint = captureJournalCheckpointsRef.current.get(
+      journalTupleKey('system', sequence),
+    );
+    if (!micCheckpoint || (systemExpected && !systemCheckpoint)) return null;
+    const activityInputs = {
       chunkStartSec,
       chunkEndSec,
-      format,
-      data,
-    });
+      micMeanRms: micMeanRms ?? 0,
+      systemMeanRms: systemMeanRms ?? 0,
+      micActivitySeconds: getSpeakerActivityCoverage(
+        chunkStartSec,
+        chunkEndSec,
+        'Me',
+      ),
+      systemActivitySeconds: getSpeakerActivityCoverage(
+        chunkStartSec,
+        chunkEndSec,
+        'Them',
+      ),
+      evidence: {
+        clock: {
+          kind: 'meeting_relative_seconds',
+          origin: 'recording_start',
+        },
+        thresholds: {
+          rms: TRANSCRIPTION_TUNING.speaking.rmsThreshold,
+          dominanceRatio: TRANSCRIPTION_TUNING.speaking.ratio,
+          minimumSwitchIntervalMs: TRANSCRIPTION_TUNING.speaking.minIntervalMs,
+        },
+        algorithmVersion: 'speaker_activity_v1',
+        serializationVersion: 1,
+        windows:
+          captureActivitySessionRef.current
+            ?.windows()
+            .filter(
+              (window) =>
+                window.endTime > chunkStartSec &&
+                window.startTime < chunkEndSec,
+            ) ?? [],
+      },
+    };
+    const activityEvidenceDigestSha256 = await sha256Hex(
+      JSON.stringify(activityInputs),
+    );
+    const sidecar = {
+      schemaVersion: 1,
+      meetingId,
+      sequence,
+      arbitrationVersion: 'chunk_arbitration_v1',
+      activityInputs,
+      segments: [
+        ...micSegments.map((segment) => ({
+          source: 'mic',
+          start: segment.startTime + chunkStartSec,
+          end: segment.endTime + chunkStartSec,
+          text: segment.text,
+          words: segment.words,
+        })),
+        ...systemSegments.map((segment) => ({
+          source: 'system',
+          start: segment.startTime + chunkStartSec,
+          end: segment.endTime + chunkStartSec,
+          text: segment.text,
+          words: segment.words,
+        })),
+      ],
+    };
+    const current = await refreshCaptureJournalState(meetingId);
+    if (!current) return null;
+    const saved = (await window.ipcRenderer.invoke(
+      'AUDIO_CAPTURE_JOURNAL_ACCEPTANCE_APPEND',
+      {
+        meetingId,
+        generation: current.generation,
+        expectedRevision: current.revision,
+        sequence,
+        micCheckpointChecksumSha256:
+          micCheckpoint?.transcriptChecksumSha256 ?? null,
+        systemCheckpointChecksumSha256:
+          systemCheckpoint?.transcriptChecksumSha256 ?? null,
+        activityEvidenceDigestSha256,
+        sidecar,
+      },
+    )) as { manifest: JournalManifestState };
+    captureJournalStateRef.current = saved.manifest;
+    return saved;
+  };
+
+  const hasCompleteCaptureJournalCheckpoints = async (meetingId: string) => {
+    const manifest = (await window.ipcRenderer.invoke(
+      'AUDIO_CAPTURE_JOURNAL_READ',
+      { meetingId },
+    )) as {
+      schemaVersion?: number;
+      lifecycleState?: string;
+      generation?: string;
+      revision?: number;
+      intervals?: Array<{
+        sequence: number;
+        sources: Record<'mic' | 'system', { disposition: string }>;
+      }>;
+      transcriptCheckpoints?: Array<{
+        source: 'mic' | 'system';
+        sequence: number;
+        disposition: string;
+      }>;
+      acceptanceFrames?: Array<{ sequence: number }>;
+    };
+    if (
+      manifest.schemaVersion !== 3 ||
+      manifest.lifecycleState !== 'sealed' ||
+      !Array.isArray(manifest.intervals) ||
+      !Array.isArray(manifest.transcriptCheckpoints) ||
+      !Array.isArray(manifest.acceptanceFrames)
+    ) {
+      return false;
+    }
+    const checkpoints = new Set(
+      manifest.transcriptCheckpoints
+        .filter(
+          (checkpoint) =>
+            checkpoint.disposition === 'transcribed' ||
+            checkpoint.disposition === 'verified_silence',
+        )
+        .map((checkpoint) =>
+          journalTupleKey(checkpoint.source, checkpoint.sequence),
+        ),
+    );
+    const acceptanceSequences = new Set(
+      manifest.acceptanceFrames.map((frame) => frame.sequence),
+    );
+    const structurallyComplete = manifest.intervals.every(
+      (interval) =>
+        acceptanceSequences.has(interval.sequence) &&
+        (['mic', 'system'] as const).every((source) => {
+          const disposition = interval.sources[source]?.disposition;
+          if (
+            disposition === 'verified_silence' ||
+            disposition === 'source_unavailable'
+          ) {
+            return true;
+          }
+          return (
+            disposition === 'captured' &&
+            checkpoints.has(journalTupleKey(source, interval.sequence))
+          );
+        }),
+    );
+    if (!structurallyComplete) return false;
+    try {
+      const verified = (await window.ipcRenderer.invoke(
+        'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
+        {
+          meetingId,
+          expectedConfigKey: await sha256Hex(
+            canonicalizeTranscriptCheckpointConfig(
+              buildTranscriptCheckpointConfig(),
+            ),
+          ),
+        },
+      )) as { generation?: string; revision?: number };
+      return (
+        verified.generation === manifest.generation &&
+        verified.revision === manifest.revision
+      );
+    } catch {
+      return false;
+    }
   };
 
   const startSession = async () => {
@@ -639,10 +1094,23 @@ export const AudioManager = ({
         `[Pluto] Starting session ${meetingId} (Robust Mic First)...`,
       );
       try {
-        await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_START', {
-          meetingId,
-          startedAtMs: startTimeRef.current,
-        });
+        const manifest = (await window.ipcRenderer.invoke(
+          'AUDIO_CAPTURE_JOURNAL_START',
+          {
+            meetingId,
+            startedAtMs: startTimeRef.current,
+            sourceAvailability: {
+              system: isGrantedStatus(systemAudioStatus)
+                ? 'available'
+                : 'unavailable_at_start',
+            },
+          },
+        )) as JournalManifestState;
+        captureJournalStateRef.current =
+          manifest?.schemaVersion === 3 ? manifest : null;
+        captureJournalRawChunksRef.current.clear();
+        captureJournalReceiptsRef.current.clear();
+        captureJournalCheckpointsRef.current.clear();
       } catch (journalErr) {
         console.warn(
           '[Pluto] Failed to initialize capture journal:',
@@ -2654,7 +3122,12 @@ export const AudioManager = ({
       label: 'Me' | 'Them',
       blob?: Blob,
       format: 'webm' | 'ogg' | 'wav' = 'webm',
-    ) => {
+    ): Promise<{
+      segments: TranscriptionSegment[];
+      rms: RmsData | null;
+      conversionFailed: boolean;
+      audioPath?: string | null;
+    }> => {
       if (label === 'Me' && disableMicChunkTranscriptionRef.current) {
         return {
           segments: [],
@@ -2687,6 +3160,7 @@ export const AudioManager = ({
           e instanceof Error ? e.message : e,
         );
       }
+      let skipTranscription = false;
       if (label === 'Me') {
         const streamMeanRms = meanRms(rms);
         if (streamMeanRms !== null && streamMeanRms < MIC_TRANSCRIBE_MIN_RMS) {
@@ -2695,12 +3169,13 @@ export const AudioManager = ({
               `[Pluto] Skipping low-energy Me chunk #${opts.chunkIndex}: rms=${streamMeanRms.toFixed(5)}`,
             );
           }
-          return { segments: [], rms, conversionFailed: false };
+          skipTranscription = true;
         }
 
         if (
-          speakerTimelineRef.current.length > 0 ||
-          activeSpeakerWindowRef.current
+          !skipTranscription &&
+          (speakerTimelineRef.current.length > 0 ||
+            activeSpeakerWindowRef.current)
         ) {
           const coverageSeconds = getSpeakerActivityCoverage(
             chunkStartSec,
@@ -2719,7 +3194,7 @@ export const AudioManager = ({
                   `coverage=${coverageSeconds.toFixed(2)}s ratio=${coverageRatio.toFixed(2)}`,
               );
             }
-            return { segments: [], rms, conversionFailed: false };
+            skipTranscription = true;
           }
         }
       }
@@ -2734,7 +3209,7 @@ export const AudioManager = ({
               `[Pluto] Skipping low-energy Them chunk #${opts.chunkIndex}: rms=${streamMeanRms.toFixed(5)}`,
             );
           }
-          return { segments: [], rms, conversionFailed: false };
+          skipTranscription = true;
         }
       }
 
@@ -2860,6 +3335,14 @@ export const AudioManager = ({
         }
         return { segments: [], rms, conversionFailed: true };
       }
+      if (skipTranscription) {
+        return {
+          segments: [],
+          rms,
+          conversionFailed: false,
+          audioPath: wavPath,
+        };
+      }
 
       const chunkDurationSec = Math.max(0.01, chunkEndSec - chunkStartSec);
       const mapSegments = (
@@ -2925,7 +3408,12 @@ export const AudioManager = ({
               console.log(
                 `[Pluto] ${label} chunk #${opts.chunkIndex} flush slices=${attemptedSlices}, segments=${sliceSegments.length}`,
               );
-              return { segments: sliceSegments, rms, conversionFailed: false };
+              return {
+                segments: sliceSegments,
+                rms,
+                conversionFailed: false,
+                audioPath: wavPath,
+              };
             }
           }
         }
@@ -2949,6 +3437,7 @@ export const AudioManager = ({
       processStream('Me', opts.micBlob, opts.micFormat),
       processStream('Them', opts.systemBlob, 'wav'),
     ]);
+    const checkpointMeetingId = currentMeetingIdRef.current;
     const micActivitySeconds = getSpeakerActivityCoverage(
       chunkStartSec,
       chunkEndSec,
@@ -2972,6 +3461,44 @@ export const AudioManager = ({
         retryCount: (opts.retryCount || 0) + 1,
       });
       return;
+    }
+    if (checkpointMeetingId) {
+      if (micResult.audioPath) {
+        await completeCaptureJournalChunkFromPath({
+          meetingId: checkpointMeetingId,
+          source: 'mic',
+          sequence: opts.chunkIndex,
+          repairPath: micResult.audioPath,
+        });
+      }
+      if (systemResult.audioPath) {
+        await completeCaptureJournalChunkFromPath({
+          meetingId: checkpointMeetingId,
+          source: 'system',
+          sequence: opts.chunkIndex,
+          repairPath: systemResult.audioPath,
+        });
+      }
+      await persistTranscriptCheckpoint({
+        meetingId: checkpointMeetingId,
+        source: 'mic',
+        sequence: opts.chunkIndex,
+        segments: micResult.segments,
+        disposition: micResult.conversionFailed
+          ? 'conversion_failed'
+          : 'transcribed',
+      });
+      if (opts.systemBlob) {
+        await persistTranscriptCheckpoint({
+          meetingId: checkpointMeetingId,
+          source: 'system',
+          sequence: opts.chunkIndex,
+          segments: systemResult.segments,
+          disposition: systemResult.conversionFailed
+            ? 'conversion_failed'
+            : 'transcribed',
+        });
+      }
     }
     if (systemResult.audioPath) {
       savedSystemChunkAudioRef.current.set(opts.chunkIndex, {
@@ -3213,6 +3740,20 @@ export const AudioManager = ({
       }
     } else {
       zeroMicChunkStreakRef.current = 0;
+    }
+
+    if (checkpointMeetingId) {
+      await persistTranscriptAcceptanceFrame({
+        meetingId: checkpointMeetingId,
+        sequence: opts.chunkIndex,
+        chunkStartSec,
+        chunkEndSec,
+        micSegments: filteredMicSegments,
+        systemSegments: filteredSystemSegments,
+        micMeanRms: micMean,
+        systemMeanRms: systemMean,
+        systemExpected: Boolean(opts.systemBlob),
+      });
     }
 
     // Channel-first strategy: keep per-channel attribution from chunk processing.
@@ -3508,12 +4049,48 @@ export const AudioManager = ({
       isRecordingRef.current = false;
       setIsRecording(false);
 
+      await captureActivitySessionRef.current?.drain();
+      for (const [
+        chunkIndex,
+        micPending,
+      ] of pendingMicChunksRef.current.entries()) {
+        const sysB = pendingSystemChunksRef.current.get(chunkIndex);
+        enqueueBackgroundJob(() =>
+          transcribeChunkPair({
+            micBlob: micPending.blob,
+            micFormat: micPending.format,
+            systemBlob: sysB,
+            chunkIndex,
+            chunkStartSec: micPending.chunkStartSec,
+            chunkEndSec: micPending.chunkEndSec,
+          }),
+        );
+      }
+      pendingMicChunksRef.current.clear();
+      pendingSystemChunksRef.current.clear();
+      zeroMicChunkStreakRef.current = 0;
+      await processingQueueRef.current;
+
       const journalSealOutcome = await sealCaptureJournalBeforeFinalization({
         drainAppends: async () =>
           await captureActivitySessionRef.current?.drain(),
         hasWriteFailure: () =>
           captureActivitySessionRef.current?.hasDurabilityFailure() ?? true,
         seal: async () => {
+          const current = await refreshCaptureJournalState(
+            stopSnapshot.meetingId,
+          );
+          if (current) {
+            const stopping = (await window.ipcRenderer.invoke(
+              'AUDIO_CAPTURE_JOURNAL_STOP',
+              {
+                meetingId: stopSnapshot.meetingId,
+                generation: current.generation,
+                expectedRevision: current.revision,
+              },
+            )) as JournalManifestState;
+            captureJournalStateRef.current = stopping;
+          }
           return await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_SEAL', {
             meetingId: stopSnapshot.meetingId,
             endedAtMs: stopSnapshot.recordingEndedAtMs,
@@ -3544,6 +4121,8 @@ export const AudioManager = ({
           await window.ipcRenderer.invoke('SAVE_MEETING', {
             ...degradedMeeting,
             participants,
+            capture_journal_generation:
+              captureJournalStateRef.current?.generation ?? null,
             transcript_json: JSON.stringify(
               buildTranscriptJsonPayload([], {
                 canonicalSource: 'mic',
@@ -3565,29 +4144,6 @@ export const AudioManager = ({
         journalSealOutcome.activityEvidence,
       );
 
-      // Process final chunks only after the journal is durably sealed.
-      for (const [
-        chunkIndex,
-        micPending,
-      ] of pendingMicChunksRef.current.entries()) {
-        const sysB = pendingSystemChunksRef.current.get(chunkIndex);
-        enqueueBackgroundJob(() =>
-          transcribeChunkPair({
-            micBlob: micPending.blob,
-            micFormat: micPending.format,
-            systemBlob: sysB,
-            chunkIndex,
-            chunkStartSec: micPending.chunkStartSec,
-            chunkEndSec: micPending.chunkEndSec,
-          }),
-        );
-      }
-      pendingMicChunksRef.current.clear();
-      pendingSystemChunksRef.current.clear();
-      zeroMicChunkStreakRef.current = 0;
-
-      // Wait for queue
-      await processingQueueRef.current;
       if (!currentMeetingIdRef.current) return; // Session aborted or never started
 
       // Store a single full audio file for playback
@@ -4631,6 +5187,8 @@ export const AudioManager = ({
       }
 
       const meetingTiming = buildMeetingTiming(stopSnapshot);
+      const checkpointEvidenceVerified =
+        await hasCompleteCaptureJournalCheckpoints(stopSnapshot.meetingId);
       const integrityValidation = await sealedActivityHandoff.runValidation(
         async (activityWindows) =>
           await runRecordingTranscriptValidation({
@@ -4641,6 +5199,10 @@ export const AudioManager = ({
             systemAudioPath,
             provisionalSegments: newTranscription,
             activityWindows,
+            canonicalMode: checkpointEvidenceVerified
+              ? 'checkpointed'
+              : 'full_mix',
+            checkpointEvidenceVerified,
             transcribe: async (audioPath, options) =>
               await window.ipcRenderer.invoke(
                 'WHISPER_TRANSCRIBE',
@@ -4703,6 +5265,8 @@ export const AudioManager = ({
           analysis_json: null,
           value_signals_json: null,
           participants,
+          capture_journal_generation:
+            captureJournalStateRef.current?.generation ?? null,
           folder_id: null,
           is_favorite: false,
           end_reason: endReason || 'manual',
@@ -4762,6 +5326,8 @@ export const AudioManager = ({
             runId: downstreamRunId,
             stage: 'analysis',
           }),
+          capture_journal_generation:
+            captureJournalStateRef.current?.generation ?? null,
         },
         segments: newTranscription,
         transcriptMetadata: {
@@ -4845,13 +5411,60 @@ export const AudioManager = ({
       let transcriptWithLatency = '';
       const { patchOutcome: metricPatchOutcome, downstream: rawArtifacts } =
         await persistTranscriptThenRunLatencyPatchAndDownstream({
-          persistTranscript: async () =>
-            await sealedActivityHandoff.persistMeeting(
+          persistTranscript: async () => {
+            if (
+              checkpointEvidenceVerified &&
+              attributionPersistenceRecord.capture_journal_generation
+            ) {
+              const validatingIntegrity = {
+                ...attributionIntegrity,
+                state: 'validating',
+                validationProof: undefined,
+              };
+              const inserted = await sealedActivityHandoff.persistMeeting(
+                {
+                  ...attributionPersistenceRecord,
+                  transcript_status: 'validating',
+                  transcript_validated_at: null,
+                  transcript_json: withTranscriptLifecycleStatus(
+                    attributionPersistenceRecord.transcript_json,
+                    'validating',
+                  ),
+                  downstream_processing_json: null,
+                },
+                validatingIntegrity,
+                async (meeting) =>
+                  await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
+              );
+              if (inserted === false) return false;
+              const outcome = await window.ipcRenderer.invoke(
+                'FINALIZE_CHECKPOINT_TRANSCRIPT',
+                {
+                  meetingId: attributionPersistenceRecord.id,
+                  journalGeneration:
+                    attributionPersistenceRecord.capture_journal_generation,
+                  expectedTranscriptStatus: 'validating',
+                  expectedValidationRunId: null,
+                  canonicalTranscriptJson:
+                    attributionPersistenceRecord.transcript_json,
+                  transcriptIntegrityJson: attributionIntegrityJson,
+                  transcriptValidatedAt:
+                    attributionPersistenceRecord.transcript_validated_at,
+                  downstreamRunId,
+                },
+              );
+              return (
+                outcome === 'committed_and_claimed' ||
+                outcome === 'already_committed'
+              );
+            }
+            return await sealedActivityHandoff.persistMeeting(
               attributionPersistenceRecord,
               attributionIntegrity,
               async (meeting) =>
                 await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
-            ),
+            );
+          },
           patchLatency: async () => {
             stopToValidatedLatency =
               stopToValidatedLatencyRef.current.completeValidatedSave(

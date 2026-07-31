@@ -2,7 +2,7 @@
 
 **Issue:** #442  
 **Depends on:** #445, #556  
-**Status:** Owner-approved direction; awaiting independent written-spec review
+**Status:** Owner-approved and independently reviewed; implementation in progress
 
 ## Outcome
 

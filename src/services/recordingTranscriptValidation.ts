@@ -170,10 +170,73 @@ export const runRecordingTranscriptValidation = async (input: {
   systemAudioPath: string;
   provisionalSegments: AttributionSegment[];
   activityWindows: SpeakerActivityWindow[];
-  canonicalMode?: 'full_mix' | 'recovered_channels';
+  canonicalMode?: 'full_mix' | 'recovered_channels' | 'checkpointed';
+  checkpointEvidenceVerified?: boolean;
   transcribe: RecordingTranscribe;
   probeDuration: (audioPath: string) => Promise<number | null>;
 }): Promise<RecordingTranscriptValidationResult> => {
+  if (input.canonicalMode === 'checkpointed') {
+    const micActivitySeconds = activitySeconds(input.activityWindows, 'Me');
+    const systemActivitySeconds = activitySeconds(
+      input.activityWindows,
+      'Them',
+    );
+    const localTranscriptCoveredSeconds = coveredActivitySeconds(
+      input.activityWindows,
+      input.provisionalSegments,
+      'Me',
+    );
+    const remoteTranscriptCoveredSeconds = coveredActivitySeconds(
+      input.activityWindows,
+      input.provisionalSegments,
+      'Them',
+    );
+    const validation = validateTranscriptIntegrity({
+      recordingDurationSeconds: input.recordingDurationSeconds,
+      micAudioDurationSeconds: input.recordingDurationSeconds,
+      systemAudioDurationSeconds: input.recordingDurationSeconds,
+      micActivitySeconds,
+      systemActivitySeconds,
+      localTranscriptCoveredSeconds,
+      remoteTranscriptCoveredSeconds,
+      unresolvedAmbiguousSeconds: 0,
+      requiredSourcesSucceeded: input.checkpointEvidenceVerified === true,
+    });
+    return {
+      status: validation.status,
+      reasons: validation.reasons,
+      segments: [...input.provisionalSegments].sort(
+        (left, right) => left.startTime - right.startTime,
+      ),
+      evidence: {
+        micActivitySeconds,
+        systemActivitySeconds,
+        localTranscriptCoveredSeconds,
+        remoteTranscriptCoveredSeconds,
+        unexplainedMicSeconds: Math.max(
+          0,
+          micActivitySeconds - localTranscriptCoveredSeconds,
+        ),
+        unexplainedSystemSeconds: Math.max(
+          0,
+          systemActivitySeconds - remoteTranscriptCoveredSeconds,
+        ),
+        collapsedPassThroughSeconds: 0,
+        unresolvedAmbiguousSeconds: 0,
+      },
+      attempts: { mic: 0, mix: 0, system: 0 },
+      transcriptionMeta: {},
+      sourceSegmentCounts: {
+        mic: input.provisionalSegments.filter(
+          (segment) => segment.speaker === 'Me',
+        ).length,
+        mix: 0,
+        system: input.provisionalSegments.filter(
+          (segment) => segment.speaker === 'Them',
+        ).length,
+      },
+    };
+  }
   const [mic, mix, system, micDuration, mixDuration, systemDuration] =
     await Promise.all([
       transcribeWithRetry(

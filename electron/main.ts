@@ -31,7 +31,10 @@ import {
   stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from './captureJournal';
-import { recoverInterruptedCaptureJournals } from './captureJournalRecovery';
+import {
+  recoverInterruptedCaptureJournals,
+  verifySealedCaptureJournalTranscriptEvidence,
+} from './captureJournalRecovery';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import {
   canReuseRunningCaptureForProbe,
@@ -132,6 +135,10 @@ app.on('activate', () => {
   }
 });
 
+import {
+  type TranscriptionSettings,
+  resolveTranscriptionSettings,
+} from '../src/utils/transcriptionSettings';
 // Module imports
 import * as db from './db';
 import {
@@ -486,6 +493,16 @@ app.whenReady().then(async () => {
       await readCaptureJournalManifest(
         getMeetingArtifactsRootDir(),
         String(meetingId || ''),
+      ),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
+    async (_event, { meetingId, expectedConfigKey } = {}) =>
+      await verifySealedCaptureJournalTranscriptEvidence(
+        getMeetingArtifactsRootDir(),
+        String(meetingId || ''),
+        typeof expectedConfigKey === 'string' ? expectedConfigKey : undefined,
       ),
   );
 
@@ -1320,6 +1337,9 @@ app.whenReady().then(async () => {
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
     (_event, meetingId, runId, stage) =>
       db.updateMeetingTranscriptValidationRetryStage(meetingId, runId, stage),
+  );
+  ipcMain.handle('FINALIZE_CHECKPOINT_TRANSCRIPT', (_event, input) =>
+    db.finalizeCheckpointTranscript(input),
   );
   ipcMain.handle('PATCH_STOP_TO_VALIDATED_LATENCY', (_event, input) =>
     runConditionalMeetingUpdateForIpc(() =>
@@ -2340,6 +2360,14 @@ app.whenReady().then(async () => {
   }
 
   try {
+    const recoveryTranscriptionSettings = resolveTranscriptionSettings({
+      backend: db.getSetting('transcription_backend'),
+      preset: db.getSetting('transcription_preset'),
+      model: db.getSetting('whisper_model'),
+      device: db.getSetting('whisper_device'),
+      computeType: db.getSetting('whisper_compute_type'),
+      language: db.getSetting('whisper_language'),
+    } as TranscriptionSettings);
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),
       {
@@ -2348,6 +2376,73 @@ app.whenReady().then(async () => {
         saveMeeting: (meeting) => db.saveMeeting(meeting),
         stitchWavSegments: async (segments, outputTag) =>
           await stitchWavSegments({ segments, outputTag }),
+        repairRawChunk: async (inputPath) => {
+          const outputPath = path.join(
+            app.getPath('temp'),
+            `capture-repair-${randomUUID()}.wav`,
+          );
+          const converted = await new Promise<boolean>((resolve) => {
+            ffmpeg(inputPath)
+              .audioChannels(1)
+              .audioFrequency(16000)
+              .toFormat('wav')
+              .on('end', () => resolve(true))
+              .on('error', () => resolve(false))
+              .save(outputPath);
+          });
+          if (!converted || !fs.existsSync(outputPath)) {
+            if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+            return null;
+          }
+          try {
+            return fs.readFileSync(outputPath);
+          } finally {
+            fs.unlinkSync(outputPath);
+          }
+        },
+        transcribeChunk: async (inputPath, config) => {
+          const options = {
+            backend: config.backend,
+            preset: config.preset,
+            model: config.model,
+            device: config.device,
+            computeType: config.computeType,
+            language:
+              config.languageMode === 'fixed'
+                ? (config.requestedLanguage ?? undefined)
+                : undefined,
+            diarize: false,
+          } as Parameters<typeof transcribeWithBackend>[1];
+          const result = await transcribeWithBackend(inputPath, options);
+          return {
+            detectedLanguage: result.language ?? null,
+            providerLabel:
+              typeof result.meta?.providerLabel === 'string'
+                ? result.meta.providerLabel
+                : 'local',
+            segments: Array.isArray(result.segments)
+              ? result.segments.map((segment) => ({
+                  start: segment.start,
+                  end: segment.end,
+                  text: segment.text,
+                  ...(segment.words ? { words: segment.words } : {}),
+                }))
+              : [],
+          };
+        },
+        transcriptionConfig: {
+          backend: recoveryTranscriptionSettings.backend,
+          preset: recoveryTranscriptionSettings.preset,
+          model: recoveryTranscriptionSettings.model,
+          device: recoveryTranscriptionSettings.device,
+          computeType: recoveryTranscriptionSettings.computeType,
+          languageMode: recoveryTranscriptionSettings.language
+            ? 'fixed'
+            : 'detected',
+          requestedLanguage:
+            recoveryTranscriptionSettings.language?.toLowerCase() || null,
+          pipelineVersion: 'live_chunk_v1',
+        },
       },
     );
     if (

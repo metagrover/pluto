@@ -120,6 +120,7 @@ export interface PersistedMeeting {
     | 'capture_journal_write_failed'
     | null;
   downstream_processing_json?: string | null;
+  capture_journal_generation?: string | null;
   created_at?: string | null;
 }
 
@@ -205,6 +206,7 @@ const initDb = () => {
         finalization_status TEXT NOT NULL DEFAULT 'finalized',
         finalization_error_category TEXT,
         downstream_processing_json TEXT,
+        capture_journal_generation TEXT,
         folder_id TEXT,
         is_favorite BOOLEAN DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -585,6 +587,14 @@ const initDb = () => {
         'ALTER TABLE meetings ADD COLUMN downstream_processing_json TEXT',
       );
       console.log('[DB] Added meetings.downstream_processing_json column');
+    }
+    if (
+      !meetingColumns.some((col) => col.name === 'capture_journal_generation')
+    ) {
+      db.exec(
+        'ALTER TABLE meetings ADD COLUMN capture_journal_generation TEXT',
+      );
+      console.log('[DB] Added meetings.capture_journal_generation column');
     }
   } catch (e) {
     console.warn('[DB] Optional column migration failed:', e);
@@ -1509,6 +1519,7 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
     meeting.finalization_status || 'finalized',
     meeting.finalization_error_category || null,
     meeting.downstream_processing_json || null,
+    meeting.capture_journal_generation || null,
     meeting.created_at,
   );
 
@@ -1526,6 +1537,85 @@ export type ConditionalMeetingUpdateOutcome =
   | 'already_current'
   | 'conflict'
   | 'missing';
+
+export type FinalizeCheckpointTranscriptOutcome =
+  | 'committed_and_claimed'
+  | 'already_committed'
+  | 'superseded';
+
+export type FinalizeCheckpointTranscriptInput = {
+  meetingId: string | number;
+  journalGeneration: string;
+  expectedTranscriptStatus: TranscriptLifecycleStatus;
+  expectedValidationRunId: string | null;
+  canonicalTranscriptJson: string;
+  transcriptIntegrityJson: string;
+  transcriptValidatedAt: string;
+  downstreamRunId: string;
+};
+
+export const finalizeCheckpointTranscript = (
+  input: FinalizeCheckpointTranscriptInput,
+): FinalizeCheckpointTranscriptOutcome =>
+  db.transaction(() => {
+    const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+    if (!current) return 'superseded';
+
+    const downstreamProcessingJson = JSON.stringify({
+      schemaVersion: 1,
+      state: 'processing',
+      transcriptValidatedAt: input.transcriptValidatedAt,
+      runId: input.downstreamRunId,
+      stage: 'analysis',
+    });
+    const alreadyCommitted =
+      current.capture_journal_generation === input.journalGeneration &&
+      current.transcript_status === 'validated' &&
+      current.transcript_json === input.canonicalTranscriptJson &&
+      current.transcript_integrity_json === input.transcriptIntegrityJson &&
+      current.transcript_validated_at === input.transcriptValidatedAt &&
+      current.downstream_processing_json === downstreamProcessingJson;
+    if (alreadyCommitted) return 'already_committed';
+
+    const integrity = parseIntegrityRecord(current.transcript_integrity_json);
+    const currentValidationRunId = readRetryLease(integrity)?.runId ?? null;
+    if (
+      current.capture_journal_generation !== input.journalGeneration ||
+      current.transcript_status !== input.expectedTranscriptStatus ||
+      currentValidationRunId !== input.expectedValidationRunId ||
+      current.transcript_validated_at !== null
+    ) {
+      return 'superseded';
+    }
+
+    const updated = db
+      .prepare(
+        `UPDATE meetings
+         SET transcript_json = ?,
+             transcript_integrity_json = ?,
+             transcript_validated_at = ?,
+             transcript_status = 'validated',
+             finalization_status = 'finalized',
+             finalization_error_category = NULL,
+             downstream_processing_json = ?
+         WHERE id = ?
+           AND capture_journal_generation = ?
+           AND transcript_status = ?
+           AND transcript_validated_at IS NULL
+           AND transcript_integrity_json IS ?`,
+      )
+      .run(
+        input.canonicalTranscriptJson,
+        input.transcriptIntegrityJson,
+        input.transcriptValidatedAt,
+        downstreamProcessingJson,
+        String(input.meetingId),
+        input.journalGeneration,
+        input.expectedTranscriptStatus,
+        current.transcript_integrity_json,
+      ).changes;
+    return updated === 1 ? 'committed_and_claimed' : 'superseded';
+  })();
 
 export const patchStopToValidatedLatency = (input: {
   meetingId: string | number;
