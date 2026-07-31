@@ -9,6 +9,10 @@ import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
 type IpcRendererLike = Window['ipcRenderer'];
 type BrowserCaptureJournal = {
   activityEvidence?: unknown;
+  schemaVersion: 3;
+  generation: string;
+  revision: number;
+  supported: false;
 };
 
 const now = new Date().toISOString();
@@ -198,9 +202,44 @@ const createInvokeFallback =
       case 'AUDIO_CAPTURE_JOURNAL_START': {
         const request = args[0] as { meetingId?: unknown } | undefined;
         if (typeof request?.meetingId === 'string') {
-          captureJournals.set(request.meetingId, {});
+          const journal: BrowserCaptureJournal = {
+            schemaVersion: 3,
+            generation: `browser-preview-${request.meetingId}`,
+            revision: 0,
+            supported: false,
+          };
+          captureJournals.set(request.meetingId, journal);
+          result = journal;
+        } else {
+          result = null;
         }
-        result = null;
+        break;
+      }
+      case 'AUDIO_CAPTURE_JOURNAL_READ': {
+        const request = args[0] as { meetingId?: unknown } | undefined;
+        result =
+          typeof request?.meetingId === 'string'
+            ? (captureJournals.get(request.meetingId) ?? null)
+            : null;
+        break;
+      }
+      case 'AUDIO_CAPTURE_JOURNAL_INTERVAL_AUTHORIZE':
+      case 'AUDIO_CAPTURE_JOURNAL_RAW_APPEND':
+      case 'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE':
+      case 'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND':
+      case 'AUDIO_CAPTURE_JOURNAL_ACCEPTANCE_APPEND':
+      case 'AUDIO_CAPTURE_JOURNAL_STOP': {
+        const request = args[0] as { meetingId?: unknown } | undefined;
+        const journal =
+          typeof request?.meetingId === 'string'
+            ? captureJournals.get(request.meetingId)
+            : undefined;
+        result = journal
+          ? {
+              ...journal,
+              reason: 'electron_capture_journal_required',
+            }
+          : null;
         break;
       }
       case 'AUDIO_CAPTURE_JOURNAL_ACTIVITY_UPDATE': {
@@ -211,7 +250,9 @@ const createInvokeFallback =
           typeof request?.meetingId === 'string' &&
           captureJournals.has(request.meetingId)
         ) {
+          const journal = captureJournals.get(request.meetingId)!;
           captureJournals.set(request.meetingId, {
+            ...journal,
             activityEvidence: request.activityEvidence,
           });
         }
@@ -225,7 +266,7 @@ const createInvokeFallback =
         const journal = meetingId ? captureJournals.get(meetingId) : undefined;
         if (meetingId) captureJournals.delete(meetingId);
         result = journal?.activityEvidence
-          ? { activityEvidence: journal.activityEvidence }
+          ? { ...journal, activityEvidence: journal.activityEvidence }
           : null;
         break;
       }

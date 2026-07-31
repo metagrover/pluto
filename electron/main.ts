@@ -19,8 +19,16 @@ import ffmpeg from 'fluent-ffmpeg';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   appendCaptureJournalChunk,
+  appendCaptureTranscriptAcceptanceFrame,
+  appendCaptureTranscriptCheckpoint,
+  authorizeCaptureJournalInterval,
+  completeCaptureJournalCapturedChunk,
   createCaptureJournal,
+  deleteCaptureJournal,
+  persistCaptureJournalRawChunk,
+  readCaptureJournalManifest,
   sealCaptureJournal,
+  stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from './captureJournal';
 import { recoverInterruptedCaptureJournals } from './captureJournalRecovery';
@@ -458,12 +466,76 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_START',
-    async (_event, { meetingId, startedAtMs } = {}) => {
+    async (
+      _event,
+      { meetingId, startedAtMs, expectedSources, sourceAvailability } = {},
+    ) => {
       return await createCaptureJournal(getMeetingArtifactsRootDir(), {
         meetingId: String(meetingId || ''),
         startedAtMs: typeof startedAtMs === 'number' ? startedAtMs : Date.now(),
+        schemaVersion: 3,
+        expectedSources,
+        sourceAvailability,
       });
     },
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_READ',
+    async (_event, { meetingId } = {}) =>
+      await readCaptureJournalManifest(
+        getMeetingArtifactsRootDir(),
+        String(meetingId || ''),
+      ),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_INTERVAL_AUTHORIZE',
+    async (_event, request = {}) =>
+      await authorizeCaptureJournalInterval(getMeetingArtifactsRootDir(), {
+        ...request,
+        meetingId: String(request.meetingId || ''),
+      }),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_RAW_APPEND',
+    async (_event, request = {}) =>
+      await persistCaptureJournalRawChunk(getMeetingArtifactsRootDir(), {
+        ...request,
+        meetingId: String(request.meetingId || ''),
+        data: Buffer.from(request.data ?? []),
+      }),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
+    async (_event, request = {}) =>
+      await completeCaptureJournalCapturedChunk(getMeetingArtifactsRootDir(), {
+        ...request,
+        meetingId: String(request.meetingId || ''),
+        ...(request.repairData
+          ? { repairData: Buffer.from(request.repairData) }
+          : {}),
+      }),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND',
+    async (_event, request = {}) =>
+      await appendCaptureTranscriptCheckpoint(
+        getMeetingArtifactsRootDir(),
+        request,
+      ),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_ACCEPTANCE_APPEND',
+    async (_event, request = {}) =>
+      await appendCaptureTranscriptAcceptanceFrame(
+        getMeetingArtifactsRootDir(),
+        request,
+      ),
   );
 
   ipcMain.handle(
@@ -501,6 +573,15 @@ app.whenReady().then(async () => {
         { meetingId, activityEvidence },
       );
     },
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_STOP',
+    async (_event, request = {}) =>
+      await stopCaptureJournal(getMeetingArtifactsRootDir(), {
+        ...request,
+        meetingId: String(request.meetingId || ''),
+      }),
   );
 
   ipcMain.handle(
@@ -1344,7 +1425,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_ANALYSIS_QUALITY_STATS', () =>
     db.getAnalysisQualityStats(),
   );
-  ipcMain.handle('DELETE_MEETING', (_event, id) => {
+  ipcMain.handle('DELETE_MEETING', async (_event, id) => {
     try {
       const meetingId = String(id);
 
@@ -1352,6 +1433,11 @@ app.whenReady().then(async () => {
       abortMeetingTasks(meetingId);
 
       const result = db.deleteMeeting(id);
+      await deleteCaptureJournal(getMeetingArtifactsRootDir(), meetingId).catch(
+        (error) => {
+          console.warn('[Pluto] Failed to delete capture journal:', error);
+        },
+      );
 
       // Broadcast to renderer that a meeting has been deleted
       if (win && !win.isDestroyed()) {

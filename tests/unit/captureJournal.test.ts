@@ -11,11 +11,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createHash } from 'node:crypto';
 import {
   appendCaptureJournalChunk,
+  appendCaptureTranscriptAcceptanceFrame,
+  appendCaptureTranscriptCheckpoint,
+  authorizeCaptureJournalInterval,
+  completeCaptureJournalCapturedChunk,
   createCaptureJournal,
+  deleteCaptureJournal,
+  persistCaptureJournalRawChunk,
   readCaptureJournalManifest,
+  readCaptureJournalSidecar,
   sealCaptureJournal,
+  stopCaptureJournal,
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
@@ -74,9 +83,10 @@ describe('capture journal', () => {
     const manifest = await createCaptureJournal(root, {
       meetingId: 'meeting-123',
       startedAtMs: 1_000,
+      schemaVersion: 3,
     });
 
-    expect(manifest.schemaVersion).toBe(2);
+    expect(manifest.schemaVersion).toBe(3);
     expect(manifest.meetingId).toBe('meeting-123');
     expect(manifest.lifecycleState).toBe('recording');
     expect(manifest.entries).toEqual([]);
@@ -84,6 +94,201 @@ describe('capture journal', () => {
       'meeting-123/capture-journal',
     );
     expect(manifest.activityEvidence).toBeUndefined();
+    expect(manifest).toMatchObject({
+      revision: 0,
+      expectedSources: ['mic', 'system'],
+      intervals: [],
+      transcriptCheckpoints: [],
+      acceptanceFrames: [],
+    });
+    expect('generation' in manifest ? manifest.generation : '').toMatch(
+      /^[0-9a-f-]{16,}$/,
+    );
+  });
+
+  it('enforces the v3 interval CAS and raw_durable to captured transition', async () => {
+    const root = await makeRoot();
+    const created = await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    if (created.schemaVersion !== 3) throw new Error('expected v3');
+    const authorized = await authorizeCaptureJournalInterval(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: created.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+    });
+    expect(authorized.intervals[0].sources).toEqual({
+      mic: { disposition: 'pending' },
+      system: { disposition: 'pending' },
+    });
+    await expect(
+      authorizeCaptureJournalInterval(root, {
+        meetingId: created.meetingId,
+        generation: created.generation,
+        expectedRevision: created.revision,
+        sequence: 1,
+        chunkStartSec: 5,
+        chunkEndSec: 10,
+      }),
+    ).rejects.toThrow(/revision conflict/i);
+
+    const raw = await persistCaptureJournalRawChunk(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: authorized.revision,
+      source: 'mic',
+      sequence: 0,
+      format: 'webm',
+      data: Buffer.from('raw-webm'),
+    });
+    expect(raw.intervals[0].sources.mic.disposition).toBe('raw_durable');
+    const rawDisposition = raw.intervals[0].sources.mic;
+    if (rawDisposition.disposition !== 'raw_durable') throw new Error();
+    const completed = await completeCaptureJournalCapturedChunk(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: raw.revision,
+      source: 'mic',
+      sequence: 0,
+      rawChecksumSha256: rawDisposition.rawChecksumSha256,
+      repairData: Buffer.from('repair-wav'),
+    });
+    expect(completed.manifest.intervals[0].sources.mic.disposition).toBe(
+      'captured',
+    );
+    expect(completed.receipt).toMatchObject({
+      generation: created.generation,
+      manifestRevision: completed.manifest.revision,
+      repairAudioRelativePath:
+        'meeting-123/capture-journal/repair/mic-000000.wav',
+    });
+  });
+
+  it('atomically appends and verifies transcript and acceptance sidecars', async () => {
+    const root = await makeRoot();
+    const created = await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    if (created.schemaVersion !== 3) throw new Error('expected v3');
+    const authorized = await authorizeCaptureJournalInterval(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: created.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+    });
+    const raw = await persistCaptureJournalRawChunk(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: authorized.revision,
+      source: 'mic',
+      sequence: 0,
+      format: 'wav',
+      data: Buffer.from('raw'),
+    });
+    const rawDisposition = raw.intervals[0].sources.mic;
+    if (rawDisposition.disposition !== 'raw_durable') throw new Error();
+    const completed = await completeCaptureJournalCapturedChunk(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: raw.revision,
+      source: 'mic',
+      sequence: 0,
+      rawChecksumSha256: rawDisposition.rawChecksumSha256,
+      repairData: Buffer.from('wav'),
+    });
+    const configKey = createHash('sha256').update('config').digest('hex');
+    const sidecar = {
+      schemaVersion: 1 as const,
+      meetingId: created.meetingId,
+      source: 'mic' as const,
+      sequence: 0,
+      chunkChecksumSha256: completed.receipt.checksumSha256,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+      transcriptionConfig: {
+        backend: 'whisperx',
+        preset: 'balanced',
+        model: 'small',
+        device: 'cpu',
+        computeType: 'int8',
+        languageMode: 'detected' as const,
+        requestedLanguage: null,
+        pipelineVersion: 'live_chunk_v1' as const,
+      },
+      backendResult: { detectedLanguage: 'en', providerLabel: 'local' },
+      segments: [],
+    };
+    const checkpoint = await appendCaptureTranscriptCheckpoint(root, {
+      receipt: completed.receipt,
+      expectedManifestRevision: completed.manifest.revision,
+      transcriptionConfigKey: configKey,
+      sidecar,
+    });
+    const checkpointBytes = await readCaptureJournalSidecar(
+      root,
+      created.meetingId,
+      checkpoint.checkpoint.relativePath,
+      checkpoint.checkpoint.transcriptChecksumSha256,
+    );
+    expect(JSON.parse(checkpointBytes.toString())).toEqual(sidecar);
+
+    const digest = createHash('sha256').update('activity').digest('hex');
+    const frame = await appendCaptureTranscriptAcceptanceFrame(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: checkpoint.manifest.revision,
+      sequence: 0,
+      micCheckpointChecksumSha256:
+        checkpoint.checkpoint.transcriptChecksumSha256,
+      systemCheckpointChecksumSha256: null,
+      activityEvidenceDigestSha256: digest,
+      sidecar: { schemaVersion: 1, sequence: 0, acceptedSegments: [] },
+    });
+    expect(frame.manifest.acceptanceFrames).toEqual([frame.frame]);
+  });
+
+  it('resolves pending tuples at stopping and removes all artifacts on deletion', async () => {
+    const root = await makeRoot();
+    const created = await createCaptureJournal(root, {
+      meetingId: 'meeting-123',
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+      sourceAvailability: { system: 'unavailable_at_start' },
+    });
+    if (created.schemaVersion !== 3) throw new Error('expected v3');
+    const authorized = await authorizeCaptureJournalInterval(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: created.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 5,
+    });
+    const stopped = await stopCaptureJournal(root, {
+      meetingId: created.meetingId,
+      generation: created.generation,
+      expectedRevision: authorized.revision,
+    });
+    expect(stopped.intervals[0].sources).toEqual({
+      mic: { disposition: 'missing', reason: 'pending_at_stop' },
+      system: {
+        disposition: 'source_unavailable',
+        reason: 'unavailable_at_start',
+      },
+    });
+    await deleteCaptureJournal(root, created.meetingId);
+    await expect(
+      stat(join(root, 'meeting-123', 'capture-journal')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('reads a legacy v1 manifest as uncertain evidence', async () => {
@@ -743,11 +948,12 @@ describe('capture journal', () => {
     ).rejects.toThrow('capture_activity_missing');
   });
 
-  it('rejects sealing a recording v2 journal without activity evidence', async () => {
+  it('rejects sealing a recording v3 journal before stopping', async () => {
     const root = await makeRoot();
     await createCaptureJournal(root, {
       meetingId: 'meeting-123',
       startedAtMs: 1_000,
+      schemaVersion: 3,
     });
 
     await expect(
@@ -755,7 +961,7 @@ describe('capture journal', () => {
         meetingId: 'meeting-123',
         endedAtMs: 6_000,
       }),
-    ).rejects.toThrow('capture_activity_missing');
+    ).rejects.toThrow(/must enter stopping/i);
   });
 
   it.each([

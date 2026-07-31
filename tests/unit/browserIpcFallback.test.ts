@@ -22,9 +22,26 @@ describe('browser IPC capture journal fallback', () => {
       },
     );
 
-    await ipc.invoke('AUDIO_CAPTURE_JOURNAL_START', {
+    const started = await ipc.invoke<{
+      schemaVersion: number;
+      revision: number;
+      supported: boolean;
+    }>('AUDIO_CAPTURE_JOURNAL_START', {
       meetingId: 'preview-meeting',
       startedAtMs: 1_000,
+    });
+    expect(started).toMatchObject({
+      schemaVersion: 3,
+      revision: 0,
+      supported: false,
+    });
+    await expect(
+      ipc.invoke('AUDIO_CAPTURE_JOURNAL_INTERVAL_AUTHORIZE', {
+        meetingId: 'preview-meeting',
+      }),
+    ).resolves.toMatchObject({
+      supported: false,
+      reason: 'electron_capture_journal_required',
     });
     await ipc.invoke('AUDIO_CAPTURE_JOURNAL_ACTIVITY_UPDATE', {
       meetingId: 'preview-meeting',
