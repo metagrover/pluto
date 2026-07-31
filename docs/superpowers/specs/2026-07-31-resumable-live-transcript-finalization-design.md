@@ -76,13 +76,24 @@ correctness.
 ### Journal schema
 
 Introduce capture-journal schema version 3. Existing v1/v2 journals remain
-readable through their existing compatibility paths.
+readable through their existing compatibility paths. For v3,
+`CaptureJournalManifestBase.lifecycleState` is widened to include `stopping`;
+the v1/v2 parsers retain their original `recording | sealed` restriction.
 
 ```ts
 type CaptureJournalManifestV3 = CaptureJournalManifestBase & {
   schemaVersion: 3;
+  lifecycleState: 'recording' | 'stopping' | 'sealed';
+  generation: string;
+  revision: number;
+  expectedSources: Array<'mic' | 'system'>;
+  sourceAvailability: Record<
+    'mic' | 'system',
+    'available' | 'unavailable_at_start' | 'failed_during_capture'
+  >;
   activityEvidence?: CaptureActivityEvidence;
   transcriptCheckpoints: CaptureTranscriptCheckpointRef[];
+  acceptanceFrames: CaptureTranscriptAcceptanceFrame[];
 };
 
 type CaptureTranscriptCheckpointRef = {
@@ -93,13 +104,38 @@ type CaptureTranscriptCheckpointRef = {
   chunkEndSec: number;
   transcriptionConfigKey: string;
   transcriptChecksumSha256: string;
+  revision: number;
+  disposition:
+    | 'transcribed'
+    | 'verified_silence'
+    | 'conversion_failed'
+    | 'transcription_failed'
+    | 'cancelled';
+  relativePath: string;
+};
+
+type CaptureTranscriptAcceptanceFrame = {
+  sequence: number;
+  micCheckpointChecksumSha256: string | null;
+  systemCheckpointChecksumSha256: string | null;
+  arbitrationVersion: 'chunk_arbitration_v1';
+  activityEvidenceDigestSha256: string;
+  acceptedChecksumSha256: string;
   relativePath: string;
 };
 ```
 
 The tuple `(source, sequence)` is unique. A checkpoint may be appended only after
 the matching audio entry exists. The checkpoint must copy the audio entry's
-checksum and exact time interval.
+checksum and exact time interval. A manifest also contains an explicit expected
+source inventory. For every expected `(source, sequence)` tuple, the audio entry
+must have one of these content-free dispositions: `captured`,
+`verified_silence`, `source_unavailable`, or `missing`. Absence is never treated
+as silence. `missing` is a capture gap; `source_unavailable` is legal only when
+the source-availability state was durably established before that interval.
+Each v3 audio entry therefore adds `disposition`, `repairRelativePath`,
+`repairChecksumSha256`, and optional
+`decodeDependency: { anchorSequence; initializationChecksumSha256 }`.
 
 ### Transcript sidecar
 
@@ -141,31 +177,145 @@ Sidecar segments use chunk-relative timestamps. Every segment must have finite
 timestamps, `0 <= start < end`, `end <= chunkDuration + 0.25`, non-empty text,
 and optional words satisfying the same ordering and bounds.
 
+The raw source checkpoint is not the durable representation of what the live UI
+accepted. After both available source results for a sequence have resolved,
+`AudioManager` runs the existing RMS/activity arbitration and duplicate pruning,
+then writes an acceptance-frame sidecar containing the accepted mic/system
+segments, their source-checkpoint digests, the exact activity-evidence digest,
+and the arbitration algorithm version. Recovery uses acceptance frames to
+rehydrate what the user saw. Raw source checkpoints remain the reusable input for
+rerunning deterministic arbitration when one source is repaired or the
+arbitration version changes.
+
+Acceptance-frame timestamps are meeting-relative and clipped to the half-open
+interval `[chunkStartSec, chunkEndSec)`. A segment crossing the right boundary is
+owned by the earlier sequence and clipped there; the next sequence may contain
+only the non-overlapping suffix. Word timestamps receive the same clipping and
+empty words are removed. Stable identity is
+`sha256(source + sequence + normalizedStartMicros + normalizedEndMicros +
+normalizedText)`. Cumulative fallback output is converted from meeting-relative
+to chunk-relative time before writing a raw checkpoint and is clipped using the
+same ownership rule. The live UI and recovery both consume the acceptance-frame
+normalizer, so boundary behavior cannot diverge.
+
+### Canonical transcription configuration
+
+The configuration key is calculated from UTF-8 bytes of RFC 8785 JSON
+canonicalization over exactly these fully resolved runtime keys, in lexical key
+order:
+
+`backend`, `computeType`, `device`, `languageMode`, `languageValue`, `model`,
+`pipelineVersion`, and `preset`.
+
+`languageMode` is `fixed` or `detected`. A detected language is not reusable
+across a later request for a fixed language. `languageValue` is the normalized
+lowercase BCP-47 tag actually used or returned by the backend, never `auto`.
+Device, model, preset, and compute type are the resolved runtime values recorded
+by the backend, not requested aliases. Unknown or absent resolved values make the
+checkpoint non-reusable.
+
+### Recording generation and manifest revision
+
+`generation` is a random recording-session token created with the journal.
+`revision` starts at zero and increments for every successful manifest mutation.
+Every audio append returns an immutable receipt:
+
+```ts
+type CaptureAudioReceipt = {
+  meetingId: string;
+  generation: string;
+  manifestRevision: number;
+  source: 'mic' | 'system';
+  sequence: number;
+  checksumSha256: string;
+  chunkStartSec: number;
+  chunkEndSec: number;
+  repairAudioRelativePath: string | null;
+};
+```
+
+Checkpoint and acceptance mutations require the receipt, generation, and expected
+manifest revision. The main process performs compare-and-swap under the existing
+per-journal mutation serializer. A stale revision is retried only after rereading
+the manifest and proving the identical audio receipt still exists. A stale
+generation, sealed lifecycle, cancelled meeting, changed receipt, or superseded
+checkpoint fails without mutation.
+
+### Independently repairable audio
+
+New v3 microphone and system entries retain their current durable raw capture
+artifact and also produce a canonical mono PCM WAV repair artifact for that exact
+interval before the entry becomes `repair_ready`. The WAV checksum/path are part
+of the audio entry and receipt. Live transcription reads the same repair artifact.
+
+If the app crashes after raw capture durability but before WAV conversion,
+recovery attempts conversion of that exact raw chunk. A WebM continuation chunk
+records the checksum of its initialization dependency and the smallest preceding
+anchor sequence needed for decoding. Recovery may decode only the bounded range
+from that anchor through the affected sequence, emit separate interval WAVs, and
+then repair only unresolved transcript tuples. V3 writers must create an
+independently decodable anchor at least every two sequences; if the dependency
+range is missing or corrupt, the affected interval is a capture-repair failure
+and cannot be hidden by transcript checkpoints. Full-session transcription is
+not the fallback for a new v3 decode failure.
+
 ### Write ordering and atomicity
 
 For each source chunk:
 
-1. Append and durably sync the audio artifact.
-2. Transcribe the chunk.
-3. Write the sidecar to a temporary file in the checkpoint directory.
-4. Sync the temporary file.
-5. Rename it to its deterministic final path.
-6. Sync the checkpoint directory.
-7. Append the checkpoint reference to a newly written manifest.
-8. Sync the manifest and journal directory using the existing atomic manifest
+1. Append and durably sync the raw audio artifact.
+2. Produce, sync, and reference the interval-scoped repair WAV, then return the
+   immutable audio receipt.
+3. Transcribe the repair WAV under the receipt's generation.
+4. Write the sidecar to a temporary file in the checkpoint directory.
+5. Sync the temporary file.
+6. Rename it to its deterministic final path.
+7. Sync the checkpoint directory.
+8. Compare-and-swap the checkpoint reference into a newly written manifest.
+9. After both source dispositions resolve, persist the acceptance frame through
+   the same sidecar/fsync/rename/manifest-CAS protocol.
+10. Sync the manifest and journal directory using the existing atomic manifest
    replacement protocol.
 
-A crash before step 7 leaves an unreferenced sidecar, which recovery ignores and
+A crash before manifest CAS leaves an unreferenced sidecar, which recovery ignores and
 cleanup may remove. A manifest may never reference a missing or unsynced sidecar.
 Appending the same valid `(source, sequence)` checkpoint is idempotent. A
-different checkpoint for the same tuple is a conflict and must not overwrite the
-accepted one.
+different initial checkpoint for the same tuple is a conflict.
+
+Coverage repair creates revision `prior.revision + 1` and must compare-and-swap
+against the prior checkpoint checksum, current generation, and manifest revision.
+The old reference is replaced only after the new sidecar is durable. The manifest
+retains content-free `repairAttempted: true` evidence for that tuple, so coverage
+repair can happen at most once. A crash before CAS leaves an orphan; a crash after
+CAS makes the new revision authoritative. Cleanup removes superseded/orphan
+sidecars only after canonical transcript commit.
+
+### Journal lifecycle
+
+The legal lifecycle is:
+
+```text
+recording -> stopping -> sealed
+```
+
+- `recording`: accepts new audio receipts, checkpoints, and acceptance frames for
+  the current generation.
+- `stopping`: rejects new audio capture but accepts completions for receipts
+  authorized before the transition plus generation-guarded repair mutations.
+- `sealed`: immutable. It contains final activity evidence, source inventory,
+  tuple dispositions, checkpoint set, and acceptance frames.
+
+The `recording -> stopping` transition records the highest authorized sequence
+per source and freezes the generation. Only receipts at or below those watermarks
+may complete. Seal is legal only after all expected tuples have a disposition and
+all repair work has either completed or produced an explicit failure.
 
 ## Live Capture Integration
 
-`AudioManager` persists the raw transcription result for each source before
-speaker arbitration mutates or combines it. UI publication remains based on the
-existing accepted/arbitrated segments.
+`AudioManager` persists the raw transcription result for each source, then
+persists the accepted/arbitrated acceptance frame before publishing that frame to
+the UI. A frame is never shown as confirmed before its manifest reference is
+durable.
 
 A checkpoint is eligible for persistence when:
 
@@ -173,7 +323,9 @@ A checkpoint is eligible for persistence when:
 - transcription returned a structurally valid result, including an empty segment
   array for a successfully processed silent chunk;
 - the transcription configuration is fully resolved; and
-- the meeting has not been stopped, superseded, or cancelled.
+- its receipt belongs to the current generation and is authorized by the
+  `recording` or `stopping` watermark; and
+- the meeting has not been superseded or cancelled.
 
 If checkpoint persistence fails, Pluto keeps recording audio, marks capture
 durability warning state, and records a content-free checkpoint durability
@@ -232,9 +384,13 @@ files:
 5. Re-run verification and assemble the full provisional transcript.
 6. Evaluate activity coverage by source over the union of assembled segments.
 
-An empty checkpoint is a successful transcription result for a silent chunk. It
-becomes under-covered only when durable activity evidence shows speech in that
-interval without transcript coverage.
+An empty checkpoint is legal only for `verified_silence` or a successful Whisper
+response with no segments. `verified_silence` requires source-appropriate durable
+activity below the existing speech threshold for the entire interval.
+`source_unavailable`, conversion failure, Whisper error, cancellation, timeout,
+and retry exhaustion are distinct dispositions and cannot create a successful
+empty checkpoint. A successful empty Whisper response becomes under-covered when
+durable activity evidence shows speech in that interval.
 
 Coverage repair may add a chunk to the repair set once even when a structurally
 valid checkpoint exists. If the replacement still fails the coverage gate, the
@@ -246,15 +402,22 @@ automatically to full-session transcription.
 Clean finalization uses the same verifier and repair service as interrupted
 recovery:
 
-1. Stop and seal audio/activity evidence.
-2. Wait for already-started live chunk work within the bounded finalization
-   deadline.
-3. Verify durable checkpoints.
-4. Repair only unresolved tuples.
-5. Assemble and reconcile the canonical transcript.
-6. Run the existing deterministic integrity gate.
-7. Persist the v2 `validated` proof and canonical transcript atomically.
-8. Start downstream analysis.
+1. Stop creation of new jobs and transition the current generation to
+   `stopping`, recording source watermarks.
+2. Drain authorized audio appends.
+3. Await already-authorized transcription/acceptance work within the bounded
+   finalization deadline.
+4. Freeze and persist final activity evidence.
+5. Verify durable checkpoints and tuple dispositions.
+6. Repair only unresolved tuples while the journal is `stopping`.
+7. Assemble and reconcile the canonical transcript.
+8. Run the deterministic integrity gate.
+9. Seal the complete journal. No further checkpoint mutation is possible.
+10. Compare-and-swap the canonical transcript, lifecycle projections, v2
+    validation proof, finalization generation, and downstream analysis claim in
+    one database transaction.
+11. Start downstream analysis only when that transaction reports that this run
+    acquired the claim.
 
 A fully checkpointed healthy meeting makes zero full-session
 `WHISPER_TRANSCRIBE` calls during finalization.
@@ -276,6 +439,49 @@ Recovery no longer writes an empty transcript unconditionally.
 Recovery is idempotent. Relaunching after provisional meeting persistence reuses
 the same checkpoints and cannot duplicate segments or overwrite a newer
 validation run.
+
+### Recovery routing
+
+| Journal / meeting state | Recovery behavior |
+| --- | --- |
+| `recording`, no meeting | Treat as interrupted; transition generation to `stopping`, set observed watermarks, finish dispositions/repair, then seal |
+| `stopping`, no meeting | Resume the same generation from manifest revision |
+| `sealed`, no meeting | Rehydrate and attempt the database finalization CAS |
+| sealed + provisional recovered meeting | Resume only if meeting generation/proof still matches the journal and no newer retry lease exists |
+| sealed + `validating` | Do not start another run; expiry/startup repair follows #556 |
+| sealed + `validated` | No transcript mutation; start analysis only if the same validation proof has an unclaimed downstream state |
+| cancelled/deleted meeting | Abort and clean only meeting-scoped orphans; never recreate |
+| downstream processing | Preserve proof and obey `downstream_processing_json` run ownership |
+
+The current “skip sealed journal when a non-recovery-required meeting exists”
+rule is replaced by this table for v3. V1/v2 keep their compatibility routing.
+
+### Atomic #556 handoff
+
+Add one database command whose transaction predicate includes meeting ID,
+journal generation, expected current `transcript_status`, expected validation
+run ID when present, and absence of a newer validation proof:
+
+```ts
+finalizeCheckpointTranscript({
+  meetingId,
+  journalGeneration,
+  expectedTranscriptStatus,
+  expectedValidationRunId,
+  canonicalTranscriptJson,
+  transcriptIntegrityJson,
+  transcriptValidatedAt,
+  downstreamRunId,
+}): 'committed_and_claimed' | 'already_committed' | 'superseded';
+```
+
+On commit it atomically writes the canonical transcript, all lifecycle
+projections, validation timestamp/proof, finalized status, and
+`downstream_processing_json = processing` bound to that exact proof and
+`downstreamRunId`. A uniqueness predicate on the proof timestamp/run binding
+ensures only the committed run may generate analysis. `already_committed` is
+idempotent and may resume only the same downstream run; `superseded` performs no
+work. Analysis persistence retains the existing proof/run compare-and-swap.
 
 ## Full-Session Fallback
 
@@ -313,6 +519,10 @@ trust contract.
   proof and use `downstream_processing_json`.
 - Cancellation or superseded run: stale work cannot append checkpoints, replace
   the canonical transcript, or overwrite analysis.
+- Browser IPC fallback does not emulate v3 durability. In browser mode, v3
+  recording is disabled with a safe capability result and the existing
+  non-durable demo behavior remains explicitly non-production. IPC types and
+  fallback tests must make this distinction observable.
 
 ## Privacy and Cleanup
 
@@ -347,6 +557,7 @@ trust contract.
 | `electron/captureJournal.ts` | Add v3 manifest/checkpoint types, strict parsing, atomic checkpoint append, cleanup |
 | `electron/captureJournalRecovery.ts` | Rehydrate checkpoints and persist provisional recovered transcript |
 | `electron/main.ts` | Add checkpoint append/read IPC handlers with artifact-root guards |
+| `src/utils/browserIpcFallback.ts` | Return explicit unsupported capability for v3 durability |
 | `src/components/AudioManager.tsx` | Persist resolved per-source chunk transcription results and finalize from checkpoints |
 | `src/services/recordingTranscriptValidation.ts` | Separate deterministic validation from unconditional transcription |
 | `src/services/retryMeetingTranscriptValidation.ts` | Use journal checkpoint verification/targeted repair for v3 recovery |
@@ -381,6 +592,11 @@ trust contract.
     remains under-covered.
 11. Preserve capture-gap precedence.
 12. Preserve stale-run and cancellation protection.
+13. Reject stale generation/revision checkpoint completions.
+14. Compare-and-swap an under-coverage replacement and retain one-attempt evidence.
+15. Normalize cumulative/sliced timestamps without boundary duplication.
+16. Distinguish silence, source unavailable, conversion failure, cancellation,
+    and retry exhaustion.
 
 ### Integration tests
 
@@ -396,6 +612,16 @@ trust contract.
 6. v2 legacy recovery: current full-audio compatibility path remains available.
 7. Meeting deletion removes all checkpoint artifacts without escaping the meeting
    root.
+8. Stop during transcription accepts only pre-watermark completions before seal.
+9. A completion racing seal cannot mutate a sealed journal.
+10. Cancellation followed by a stale completion performs no mutation.
+11. Crash before and after under-coverage replacement CAS selects exactly one
+    authoritative revision.
+12. WebM continuation repair uses only its bounded anchor range.
+13. Missing system tuple classification cannot be inferred as silence.
+14. Existing provisional recovery resumes without overwriting a newer validation
+    lease.
+15. Canonical transcript/proof/downstream claim commits exactly once.
 
 ### Product verification
 
@@ -446,4 +672,3 @@ Run:
 - Redesigning the recording workspace or standard meeting analysis page.
 - Migrating historical v1/v2 journals to v3.
 - Persisting partial UI hypotheses before a chunk transcription is accepted.
-
