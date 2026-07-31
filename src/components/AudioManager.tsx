@@ -4712,9 +4712,15 @@ export const AudioManager = ({
         await sealedActivityHandoff.persistMeeting(
           recoverableMeeting,
           {
-            ...integrityValidation.evidence,
-            reasons: integrityValidation.reasons,
-            attempts: integrityValidation.attempts,
+            schemaVersion: 2,
+            state: 'needs_attention',
+            causes: integrityValidation.reasons.map((code) => ({ code })),
+            evidenceProvenance: {
+              kind: 'sealed_capture_activity_v2',
+              digestSha256: sealedActivityEvidence.digestSha256,
+            },
+            activityEvidence: sealedActivityEvidence,
+            evidence: integrityValidation.evidence,
           },
           async (meeting) =>
             await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
@@ -4731,6 +4737,7 @@ export const AudioManager = ({
         console.warn('[Pluto] No transcription segments from either source');
       }
 
+      const downstreamRunId = crypto.randomUUID();
       const attributionPersistenceRecord = buildInitialValidatedMeetingPayload({
         meeting: {
           id: stopSnapshot.meetingId,
@@ -4748,6 +4755,13 @@ export const AudioManager = ({
           folder_id: null,
           is_favorite: false,
           end_reason: endReason || 'manual',
+          downstream_processing_json: JSON.stringify({
+            schemaVersion: 1,
+            state: 'processing',
+            transcriptValidatedAt: '',
+            runId: downstreamRunId,
+            stage: 'analysis',
+          }),
         },
         segments: newTranscription,
         transcriptMetadata: {
@@ -4791,12 +4805,30 @@ export const AudioManager = ({
         },
         participants,
       });
+      const transcriptValidatedAt = String(
+        attributionPersistenceRecord.transcript_validated_at,
+      );
+      attributionPersistenceRecord.downstream_processing_json = JSON.stringify({
+        schemaVersion: 1,
+        state: 'processing',
+        transcriptValidatedAt,
+        runId: downstreamRunId,
+        stage: 'analysis',
+      });
       const attributionIntegrity = {
-        ...integrityValidation.evidence,
-        reasons: integrityValidation.reasons,
-        attempts: integrityValidation.attempts,
-        activityEvidenceSource: 'capture_activity_v2',
+        schemaVersion: 2,
+        state: 'validated',
+        causes: [],
+        evidenceProvenance: {
+          kind: 'sealed_capture_activity_v2',
+          digestSha256: sealedActivityEvidence.digestSha256,
+        },
         activityEvidence: sealedActivityEvidence,
+        evidence: integrityValidation.evidence,
+        validationProof: {
+          gateVersion: 'canonical_integrity_v1',
+          validatedAt: transcriptValidatedAt,
+        },
       };
       const attributionIntegrityJson = JSON.stringify(attributionIntegrity);
 
@@ -5008,6 +5040,21 @@ export const AudioManager = ({
         end_reason: endReason || 'manual',
         finalization_status: 'finalized',
         finalization_error_category: null,
+        downstream_processing_json: JSON.stringify(
+          rawArtifacts
+            ? {
+                schemaVersion: 1,
+                state: 'complete',
+                transcriptValidatedAt,
+              }
+            : {
+                schemaVersion: 1,
+                state: 'failed',
+                transcriptValidatedAt,
+                stage: 'analysis',
+                failure: 'generation_failed',
+              },
+        ),
       };
 
       const derivedPersistence = await persistDerivedAfterLatencyPatch<unknown>(
@@ -5038,6 +5085,8 @@ export const AudioManager = ({
                 analysisErrorCategoriesJson:
                   meetingData.analysis_error_categories_json,
                 valueSignalsJson: meetingData.value_signals_json,
+                downstreamProcessingJson:
+                  meetingData.downstream_processing_json,
               },
             ),
         },
@@ -5175,10 +5224,22 @@ export const AudioManager = ({
             mixed_audio_path: mixedAudioPath || null,
             transcript_status: 'needs_attention',
             transcript_integrity_json: JSON.stringify({
-              reasons: ['required_source_failed'],
+              schemaVersion: 2,
+              state: 'needs_attention',
+              causes: [
+                {
+                  code: 'processing_stage_failed',
+                  stage: 'canonical_save',
+                },
+              ],
+              evidenceProvenance: sealedActivityEvidence
+                ? {
+                    kind: 'sealed_capture_activity_v2',
+                    digestSha256: sealedActivityEvidence.digestSha256,
+                  }
+                : { kind: 'missing' },
               ...(sealedActivityEvidence
                 ? {
-                    activityEvidenceSource: 'capture_activity_v2',
                     activityEvidence: sealedActivityEvidence,
                   }
                 : {}),

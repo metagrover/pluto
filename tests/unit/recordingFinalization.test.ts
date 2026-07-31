@@ -135,9 +135,12 @@ describe('recording finalization helpers', () => {
       user_notes: 'Keep this note',
       end_reason: 'manual',
     });
-    expect(meeting.transcript_integrity_json).toBe(
-      JSON.stringify({ reasons: ['journal_seal_failed'] }),
-    );
+    expect(JSON.parse(meeting.transcript_integrity_json)).toMatchObject({
+      schemaVersion: 2,
+      state: 'needs_attention',
+      causes: [{ code: 'processing_stage_failed', stage: 'capture_seal' }],
+      evidenceProvenance: { kind: 'missing' },
+    });
     expect(meeting.audio_path).toBeNull();
     expect(meeting.system_audio_path).toBeNull();
     expect(meeting.mixed_audio_path).toBeNull();
@@ -172,9 +175,12 @@ describe('recording finalization helpers', () => {
       'capture_journal_write_failed',
     );
     expect(meeting.end_reason).toBe('capture_journal_write_failed');
-    expect(meeting.transcript_integrity_json).toBe(
-      JSON.stringify({ reasons: ['capture_journal_write_failed'] }),
-    );
+    expect(JSON.parse(meeting.transcript_integrity_json)).toMatchObject({
+      schemaVersion: 2,
+      state: 'needs_attention',
+      causes: [{ code: 'capture_journal_write_failed' }],
+      evidenceProvenance: { kind: 'missing' },
+    });
   });
 
   it('drains journal appends before requesting a seal', async () => {

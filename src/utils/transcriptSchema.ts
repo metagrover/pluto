@@ -16,7 +16,7 @@ import type {
 
 export const TRANSCRIPT_PIPELINE_VERSION = '3.0.0';
 
-export type CanonicalTranscriptSource = 'mic' | 'mix';
+export type CanonicalTranscriptSource = 'mic' | 'mix' | 'recovered_channels';
 export type TranscriptPipelineMode = 'legacy' | 'canonical_session_v2';
 
 export type TranscriptTranscriptionMeta = {
@@ -242,3 +242,19 @@ export function buildTranscriptJsonPayload(
     segments,
   };
 }
+
+export const withTranscriptLifecycleStatus = (
+  transcriptJson: string | null | undefined,
+  lifecycleStatus: 'validating' | 'needs_attention',
+) => {
+  try {
+    const parsed = JSON.parse(transcriptJson || '{}') as unknown;
+    return JSON.stringify(
+      Array.isArray(parsed)
+        ? { segments: parsed, lifecycleStatus }
+        : { ...(parsed as Record<string, unknown>), lifecycleStatus },
+    );
+  } catch {
+    return JSON.stringify({ segments: [], lifecycleStatus });
+  }
+};

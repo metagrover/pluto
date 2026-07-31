@@ -49,17 +49,45 @@ export const readRetryLease = (
 export const beginRetryLease = (
   integrity: TranscriptIntegrityRecord,
   retry: TranscriptValidationRetryLease,
-): TranscriptIntegrityRecord => ({
-  ...integrity,
-  retry,
-  retryFailure: undefined,
-});
+): TranscriptIntegrityRecord =>
+  integrity.schemaVersion === 2
+    ? {
+        ...integrity,
+        state: 'validating',
+        causes: [],
+        retry,
+        validationProof: undefined,
+        retryFailure: undefined,
+      }
+    : {
+        ...integrity,
+        retry,
+        retryFailure: undefined,
+      };
 
 export const finishRetryLease = (
   integrity: TranscriptIntegrityRecord,
   retryFailure?: TranscriptValidationRetryFailure,
 ): TranscriptIntegrityRecord => {
   const { retry: _retry, retryFailure: _priorFailure, ...prior } = integrity;
+  if (integrity.schemaVersion === 2) {
+    const failureCode =
+      retryFailure === 'retry_timeout'
+        ? 'validation_retry_timeout'
+        : retryFailure === 'retry_failed'
+          ? 'validation_retry_failed'
+          : retryFailure === 'retry_interrupted'
+            ? 'validation_retry_interrupted'
+            : null;
+    return failureCode
+      ? {
+          ...prior,
+          state: 'needs_attention',
+          causes: [{ code: failureCode }],
+          validationProof: undefined,
+        }
+      : prior;
+  }
   return retryFailure ? { ...prior, retryFailure } : prior;
 };
 

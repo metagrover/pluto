@@ -191,7 +191,18 @@ export const buildRecoverableSealFailureMeeting = ({
     mixed_audio_path: null,
     transcript_status: 'needs_attention' as const,
     transcript_integrity_json: JSON.stringify({
-      reasons: [failureCategory],
+      schemaVersion: 2,
+      state: 'needs_attention',
+      causes:
+        failureReason === 'capture_journal_write_failed'
+          ? [{ code: 'capture_journal_write_failed' }]
+          : [
+              {
+                code: 'processing_stage_failed',
+                stage: 'capture_seal',
+              },
+            ],
+      evidenceProvenance: { kind: 'missing' },
     }),
     transcript_validated_at: null,
     transcript_json: JSON.stringify([]),
@@ -236,7 +247,14 @@ export const createSealedCaptureActivityHandoff = (
       ...meeting,
       transcript_integrity_json: JSON.stringify({
         ...integrity,
-        activityEvidenceSource: 'capture_activity_v2',
+        ...(integrity.schemaVersion === 2
+          ? {
+              evidenceProvenance: {
+                kind: 'sealed_capture_activity_v2',
+                digestSha256: activityEvidence.digestSha256,
+              },
+            }
+          : { activityEvidenceSource: 'capture_activity_v2' }),
         activityEvidence,
       }),
     }),

@@ -68,9 +68,9 @@ describe('capture journal recovery', () => {
     return {
       result,
       integrity: JSON.parse(String(recovered.transcript_integrity_json)) as {
-        activityEvidenceSource: string;
+        evidenceProvenance: { kind: string };
         activityEvidence?: unknown;
-        reasons: string[];
+        causes: Array<{ code: string }>;
       },
     };
   };
@@ -146,20 +146,19 @@ describe('capture journal recovery', () => {
       String(recoveredMeeting?.transcript_integrity_json),
     );
     expect(integrity).toMatchObject({
-      recovery_source: 'capture_journal',
-      journal_lifecycle_state: 'recording',
-      gap_detected: false,
-      activityEvidenceSource: 'capture_activity_v2',
-      reasons: [],
-      recovered_sources: {
-        mic: {
-          acknowledgedChunkCount: 1,
-          recoveredChunkCount: 1,
-        },
-        system: {
-          acknowledgedChunkCount: 1,
-          recoveredChunkCount: 1,
-        },
+      schemaVersion: 2,
+      state: 'needs_attention',
+      causes: [{ code: 'recovered_awaiting_validation' }],
+      evidenceProvenance: {
+        kind: 'sealed_capture_activity_v2',
+        digestSha256: activityEvidence.digestSha256,
+      },
+      recovery: {
+        source: 'capture_journal',
+        gapDetected: false,
+        sourceScope: 'multiple',
+        acknowledgedChunkCount: 2,
+        recoveredChunkCount: 2,
       },
     });
     expect(integrity.activityEvidence).toEqual(activityEvidence);
@@ -356,13 +355,13 @@ describe('capture journal recovery', () => {
     );
     const recovered = saveMeeting.mock.calls[0]?.[0];
     const integrity = JSON.parse(recovered.transcript_integrity_json) as {
-      journal_lifecycle_state: string;
-      activityEvidenceSource: string;
+      state: string;
+      evidenceProvenance: { kind: string };
       activityEvidence?: { digestSha256: string };
     };
     expect(integrity).toMatchObject({
-      journal_lifecycle_state: 'sealed',
-      activityEvidenceSource: 'capture_activity_v2',
+      state: 'needs_attention',
+      evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
       activityEvidence: {
         digestSha256: (await buildEvidence()).digestSha256,
       },
@@ -547,10 +546,20 @@ describe('capture journal recovery', () => {
       const { result, integrity } = await recoverSingleMeeting(root);
 
       expect(result.recoveredCount).toBe(1);
+      const provenanceKind =
+        source === 'legacy_provisional_segments'
+          ? 'legacy_provisional_segments'
+          : source === 'capture_activity_missing'
+            ? 'missing'
+            : source === 'capture_activity_unsupported'
+              ? 'unsupported'
+              : 'corrupt';
       expect(integrity).toEqual(
         expect.objectContaining({
-          activityEvidenceSource: source,
-          reasons: [reason],
+          evidenceProvenance: expect.objectContaining({
+            kind: provenanceKind,
+          }),
+          causes: expect.arrayContaining([{ code: reason }]),
         }),
       );
       expect(integrity.activityEvidence).toBeUndefined();
@@ -609,29 +618,24 @@ describe('capture journal recovery', () => {
     const integrity = JSON.parse(
       String(recoveredMeeting.transcript_integrity_json),
     ) as {
-      gap_detected: boolean;
-      recovered_sources: {
-        mic: {
-          gapCount: number;
-          recoveredChunkCount: number;
-        };
+      causes: Array<{ code: string; sourceScope?: string }>;
+      recovery: {
+        gapDetected: boolean;
+        sourceScope: string;
+        acknowledgedChunkCount: number;
+        recoveredChunkCount: number;
       };
-      recovery_gaps: Array<{
-        source: string;
-        sequence: number;
-        reason: string;
-      }>;
     };
 
-    expect(integrity.gap_detected).toBe(true);
-    expect(integrity.recovered_sources.mic).toMatchObject({
-      gapCount: 1,
+    expect(integrity.recovery).toMatchObject({
+      gapDetected: true,
+      sourceScope: 'mic',
+      acknowledgedChunkCount: 2,
       recoveredChunkCount: 1,
     });
-    expect(integrity.recovery_gaps).toContainEqual({
-      source: 'mic',
-      sequence: 1,
-      reason: 'byte_count_mismatch',
+    expect(integrity.causes).toContainEqual({
+      code: 'capture_gap_detected',
+      sourceScope: 'mic',
     });
 
     const recoveredPath = String(recoveredMeeting.audio_path);
@@ -695,29 +699,24 @@ describe('capture journal recovery', () => {
     const integrity = JSON.parse(
       String(recoveredMeeting.transcript_integrity_json),
     ) as {
-      gap_detected: boolean;
-      recovered_sources: {
-        mic: {
-          gapCount: number;
-          recoveredChunkCount: number;
-        };
+      causes: Array<{ code: string; sourceScope?: string }>;
+      recovery: {
+        gapDetected: boolean;
+        sourceScope: string;
+        acknowledgedChunkCount: number;
+        recoveredChunkCount: number;
       };
-      recovery_gaps: Array<{
-        source: string;
-        sequence: number;
-        reason: string;
-      }>;
     };
 
-    expect(integrity.gap_detected).toBe(true);
-    expect(integrity.recovered_sources.mic).toMatchObject({
-      gapCount: 1,
+    expect(integrity.recovery).toMatchObject({
+      gapDetected: true,
+      sourceScope: 'mic',
+      acknowledgedChunkCount: 2,
       recoveredChunkCount: 1,
     });
-    expect(integrity.recovery_gaps).toContainEqual({
-      source: 'mic',
-      sequence: 1,
-      reason: 'checksum_mismatch',
+    expect(integrity.causes).toContainEqual({
+      code: 'capture_gap_detected',
+      sourceScope: 'mic',
     });
   });
 });

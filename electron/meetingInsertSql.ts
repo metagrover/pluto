@@ -6,7 +6,7 @@ export const MEETING_INSERT_SQL = `
     analysis_generation_path, analysis_prompt_version, analysis_generated_at, analysis_error_categories_json,
     value_signals_json, follow_up_drafts_json, folder_id, is_favorite, end_reason, user_edits_json,
     transcript_status, transcript_integrity_json, system_audio_path, mixed_audio_path, transcript_validated_at,
-    finalization_status, finalization_error_category,
+    finalization_status, finalization_error_category, downstream_processing_json,
     created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
 `;

@@ -170,6 +170,7 @@ export const runRecordingTranscriptValidation = async (input: {
   systemAudioPath: string;
   provisionalSegments: AttributionSegment[];
   activityWindows: SpeakerActivityWindow[];
+  canonicalMode?: 'full_mix' | 'recovered_channels';
   transcribe: RecordingTranscribe;
   probeDuration: (audioPath: string) => Promise<number | null>;
 }): Promise<RecordingTranscriptValidationResult> => {
@@ -201,8 +202,14 @@ export const runRecordingTranscriptValidation = async (input: {
   const micSegments = toSegments(mic.result, 'Me', 'mic');
   const mixedSegments = toSegments(mix.result, 'Unknown', 'mix');
   const systemSegments = toSegments(system.result, 'Them', 'system');
+  const recoveredChannelSegments = [...micSegments, ...systemSegments].sort(
+    (left, right) => left.startTime - right.startTime,
+  );
   const reconciliation = reconcileCanonicalTranscript({
-    mixedSegments,
+    mixedSegments:
+      input.canonicalMode === 'recovered_channels'
+        ? recoveredChannelSegments
+        : mixedSegments,
     micSegments,
     systemSegments,
     provisionalSegments: input.provisionalSegments,
@@ -220,19 +227,34 @@ export const runRecordingTranscriptValidation = async (input: {
     reconciliation.segments,
     'Them',
   );
-  const requiredSourcesSucceeded = Boolean(
-    mic.result &&
-      mix.result &&
-      system.result &&
-      micDuration != null &&
-      mixDuration != null &&
-      systemDuration != null &&
-      micSegments.length + mixedSegments.length + systemSegments.length > 0,
-  );
+  const recoveredChannels = input.canonicalMode === 'recovered_channels';
+  const micRequired = micActivitySeconds > 0;
+  const systemRequired = systemActivitySeconds > 0;
+  const requiredSourcesSucceeded = recoveredChannels
+    ? Boolean(
+        (!micRequired || (mic.result && micDuration != null)) &&
+          (!systemRequired || (system.result && systemDuration != null)) &&
+          micSegments.length + systemSegments.length > 0,
+      )
+    : Boolean(
+        mic.result &&
+          mix.result &&
+          system.result &&
+          micDuration != null &&
+          mixDuration != null &&
+          systemDuration != null &&
+          micSegments.length + mixedSegments.length + systemSegments.length > 0,
+      );
   const validation = validateTranscriptIntegrity({
     recordingDurationSeconds: input.recordingDurationSeconds,
-    micAudioDurationSeconds: micDuration ?? 0,
-    systemAudioDurationSeconds: systemDuration ?? 0,
+    micAudioDurationSeconds:
+      recoveredChannels && !micRequired
+        ? input.recordingDurationSeconds
+        : (micDuration ?? 0),
+    systemAudioDurationSeconds:
+      recoveredChannels && !systemRequired
+        ? input.recordingDurationSeconds
+        : (systemDuration ?? 0),
     micActivitySeconds,
     systemActivitySeconds,
     localTranscriptCoveredSeconds,

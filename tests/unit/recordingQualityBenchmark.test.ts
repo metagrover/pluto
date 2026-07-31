@@ -781,7 +781,7 @@ describe('runCaptureRecoveryBenchmarkCase', () => {
         expected: {
           status: 'needs_attention',
           requiredRecoveredSources: ['mic', 'system'],
-          requiredReasons: ['checksum_mismatch:mic:1'],
+          requiredCauseCodes: ['capture_gap_detected'],
           primaryMetric: {
             name: 'recoveredChunkRatio',
             value: 0.75,
@@ -805,7 +805,7 @@ describe('runCaptureRecoveryBenchmarkCase', () => {
         name: 'recoveredChunkRatio',
         value: 0.75,
       },
-      reasons: ['checksum_mismatch:mic:1'],
+      reasons: ['capture_gap_detected', 'capture_activity_missing'],
     });
   });
 });

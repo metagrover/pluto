@@ -47,6 +47,11 @@ import {
   isTranscriptJsonEffectivelyEmpty,
   parseTranscriptSegments,
 } from '../../utils/transcript';
+import {
+  buildTranscriptTrustCapabilities,
+  canUseTranscriptTrustState,
+  resolveTranscriptTrustState,
+} from '../../utils/transcriptTrustState';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
@@ -87,44 +92,104 @@ export const TranscriptIntegrityPanel = ({
   status,
   finalizationStatus,
   integrityJson,
+  transcriptJson,
+  transcriptValidatedAt,
+  audioPath,
+  systemAudioPath,
+  mixedAudioPath,
+  activityEvidenceAvailable = false,
+  hasExistingAnalysis = false,
   onRetry,
   retrying = false,
 }: {
   status: Meeting['transcript_status'];
   finalizationStatus?: Meeting['finalization_status'];
   integrityJson?: string;
+  transcriptJson?: string;
+  transcriptValidatedAt?: string;
+  audioPath?: string;
+  systemAudioPath?: string;
+  mixedAudioPath?: string;
+  activityEvidenceAvailable?: boolean;
+  hasExistingAnalysis?: boolean;
   onRetry?: () => void;
   retrying?: boolean;
 }) => {
-  if (finalizationStatus === 'recovery_required') {
-    return (
-      <section
-        aria-live="polite"
-        className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5"
-      >
-        <strong className="text-sm text-pro-text">Recording saved</strong>
-        <p className="mt-1 text-sm text-pro-text-muted">
-          Processing needs recovery before this meeting is complete.
-        </p>
-      </section>
-    );
-  }
-  if (status !== 'validating' && status !== 'needs_attention') return null;
+  if (hasExistingAnalysis) return null;
+  let micActivitySeconds = 0;
+  let systemActivitySeconds = 0;
   let retryStage: string | null = null;
   let retryFailure: string | null = null;
   try {
     const integrity = JSON.parse(integrityJson || '{}') as {
+      activityEvidence?: {
+        windows?: Array<{
+          speaker?: unknown;
+          startTime?: unknown;
+          endTime?: unknown;
+        }>;
+      };
       retry?: { stage?: unknown };
       retryFailure?: unknown;
+      causes?: Array<{ code?: unknown }>;
     };
+    for (const window of integrity.activityEvidence?.windows || []) {
+      if (
+        typeof window.startTime !== 'number' ||
+        typeof window.endTime !== 'number'
+      ) {
+        continue;
+      }
+      const duration = Math.max(0, window.endTime - window.startTime);
+      if (window.speaker === 'Me') micActivitySeconds += duration;
+      if (window.speaker === 'Them') systemActivitySeconds += duration;
+    }
     retryStage =
       typeof integrity.retry?.stage === 'string' ? integrity.retry.stage : null;
     retryFailure =
       typeof integrity.retryFailure === 'string'
         ? integrity.retryFailure
-        : null;
+        : typeof integrity.causes?.[0]?.code === 'string'
+          ? integrity.causes[0].code
+          : null;
   } catch {
-    // Invalid content-free metadata falls back to the generic trust copy.
+    // The resolver maps invalid content-free metadata to an honest safe state.
+  }
+  const capabilities = buildTranscriptTrustCapabilities({
+    hasUsableMicArtifact: Boolean(audioPath),
+    hasUsableSystemArtifact: Boolean(systemAudioPath),
+    hasUsableMixArtifact: Boolean(mixedAudioPath),
+    hasSupportedActivityEvidence:
+      activityEvidenceAvailable ||
+      micActivitySeconds + systemActivitySeconds > 0,
+    micActivitySeconds,
+    systemActivitySeconds,
+    recoverySource: integrityJson?.includes('"source":"capture_journal"')
+      ? 'capture_journal'
+      : null,
+    hasCaptureRecoveryHandler: false,
+    canRestoreCaptureGap: false,
+    hasExistingTranscript: Boolean(transcriptJson),
+    hasExistingDerivedArtifacts: false,
+  });
+  const trust = resolveTranscriptTrustState(
+    {
+      transcript_status: status,
+      transcript_integrity_json: integrityJson,
+      transcript_validated_at: transcriptValidatedAt,
+      transcript_json: transcriptJson,
+      finalization_status: finalizationStatus,
+    },
+    capabilities,
+  );
+  if (
+    trust.kind === 'validated' ||
+    trust.kind === 'legacy_complete' ||
+    (status !== 'validating' &&
+      status !== 'needs_attention' &&
+      finalizationStatus !== 'recovery_required')
+  ) {
+    return null;
   }
   const validatingDetail =
     retryStage === 'transcribing'
@@ -134,45 +199,94 @@ export const TranscriptIntegrityPanel = ({
         : retryStage === 'saving'
           ? 'Saving the validated transcript.'
           : 'Pluto is checking the complete recording before creating intelligence.';
-  const attentionDetail =
-    retryFailure === 'retry_timeout'
-      ? 'Validation stopped after its safety deadline. The recording and prior evidence are safe.'
-      : retryFailure === 'retry_failed' || retryFailure === 'retry_interrupted'
-        ? 'Validation stopped safely before completion. The recording and prior evidence are safe.'
-        : 'The recording is safe, but Pluto could not account for all captured speech.';
+  const copy = {
+    capture_recovery_required:
+      'Processing needs recovery before this meeting is complete.',
+    validation_state_corrupt:
+      'The recording is safe, but Pluto cannot safely read its transcript validation state.',
+    validation_in_progress: validatingDetail,
+    recovered_awaiting_validation:
+      'Recording recovered. Validate the transcript before creating intelligence.',
+    capture_gap:
+      'Pluto recovered the available recording, but some captured audio is missing.',
+    speech_unaccounted:
+      'The recording is safe, but Pluto could not account for all captured speech.',
+    integrity_needs_attention:
+      'The recording is safe, but transcript validation needs another pass.',
+    validation_retry_failed:
+      retryFailure === 'retry_timeout' ||
+      retryFailure === 'validation_retry_timeout'
+        ? 'Validation stopped after its safety deadline. The recording and prior evidence are safe.'
+        : 'Validation stopped safely before completion. The recording and prior evidence are safe.',
+    validated: '',
+    legacy_complete: '',
+    legacy_needs_attention:
+      'The recording is safe, but its transcript has not been validated with the current pipeline.',
+  } as const;
+  const showValidationAction =
+    trust.action === 'start_validation' || trust.action === 'retry_validation';
+  const preparingAnalysis = retrying || trust.kind === 'validation_in_progress';
+  const title = preparingAnalysis
+    ? 'Preparing meeting analysis'
+    : trust.kind === 'capture_recovery_required'
+      ? 'Recording saved'
+      : trust.kind === 'validation_in_progress'
+        ? 'Validating transcript'
+        : 'Transcript needs attention';
   return (
     <section
       aria-live="polite"
       className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5"
     >
-      <strong className="text-sm text-pro-text">
-        {status === 'validating'
-          ? 'Validating transcript'
-          : 'Transcript needs attention'}
-      </strong>
+      <strong className="text-sm text-pro-text">{title}</strong>
       <p className="mt-1 text-sm text-pro-text-muted">
-        {status === 'validating' ? validatingDetail : attentionDetail}
+        {preparingAnalysis
+          ? 'Pluto is validating the preserved recording, then it will build the standard meeting analysis.'
+          : copy[trust.copyKey]}
       </p>
-      {status === 'needs_attention' ? (
+      {showValidationAction ? (
         <button
           type="button"
           disabled={retrying}
           onClick={onRetry}
           className="mt-4 rounded-xl bg-pro-accent px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
         >
-          {retrying ? 'Retrying validation…' : 'Retry transcript validation'}
+          {retrying
+            ? 'Retrying validation…'
+            : trust.action === 'start_validation'
+              ? 'Validate transcript'
+              : 'Retry transcript validation'}
         </button>
       ) : null}
     </section>
   );
 };
 
-export const canGenerateMeetingIntelligence = (
-  transcriptStatus: Meeting['transcript_status'],
-  finalizationStatus: Meeting['finalization_status'],
-) =>
-  finalizationStatus !== 'recovery_required' &&
-  (transcriptStatus == null || transcriptStatus === 'validated');
+export const canGenerateMeetingIntelligence = (meeting: Partial<Meeting>) => {
+  const trust = resolveTranscriptTrustState(
+    {
+      transcript_status: meeting.transcript_status,
+      transcript_integrity_json: meeting.transcript_integrity_json,
+      transcript_validated_at: meeting.transcript_validated_at,
+      transcript_json: meeting.transcript_json,
+      finalization_status: meeting.finalization_status,
+    },
+    buildTranscriptTrustCapabilities({
+      hasUsableMicArtifact: Boolean(meeting.audio_path),
+      hasUsableSystemArtifact: Boolean(meeting.system_audio_path),
+      hasUsableMixArtifact: Boolean(meeting.mixed_audio_path),
+      hasSupportedActivityEvidence: false,
+      micActivitySeconds: 0,
+      systemActivitySeconds: 0,
+      recoverySource: null,
+      hasCaptureRecoveryHandler: false,
+      canRestoreCaptureGap: false,
+      hasExistingTranscript: Boolean(meeting.transcript_json),
+      hasExistingDerivedArtifacts: Boolean(meeting.analysis_json),
+    }),
+  );
+  return canUseTranscriptTrustState(trust, 'generate_new');
+};
 
 interface MeetingActionCardsProps {
   items: MeetingActionItemCard[];
@@ -714,12 +828,7 @@ export const MeetingView = ({
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
-    if (
-      !canGenerateMeetingIntelligence(
-        selectedMeeting.transcript_status,
-        selectedMeeting.finalization_status,
-      )
-    ) {
+    if (!canGenerateMeetingIntelligence(selectedMeeting)) {
       setRegenerateNotesError(
         'Transcript validation must finish before Pluto creates intelligence.',
       );
@@ -980,6 +1089,19 @@ export const MeetingView = ({
         status={selectedMeeting.transcript_status}
         finalizationStatus={selectedMeeting.finalization_status}
         integrityJson={selectedMeeting.transcript_integrity_json}
+        transcriptJson={selectedMeeting.transcript_json}
+        transcriptValidatedAt={selectedMeeting.transcript_validated_at}
+        audioPath={selectedMeeting.audio_path}
+        systemAudioPath={selectedMeeting.system_audio_path}
+        mixedAudioPath={selectedMeeting.mixed_audio_path}
+        activityEvidenceAvailable={Boolean(
+          selectedMeeting.transcript_integrity_json?.includes(
+            '"activityEvidence"',
+          ),
+        )}
+        hasExistingAnalysis={Boolean(
+          selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
+        )}
         onRetry={onRetryTranscriptValidation}
         retrying={transcriptValidationRetrying}
       />
@@ -1180,10 +1302,7 @@ export const MeetingView = ({
 
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
       <div className="mb-12 space-y-6">
-        {canGenerateMeetingIntelligence(
-          selectedMeeting.transcript_status,
-          selectedMeeting.finalization_status,
-        ) ? (
+        {canGenerateMeetingIntelligence(selectedMeeting) ? (
           <FollowUpDrafts
             meeting={selectedMeeting}
             overview={followUpDraftOverview}
