@@ -419,6 +419,9 @@ export async function processExtractedEntities(
       metadata: {
         full_description: actionItem.description,
         assignee_name: actionItem.assignee,
+        commitment_state: 'possible',
+        origin: 'extraction',
+        source_meeting_id: meetingId,
       },
     });
 

@@ -411,7 +411,11 @@ const QuickAddTask: React.FC<{
         type: 'action_item',
         name: value.trim(),
         status: 'active',
-        metadata: { full_description: value.trim() },
+        metadata: {
+          full_description: value.trim(),
+          commitment_state: 'confirmed',
+          origin: 'user',
+        },
       });
       if (projectId) {
         await linkEntities({

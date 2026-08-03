@@ -153,6 +153,37 @@ describe('Relationship Inference', () => {
     );
   });
 
+  it('persists extracted actions as possible commitments with their source', async () => {
+    const extracted: ExtractedEntities = {
+      people: [],
+      topics: [],
+      action_items: [
+        {
+          description: 'Send the rollout note',
+          assignee: 'Alex',
+        },
+      ],
+      decisions: [],
+      projects: [],
+      relationships: [],
+    };
+
+    await processExtractedEntities(extracted, 'meeting-action-source');
+
+    expect(db.upsertEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'action_item',
+        metadata: {
+          full_description: 'Send the rollout note',
+          assignee_name: 'Alex',
+          commitment_state: 'possible',
+          origin: 'extraction',
+          source_meeting_id: 'meeting-action-source',
+        },
+      }),
+    );
+  });
+
   it('should not link ungrounded person relationships even if person exists in DB', async () => {
     const existingPerson: Entity = {
       id: 'p-sarah',
