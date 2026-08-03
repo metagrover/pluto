@@ -173,6 +173,7 @@ describe('Relationship Inference', () => {
     expect(db.upsertEntity).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'action_item',
+        dedupe_by_name: false,
         metadata: {
           full_description: 'Send the rollout note',
           assignee_name: 'Alex',

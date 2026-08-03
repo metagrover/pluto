@@ -20,6 +20,7 @@ describe('buildQuickAddActionEntity', () => {
       type: 'action_item',
       name: 'Send the rollout note',
       status: 'active',
+      dedupe_by_name: false,
       metadata: {
         full_description: 'Send the rollout note',
         commitment_state: 'confirmed',

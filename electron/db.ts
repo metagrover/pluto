@@ -4316,6 +4316,7 @@ export const upsertEntity = (entity: {
   due_date?: string | null;
   assigned_to?: string | null;
   metadata?: Record<string, unknown>;
+  dedupe_by_name?: boolean;
   saliency_score?: number;
   domain_tag?: string;
 }): Entity => {
@@ -4354,9 +4355,9 @@ export const upsertEntity = (entity: {
       .get(entity.id) as Entity | undefined;
   }
 
-  // 2. If no ID or not found by ID, try normalization match. New action items
-  // are distinct commitments even when their display names match.
-  if (!existing && (entity.id || entity.type !== 'action_item')) {
+  // 2. If no ID or not found by ID, try normalization match unless the caller
+  // explicitly requests a distinct entity.
+  if (!existing && entity.dedupe_by_name !== false) {
     existing = db
       .prepare(`
         SELECT * FROM entities WHERE type = ? AND normalized_name = ?

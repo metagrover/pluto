@@ -24,6 +24,7 @@ describe('action commitment database persistence', () => {
     const userAction = upsertEntity({
       type: 'action_item',
       name: 'Send the rollout note',
+      dedupe_by_name: false,
       metadata: {
         full_description: 'Send the rollout note',
         commitment_state: 'confirmed',
@@ -33,6 +34,7 @@ describe('action commitment database persistence', () => {
     const extractedAction = upsertEntity({
       type: 'action_item',
       name: 'Send the rollout note',
+      dedupe_by_name: false,
       metadata: {
         full_description: 'Send the rollout note',
         commitment_state: 'possible',
@@ -75,5 +77,19 @@ describe('action commitment database persistence', () => {
     expect(updated.id).toBe(userAction.id);
     expect(updated.status).toBe('completed');
     expect(getEntitiesByType('action_item')).toHaveLength(2);
+
+    const defaultFirst = upsertEntity({
+      type: 'action_item',
+      name: 'Synthesize the project status',
+    });
+    const defaultSecond = upsertEntity({
+      type: 'action_item',
+      name: 'Synthesize the project status',
+      status: 'completed',
+    });
+
+    expect(defaultSecond.id).toBe(defaultFirst.id);
+    expect(defaultSecond.status).toBe('completed');
+    expect(getEntitiesByType('action_item')).toHaveLength(3);
   });
 });

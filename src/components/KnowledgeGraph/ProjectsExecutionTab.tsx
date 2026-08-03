@@ -17,6 +17,7 @@ export const buildQuickAddActionEntity = (value: string) => {
     type: 'action_item' as const,
     name: description,
     status: 'active' as const,
+    dedupe_by_name: false,
     metadata: {
       full_description: description,
       commitment_state: 'confirmed',

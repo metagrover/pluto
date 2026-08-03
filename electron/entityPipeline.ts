@@ -417,6 +417,7 @@ export async function processExtractedEntities(
       name: actionItem.description.substring(0, 100), // Truncate for name
       status: 'active',
       due_date: dueDate,
+      dedupe_by_name: false,
       metadata: {
         full_description: actionItem.description,
         assignee_name: actionItem.assignee,

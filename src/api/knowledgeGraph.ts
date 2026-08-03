@@ -265,6 +265,7 @@ export const upsertEntity = async (entity: {
   due_date?: string | null;
   assigned_to?: string | null;
   metadata?: Record<string, unknown>;
+  dedupe_by_name?: boolean;
 }): Promise<Entity> => {
   return invoke('UPSERT_ENTITY', entity);
 };
