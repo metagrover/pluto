@@ -26,26 +26,59 @@ const makeLoaders = () => ({
 });
 
 describe('createDashboardRefreshCoordinator', () => {
-  it('returns the active reload promise and keeps concurrent callers on the same reload', async () => {
-    const reloadFinished = deferred<void>();
-    const reload = vi.fn(() => reloadFinished.promise);
+  it('queues one trailing reload for callers arriving during an active reload', async () => {
+    const reloadA = deferred<void>();
+    const reloadB = deferred<void>();
+    const reload = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(reloadA.promise)
+      .mockReturnValueOnce(reloadB.promise);
     const refresh = createDashboardRefreshCoordinator(reload);
 
     const first = refresh();
     const second = refresh();
-    let settled = false;
-    void first.finally(() => {
-      settled = true;
+    const third = refresh();
+    let secondSettled = false;
+    void second.finally(() => {
+      secondSettled = true;
     });
 
     await Promise.resolve();
-    expect(settled).toBe(false);
+    expect(second).not.toBe(first);
+    expect(third).toBe(second);
     expect(reload).toHaveBeenCalledTimes(1);
-    expect(second).toBe(first);
+    expect(secondSettled).toBe(false);
 
-    reloadFinished.resolve();
+    reloadA.resolve();
     await first;
-    expect(settled).toBe(true);
+    await Promise.resolve();
+    expect(reload).toHaveBeenCalledTimes(2);
+    expect(secondSettled).toBe(false);
+
+    reloadB.resolve();
+    await second;
+    expect(secondSettled).toBe(true);
+  });
+
+  it('runs the queued reload after an active failure and keeps their outcomes distinct', async () => {
+    const reloadA = deferred<void>();
+    const reloadB = deferred<void>();
+    const reload = vi
+      .fn<() => Promise<void>>()
+      .mockReturnValueOnce(reloadA.promise)
+      .mockReturnValueOnce(reloadB.promise);
+    const refresh = createDashboardRefreshCoordinator(reload);
+
+    const first = refresh();
+    const queued = refresh();
+    reloadA.reject(new Error('reload A failed'));
+
+    await expect(first).rejects.toThrow('reload A failed');
+    await Promise.resolve();
+    expect(reload).toHaveBeenCalledTimes(2);
+
+    reloadB.resolve();
+    await expect(queued).resolves.toBeUndefined();
   });
 });
 

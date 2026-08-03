@@ -134,14 +134,42 @@ export const createDashboardRefreshCoordinator = (
   reload: () => Promise<void>,
 ): (() => Promise<void>) => {
   let activeRefresh: Promise<void> | null = null;
+  let queuedRefresh: {
+    promise: Promise<void>;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  } | null = null;
+
+  const finishActiveRefresh = () => {
+    activeRefresh = null;
+    const queued = queuedRefresh;
+    queuedRefresh = null;
+    if (queued) {
+      startRefresh().then(queued.resolve, queued.reject);
+    }
+  };
+
+  const startRefresh = (): Promise<void> => {
+    const refresh = reload();
+    activeRefresh = refresh;
+    void refresh.then(finishActiveRefresh, finishActiveRefresh);
+    return refresh;
+  };
 
   return () => {
-    if (activeRefresh) return activeRefresh;
+    if (!activeRefresh) return startRefresh();
 
-    activeRefresh = reload().finally(() => {
-      activeRefresh = null;
-    });
-    return activeRefresh;
+    if (!queuedRefresh) {
+      let resolve!: () => void;
+      let reject!: (error: unknown) => void;
+      const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise;
+        reject = rejectPromise;
+      });
+      queuedRefresh = { promise, resolve, reject };
+    }
+
+    return queuedRefresh.promise;
   };
 };
 
