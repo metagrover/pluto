@@ -5,6 +5,7 @@
  * Handles entity resolution, relationship creation, and meeting associations.
  */
 
+import { createHash } from 'node:crypto';
 import levenshtein from 'fast-levenshtein';
 import type { ActionCommitmentMetadata } from '../src/utils/actionCommitment';
 import * as db from './db';
@@ -54,6 +55,16 @@ export function normalizeForMatch(str: string | null | undefined): string {
     .replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, '')
     .trim();
 }
+
+const getExtractedActionId = (meetingId: string, description: string) => {
+  const normalizedDescription = normalizeForMatch(description).replace(
+    /\s+/g,
+    ' ',
+  );
+  return `action-extraction-${createHash('sha256')
+    .update(`${meetingId}\0${normalizedDescription}`)
+    .digest('hex')}`;
+};
 
 /**
  * Tokenize and sort string for bag-of-words comparison
@@ -409,25 +420,29 @@ export async function processExtractedEntities(
   for (const actionItem of extracted.action_items) {
     if (!actionItem?.description || typeof actionItem.description !== 'string')
       continue;
-    // Action items are always created fresh (not deduplicated by name)
     const dueDate = parseDueDate(actionItem.due_date || '');
+    const actionId = getExtractedActionId(meetingId, actionItem.description);
+    const existingAction = db.getEntity(actionId);
+    const entity =
+      existingAction ??
+      db.upsertEntity({
+        id: actionId,
+        type: 'action_item',
+        name: actionItem.description.substring(0, 100), // Truncate for name
+        status: 'active',
+        due_date: dueDate,
+        dedupe_by_name: false,
+        metadata: {
+          full_description: actionItem.description,
+          assignee_name: actionItem.assignee,
+          commitment_state: 'possible',
+          origin: 'extraction',
+          source_meeting_id: meetingId,
+        } satisfies ActionCommitmentMetadata,
+      });
 
-    const entity = db.upsertEntity({
-      type: 'action_item',
-      name: actionItem.description.substring(0, 100), // Truncate for name
-      status: 'active',
-      due_date: dueDate,
-      dedupe_by_name: false,
-      metadata: {
-        full_description: actionItem.description,
-        assignee_name: actionItem.assignee,
-        commitment_state: 'possible',
-        origin: 'extraction',
-        source_meeting_id: meetingId,
-      } satisfies ActionCommitmentMetadata,
-    });
-
-    created++;
+    if (existingAction) updated++;
+    else created++;
     entities.push(entity);
 
     // Associate with meeting

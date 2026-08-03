@@ -282,7 +282,7 @@ handleReviewCommitment: (
 ) => Promise<void>;
 ```
 
-Possible rows omit the leading check button. Their review-source action navigates using `sourceMeetingId`; source-less review is a non-mutating row action. Confirmation/rejection buttons call the review handler. Confirmed rows keep the existing checkbox, completion label, and attention lifecycle controls.
+Possible rows omit the leading check button. Their review-source action navigates using `sourceMeetingId`; source-less review stays within the row as a native `details` disclosure that explains no source meeting is available. Confirmation/rejection buttons call the review handler. Confirmed rows keep the existing checkbox, completion label, and attention lifecycle controls.
 
 Replace `Only the highest-value signals` with the exact model summary.
 

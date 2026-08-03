@@ -1,5 +1,6 @@
 vi.mock('../../electron/db', () => ({
   getEntitiesByType: vi.fn(),
+  getEntity: vi.fn(),
   findEntity: vi.fn(),
   upsertEntity: vi.fn().mockImplementation((e: Record<string, unknown>) => ({
     ...e,
@@ -19,6 +20,7 @@ describe('Relationship Inference', () => {
     vi.clearAllMocks();
     // Default return values if needed, though simpler to set in test or let default undefined work
     vi.mocked(db.getEntitiesByType).mockReturnValue([]);
+    vi.mocked(db.getEntity).mockReturnValue(undefined);
     vi.mocked(db.findEntity).mockReturnValue(undefined);
   });
 

@@ -86,7 +86,7 @@ Confirmed row:
 ## Interaction model
 
 - `Review source` navigates to the exact persisted meeting through the existing meeting-selection path.
-- `Review task` leaves the row in place when no source is available; the row already exposes all known evidence and review controls.
+- `Review task` is an inline native disclosure when no source is available; it leaves the dashboard in place and explains that the wording above is the available evidence before confirmation or rejection.
 - `Confirm task` persists the confirmed state, refreshes dashboard data, and transforms the same row into the standard confirmed-task presentation.
 - `Not a task` persists rejection, refreshes dashboard data, and removes the row from Attention.
 - Existing loading, disabled, error, keyboard focus, and accessible-name behavior applies to the new controls.

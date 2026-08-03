@@ -64,7 +64,7 @@ const getActionInsightPrimaryAriaLabel = (item: DashboardActionInsightItem) =>
     : `Mark ${item.title} complete`;
 
 interface DashboardReviewAction {
-  label: 'Review source' | 'Review task' | 'Confirm task' | 'Not a task';
+  label: 'Review source' | 'Confirm task' | 'Not a task';
   ariaLabel: string;
   onClick: () => void | Promise<void>;
 }
@@ -73,24 +73,21 @@ export const getDashboardReviewActions = (
   item: DashboardActionInsightItem,
   handlers: {
     setSelectedMeetingId: (id: string | number | null) => void;
-    setActiveTab: (tab: 'projects') => void;
     handleReviewCommitment: (
       id: string,
       state: 'confirmed' | 'rejected',
     ) => Promise<void>;
   },
 ): DashboardReviewAction[] => [
-  {
-    label: item.sourceMeetingId ? 'Review source' : 'Review task',
-    ariaLabel: `${item.sourceMeetingId ? 'Review source for' : 'Review task'} ${item.title}`,
-    onClick: () => {
-      if (item.sourceMeetingId) {
-        handlers.setSelectedMeetingId(item.sourceMeetingId);
-      } else {
-        handlers.setActiveTab('projects');
-      }
-    },
-  },
+  ...(item.sourceMeetingId
+    ? [
+        {
+          label: 'Review source' as const,
+          ariaLabel: `Review source for ${item.title}`,
+          onClick: () => handlers.setSelectedMeetingId(item.sourceMeetingId),
+        },
+      ]
+    : []),
   {
     label: 'Confirm task',
     ariaLabel: `Confirm task: ${item.title}`,
@@ -293,7 +290,6 @@ export const Dashboard = ({
                     getActionInsightPrimaryAriaLabel(item);
                   const reviewActions = getDashboardReviewActions(item, {
                     setSelectedMeetingId,
-                    setActiveTab,
                     handleReviewCommitment,
                   });
                   return (
@@ -350,18 +346,32 @@ export const Dashboard = ({
                                 {primaryLabel}
                               </button>
                             ) : (
-                              reviewActions.map((action) => (
-                                <button
-                                  key={action.label}
-                                  type="button"
-                                  aria-label={action.ariaLabel}
-                                  disabled={isUpdating}
-                                  onClick={action.onClick}
-                                  className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
-                                >
-                                  {action.label}
-                                </button>
-                              ))
+                              <>
+                                {!item.sourceMeetingId ? (
+                                  <details className="min-h-8 rounded-lg px-2 text-pro-accent">
+                                    <summary className="cursor-pointer py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent">
+                                      Review task
+                                    </summary>
+                                    <p className="max-w-md pb-2 font-medium leading-5 text-pro-text-muted">
+                                      No source meeting is available. Review the
+                                      wording above, then confirm it or mark it
+                                      not a task.
+                                    </p>
+                                  </details>
+                                ) : null}
+                                {reviewActions.map((action) => (
+                                  <button
+                                    key={action.label}
+                                    type="button"
+                                    aria-label={action.ariaLabel}
+                                    disabled={isUpdating}
+                                    onClick={action.onClick}
+                                    className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+                                  >
+                                    {action.label}
+                                  </button>
+                                ))}
+                              </>
                             )}
                             {item.canComplete &&
                             item.attentionItemId &&

@@ -687,11 +687,14 @@ describe('Dashboard', () => {
     );
 
     expect(markup).toContain('Review task');
+    expect(markup).toContain('<details');
+    expect(markup).toContain(
+      'No source meeting is available. Review the wording above, then confirm it or mark it not a task.',
+    );
     expect(markup).not.toContain('Review source');
   });
 
-  it('opens the Projects task surface when reviewing a possible follow-up without source evidence', () => {
-    const setActiveTab = vi.fn();
+  it('keeps source-less review inline instead of exporting a navigation action', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [],
@@ -708,14 +711,13 @@ describe('Dashboard', () => {
     });
     const actions = getDashboardReviewActions(model.actionInsights.items[0], {
       setSelectedMeetingId: vi.fn(),
-      setActiveTab,
       handleReviewCommitment: vi.fn(async () => {}),
     });
 
-    actions[0].onClick();
-
-    expect(actions[0].label).toBe('Review task');
-    expect(setActiveTab).toHaveBeenCalledWith('projects');
+    expect(actions.map((action) => action.label)).toEqual([
+      'Confirm task',
+      'Not a task',
+    ]);
   });
 
   it('binds possible follow-up review actions to the exact source and action state', async () => {
@@ -741,7 +743,6 @@ describe('Dashboard', () => {
     const item = model.actionInsights.items[0];
     const actions = getDashboardReviewActions(item, {
       setSelectedMeetingId,
-      setActiveTab: vi.fn(),
       handleReviewCommitment,
     });
 

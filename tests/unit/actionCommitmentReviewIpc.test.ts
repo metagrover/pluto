@@ -70,4 +70,22 @@ describe('action commitment review IPC validation', () => {
     ).toBe(entity);
     expect(calls).toEqual(['update', 'refresh']);
   });
+
+  it('surfaces transition failures without queueing refresh', () => {
+    const transitionError = new Error(
+      'Cannot transition action commitment from confirmed to rejected',
+    );
+    const updateActionCommitmentState = vi.fn(() => {
+      throw transitionError;
+    });
+    const queueKnowledgeRefresh = vi.fn();
+
+    expect(() =>
+      handleActionCommitmentReview(
+        { id: 'action-1', commitmentState: 'rejected' },
+        { updateActionCommitmentState, queueKnowledgeRefresh },
+      ),
+    ).toThrow(transitionError);
+    expect(queueKnowledgeRefresh).not.toHaveBeenCalled();
+  });
 });

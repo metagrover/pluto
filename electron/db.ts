@@ -14,7 +14,10 @@ import {
   readRetryLease,
 } from '../src/services/transcriptValidationRetryLease';
 import type { MeetingFinalizationStatus } from '../src/types';
-import { mergeCommitmentReview } from '../src/utils/actionCommitment';
+import {
+  getCommitmentState,
+  mergeCommitmentReview,
+} from '../src/utils/actionCommitment';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
@@ -4519,22 +4522,32 @@ export const updateActionCommitmentState = (
     throw new Error(`Invalid commitment state: ${String(commitmentState)}`);
   }
 
-  const entity = getEntity(id);
-  if (!entity) throw new Error(`Entity not found: ${id}`);
-  if (entity.type !== 'action_item') {
-    throw new Error(`Entity is not an action item: ${id}`);
-  }
+  return db.transaction(() => {
+    const entity = getEntity(id);
+    if (!entity) throw new Error(`Entity not found: ${id}`);
+    if (entity.type !== 'action_item') {
+      throw new Error(`Entity is not an action item: ${id}`);
+    }
 
-  const metadata = mergeCommitmentReview(
-    entity.metadata,
-    commitmentState,
-    reviewedAt,
-  );
-  db.prepare(`
-    UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-  `).run(JSON.stringify(metadata), id);
+    const currentState = getCommitmentState(entity.metadata);
+    if (currentState === commitmentState) return entity;
+    if (currentState !== 'possible') {
+      throw new Error(
+        `Cannot transition action commitment from ${currentState} to ${commitmentState}`,
+      );
+    }
 
-  return getEntity(id) as Entity;
+    const metadata = mergeCommitmentReview(
+      entity.metadata,
+      commitmentState,
+      reviewedAt,
+    );
+    db.prepare(`
+      UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(JSON.stringify(metadata), id);
+
+    return getEntity(id) as Entity;
+  })();
 };
 
 /**

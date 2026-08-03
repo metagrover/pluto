@@ -24,6 +24,71 @@ afterAll(() => {
 });
 
 describe('action commitment database persistence', () => {
+  it.each([
+    ['confirmed', 'rejected'],
+    ['rejected', 'confirmed'],
+  ] as const)(
+    'does not allow a final %s review to transition to %s',
+    (initialState, attemptedState) => {
+      const action = upsertEntity({
+        type: 'action_item',
+        name: `Final ${initialState} action`,
+        dedupe_by_name: false,
+        metadata: {
+          commitment_state: initialState,
+          origin: initialState === 'confirmed' ? 'user' : 'extraction',
+          reviewed_at: '2026-08-03T12:00:00.000Z',
+        },
+      });
+
+      expect(() =>
+        updateActionCommitmentState(action.id, attemptedState),
+      ).toThrow(
+        `Cannot transition action commitment from ${initialState} to ${attemptedState}`,
+      );
+
+      const persisted = getEntitiesByType('action_item').find(
+        (entity) => entity.id === action.id,
+      );
+      expect(JSON.parse(persisted?.metadata ?? '{}')).toMatchObject({
+        commitment_state: initialState,
+        origin: initialState === 'confirmed' ? 'user' : 'extraction',
+        reviewed_at: '2026-08-03T12:00:00.000Z',
+      });
+    },
+  );
+
+  it.each(['confirmed', 'rejected'] as const)(
+    'allows possible to transition exactly once to %s and treats a retry as idempotent',
+    (finalState) => {
+      const action = upsertEntity({
+        type: 'action_item',
+        name: `Possible to ${finalState}`,
+        status: 'overdue',
+        dedupe_by_name: false,
+        metadata: {
+          commitment_state: 'possible',
+          origin: 'extraction',
+          source_meeting_id: 'meeting-transition',
+        },
+      });
+
+      const first = updateActionCommitmentState(
+        action.id,
+        finalState,
+        '2026-08-03T12:00:00.000Z',
+      );
+      const retry = updateActionCommitmentState(
+        action.id,
+        finalState,
+        '2026-08-03T13:00:00.000Z',
+      );
+
+      expect(retry.status).toBe('overdue');
+      expect(retry.metadata).toBe(first.metadata);
+    },
+  );
+
   it.each(['confirmed', 'rejected'] as const)(
     'persists a %s review without overwriting action metadata or completion status',
     (commitmentState) => {
