@@ -3,10 +3,10 @@ export type CommitmentState = 'possible' | 'confirmed' | 'rejected';
 export type ActionOrigin = 'extraction' | 'user';
 
 export interface ActionCommitmentMetadata extends Record<string, unknown> {
-  commitment_state?: CommitmentState;
-  origin?: ActionOrigin;
-  commitment_reviewed_at?: string;
+  commitment_state: CommitmentState;
+  origin: ActionOrigin;
   source_meeting_id?: string;
+  reviewed_at?: string;
   full_description?: string;
   assignee_name?: string;
 }
@@ -43,5 +43,5 @@ export const mergeCommitmentReview = (
 ): Record<string, unknown> => ({
   ...parseActionMetadata(value),
   commitment_state: commitmentState,
-  commitment_reviewed_at: reviewedAt,
+  reviewed_at: reviewedAt,
 });

@@ -47,7 +47,7 @@ describe('action commitment metadata', () => {
         assignee_name: 'Alex',
         commitment_state: commitmentState,
         origin: 'extraction',
-        commitment_reviewed_at: reviewedAt,
+        reviewed_at: reviewedAt,
       });
     },
   );
