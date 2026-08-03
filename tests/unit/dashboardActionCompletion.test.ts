@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  DashboardRefreshAfterMutationError,
   persistDashboardActionCompletion,
   persistDashboardAttentionStatus,
   persistDashboardCommitmentReview,
@@ -50,6 +51,25 @@ describe('persistDashboardCommitmentReview', () => {
       expect(refreshDashboard).not.toHaveBeenCalled();
     },
   );
+
+  it('distinguishes refresh failure after a durable commitment review', async () => {
+    const updateActionCommitmentState = vi.fn(async () => {});
+    const refreshDashboard = vi.fn(async () => {
+      throw new Error('refresh failed');
+    });
+
+    await expect(
+      persistDashboardCommitmentReview('action-3', 'confirmed', {
+        updateActionCommitmentState,
+        refreshDashboard,
+      }),
+    ).rejects.toBeInstanceOf(DashboardRefreshAfterMutationError);
+
+    expect(updateActionCommitmentState).toHaveBeenCalledWith(
+      'action-3',
+      'confirmed',
+    );
+  });
 });
 
 describe('persistDashboardActionCompletion', () => {

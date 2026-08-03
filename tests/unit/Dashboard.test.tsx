@@ -8,7 +8,10 @@ import type {
   KnowledgeProjectHealthCard,
   KnowledgeWorkspacePayload,
 } from '../../src/api/knowledgeWorkspace';
-import { Dashboard } from '../../src/components/features/Dashboard';
+import {
+  Dashboard,
+  getDashboardReviewActions,
+} from '../../src/components/features/Dashboard';
 import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
 import type { Meeting } from '../../src/types';
 
@@ -33,7 +36,7 @@ const makeAction = (overrides: Partial<Entity> = {}): Entity => ({
   status: 'active',
   due_date: '2026-04-26T12:00:00.000Z',
   assigned_to: null,
-  metadata: null,
+  metadata: JSON.stringify({ commitment_state: 'confirmed' }),
   saliency_score: 0.8,
   domain_tag: 'work',
   created_at: '2026-04-25T10:00:00.000Z',
@@ -592,5 +595,209 @@ describe('Dashboard', () => {
     );
     expect(markup.match(/Mark complete/g) ?? []).toHaveLength(2);
     expect(markup).not.toContain('Reopen');
+  });
+
+  it('renders possible follow-ups as reviewable evidence without settled-work controls', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          name: 'Check whether privacy review is assigned',
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            origin: 'extraction',
+            source_meeting_id: 'meeting-1',
+          }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+        handleReviewCommitment={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Needs review');
+    expect(markup).toContain(
+      'Possible follow-up · From Launch Review · Apr 27, 2026',
+    );
+    expect(markup).toContain('Review source');
+    expect(markup).toContain('Confirm task');
+    expect(markup).toContain('Not a task');
+    expect(markup).toContain(
+      'aria-label="Review source for Check whether privacy review is assigned"',
+    );
+    expect(markup).toContain(
+      'aria-label="Confirm task: Check whether privacy review is assigned"',
+    );
+    expect(markup).toContain(
+      'aria-label="Not a task: Check whether privacy review is assigned"',
+    );
+    expect(
+      markup.match(/focus-visible:outline-pro-accent/g) ?? [],
+    ).toHaveLength(5);
+    expect(markup).not.toContain('Mark complete');
+    expect(markup).not.toContain('Resolve blocker');
+    expect(markup).not.toContain(
+      'Mark Check whether privacy review is assigned complete',
+    );
+  });
+
+  it('renders a truthful Review task affordance when possible evidence has no source meeting', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+        handleReviewCommitment={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Review task');
+    expect(markup).not.toContain('Review source');
+  });
+
+  it('binds possible follow-up review actions to the exact source and action state', async () => {
+    const setSelectedMeetingId = vi.fn();
+    const handleReviewCommitment = vi.fn(async () => {});
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting({ id: 'meeting-exact' })],
+      overdueActions: [
+        makeAction({
+          id: 'action-exact',
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            source_meeting_id: 'meeting-exact',
+          }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const item = model.actionInsights.items[0];
+    const actions = getDashboardReviewActions(item, {
+      setSelectedMeetingId,
+      handleReviewCommitment,
+    });
+
+    actions[0].onClick();
+    await actions[1].onClick();
+    await actions[2].onClick();
+
+    expect(setSelectedMeetingId).toHaveBeenCalledWith('meeting-exact');
+    expect(handleReviewCommitment).toHaveBeenNthCalledWith(
+      1,
+      'action-exact',
+      'confirmed',
+    );
+    expect(handleReviewCommitment).toHaveBeenNthCalledWith(
+      2,
+      'action-exact',
+      'rejected',
+    );
+  });
+
+  it('keeps possible blockers out of completion and blocker lifecycle controls', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [
+        makeAction({
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [makeAttentionItem({ kind: 'blocker' })],
+      workspace: null,
+      graphStats: null,
+    });
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+        handleReviewCommitment={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('Needs review');
+    expect(markup).not.toContain('Resolve blocker');
+    expect(markup).not.toContain('Dismiss blocker');
+    expect(markup).not.toContain('Snooze blocker');
+  });
+
+  it('renders the model-generated action insight summary', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [makeAction()],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+        handleReviewCommitment={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('1 confirmed commitment needs attention.');
+    expect(markup).not.toContain('Only the highest-value signals');
   });
 });

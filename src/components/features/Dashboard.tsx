@@ -26,6 +26,10 @@ interface DashboardProps {
   updatingTaskIds: Set<string>;
   actionError: string | null;
   handleCompleteTask: (id: string) => Promise<void>;
+  handleReviewCommitment: (
+    id: string,
+    state: 'confirmed' | 'rejected',
+  ) => Promise<void>;
   handleUpdateAttentionStatus: (
     attentionItemId: string,
     nextStatus: 'active' | 'dismissed' | 'snoozed',
@@ -36,10 +40,10 @@ const isTabTarget = (
   target: DashboardAction['target'],
 ): target is 'projects' | 'wiki' => target === 'projects' || target === 'wiki';
 
-const getActionInsightStatusLabel = (item: DashboardActionInsightItem) =>
-  item.attentionLabel ?? item.status;
-
 const getActionInsightStatusTone = (item: DashboardActionInsightItem) => {
+  if (item.commitmentState === 'possible') {
+    return 'bg-pro-warning/10 text-pro-warning';
+  }
   if (item.attentionLabel === 'Blocker' || item.status === 'overdue') {
     return 'bg-pro-urgent/10 text-pro-urgent';
   }
@@ -58,6 +62,43 @@ const getActionInsightPrimaryAriaLabel = (item: DashboardActionInsightItem) =>
   item.attentionLabel === 'Blocker' && item.attentionStatus === 'active'
     ? `Resolve blocker: ${item.title}`
     : `Mark ${item.title} complete`;
+
+interface DashboardReviewAction {
+  label: 'Review source' | 'Review task' | 'Confirm task' | 'Not a task';
+  ariaLabel: string;
+  onClick: () => void | Promise<void>;
+}
+
+export const getDashboardReviewActions = (
+  item: DashboardActionInsightItem,
+  handlers: {
+    setSelectedMeetingId: (id: string | number | null) => void;
+    handleReviewCommitment: (
+      id: string,
+      state: 'confirmed' | 'rejected',
+    ) => Promise<void>;
+  },
+): DashboardReviewAction[] => [
+  {
+    label: item.sourceMeetingId ? 'Review source' : 'Review task',
+    ariaLabel: `${item.sourceMeetingId ? 'Review source for' : 'Review task'} ${item.title}`,
+    onClick: () => {
+      if (item.sourceMeetingId) {
+        handlers.setSelectedMeetingId(item.sourceMeetingId);
+      }
+    },
+  },
+  {
+    label: 'Confirm task',
+    ariaLabel: `Confirm task: ${item.title}`,
+    onClick: () => handlers.handleReviewCommitment(item.id, 'confirmed'),
+  },
+  {
+    label: 'Not a task',
+    ariaLabel: `Not a task: ${item.title}`,
+    onClick: () => handlers.handleReviewCommitment(item.id, 'rejected'),
+  },
+];
 
 const getHeroTone = (
   severity: DashboardHomeModel['hero']['severity'],
@@ -91,6 +132,7 @@ export const Dashboard = ({
   updatingTaskIds,
   actionError,
   handleCompleteTask,
+  handleReviewCommitment,
   handleUpdateAttentionStatus,
 }: DashboardProps) => {
   const runAction = (action: DashboardAction) => {
@@ -230,7 +272,7 @@ export const Dashboard = ({
                 </h2>
               </div>
               <p className="text-right text-[11px] font-semibold text-pro-text-main/55">
-                Only the highest-value signals
+                {model.actionInsights.summary}
               </p>
             </div>
 
@@ -246,6 +288,10 @@ export const Dashboard = ({
                   const primaryLabel = getActionInsightPrimaryLabel(item);
                   const primaryAriaLabel =
                     getActionInsightPrimaryAriaLabel(item);
+                  const reviewActions = getDashboardReviewActions(item, {
+                    setSelectedMeetingId,
+                    handleReviewCommitment,
+                  });
                   return (
                     <article
                       key={item.id}
@@ -254,19 +300,21 @@ export const Dashboard = ({
                       className="group py-4"
                     >
                       <div className="flex items-start gap-3">
-                        <button
-                          type="button"
-                          aria-label={primaryAriaLabel}
-                          disabled={isUpdating}
-                          onClick={() => handleCompleteTask(item.id)}
-                          className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-pro-border text-pro-text-muted transition-colors hover:border-pro-accent hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
-                        >
-                          {isUpdating ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Check className="h-3.5 w-3.5" />
-                          )}
-                        </button>
+                        {item.canComplete ? (
+                          <button
+                            type="button"
+                            aria-label={primaryAriaLabel}
+                            disabled={isUpdating}
+                            onClick={() => handleCompleteTask(item.id)}
+                            className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-pro-border text-pro-text-muted transition-colors hover:border-pro-accent hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
+                          >
+                            {isUpdating ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Check className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        ) : null}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-3">
                             <h3 className="text-[14px] font-bold leading-5 text-pro-text-main">
@@ -275,12 +323,11 @@ export const Dashboard = ({
                             <span
                               className={`shrink-0 rounded-full px-2 py-1 text-[9px] font-black ${getActionInsightStatusTone(item)}`}
                             >
-                              {getActionInsightStatusLabel(item)}
+                              {item.statusLabel}
                             </span>
                           </div>
                           <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
-                            {item.dueLabel} ·{' '}
-                            {item.contextLabel ?? item.sourceLabel}
+                            {item.basisLabel}
                           </p>
                           {item.attentionReason &&
                           item.attentionReason !== item.contextLabel ? (
@@ -289,15 +336,41 @@ export const Dashboard = ({
                             </p>
                           ) : null}
                           <div className="mt-2 flex min-h-8 flex-wrap items-center gap-1 text-[10px] font-bold">
-                            <button
-                              type="button"
-                              disabled={isUpdating}
-                              onClick={() => handleCompleteTask(item.id)}
-                              className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main disabled:opacity-50"
-                            >
-                              {primaryLabel}
-                            </button>
-                            {item.attentionItemId && item.dismissLabel ? (
+                            {item.canComplete ? (
+                              <button
+                                type="button"
+                                disabled={isUpdating}
+                                onClick={() => handleCompleteTask(item.id)}
+                                className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                              >
+                                {primaryLabel}
+                              </button>
+                            ) : (
+                              reviewActions.map((action) =>
+                                action.label === 'Review task' ? (
+                                  <span
+                                    key={action.label}
+                                    className="min-h-8 px-2 py-2 text-pro-text-muted"
+                                  >
+                                    {action.label}
+                                  </span>
+                                ) : (
+                                  <button
+                                    key={action.label}
+                                    type="button"
+                                    aria-label={action.ariaLabel}
+                                    disabled={isUpdating}
+                                    onClick={action.onClick}
+                                    className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+                                  >
+                                    {action.label}
+                                  </button>
+                                ),
+                              )
+                            )}
+                            {item.canComplete &&
+                            item.attentionItemId &&
+                            item.dismissLabel ? (
                               <button
                                 type="button"
                                 disabled={isUpdating}
@@ -314,7 +387,9 @@ export const Dashboard = ({
                                 {item.dismissLabel}
                               </button>
                             ) : null}
-                            {item.attentionItemId && item.snoozeLabel ? (
+                            {item.canComplete &&
+                            item.attentionItemId &&
+                            item.snoozeLabel ? (
                               <button
                                 type="button"
                                 disabled={isUpdating}
