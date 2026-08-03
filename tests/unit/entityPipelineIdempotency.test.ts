@@ -13,6 +13,8 @@ vi.mock('electron', () => ({
 
 import {
   getEntitiesByType,
+  getEntity,
+  getEntityLinks,
   getMeetingEntities,
   saveMeeting,
   updateActionCommitmentState,
@@ -49,7 +51,7 @@ describe('extracted action idempotency', () => {
         '2026-08-03T12:00:00.000Z',
       );
 
-      await processExtractedEntities(
+      const replay = await processExtractedEntities(
         extractedAction(' send the rollout note '),
         meetingId,
       );
@@ -67,7 +69,10 @@ describe('extracted action idempotency', () => {
         source_meeting_id: meetingId,
         reviewed_at: '2026-08-03T12:00:00.000Z',
       });
-      expect(getMeetingEntities(meetingId)).toHaveLength(1);
+      const associations = getMeetingEntities(meetingId);
+      expect(associations).toHaveLength(1);
+      expect(associations[0].mention_count).toBe(1);
+      expect(replay.linked).toBe(0);
     },
   );
 
@@ -85,5 +90,42 @@ describe('extracted action idempotency', () => {
     );
 
     expect(first.entities[0].id).not.toBe(second.entities[0].id);
+  });
+
+  it('does not adopt a changed assignee when replaying a preserved action', async () => {
+    saveMeeting({ id: 'meeting-assignee', title: 'Assignee drift fixture' });
+    const first = await processExtractedEntities(
+      {
+        ...extractedAction('Publish the launch memo'),
+        action_items: [
+          { description: 'Publish the launch memo', assignee: 'Alex' },
+        ],
+      },
+      'meeting-assignee',
+    );
+
+    await processExtractedEntities(
+      {
+        ...extractedAction(' publish the launch memo. '),
+        action_items: [
+          { description: ' publish the launch memo. ', assignee: 'Taylor' },
+        ],
+      },
+      'meeting-assignee',
+    );
+
+    const action = getEntity(first.entities[0].id);
+    expect(JSON.parse(action?.metadata ?? '{}')).toMatchObject({
+      assignee_name: 'Alex',
+      full_description: 'Publish the launch memo',
+    });
+    const assignmentLinks = getEntityLinks(first.entities[0].id).filter(
+      (link) => link.relationship === 'assigned_to',
+    );
+    expect(assignmentLinks).toHaveLength(1);
+    expect(getEntity(assignmentLinks[0].target_entity_id)?.name).toBe('Alex');
+    expect(
+      getEntitiesByType('person').map((person) => person.name),
+    ).not.toContain('Taylor');
   });
 });

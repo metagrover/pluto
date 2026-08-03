@@ -4799,6 +4799,33 @@ export const addMeetingEntity = (meetingEntity: {
 };
 
 /**
+ * Insert a meeting association once without treating pipeline replay as a new
+ * mention or replacing the original evidence context.
+ */
+export const ensureMeetingEntity = (meetingEntity: {
+  meeting_id: string;
+  entity_id: string;
+  mention_count?: number;
+  first_mentioned_at?: number;
+  context?: string;
+}): boolean => {
+  const result = db
+    .prepare(`
+      INSERT INTO meeting_entities (meeting_id, entity_id, mention_count, first_mentioned_at, context)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(meeting_id, entity_id) DO NOTHING
+    `)
+    .run(
+      meetingEntity.meeting_id,
+      meetingEntity.entity_id,
+      meetingEntity.mention_count || 1,
+      meetingEntity.first_mentioned_at || null,
+      meetingEntity.context || null,
+    );
+  return result.changes === 1;
+};
+
+/**
  * Get all entities mentioned in a meeting
  */
 export const getMeetingEntities = (

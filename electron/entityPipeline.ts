@@ -446,15 +446,15 @@ export async function processExtractedEntities(
     entities.push(entity);
 
     // Associate with meeting
-    db.addMeetingEntity({
+    const associationInserted = db.ensureMeetingEntity({
       meeting_id: meetingId,
       entity_id: entity.id,
       context: actionItem.description,
     });
-    linked++;
+    if (associationInserted) linked++;
 
     // If there's an assignee, find/create that person and link
-    if (actionItem.assignee) {
+    if (!existingAction && actionItem.assignee) {
       if (
         transcriptForGrounding &&
         !isPersonGroundedInTranscript(

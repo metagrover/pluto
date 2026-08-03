@@ -8,6 +8,7 @@ vi.mock('../../electron/db', () => ({
   })),
   linkEntities: vi.fn().mockImplementation((l: unknown) => l),
   addMeetingEntity: vi.fn(),
+  ensureMeetingEntity: vi.fn(() => true),
 }));
 
 import * as db from '../../electron/db';
