@@ -5,6 +5,7 @@ import type { Entity } from '../../src/api/knowledgeGraph';
 import {
   ProjectHealthCard,
   buildExecutionSummary,
+  buildQuickAddActionEntity,
   getExecutionBriefHeading,
   getInboxSummary,
   getNextTaskStatusForToggle,
@@ -12,6 +13,21 @@ import {
   partitionProjectsForDisplay,
   sortExecutionTasksForDisplay,
 } from '../../src/components/KnowledgeGraph/ProjectsExecutionTab';
+
+describe('buildQuickAddActionEntity', () => {
+  it('creates an explicitly confirmed user commitment', () => {
+    expect(buildQuickAddActionEntity('  Send the rollout note  ')).toEqual({
+      type: 'action_item',
+      name: 'Send the rollout note',
+      status: 'active',
+      metadata: {
+        full_description: 'Send the rollout note',
+        commitment_state: 'confirmed',
+        origin: 'user',
+      },
+    });
+  });
+});
 
 const makeEntity = (overrides: Partial<Entity>): Entity => ({
   id: 'entity-1',

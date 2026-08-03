@@ -6,6 +6,7 @@
  */
 
 import levenshtein from 'fast-levenshtein';
+import type { ActionCommitmentMetadata } from '../src/utils/actionCommitment';
 import * as db from './db';
 import type {
   EntityExtractionContext,
@@ -422,7 +423,7 @@ export async function processExtractedEntities(
         commitment_state: 'possible',
         origin: 'extraction',
         source_meeting_id: meetingId,
-      },
+      } satisfies ActionCommitmentMetadata,
     });
 
     created++;

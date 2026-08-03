@@ -4354,8 +4354,9 @@ export const upsertEntity = (entity: {
       .get(entity.id) as Entity | undefined;
   }
 
-  // 2. If no ID or not found by ID, try normalization match
-  if (!existing) {
+  // 2. If no ID or not found by ID, try normalization match. New action items
+  // are distinct commitments even when their display names match.
+  if (!existing && (entity.id || entity.type !== 'action_item')) {
     existing = db
       .prepare(`
         SELECT * FROM entities WHERE type = ? AND normalized_name = ?
