@@ -693,6 +693,34 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Review source');
   });
 
+  it('opens the Projects task surface when reviewing a possible follow-up without source evidence', () => {
+    const setActiveTab = vi.fn();
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'action-without-source',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+    const actions = getDashboardReviewActions(model.actionInsights.items[0], {
+      setSelectedMeetingId: vi.fn(),
+      setActiveTab,
+      handleReviewCommitment: vi.fn(async () => {}),
+    });
+
+    actions[0].onClick();
+
+    expect(actions[0].label).toBe('Review task');
+    expect(setActiveTab).toHaveBeenCalledWith('projects');
+  });
+
   it('binds possible follow-up review actions to the exact source and action state', async () => {
     const setSelectedMeetingId = vi.fn();
     const handleReviewCommitment = vi.fn(async () => {});
@@ -716,6 +744,7 @@ describe('Dashboard', () => {
     const item = model.actionInsights.items[0];
     const actions = getDashboardReviewActions(item, {
       setSelectedMeetingId,
+      setActiveTab: vi.fn(),
       handleReviewCommitment,
     });
 
@@ -799,5 +828,44 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('1 confirmed commitment needs attention.');
     expect(markup).not.toContain('Only the highest-value signals');
+  });
+
+  it('gives confirmed blocker lifecycle controls specific labels and visible focus rings', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [makeAction({ id: 'confirmed-blocker' })],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [
+        makeAttentionItem({
+          kind: 'blocker',
+          related_entity_ids: ['confirmed-blocker'],
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+        handleReviewCommitment={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toMatch(
+      /aria-label="Dismiss blocker: Ship privacy review"[^>]+focus-visible:outline-pro-accent/,
+    );
+    expect(markup).toMatch(
+      /aria-label="Snooze blocker: Ship privacy review"[^>]+focus-visible:outline-pro-accent/,
+    );
   });
 });

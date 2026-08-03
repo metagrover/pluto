@@ -73,6 +73,7 @@ export const getDashboardReviewActions = (
   item: DashboardActionInsightItem,
   handlers: {
     setSelectedMeetingId: (id: string | number | null) => void;
+    setActiveTab: (tab: 'projects') => void;
     handleReviewCommitment: (
       id: string,
       state: 'confirmed' | 'rejected',
@@ -85,6 +86,8 @@ export const getDashboardReviewActions = (
     onClick: () => {
       if (item.sourceMeetingId) {
         handlers.setSelectedMeetingId(item.sourceMeetingId);
+      } else {
+        handlers.setActiveTab('projects');
       }
     },
   },
@@ -290,6 +293,7 @@ export const Dashboard = ({
                     getActionInsightPrimaryAriaLabel(item);
                   const reviewActions = getDashboardReviewActions(item, {
                     setSelectedMeetingId,
+                    setActiveTab,
                     handleReviewCommitment,
                   });
                   return (
@@ -346,33 +350,25 @@ export const Dashboard = ({
                                 {primaryLabel}
                               </button>
                             ) : (
-                              reviewActions.map((action) =>
-                                action.label === 'Review task' ? (
-                                  <span
-                                    key={action.label}
-                                    className="min-h-8 px-2 py-2 text-pro-text-muted"
-                                  >
-                                    {action.label}
-                                  </span>
-                                ) : (
-                                  <button
-                                    key={action.label}
-                                    type="button"
-                                    aria-label={action.ariaLabel}
-                                    disabled={isUpdating}
-                                    onClick={action.onClick}
-                                    className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
-                                  >
-                                    {action.label}
-                                  </button>
-                                ),
-                              )
+                              reviewActions.map((action) => (
+                                <button
+                                  key={action.label}
+                                  type="button"
+                                  aria-label={action.ariaLabel}
+                                  disabled={isUpdating}
+                                  onClick={action.onClick}
+                                  className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+                                >
+                                  {action.label}
+                                </button>
+                              ))
                             )}
                             {item.canComplete &&
                             item.attentionItemId &&
                             item.dismissLabel ? (
                               <button
                                 type="button"
+                                aria-label={`${item.dismissLabel}: ${item.title}`}
                                 disabled={isUpdating}
                                 onClick={() =>
                                   handleUpdateAttentionStatus(
@@ -382,7 +378,7 @@ export const Dashboard = ({
                                       : 'dismissed',
                                   )
                                 }
-                                className="min-h-8 rounded-lg px-2 text-pro-text-main/60 hover:bg-pro-surface hover:text-pro-text-main disabled:opacity-50"
+                                className="min-h-8 rounded-lg px-2 text-pro-text-main/60 hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
                               >
                                 {item.dismissLabel}
                               </button>
@@ -392,6 +388,7 @@ export const Dashboard = ({
                             item.snoozeLabel ? (
                               <button
                                 type="button"
+                                aria-label={`${item.snoozeLabel}: ${item.title}`}
                                 disabled={isUpdating}
                                 onClick={() =>
                                   handleUpdateAttentionStatus(
@@ -401,7 +398,7 @@ export const Dashboard = ({
                                       : 'snoozed',
                                   )
                                 }
-                                className="min-h-8 rounded-lg px-2 text-pro-text-main/60 hover:bg-pro-warning/10 hover:text-pro-warning disabled:opacity-50"
+                                className="min-h-8 rounded-lg px-2 text-pro-text-main/60 hover:bg-pro-warning/10 hover:text-pro-warning focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
                               >
                                 {item.snoozeLabel}
                               </button>
