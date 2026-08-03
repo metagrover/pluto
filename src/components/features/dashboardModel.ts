@@ -7,6 +7,10 @@ import type {
   KnowledgeWorkspacePayload,
 } from '../../api/knowledgeWorkspace';
 import type { Meeting } from '../../types';
+import {
+  getCommitmentState,
+  parseActionMetadata,
+} from '../../utils/actionCommitment';
 import type { TrustStatus } from '../../utils/trustStatus';
 import {
   deriveKnowledgeTrustStatus,
@@ -68,6 +72,11 @@ export interface DashboardActionInsightItem {
   title: string;
   dueLabel: string;
   status: 'overdue' | 'stale' | 'active';
+  commitmentState: 'possible' | 'confirmed';
+  statusLabel: string;
+  basisLabel: string;
+  sourceMeetingId: string | null;
+  canComplete: boolean;
   sourceLabel: string;
   contextLabel: string | null;
   attentionLabel: string | null;
@@ -84,6 +93,9 @@ export type DashboardActionInsights =
       overdueCount: 0;
       staleCount: 0;
       activeCount: 0;
+      possibleCount: 0;
+      confirmedCount: 0;
+      summary: string;
       items: [];
     }
   | {
@@ -91,6 +103,9 @@ export type DashboardActionInsights =
       overdueCount: number;
       staleCount: number;
       activeCount: number;
+      possibleCount: number;
+      confirmedCount: number;
+      summary: string;
       items: DashboardActionInsightItem[];
     };
 
@@ -227,6 +242,17 @@ const formatDueLabel = (value: string | null): string => {
     day: 'numeric',
     timeZone: 'UTC',
   })}`;
+};
+
+const formatMeetingBasisDate = (value: string): string => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 };
 
 const getMeetingTimestamp = (meeting: Meeting): string =>
@@ -402,6 +428,16 @@ const filterSuppressedDashboardActions = (
     (action) => !shouldSuppressDashboardAction(action.id, attentionAlerts),
   );
 
+const filterRejectedDashboardActions = (actions: Entity[]): Entity[] =>
+  actions.filter(
+    (action) => getCommitmentState(action.metadata) !== 'rejected',
+  );
+
+const filterConfirmedDashboardActions = (actions: Entity[]): Entity[] =>
+  actions.filter(
+    (action) => getCommitmentState(action.metadata) === 'confirmed',
+  );
+
 const compareDashboardAttentionPriority = (
   left: AttentionItem,
   right: AttentionItem,
@@ -507,37 +543,98 @@ const actionToInsightItem = (
   status: DashboardActionInsightItem['status'],
   contextLabel: string | null,
   linkedAttention: AttentionItem | null,
-): DashboardActionInsightItem => ({
-  id: action.id,
-  title: action.name,
-  dueLabel: formatDueLabel(action.due_date),
-  status,
-  sourceLabel: titleCase(action.domain_tag || 'workspace'),
-  contextLabel,
-  ...getDashboardActionAttentionContext(linkedAttention),
-  attentionItemId: linkedAttention?.id ?? null,
-  attentionStatus: linkedAttention?.status ?? null,
-  dismissLabel:
-    linkedAttention == null
-      ? null
-      : linkedAttention.status === 'dismissed'
-        ? 'Reopen'
-        : linkedAttention.status === 'snoozed'
-          ? null
-          : linkedAttention.kind === 'blocker'
-            ? 'Dismiss blocker'
-            : 'Dismiss',
-  snoozeLabel:
-    linkedAttention == null
-      ? null
-      : linkedAttention.status === 'dismissed'
+  sourceMeeting: Meeting | null,
+): DashboardActionInsightItem => {
+  const commitmentState =
+    getCommitmentState(action.metadata) === 'confirmed'
+      ? 'confirmed'
+      : 'possible';
+  const attentionContext = getDashboardActionAttentionContext(linkedAttention);
+  const dueLabel = formatDueLabel(action.due_date);
+  const sourceLabel = titleCase(action.domain_tag || 'workspace');
+  const sourceMeetingId = sourceMeeting ? String(sourceMeeting.id) : null;
+
+  return {
+    id: action.id,
+    title: action.name,
+    dueLabel,
+    status,
+    commitmentState,
+    statusLabel:
+      commitmentState === 'possible'
+        ? 'Needs review'
+        : (attentionContext.attentionLabel ?? titleCase(status)),
+    basisLabel:
+      commitmentState === 'possible'
+        ? sourceMeeting
+          ? `Possible follow-up · From ${sourceMeeting.title} · ${formatMeetingBasisDate(
+              getMeetingTimestamp(sourceMeeting),
+            )}`
+          : 'Possible follow-up · Owner and due date not confirmed'
+        : `${dueLabel} · ${contextLabel ?? sourceLabel}`,
+    sourceMeetingId,
+    canComplete: commitmentState === 'confirmed',
+    sourceLabel,
+    contextLabel,
+    ...attentionContext,
+    attentionItemId: linkedAttention?.id ?? null,
+    attentionStatus: linkedAttention?.status ?? null,
+    dismissLabel:
+      linkedAttention == null
         ? null
-        : linkedAttention.status === 'snoozed'
+        : linkedAttention.status === 'dismissed'
           ? 'Reopen'
-          : linkedAttention.kind === 'blocker'
-            ? 'Snooze blocker'
-            : 'Snooze',
-});
+          : linkedAttention.status === 'snoozed'
+            ? null
+            : linkedAttention.kind === 'blocker'
+              ? 'Dismiss blocker'
+              : 'Dismiss',
+    snoozeLabel:
+      linkedAttention == null
+        ? null
+        : linkedAttention.status === 'dismissed'
+          ? null
+          : linkedAttention.status === 'snoozed'
+            ? 'Reopen'
+            : linkedAttention.kind === 'blocker'
+              ? 'Snooze blocker'
+              : 'Snooze',
+  };
+};
+
+const getPersistedSourceMeeting = (
+  action: Entity,
+  meetings: Meeting[],
+): Meeting | null => {
+  const sourceMeetingId = parseActionMetadata(
+    action.metadata,
+  ).source_meeting_id;
+  if (typeof sourceMeetingId !== 'string' || !sourceMeetingId.trim()) {
+    return null;
+  }
+  return meetings.find((meeting) => meeting.id === sourceMeetingId) ?? null;
+};
+
+const buildActionInsightSummary = (
+  possibleCount: number,
+  confirmedCount: number,
+): string => {
+  const possibleVerb = possibleCount === 1 ? 'needs' : 'need';
+  const confirmedVerb = confirmedCount === 1 ? 'needs' : 'need';
+  if (possibleCount > 0 && confirmedCount > 0) {
+    return `${pluralize(possibleCount, 'possible follow-up')} ${possibleVerb} review; ${pluralize(
+      confirmedCount,
+      'confirmed commitment',
+    )} ${confirmedVerb} attention.`;
+  }
+  if (possibleCount > 0) {
+    return `${pluralize(possibleCount, 'possible follow-up')} ${possibleVerb} review before action.`;
+  }
+  if (confirmedCount > 0) {
+    return `${pluralize(confirmedCount, 'confirmed commitment')} ${confirmedVerb} attention.`;
+  }
+  return 'Nothing is asking for intervention.';
+};
 
 const getDashboardActionContextLabel = (
   linkedAttention: AttentionItem | null,
@@ -607,6 +704,7 @@ const buildActionInsights = (
         'overdue',
         contextLabel,
         linkedAttention,
+        getPersistedSourceMeeting(action, meetings),
       );
     }),
     ...sortActions(staleActions, (a, b) =>
@@ -627,6 +725,7 @@ const buildActionInsights = (
         'stale',
         contextLabel,
         linkedAttention,
+        getPersistedSourceMeeting(action, meetings),
       );
     }),
     ...sortActions(activeActions, (a, b) => {
@@ -652,17 +751,22 @@ const buildActionInsights = (
         'active',
         contextLabel,
         linkedAttention,
+        getPersistedSourceMeeting(action, meetings),
       );
     }),
   ];
   const seenIds = new Set<string>();
-  const items = prioritizedItems
-    .filter((item) => {
-      if (seenIds.has(item.id)) return false;
-      seenIds.add(item.id);
-      return true;
-    })
-    .slice(0, MAX_ACTION_INSIGHT_ITEMS);
+  const deduplicatedItems = prioritizedItems.filter((item) => {
+    if (seenIds.has(item.id)) return false;
+    seenIds.add(item.id);
+    return true;
+  });
+  const possibleCount = deduplicatedItems.filter(
+    (item) => item.commitmentState === 'possible',
+  ).length;
+  const confirmedCount = deduplicatedItems.length - possibleCount;
+  const summary = buildActionInsightSummary(possibleCount, confirmedCount);
+  const items = deduplicatedItems.slice(0, MAX_ACTION_INSIGHT_ITEMS);
 
   if (items.length === 0) {
     return {
@@ -670,6 +774,9 @@ const buildActionInsights = (
       overdueCount: 0,
       staleCount: 0,
       activeCount: 0,
+      possibleCount: 0,
+      confirmedCount: 0,
+      summary,
       items: [],
     };
   }
@@ -679,6 +786,9 @@ const buildActionInsights = (
     overdueCount: overdueActions.length,
     staleCount: staleActions.length,
     activeCount: activeActions.length,
+    possibleCount,
+    confirmedCount,
+    summary,
     items,
   };
 };
@@ -1121,7 +1231,7 @@ const buildBriefingFocus = (
 ): DashboardBriefingFocus => {
   if (
     actionInsights.state === 'populated' &&
-    actionInsights.overdueCount > 0 &&
+    overdueActions.length > 0 &&
     hero.kind === 'overdue_action'
   ) {
     const prioritizedOverdueAction = sortActions(overdueActions, (a, b) =>
@@ -1149,18 +1259,18 @@ const buildBriefingFocus = (
     }
   }
 
-  if (actionInsights.state === 'populated' && actionInsights.overdueCount > 0) {
+  if (actionInsights.state === 'populated' && overdueActions.length > 0) {
     const hasBlockedUrgentFollowUp =
       hero.kind === 'overdue_action' && hero.label === 'Blocked';
     return {
       kind: 'attention',
       title: hasBlockedUrgentFollowUp ? 'Blocked follow-up' : 'Needs attention',
       detail: joinCountLabels([
-        actionInsights.overdueCount > 0
-          ? pluralize(actionInsights.overdueCount, 'overdue item')
+        overdueActions.length > 0
+          ? pluralize(overdueActions.length, 'overdue item')
           : '',
-        actionInsights.staleCount > 0
-          ? pluralize(actionInsights.staleCount, 'stale item')
+        staleActions.length > 0
+          ? pluralize(staleActions.length, 'stale item')
           : '',
       ]),
       action: {
@@ -1198,11 +1308,11 @@ const buildBriefingFocus = (
     };
   }
 
-  if (actionInsights.state === 'populated' && actionInsights.staleCount > 0) {
+  if (actionInsights.state === 'populated' && staleActions.length > 0) {
     return {
       kind: 'attention',
       title: 'Needs attention',
-      detail: pluralize(actionInsights.staleCount, 'stale item'),
+      detail: pluralize(staleActions.length, 'stale item'),
       action: { label: 'Review actions', target: 'projects' },
     };
   }
@@ -1232,14 +1342,14 @@ const buildBriefingFocus = (
 
   if (
     actionInsights.state === 'populated' &&
-    actionInsights.activeCount > 0 &&
+    activeActions.length > 0 &&
     hero.kind === 'active_action' &&
     hero.severity === 'watch'
   ) {
     return {
       kind: 'attention',
       title: 'Needs attention',
-      detail: pluralize(actionInsights.activeCount, 'active item'),
+      detail: pluralize(activeActions.length, 'active item'),
       action: { label: 'Review actions', target: 'projects' },
     };
   }
@@ -1284,17 +1394,21 @@ export const buildDashboardHomeModel = (
     (input.workingMemorySnapshot ? [input.workingMemorySnapshot] : []);
   const attentionAlerts = input.attentionAlerts ?? [];
   const overdueActions = filterSuppressedDashboardActions(
-    input.overdueActions,
+    filterRejectedDashboardActions(input.overdueActions),
     attentionAlerts,
   );
   const staleActions = filterSuppressedDashboardActions(
-    input.staleActions,
+    filterRejectedDashboardActions(input.staleActions),
     attentionAlerts,
   );
   const activeActions = filterSuppressedDashboardActions(
-    input.activeActions,
+    filterRejectedDashboardActions(input.activeActions),
     attentionAlerts,
   );
+  const confirmedOverdueActions =
+    filterConfirmedDashboardActions(overdueActions);
+  const confirmedStaleActions = filterConfirmedDashboardActions(staleActions);
+  const confirmedActiveActions = filterConfirmedDashboardActions(activeActions);
   const latestMeeting = buildLatestMeeting(input.meetings);
   const actionInsights = buildActionInsights(
     input.meetings,
@@ -1311,9 +1425,9 @@ export const buildDashboardHomeModel = (
   const hero = buildHero(
     {
       ...input,
-      overdueActions,
-      staleActions,
-      activeActions,
+      overdueActions: confirmedOverdueActions,
+      staleActions: confirmedStaleActions,
+      activeActions: confirmedActiveActions,
     },
     latestMeeting,
     knowledgeDocuments,
@@ -1323,9 +1437,9 @@ export const buildDashboardHomeModel = (
     actionInsights,
     latestMeeting,
     knowledgeDocuments,
-    overdueActions,
-    activeActions,
-    staleActions,
+    confirmedOverdueActions,
+    confirmedActiveActions,
+    confirmedStaleActions,
     attentionAlerts,
   );
 
