@@ -612,7 +612,9 @@ const getPersistedSourceMeeting = (
   if (typeof sourceMeetingId !== 'string' || !sourceMeetingId.trim()) {
     return null;
   }
-  return meetings.find((meeting) => meeting.id === sourceMeetingId) ?? null;
+  return (
+    meetings.find((meeting) => String(meeting.id) === sourceMeetingId) ?? null
+  );
 };
 
 const buildActionInsightSummary = (

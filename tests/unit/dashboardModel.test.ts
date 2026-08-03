@@ -1799,6 +1799,38 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('resolves a persisted string source id to the exact numeric meeting id', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          id: 42,
+          title: 'Numeric Source Review',
+          started_at: '2026-05-01T17:30:00.000Z',
+        }),
+      ],
+      overdueActions: [
+        makeAction({
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            origin: 'extraction',
+            source_meeting_id: '42',
+          }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.items[0]).toMatchObject({
+      sourceMeetingId: '42',
+      basisLabel:
+        'Possible follow-up · From Numeric Source Review · May 1, 2026',
+    });
+  });
+
   it('uses a truthful review-task fallback when a possible action source is missing', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
