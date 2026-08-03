@@ -71,6 +71,35 @@ describe('action commitment database persistence', () => {
     );
   });
 
+  it.each([undefined, 'possible', 'invented-state'])(
+    'rejects invalid runtime commitment state %j without mutating metadata',
+    (invalidState) => {
+      const action = upsertEntity({
+        type: 'action_item',
+        name: `Invalid state ${String(invalidState)}`,
+        dedupe_by_name: false,
+        metadata: {
+          commitment_state: 'possible',
+          origin: 'extraction',
+          source_meeting_id: 'meeting-invalid-state',
+        },
+      });
+      const metadataBefore = action.metadata;
+
+      expect(() =>
+        updateActionCommitmentState(
+          action.id,
+          invalidState as unknown as 'confirmed' | 'rejected',
+        ),
+      ).toThrow('Invalid commitment state');
+
+      const persisted = getEntitiesByType('action_item').find(
+        (entity) => entity.id === action.id,
+      );
+      expect(persisted?.metadata).toBe(metadataBefore);
+    },
+  );
+
   it('keeps same-name action creates distinct while explicit IDs still update', () => {
     const initialCount = getEntitiesByType('action_item').length;
     const userAction = upsertEntity({

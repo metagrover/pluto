@@ -4515,6 +4515,10 @@ export const updateActionCommitmentState = (
   commitmentState: 'confirmed' | 'rejected',
   reviewedAt = new Date().toISOString(),
 ): Entity => {
+  if (commitmentState !== 'confirmed' && commitmentState !== 'rejected') {
+    throw new Error(`Invalid commitment state: ${String(commitmentState)}`);
+  }
+
   const entity = getEntity(id);
   if (!entity) throw new Error(`Entity not found: ${id}`);
   if (entity.type !== 'action_item') {
