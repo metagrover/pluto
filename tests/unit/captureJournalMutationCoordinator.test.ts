@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { createCaptureJournalMutationCoordinator } from '../../src/utils/captureJournalMutationCoordinator';
@@ -82,5 +83,42 @@ describe('capture journal mutation coordinator', () => {
     releaseFinalAudio?.();
     await drained;
     expect(events).toEqual(['final-audio-start', 'final-audio-end', 'drained']);
+  });
+
+  it('resolves dependent receipt state after the prior audio mutation', async () => {
+    const coordinator = createCaptureJournalMutationCoordinator();
+    let receipt: string | null = null;
+    let releaseAudio: (() => void) | undefined;
+    const audioBlocked = new Promise<void>((resolve) => {
+      releaseAudio = resolve;
+    });
+
+    const audio = coordinator.run(async () => {
+      await audioBlocked;
+      receipt = 'durable-audio-receipt';
+    });
+    const checkpoint = coordinator.run(async () => receipt);
+
+    await Promise.resolve();
+    expect(receipt).toBeNull();
+
+    releaseAudio?.();
+    await audio;
+    await expect(checkpoint).resolves.toBe('durable-audio-receipt');
+  });
+
+  it('waits for prior audio mutations before resolving checkpoint receipts', () => {
+    const audioManager = readFileSync(
+      'src/components/AudioManager.tsx',
+      'utf8',
+    );
+    const checkpointBoundary = audioManager.slice(
+      audioManager.indexOf('const persistTranscriptCheckpoint ='),
+      audioManager.indexOf('const persistTranscriptAcceptanceFrame ='),
+    );
+
+    expect(checkpointBoundary.indexOf('.run(async () =>')).toBeLessThan(
+      checkpointBoundary.indexOf('captureJournalReceiptsRef.current.get'),
+    );
   });
 });

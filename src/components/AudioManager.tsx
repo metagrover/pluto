@@ -790,48 +790,48 @@ export const AudioManager = ({
       | 'transcription_failed'
       | 'cancelled';
   }) => {
-    const tuple = journalTupleKey(source, sequence);
-    const receipt = captureJournalReceiptsRef.current.get(tuple);
-    if (!receipt) return null;
-    const config = buildTranscriptCheckpointConfig();
-    const configKey = await sha256Hex(
-      canonicalizeTranscriptCheckpointConfig(config),
-    );
-    const sidecar = {
-      schemaVersion: 1 as const,
-      meetingId,
-      source: source,
-      sequence,
-      chunkChecksumSha256: receipt.checksumSha256,
-      chunkStartSec: receipt.chunkStartSec,
-      chunkEndSec: receipt.chunkEndSec,
-      transcriptionConfig: config,
-      backendResult: {
-        detectedLanguage:
-          typeof backendResult?.language === 'string'
-            ? backendResult.language.toLowerCase()
-            : null,
-        providerLabel:
-          typeof backendResult?.meta?.providerLabel === 'string'
-            ? backendResult.meta.providerLabel
-            : 'local',
-      },
-      segments: segments.map((segment) => ({
-        start: Math.max(0, segment.startTime - receipt.chunkStartSec),
-        end: Math.max(0, segment.endTime - receipt.chunkStartSec),
-        text: segment.text,
-        ...(segment.words
-          ? {
-              words: segment.words.map((word) => ({
-                word: word.word,
-                start: Math.max(0, word.start - receipt.chunkStartSec),
-                end: Math.max(0, word.end - receipt.chunkStartSec),
-              })),
-            }
-          : {}),
-      })),
-    };
     return await captureJournalMutationCoordinatorRef.current.run(async () => {
+      const tuple = journalTupleKey(source, sequence);
+      const receipt = captureJournalReceiptsRef.current.get(tuple);
+      if (!receipt) return null;
+      const config = buildTranscriptCheckpointConfig();
+      const configKey = await sha256Hex(
+        canonicalizeTranscriptCheckpointConfig(config),
+      );
+      const sidecar = {
+        schemaVersion: 1 as const,
+        meetingId,
+        source: source,
+        sequence,
+        chunkChecksumSha256: receipt.checksumSha256,
+        chunkStartSec: receipt.chunkStartSec,
+        chunkEndSec: receipt.chunkEndSec,
+        transcriptionConfig: config,
+        backendResult: {
+          detectedLanguage:
+            typeof backendResult?.language === 'string'
+              ? backendResult.language.toLowerCase()
+              : null,
+          providerLabel:
+            typeof backendResult?.meta?.providerLabel === 'string'
+              ? backendResult.meta.providerLabel
+              : 'local',
+        },
+        segments: segments.map((segment) => ({
+          start: Math.max(0, segment.startTime - receipt.chunkStartSec),
+          end: Math.max(0, segment.endTime - receipt.chunkStartSec),
+          text: segment.text,
+          ...(segment.words
+            ? {
+                words: segment.words.map((word) => ({
+                  word: word.word,
+                  start: Math.max(0, word.start - receipt.chunkStartSec),
+                  end: Math.max(0, word.end - receipt.chunkStartSec),
+                })),
+              }
+            : {}),
+        })),
+      };
       const current = await refreshCaptureJournalState(meetingId);
       if (!current) return null;
       const saved = (await window.ipcRenderer.invoke(
