@@ -436,6 +436,358 @@ describe('capture journal recovery', () => {
     ).resolves.toMatchObject({ segmentCount: 1 });
   });
 
+  it('executes short coverage repair requested for an empty valid checkpoint', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-short-coverage-repair';
+    let manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+    });
+    if (manifest.schemaVersion !== 3) throw new Error('expected v3 journal');
+    manifest = await authorizeCaptureJournalInterval(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 2,
+    });
+    const receipts = {} as Record<
+      'mic' | 'system',
+      Awaited<ReturnType<typeof completeCaptureJournalCapturedChunk>>['receipt']
+    >;
+    for (const source of ['mic', 'system'] as const) {
+      manifest = await persistCaptureJournalRawChunk(root, {
+        meetingId,
+        generation: manifest.generation,
+        expectedRevision: manifest.revision,
+        source,
+        sequence: 0,
+        format: 'wav',
+        data: Buffer.from(`${source}-raw`),
+      });
+      const raw = manifest.intervals[0].sources[source];
+      if (raw.disposition !== 'raw_durable') throw new Error('expected raw');
+      const completed = await completeCaptureJournalCapturedChunk(root, {
+        meetingId,
+        generation: manifest.generation,
+        expectedRevision: manifest.revision,
+        source,
+        sequence: 0,
+        rawChecksumSha256: raw.rawChecksumSha256,
+        repairData: Buffer.from(`${source}-repair`),
+      });
+      manifest = completed.manifest;
+      receipts[source] = completed.receipt;
+    }
+    const transcriptionConfig = {
+      backend: 'whisperx_current',
+      preset: 'balanced',
+      model: 'small',
+      device: 'cpu',
+      computeType: 'int8',
+      languageMode: 'detected' as const,
+      requestedLanguage: null,
+      pipelineVersion: 'live_chunk_v1' as const,
+    };
+    const configKey = createHash('sha256')
+      .update(canonicalizeTranscriptCheckpointConfig(transcriptionConfig))
+      .digest('hex');
+    const checkpointDigests = {} as Record<'mic' | 'system', string>;
+    for (const source of ['mic', 'system'] as const) {
+      const saved = await appendCaptureTranscriptCheckpoint(root, {
+        receipt: receipts[source],
+        expectedManifestRevision: manifest.revision,
+        transcriptionConfigKey: configKey,
+        sidecar: {
+          schemaVersion: 1,
+          meetingId,
+          source,
+          sequence: 0,
+          chunkChecksumSha256: receipts[source].checksumSha256,
+          chunkStartSec: 0,
+          chunkEndSec: 2,
+          transcriptionConfig,
+          backendResult: { detectedLanguage: 'en', providerLabel: 'local' },
+          segments: [],
+        },
+      });
+      manifest = saved.manifest;
+      checkpointDigests[source] = saved.checkpoint.transcriptChecksumSha256;
+    }
+    const activityEvidence = await buildEvidence();
+    manifest = await updateCaptureJournalActivityEvidence(root, {
+      meetingId,
+      activityEvidence,
+    });
+    const activityInputs = {
+      chunkStartSec: 0,
+      chunkEndSec: 2,
+      evidence: {
+        clock: activityEvidence.clock,
+        thresholds: activityEvidence.thresholds,
+        algorithmVersion: activityEvidence.algorithmVersion,
+        serializationVersion: activityEvidence.serializationVersion,
+        windows: activityEvidence.windows,
+      },
+    };
+    const savedFrame = await appendCaptureTranscriptAcceptanceFrame(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: 0,
+      micCheckpointChecksumSha256: checkpointDigests.mic,
+      systemCheckpointChecksumSha256: checkpointDigests.system,
+      activityEvidenceDigestSha256: createHash('sha256')
+        .update(JSON.stringify(activityInputs))
+        .digest('hex'),
+      sidecar: {
+        schemaVersion: 1,
+        meetingId,
+        sequence: 0,
+        arbitrationVersion: 'chunk_arbitration_v1',
+        activityInputs,
+        segments: [],
+      },
+    });
+    manifest = await stopCaptureJournal(root, {
+      meetingId,
+      generation: savedFrame.manifest.generation,
+      expectedRevision: savedFrame.manifest.revision,
+    });
+
+    const transcribeChunk = vi.fn(async () => ({
+      detectedLanguage: 'en',
+      providerLabel: 'local',
+      segments: [],
+    }));
+    const saveMeeting = vi.fn();
+    const result = await recoverInterruptedCaptureJournals(root, {
+      getMeeting: () => null,
+      saveMeeting,
+      stitchWavSegments: async (_segments, outputTag) =>
+        join(root, `${outputTag}.wav`),
+      transcribeChunk,
+      transcriptionConfig,
+      nowMs: 4_000,
+    });
+
+    expect(result.recoveredCount).toBe(1);
+    expect(result.failedRecoveryCount).toBe(0);
+    expect(transcribeChunk).toHaveBeenCalledTimes(1);
+    expect(transcribeChunk).toHaveBeenCalledWith(
+      expect.stringContaining('mic-000000.wav'),
+      transcriptionConfig,
+    );
+    const recoveredManifest = await readCaptureJournalManifest(root, meetingId);
+    if (recoveredManifest.schemaVersion !== 3) {
+      throw new Error('expected recovered v3 journal');
+    }
+    expect(
+      recoveredManifest.transcriptCheckpoints.find(
+        (checkpoint) => checkpoint.source === 'mic',
+      )?.repairAttempted,
+    ).toBe(true);
+  });
+
+  it('re-evaluates correlated speech after replacing its source checkpoint', async () => {
+    const runScenario = async (replaceCorrelatedSource: boolean) => {
+      const root = await makeRoot();
+      const meetingId = replaceCorrelatedSource
+        ? 'meeting-invalidated-correlation'
+        : 'meeting-stable-correlation';
+      const chunkEndSec = replaceCorrelatedSource ? 4 : 2;
+      let manifest = await createCaptureJournal(root, {
+        meetingId,
+        startedAtMs: 1_000,
+        schemaVersion: 3,
+      });
+      if (manifest.schemaVersion !== 3) throw new Error('expected v3 journal');
+      manifest = await authorizeCaptureJournalInterval(root, {
+        meetingId,
+        generation: manifest.generation,
+        expectedRevision: manifest.revision,
+        sequence: 0,
+        chunkStartSec: 0,
+        chunkEndSec,
+      });
+      const receipts = {} as Record<
+        'mic' | 'system',
+        Awaited<
+          ReturnType<typeof completeCaptureJournalCapturedChunk>
+        >['receipt']
+      >;
+      for (const source of ['mic', 'system'] as const) {
+        manifest = await persistCaptureJournalRawChunk(root, {
+          meetingId,
+          generation: manifest.generation,
+          expectedRevision: manifest.revision,
+          source,
+          sequence: 0,
+          format: 'wav',
+          data: Buffer.from(`${source}-raw`),
+        });
+        const raw = manifest.intervals[0].sources[source];
+        if (raw.disposition !== 'raw_durable') throw new Error('expected raw');
+        const completed = await completeCaptureJournalCapturedChunk(root, {
+          meetingId,
+          generation: manifest.generation,
+          expectedRevision: manifest.revision,
+          source,
+          sequence: 0,
+          rawChecksumSha256: raw.rawChecksumSha256,
+          repairData: Buffer.from(`${source}-repair`),
+        });
+        manifest = completed.manifest;
+        receipts[source] = completed.receipt;
+      }
+      const transcriptionConfig = {
+        backend: 'whisperx_current',
+        preset: 'balanced',
+        model: 'small',
+        device: 'cpu',
+        computeType: 'int8',
+        languageMode: 'detected' as const,
+        requestedLanguage: null,
+        pipelineVersion: 'live_chunk_v1' as const,
+      };
+      const configKey = createHash('sha256')
+        .update(canonicalizeTranscriptCheckpointConfig(transcriptionConfig))
+        .digest('hex');
+      const micSegments = [
+        {
+          start: 0.25,
+          end: replaceCorrelatedSource ? 0.45 : 0.9,
+          text: 'Synthetic accepted source',
+        },
+      ];
+      const checkpointDigests = {} as Record<'mic' | 'system', string>;
+      for (const source of ['mic', 'system'] as const) {
+        const saved = await appendCaptureTranscriptCheckpoint(root, {
+          receipt: receipts[source],
+          expectedManifestRevision: manifest.revision,
+          transcriptionConfigKey: configKey,
+          sidecar: {
+            schemaVersion: 1,
+            meetingId,
+            source,
+            sequence: 0,
+            chunkChecksumSha256: receipts[source].checksumSha256,
+            chunkStartSec: 0,
+            chunkEndSec,
+            transcriptionConfig,
+            backendResult: { detectedLanguage: 'en', providerLabel: 'local' },
+            segments: source === 'mic' ? micSegments : [],
+          },
+        });
+        manifest = saved.manifest;
+        checkpointDigests[source] = saved.checkpoint.transcriptChecksumSha256;
+      }
+      const activityEvidence = await buildCaptureActivityEvidence(
+        [
+          ...(replaceCorrelatedSource
+            ? [{ startTime: 0.25, endTime: 3.7, speaker: 'Me' as const }]
+            : []),
+          {
+            startTime: replaceCorrelatedSource ? 3.7 : 0.5,
+            endTime: replaceCorrelatedSource ? 4 : 1,
+            speaker: 'Them' as const,
+          },
+        ],
+        {
+          clock: {
+            kind: 'meeting_relative_seconds',
+            origin: 'recording_start',
+          },
+          thresholds: {
+            rms: 0.02,
+            dominanceRatio: 1.4,
+            minimumSwitchIntervalMs: 250,
+          },
+          algorithmVersion: 'speaker_activity_v1',
+        },
+      );
+      manifest = await updateCaptureJournalActivityEvidence(root, {
+        meetingId,
+        activityEvidence,
+      });
+      const activityInputs = {
+        chunkStartSec: 0,
+        chunkEndSec,
+        evidence: {
+          clock: activityEvidence.clock,
+          thresholds: activityEvidence.thresholds,
+          algorithmVersion: activityEvidence.algorithmVersion,
+          serializationVersion: activityEvidence.serializationVersion,
+          windows: activityEvidence.windows,
+        },
+      };
+      const savedFrame = await appendCaptureTranscriptAcceptanceFrame(root, {
+        meetingId,
+        generation: manifest.generation,
+        expectedRevision: manifest.revision,
+        sequence: 0,
+        micCheckpointChecksumSha256: checkpointDigests.mic,
+        systemCheckpointChecksumSha256: checkpointDigests.system,
+        activityEvidenceDigestSha256: createHash('sha256')
+          .update(JSON.stringify(activityInputs))
+          .digest('hex'),
+        sidecar: {
+          schemaVersion: 1,
+          meetingId,
+          sequence: 0,
+          arbitrationVersion: 'chunk_arbitration_v1',
+          activityInputs,
+          segments: micSegments.map((segment) => ({
+            source: 'mic' as const,
+            ...segment,
+          })),
+        },
+      });
+      await stopCaptureJournal(root, {
+        meetingId,
+        generation: savedFrame.manifest.generation,
+        expectedRevision: savedFrame.manifest.revision,
+      });
+      const transcribeChunk = vi.fn(async () => ({
+        detectedLanguage: 'en',
+        providerLabel: 'local',
+        segments: [],
+      }));
+      const result = await recoverInterruptedCaptureJournals(root, {
+        getMeeting: () => null,
+        saveMeeting: vi.fn(),
+        stitchWavSegments: async (_segments, outputTag) =>
+          join(root, `${outputTag}.wav`),
+        transcribeChunk,
+        transcriptionConfig,
+        nowMs: 6_000,
+      });
+      return { result, transcribeChunk };
+    };
+
+    const stable = await runScenario(false);
+    expect(stable.result).toMatchObject({
+      recoveredCount: 1,
+      failedRecoveryCount: 0,
+    });
+    expect(stable.transcribeChunk).not.toHaveBeenCalled();
+
+    const invalidated = await runScenario(true);
+    expect(invalidated.result).toMatchObject({
+      recoveredCount: 1,
+      failedRecoveryCount: 0,
+    });
+    expect(invalidated.transcribeChunk).toHaveBeenCalledTimes(2);
+    expect(
+      invalidated.transcribeChunk.mock.calls.map(([path]) => path),
+    ).toEqual([
+      expect.stringContaining('mic-000000.wav'),
+      expect.stringContaining('system-000000.wav'),
+    ]);
+  });
+
   it('continues recovering later journals after one stitch operation fails', async () => {
     const root = await makeRoot();
     for (const meetingId of ['meeting-a', 'meeting-b']) {

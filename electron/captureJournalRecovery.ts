@@ -397,18 +397,32 @@ const repairV3TranscriptGaps = async (
     ),
   );
   for (const interval of manifest.intervals) {
+    const acceptedSpeechSources = await readAcceptedSpeechSources(
+      rootDir,
+      manifest,
+      interval,
+    );
+    const inspections = new Map<
+      CaptureJournalSource,
+      {
+        existing:
+          | CaptureJournalManifestV3['transcriptCheckpoints'][number]
+          | undefined;
+        structurallyReusable: boolean;
+        emptyWithActivity: boolean;
+      }
+    >();
     for (const source of ['mic', 'system'] as const) {
       const disposition = interval.sources[source];
-      if (disposition.disposition !== 'captured') {
-        continue;
-      }
+      if (disposition.disposition !== 'captured') continue;
       const existing = manifest.transcriptCheckpoints.find(
         (checkpoint) =>
           checkpoint.source === source &&
           checkpoint.sequence === interval.sequence,
       );
-      let reusable = false;
-      if (existing && !existing.repairAttempted) {
+      let structurallyReusable = false;
+      let emptyWithActivity = false;
+      if (existing) {
         try {
           const bytes = await readCaptureJournalSidecar(
             rootDir,
@@ -446,7 +460,9 @@ const repairV3TranscriptGaps = async (
           const underCovered =
             activeSeconds >= 3 &&
             coveredSeconds / Math.max(activeSeconds, 0.001) < 0.35;
-          reusable =
+          emptyWithActivity =
+            sidecar.segments.length === 0 && sourceActivityWindows.length > 0;
+          structurallyReusable =
             existing.transcriptionConfigKey === configKey &&
             computeChecksum(
               Buffer.from(
@@ -457,9 +473,32 @@ const repairV3TranscriptGaps = async (
             ) === configKey &&
             !underCovered;
         } catch {
-          reusable = false;
+          structurallyReusable = false;
         }
       }
+      inspections.set(source, {
+        existing,
+        structurallyReusable,
+        emptyWithActivity,
+      });
+    }
+    const stableAcceptedSpeechSources = new Set(
+      [...acceptedSpeechSources].filter(
+        (source) => inspections.get(source)?.structurallyReusable,
+      ),
+    );
+    for (const source of ['mic', 'system'] as const) {
+      const disposition = interval.sources[source];
+      if (disposition.disposition !== 'captured') continue;
+      const inspection = inspections.get(source);
+      if (!inspection) continue;
+      const correlatedSpeechAccepted = stableAcceptedSpeechSources.has(
+        source === 'mic' ? 'system' : 'mic',
+      );
+      const reusable =
+        inspection.structurallyReusable &&
+        (!inspection.emptyWithActivity || correlatedSpeechAccepted);
+      const existing = inspection.existing;
       if (reusable || existing?.repairAttempted) continue;
       const result = await transcribeChunk(
         join(rootDir, disposition.repairRelativePath),
@@ -504,6 +543,11 @@ const repairV3TranscriptGaps = async (
           })
         : await appendCaptureTranscriptCheckpoint(rootDir, checkpointArgs);
       manifest = saved.manifest;
+      if (result.segments.length > 0) {
+        stableAcceptedSpeechSources.add(source);
+      } else {
+        stableAcceptedSpeechSources.delete(source);
+      }
     }
   }
 
@@ -746,6 +790,71 @@ const acceptanceEvidenceMatchesSealedManifest = (
       ),
   );
 };
+
+async function readAcceptedSpeechSources(
+  rootDir: string,
+  manifest: CaptureJournalManifestV3,
+  interval: CaptureJournalManifestV3['intervals'][number],
+): Promise<Set<CaptureJournalSource>> {
+  const frame = manifest.acceptanceFrames.find(
+    (candidate) => candidate.sequence === interval.sequence,
+  );
+  if (!frame || frame.arbitrationVersion !== 'chunk_arbitration_v1') {
+    return new Set();
+  }
+  for (const source of ['mic', 'system'] as const) {
+    const disposition = interval.sources[source];
+    const supplied =
+      source === 'mic'
+        ? frame.micCheckpointChecksumSha256
+        : frame.systemCheckpointChecksumSha256;
+    if (disposition.disposition === 'captured') {
+      const checkpointMatches = manifest.transcriptCheckpoints.some(
+        (checkpoint) =>
+          checkpoint.source === source &&
+          checkpoint.sequence === interval.sequence &&
+          checkpoint.transcriptChecksumSha256 === supplied,
+      );
+      if (!checkpointMatches) return new Set();
+    } else if (supplied !== null) {
+      return new Set();
+    }
+  }
+  try {
+    const bytes = await readCaptureJournalSidecar(
+      rootDir,
+      manifest.meetingId,
+      frame.relativePath,
+      frame.acceptedChecksumSha256,
+    );
+    const sidecar = JSON.parse(bytes.toString('utf8')) as {
+      arbitrationVersion?: unknown;
+      activityInputs?: unknown;
+      segments?: Array<{ source?: unknown; text?: unknown }>;
+    };
+    const evidenceMatches =
+      sidecar.arbitrationVersion === 'chunk_arbitration_v1' &&
+      computeChecksum(Buffer.from(JSON.stringify(sidecar.activityInputs))) ===
+        frame.activityEvidenceDigestSha256 &&
+      acceptanceEvidenceMatchesSealedManifest(
+        sidecar.activityInputs,
+        manifest,
+        interval,
+      );
+    if (!evidenceMatches || !Array.isArray(sidecar.segments)) return new Set();
+    return new Set(
+      sidecar.segments.flatMap((segment) =>
+        (segment.source === 'mic' || segment.source === 'system') &&
+        typeof segment.text === 'string' &&
+        segment.text.trim()
+          ? [segment.source]
+          : [],
+      ),
+    );
+  } catch {
+    return new Set();
+  }
+}
 
 const readV3AcceptedSegments = async (
   rootDir: string,
