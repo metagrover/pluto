@@ -4,6 +4,21 @@ import type { EntityStatus } from '../../api/knowledgeGraph';
 export const DASHBOARD_ACTION_COMPLETION_ERROR =
   'Could not update follow-up status. Try again.';
 
+export const persistDashboardCommitmentReview = async (
+  taskId: string,
+  commitmentState: 'confirmed' | 'rejected',
+  deps: {
+    updateActionCommitmentState: (
+      id: string,
+      state: 'confirmed' | 'rejected',
+    ) => Promise<unknown>;
+    refreshDashboard: () => Promise<void>;
+  },
+): Promise<void> => {
+  await deps.updateActionCommitmentState(taskId, commitmentState);
+  await deps.refreshDashboard();
+};
+
 export const persistDashboardActionCompletion = async (
   taskId: string,
   deps: {

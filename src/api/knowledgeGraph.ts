@@ -320,6 +320,13 @@ export const updateEntityStatus = async (
   return invoke('UPDATE_ENTITY_STATUS', { id, status });
 };
 
+export const updateActionCommitmentState = async (
+  id: string,
+  commitmentState: 'confirmed' | 'rejected',
+): Promise<Entity> => {
+  return invoke('UPDATE_ACTION_COMMITMENT_STATE', { id, commitmentState });
+};
+
 /**
  * Delete an entity
  */

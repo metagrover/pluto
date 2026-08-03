@@ -13,14 +13,66 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { getEntitiesByType, upsertEntity } from '../../electron/db';
+import {
+  getEntitiesByType,
+  updateActionCommitmentState,
+  upsertEntity,
+} from '../../electron/db';
 
 afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
 });
 
 describe('action commitment database persistence', () => {
+  it.each(['confirmed', 'rejected'] as const)(
+    'persists a %s review without overwriting action metadata or completion status',
+    (commitmentState) => {
+      const action = upsertEntity({
+        type: 'action_item',
+        name: `Review ${commitmentState} action`,
+        status: 'active',
+        dedupe_by_name: false,
+        metadata: {
+          full_description: 'Send the rollout note with metrics',
+          assignee_name: 'Alex',
+          commitment_state: 'possible',
+          origin: 'extraction',
+          source_meeting_id: 'meeting-1',
+        },
+      });
+      const reviewedAt = '2026-08-03T12:00:00.000Z';
+
+      const updated = updateActionCommitmentState(
+        action.id,
+        commitmentState,
+        reviewedAt,
+      );
+
+      expect(updated.status).toBe('active');
+      expect(JSON.parse(updated.metadata ?? '{}')).toEqual({
+        full_description: 'Send the rollout note with metrics',
+        assignee_name: 'Alex',
+        commitment_state: commitmentState,
+        origin: 'extraction',
+        source_meeting_id: 'meeting-1',
+        reviewed_at: reviewedAt,
+      });
+    },
+  );
+
+  it('rejects missing and non-action entities', () => {
+    const person = upsertEntity({ type: 'person', name: 'Alex Example' });
+
+    expect(() =>
+      updateActionCommitmentState('missing-action', 'confirmed'),
+    ).toThrow('Entity not found');
+    expect(() => updateActionCommitmentState(person.id, 'rejected')).toThrow(
+      'not an action item',
+    );
+  });
+
   it('keeps same-name action creates distinct while explicit IDs still update', () => {
+    const initialCount = getEntitiesByType('action_item').length;
     const userAction = upsertEntity({
       type: 'action_item',
       name: 'Send the rollout note',
@@ -76,7 +128,7 @@ describe('action commitment database persistence', () => {
 
     expect(updated.id).toBe(userAction.id);
     expect(updated.status).toBe('completed');
-    expect(getEntitiesByType('action_item')).toHaveLength(2);
+    expect(getEntitiesByType('action_item')).toHaveLength(initialCount + 2);
 
     const defaultFirst = upsertEntity({
       type: 'action_item',
@@ -90,6 +142,6 @@ describe('action commitment database persistence', () => {
 
     expect(defaultSecond.id).toBe(defaultFirst.id);
     expect(defaultSecond.status).toBe('completed');
-    expect(getEntitiesByType('action_item')).toHaveLength(3);
+    expect(getEntitiesByType('action_item')).toHaveLength(initialCount + 3);
   });
 });

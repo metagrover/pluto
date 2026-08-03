@@ -38,6 +38,7 @@ describe('action commitment metadata', () => {
         assignee_name: 'Alex',
         commitment_state: 'possible',
         origin: 'extraction',
+        source_meeting_id: 'meeting-1',
       });
 
       expect(
@@ -47,6 +48,7 @@ describe('action commitment metadata', () => {
         assignee_name: 'Alex',
         commitment_state: commitmentState,
         origin: 'extraction',
+        source_meeting_id: 'meeting-1',
         reviewed_at: reviewedAt,
       });
     },

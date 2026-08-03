@@ -1597,6 +1597,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('UPDATE_ENTITY_STATUS', (_event, { id, status }) =>
     db.updateEntityStatus(id, status),
   );
+  ipcMain.handle(
+    'UPDATE_ACTION_COMMITMENT_STATE',
+    (_event, { id, commitmentState }) => {
+      const updated = db.updateActionCommitmentState(id, commitmentState);
+      queueAllKnowledgeDocsRefresh();
+      return updated;
+    },
+  );
   ipcMain.handle('DELETE_ENTITY', (_event, id) => {
     db.deleteEntity(id);
     queueAllKnowledgeDocsRefresh();

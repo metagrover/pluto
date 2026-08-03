@@ -14,6 +14,7 @@ import {
   readRetryLease,
 } from '../src/services/transcriptValidationRetryLease';
 import type { MeetingFinalizationStatus } from '../src/types';
+import { mergeCommitmentReview } from '../src/utils/actionCommitment';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
@@ -4503,6 +4504,33 @@ export const updateEntityStatus = (id: string, status: EntityStatus): void => {
   db.prepare(`
     UPDATE entities SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
   `).run(status, id);
+};
+
+/**
+ * Record a human review of an extracted action commitment without changing
+ * completion status or replacing extraction metadata.
+ */
+export const updateActionCommitmentState = (
+  id: string,
+  commitmentState: 'confirmed' | 'rejected',
+  reviewedAt = new Date().toISOString(),
+): Entity => {
+  const entity = getEntity(id);
+  if (!entity) throw new Error(`Entity not found: ${id}`);
+  if (entity.type !== 'action_item') {
+    throw new Error(`Entity is not an action item: ${id}`);
+  }
+
+  const metadata = mergeCommitmentReview(
+    entity.metadata,
+    commitmentState,
+    reviewedAt,
+  );
+  db.prepare(`
+    UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(JSON.stringify(metadata), id);
+
+  return getEntity(id) as Entity;
 };
 
 /**
