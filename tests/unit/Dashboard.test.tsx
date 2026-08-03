@@ -640,18 +640,15 @@ describe('Dashboard', () => {
     expect(markup).toContain('Review source');
     expect(markup).toContain('Confirm task');
     expect(markup).toContain('Not a task');
-    expect(markup).toContain(
-      'aria-label="Review source for Check whether privacy review is assigned"',
+    expect(markup).toMatch(
+      /aria-label="Review source for Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
     );
-    expect(markup).toContain(
-      'aria-label="Confirm task: Check whether privacy review is assigned"',
+    expect(markup).toMatch(
+      /aria-label="Confirm task: Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
     );
-    expect(markup).toContain(
-      'aria-label="Not a task: Check whether privacy review is assigned"',
+    expect(markup).toMatch(
+      /aria-label="Not a task: Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
     );
-    expect(
-      markup.match(/focus-visible:outline-pro-accent/g) ?? [],
-    ).toHaveLength(5);
     expect(markup).not.toContain('Mark complete');
     expect(markup).not.toContain('Resolve blocker');
     expect(markup).not.toContain(
