@@ -83,6 +83,7 @@ type RecoveryDependencies = {
       languageMode: 'fixed' | 'detected';
       requestedLanguage: string | null;
     },
+    journalDurationSeconds: number,
   ) => Promise<{
     detectedLanguage?: string | null;
     providerLabel?: string;
@@ -503,6 +504,7 @@ const repairV3TranscriptGaps = async (
       const result = await transcribeChunk(
         join(rootDir, disposition.repairRelativePath),
         templateSidecar.transcriptionConfig,
+        interval.chunkEndSec - interval.chunkStartSec,
       );
       const receipt = {
         meetingId: manifest.meetingId,
@@ -860,6 +862,7 @@ const readV3AcceptedSegments = async (
   rootDir: string,
   manifest: CaptureJournalManifestV3,
   expectedConfigKey?: string,
+  options: { allowCaptureFailures?: boolean } = {},
 ) => {
   const configKeys = new Set(
     manifest.transcriptCheckpoints.map(
@@ -1121,9 +1124,17 @@ const readV3AcceptedSegments = async (
       })),
     ),
   });
+  const unresolvedFailures = finalized.failures.filter((failure) => {
+    const interval = manifest.intervals.find(
+      (candidate) => candidate.sequence === failure.sequence,
+    );
+    return interval?.sources[failure.source].disposition === 'captured';
+  });
   if (
     finalized.transcriptionRequests.length > 0 ||
-    finalized.failures.length > 0
+    (options.allowCaptureFailures
+      ? unresolvedFailures.length > 0
+      : finalized.failures.length > 0)
   ) {
     throw new Error('Transcript checkpoint repair required');
   }
@@ -1327,7 +1338,9 @@ export const recoverInterruptedCaptureJournals = async (
               // Checkpoints are authoritative for an interrupted recording.
               // readV3AcceptedSegments still enforces that every accepted
               // checkpoint uses one internally consistent configuration.
-              readV3AcceptedSegments(rootDir, manifest),
+              readV3AcceptedSegments(rootDir, manifest, undefined, {
+                allowCaptureFailures: true,
+              }),
             ])
           : await Promise.all([
               buildSourceSegments(rootDir, micEntries),

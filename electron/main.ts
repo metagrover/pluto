@@ -41,12 +41,45 @@ import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
+import {
+  normalizeCheckpointWords,
+  transcribeJournalAlignedAudio,
+} from './recoveryTranscriptionAudio';
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic);
 }
+
+const probeAudioDuration = async (inputPath: string) =>
+  await new Promise<number | null>((resolve) => {
+    const probe = spawn(ffprobeStatic.path, [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'default=noprint_wrappers=1:nokey=1',
+      inputPath,
+    ]);
+    let stdout = '';
+    probe.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    probe.on('error', (error) => {
+      console.warn('[Pluto] Audio duration probe failed to start:', error.code);
+      resolve(null);
+    });
+    probe.on('close', (code) => {
+      if (code !== 0) {
+        console.warn('[Pluto] Audio duration probe exited:', code);
+        return resolve(null);
+      }
+      const duration = Number.parseFloat(stdout.trim());
+      resolve(Number.isFinite(duration) && duration >= 0 ? duration : null);
+    });
+  });
 
 // Note: We intentionally avoid Chromium loopback/screen-capture APIs to keep
 // permissions limited to microphone + system audio recording only.
@@ -149,6 +182,7 @@ const getTranscriptCheckpointRepairConfig = () => {
 const transcribeTranscriptCheckpointChunk = async (
   inputPath: string,
   config: ReturnType<typeof getTranscriptCheckpointRepairConfig>,
+  journalDurationSeconds: number,
 ) => {
   const result = await transcribeWithBackend(inputPath, {
     backend: config.backend,
@@ -169,12 +203,15 @@ const transcribeTranscriptCheckpointChunk = async (
         ? result.meta.providerLabel
         : 'local',
     segments: Array.isArray(result.segments)
-      ? result.segments.map((segment) => ({
-          start: segment.start,
-          end: segment.end,
-          text: segment.text,
-          ...(segment.words ? { words: segment.words } : {}),
-        }))
+      ? normalizeCheckpointWords(
+          result.segments.map((segment) => ({
+            start: segment.start,
+            end: segment.end,
+            text: segment.text,
+            ...(segment.words ? { words: segment.words } : {}),
+          })),
+          journalDurationSeconds,
+        )
       : [],
   };
 };
@@ -1266,27 +1303,7 @@ app.whenReady().then(async () => {
     if (!resolvedPath.startsWith(`${meetingsRoot}${path.sep}`)) return null;
     if (!fs.existsSync(resolvedPath)) return null;
 
-    return await new Promise<number | null>((resolve) => {
-      const probe = spawn(ffprobeStatic.path, [
-        '-v',
-        'error',
-        '-show_entries',
-        'format=duration',
-        '-of',
-        'default=noprint_wrappers=1:nokey=1',
-        resolvedPath,
-      ]);
-      let stdout = '';
-      probe.stdout.on('data', (chunk) => {
-        stdout += String(chunk);
-      });
-      probe.on('error', () => resolve(null));
-      probe.on('close', (code) => {
-        if (code !== 0) return resolve(null);
-        const duration = Number.parseFloat(stdout.trim());
-        resolve(Number.isFinite(duration) && duration >= 0 ? duration : null);
-      });
-    });
+    return await probeAudioDuration(resolvedPath);
   });
 
   // Database handlers
@@ -2478,7 +2495,7 @@ app.whenReady().then(async () => {
             fs.unlinkSync(outputPath);
           }
         },
-        transcribeChunk: async (inputPath, config) => {
+        transcribeChunk: async (inputPath, config, journalDurationSeconds) => {
           const options = {
             backend: config.backend,
             preset: config.preset,
@@ -2491,7 +2508,40 @@ app.whenReady().then(async () => {
                 : undefined,
             diarize: false,
           } as Parameters<typeof transcribeWithBackend>[1];
-          const result = await transcribeWithBackend(inputPath, options);
+          const result = await transcribeJournalAlignedAudio(
+            inputPath,
+            journalDurationSeconds,
+            {
+              probeDuration: probeAudioDuration,
+              createTemporaryPath: () =>
+                path.join(
+                  app.getPath('temp'),
+                  `capture-transcript-${randomUUID()}.wav`,
+                ),
+              trimLeadingOverflow: async ({
+                inputPath: trimInputPath,
+                outputPath,
+                startSec,
+                durationSec,
+              }) =>
+                await new Promise<boolean>((resolve) => {
+                  ffmpeg(trimInputPath)
+                    .seekInput(startSec)
+                    .duration(durationSec)
+                    .audioChannels(1)
+                    .audioFrequency(16000)
+                    .toFormat('wav')
+                    .on('end', () => resolve(true))
+                    .on('error', () => resolve(false))
+                    .save(outputPath);
+                }),
+              removeTemporaryFile: (temporaryPath) => {
+                if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+              },
+            },
+            async (alignedPath) =>
+              await transcribeWithBackend(alignedPath, options),
+          );
           return {
             detectedLanguage: result.language ?? null,
             providerLabel:
@@ -2499,12 +2549,15 @@ app.whenReady().then(async () => {
                 ? result.meta.providerLabel
                 : 'local',
             segments: Array.isArray(result.segments)
-              ? result.segments.map((segment) => ({
-                  start: segment.start,
-                  end: segment.end,
-                  text: segment.text,
-                  ...(segment.words ? { words: segment.words } : {}),
-                }))
+              ? normalizeCheckpointWords(
+                  result.segments.map((segment) => ({
+                    start: segment.start,
+                    end: segment.end,
+                    text: segment.text,
+                    ...(segment.words ? { words: segment.words } : {}),
+                  })),
+                  journalDurationSeconds,
+                )
               : [],
           };
         },

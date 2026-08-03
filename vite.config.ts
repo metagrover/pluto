@@ -29,6 +29,7 @@ export default defineConfig({
                 'better-sqlite3',
                 'fluent-ffmpeg',
                 'ffmpeg-static',
+                'ffprobe-static',
                 'cross-spawn',
               ],
             },
