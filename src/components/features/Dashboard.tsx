@@ -8,6 +8,8 @@ import {
   Mic,
   Sparkles,
 } from 'lucide-react';
+import { useCallback, useLayoutEffect, useReducer, useRef } from 'react';
+import type { RefObject } from 'react';
 
 import { getTrustStatusMeta } from '../../utils/trustStatus';
 import type {
@@ -122,6 +124,141 @@ const formatMeetingDate = (value: string): string => {
   });
 };
 
+const CURRENT_READ_CLAIM_ID = 'dashboard-current-read-claim';
+
+export interface CurrentReadClaimState {
+  claimIdentity: string;
+  expanded: boolean;
+  isClipped: boolean;
+}
+
+export type CurrentReadClaimAction =
+  | { type: 'toggle' }
+  | { type: 'measured'; isClipped: boolean }
+  | { type: 'claim-changed'; claimIdentity: string };
+
+export const reduceCurrentReadClaimState = (
+  state: CurrentReadClaimState,
+  action: CurrentReadClaimAction,
+): CurrentReadClaimState => {
+  if (action.type === 'toggle') {
+    return { ...state, expanded: !state.expanded };
+  }
+  if (action.type === 'measured') {
+    return { ...state, isClipped: action.isClipped };
+  }
+  if (action.claimIdentity === state.claimIdentity) return state;
+  return {
+    claimIdentity: action.claimIdentity,
+    expanded: false,
+    isClipped: false,
+  };
+};
+
+export const CurrentReadClaimView = ({
+  claim,
+  expanded,
+  isClipped,
+  onToggle,
+  claimRef,
+}: {
+  claim: string;
+  expanded: boolean;
+  isClipped: boolean;
+  onToggle: () => void;
+  claimRef?: RefObject<HTMLHeadingElement>;
+}) => (
+  <>
+    <h1
+      ref={claimRef}
+      id={CURRENT_READ_CLAIM_ID}
+      className={`max-w-[36ch] break-words text-[26px] font-black leading-[1.22] tracking-[-0.025em] text-pro-text-main [overflow-wrap:anywhere] ${expanded ? '' : 'line-clamp-3'}`}
+    >
+      {claim}
+    </h1>
+    {isClipped ? (
+      <button
+        id="dashboard-current-read-disclosure"
+        type="button"
+        aria-controls={CURRENT_READ_CLAIM_ID}
+        aria-expanded={expanded}
+        onClick={onToggle}
+        className="mt-3 min-h-11 text-[11px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+      >
+        {expanded ? 'Collapse current read' : 'Show full current read'}
+      </button>
+    ) : null}
+  </>
+);
+
+export const isCurrentReadClaimClipped = (element: {
+  scrollHeight: number;
+  clientHeight: number;
+}) => element.scrollHeight > element.clientHeight + 1;
+
+export const CurrentReadClaim = ({ claim }: { claim: string }) => {
+  const claimRef = useRef<HTMLHeadingElement>(null);
+  const [state, dispatch] = useReducer(reduceCurrentReadClaimState, {
+    claimIdentity: claim,
+    expanded: false,
+    isClipped: false,
+  });
+  const { expanded, isClipped } = state;
+
+  const measureOverflow = useCallback(() => {
+    const claimElement = claimRef.current;
+    if (!claimElement) return;
+    const lineHeight = Number.parseFloat(
+      window.getComputedStyle(claimElement).lineHeight,
+    );
+    const collapsedHeight = expanded
+      ? lineHeight * 3
+      : claimElement.clientHeight;
+    dispatch({
+      type: 'measured',
+      isClipped: isCurrentReadClaimClipped({
+        scrollHeight: claimElement.scrollHeight,
+        clientHeight: Number.isFinite(collapsedHeight)
+          ? collapsedHeight
+          : claimElement.clientHeight,
+      }),
+    });
+  }, [expanded]);
+
+  useLayoutEffect(() => {
+    dispatch({ type: 'claim-changed', claimIdentity: claim });
+  }, [claim]);
+
+  useLayoutEffect(() => {
+    measureOverflow();
+
+    const claimElement = claimRef.current;
+    if (!claimElement) return;
+
+    const resizeObserver = new ResizeObserver(measureOverflow);
+    resizeObserver.observe(claimElement);
+
+    const fonts = document.fonts;
+    void fonts?.ready.then(measureOverflow);
+    fonts?.addEventListener('loadingdone', measureOverflow);
+
+    return () => {
+      resizeObserver.disconnect();
+      fonts?.removeEventListener('loadingdone', measureOverflow);
+    };
+  }, [measureOverflow]);
+
+  return (
+    <CurrentReadClaimView
+      claim={claim}
+      expanded={expanded}
+      isClipped={isClipped}
+      onToggle={() => dispatch({ type: 'toggle' })}
+      claimRef={claimRef}
+    />
+  );
+};
+
 export const Dashboard = ({
   model,
   loading,
@@ -166,7 +303,7 @@ export const Dashboard = ({
   return (
     <main className="mx-auto w-full max-w-[1180px] animate-in pb-20">
       <section
-        aria-labelledby="current-read-title"
+        aria-labelledby={CURRENT_READ_CLAIM_ID}
         className="border-b border-pro-border/70 pb-7"
       >
         <div className="flex flex-col gap-7 lg:grid lg:grid-cols-[minmax(0,1fr)_260px] lg:items-end lg:gap-12">
@@ -186,12 +323,7 @@ export const Dashboard = ({
                 </span>
               ) : null}
             </div>
-            <h1
-              id="current-read-title"
-              className="max-w-[24ch] text-[32px] font-black leading-[1.12] tracking-[-0.035em] text-pro-text-main md:text-[38px]"
-            >
-              {currentRead}
-            </h1>
+            <CurrentReadClaim claim={currentRead} />
             <p className="mt-4 max-w-[68ch] text-[15px] font-medium leading-7 text-pro-text-main/65">
               {currentReadDetail}
             </p>
