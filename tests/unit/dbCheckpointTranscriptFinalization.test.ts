@@ -20,8 +20,8 @@ import {
   getMeeting,
   getMeetingMid,
   saveMeeting,
-  saveMeetingMid,
   saveMeetingIfDownstreamRunCurrent,
+  saveMeetingMid,
 } from '../../electron/db';
 import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
 import { parseMeetingDownstreamProcessing } from '../../src/utils/transcriptTrustState';
