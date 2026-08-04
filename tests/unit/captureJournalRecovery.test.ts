@@ -296,7 +296,13 @@ describe('capture journal recovery', () => {
     ).toBe('sealed');
     await expect(
       verifySealedCaptureJournalTranscriptEvidence(root, meetingId),
-    ).resolves.toMatchObject({ segmentCount: 2 });
+    ).resolves.toMatchObject({
+      segmentCount: 2,
+      sourceCoverageSegments: expect.arrayContaining([
+        expect.objectContaining({ speaker: 'Me' }),
+        expect.objectContaining({ speaker: 'Them' }),
+      ]),
+    });
     const recovered = saveMeeting.mock.calls[0][0];
     const transcript = JSON.parse(recovered.transcript_json) as {
       segments: Array<{ speaker: string; text: string }>;

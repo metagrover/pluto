@@ -200,6 +200,7 @@ export const validateTranscriptIntegrity = (input: {
   systemActivitySeconds: number;
   localTranscriptCoveredSeconds: number;
   remoteTranscriptCoveredSeconds: number;
+  collapsedPassThroughSeconds?: number;
   unresolvedAmbiguousSeconds: number;
   requiredSourcesSucceeded: boolean;
 }) => {
@@ -224,7 +225,8 @@ export const validateTranscriptIntegrity = (input: {
   if (
     input.micActivitySeconds >= 3 &&
     coverageRatio(
-      input.localTranscriptCoveredSeconds,
+      input.localTranscriptCoveredSeconds +
+        (input.collapsedPassThroughSeconds ?? 0),
       input.micActivitySeconds,
     ) < 0.65
   ) {

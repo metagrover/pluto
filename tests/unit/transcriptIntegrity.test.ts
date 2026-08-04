@@ -45,6 +45,23 @@ describe('transcriptIntegrity', () => {
     expect(result.reasons).toContain('local_speech_unaccounted');
   });
 
+  it('accounts for verified system pass-through on the mic channel', () => {
+    const result = validateTranscriptIntegrity({
+      recordingDurationSeconds: 120,
+      micAudioDurationSeconds: 120,
+      systemAudioDurationSeconds: 120,
+      micActivitySeconds: 35,
+      systemActivitySeconds: 36,
+      localTranscriptCoveredSeconds: 9,
+      remoteTranscriptCoveredSeconds: 34,
+      collapsedPassThroughSeconds: 50,
+      unresolvedAmbiguousSeconds: 0,
+      requiredSourcesSucceeded: true,
+    });
+
+    expect(result).toEqual({ status: 'validated', reasons: [] });
+  });
+
   it('preserves mic-only canonical speech missing from provisional chunks', () => {
     const result = reconcileCanonicalTranscript({
       mixedSegments: [segment('Unknown', 10, 16, 'Synthetic local proposal')],

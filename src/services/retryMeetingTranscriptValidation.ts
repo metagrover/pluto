@@ -33,7 +33,8 @@ export const shouldAutoProcessMeetingAnalysis = (
 ) => {
   if (
     !meeting ||
-    meeting.transcript_status !== 'needs_attention' ||
+    (meeting.transcript_status !== 'needs_attention' &&
+      meeting.transcript_status !== 'validated') ||
     meeting.finalization_status === 'recovery_required' ||
     Boolean(meeting.analysis_json || meeting.enhanced_notes) ||
     !meeting.transcript_json ||
@@ -315,14 +316,61 @@ export const retryMeetingTranscriptValidation = async (
   const checkpointEvidenceProvenance = priorIntegrity.evidenceProvenance as
     | { kind?: unknown }
     | undefined;
-  const checkpointEvidenceVerified =
+  type CheckpointVerification = {
+    generation?: unknown;
+    segmentCount?: unknown;
+    sourceCoverageSegments?: unknown;
+  };
+  let verifiedCheckpointEvidence: CheckpointVerification | null = null;
+  const storedCheckpointCandidate =
     recovery?.source === 'capture_journal' &&
     recovery.journalSchemaVersion === 3 &&
     recovery.checkpointEvidenceVerified === true &&
     recovery.gapDetected === false &&
     provisionalSegments.length > 0 &&
-    checkpointEvidenceProvenance?.kind === 'sealed_capture_activity_v2';
-  const canonicalMode = checkpointEvidenceVerified
+    checkpointEvidenceProvenance?.kind === 'sealed_capture_activity_v2' &&
+    typeof meeting.capture_journal_generation === 'string';
+  if (storedCheckpointCandidate) {
+    try {
+      verifiedCheckpointEvidence = (await invoke(
+        'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
+        { meetingId: String(meeting.id) },
+      )) as CheckpointVerification;
+    } catch {
+      verifiedCheckpointEvidence = null;
+    }
+  }
+  const checkpointSourceSegments = Array.isArray(
+    verifiedCheckpointEvidence?.sourceCoverageSegments,
+  )
+    ? verifiedCheckpointEvidence.sourceCoverageSegments
+        .filter(
+          (
+            segment,
+          ): segment is {
+            startTime: number;
+            endTime: number;
+            speaker: 'Me' | 'Them';
+          } =>
+          Boolean(segment) &&
+          typeof segment === 'object' &&
+          Number.isFinite((segment as AttributionSegment).startTime) &&
+          Number.isFinite((segment as AttributionSegment).endTime) &&
+          (segment as AttributionSegment).endTime >
+            (segment as AttributionSegment).startTime &&
+          ((segment as AttributionSegment).speaker === 'Me' ||
+            (segment as AttributionSegment).speaker === 'Them'),
+        )
+        .map((segment) => ({ ...segment, text: '' }))
+    : [];
+  const checkpointEvidenceVerified =
+    storedCheckpointCandidate &&
+    verifiedCheckpointEvidence?.generation ===
+      meeting.capture_journal_generation &&
+    verifiedCheckpointEvidence?.segmentCount === provisionalSegments.length &&
+    checkpointSourceSegments.length > 0;
+  let canonicalMode: 'checkpointed' | 'recovered_channels' | 'full_mix' =
+    checkpointEvidenceVerified
     ? ('checkpointed' as const)
     : recovery?.source === 'capture_journal'
       ? ('recovered_channels' as const)
@@ -375,27 +423,39 @@ export const retryMeetingTranscriptValidation = async (
       : ({ status: 'needs_attention' } as const);
   };
   let validation: Awaited<ReturnType<typeof runRecordingTranscriptValidation>>;
+  const validateTranscript = (
+    mode: 'checkpointed' | 'recovered_channels' | 'full_mix',
+  ) =>
+    runRecordingTranscriptValidation({
+      meetingId: String(meeting.id),
+      recordingDurationSeconds: meeting.duration_seconds || 0,
+      micAudioPath: sourcePaths.mic,
+      systemAudioPath: sourcePaths.system,
+      mixAudioPath: sourcePaths.mix,
+      provisionalSegments,
+      checkpointSourceSegments:
+        mode === 'checkpointed' ? checkpointSourceSegments : [],
+      activityWindows: activityEvidence.windows,
+      canonicalMode: mode,
+      checkpointEvidenceVerified:
+        mode === 'checkpointed' && checkpointEvidenceVerified,
+      transcribe: async (audioPath, options) =>
+        (await invoke('WHISPER_TRANSCRIBE', audioPath, options)) as {
+          segments?: Array<{ start: number; end: number; text: string }>;
+          meta?: Record<string, unknown>;
+        },
+      probeDuration: async (audioPath) =>
+        (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
+    });
   try {
-    validation = await runBeforeDeadline(
-      runRecordingTranscriptValidation({
-        meetingId: String(meeting.id),
-        recordingDurationSeconds: meeting.duration_seconds || 0,
-        micAudioPath: sourcePaths.mic,
-        systemAudioPath: sourcePaths.system,
-        mixAudioPath: sourcePaths.mix,
-        provisionalSegments,
-        activityWindows: activityEvidence.windows,
-        canonicalMode,
-        checkpointEvidenceVerified,
-        transcribe: async (audioPath, options) =>
-          (await invoke('WHISPER_TRANSCRIBE', audioPath, options)) as {
-            segments?: Array<{ start: number; end: number; text: string }>;
-            meta?: Record<string, unknown>;
-          },
-        probeDuration: async (audioPath) =>
-          (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
-      }),
-    );
+    validation = await runBeforeDeadline(validateTranscript(canonicalMode));
+    if (
+      canonicalMode === 'checkpointed' &&
+      validation.status === 'needs_attention'
+    ) {
+      canonicalMode = 'recovered_channels';
+      validation = await runBeforeDeadline(validateTranscript(canonicalMode));
+    }
   } catch (error) {
     const failure =
       error instanceof Error &&

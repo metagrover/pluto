@@ -50,6 +50,59 @@ describe('runRecordingTranscriptValidation', () => {
     expect(result.segments).toHaveLength(2);
   });
 
+  it('validates checkpoint source coverage after canonical duplicate arbitration', async () => {
+    const transcribe = vi.fn();
+    const probeDuration = vi.fn();
+
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'checkpointed-duplicate-meeting',
+      recordingDurationSeconds: 60,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [
+        {
+          id: 'system-0',
+          startTime: 0,
+          endTime: 9,
+          text: 'Canonical duplicate winner',
+          speaker: 'Them',
+        },
+      ],
+      checkpointSourceSegments: [
+        {
+          id: 'mic-source-0',
+          startTime: 0,
+          endTime: 9,
+          text: '',
+          speaker: 'Me',
+        },
+        {
+          id: 'system-source-0',
+          startTime: 0,
+          endTime: 9,
+          text: '',
+          speaker: 'Them',
+        },
+      ],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0, endTime: 4 },
+        { speaker: 'Them', startTime: 5, endTime: 9 },
+      ],
+      canonicalMode: 'checkpointed',
+      checkpointEvidenceVerified: true,
+      transcribe,
+      probeDuration,
+    });
+
+    expect(result.status).toBe('validated');
+    expect(result.reasons).toEqual([]);
+    expect(result.segments).toEqual([
+      expect.objectContaining({ speaker: 'Them' }),
+    ]);
+    expect(result.sourceSegmentCounts).toMatchObject({ mic: 1, system: 1 });
+  });
+
   it('always transcribes mic, mix, and system sources', async () => {
     const transcribe = vi.fn(async (path: string) => ({
       segments: path.includes('mix')
