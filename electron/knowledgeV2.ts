@@ -160,6 +160,99 @@ export interface KnowledgeV2Correction {
 const normalizeText = (value: unknown): string =>
   value == null ? '' : String(value).toLowerCase().replace(/\s+/g, ' ').trim();
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const isEvidenceQuality = (
+  value: unknown,
+): value is KnowledgeV2EvidenceQuality =>
+  isRecord(value) &&
+  typeof value.mode === 'string' &&
+  typeof value.confidence === 'number' &&
+  typeof value.cited_meeting_count === 'number' &&
+  typeof value.source_count === 'number' &&
+  (typeof value.last_reinforced_at === 'string' ||
+    value.last_reinforced_at === null) &&
+  typeof value.freshness === 'string';
+
+const isCitation = (value: unknown): value is KnowledgeV2Citation =>
+  isRecord(value) &&
+  typeof value.meeting_id === 'string' &&
+  typeof value.quote === 'string';
+
+const isStream = (value: unknown): value is KnowledgeV2Stream =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.title === 'string' &&
+  typeof value.domain === 'string' &&
+  typeof value.status === 'string' &&
+  typeof value.current_read === 'string' &&
+  (typeof value.last_touched_at === 'string' ||
+    value.last_touched_at === null) &&
+  typeof value.source_count === 'number' &&
+  typeof value.open_follow_up_count === 'number' &&
+  typeof value.decision_count === 'number' &&
+  typeof value.unresolved_question_count === 'number' &&
+  typeof value.pinned === 'boolean' &&
+  isEvidenceQuality(value.evidence_quality);
+
+const isItem = (value: unknown): value is KnowledgeV2Item =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.title === 'string' &&
+  typeof value.summary === 'string' &&
+  typeof value.kind === 'string' &&
+  typeof value.severity === 'string' &&
+  typeof value.why_now === 'string' &&
+  Array.isArray(value.stream_ids) &&
+  value.stream_ids.every((streamId) => typeof streamId === 'string') &&
+  Array.isArray(value.citations) &&
+  value.citations.every(isCitation) &&
+  isEvidenceQuality(value.evidence_quality);
+
+const isEvidenceEntry = (value: unknown): value is KnowledgeV2EvidenceEntry =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.meeting_id === 'string' &&
+  typeof value.meeting_title === 'string' &&
+  (typeof value.captured_at === 'string' || value.captured_at === null) &&
+  typeof value.quote === 'string' &&
+  Array.isArray(value.stream_ids) &&
+  value.stream_ids.every((streamId) => typeof streamId === 'string') &&
+  Array.isArray(value.item_ids) &&
+  value.item_ids.every((itemId) => typeof itemId === 'string') &&
+  typeof value.mode === 'string' &&
+  typeof value.confidence === 'number';
+
+const isSourceQualityRecord = (
+  value: unknown,
+): value is KnowledgeV2SourceQualityRecord =>
+  isRecord(value) &&
+  typeof value.meeting_id === 'string' &&
+  typeof value.title === 'string' &&
+  typeof value.usable === 'boolean' &&
+  typeof value.domain === 'string' &&
+  typeof value.score === 'number' &&
+  Array.isArray(value.reasons) &&
+  value.reasons.every((reason) => typeof reason === 'string');
+
+const filterArray = <T>(
+  value: unknown,
+  predicate: (item: unknown) => item is T,
+): T[] => (Array.isArray(value) ? value.filter(predicate) : []);
+
+const sanitizeKnowledgeCollections = (doc: KnowledgeV2Document) => ({
+  activeStreams: filterArray(doc.active_streams, isStream),
+  attention: filterArray(doc.needs_attention, isItem),
+  patterns: filterArray(doc.patterns, isItem),
+  risks: filterArray(doc.risks_and_unknowns, isItem),
+  evidence: filterArray(doc.evidence_index, isEvidenceEntry),
+  records: filterArray(
+    doc.source_quality_summary?.records,
+    isSourceQualityRecord,
+  ),
+});
+
 const normalizeId = (value: string): string =>
   normalizeText(value)
     .replace(/[^a-z0-9]+/g, '-')
@@ -771,14 +864,15 @@ export const repairKnowledgeV2Document = (
   doc: KnowledgeV2Document,
   fallback?: KnowledgeV2Document | null,
 ): KnowledgeV2Document => {
-  const repairedStreams = doc.active_streams
+  const sanitized = sanitizeKnowledgeCollections(doc);
+  const repairedStreams = sanitized.activeStreams
     .map(repairStream)
     .filter((stream): stream is KnowledgeV2Stream => Boolean(stream));
   const activeStreams =
     repairedStreams.length > 0
       ? repairedStreams
       : fallback?.active_streams || [];
-  const patterns = doc.patterns.filter(
+  const patterns = sanitized.patterns.filter(
     (pattern) =>
       pattern.evidence_quality.cited_meeting_count >= 2 ||
       /\b(repeated|multiple|recurring|again|across)\b/i.test(
@@ -791,8 +885,8 @@ export const repairKnowledgeV2Document = (
   const headline = headlineIsWeak
     ? headlineForDocument(
         activeStreams,
-        doc.needs_attention.length > 0
-          ? doc.needs_attention
+        sanitized.attention.length > 0
+          ? sanitized.attention
           : fallback?.needs_attention || [],
         patterns.length > 0 ? patterns : fallback?.patterns || [],
       )
@@ -811,7 +905,14 @@ export const repairKnowledgeV2Document = (
           : doc.current_read.supporting_bullets,
     },
     active_streams: activeStreams,
+    needs_attention: sanitized.attention,
     patterns,
+    risks_and_unknowns: sanitized.risks,
+    evidence_index: sanitized.evidence,
+    source_quality_summary: {
+      ...doc.source_quality_summary,
+      records: sanitized.records,
+    },
   };
 };
 
@@ -1089,24 +1190,25 @@ export const mergeKnowledgeV2Documents = (
   scope: KnowledgeV2Scope,
   documents: KnowledgeV2Document[],
 ): KnowledgeV2Document => {
+  const sanitizedDocuments = documents.map(sanitizeKnowledgeCollections);
   const streams = dedupeBy(
-    documents.flatMap((doc) => doc.active_streams),
+    sanitizedDocuments.flatMap((doc) => doc.activeStreams),
     (stream) => stream.id,
   );
   const attention = dedupeBy(
-    documents.flatMap((doc) => doc.needs_attention),
+    sanitizedDocuments.flatMap((doc) => doc.attention),
     (item) => normalizeText(item.title),
   );
   const patterns = dedupeBy(
-    documents.flatMap((doc) => doc.patterns),
+    sanitizedDocuments.flatMap((doc) => doc.patterns),
     (item) => normalizeText(item.title),
   );
   const risks = dedupeBy(
-    documents.flatMap((doc) => doc.risks_and_unknowns),
+    sanitizedDocuments.flatMap((doc) => doc.risks),
     (item) => normalizeText(item.title),
   );
   const evidence = dedupeBy(
-    documents.flatMap((doc) => doc.evidence_index),
+    sanitizedDocuments.flatMap((doc) => doc.evidence),
     (entry) => {
       const meetingId = normalizeText(entry.meeting_id);
       const quote = normalizeText(entry.quote);
@@ -1114,7 +1216,7 @@ export const mergeKnowledgeV2Documents = (
     },
   );
   const records = dedupeBy(
-    documents.flatMap((doc) => doc.source_quality_summary.records),
+    sanitizedDocuments.flatMap((doc) => doc.records),
     (record) => record.meeting_id,
   );
   const citedMeetingIds = new Set(evidence.map((entry) => entry.meeting_id));
@@ -1178,12 +1280,19 @@ export const isKnowledgeV2Document = (
 ): value is KnowledgeV2Document => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
+  const currentRead = record.current_read;
   return (
     record.schema_version === KNOWLEDGE_V2_SCHEMA_VERSION &&
-    Boolean(record.current_read) &&
+    isRecord(currentRead) &&
+    typeof currentRead.headline === 'string' &&
+    Array.isArray(currentRead.supporting_bullets) &&
     Array.isArray(record.active_streams) &&
     Array.isArray(record.needs_attention) &&
-    Array.isArray(record.evidence_index)
+    Array.isArray(record.patterns) &&
+    Array.isArray(record.risks_and_unknowns) &&
+    Array.isArray(record.evidence_index) &&
+    isRecord(record.source_quality_summary) &&
+    Array.isArray(record.source_quality_summary.records)
   );
 };
 

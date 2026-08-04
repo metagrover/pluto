@@ -260,11 +260,22 @@ describe('capture journal recovery', () => {
       providerLabel: 'local',
       segments: [
         {
-          start: inputPath.includes('mic') ? 0.2 : 1,
-          end: inputPath.includes('mic') ? 0.8 : 1.6,
+          start: inputPath.includes('mic') ? -0.2 : 1,
+          end: inputPath.includes('mic') ? 0.8 : 2.8,
           text: inputPath.includes('mic')
             ? 'Synthetic mic statement'
             : 'Synthetic system statement',
+          ...(inputPath.includes('mic')
+            ? {}
+            : {
+                words: [
+                  {
+                    word: 'Synthetic system statement',
+                    start: 1,
+                    end: 1.6,
+                  },
+                ],
+              }),
         },
       ],
     }));
