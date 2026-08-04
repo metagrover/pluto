@@ -32,6 +32,7 @@ import type {
 import { useDashboardHome } from './components/features/useDashboardHome';
 import {
   meetingProcessingFingerprint,
+  rememberMeetingProcessingOutcome,
   selectNextMeetingForProcessing,
 } from './services/postMeetingProcessingCoordinator';
 import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
@@ -456,10 +457,13 @@ function App() {
   const fetchMeetings = async () => {
     try {
       const data = await window.ipcRenderer.invoke('GET_MEETINGS');
-      setMeetings(Array.isArray(data) ? data : []);
+      const fetchedMeetings = Array.isArray(data) ? (data as Meeting[]) : [];
+      setMeetings(fetchedMeetings);
+      return fetchedMeetings;
     } catch (e) {
       console.error('Failed to fetch meetings', e);
       setMeetings([]);
+      return [];
     }
   };
 
@@ -472,7 +476,13 @@ function App() {
       await retryMeetingTranscriptValidation(meetingId, (channel, ...args) =>
         window.ipcRenderer.invoke(channel, ...args),
       );
-      await fetchMeetings();
+      const refreshedMeetings = await fetchMeetings();
+      rememberMeetingProcessingOutcome(
+        autoAnalysisAttemptsRef.current,
+        refreshedMeetings.find(
+          (meeting) => String(meeting.id) === String(meetingId),
+        ),
+      );
     } catch (error) {
       console.error('[Pluto] Transcript validation retry failed', error);
     } finally {
