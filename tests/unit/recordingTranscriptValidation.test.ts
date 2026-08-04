@@ -159,6 +159,54 @@ describe('runRecordingTranscriptValidation', () => {
     expect(result.attempts.system).toBe(2);
   });
 
+  it('rejects acoustic false positives only when every preserved source returns explicit no-speech VAD proof', async () => {
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'detector-false-positive',
+      recordingDurationSeconds: 60,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '/synthetic/mix.wav',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0, endTime: 40 },
+        { speaker: 'Them', startTime: 40, endTime: 60 },
+      ],
+      transcribe: async () => ({
+        segments: [],
+        vad: { status: 'no_speech', speechSeconds: 0 },
+      }),
+      probeDuration: async () => 60,
+    });
+
+    expect(result.status).toBe('validated');
+    expect(result.reasons).toEqual([]);
+    expect(result.evidence).toMatchObject({
+      micActivitySeconds: 40,
+      systemActivitySeconds: 20,
+      unexplainedMicSeconds: 0,
+      unexplainedSystemSeconds: 0,
+      rejectedMicCandidateSeconds: 40,
+      rejectedSystemCandidateSeconds: 20,
+    });
+  });
+
+  it('keeps empty transcription fail-closed when explicit VAD proof is missing', async () => {
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'ambiguous-empty-transcription',
+      recordingDurationSeconds: 60,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '/synthetic/mix.wav',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [],
+      activityWindows: [{ speaker: 'Me', startTime: 0, endTime: 40 }],
+      transcribe: async () => ({ segments: [] }),
+      probeDuration: async () => 60,
+    });
+
+    expect(result.status).toBe('needs_attention');
+    expect(result.reasons).toContain('required_source_failed');
+  });
+
   it('counts duplicate and overlapping transcript segments once when measuring coverage', async () => {
     const result = await runRecordingTranscriptValidation({
       meetingId: 'synthetic-meeting',

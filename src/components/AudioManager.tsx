@@ -4776,7 +4776,33 @@ export const AudioManager = ({
               : 'missing_diarization_audio'
             : 'diarization_disabled',
         });
-      if (diarizationEnabled && diarizationAudioPath) {
+      let diarizationCapabilityReady = true;
+      if (
+        diarizationEnabled &&
+        diarizationAudioPath &&
+        resolveProductionDiarizationProvider(hfTokenValue) === 'sherpa_local'
+      ) {
+        try {
+          const readiness = await window.ipcRenderer.invoke(
+            'WHISPER_DIARIZATION_MODEL_STATUS',
+          );
+          diarizationCapabilityReady = readiness?.ready === true;
+        } catch {
+          diarizationCapabilityReady = false;
+        }
+        if (!diarizationCapabilityReady) {
+          speakerAttribution = buildTranscriptSpeakerAttribution({
+            diarizationEnabled: true,
+            diarizationAttempted: false,
+            fallbackReason: 'diarization_models_unavailable',
+          });
+        }
+      }
+      if (
+        diarizationEnabled &&
+        diarizationAudioPath &&
+        diarizationCapabilityReady
+      ) {
         let acousticEvidenceWindows: ReturnType<
           typeof deriveAttributionEvidence
         > = [];
@@ -5424,6 +5450,7 @@ export const AudioManager = ({
       const fullTranscript = newTranscription
         .map((s) => `${s.speaker}: ${s.text}`)
         .join('\n');
+      void fullTranscript;
       let enhancedNotes = '';
       let valueSignals = emptyValueSignals();
       let analysisDocument: AnalysisDocument | AnalysisDocumentV3 =
@@ -5523,25 +5550,20 @@ export const AudioManager = ({
               },
             );
           },
-          runDownstream: async () => {
-            try {
-              return (await window.ipcRenderer.invoke('GENERATE_ANALYSIS_V2', {
-                transcript: fullTranscript,
-                userNotes: userNotes,
-              })) as AnalysisArtifacts;
-            } catch (analysisErr) {
-              console.error(
-                '[Pluto] V3 analysis generation failed:',
-                analysisErr,
-              );
-              return null;
-            }
-          },
+          runDownstream: (async () =>
+            null) as () => Promise<AnalysisArtifacts | null>,
         });
       if (!stopToValidatedLatency) {
         throw new Error('Validated latency summary was not finalized');
       }
 
+      // The durable post-meeting coordinator owns every intelligence stage.
+      // Recording finalization ends after canonical transcript persistence so
+      // navigation, restart, and manual retry all use the same worker.
+      onSessionComplete?.(attributionPersistenceRecord.id);
+      return;
+
+      // biome-ignore lint/correctness/noUnreachable: retained temporarily while the single-worker migration removes the legacy inline intelligence block
       if (rawArtifacts) {
         analysisDocument = normalizeAnalysisDocument(rawArtifacts?.analysis);
         valueSignals = normalizeValueSignals(rawArtifacts?.signals);

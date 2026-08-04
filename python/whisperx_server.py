@@ -240,7 +240,8 @@ def transcribe(request: TranscribeRequest):
             return {
                 "segments": [],
                 "language": "en",
-                "duration": 0
+                "duration": 0,
+                "vad": {"status": "failed", "speechSeconds": 0}
             }
         
         detected_language = result["language"]
@@ -250,7 +251,8 @@ def transcribe(request: TranscribeRequest):
             return {
                 "segments": [],
                 "language": detected_language,
-                "duration": 0
+                "duration": 0,
+                "vad": {"status": "no_speech", "speechSeconds": 0}
             }
         
         # 2. Align for word-level timestamps
@@ -296,6 +298,13 @@ def transcribe(request: TranscribeRequest):
             "segments": result["segments"],
             "language": detected_language,
             "duration": 0, # TODO: Calculate duration
+            "vad": {
+                "status": "speech",
+                "speechSeconds": sum(
+                    max(0, float(segment.get("end", 0)) - float(segment.get("start", 0)))
+                    for segment in result["segments"]
+                ),
+            },
             "active_config": {
                 "model": model_config["model_name"],
                 "device": model_config["device"],
