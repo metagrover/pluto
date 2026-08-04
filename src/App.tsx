@@ -31,9 +31,10 @@ import type {
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
 import {
-  retryMeetingTranscriptValidation,
-  shouldAutoProcessMeetingAnalysis,
-} from './services/retryMeetingTranscriptValidation';
+  meetingProcessingFingerprint,
+  selectNextMeetingForProcessing,
+} from './services/postMeetingProcessingCoordinator';
+import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 
 import {
   updateActionCommitmentState,
@@ -462,13 +463,14 @@ function App() {
     }
   };
 
-  const handleRetryTranscriptValidation = async () => {
-    if (!selectedMeetingId || transcriptValidationRetrying) return;
+  const handleRetryTranscriptValidation = async (
+    meetingId: string | number | null = selectedMeetingId,
+  ) => {
+    if (!meetingId || transcriptValidationRetrying) return;
     setTranscriptValidationRetrying(true);
     try {
-      await retryMeetingTranscriptValidation(
-        selectedMeetingId,
-        (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+      await retryMeetingTranscriptValidation(meetingId, (channel, ...args) =>
+        window.ipcRenderer.invoke(channel, ...args),
       );
       await fetchMeetings();
     } catch (error) {
@@ -500,17 +502,17 @@ function App() {
   );
 
   useEffect(() => {
-    if (
-      transcriptValidationRetrying ||
-      !shouldAutoProcessMeetingAnalysis(selectedMeeting)
-    ) {
-      return;
-    }
-    const meetingKey = String(selectedMeeting?.id);
-    if (autoAnalysisAttemptsRef.current.has(meetingKey)) return;
-    autoAnalysisAttemptsRef.current.add(meetingKey);
-    void handleRetryTranscriptValidation();
-  }, [selectedMeeting, selectedMeetingId, transcriptValidationRetrying]);
+    if (transcriptValidationRetrying) return;
+    const candidate = selectNextMeetingForProcessing(
+      safeMeetings,
+      autoAnalysisAttemptsRef.current,
+    );
+    if (!candidate?.id) return;
+    autoAnalysisAttemptsRef.current.add(
+      meetingProcessingFingerprint(candidate),
+    );
+    void handleRetryTranscriptValidation(candidate.id);
+  }, [safeMeetings, transcriptValidationRetrying]);
 
   const filteredMeetings = safeMeetings.filter(
     (m) =>

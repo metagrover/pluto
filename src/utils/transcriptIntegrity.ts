@@ -32,6 +32,8 @@ export type TranscriptIntegrityEvidence = {
   unexplainedSystemSeconds: number;
   collapsedPassThroughSeconds: number;
   unresolvedAmbiguousSeconds: number;
+  rejectedMicCandidateSeconds?: number;
+  rejectedSystemCandidateSeconds?: number;
 };
 
 const coverageRatio = (coveredSeconds: number, activeSeconds: number) =>

@@ -1929,9 +1929,7 @@ export const initializeKnowledgeDocs = async (): Promise<void> => {
   });
 };
 
-export const queueKnowledgeDocsRefreshForMeeting = (
-  meetingId: string,
-): void => {
+const getKnowledgeDocIdsForMeeting = (meetingId: string): Set<string> => {
   const docs = ensureDocsAndCollectActive();
   const docIds = new Set<string>();
 
@@ -1973,9 +1971,30 @@ export const queueKnowledgeDocsRefreshForMeeting = (
     }
   }
 
-  for (const docId of docIds) {
+  return docIds;
+};
+
+export const queueKnowledgeDocsRefreshForMeeting = (
+  meetingId: string,
+): void => {
+  for (const docId of getKnowledgeDocIdsForMeeting(meetingId)) {
     queueKnowledgeDocRefresh(docId);
   }
+};
+
+export const refreshKnowledgeDocsForMeetingNow = async (
+  meetingId: string,
+): Promise<{ requested: number; completed: number }> => {
+  const docIds = [...getKnowledgeDocIdsForMeeting(meetingId)];
+  let completed = 0;
+  for (const docId of docIds) {
+    const refreshed = await runWithGlobalSynthesisGate(async () => {
+      return await synthesizeKnowledgeDocNowInternal(docId);
+    });
+    if (!refreshed) throw new Error('knowledge_document_refresh_failed');
+    completed += 1;
+  }
+  return { requested: docIds.length, completed };
 };
 
 export const queueAllKnowledgeDocsRefresh = (): void => {

@@ -51,6 +51,10 @@ export interface Transcript {
   segments: TranscriptSegment[];
   language: string;
   duration: number;
+  vad?: {
+    status: 'speech' | 'no_speech' | 'failed';
+    speechSeconds: number;
+  };
 }
 
 export interface DiarizationResult {

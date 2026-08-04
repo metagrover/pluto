@@ -142,6 +142,9 @@ describe('retryMeetingTranscriptValidation', () => {
         };
       }
       if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
+      if (channel === 'REFRESH_KNOWLEDGE_FOR_MEETING_NOW') {
+        return { requested: 1, completed: 1 };
+      }
       throw new Error(`Unexpected channel: ${channel}`);
     });
 
@@ -172,6 +175,70 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(
       JSON.parse(String(current.transcript_json)).stopToValidatedLatency,
     ).toEqual(stopToValidatedLatency);
+    expect(
+      JSON.parse(String(current.downstream_processing_json)),
+    ).toMatchObject({ state: 'complete' });
+  });
+
+  it('processes a newly validated meeting without transcribing it a second time', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_status: 'validated',
+      transcript_validated_at: '2026-08-04T00:00:00.000Z',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [
+          {
+            speaker: 'Me',
+            startTime: 0,
+            endTime: 4,
+            text: 'Synthetic statement.',
+          },
+        ],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'validated',
+        causes: [],
+        validationProof: { gateVersion: 'canonical_integrity_v1' },
+      }),
+      downstream_processing_json: JSON.stringify({
+        schemaVersion: 1,
+        state: 'processing',
+        stage: 'analysis',
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'GENERATE_TITLE') return 'Synthetic meeting';
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        return { analysis: { analysis_schema_version: 3 }, signals: {} };
+      }
+      if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
+      if (channel === 'REFRESH_KNOWLEDGE_FOR_MEETING_NOW') {
+        return { requested: 1, completed: 1 };
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result).toEqual({ status: 'validated' });
+    expect(invoke).not.toHaveBeenCalledWith(
+      'WHISPER_TRANSCRIBE',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(
+      JSON.parse(String(current.downstream_processing_json)),
+    ).toMatchObject({ state: 'complete' });
   });
 
   it('reuses verified recovered checkpoints without invoking Whisper', async () => {

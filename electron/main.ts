@@ -263,6 +263,7 @@ import {
   queueAllKnowledgeDocsRefresh,
   queueKnowledgeDocsRefreshForMeeting,
   refreshKnowledgeDocNow,
+  refreshKnowledgeDocsForMeetingNow,
   setKnowledgeDocSynthesisPaused,
   synthesizeEntitySummary,
 } from './knowledgeSynthesis';
@@ -1665,6 +1666,12 @@ app.whenReady().then(async () => {
     db.getKnowledgeDocs(filters),
   );
   ipcMain.handle('GET_KNOWLEDGE_DOC', (_event, id) => db.getKnowledgeDoc(id));
+
+  ipcMain.handle(
+    'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
+    async (_event, meetingId) =>
+      await refreshKnowledgeDocsForMeetingNow(String(meetingId)),
+  );
   ipcMain.handle(
     'GET_WORKING_MEMORY_SNAPSHOT',
     (_event, { scopeType, scopeKey }) =>
@@ -2081,7 +2088,14 @@ app.whenReady().then(async () => {
     'EXTRACT_AND_PROCESS_ENTITIES',
     async (
       _event,
-      { transcript, meetingId, summary, valueSignals, priorityHints },
+      {
+        transcript,
+        meetingId,
+        summary,
+        valueSignals,
+        priorityHints,
+        awaitKnowledgeSynthesis,
+      },
     ) => {
       try {
         if (!transcript || !transcript.trim()) {
@@ -2217,7 +2231,9 @@ app.whenReady().then(async () => {
           );
         }
 
-        queueKnowledgeDocsRefreshForMeeting(String(meetingId));
+        if (awaitKnowledgeSynthesis !== true) {
+          queueKnowledgeDocsRefreshForMeeting(String(meetingId));
+        }
         clearAbortControllerForMeeting(String(meetingId));
         return result;
       } catch (error) {

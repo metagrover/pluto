@@ -19,6 +19,10 @@ type RawWhisperSegment = {
 type TranscriptionResult = {
   segments?: RawWhisperSegment[];
   meta?: Record<string, unknown>;
+  vad?: {
+    status?: 'speech' | 'no_speech' | 'failed';
+    speechSeconds?: number;
+  };
 };
 
 type CanonicalSource = 'mic' | 'mix' | 'system';
@@ -120,6 +124,26 @@ const activitySeconds = (
     0,
   );
 
+const segmentSeconds = (segments: AttributionSegment[]) =>
+  mergeIntervals(
+    segments.map((segment) => ({
+      start: segment.startTime,
+      end: segment.endTime,
+    })),
+  ).reduce((total, interval) => total + interval.end - interval.start, 0);
+
+const hasSuccessfulSourceResult = (
+  source: SourceResult,
+  segments: AttributionSegment[],
+) =>
+  segments.length > 0 ||
+  source.result?.vad?.status === 'speech' ||
+  source.result?.vad?.status === 'no_speech';
+
+const hasExplicitVadProof = (source: SourceResult) =>
+  source.result?.vad?.status === 'speech' ||
+  source.result?.vad?.status === 'no_speech';
+
 const coveredActivitySeconds = (
   windows: SpeakerActivityWindow[],
   segments: AttributionSegment[],
@@ -160,6 +184,21 @@ export type RecordingTranscriptValidationResult = {
   attempts: Record<CanonicalSource, number>;
   transcriptionMeta: Partial<Record<CanonicalSource, Record<string, unknown>>>;
   sourceSegmentCounts: Record<CanonicalSource, number>;
+  sourceOutcomes: Record<
+    CanonicalSource,
+    'speech' | 'no_speech' | 'failed' | 'unknown'
+  >;
+};
+
+const sourceOutcome = (
+  source: SourceResult,
+  segments: AttributionSegment[],
+): 'speech' | 'no_speech' | 'failed' | 'unknown' => {
+  if (!source.result || source.result.vad?.status === 'failed') return 'failed';
+  if (source.result.vad?.status === 'no_speech') return 'no_speech';
+  if (source.result.vad?.status === 'speech' || segments.length > 0)
+    return 'speech';
+  return 'unknown';
 };
 
 export const runRecordingTranscriptValidation = async (input: {
@@ -237,6 +276,15 @@ export const runRecordingTranscriptValidation = async (input: {
         system: coverageSegments.filter((segment) => segment.speaker === 'Them')
           .length,
       },
+      sourceOutcomes: {
+        mic: coverageSegments.some((segment) => segment.speaker === 'Me')
+          ? 'speech'
+          : 'unknown',
+        mix: 'unknown',
+        system: coverageSegments.some((segment) => segment.speaker === 'Them')
+          ? 'speech'
+          : 'unknown',
+      },
     };
   }
   const [mic, mix, system, micDuration, mixDuration, systemDuration] =
@@ -282,24 +330,45 @@ export const runRecordingTranscriptValidation = async (input: {
   });
   const micActivitySeconds = activitySeconds(input.activityWindows, 'Me');
   const systemActivitySeconds = activitySeconds(input.activityWindows, 'Them');
-  const localTranscriptCoveredSeconds = coveredActivitySeconds(
+  const micSpeechSeconds = segmentSeconds(micSegments);
+  const systemSpeechSeconds = segmentSeconds(systemSegments);
+  const asrConfirmedLocalCoveredSeconds = Math.min(
+    micSpeechSeconds,
+    segmentSeconds(
+      reconciliation.segments.filter((segment) => segment.speaker === 'Me'),
+    ),
+  );
+  const asrConfirmedRemoteCoveredSeconds = Math.min(
+    systemSpeechSeconds,
+    segmentSeconds(
+      reconciliation.segments.filter((segment) => segment.speaker === 'Them'),
+    ),
+  );
+  const candidateLocalCoveredSeconds = coveredActivitySeconds(
     input.activityWindows,
     reconciliation.segments,
     'Me',
   );
-  const remoteTranscriptCoveredSeconds = coveredActivitySeconds(
+  const candidateRemoteCoveredSeconds = coveredActivitySeconds(
     input.activityWindows,
     reconciliation.segments,
     'Them',
   );
+  const micVadVerified = hasExplicitVadProof(mic);
+  const systemVadVerified = hasExplicitVadProof(system);
   const recoveredChannels = input.canonicalMode === 'recovered_channels';
   const micRequired = micActivitySeconds > 0;
   const systemRequired = systemActivitySeconds > 0;
   const requiredSourcesSucceeded = recoveredChannels
     ? Boolean(
-        (!micRequired || (mic.result && micDuration != null)) &&
-          (!systemRequired || (system.result && systemDuration != null)) &&
-          micSegments.length + systemSegments.length > 0,
+        (!micRequired ||
+          (mic.result &&
+            micDuration != null &&
+            hasSuccessfulSourceResult(mic, micSegments))) &&
+          (!systemRequired ||
+            (system.result &&
+              systemDuration != null &&
+              hasSuccessfulSourceResult(system, systemSegments))),
       )
     : Boolean(
         mic.result &&
@@ -308,7 +377,9 @@ export const runRecordingTranscriptValidation = async (input: {
           micDuration != null &&
           mixDuration != null &&
           systemDuration != null &&
-          micSegments.length + mixedSegments.length + systemSegments.length > 0,
+          hasSuccessfulSourceResult(mic, micSegments) &&
+          hasSuccessfulSourceResult(mix, mixedSegments) &&
+          hasSuccessfulSourceResult(system, systemSegments),
       );
   const validation = validateTranscriptIntegrity({
     recordingDurationSeconds: input.recordingDurationSeconds,
@@ -320,10 +391,16 @@ export const runRecordingTranscriptValidation = async (input: {
       recoveredChannels && !systemRequired
         ? input.recordingDurationSeconds
         : (systemDuration ?? 0),
-    micActivitySeconds,
-    systemActivitySeconds,
-    localTranscriptCoveredSeconds,
-    remoteTranscriptCoveredSeconds,
+    micActivitySeconds: micVadVerified ? micSpeechSeconds : micActivitySeconds,
+    systemActivitySeconds: systemVadVerified
+      ? systemSpeechSeconds
+      : systemActivitySeconds,
+    localTranscriptCoveredSeconds: micVadVerified
+      ? asrConfirmedLocalCoveredSeconds
+      : candidateLocalCoveredSeconds,
+    remoteTranscriptCoveredSeconds: systemVadVerified
+      ? asrConfirmedRemoteCoveredSeconds
+      : candidateRemoteCoveredSeconds,
     collapsedPassThroughSeconds:
       reconciliation.evidence.collapsedPassThroughSeconds,
     unresolvedAmbiguousSeconds:
@@ -333,18 +410,25 @@ export const runRecordingTranscriptValidation = async (input: {
   const evidence: TranscriptIntegrityEvidence = {
     micActivitySeconds,
     systemActivitySeconds,
-    localTranscriptCoveredSeconds,
-    remoteTranscriptCoveredSeconds,
-    unexplainedMicSeconds: Math.max(
-      0,
-      micActivitySeconds -
-        localTranscriptCoveredSeconds -
-        reconciliation.evidence.collapsedPassThroughSeconds,
-    ),
-    unexplainedSystemSeconds: Math.max(
-      0,
-      systemActivitySeconds - remoteTranscriptCoveredSeconds,
-    ),
+    localTranscriptCoveredSeconds: candidateLocalCoveredSeconds,
+    remoteTranscriptCoveredSeconds: candidateRemoteCoveredSeconds,
+    unexplainedMicSeconds: micVadVerified
+      ? Math.max(
+          0,
+          micSpeechSeconds -
+            asrConfirmedLocalCoveredSeconds -
+            reconciliation.evidence.collapsedPassThroughSeconds,
+        )
+      : Math.max(0, micActivitySeconds - candidateLocalCoveredSeconds),
+    unexplainedSystemSeconds: systemVadVerified
+      ? Math.max(0, systemSpeechSeconds - asrConfirmedRemoteCoveredSeconds)
+      : Math.max(0, systemActivitySeconds - candidateRemoteCoveredSeconds),
+    rejectedMicCandidateSeconds: micVadVerified
+      ? Math.max(0, micActivitySeconds - micSpeechSeconds)
+      : 0,
+    rejectedSystemCandidateSeconds: systemVadVerified
+      ? Math.max(0, systemActivitySeconds - systemSpeechSeconds)
+      : 0,
     collapsedPassThroughSeconds:
       reconciliation.evidence.collapsedPassThroughSeconds,
     unresolvedAmbiguousSeconds:
@@ -370,6 +454,11 @@ export const runRecordingTranscriptValidation = async (input: {
       mic: micSegments.length,
       mix: mixedSegments.length,
       system: systemSegments.length,
+    },
+    sourceOutcomes: {
+      mic: sourceOutcome(mic, micSegments),
+      mix: sourceOutcome(mix, mixedSegments),
+      system: sourceOutcome(system, systemSegments),
     },
   };
 };
