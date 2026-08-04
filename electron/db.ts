@@ -1529,6 +1529,7 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
     meeting.finalization_error_category || null,
     meeting.downstream_processing_json || null,
     meeting.capture_journal_generation || null,
+    meeting.mid_json || null,
     meeting.created_at,
   );
 

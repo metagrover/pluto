@@ -18,7 +18,9 @@ import {
   claimMeetingTranscriptValidationRetry,
   finalizeCheckpointTranscript,
   getMeeting,
+  getMeetingMid,
   saveMeeting,
+  saveMeetingMid,
   saveMeetingIfDownstreamRunCurrent,
 } from '../../electron/db';
 import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
@@ -139,6 +141,33 @@ it('allows only one durable downstream owner and fences stale saves', () => {
       first.runId,
     ),
   ).toBe(true);
+});
+
+it('preserves the MID across later whole-meeting saves', () => {
+  const id = 'mid-survives-save';
+  saveMeeting({ id, title: 'Meeting' });
+  saveMeetingMid(id, {
+    mid_version: 1,
+    meeting_id: id,
+    title: 'Meeting intelligence',
+    occurred_at: null,
+    duration_seconds: 0,
+    participants: [],
+    projects: [],
+    topics: [],
+    action_items: [],
+    decisions: [],
+    signals: {
+      continuity: [],
+      accountability_risks: [],
+      decision_impacts: [],
+    },
+    evidence_spans: [],
+  });
+
+  saveMeeting(getMeeting(id) as Parameters<typeof saveMeeting>[0]);
+
+  expect(getMeetingMid(id)).toMatchObject({ meeting_id: id });
 });
 
 const input = (meetingId: string) => ({
