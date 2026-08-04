@@ -32,6 +32,7 @@ import {
 } from '../utils/audio';
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
+import { createCaptureJournalMutationCoordinator } from '../utils/captureJournalMutationCoordinator';
 import { resolveProductionDiarizationProvider } from '../utils/diarizationProvider';
 import {
   type LiveTranscriptResponsivenessSummary,
@@ -562,6 +563,9 @@ export const AudioManager = ({
   const captureJournalCheckpointsRef = useRef(
     new Map<string, JournalCheckpointState>(),
   );
+  const captureJournalMutationCoordinatorRef = useRef(
+    createCaptureJournalMutationCoordinator(),
+  );
 
   // Keep state refs in sync
   useEffect(() => {
@@ -630,26 +634,6 @@ export const AudioManager = ({
     format: MicChunkFormat;
     blob: Blob;
   }): Promise<JournalAudioReceipt | null> => {
-    const state =
-      captureJournalStateRef.current ??
-      (await refreshCaptureJournalState(meetingId));
-    if (!state) return null;
-    if (source === 'mic') {
-      const current = await refreshCaptureJournalState(meetingId);
-      if (!current) return null;
-      const authorized = (await window.ipcRenderer.invoke(
-        'AUDIO_CAPTURE_JOURNAL_INTERVAL_AUTHORIZE',
-        {
-          meetingId,
-          generation: current.generation,
-          expectedRevision: current.revision,
-          sequence,
-          chunkStartSec,
-          chunkEndSec,
-        },
-      )) as JournalManifestState;
-      captureJournalStateRef.current = authorized;
-    }
     const data = await blob.arrayBuffer();
     const journalData =
       source === 'mic' &&
@@ -658,56 +642,81 @@ export const AudioManager = ({
       micWebmInitSegmentRef.current
         ? prependWebmInitSegment(micWebmInitSegmentRef.current, data)
         : data;
-    const current = await refreshCaptureJournalState(meetingId);
-    if (!current) return null;
-    const rawManifest = (await window.ipcRenderer.invoke(
-      'AUDIO_CAPTURE_JOURNAL_RAW_APPEND',
-      {
-        meetingId,
-        generation: current.generation,
-        expectedRevision: current.revision,
-        source,
-        sequence,
-        format,
-        data: journalData,
-      },
-    )) as JournalManifestState & {
-      intervals?: Array<{
-        sequence: number;
-        sources: Record<
-          'mic' | 'system',
-          { disposition: string; rawChecksumSha256?: string }
-        >;
-      }>;
-    };
-    captureJournalStateRef.current = rawManifest;
-    const rawChecksumSha256 = rawManifest.intervals?.find(
-      (interval) => interval.sequence === sequence,
-    )?.sources[source]?.rawChecksumSha256;
-    if (!rawChecksumSha256) return null;
-    captureJournalRawChunksRef.current.set(journalTupleKey(source, sequence), {
-      checksumSha256: rawChecksumSha256,
-      format,
+    return await captureJournalMutationCoordinatorRef.current.run(async () => {
+      const state =
+        captureJournalStateRef.current ??
+        (await refreshCaptureJournalState(meetingId));
+      if (!state) return null;
+      if (source === 'mic') {
+        const current = await refreshCaptureJournalState(meetingId);
+        if (!current) return null;
+        const authorized = (await window.ipcRenderer.invoke(
+          'AUDIO_CAPTURE_JOURNAL_INTERVAL_AUTHORIZE',
+          {
+            meetingId,
+            generation: current.generation,
+            expectedRevision: current.revision,
+            sequence,
+            chunkStartSec,
+            chunkEndSec,
+          },
+        )) as JournalManifestState;
+        captureJournalStateRef.current = authorized;
+      }
+      const current = await refreshCaptureJournalState(meetingId);
+      if (!current) return null;
+      const rawManifest = (await window.ipcRenderer.invoke(
+        'AUDIO_CAPTURE_JOURNAL_RAW_APPEND',
+        {
+          meetingId,
+          generation: current.generation,
+          expectedRevision: current.revision,
+          source,
+          sequence,
+          format,
+          data: journalData,
+        },
+      )) as JournalManifestState & {
+        intervals?: Array<{
+          sequence: number;
+          sources: Record<
+            'mic' | 'system',
+            { disposition: string; rawChecksumSha256?: string }
+          >;
+        }>;
+      };
+      captureJournalStateRef.current = rawManifest;
+      const rawChecksumSha256 = rawManifest.intervals?.find(
+        (interval) => interval.sequence === sequence,
+      )?.sources[source]?.rawChecksumSha256;
+      if (!rawChecksumSha256) return null;
+      captureJournalRawChunksRef.current.set(
+        journalTupleKey(source, sequence),
+        {
+          checksumSha256: rawChecksumSha256,
+          format,
+        },
+      );
+      if (format !== 'wav') return null;
+      const complete = (await window.ipcRenderer.invoke(
+        'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
+        {
+          meetingId,
+          generation: rawManifest.generation,
+          expectedRevision: rawManifest.revision,
+          source,
+          sequence,
+          rawChecksumSha256,
+          repairData: data,
+        },
+      )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
+      captureJournalStateRef.current = complete.manifest;
+      captureJournalReceiptsRef.current.set(
+        journalTupleKey(source, sequence),
+        complete.receipt,
+      );
+      return complete.receipt;
     });
-    if (format !== 'wav') return null;
-    const complete = (await window.ipcRenderer.invoke(
-      'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
-      {
-        meetingId,
-        generation: rawManifest.generation,
-        expectedRevision: rawManifest.revision,
-        source,
-        sequence,
-        rawChecksumSha256,
-        repairData: data,
-      },
-    )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
-    captureJournalStateRef.current = complete.manifest;
-    captureJournalReceiptsRef.current.set(
-      journalTupleKey(source, sequence),
-      complete.receipt,
-    );
-    return complete.receipt;
   };
 
   const completeCaptureJournalChunkFromPath = async ({
@@ -721,27 +730,29 @@ export const AudioManager = ({
     sequence: number;
     repairPath: string;
   }) => {
-    const tuple = journalTupleKey(source, sequence);
-    const existing = captureJournalReceiptsRef.current.get(tuple);
-    if (existing) return existing;
-    const raw = captureJournalRawChunksRef.current.get(tuple);
-    const current = await refreshCaptureJournalState(meetingId);
-    if (!raw || !current) return null;
-    const complete = (await window.ipcRenderer.invoke(
-      'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
-      {
-        meetingId,
-        generation: current.generation,
-        expectedRevision: current.revision,
-        source,
-        sequence,
-        rawChecksumSha256: raw.checksumSha256,
-        repairPath,
-      },
-    )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
-    captureJournalStateRef.current = complete.manifest;
-    captureJournalReceiptsRef.current.set(tuple, complete.receipt);
-    return complete.receipt;
+    return await captureJournalMutationCoordinatorRef.current.run(async () => {
+      const tuple = journalTupleKey(source, sequence);
+      const existing = captureJournalReceiptsRef.current.get(tuple);
+      if (existing) return existing;
+      const raw = captureJournalRawChunksRef.current.get(tuple);
+      const current = await refreshCaptureJournalState(meetingId);
+      if (!raw || !current) return null;
+      const complete = (await window.ipcRenderer.invoke(
+        'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
+        {
+          meetingId,
+          generation: current.generation,
+          expectedRevision: current.revision,
+          source,
+          sequence,
+          rawChecksumSha256: raw.checksumSha256,
+          repairPath,
+        },
+      )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
+      captureJournalStateRef.current = complete.manifest;
+      captureJournalReceiptsRef.current.set(tuple, complete.receipt);
+      return complete.receipt;
+    });
   };
 
   const buildTranscriptCheckpointConfig = () => {
@@ -779,65 +790,67 @@ export const AudioManager = ({
       | 'transcription_failed'
       | 'cancelled';
   }) => {
-    const tuple = journalTupleKey(source, sequence);
-    const receipt = captureJournalReceiptsRef.current.get(tuple);
-    if (!receipt) return null;
-    const config = buildTranscriptCheckpointConfig();
-    const configKey = await sha256Hex(
-      canonicalizeTranscriptCheckpointConfig(config),
-    );
-    const sidecar = {
-      schemaVersion: 1 as const,
-      meetingId,
-      source: source,
-      sequence,
-      chunkChecksumSha256: receipt.checksumSha256,
-      chunkStartSec: receipt.chunkStartSec,
-      chunkEndSec: receipt.chunkEndSec,
-      transcriptionConfig: config,
-      backendResult: {
-        detectedLanguage:
-          typeof backendResult?.language === 'string'
-            ? backendResult.language.toLowerCase()
-            : null,
-        providerLabel:
-          typeof backendResult?.meta?.providerLabel === 'string'
-            ? backendResult.meta.providerLabel
-            : 'local',
-      },
-      segments: segments.map((segment) => ({
-        start: Math.max(0, segment.startTime - receipt.chunkStartSec),
-        end: Math.max(0, segment.endTime - receipt.chunkStartSec),
-        text: segment.text,
-        ...(segment.words
-          ? {
-              words: segment.words.map((word) => ({
-                word: word.word,
-                start: Math.max(0, word.start - receipt.chunkStartSec),
-                end: Math.max(0, word.end - receipt.chunkStartSec),
-              })),
-            }
-          : {}),
-      })),
-    };
-    const current = await refreshCaptureJournalState(meetingId);
-    if (!current) return null;
-    const saved = (await window.ipcRenderer.invoke(
-      'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND',
-      {
-        receipt,
-        expectedManifestRevision: current.revision,
-        transcriptionConfigKey: configKey,
-        sidecar,
-        disposition,
-      },
-    )) as {
-      manifest: JournalManifestState;
-      checkpoint: JournalCheckpointState;
-    };
-    captureJournalStateRef.current = saved.manifest;
-    captureJournalCheckpointsRef.current.set(tuple, saved.checkpoint);
-    return saved.checkpoint;
+    return await captureJournalMutationCoordinatorRef.current.run(async () => {
+      const tuple = journalTupleKey(source, sequence);
+      const receipt = captureJournalReceiptsRef.current.get(tuple);
+      if (!receipt) return null;
+      const config = buildTranscriptCheckpointConfig();
+      const configKey = await sha256Hex(
+        canonicalizeTranscriptCheckpointConfig(config),
+      );
+      const sidecar = {
+        schemaVersion: 1 as const,
+        meetingId,
+        source: source,
+        sequence,
+        chunkChecksumSha256: receipt.checksumSha256,
+        chunkStartSec: receipt.chunkStartSec,
+        chunkEndSec: receipt.chunkEndSec,
+        transcriptionConfig: config,
+        backendResult: {
+          detectedLanguage:
+            typeof backendResult?.language === 'string'
+              ? backendResult.language.toLowerCase()
+              : null,
+          providerLabel:
+            typeof backendResult?.meta?.providerLabel === 'string'
+              ? backendResult.meta.providerLabel
+              : 'local',
+        },
+        segments: segments.map((segment) => ({
+          start: Math.max(0, segment.startTime - receipt.chunkStartSec),
+          end: Math.max(0, segment.endTime - receipt.chunkStartSec),
+          text: segment.text,
+          ...(segment.words
+            ? {
+                words: segment.words.map((word) => ({
+                  word: word.word,
+                  start: Math.max(0, word.start - receipt.chunkStartSec),
+                  end: Math.max(0, word.end - receipt.chunkStartSec),
+                })),
+              }
+            : {}),
+        })),
+      };
+      const current = await refreshCaptureJournalState(meetingId);
+      if (!current) return null;
+      const saved = (await window.ipcRenderer.invoke(
+        'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND',
+        {
+          receipt,
+          expectedManifestRevision: current.revision,
+          transcriptionConfigKey: configKey,
+          sidecar,
+          disposition,
+        },
+      )) as {
+        manifest: JournalManifestState;
+        checkpoint: JournalCheckpointState;
+      };
+      captureJournalStateRef.current = saved.manifest;
+      captureJournalCheckpointsRef.current.set(tuple, saved.checkpoint);
+      return saved.checkpoint;
+    });
   };
 
   const persistTranscriptAcceptanceFrame = async ({
@@ -931,25 +944,27 @@ export const AudioManager = ({
         })),
       ],
     };
-    const current = await refreshCaptureJournalState(meetingId);
-    if (!current) return null;
-    const saved = (await window.ipcRenderer.invoke(
-      'AUDIO_CAPTURE_JOURNAL_ACCEPTANCE_APPEND',
-      {
-        meetingId,
-        generation: current.generation,
-        expectedRevision: current.revision,
-        sequence,
-        micCheckpointChecksumSha256:
-          micCheckpoint?.transcriptChecksumSha256 ?? null,
-        systemCheckpointChecksumSha256:
-          systemCheckpoint?.transcriptChecksumSha256 ?? null,
-        activityEvidenceDigestSha256,
-        sidecar,
-      },
-    )) as { manifest: JournalManifestState };
-    captureJournalStateRef.current = saved.manifest;
-    return saved;
+    return await captureJournalMutationCoordinatorRef.current.run(async () => {
+      const current = await refreshCaptureJournalState(meetingId);
+      if (!current) return null;
+      const saved = (await window.ipcRenderer.invoke(
+        'AUDIO_CAPTURE_JOURNAL_ACCEPTANCE_APPEND',
+        {
+          meetingId,
+          generation: current.generation,
+          expectedRevision: current.revision,
+          sequence,
+          micCheckpointChecksumSha256:
+            micCheckpoint?.transcriptChecksumSha256 ?? null,
+          systemCheckpointChecksumSha256:
+            systemCheckpoint?.transcriptChecksumSha256 ?? null,
+          activityEvidenceDigestSha256,
+          sidecar,
+        },
+      )) as { manifest: JournalManifestState };
+      captureJournalStateRef.current = saved.manifest;
+      return saved;
+    });
   };
 
   const hasCompleteCaptureJournalCheckpoints = async (meetingId: string) => {
@@ -1067,10 +1082,13 @@ export const AudioManager = ({
           algorithmVersion: 'speaker_activity_v1',
         },
         persistSnapshot: async (activityEvidence) => {
-          await window.ipcRenderer.invoke(
-            'AUDIO_CAPTURE_JOURNAL_ACTIVITY_UPDATE',
-            { meetingId, activityEvidence },
-          );
+          await captureJournalMutationCoordinatorRef.current.run(async () => {
+            const manifest = (await window.ipcRenderer.invoke(
+              'AUDIO_CAPTURE_JOURNAL_ACTIVITY_UPDATE',
+              { meetingId, activityEvidence },
+            )) as JournalManifestState;
+            captureJournalStateRef.current = manifest;
+          });
         },
       });
       onRecordingStarted?.(startTimeRef.current);
@@ -4069,30 +4087,36 @@ export const AudioManager = ({
       await processingQueueRef.current;
 
       const journalSealOutcome = await sealCaptureJournalBeforeFinalization({
-        drainAppends: async () =>
-          await captureActivitySessionRef.current?.drain(),
+        drainAppends: async () => {
+          await captureActivitySessionRef.current?.drain();
+          await captureJournalMutationCoordinatorRef.current.drain();
+        },
         hasWriteFailure: () =>
           captureActivitySessionRef.current?.hasDurabilityFailure() ?? true,
-        seal: async () => {
-          const current = await refreshCaptureJournalState(
-            stopSnapshot.meetingId,
-          );
-          if (current) {
-            const stopping = (await window.ipcRenderer.invoke(
-              'AUDIO_CAPTURE_JOURNAL_STOP',
+        seal: async () =>
+          await captureJournalMutationCoordinatorRef.current.run(async () => {
+            const current = await refreshCaptureJournalState(
+              stopSnapshot.meetingId,
+            );
+            if (current) {
+              const stopping = (await window.ipcRenderer.invoke(
+                'AUDIO_CAPTURE_JOURNAL_STOP',
+                {
+                  meetingId: stopSnapshot.meetingId,
+                  generation: current.generation,
+                  expectedRevision: current.revision,
+                },
+              )) as JournalManifestState;
+              captureJournalStateRef.current = stopping;
+            }
+            return await window.ipcRenderer.invoke(
+              'AUDIO_CAPTURE_JOURNAL_SEAL',
               {
                 meetingId: stopSnapshot.meetingId,
-                generation: current.generation,
-                expectedRevision: current.revision,
+                endedAtMs: stopSnapshot.recordingEndedAtMs,
               },
-            )) as JournalManifestState;
-            captureJournalStateRef.current = stopping;
-          }
-          return await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_SEAL', {
-            meetingId: stopSnapshot.meetingId,
-            endedAtMs: stopSnapshot.recordingEndedAtMs,
-          });
-        },
+            );
+          }),
       });
 
       if (journalSealOutcome.status === 'recovery_required') {
