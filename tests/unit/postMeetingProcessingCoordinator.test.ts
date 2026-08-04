@@ -37,6 +37,14 @@ describe('post-meeting processing coordinator', () => {
     expect(selectNextMeetingForProcessing([meeting], attempted)).toBeNull();
   });
 
+  it('does not skip an in-flight head meeting to start another local-model job', () => {
+    const head = incomplete('newest');
+    const next = incomplete('next');
+    const attempted = new Set([meetingProcessingFingerprint(head)]);
+
+    expect(selectNextMeetingForProcessing([head, next], attempted)).toBeNull();
+  });
+
   it('selects a meeting again after its persisted processing stage changes', () => {
     const meeting = incomplete('meeting');
     const attempted = new Set([meetingProcessingFingerprint(meeting)]);
