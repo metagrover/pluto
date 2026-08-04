@@ -265,6 +265,7 @@ export const upsertEntity = async (entity: {
   due_date?: string | null;
   assigned_to?: string | null;
   metadata?: Record<string, unknown>;
+  dedupe_by_name?: boolean;
 }): Promise<Entity> => {
   return invoke('UPSERT_ENTITY', entity);
 };
@@ -317,6 +318,13 @@ export const updateEntityStatus = async (
   status: EntityStatus,
 ): Promise<void> => {
   return invoke('UPDATE_ENTITY_STATUS', { id, status });
+};
+
+export const updateActionCommitmentState = async (
+  id: string,
+  commitmentState: 'confirmed' | 'rejected',
+): Promise<Entity> => {
+  return invoke('UPDATE_ACTION_COMMITMENT_STATE', { id, commitmentState });
 };
 
 /**

@@ -9,6 +9,22 @@ import {
   updateEntityStatus,
   upsertEntity,
 } from '../../api/knowledgeGraph';
+import type { ActionCommitmentMetadata } from '../../utils/actionCommitment';
+
+export const buildQuickAddActionEntity = (value: string) => {
+  const description = value.trim();
+  return {
+    type: 'action_item' as const,
+    name: description,
+    status: 'active' as const,
+    dedupe_by_name: false,
+    metadata: {
+      full_description: description,
+      commitment_state: 'confirmed',
+      origin: 'user',
+    } satisfies ActionCommitmentMetadata,
+  };
+};
 
 // ─── Health Logic ────────────────────────────────────────────────
 type HealthStatus = 'on_track' | 'at_risk' | 'slipping' | 'complete';
@@ -407,12 +423,7 @@ const QuickAddTask: React.FC<{
     if (!value.trim() || saving) return;
     setSaving(true);
     try {
-      const entity = await upsertEntity({
-        type: 'action_item',
-        name: value.trim(),
-        status: 'active',
-        metadata: { full_description: value.trim() },
-      });
+      const entity = await upsertEntity(buildQuickAddActionEntity(value));
       if (projectId) {
         await linkEntities({
           source_entity_id: entity.id,

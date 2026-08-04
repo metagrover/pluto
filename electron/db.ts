@@ -14,6 +14,10 @@ import {
   readRetryLease,
 } from '../src/services/transcriptValidationRetryLease';
 import type { MeetingFinalizationStatus } from '../src/types';
+import {
+  getCommitmentState,
+  mergeCommitmentReview,
+} from '../src/utils/actionCommitment';
 import { canDeleteMeeting } from '../src/utils/recordingFinalization';
 import type { TranscriptLifecycleStatus } from '../src/utils/transcriptIntegrity';
 import { withTranscriptLifecycleStatus } from '../src/utils/transcriptSchema';
@@ -4316,6 +4320,7 @@ export const upsertEntity = (entity: {
   due_date?: string | null;
   assigned_to?: string | null;
   metadata?: Record<string, unknown>;
+  dedupe_by_name?: boolean;
   saliency_score?: number;
   domain_tag?: string;
 }): Entity => {
@@ -4354,8 +4359,9 @@ export const upsertEntity = (entity: {
       .get(entity.id) as Entity | undefined;
   }
 
-  // 2. If no ID or not found by ID, try normalization match
-  if (!existing) {
+  // 2. If no ID or not found by ID, try normalization match unless the caller
+  // explicitly requests a distinct entity.
+  if (!existing && entity.dedupe_by_name !== false) {
     existing = db
       .prepare(`
         SELECT * FROM entities WHERE type = ? AND normalized_name = ?
@@ -4501,6 +4507,47 @@ export const updateEntityStatus = (id: string, status: EntityStatus): void => {
   db.prepare(`
     UPDATE entities SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
   `).run(status, id);
+};
+
+/**
+ * Record a human review of an extracted action commitment without changing
+ * completion status or replacing extraction metadata.
+ */
+export const updateActionCommitmentState = (
+  id: string,
+  commitmentState: 'confirmed' | 'rejected',
+  reviewedAt = new Date().toISOString(),
+): Entity => {
+  if (commitmentState !== 'confirmed' && commitmentState !== 'rejected') {
+    throw new Error(`Invalid commitment state: ${String(commitmentState)}`);
+  }
+
+  return db.transaction(() => {
+    const entity = getEntity(id);
+    if (!entity) throw new Error(`Entity not found: ${id}`);
+    if (entity.type !== 'action_item') {
+      throw new Error(`Entity is not an action item: ${id}`);
+    }
+
+    const currentState = getCommitmentState(entity.metadata);
+    if (currentState === commitmentState) return entity;
+    if (currentState !== 'possible') {
+      throw new Error(
+        `Cannot transition action commitment from ${currentState} to ${commitmentState}`,
+      );
+    }
+
+    const metadata = mergeCommitmentReview(
+      entity.metadata,
+      commitmentState,
+      reviewedAt,
+    );
+    db.prepare(`
+      UPDATE entities SET metadata = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(JSON.stringify(metadata), id);
+
+    return getEntity(id) as Entity;
+  })();
 };
 
 /**
@@ -4749,6 +4796,33 @@ export const addMeetingEntity = (meetingEntity: {
       'SELECT * FROM meeting_entities WHERE meeting_id = ? AND entity_id = ?',
     )
     .get(meetingEntity.meeting_id, meetingEntity.entity_id) as MeetingEntity;
+};
+
+/**
+ * Insert a meeting association once without treating pipeline replay as a new
+ * mention or replacing the original evidence context.
+ */
+export const ensureMeetingEntity = (meetingEntity: {
+  meeting_id: string;
+  entity_id: string;
+  mention_count?: number;
+  first_mentioned_at?: number;
+  context?: string;
+}): boolean => {
+  const result = db
+    .prepare(`
+      INSERT INTO meeting_entities (meeting_id, entity_id, mention_count, first_mentioned_at, context)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(meeting_id, entity_id) DO NOTHING
+    `)
+    .run(
+      meetingEntity.meeting_id,
+      meetingEntity.entity_id,
+      meetingEntity.mention_count || 1,
+      meetingEntity.first_mentioned_at || null,
+      meetingEntity.context || null,
+    );
+  return result.changes === 1;
 };
 
 /**

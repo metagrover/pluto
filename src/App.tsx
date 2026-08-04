@@ -19,8 +19,10 @@ import { MeetingView } from './components/features/MeetingView';
 import { ZenMode } from './components/features/ZenMode';
 import {
   DASHBOARD_ACTION_COMPLETION_ERROR,
+  DashboardRefreshAfterMutationError,
   persistDashboardActionCompletion,
   persistDashboardAttentionStatus,
+  persistDashboardCommitmentReview,
 } from './components/features/dashboardActionCompletion';
 import type {
   CaptureHealthState,
@@ -33,7 +35,10 @@ import {
   shouldAutoProcessMeetingAnalysis,
 } from './services/retryMeetingTranscriptValidation';
 
-import { updateEntityStatus } from './api/knowledgeGraph';
+import {
+  updateActionCommitmentState,
+  updateEntityStatus,
+} from './api/knowledgeGraph';
 // Knowledge Graph
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
@@ -212,6 +217,36 @@ function App() {
       setUpdatingDashboardTaskIds((prev) => {
         const next = new Set(prev);
         next.delete(attentionItemId);
+        return next;
+      });
+    }
+  };
+
+  const handleReviewDashboardCommitment = async (
+    taskId: string,
+    commitmentState: 'confirmed' | 'rejected',
+  ) => {
+    if (updatingDashboardTaskIds.has(taskId)) return;
+
+    setDashboardActionError(null);
+    setUpdatingDashboardTaskIds((prev) => new Set(prev).add(taskId));
+
+    try {
+      await persistDashboardCommitmentReview(taskId, commitmentState, {
+        updateActionCommitmentState,
+        refreshDashboard: dashboardHome.refresh,
+      });
+    } catch (error) {
+      console.error('Failed to review dashboard follow-up', error);
+      setDashboardActionError(
+        error instanceof DashboardRefreshAfterMutationError
+          ? 'Follow-up review saved, but the dashboard could not refresh.'
+          : 'Could not update follow-up review. Try again.',
+      );
+    } finally {
+      setUpdatingDashboardTaskIds((prev) => {
+        const next = new Set(prev);
+        next.delete(taskId);
         return next;
       });
     }
@@ -844,6 +879,7 @@ function App() {
                 updatingTaskIds={updatingDashboardTaskIds}
                 actionError={dashboardActionError}
                 handleCompleteTask={handleCompleteTask}
+                handleReviewCommitment={handleReviewDashboardCommitment}
                 handleUpdateAttentionStatus={
                   handleUpdateDashboardAttentionStatus
                 }

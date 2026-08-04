@@ -32,7 +32,10 @@ const makeAction = (overrides: Partial<Entity> = {}): Entity => ({
   status: 'active',
   due_date: '2026-04-26T12:00:00.000Z',
   assigned_to: null,
-  metadata: null,
+  metadata: JSON.stringify({
+    commitment_state: 'confirmed',
+    origin: 'user',
+  }),
   saliency_score: 0.8,
   domain_tag: 'work',
   created_at: '2026-04-25T10:00:00.000Z',
@@ -1739,6 +1742,293 @@ describe('buildDashboardHomeModel', () => {
         status: 'overdue',
       }),
     ]);
+  });
+
+  it('fails metadata-free legacy actions closed to review without projecting commitment urgency', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [makeAction({ metadata: null })],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.state).toBe('populated');
+    expect(model.actionInsights.items[0]).toMatchObject({
+      commitmentState: 'possible',
+      statusLabel: 'Needs review',
+      canComplete: false,
+    });
+    expect(model.hero.kind).toBe('latest_meeting');
+    expect(model.briefingFocus.kind).toBe('latest_meeting');
+  });
+
+  it('resolves possible action evidence only from its exact persisted source meeting', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({ id: 'meeting-other', title: 'Other Review' }),
+        makeMeeting({
+          id: 'meeting-source',
+          title: 'Launch Decision',
+          started_at: '2026-04-29T17:30:00.000Z',
+        }),
+      ],
+      overdueActions: [
+        makeAction({
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            origin: 'extraction',
+            source_meeting_id: 'meeting-source',
+          }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.items[0]).toMatchObject({
+      commitmentState: 'possible',
+      sourceMeetingId: 'meeting-source',
+      basisLabel: 'Possible follow-up · From Launch Decision · Apr 29, 2026',
+      canComplete: false,
+    });
+  });
+
+  it('resolves a persisted string source id to the exact numeric meeting id', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          id: 42,
+          title: 'Numeric Source Review',
+          started_at: '2026-05-01T17:30:00.000Z',
+        }),
+      ],
+      overdueActions: [
+        makeAction({
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            origin: 'extraction',
+            source_meeting_id: '42',
+          }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.items[0]).toMatchObject({
+      sourceMeetingId: '42',
+      basisLabel:
+        'Possible follow-up · From Numeric Source Review · May 1, 2026',
+    });
+  });
+
+  it('uses a truthful review-task fallback when a possible action source is missing', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            origin: 'extraction',
+            source_meeting_id: 'meeting-missing',
+          }),
+        }),
+      ],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.items[0]).toMatchObject({
+      sourceMeetingId: null,
+      basisLabel: 'Possible follow-up · Owner and due date not confirmed',
+      canComplete: false,
+    });
+  });
+
+  it('authorizes confirmed actions for completion while preserving their status', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [makeAction()],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.items[0]).toMatchObject({
+      commitmentState: 'confirmed',
+      status: 'overdue',
+      statusLabel: 'Overdue',
+      canComplete: true,
+    });
+  });
+
+  it('keeps a blocker-backed possible action possible and non-completable', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [
+        makeAction({
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [makeAttentionItem({ kind: 'blocker' })],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.items[0]).toMatchObject({
+      commitmentState: 'possible',
+      statusLabel: 'Needs review',
+      attentionLabel: 'Blocker',
+      canComplete: false,
+    });
+  });
+
+  it('excludes rejected actions before counts, deduplication, and ranking', () => {
+    const rejected = makeAction({
+      id: 'rejected',
+      metadata: JSON.stringify({ commitment_state: 'rejected' }),
+    });
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [rejected],
+      staleActions: [rejected],
+      activeActions: [makeAction({ id: 'confirmed' })],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights).toMatchObject({
+      state: 'populated',
+      overdueCount: 0,
+      staleCount: 0,
+      activeCount: 1,
+      possibleCount: 0,
+      confirmedCount: 1,
+    });
+    expect(model.actionInsights.items.map((item) => item.id)).toEqual([
+      'confirmed',
+    ]);
+  });
+
+  it.each([
+    {
+      label: 'one possible',
+      actions: [
+        makeAction({
+          id: 'possible-1',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      expected: '1 possible follow-up needs review before action.',
+    },
+    {
+      label: 'multiple possible',
+      actions: [
+        makeAction({
+          id: 'possible-1',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+        makeAction({
+          id: 'possible-2',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      expected: '2 possible follow-ups need review before action.',
+    },
+    {
+      label: 'mixed states',
+      actions: [
+        makeAction({
+          id: 'possible-1',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+        makeAction({ id: 'confirmed-1' }),
+        makeAction({ id: 'confirmed-2' }),
+      ],
+      expected:
+        '1 possible follow-up needs review; 2 confirmed commitments need attention.',
+    },
+    {
+      label: 'one confirmed',
+      actions: [makeAction({ id: 'confirmed-1' })],
+      expected: '1 confirmed commitment needs attention.',
+    },
+    {
+      label: 'multiple confirmed',
+      actions: [
+        makeAction({ id: 'confirmed-1' }),
+        makeAction({ id: 'confirmed-2' }),
+      ],
+      expected: '2 confirmed commitments need attention.',
+    },
+  ])('builds the exact $label summary', ({ actions, expected }) => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: actions,
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.summary).toBe(expected);
+  });
+
+  it('keeps the existing calm summary when action insights are empty', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.summary).toBe(
+      'Nothing is asking for intervention.',
+    );
+  });
+
+  it('labels a possible stale row as needing review instead of stale', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [
+        makeAction({
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.items[0]).toMatchObject({
+      status: 'stale',
+      statusLabel: 'Needs review',
+      canComplete: false,
+    });
   });
 
   it('orders action insights by urgency, due date, and recency within each bucket', () => {

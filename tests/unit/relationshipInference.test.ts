@@ -1,5 +1,6 @@
 vi.mock('../../electron/db', () => ({
   getEntitiesByType: vi.fn(),
+  getEntity: vi.fn(),
   findEntity: vi.fn(),
   upsertEntity: vi.fn().mockImplementation((e: Record<string, unknown>) => ({
     ...e,
@@ -7,6 +8,7 @@ vi.mock('../../electron/db', () => ({
   })),
   linkEntities: vi.fn().mockImplementation((l: unknown) => l),
   addMeetingEntity: vi.fn(),
+  ensureMeetingEntity: vi.fn(() => true),
 }));
 
 import * as db from '../../electron/db';
@@ -19,6 +21,7 @@ describe('Relationship Inference', () => {
     vi.clearAllMocks();
     // Default return values if needed, though simpler to set in test or let default undefined work
     vi.mocked(db.getEntitiesByType).mockReturnValue([]);
+    vi.mocked(db.getEntity).mockReturnValue(undefined);
     vi.mocked(db.findEntity).mockReturnValue(undefined);
   });
 
@@ -149,6 +152,38 @@ describe('Relationship Inference', () => {
         relationship: 'works_on',
         meeting_id: 'meeting-5',
         confidence: 0.95,
+      }),
+    );
+  });
+
+  it('persists extracted actions as possible commitments with their source', async () => {
+    const extracted: ExtractedEntities = {
+      people: [],
+      topics: [],
+      action_items: [
+        {
+          description: 'Send the rollout note',
+          assignee: 'Alex',
+        },
+      ],
+      decisions: [],
+      projects: [],
+      relationships: [],
+    };
+
+    await processExtractedEntities(extracted, 'meeting-action-source');
+
+    expect(db.upsertEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'action_item',
+        dedupe_by_name: false,
+        metadata: {
+          full_description: 'Send the rollout note',
+          assignee_name: 'Alex',
+          commitment_state: 'possible',
+          origin: 'extraction',
+          source_meeting_id: 'meeting-action-source',
+        },
       }),
     );
   });
