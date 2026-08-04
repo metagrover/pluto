@@ -169,6 +169,7 @@ export const runRecordingTranscriptValidation = async (input: {
   mixAudioPath: string;
   systemAudioPath: string;
   provisionalSegments: AttributionSegment[];
+  checkpointSourceSegments?: AttributionSegment[];
   activityWindows: SpeakerActivityWindow[];
   canonicalMode?: 'full_mix' | 'recovered_channels' | 'checkpointed';
   checkpointEvidenceVerified?: boolean;
@@ -176,6 +177,9 @@ export const runRecordingTranscriptValidation = async (input: {
   probeDuration: (audioPath: string) => Promise<number | null>;
 }): Promise<RecordingTranscriptValidationResult> => {
   if (input.canonicalMode === 'checkpointed') {
+    const coverageSegments = input.checkpointSourceSegments?.length
+      ? input.checkpointSourceSegments
+      : input.provisionalSegments;
     const micActivitySeconds = activitySeconds(input.activityWindows, 'Me');
     const systemActivitySeconds = activitySeconds(
       input.activityWindows,
@@ -183,12 +187,12 @@ export const runRecordingTranscriptValidation = async (input: {
     );
     const localTranscriptCoveredSeconds = coveredActivitySeconds(
       input.activityWindows,
-      input.provisionalSegments,
+      coverageSegments,
       'Me',
     );
     const remoteTranscriptCoveredSeconds = coveredActivitySeconds(
       input.activityWindows,
-      input.provisionalSegments,
+      coverageSegments,
       'Them',
     );
     const validation = validateTranscriptIntegrity({
@@ -227,13 +231,11 @@ export const runRecordingTranscriptValidation = async (input: {
       attempts: { mic: 0, mix: 0, system: 0 },
       transcriptionMeta: {},
       sourceSegmentCounts: {
-        mic: input.provisionalSegments.filter(
-          (segment) => segment.speaker === 'Me',
-        ).length,
+        mic: coverageSegments.filter((segment) => segment.speaker === 'Me')
+          .length,
         mix: 0,
-        system: input.provisionalSegments.filter(
-          (segment) => segment.speaker === 'Them',
-        ).length,
+        system: coverageSegments.filter((segment) => segment.speaker === 'Them')
+          .length,
       },
     };
   }
@@ -322,6 +324,8 @@ export const runRecordingTranscriptValidation = async (input: {
     systemActivitySeconds,
     localTranscriptCoveredSeconds,
     remoteTranscriptCoveredSeconds,
+    collapsedPassThroughSeconds:
+      reconciliation.evidence.collapsedPassThroughSeconds,
     unresolvedAmbiguousSeconds:
       reconciliation.evidence.unresolvedAmbiguousSeconds,
     requiredSourcesSucceeded,
@@ -333,7 +337,9 @@ export const runRecordingTranscriptValidation = async (input: {
     remoteTranscriptCoveredSeconds,
     unexplainedMicSeconds: Math.max(
       0,
-      micActivitySeconds - localTranscriptCoveredSeconds,
+      micActivitySeconds -
+        localTranscriptCoveredSeconds -
+        reconciliation.evidence.collapsedPassThroughSeconds,
     ),
     unexplainedSystemSeconds: Math.max(
       0,

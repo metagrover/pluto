@@ -691,7 +691,9 @@ const repairV3TranscriptGaps = async (
       0,
       frameSegments.length,
       ...reconciled.map((segment) => ({
-        source: segment.speaker === 'Me' ? 'mic' : 'system',
+        source: (segment.speaker === 'Me'
+          ? 'mic'
+          : 'system') as CaptureJournalSource,
         start: segment.startTime,
         end: segment.endTime,
         text: segment.text,
@@ -1143,26 +1145,49 @@ const readV3AcceptedSegments = async (
   ) {
     throw new Error('Transcript checkpoint repair required');
   }
-  return finalized.segments.map((segment) => ({
-    id: segment.id,
-    startTime: segment.start,
-    endTime: segment.end,
-    text: segment.text,
-    speaker: segment.speaker,
-    ...(segment.words ? { words: segment.words } : {}),
-  }));
+  return {
+    segments: finalized.segments.map((segment) => ({
+      id: segment.id,
+      startTime: segment.start,
+      endTime: segment.end,
+      text: segment.text,
+      speaker: segment.speaker,
+      ...(segment.words ? { words: segment.words } : {}),
+    })),
+    sourceCoverageSegments: checkpoints.flatMap((checkpoint) =>
+      checkpoint.sidecar.segments.map((segment, index) => ({
+        id: `${checkpoint.reference.source}-${checkpoint.reference.sequence}-${index}`,
+        startTime: checkpoint.sidecar.chunkStartSec + segment.start,
+        endTime: checkpoint.sidecar.chunkStartSec + segment.end,
+        speaker:
+          checkpoint.reference.source === 'mic'
+            ? ('Me' as const)
+            : ('Them' as const),
+      })),
+    ),
+  };
 };
 
 export const verifySealedCaptureJournalTranscriptEvidence = async (
   rootDir: string,
   meetingId: string,
   expectedConfigKey?: string,
-): Promise<{ generation: string; revision: number; segmentCount: number }> => {
+): Promise<{
+  generation: string;
+  revision: number;
+  segmentCount: number;
+  sourceCoverageSegments: Array<{
+    id: string;
+    startTime: number;
+    endTime: number;
+    speaker: 'Me' | 'Them';
+  }>;
+}> => {
   const manifest = await readCaptureJournalManifest(rootDir, meetingId);
   if (manifest.schemaVersion !== 3 || manifest.lifecycleState !== 'sealed') {
     throw new Error('Capture journal transcript evidence is not sealed v3');
   }
-  const segments = await readV3AcceptedSegments(
+  const evidence = await readV3AcceptedSegments(
     rootDir,
     manifest,
     expectedConfigKey,
@@ -1170,7 +1195,8 @@ export const verifySealedCaptureJournalTranscriptEvidence = async (
   return {
     generation: manifest.generation,
     revision: manifest.revision,
-    segmentCount: segments.length,
+    segmentCount: evidence.segments.length,
+    sourceCoverageSegments: evidence.sourceCoverageSegments,
   };
 };
 
@@ -1180,7 +1206,9 @@ const buildRecoveredMeeting = (params: {
   micAudioPath: string | null;
   systemAudioPath: string | null;
   integrity: RecoveryMeetingIntegrity;
-  acceptedSegments?: Awaited<ReturnType<typeof readV3AcceptedSegments>>;
+  acceptedSegments?: Awaited<
+    ReturnType<typeof readV3AcceptedSegments>
+  >['segments'];
   existingMeeting?: PersistedMeeting | null;
 }): PersistedMeeting => {
   const recoveredDurationSeconds = getRecoveredDurationSeconds(params.manifest);
@@ -1335,7 +1363,7 @@ export const recoverInterruptedCaptureJournals = async (
         (entry) => entry.source === 'system',
       );
 
-      const [micRecovery, systemRecovery, acceptedSegments] =
+      const [micRecovery, systemRecovery, acceptedEvidence] =
         manifest.schemaVersion === 3
           ? await Promise.all([
               buildV3SourceSegments(rootDir, manifest, 'mic'),
@@ -1350,7 +1378,7 @@ export const recoverInterruptedCaptureJournals = async (
           : await Promise.all([
               buildSourceSegments(rootDir, micEntries),
               buildSourceSegments(rootDir, systemEntries),
-              Promise.resolve([]),
+              Promise.resolve({ segments: [], sourceCoverageSegments: [] }),
             ]);
       if (
         manifest.schemaVersion === 3 &&
@@ -1432,7 +1460,7 @@ export const recoverInterruptedCaptureJournals = async (
           micAudioPath,
           systemAudioPath,
           integrity,
-          acceptedSegments,
+          acceptedSegments: acceptedEvidence.segments,
           existingMeeting,
         }),
       );

@@ -228,6 +228,22 @@ describe('retryMeetingTranscriptValidation', () => {
     };
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT') {
+        return {
+          generation: 'checkpoint-generation-1',
+          revision: 12,
+          segmentCount: 2,
+          sourceCoverageSegments: [
+            { id: 'mic-source-0', startTime: 0, endTime: 4, speaker: 'Me' },
+            {
+              id: 'system-source-0',
+              startTime: 5,
+              endTime: 9,
+              speaker: 'Them',
+            },
+          ],
+        };
+      }
       if (channel === 'FINALIZE_CHECKPOINT_TRANSCRIPT') {
         const finalization = payload as {
           journalGeneration: string;
@@ -287,6 +303,10 @@ describe('retryMeetingTranscriptValidation', () => {
       expect.anything(),
     );
     expect(invoke).toHaveBeenCalledWith(
+      'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
+      expect.objectContaining({ meetingId: 'synthetic-id' }),
+    );
+    expect(invoke).toHaveBeenCalledWith(
       'FINALIZE_CHECKPOINT_TRANSCRIPT',
       expect.objectContaining({
         journalGeneration: 'checkpoint-generation-1',
@@ -296,8 +316,106 @@ describe('retryMeetingTranscriptValidation', () => {
       {
         canonicalMode: 'checkpointed',
         checkpointEvidenceVerified: true,
+        checkpointSourceSegments: expect.arrayContaining([
+          expect.objectContaining({ speaker: 'Me' }),
+          expect.objectContaining({ speaker: 'Them' }),
+        ]),
       },
     );
+  });
+
+  it('retranscribes preserved channels when verified checkpoints leave speech uncovered', async () => {
+    const activityEvidence = await buildCaptureActivityEvidence(
+      [
+        { speaker: 'Me', startTime: 0, endTime: 8 },
+        { speaker: 'Them', startTime: 10, endTime: 18 },
+      ],
+      activityProducer,
+    );
+    let current: Record<string, unknown> = {
+      ...meeting,
+      mixed_audio_path: null,
+      transcript_json: JSON.stringify({
+        schemaVersion: 2,
+        lifecycleStatus: 'needs_attention',
+        segments: [
+          {
+            id: 'system-0',
+            startTime: 10,
+            endTime: 18,
+            text: 'Synthetic remote statement.',
+            speaker: 'Them',
+          },
+        ],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [{ code: 'local_speech_unaccounted' }],
+        evidenceProvenance: {
+          kind: 'sealed_capture_activity_v2',
+          digestSha256: activityEvidence.digestSha256,
+        },
+        activityEvidence,
+        recovery: {
+          source: 'capture_journal',
+          journalSchemaVersion: 3,
+          checkpointEvidenceVerified: true,
+          gapDetected: false,
+        },
+      }),
+      capture_journal_generation: 'checkpoint-generation-2',
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT') {
+        return {
+          generation: 'checkpoint-generation-2',
+          revision: 13,
+          segmentCount: 1,
+          sourceCoverageSegments: [
+            {
+              id: 'system-source-0',
+              startTime: 10,
+              endTime: 18,
+              speaker: 'Them',
+            },
+          ],
+        };
+      }
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'WHISPER_TRANSCRIBE') {
+        return String(payload).includes('system')
+          ? { segments: [rawSegment(10, 18, 'Synthetic remote statement.')] }
+          : { segments: [rawSegment(0, 8, 'Synthetic local statement.')] };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'GENERATE_TITLE') return 'Recovered meeting';
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
+      }
+      if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    const result = await retryMeetingTranscriptValidation(
+      'synthetic-id',
+      invoke,
+    );
+
+    expect(result.status).toBe('validated');
+    expect(invoke).toHaveBeenCalledWith(
+      'WHISPER_TRANSCRIBE',
+      '/synthetic/mic.wav',
+      expect.objectContaining({ canonicalSource: 'mic' }),
+    );
+    expect(validationInputs.slice(-2)).toEqual([
+      expect.objectContaining({ canonicalMode: 'checkpointed' }),
+      expect.objectContaining({ canonicalMode: 'recovered_channels' }),
+    ]);
   });
 
   it('preserves user edits made while validation is running', async () => {
@@ -1020,6 +1138,20 @@ describe('retryMeetingTranscriptValidation', () => {
 describe('shouldAutoProcessMeetingAnalysis', () => {
   it('starts background processing for an unanalyzed preserved recording', () => {
     expect(shouldAutoProcessMeetingAnalysis(meeting)).toBe(true);
+  });
+
+  it('resumes analysis interrupted after transcript validation', () => {
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...meeting,
+        transcript_status: 'validated',
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'processing',
+          stage: 'analysis',
+        }),
+      }),
+    ).toBe(true);
   });
 
   it('does not replace existing analysis or retry recovery-required meetings', () => {
