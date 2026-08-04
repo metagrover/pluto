@@ -22,3 +22,12 @@ export const selectNextMeetingForProcessing = (
       shouldAutoProcessMeetingAnalysis(meeting) &&
       !attemptedFingerprints.has(meetingProcessingFingerprint(meeting)),
   ) ?? null;
+
+export const rememberMeetingProcessingOutcome = (
+  attemptedFingerprints: Set<string>,
+  meeting: Partial<Meeting> | null | undefined,
+): void => {
+  if (meeting) {
+    attemptedFingerprints.add(meetingProcessingFingerprint(meeting));
+  }
+};

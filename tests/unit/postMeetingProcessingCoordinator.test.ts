@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   meetingProcessingFingerprint,
+  rememberMeetingProcessingOutcome,
   selectNextMeetingForProcessing,
 } from '../../src/services/postMeetingProcessingCoordinator';
 
@@ -53,6 +54,25 @@ describe('post-meeting processing coordinator', () => {
     expect(
       selectNextMeetingForProcessing([failedAnalysis], attempted)?.id,
     ).toBe('meeting');
+  });
+
+  it('remembers the post-run durable state so persistence does not trigger an immediate retry', () => {
+    const attempted = new Set<string>();
+    const before = incomplete('meeting');
+    const after = {
+      ...before,
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [{ code: 'remote_speech_unaccounted' }],
+        validation_run_id: 'completed-run',
+      }),
+    };
+
+    attempted.add(meetingProcessingFingerprint(before));
+    rememberMeetingProcessingOutcome(attempted, after);
+
+    expect(selectNextMeetingForProcessing([after], attempted)).toBeNull();
   });
 
   it('never selects proven capture gaps or completed meetings', () => {

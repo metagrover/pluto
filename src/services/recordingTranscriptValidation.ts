@@ -332,18 +332,11 @@ export const runRecordingTranscriptValidation = async (input: {
   const systemActivitySeconds = activitySeconds(input.activityWindows, 'Them');
   const micSpeechSeconds = segmentSeconds(micSegments);
   const systemSpeechSeconds = segmentSeconds(systemSegments);
-  const asrConfirmedLocalCoveredSeconds = Math.min(
-    micSpeechSeconds,
-    segmentSeconds(
-      reconciliation.segments.filter((segment) => segment.speaker === 'Me'),
-    ),
-  );
-  const asrConfirmedRemoteCoveredSeconds = Math.min(
-    systemSpeechSeconds,
-    segmentSeconds(
-      reconciliation.segments.filter((segment) => segment.speaker === 'Them'),
-    ),
-  );
+  // Preserved channel transcripts are the coverage proof. Canonical speaker
+  // arbitration may relabel or deduplicate those words, but it cannot erase
+  // the fact that ASR accounted for speech on the original source channel.
+  const asrConfirmedLocalCoveredSeconds = micSpeechSeconds;
+  const asrConfirmedRemoteCoveredSeconds = systemSpeechSeconds;
   const candidateLocalCoveredSeconds = coveredActivitySeconds(
     input.activityWindows,
     reconciliation.segments,

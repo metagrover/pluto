@@ -207,6 +207,41 @@ describe('runRecordingTranscriptValidation', () => {
     expect(result.reasons).toContain('required_source_failed');
   });
 
+  it('uses preserved source ASR coverage even when canonical speaker arbitration disagrees', async () => {
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'source-coverage-survives-attribution',
+      recordingDurationSeconds: 10,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '/synthetic/mix.wav',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [],
+      activityWindows: [{ speaker: 'Me', startTime: 0, endTime: 10 }],
+      transcribe: async (path) => {
+        if (path.includes('mic')) {
+          return {
+            segments: [],
+            vad: { status: 'no_speech' as const, speechSeconds: 0 },
+          };
+        }
+        if (path.includes('system')) {
+          return {
+            segments: [rawSegment(0, 4, 'Preserved remote source evidence')],
+            vad: { status: 'speech' as const, speechSeconds: 4 },
+          };
+        }
+        return {
+          segments: [rawSegment(0, 4, 'Different canonical wording')],
+          vad: { status: 'speech' as const, speechSeconds: 4 },
+        };
+      },
+      probeDuration: async () => 10,
+    });
+
+    expect(result.segments[0]?.speaker).toBe('Me');
+    expect(result.status).toBe('validated');
+    expect(result.reasons).not.toContain('remote_speech_unaccounted');
+  });
+
   it('counts duplicate and overlapping transcript segments once when measuring coverage', async () => {
     const result = await runRecordingTranscriptValidation({
       meetingId: 'synthetic-meeting',
