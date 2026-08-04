@@ -634,6 +634,31 @@ describe('knowledge V2 utilities', () => {
     );
   });
 
+  it('normalizes malformed change summaries before snapshot persistence', () => {
+    const fallback = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [makeSource({ id: 'm1', title: 'Synthetic source' })],
+    );
+    const repaired = repairKnowledgeV2Document({
+      ...fallback,
+      change_summary: {
+        generated_at: 42,
+        added_count: 'bad',
+        removed_count: -2,
+        updated_count: 1,
+        notable_changes: null,
+      },
+    } as unknown as typeof fallback);
+
+    expect(repaired.change_summary).toMatchObject({
+      added_count: 0,
+      removed_count: 0,
+      updated_count: 1,
+      notable_changes: [],
+    });
+    expect(typeof repaired.change_summary.generated_at).toBe('string');
+  });
+
   it('hard resets stale V1 generated docs while preserving current V2 docs', () => {
     expect(
       shouldHardResetKnowledgeDoc({

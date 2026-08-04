@@ -361,6 +361,18 @@ describe('working memory snapshots', () => {
     );
   });
 
+  it('fails safe when an older V2 document has malformed notable changes', () => {
+    const structured = makeKnowledgeSnapshotDoc();
+    structured.change_summary.notable_changes = null as unknown as string[];
+
+    const snapshot = buildGlobalWorkingMemorySnapshot({
+      knowledgeDoc: makeKnowledgeDoc(),
+      structured,
+    });
+
+    expect(snapshot.payload.change_summary.notable_changes).toEqual([]);
+  });
+
   it('persists a global snapshot and reads it back by scope', () => {
     const saved = persistGlobalWorkingMemorySnapshot({
       knowledgeDoc: makeKnowledgeDoc(),

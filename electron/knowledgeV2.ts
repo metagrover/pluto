@@ -864,6 +864,32 @@ export const repairKnowledgeV2Document = (
   doc: KnowledgeV2Document,
   fallback?: KnowledgeV2Document | null,
 ): KnowledgeV2Document => {
+  const rawChangeSummary = isRecord(
+    (doc as unknown as Record<string, unknown>).change_summary,
+  )
+    ? ((doc as unknown as Record<string, unknown>).change_summary as Record<
+        string,
+        unknown
+      >)
+    : {};
+  const normalizedCount = (value: unknown): number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0
+      ? value
+      : 0;
+  const changeSummary: KnowledgeV2ChangeSummary = {
+    generated_at:
+      typeof rawChangeSummary.generated_at === 'string'
+        ? rawChangeSummary.generated_at
+        : new Date().toISOString(),
+    added_count: normalizedCount(rawChangeSummary.added_count),
+    removed_count: normalizedCount(rawChangeSummary.removed_count),
+    updated_count: normalizedCount(rawChangeSummary.updated_count),
+    notable_changes: Array.isArray(rawChangeSummary.notable_changes)
+      ? rawChangeSummary.notable_changes.filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : [],
+  };
   const sanitized = sanitizeKnowledgeCollections(doc);
   const repairedStreams = sanitized.activeStreams
     .map(repairStream)
@@ -913,6 +939,7 @@ export const repairKnowledgeV2Document = (
       ...doc.source_quality_summary,
       records: sanitized.records,
     },
+    change_summary: changeSummary,
   };
 };
 
