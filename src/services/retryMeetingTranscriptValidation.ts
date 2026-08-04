@@ -19,6 +19,7 @@ import {
 import {
   advanceDownstreamProcessingLease,
   buildDownstreamProcessingLease,
+  selectDownstreamResumeStage,
 } from './downstreamProcessingLease.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
 import { reprocessAttributedMeeting } from './safeAttributionReprocessing.ts';
@@ -297,11 +298,12 @@ export const retryMeetingTranscriptValidation = async (
       return { status: 'validated' };
     }
 
+    let resumeStage = selectDownstreamResumeStage(meeting);
     const downstreamLease = buildDownstreamProcessingLease({
       runId: crypto.randomUUID(),
       transcriptValidatedAt: meeting.transcript_validated_at || '',
       now: options.now?.(),
-      stage: 'analysis',
+      stage: resumeStage,
     });
     const claimed = await invoke(
       'CLAIM_DOWNSTREAM_PROCESSING',
@@ -316,7 +318,7 @@ export const retryMeetingTranscriptValidation = async (
     const validatedAt = meeting.transcript_validated_at || '';
     try {
       let current = meeting;
-      if (!current.analysis_json) {
+      if (resumeStage === 'analysis') {
         const generatedTitle =
           current.title === 'Meeting'
             ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
@@ -333,16 +335,14 @@ export const retryMeetingTranscriptValidation = async (
           analysis_json: JSON.stringify(artifacts.analysis ?? null),
           value_signals_json: JSON.stringify(artifacts.signals ?? null),
         };
+        resumeStage = 'knowledge_extraction';
       }
       const analysisSaved = await invoke(
         'SAVE_MEETING',
         {
           ...current,
           downstream_processing_json: JSON.stringify(
-            advanceDownstreamProcessingLease(
-              downstreamLease,
-              'knowledge_extraction',
-            ),
+            advanceDownstreamProcessingLease(downstreamLease, resumeStage),
           ),
         },
         {
@@ -351,15 +351,17 @@ export const retryMeetingTranscriptValidation = async (
         },
       );
       if (analysisSaved === false) return { status: 'superseded' };
-      await invoke('EXTRACT_AND_PROCESS_ENTITIES', {
-        transcript,
-        meetingId: String(meeting.id),
-        summary: current.enhanced_notes || '',
-        valueSignals: current.value_signals_json
-          ? JSON.parse(current.value_signals_json)
-          : null,
-        awaitKnowledgeSynthesis: true,
-      });
+      if (resumeStage === 'knowledge_extraction') {
+        await invoke('EXTRACT_AND_PROCESS_ENTITIES', {
+          transcript,
+          meetingId: String(meeting.id),
+          summary: current.enhanced_notes || '',
+          valueSignals: current.value_signals_json
+            ? JSON.parse(current.value_signals_json)
+            : null,
+          awaitKnowledgeSynthesis: true,
+        });
+      }
       const extractionComplete = (await invoke(
         'GET_MEETING',
         meetingId,

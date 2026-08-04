@@ -65,3 +65,13 @@ export const advanceDownstreamProcessingLease = (
   deadlineAt: new Date(now + DOWNSTREAM_LEASE_MS).toISOString(),
   stage,
 });
+
+export const selectDownstreamResumeStage = (meeting: {
+  analysis_json?: string | null;
+  enhanced_notes?: string | null;
+  mid_json?: string | null;
+}): DownstreamProcessingStage => {
+  if (!meeting.analysis_json && !meeting.enhanced_notes) return 'analysis';
+  if (meeting.mid_json) return 'knowledge_synthesis';
+  return 'knowledge_extraction';
+};
