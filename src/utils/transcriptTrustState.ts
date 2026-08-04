@@ -161,7 +161,14 @@ export type MeetingDownstreamProcessingV1 = {
   transcriptValidatedAt: string;
   validationRunId?: string | null;
   runId?: string;
-  stage?: 'analysis' | 'value_signals' | 'knowledge_extraction' | 'final_save';
+  startedAt?: string;
+  deadlineAt?: string;
+  stage?:
+    | 'analysis'
+    | 'value_signals'
+    | 'knowledge_extraction'
+    | 'knowledge_synthesis'
+    | 'final_save';
   failure?: 'generation_failed' | 'save_failed' | 'interrupted';
 };
 
@@ -654,7 +661,7 @@ export const parseMeetingDownstreamProcessing = (
     !exactKeys(
       raw,
       ['schemaVersion', 'state', 'transcriptValidatedAt'],
-      ['runId', 'stage', 'failure'],
+      ['runId', 'startedAt', 'deadlineAt', 'stage', 'failure'],
     ) ||
     raw.schemaVersion !== 1 ||
     !['not_started', 'processing', 'complete', 'failed'].includes(
@@ -673,6 +680,7 @@ export const parseMeetingDownstreamProcessing = (
     'analysis',
     'value_signals',
     'knowledge_extraction',
+    'knowledge_synthesis',
     'final_save',
   ].includes(String(raw.stage));
   const hasFailure = [
@@ -680,6 +688,11 @@ export const parseMeetingDownstreamProcessing = (
     'save_failed',
     'interrupted',
   ].includes(String(raw.failure));
+  const hasLeaseWindow =
+    (raw.startedAt === undefined && raw.deadlineAt === undefined) ||
+    (isoTimestamp(raw.startedAt) &&
+      isoTimestamp(raw.deadlineAt) &&
+      Date.parse(String(raw.deadlineAt)) > Date.parse(String(raw.startedAt)));
   const validByState =
     (raw.state === 'not_started' &&
       raw.runId === undefined &&
@@ -687,6 +700,7 @@ export const parseMeetingDownstreamProcessing = (
       raw.failure === undefined) ||
     (raw.state === 'processing' &&
       hasRunId &&
+      hasLeaseWindow &&
       hasStage &&
       raw.failure === undefined) ||
     (raw.state === 'complete' &&

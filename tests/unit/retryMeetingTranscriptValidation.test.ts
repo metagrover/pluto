@@ -114,6 +114,7 @@ describe('retryMeetingTranscriptValidation', () => {
     };
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
       if (channel === 'WHISPER_TRANSCRIBE') {
         const path = String(payload);
@@ -180,6 +181,40 @@ describe('retryMeetingTranscriptValidation', () => {
     ).toMatchObject({ state: 'complete' });
   });
 
+  it('does not duplicate downstream work when another durable owner is active', async () => {
+    const current = {
+      ...meeting,
+      transcript_status: 'validated' as const,
+      transcript_validated_at: '2026-08-04T00:00:00.000Z',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [{ speaker: 'Me', text: 'Synthetic statement.' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'validated',
+        causes: [],
+      }),
+    };
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return false;
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    expect(
+      await retryMeetingTranscriptValidation('synthetic-id', invoke),
+    ).toEqual({ status: 'superseded' });
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_ANALYSIS_V2',
+      expect.anything(),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'EXTRACT_AND_PROCESS_ENTITIES',
+      expect.anything(),
+    );
+  });
+
   it('processes a newly validated meeting without transcribing it a second time', async () => {
     let current: Record<string, unknown> = {
       ...meeting,
@@ -210,6 +245,7 @@ describe('retryMeetingTranscriptValidation', () => {
     };
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
       if (channel === 'SAVE_MEETING') {
         current = { ...current, ...(payload as Record<string, unknown>) };
         return true;

@@ -14,11 +14,14 @@ vi.mock('electron', () => ({
 }));
 
 import {
+  claimMeetingDownstreamProcessing,
   claimMeetingTranscriptValidationRetry,
   finalizeCheckpointTranscript,
   getMeeting,
   saveMeeting,
+  saveMeetingIfDownstreamRunCurrent,
 } from '../../electron/db';
+import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
 import { parseMeetingDownstreamProcessing } from '../../src/utils/transcriptTrustState';
 
 afterAll(() => {
@@ -82,6 +85,62 @@ const seedValidatingMeeting = (id: string) => {
   });
 };
 
+it('allows only one durable downstream owner and fences stale saves', () => {
+  const id = 'downstream-single-flight';
+  saveMeeting({
+    id,
+    title: 'Meeting',
+    transcript_status: 'validated',
+    transcript_validated_at: validatedAt,
+    transcript_json: canonicalTranscriptJson,
+    transcript_integrity_json: transcriptIntegrityJson,
+  });
+  const first = buildDownstreamProcessingLease({
+    runId: 'downstream-first',
+    transcriptValidatedAt: validatedAt,
+    now: Date.parse('2026-08-04T00:00:00.000Z'),
+    stage: 'analysis',
+  });
+  const second = buildDownstreamProcessingLease({
+    runId: 'downstream-second',
+    transcriptValidatedAt: validatedAt,
+    now: Date.parse('2026-08-04T00:00:01.000Z'),
+    stage: 'analysis',
+  });
+
+  expect(claimMeetingDownstreamProcessing(id, first)).toBe(true);
+  expect(claimMeetingDownstreamProcessing(id, second)).toBe(false);
+  const claimed = getMeeting(id) as Parameters<
+    typeof saveMeetingIfDownstreamRunCurrent
+  >[0];
+  expect(
+    saveMeetingIfDownstreamRunCurrent(
+      {
+        ...claimed,
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'complete',
+          transcriptValidatedAt: validatedAt,
+        }),
+      },
+      second.runId,
+    ),
+  ).toBe(false);
+  expect(
+    saveMeetingIfDownstreamRunCurrent(
+      {
+        ...claimed,
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'complete',
+          transcriptValidatedAt: validatedAt,
+        }),
+      },
+      first.runId,
+    ),
+  ).toBe(true);
+});
+
 const input = (meetingId: string) => ({
   meetingId,
   journalGeneration,
@@ -109,13 +168,15 @@ describe('checkpoint transcript database finalization', () => {
       transcript_validated_at: validatedAt,
       finalization_status: 'finalized',
       finalization_error_category: null,
-      downstream_processing_json: JSON.stringify({
-        schemaVersion: 1,
-        state: 'processing',
-        transcriptValidatedAt: validatedAt,
-        runId: downstreamRunId,
-        stage: 'analysis',
-      }),
+    });
+    expect(JSON.parse(String(saved.downstream_processing_json))).toMatchObject({
+      schemaVersion: 1,
+      state: 'processing',
+      transcriptValidatedAt: validatedAt,
+      runId: downstreamRunId,
+      stage: 'analysis',
+      startedAt: expect.any(String),
+      deadlineAt: expect.any(String),
     });
     expect(
       parseMeetingDownstreamProcessing(

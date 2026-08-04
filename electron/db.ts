@@ -4,6 +4,11 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { app } from 'electron';
 import {
+  type DownstreamProcessingLease,
+  buildDownstreamProcessingLease,
+  readDownstreamProcessingLease,
+} from '../src/services/downstreamProcessingLease';
+import {
   type TranscriptValidationRetryFailure,
   type TranscriptValidationRetryLease,
   type TranscriptValidationRetryStage,
@@ -1565,20 +1570,25 @@ export const finalizeCheckpointTranscript = (
     const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
     if (!current) return 'superseded';
 
-    const downstreamProcessingJson = JSON.stringify({
-      schemaVersion: 1,
-      state: 'processing',
-      transcriptValidatedAt: input.transcriptValidatedAt,
-      runId: input.downstreamRunId,
-      stage: 'analysis',
-    });
+    const downstreamProcessingJson = JSON.stringify(
+      buildDownstreamProcessingLease({
+        runId: input.downstreamRunId,
+        transcriptValidatedAt: input.transcriptValidatedAt,
+        stage: 'analysis',
+      }),
+    );
+    const currentDownstreamLease = readDownstreamProcessingLease(
+      current.downstream_processing_json,
+    );
     const alreadyCommitted =
       current.capture_journal_generation === input.journalGeneration &&
       current.transcript_status === 'validated' &&
       current.transcript_json === input.canonicalTranscriptJson &&
       current.transcript_integrity_json === input.transcriptIntegrityJson &&
       current.transcript_validated_at === input.transcriptValidatedAt &&
-      current.downstream_processing_json === downstreamProcessingJson;
+      currentDownstreamLease?.runId === input.downstreamRunId &&
+      currentDownstreamLease.transcriptValidatedAt ===
+        input.transcriptValidatedAt;
     if (alreadyCommitted) return 'already_committed';
 
     const integrity = parseIntegrityRecord(current.transcript_integrity_json);
@@ -1783,6 +1793,57 @@ export const saveMeetingIfTranscriptRunCurrent = (
     }
     if (currentRunId !== expectedValidationRunId) return false;
     saveMeetingTransaction(meeting);
+    return true;
+  })();
+
+export const claimMeetingDownstreamProcessing = (
+  meetingId: string | number,
+  lease: DownstreamProcessingLease,
+) =>
+  db.transaction(() => {
+    const current = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (!current || current.transcript_status !== 'validated') return false;
+    const active = readDownstreamProcessingLease(
+      current.downstream_processing_json,
+    );
+    if (active && Date.parse(active.deadlineAt) > Date.parse(lease.startedAt)) {
+      return false;
+    }
+    const prior = current.downstream_processing_json ?? null;
+    return (
+      db
+        .prepare(
+          `UPDATE meetings
+           SET downstream_processing_json = ?
+           WHERE id = ? AND downstream_processing_json IS ?`,
+        )
+        .run(JSON.stringify(lease), String(meetingId), prior).changes === 1
+    );
+  })();
+
+export const saveMeetingIfDownstreamRunCurrent = (
+  meeting: PersistedMeeting,
+  expectedDownstreamRunId: string,
+  expectedTitle?: string,
+) =>
+  db.transaction(() => {
+    const current = getMeeting(meeting.id) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const active = readDownstreamProcessingLease(
+      current.downstream_processing_json,
+    );
+    if (active?.runId !== expectedDownstreamRunId) return false;
+    const merged = {
+      ...current,
+      enhanced_notes: meeting.enhanced_notes,
+      analysis_json: meeting.analysis_json,
+      value_signals_json: meeting.value_signals_json,
+      downstream_processing_json: meeting.downstream_processing_json,
+    };
+    if (expectedTitle !== undefined && current.title === expectedTitle) {
+      merged.title = meeting.title;
+    }
+    saveMeetingTransaction(merged);
     return true;
   })();
 
