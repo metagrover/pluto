@@ -36,6 +36,7 @@ import {
   stopCaptureJournal,
 } from './captureJournal.ts';
 import type { PersistedMeeting } from './db.ts';
+import { normalizeCheckpointWords } from './recoveryTranscriptionAudio.ts';
 
 type RecoveryGapReason =
   | 'missing_artifact'
@@ -506,6 +507,10 @@ const repairV3TranscriptGaps = async (
         templateSidecar.transcriptionConfig,
         interval.chunkEndSec - interval.chunkStartSec,
       );
+      const normalizedSegments = normalizeCheckpointWords(
+        result.segments,
+        interval.chunkEndSec - interval.chunkStartSec,
+      );
       const receipt = {
         meetingId: manifest.meetingId,
         generation: manifest.generation,
@@ -534,7 +539,7 @@ const repairV3TranscriptGaps = async (
             detectedLanguage: result.detectedLanguage ?? null,
             providerLabel: result.providerLabel ?? 'local',
           },
-          segments: result.segments,
+          segments: normalizedSegments,
         },
       };
       const saved = existing
@@ -545,7 +550,7 @@ const repairV3TranscriptGaps = async (
           })
         : await appendCaptureTranscriptCheckpoint(rootDir, checkpointArgs);
       manifest = saved.manifest;
-      if (result.segments.length > 0) {
+      if (normalizedSegments.length > 0) {
         stableAcceptedSpeechSources.add(source);
       } else {
         stableAcceptedSpeechSources.delete(source);

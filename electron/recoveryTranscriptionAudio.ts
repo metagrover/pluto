@@ -10,25 +10,56 @@ type CheckpointSegment = {
 export const normalizeCheckpointWords = (
   segments: CheckpointSegment[],
   journalDurationSeconds: number,
-): CheckpointSegment[] =>
-  segments.map((segment) => ({
-    ...segment,
-    ...(segment.words
-      ? {
-          words: segment.words.filter(
-            (word) =>
-              typeof word.word === 'string' &&
-              Boolean(word.word.trim()) &&
-              Number.isFinite(word.start) &&
-              Number.isFinite(word.end) &&
-              word.start >= segment.start &&
-              word.end > word.start &&
-              word.end <= segment.end &&
-              word.end <= journalDurationSeconds + ALIGNMENT_TOLERANCE_SECONDS,
-          ),
-        }
-      : {}),
-  }));
+): CheckpointSegment[] => {
+  if (!Number.isFinite(journalDurationSeconds) || journalDurationSeconds <= 0) {
+    return [];
+  }
+
+  return segments.flatMap((segment) => {
+    if (
+      typeof segment.text !== 'string' ||
+      !segment.text.trim() ||
+      !Number.isFinite(segment.start) ||
+      !Number.isFinite(segment.end) ||
+      segment.end <= segment.start
+    ) {
+      return [];
+    }
+
+    const start = Math.max(0, segment.start);
+    const end = Math.min(journalDurationSeconds, segment.end);
+    if (end <= start) return [];
+
+    const words = segment.words?.filter(
+      (word) =>
+        typeof word.word === 'string' &&
+        Boolean(word.word.trim()) &&
+        Number.isFinite(word.start) &&
+        Number.isFinite(word.end) &&
+        word.start >= start &&
+        word.end > word.start &&
+        word.end <= end,
+    );
+    const exceedsAlignmentTolerance =
+      segment.start < -ALIGNMENT_TOLERANCE_SECONDS ||
+      segment.end > journalDurationSeconds + ALIGNMENT_TOLERANCE_SECONDS;
+    if (exceedsAlignmentTolerance && !words?.length) return [];
+    const text = exceedsAlignmentTolerance
+      ? words?.map((word) => word.word.trim()).join(' ')
+      : segment.text;
+    if (!text?.trim()) return [];
+
+    return [
+      {
+        ...segment,
+        start,
+        end,
+        text,
+        ...(words ? { words } : {}),
+      },
+    ];
+  });
+};
 
 export type RecoveryAudioAlignmentDependencies = {
   probeDuration: (inputPath: string) => Promise<number | null>;

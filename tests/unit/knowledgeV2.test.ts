@@ -4,6 +4,7 @@ import {
   applyKnowledgeCorrectionsToDocument,
   buildDeterministicKnowledgeV2Document,
   classifyKnowledgeV2Item,
+  isKnowledgeV2Document,
   mergeKnowledgeV2Documents,
   repairKnowledgeV2Document,
   scoreKnowledgeV2Source,
@@ -334,6 +335,53 @@ describe('knowledge V2 utilities', () => {
     expect(merged.active_streams.map((stream) => stream.title)).toContain(
       'Knowledge Dashboard',
     );
+  });
+
+  it('excludes malformed LLM collection members before merging', () => {
+    const base = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [makeSource({ id: 'm1', entity_names: ['Knowledge Dashboard'] })],
+    );
+    const malformed = {
+      ...base,
+      active_streams: [null, ...base.active_streams],
+      needs_attention: [undefined, ...base.needs_attention],
+      patterns: undefined,
+      risks_and_unknowns: null,
+      evidence_index: [null, ...base.evidence_index],
+      source_quality_summary: null,
+    } as unknown as typeof base;
+
+    const merged = mergeKnowledgeV2Documents(
+      { type: 'global', title: 'Global Knowledge' },
+      [malformed, base],
+    );
+
+    expect(merged.active_streams).toEqual(base.active_streams);
+    expect(merged.needs_attention).toEqual(base.needs_attention);
+    expect(merged.patterns).toEqual(base.patterns);
+    expect(merged.risks_and_unknowns).toEqual(base.risks_and_unknowns);
+    expect(merged.evidence_index).toEqual(base.evidence_index);
+    expect(merged.source_quality_summary.records).toEqual(
+      base.source_quality_summary.records,
+    );
+  });
+
+  it('rejects V2-shaped output with malformed current-read data', () => {
+    const base = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [makeSource()],
+    );
+
+    expect(isKnowledgeV2Document({ ...base, current_read: 'invalid' })).toBe(
+      false,
+    );
+    expect(
+      isKnowledgeV2Document({
+        ...base,
+        current_read: { ...base.current_read, headline: undefined },
+      }),
+    ).toBe(false);
   });
 
   it('applies durable correction overlays to synthesized streams and items', () => {

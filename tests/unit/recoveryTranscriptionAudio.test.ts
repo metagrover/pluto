@@ -41,6 +41,57 @@ describe('normalizeCheckpointWords', () => {
     const segments = [{ start: 0, end: 1, text: 'Synthetic statement' }];
     expect(normalizeCheckpointWords(segments, 1)).toEqual(segments);
   });
+
+  it('clips overlapping segment timing and filters words against the journal boundary', () => {
+    expect(
+      normalizeCheckpointWords(
+        [
+          {
+            start: -0.2,
+            end: 2.8,
+            text: 'Synthetic boundary statement',
+            words: [
+              { word: 'before', start: -0.2, end: 0.1 },
+              { word: 'Synthetic', start: 0.1, end: 0.8 },
+              { word: 'overflow', start: 1.8, end: 2.8 },
+            ],
+          },
+        ],
+        2,
+      ),
+    ).toEqual([
+      {
+        start: 0,
+        end: 2,
+        text: 'Synthetic',
+        words: [{ word: 'Synthetic', start: 0.1, end: 0.8 }],
+      },
+    ]);
+  });
+
+  it('drops a mostly out-of-window segment without retained word evidence', () => {
+    expect(
+      normalizeCheckpointWords(
+        [{ start: -30, end: 0.1, text: 'Unbounded synthetic statement' }],
+        2,
+      ),
+    ).toEqual([]);
+  });
+
+  it('drops malformed or wholly out-of-window checkpoint segments', () => {
+    expect(
+      normalizeCheckpointWords(
+        [
+          { start: 2, end: 3, text: 'After the journal' },
+          { start: -2, end: 0, text: 'Before the journal' },
+          { start: 0.5, end: 0.5, text: 'Inverted' },
+          { start: 0, end: 1, text: '   ' },
+          { start: Number.NaN, end: 1, text: 'Non-finite' },
+        ],
+        2,
+      ),
+    ).toEqual([]);
+  });
 });
 
 describe('transcribeJournalAlignedAudio', () => {
