@@ -373,9 +373,9 @@ describe('knowledge V2 utilities', () => {
       [makeSource()],
     );
 
-    expect(
-      isKnowledgeV2Document({ ...base, current_read: 'invalid' }),
-    ).toBe(false);
+    expect(isKnowledgeV2Document({ ...base, current_read: 'invalid' })).toBe(
+      false,
+    );
     expect(
       isKnowledgeV2Document({
         ...base,

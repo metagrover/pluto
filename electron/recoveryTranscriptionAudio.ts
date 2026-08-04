@@ -42,8 +42,7 @@ export const normalizeCheckpointWords = (
     );
     const exceedsAlignmentTolerance =
       segment.start < -ALIGNMENT_TOLERANCE_SECONDS ||
-      segment.end >
-        journalDurationSeconds + ALIGNMENT_TOLERANCE_SECONDS;
+      segment.end > journalDurationSeconds + ALIGNMENT_TOLERANCE_SECONDS;
     if (exceedsAlignmentTolerance && !words?.length) return [];
     const text = exceedsAlignmentTolerance
       ? words?.map((word) => word.word.trim()).join(' ')
