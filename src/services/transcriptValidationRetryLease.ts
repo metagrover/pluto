@@ -112,6 +112,7 @@ const TRANSCRIPT_OWNED_FIELDS = [
   'enhanced_notes',
   'analysis_json',
   'value_signals_json',
+  'downstream_processing_json',
 ] as const;
 
 export const mergeTranscriptOwnedFields = <T extends Record<string, unknown>>(

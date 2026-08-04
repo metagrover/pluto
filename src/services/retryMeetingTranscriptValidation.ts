@@ -16,6 +16,10 @@ import {
   buildTranscriptJsonPayload,
   withTranscriptLifecycleStatus,
 } from '../utils/transcriptSchema.ts';
+import {
+  advanceDownstreamProcessingLease,
+  buildDownstreamProcessingLease,
+} from './downstreamProcessingLease.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
 import { reprocessAttributedMeeting } from './safeAttributionReprocessing.ts';
 import {
@@ -293,6 +297,19 @@ export const retryMeetingTranscriptValidation = async (
       return { status: 'validated' };
     }
 
+    const downstreamLease = buildDownstreamProcessingLease({
+      runId: crypto.randomUUID(),
+      transcriptValidatedAt: meeting.transcript_validated_at || '',
+      now: options.now?.(),
+      stage: 'analysis',
+    });
+    const claimed = await invoke(
+      'CLAIM_DOWNSTREAM_PROCESSING',
+      meetingId,
+      downstreamLease,
+    );
+    if (claimed !== true) return { status: 'superseded' };
+
     const transcript = parseSegments(meeting.transcript_json)
       .map((segment) => `${segment.speaker}: ${segment.text}`)
       .join('\n');
@@ -317,15 +334,23 @@ export const retryMeetingTranscriptValidation = async (
           value_signals_json: JSON.stringify(artifacts.signals ?? null),
         };
       }
-      await invoke('SAVE_MEETING', {
-        ...current,
-        downstream_processing_json: JSON.stringify({
-          schemaVersion: 1,
-          state: 'processing',
-          transcriptValidatedAt: validatedAt,
-          stage: 'knowledge_extraction',
-        }),
-      });
+      const analysisSaved = await invoke(
+        'SAVE_MEETING',
+        {
+          ...current,
+          downstream_processing_json: JSON.stringify(
+            advanceDownstreamProcessingLease(
+              downstreamLease,
+              'knowledge_extraction',
+            ),
+          ),
+        },
+        {
+          expectedDownstreamRunId: downstreamLease.runId,
+          expectedTitle: meeting.title,
+        },
+      );
+      if (analysisSaved === false) return { status: 'superseded' };
       await invoke('EXTRACT_AND_PROCESS_ENTITIES', {
         transcript,
         meetingId: String(meeting.id),
@@ -346,27 +371,35 @@ export const retryMeetingTranscriptValidation = async (
         throw new Error('knowledge_synthesis_incomplete');
       }
       const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-      await invoke('SAVE_MEETING', {
-        ...latest,
-        downstream_processing_json: JSON.stringify({
-          schemaVersion: 1,
-          state: 'complete',
-          transcriptValidatedAt: validatedAt,
-        }),
-      });
+      await invoke(
+        'SAVE_MEETING',
+        {
+          ...latest,
+          downstream_processing_json: JSON.stringify({
+            schemaVersion: 1,
+            state: 'complete',
+            transcriptValidatedAt: validatedAt,
+          }),
+        },
+        { expectedDownstreamRunId: downstreamLease.runId },
+      );
     } catch (error) {
       console.error('[Pluto] Downstream intelligence resume failed', error);
       const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
-      await invoke('SAVE_MEETING', {
-        ...latest,
-        downstream_processing_json: JSON.stringify({
-          schemaVersion: 1,
-          state: 'failed',
-          transcriptValidatedAt: validatedAt,
-          stage: 'knowledge_synthesis',
-          failure: 'generation_failed',
-        }),
-      });
+      await invoke(
+        'SAVE_MEETING',
+        {
+          ...latest,
+          downstream_processing_json: JSON.stringify({
+            schemaVersion: 1,
+            state: 'failed',
+            transcriptValidatedAt: validatedAt,
+            stage: 'knowledge_synthesis',
+            failure: 'generation_failed',
+          }),
+        },
+        { expectedDownstreamRunId: downstreamLease.runId },
+      );
     }
     return { status: 'validated' };
   }
@@ -695,6 +728,11 @@ export const retryMeetingTranscriptValidation = async (
     .join('\n');
   const validatedAt = new Date().toISOString();
   const downstreamRunId = crypto.randomUUID();
+  const downstreamLease = buildDownstreamProcessingLease({
+    runId: downstreamRunId,
+    transcriptValidatedAt: validatedAt,
+    stage: 'analysis',
+  });
   const validatedIntegrity = usesV2Trust
     ? {
         ...finishRetryLease(integrity),
@@ -735,13 +773,7 @@ export const retryMeetingTranscriptValidation = async (
     enhanced_notes: null,
     analysis_json: null,
     value_signals_json: null,
-    downstream_processing_json: JSON.stringify({
-      schemaVersion: 1,
-      state: 'processing',
-      transcriptValidatedAt: validatedAt,
-      runId: downstreamRunId,
-      stage: 'analysis',
-    }),
+    downstream_processing_json: JSON.stringify(downstreamLease),
   };
   await invoke(
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
@@ -832,16 +864,15 @@ export const retryMeetingTranscriptValidation = async (
         enhanced_notes: artifacts.markdown || '',
         analysis_json: JSON.stringify(artifacts.analysis ?? null),
         value_signals_json: JSON.stringify(artifacts.signals ?? null),
-        downstream_processing_json: JSON.stringify({
-          schemaVersion: 1,
-          state: 'processing',
-          transcriptValidatedAt: validatedAt,
-          stage: 'knowledge_extraction',
-        }),
+        downstream_processing_json: JSON.stringify(
+          advanceDownstreamProcessingLease(
+            downstreamLease,
+            'knowledge_extraction',
+          ),
+        ),
       },
       {
-        ...(usesV2Trust ? {} : { expectedValidationRunId: runId }),
-        transcriptOwnedFieldsOnly: true,
+        expectedDownstreamRunId: downstreamRunId,
         expectedTitle: current.title,
       },
     );
@@ -869,14 +900,18 @@ export const retryMeetingTranscriptValidation = async (
     if (completed.transcript_validated_at !== validatedAt) {
       return { status: 'superseded' };
     }
-    await invoke('SAVE_MEETING', {
-      ...completed,
-      downstream_processing_json: JSON.stringify({
-        schemaVersion: 1,
-        state: 'complete',
-        transcriptValidatedAt: validatedAt,
-      }),
-    });
+    await invoke(
+      'SAVE_MEETING',
+      {
+        ...completed,
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'complete',
+          transcriptValidatedAt: validatedAt,
+        }),
+      },
+      { expectedDownstreamRunId: downstreamRunId },
+    );
   } catch (error) {
     console.error('[Pluto] Post-validation intelligence failed', error);
     const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
@@ -905,8 +940,7 @@ export const retryMeetingTranscriptValidation = async (
           }),
         },
         {
-          ...(usesV2Trust ? {} : { expectedValidationRunId: runId }),
-          transcriptOwnedFieldsOnly: true,
+          expectedDownstreamRunId: downstreamRunId,
         },
       );
     }

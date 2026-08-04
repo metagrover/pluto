@@ -1391,31 +1391,43 @@ app.whenReady().then(async () => {
         options && typeof options.expectedValidationRunId === 'string'
           ? options.expectedValidationRunId
           : null;
+      const expectedDownstreamRunId =
+        options && typeof options.expectedDownstreamRunId === 'string'
+          ? options.expectedDownstreamRunId
+          : null;
       const claimValidationLease = options?.claimValidationLease;
       const transcriptOwnedFieldsOnly = options?.transcriptOwnedFieldsOnly;
       return saveMeetingWithParticipantSideEffects({
         meeting,
         saveMeeting: () =>
-          claimValidationLease
-            ? db.claimMeetingTranscriptValidationRetry(
-                meeting.id,
-                claimValidationLease,
+          expectedDownstreamRunId
+            ? db.saveMeetingIfDownstreamRunCurrent(
+                meeting,
+                expectedDownstreamRunId,
+                typeof options.expectedTitle === 'string'
+                  ? options.expectedTitle
+                  : undefined,
               )
-            : transcriptOwnedFieldsOnly && expectedValidationRunId
-              ? db.saveTranscriptValidationResultIfRunCurrent(
+            : claimValidationLease
+              ? db.claimMeetingTranscriptValidationRetry(
                   meeting.id,
-                  expectedValidationRunId,
-                  meeting,
-                  typeof options.expectedTitle === 'string'
-                    ? options.expectedTitle
-                    : undefined,
+                  claimValidationLease,
                 )
-              : expectedValidationRunId
-                ? db.saveMeetingIfTranscriptRunCurrent(
-                    meeting,
+              : transcriptOwnedFieldsOnly && expectedValidationRunId
+                ? db.saveTranscriptValidationResultIfRunCurrent(
+                    meeting.id,
                     expectedValidationRunId,
+                    meeting,
+                    typeof options.expectedTitle === 'string'
+                      ? options.expectedTitle
+                      : undefined,
                   )
-                : db.saveMeeting(meeting),
+                : expectedValidationRunId
+                  ? db.saveMeetingIfTranscriptRunCurrent(
+                      meeting,
+                      expectedValidationRunId,
+                    )
+                  : db.saveMeeting(meeting),
         upsertEntity: db.upsertEntity,
         addMeetingEntity: db.addMeetingEntity,
       });
@@ -1425,6 +1437,9 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) =>
+    db.claimMeetingDownstreamProcessing(meetingId, lease),
+  );
   ipcMain.handle(
     'CLAIM_TRANSCRIPT_VALIDATION_RETRY',
     (_event, meetingId, lease) =>
