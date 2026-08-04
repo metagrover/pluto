@@ -352,14 +352,14 @@ export const retryMeetingTranscriptValidation = async (
             endTime: number;
             speaker: 'Me' | 'Them';
           } =>
-          Boolean(segment) &&
-          typeof segment === 'object' &&
-          Number.isFinite((segment as AttributionSegment).startTime) &&
-          Number.isFinite((segment as AttributionSegment).endTime) &&
-          (segment as AttributionSegment).endTime >
-            (segment as AttributionSegment).startTime &&
-          ((segment as AttributionSegment).speaker === 'Me' ||
-            (segment as AttributionSegment).speaker === 'Them'),
+            Boolean(segment) &&
+            typeof segment === 'object' &&
+            Number.isFinite((segment as AttributionSegment).startTime) &&
+            Number.isFinite((segment as AttributionSegment).endTime) &&
+            (segment as AttributionSegment).endTime >
+              (segment as AttributionSegment).startTime &&
+            ((segment as AttributionSegment).speaker === 'Me' ||
+              (segment as AttributionSegment).speaker === 'Them'),
         )
         .map((segment) => ({ ...segment, text: '' }))
     : [];
@@ -371,10 +371,10 @@ export const retryMeetingTranscriptValidation = async (
     checkpointSourceSegments.length > 0;
   let canonicalMode: 'checkpointed' | 'recovered_channels' | 'full_mix' =
     checkpointEvidenceVerified
-    ? ('checkpointed' as const)
-    : recovery?.source === 'capture_journal'
-      ? ('recovered_channels' as const)
-      : ('full_mix' as const);
+      ? ('checkpointed' as const)
+      : recovery?.source === 'capture_journal'
+        ? ('recovered_channels' as const)
+        : ('full_mix' as const);
   const claimed = await invoke(
     'SAVE_MEETING',
     {

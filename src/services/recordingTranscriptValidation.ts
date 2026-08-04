@@ -231,13 +231,11 @@ export const runRecordingTranscriptValidation = async (input: {
       attempts: { mic: 0, mix: 0, system: 0 },
       transcriptionMeta: {},
       sourceSegmentCounts: {
-        mic: coverageSegments.filter(
-          (segment) => segment.speaker === 'Me',
-        ).length,
+        mic: coverageSegments.filter((segment) => segment.speaker === 'Me')
+          .length,
         mix: 0,
-        system: coverageSegments.filter(
-          (segment) => segment.speaker === 'Them',
-        ).length,
+        system: coverageSegments.filter((segment) => segment.speaker === 'Them')
+          .length,
       },
     };
   }
