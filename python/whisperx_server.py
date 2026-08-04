@@ -41,7 +41,7 @@ app = FastAPI(title="Pluto WhisperX Server", lifespan=lifespan)
 # Global state
 model = None
 diarize_model = None
-model_lock = threading.Lock()
+model_lock = threading.RLock()
 # Force CPU for PyTorch 2.0.1 compatibility (MPS not fully supported by WhisperX with this version)
 model_config = {
     "device": "cpu",
@@ -207,6 +207,13 @@ def attribution_aligned_energy(request: AlignedEnergyRequest):
 
 @app.post("/transcribe")
 def transcribe(request: TranscribeRequest):
+    # WhisperX/faster-whisper mutate shared tokenizer and alignment state.
+    # FastAPI runs synchronous handlers in a thread pool, so serialize the
+    # complete request rather than protecting model loading alone.
+    with model_lock:
+        return _transcribe_locked(request)
+
+def _transcribe_locked(request: TranscribeRequest):
     global model, diarize_model
 
     request_conf = {}
