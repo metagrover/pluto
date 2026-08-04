@@ -16,12 +16,13 @@ export const meetingProcessingFingerprint = (
 export const selectNextMeetingForProcessing = (
   meetings: Array<Partial<Meeting>>,
   attemptedFingerprints: ReadonlySet<string>,
-): Partial<Meeting> | null =>
-  meetings.find(
-    (meeting) =>
-      shouldAutoProcessMeetingAnalysis(meeting) &&
-      !attemptedFingerprints.has(meetingProcessingFingerprint(meeting)),
-  ) ?? null;
+): Partial<Meeting> | null => {
+  const head = meetings.find(shouldAutoProcessMeetingAnalysis) ?? null;
+  if (!head || attemptedFingerprints.has(meetingProcessingFingerprint(head))) {
+    return null;
+  }
+  return head;
+};
 
 export const rememberMeetingProcessingOutcome = (
   attemptedFingerprints: Set<string>,
