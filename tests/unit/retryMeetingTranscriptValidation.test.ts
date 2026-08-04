@@ -215,6 +215,47 @@ describe('retryMeetingTranscriptValidation', () => {
     );
   });
 
+  it('resumes at knowledge synthesis when analysis and MID are already durable', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      transcript_status: 'validated',
+      transcript_validated_at: '2026-08-04T00:00:00.000Z',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [{ speaker: 'Me', text: 'Synthetic statement.' }],
+      }),
+      analysis_json: JSON.stringify({ analysis_schema_version: 3 }),
+      mid_json: JSON.stringify({ schema_version: 1 }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'REFRESH_KNOWLEDGE_FOR_MEETING_NOW') {
+        return { requested: 1, completed: 1 };
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    expect(
+      await retryMeetingTranscriptValidation('synthetic-id', invoke),
+    ).toEqual({ status: 'validated' });
+    expect(invoke).not.toHaveBeenCalledWith(
+      'EXTRACT_AND_PROCESS_ENTITIES',
+      expect.anything(),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_ANALYSIS_V2',
+      expect.anything(),
+    );
+    expect(
+      JSON.parse(String(current.downstream_processing_json)),
+    ).toMatchObject({ state: 'complete' });
+  });
+
   it('processes a newly validated meeting without transcribing it a second time', async () => {
     let current: Record<string, unknown> = {
       ...meeting,

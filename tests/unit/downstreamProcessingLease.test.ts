@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDownstreamProcessingLease,
   readDownstreamProcessingLease,
+  selectDownstreamResumeStage,
 } from '../../src/services/downstreamProcessingLease';
 
 describe('downstream processing lease', () => {
@@ -15,6 +16,16 @@ describe('downstream processing lease', () => {
 
     expect(readDownstreamProcessingLease(JSON.stringify(lease))).toEqual(lease);
     expect(Date.parse(lease.deadlineAt)).toBeGreaterThan(1_000);
+  });
+
+  it('resumes from durable analysis and MID evidence', () => {
+    expect(selectDownstreamResumeStage({})).toBe('analysis');
+    expect(selectDownstreamResumeStage({ analysis_json: '{}' })).toBe(
+      'knowledge_extraction',
+    );
+    expect(
+      selectDownstreamResumeStage({ analysis_json: '{}', mid_json: '{}' }),
+    ).toBe('knowledge_synthesis');
   });
 
   it('rejects incomplete processing records as leases', () => {
