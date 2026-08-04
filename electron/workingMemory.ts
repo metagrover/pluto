@@ -98,9 +98,7 @@ const buildWorkingMemorySnapshot = ({
       added_count: structured.change_summary.added_count,
       removed_count: structured.change_summary.removed_count,
       updated_count: structured.change_summary.updated_count,
-      notable_changes: Array.isArray(
-        structured.change_summary.notable_changes,
-      )
+      notable_changes: Array.isArray(structured.change_summary.notable_changes)
         ? structured.change_summary.notable_changes.filter(
             (value): value is string => typeof value === 'string',
           )

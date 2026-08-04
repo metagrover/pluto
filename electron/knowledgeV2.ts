@@ -867,8 +867,10 @@ export const repairKnowledgeV2Document = (
   const rawChangeSummary = isRecord(
     (doc as unknown as Record<string, unknown>).change_summary,
   )
-    ? ((doc as unknown as Record<string, unknown>)
-        .change_summary as Record<string, unknown>)
+    ? ((doc as unknown as Record<string, unknown>).change_summary as Record<
+        string,
+        unknown
+      >)
     : {};
   const normalizedCount = (value: unknown): number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0
