@@ -8,7 +8,12 @@ import type {
   KnowledgeProjectHealthCard,
   KnowledgeWorkspacePayload,
 } from '../../src/api/knowledgeWorkspace';
-import { Dashboard } from '../../src/components/features/Dashboard';
+import {
+  CurrentReadClaimView,
+  Dashboard,
+  isCurrentReadClaimClipped,
+  reduceCurrentReadClaimState,
+} from '../../src/components/features/Dashboard';
 import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
 import type { Meeting } from '../../src/types';
 
@@ -137,6 +142,111 @@ const makeWorkspace = (
 });
 
 describe('Dashboard', () => {
+  it('detects current-read overflow from measured geometry', () => {
+    expect(
+      isCurrentReadClaimClipped({ scrollHeight: 91, clientHeight: 90 }),
+    ).toBe(false);
+    expect(
+      isCurrentReadClaimClipped({ scrollHeight: 140, clientHeight: 90 }),
+    ).toBe(true);
+  });
+
+  it('renders clipped current-read disclosure accessibly in collapsed and expanded states', () => {
+    const claim = '<exact> claim & unchanged';
+    const collapsed = renderToStaticMarkup(
+      <CurrentReadClaimView
+        claim={claim}
+        expanded={false}
+        isClipped={true}
+        onToggle={vi.fn()}
+      />,
+    );
+    const expanded = renderToStaticMarkup(
+      <CurrentReadClaimView
+        claim={claim}
+        expanded={true}
+        isClipped={true}
+        onToggle={vi.fn()}
+      />,
+    );
+
+    expect(collapsed).toContain('&lt;exact&gt; claim &amp; unchanged');
+    expect(collapsed).toContain('line-clamp-3');
+    expect(collapsed).toContain('Show full current read');
+    expect(collapsed).toContain('aria-expanded="false"');
+    expect(collapsed).toContain('aria-controls="dashboard-current-read-claim"');
+    expect(expanded).toContain('&lt;exact&gt; claim &amp; unchanged');
+    expect(expanded).not.toContain('line-clamp-3');
+    expect(expanded).toContain('Collapse current read');
+    expect(expanded).toContain('aria-expanded="true"');
+    expect(expanded).toContain('aria-controls="dashboard-current-read-claim"');
+    expect(collapsed).toContain('id="dashboard-current-read-disclosure"');
+    expect(expanded).toContain('id="dashboard-current-read-disclosure"');
+  });
+
+  it('toggles expansion and resets it when the claim identity changes', () => {
+    const initial = {
+      claimIdentity: 'claim one',
+      expanded: false,
+      isClipped: true,
+    };
+    const expanded = reduceCurrentReadClaimState(initial, { type: 'toggle' });
+    expect(expanded.expanded).toBe(true);
+
+    const reset = reduceCurrentReadClaimState(expanded, {
+      type: 'claim-changed',
+      claimIdentity: 'claim two',
+    });
+    expect(reset).toEqual({
+      claimIdentity: 'claim two',
+      expanded: false,
+      isClipped: false,
+    });
+  });
+
+  it('renders the exact current read as safely wrapping text in a stable collapsed region', () => {
+    const exactClaim = `<review>${'unbroken'.repeat(30)}</review> & keep this exact`;
+    const doc = makeDoc();
+    const structured = JSON.parse(doc.structured_json ?? '{}');
+    structured.current_read.headline = exactClaim;
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: makeWorkspace({
+        docs: [makeDoc({ structured_json: JSON.stringify(structured) })],
+      }),
+      graphStats: null,
+    });
+
+    const markup = renderToStaticMarkup(
+      <Dashboard
+        model={model}
+        loading={false}
+        isRecording={false}
+        setSelectedMeetingId={vi.fn()}
+        setActiveTab={vi.fn()}
+        setAskPlutoVisible={vi.fn()}
+        updatingTaskIds={new Set()}
+        actionError={null}
+        handleCompleteTask={vi.fn(async () => {})}
+        handleUpdateAttentionStatus={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(markup).toContain('id="dashboard-current-read-claim"');
+    expect(markup).toContain('line-clamp-3');
+    expect(markup).toContain('break-words');
+    expect(markup).toContain('text-[26px]');
+    expect(markup).toContain('&lt;review&gt;unbrokenunbrokenunbrokenunbroken');
+    expect(markup).toContain('&lt;/review&gt; &amp; keep this exact');
+    expect(markup).not.toContain('Show full current read');
+    expect(markup).not.toContain('Collapse current read');
+  });
+
   it('renders one living memory brief with evidence and a deliberately small attention lane', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
