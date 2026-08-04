@@ -18,10 +18,7 @@ export const selectNextMeetingForProcessing = (
   attemptedFingerprints: ReadonlySet<string>,
 ): Partial<Meeting> | null => {
   const head = meetings.find(shouldAutoProcessMeetingAnalysis) ?? null;
-  if (
-    !head ||
-    attemptedFingerprints.has(meetingProcessingFingerprint(head))
-  ) {
+  if (!head || attemptedFingerprints.has(meetingProcessingFingerprint(head))) {
     return null;
   }
   return head;
