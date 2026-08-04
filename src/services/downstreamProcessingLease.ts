@@ -59,4 +59,9 @@ export const readDownstreamProcessingLease = (
 export const advanceDownstreamProcessingLease = (
   lease: DownstreamProcessingLease,
   stage: DownstreamProcessingStage,
-): DownstreamProcessingLease => ({ ...lease, stage });
+  now = Date.now(),
+): DownstreamProcessingLease => ({
+  ...lease,
+  deadlineAt: new Date(now + DOWNSTREAM_LEASE_MS).toISOString(),
+  stage,
+});

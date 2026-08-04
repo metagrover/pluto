@@ -360,6 +360,24 @@ export const retryMeetingTranscriptValidation = async (
           : null,
         awaitKnowledgeSynthesis: true,
       });
+      const extractionComplete = (await invoke(
+        'GET_MEETING',
+        meetingId,
+      )) as Meeting;
+      const synthesisClaimed = await invoke(
+        'SAVE_MEETING',
+        {
+          ...extractionComplete,
+          downstream_processing_json: JSON.stringify(
+            advanceDownstreamProcessingLease(
+              downstreamLease,
+              'knowledge_synthesis',
+            ),
+          ),
+        },
+        { expectedDownstreamRunId: downstreamLease.runId },
+      );
+      if (synthesisClaimed === false) return { status: 'superseded' };
       const knowledgeResult = (await invoke(
         'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
         String(meeting.id),
@@ -886,6 +904,24 @@ export const retryMeetingTranscriptValidation = async (
       awaitKnowledgeSynthesis: true,
     });
     downstreamStage = 'knowledge_synthesis';
+    const extractionComplete = (await invoke(
+      'GET_MEETING',
+      meetingId,
+    )) as Meeting;
+    const synthesisClaimed = await invoke(
+      'SAVE_MEETING',
+      {
+        ...extractionComplete,
+        downstream_processing_json: JSON.stringify(
+          advanceDownstreamProcessingLease(
+            downstreamLease,
+            'knowledge_synthesis',
+          ),
+        ),
+      },
+      { expectedDownstreamRunId: downstreamRunId },
+    );
+    if (synthesisClaimed === false) return { status: 'superseded' };
     const knowledgeResult = (await invoke(
       'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
       String(meeting.id),
