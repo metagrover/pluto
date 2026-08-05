@@ -150,6 +150,37 @@ describe('UnifiedLLMProvider', () => {
     expect(Number(options.num_ctx)).toBeGreaterThanOrEqual(8192);
   });
 
+  it('waits for the local generation slot before starting another Ollama timeout', async () => {
+    let releaseFirst: ((response: Response) => void) | undefined;
+    const firstResponse = new Promise<Response>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let generationCalls = 0;
+    const fetchMock = installFetchMock((_url, _init) => {
+      generationCalls += 1;
+      return generationCalls === 1
+        ? firstResponse
+        : jsonResponse({ response: validAnalysisMarkdown });
+    });
+    const firstProvider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    const secondProvider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+
+    const first = firstProvider.synthesizeKnowledgeDocument('knowledge');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = secondProvider.generateUserAnalysisMarkdown('analysis');
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    releaseFirst?.(jsonResponse({ response: '{}' }));
+    await expect(first).resolves.toBe('{}');
+    await expect(second).resolves.toBe(validAnalysisMarkdown);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('prefers phi4-mini variant when auto-detecting ollama model', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {

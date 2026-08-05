@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { createSerializedTaskGate } from '../serializedTaskGate';
 import {
   analysisDocumentToMarkdown,
   fallbackAnalysisDocument,
@@ -45,6 +46,11 @@ const OLLAMA_TIMEOUT_MS = 120_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v4';
+
+// The default local Ollama runtime has one generation slot. Queue every
+// generation at the provider boundary so request timeouts measure model work,
+// not time spent waiting behind another analysis or knowledge request.
+const runWithOllamaGenerationGate = createSerializedTaskGate<symbol, string>();
 
 type LLMTask =
   | 'summary'
@@ -932,7 +938,9 @@ export class UnifiedLLMProvider implements LLMProvider {
       case 'gemini':
         return this.generateWithGemini(options);
       case 'ollama':
-        return this.generateWithOllama(options);
+        return runWithOllamaGenerationGate(Symbol(options.task), async () =>
+          this.generateWithOllama(options),
+        );
       default:
         throw new Error(`Unsupported provider: ${this.providerType}`);
     }
