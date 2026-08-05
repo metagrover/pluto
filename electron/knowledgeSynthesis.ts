@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as db from './db';
 import { syncGlobalKnowledgeAttentionQueue } from './intelligence/attentionSync';
 import {
@@ -8,7 +9,10 @@ import {
   splitKnowledgeSourceChunk,
 } from './knowledgeChunking';
 import {
+  getKnowledgeSynthesisInputConfig,
   knowledgeDocNeedsSynthesis,
+  knowledgeDocSatisfiesMeetingRefresh,
+  parseKnowledgeDocConfig,
   withCurrentKnowledgeSynthesisConfig,
 } from './knowledgeDocConfig';
 import { parseKnowledgeJsonResponse } from './knowledgeJson';
@@ -28,6 +32,7 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
+import { createSerializedTaskGate } from './serializedTaskGate';
 import {
   persistGlobalWorkingMemorySnapshot,
   persistPersonContextWorkingMemorySnapshot,
@@ -146,19 +151,26 @@ type QueueState = {
 const queueByDocId = new Map<string, QueueState>();
 let queuedSynthesisPaused = false;
 
-// Global serial gate: ensures only ONE doc synthesis runs through Ollama at a
-// time. Ollama is single-threaded; concurrent requests queue inside it and the
-// later ones time out before they are processed.
-let globalSynthesisChain: Promise<void> = Promise.resolve();
+// Different documents run serially because local Ollama is capacity-bound.
+// Entity summaries use the same gate, so every local knowledge request respects
+// the model's single generation slot. Matching requests share one result.
+type GlobalSynthesisResult = db.KnowledgeDoc | EntitySummary | undefined;
+const runWithGlobalSynthesisGate = createSerializedTaskGate<
+  string,
+  GlobalSynthesisResult
+>();
 
-const runWithGlobalSynthesisGate = (fn: () => Promise<void>): Promise<void> => {
-  globalSynthesisChain = globalSynthesisChain
-    .then(() => fn())
-    .catch(() => {
-      // Errors are handled inside fn(); swallow here to keep the chain alive.
-    });
-  return globalSynthesisChain;
-};
+const runKnowledgeDocWithGlobalSynthesisGate = (
+  key: string,
+  task: () => Promise<db.KnowledgeDoc | undefined>,
+): Promise<db.KnowledgeDoc | undefined> =>
+  runWithGlobalSynthesisGate(key, task) as Promise<db.KnowledgeDoc | undefined>;
+
+const runEntitySummaryWithGlobalSynthesisGate = (
+  key: string,
+  task: () => Promise<EntitySummary>,
+): Promise<EntitySummary> =>
+  runWithGlobalSynthesisGate(key, task) as Promise<EntitySummary>;
 
 const normalizeText = (value: string): string =>
   value.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -1545,12 +1557,46 @@ const buildSourceMeetings = (doc: db.KnowledgeDoc): SynthSourceMeeting[] => {
   }));
 };
 
-const synthesizeKnowledgeDocNowInternal = async (
+type KnowledgeSynthesisRequest = {
+  key: string;
+  inputHash: string;
+  doc: db.KnowledgeDoc;
+  corrections: ReturnType<typeof db.getKnowledgeCorrections>;
+  sourceMeetings: SynthSourceMeeting[];
+};
+
+const buildKnowledgeSynthesisRequest = (
   docId: string,
-): Promise<db.KnowledgeDoc | undefined> => {
+): KnowledgeSynthesisRequest | null => {
   const doc = db.getKnowledgeDoc(docId);
-  if (!doc) return undefined;
-  const knowledgeCorrections = db.getKnowledgeCorrections(doc.id);
+  if (!doc) return null;
+  const corrections = db.getKnowledgeCorrections(docId);
+  const sourceMeetings = buildSourceMeetings(doc);
+  const inputHash = createHash('sha256')
+    .update(
+      JSON.stringify({
+        config: getKnowledgeSynthesisInputConfig(doc.config),
+        corrections,
+        sourceMeetings,
+      }),
+    )
+    .digest('hex');
+  return {
+    key: `${docId}:${inputHash}`,
+    inputHash,
+    doc,
+    corrections,
+    sourceMeetings,
+  };
+};
+
+const synthesizeKnowledgeDocNowInternal = async (
+  request: KnowledgeSynthesisRequest,
+): Promise<db.KnowledgeDoc | undefined> => {
+  const currentDoc = db.getKnowledgeDoc(request.doc.id);
+  if (!currentDoc) return undefined;
+  const doc = request.doc;
+  const knowledgeCorrections = request.corrections;
   const applyCorrections = (structured: KnowledgeCompiledDocument) =>
     isKnowledgeV2Document(structured)
       ? applyKnowledgeCorrectionsToDocument(structured, knowledgeCorrections)
@@ -1564,7 +1610,7 @@ const synthesizeKnowledgeDocNowInternal = async (
     status: 'synthesizing',
   });
 
-  const sourceMeetings = buildSourceMeetings(doc);
+  const sourceMeetings = request.sourceMeetings;
   const sourceMeetingIds = sourceMeetings.map((meeting) => meeting.id);
 
   if (sourceMeetings.length === 0) {
@@ -1605,7 +1651,10 @@ const synthesizeKnowledgeDocNowInternal = async (
       title: doc.title,
       structured_json: JSON.stringify(emptyDoc),
       rendered_content: rendered,
-      config: withCurrentKnowledgeSynthesisConfig(doc.config),
+      config: withCurrentKnowledgeSynthesisConfig(
+        doc.config,
+        request.inputHash,
+      ),
       status: 'up_to_date',
       last_synthesized_at: new Date().toISOString(),
       last_source_cursor: null,
@@ -1717,7 +1766,10 @@ const synthesizeKnowledgeDocNowInternal = async (
       title: doc.title,
       structured_json: JSON.stringify(correctedStructured),
       rendered_content: rendered,
-      config: withCurrentKnowledgeSynthesisConfig(doc.config),
+      config: withCurrentKnowledgeSynthesisConfig(
+        doc.config,
+        request.inputHash,
+      ),
       status: 'up_to_date',
       last_synthesized_at: new Date().toISOString(),
       last_source_cursor: latestSource
@@ -1775,16 +1827,22 @@ const runQueuedSynthesis = (docId: string): void => {
   state.inFlight = true;
   state.pending = false;
 
-  void runWithGlobalSynthesisGate(async () => {
-    try {
-      await synthesizeKnowledgeDocNowInternal(docId);
-    } finally {
-      state.inFlight = false;
-      if (state.pending) {
-        queueKnowledgeDocRefresh(docId, 750);
-      }
+  const request = buildKnowledgeSynthesisRequest(docId);
+  if (!request) {
+    state.inFlight = false;
+    return;
+  }
+  const synthesis = runKnowledgeDocWithGlobalSynthesisGate(
+    request.key,
+    async () => synthesizeKnowledgeDocNowInternal(request),
+  );
+  const settleQueueState = () => {
+    state.inFlight = false;
+    if (state.pending) {
+      queueKnowledgeDocRefresh(docId, 750);
     }
-  });
+  };
+  void synthesis.then(settleQueueState, settleQueueState);
 };
 
 export const queueKnowledgeDocRefresh = (
@@ -1820,7 +1878,11 @@ export const setKnowledgeDocSynthesisPaused = (paused: boolean): void => {
 export const refreshKnowledgeDocNow = async (
   docId: string,
 ): Promise<db.KnowledgeDoc | undefined> => {
-  return synthesizeKnowledgeDocNowInternal(docId);
+  const request = buildKnowledgeSynthesisRequest(docId);
+  if (!request) return undefined;
+  return runKnowledgeDocWithGlobalSynthesisGate(request.key, async () =>
+    synthesizeKnowledgeDocNowInternal(request),
+  );
 };
 
 export const synthesizeEntitySummary = async (
@@ -1854,36 +1916,49 @@ export const synthesizeEntitySummary = async (
       evidence: m.context || '',
     }));
 
-  const settings = await getAllSettings(db);
-  const provider = await getProvider(settings);
+  const inputHash = createHash('sha256')
+    .update(
+      JSON.stringify({
+        entityName: entity.name,
+        entityType: entity.type,
+        sourceMeetings,
+      }),
+    )
+    .digest('hex');
+  return runEntitySummaryWithGlobalSynthesisGate(
+    `entity-summary:${entityId}:${inputHash}`,
+    async () => {
+      const settings = await getAllSettings(db);
+      const provider = await getProvider(settings);
+      const prompt = getEntitySummaryPrompt({
+        entityName: entity.name,
+        entityType: entity.type,
+        sources: sourceMeetings,
+      });
 
-  const prompt = getEntitySummaryPrompt({
-    entityName: entity.name,
-    entityType: entity.type,
-    sources: sourceMeetings,
-  });
-
-  const raw = await provider.synthesizeKnowledgeDocument(prompt); // Reusing the same provider method
-  try {
-    const parsed = parseKnowledgeJsonResponse(raw) as {
-      sentences: EntitySummarySentence[];
-    };
-    return {
-      sentences: parsed.sentences || [],
-      isInitialExtraction: false,
-    };
-  } catch (err) {
-    console.error('[KnowledgeDoc] Entity summary parse failed:', err);
-    return {
-      sentences: [
-        {
-          text: `Synthesis failed for **${entity.name}**. Please try again.`,
-          source_meeting_ids: [],
-        },
-      ],
-      isInitialExtraction: false,
-    };
-  }
+      const raw = await provider.synthesizeKnowledgeDocument(prompt);
+      try {
+        const parsed = parseKnowledgeJsonResponse(raw) as {
+          sentences: EntitySummarySentence[];
+        };
+        return {
+          sentences: parsed.sentences || [],
+          isInitialExtraction: false,
+        };
+      } catch (err) {
+        console.error('[KnowledgeDoc] Entity summary parse failed:', err);
+        return {
+          sentences: [
+            {
+              text: `Synthesis failed for **${entity.name}**. Please try again.`,
+              source_meeting_ids: [],
+            },
+          ],
+          isInitialExtraction: false,
+        };
+      }
+    },
+  );
 };
 
 const ensureDocsAndCollectActive = (): db.KnowledgeDoc[] => {
@@ -1911,7 +1986,15 @@ export const initializeKnowledgeDocs = async (): Promise<void> => {
   const docs = ensureDocsAndCollectActive();
   // Skip docs that are already synthesized with the current synthesis
   // mechanics. Older up-to-date docs are intentionally refreshed once.
-  const needsWork = docs.filter(knowledgeDocNeedsSynthesis);
+  const needsWork = docs.filter((doc) => {
+    if (knowledgeDocNeedsSynthesis(doc)) return true;
+    const request = buildKnowledgeSynthesisRequest(doc.id);
+    return (
+      !request ||
+      parseKnowledgeDocConfig(doc.config).synthesis_input_hash !==
+        request.inputHash
+    );
+  });
   if (needsWork.length === 0) {
     console.log(
       '[KnowledgeDoc] All docs up-to-date, skipping startup synthesis',
@@ -1988,10 +2071,44 @@ export const refreshKnowledgeDocsForMeetingNow = async (
   const docIds = [...getKnowledgeDocIdsForMeeting(meetingId)];
   let completed = 0;
   for (const docId of docIds) {
-    const refreshed = await runWithGlobalSynthesisGate(async () => {
-      return await synthesizeKnowledgeDocNowInternal(docId);
-    });
+    const satisfiesMeetingRefresh = (): boolean => {
+      const doc = db.getKnowledgeDoc(docId);
+      const currentRequest = buildKnowledgeSynthesisRequest(docId);
+      return Boolean(
+        doc &&
+          knowledgeDocSatisfiesMeetingRefresh(doc, {
+            meetingIsCandidate: buildSourceMeetings(doc).some(
+              (meeting) => meeting.id === meetingId,
+            ),
+            meetingIsPersistedSource: db
+              .getKnowledgeDocSources(docId)
+              .some((source) => source.meeting_id === meetingId),
+            currentSynthesisInputHash: currentRequest?.inputHash ?? null,
+          }),
+      );
+    };
+    if (satisfiesMeetingRefresh()) {
+      completed += 1;
+      continue;
+    }
+    const request = buildKnowledgeSynthesisRequest(docId);
+    if (!request) throw new Error('knowledge_document_refresh_failed');
+    let refreshed = await runKnowledgeDocWithGlobalSynthesisGate(
+      request.key,
+      async () => synthesizeKnowledgeDocNowInternal(request),
+    );
     if (!refreshed) throw new Error('knowledge_document_refresh_failed');
+    if (!satisfiesMeetingRefresh()) {
+      const retryRequest = buildKnowledgeSynthesisRequest(docId);
+      if (!retryRequest) throw new Error('knowledge_document_refresh_failed');
+      refreshed = await runKnowledgeDocWithGlobalSynthesisGate(
+        retryRequest.key,
+        async () => synthesizeKnowledgeDocNowInternal(retryRequest),
+      );
+      if (!refreshed || !satisfiesMeetingRefresh()) {
+        throw new Error('knowledge_document_refresh_incomplete');
+      }
+    }
     completed += 1;
   }
   return { requested: docIds.length, completed };

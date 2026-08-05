@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  forgetExpiredMeetingProcessingAttempts,
   meetingProcessingFingerprint,
+  nextMeetingProcessingWakeDelay,
   rememberMeetingProcessingOutcome,
   selectNextMeetingForProcessing,
 } from '../../src/services/postMeetingProcessingCoordinator';
@@ -100,5 +102,50 @@ describe('post-meeting processing coordinator', () => {
     expect(
       selectNextMeetingForProcessing([captureGap, complete], new Set()),
     ).toBeNull();
+  });
+
+  it('schedules a refresh when a durable processing lease expires', () => {
+    const now = Date.parse('2026-08-04T00:00:00.000Z');
+    const meeting = {
+      ...incomplete('processing'),
+      downstream_processing_json: JSON.stringify({
+        schemaVersion: 1,
+        state: 'processing',
+        transcriptValidatedAt: '2026-08-03T23:59:00.000Z',
+        runId: 'run',
+        startedAt: '2026-08-03T23:59:00.000Z',
+        deadlineAt: new Date(now + 1_000).toISOString(),
+        stage: 'knowledge_synthesis',
+      }),
+    };
+
+    expect(nextMeetingProcessingWakeDelay([meeting], now)).toBe(1_050);
+    expect(
+      selectNextMeetingForProcessing([meeting], new Set(), now),
+    ).toBeNull();
+    expect(
+      selectNextMeetingForProcessing([meeting], new Set(), now + 2_000)?.id,
+    ).toBe('processing');
+    expect(nextMeetingProcessingWakeDelay([meeting], now + 2_000)).toBe(50);
+    expect(
+      nextMeetingProcessingWakeDelay(
+        [meeting],
+        now,
+        new Set([meetingProcessingFingerprint(meeting)]),
+      ),
+    ).toBe(1_050);
+    expect(
+      nextMeetingProcessingWakeDelay(
+        [meeting],
+        now + 2_000,
+        new Set([meetingProcessingFingerprint(meeting)]),
+      ),
+    ).toBeNull();
+
+    const attempted = new Set([meetingProcessingFingerprint(meeting)]);
+    forgetExpiredMeetingProcessingAttempts([meeting], attempted, now + 2_000);
+    expect(
+      selectNextMeetingForProcessing([meeting], attempted, now + 2_000)?.id,
+    ).toBe('processing');
   });
 });
