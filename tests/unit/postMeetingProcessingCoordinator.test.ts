@@ -47,6 +47,28 @@ describe('post-meeting processing coordinator', () => {
     expect(selectNextMeetingForProcessing([head, next], attempted)).toBeNull();
   });
 
+  it('does not poll a later expired lease while an attempted head blocks the queue', () => {
+    const now = Date.parse('2026-08-04T00:00:00.000Z');
+    const head = incomplete('head');
+    const later = {
+      ...incomplete('later'),
+      downstream_processing_json: JSON.stringify({
+        schemaVersion: 1,
+        state: 'processing',
+        transcriptValidatedAt: '2026-08-03T23:59:00.000Z',
+        runId: 'later-run',
+        startedAt: '2026-08-03T23:59:00.000Z',
+        deadlineAt: new Date(now - 1_000).toISOString(),
+        stage: 'analysis',
+      }),
+    };
+    const attempted = new Set([meetingProcessingFingerprint(head)]);
+
+    expect(
+      nextMeetingProcessingWakeDelay([head, later], now, attempted),
+    ).toBeNull();
+  });
+
   it('selects a meeting again after its persisted processing stage changes', () => {
     const meeting = incomplete('meeting');
     const attempted = new Set([meetingProcessingFingerprint(meeting)]);

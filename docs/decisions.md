@@ -15,6 +15,13 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-08-04 - Asynchronous Memory Dreaming and Knowledge Consolidation Engine
+- **Status:** Accepted
+- **Source:** [Issue #586](https://github.com/metagrover/pluto/issues/586), `docs/superpowers/specs/2026-08-04-memory-dreaming-engine-design.md`
+- **Decision:** Pluto introduces an asynchronous, background Dreaming Engine that runs during idle power states (and on manual trigger) to perform incremental entity cluster extraction, temporal reconciliation, entity deduplication, and cross-meeting narrative re-synthesis.
+- **Rationale:** Point-in-time post-meeting extraction accumulates fragmented snippets, conflicting temporal facts, and near-duplicate nodes over time. Offline background dreaming consolidates the knowledge graph while preserving complete user inspectability and single-click reversion via a Dream Log Drawer.
+- **Consequences:** Adds `dirty` tracking on knowledge nodes/docs, adds `knowledge_dreaming_runs` to SQLite, implements Main-process dreaming processing coordinator with battery/activity safeguards, and introduces IPC channels and a React Dream Log Drawer.
+
 ## 2026-07-22 - Delegate routine Builder review, not human authority
 - **Status:** Accepted
 - **Source:** [Issue #546](https://github.com/metagrover/pluto/issues/546), `docs/superpowers/specs/2026-07-22-delegated-design-review-design.md`
