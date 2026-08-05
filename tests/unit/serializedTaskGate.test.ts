@@ -43,4 +43,72 @@ describe('createSerializedTaskGate', () => {
     await expect(succeeded).resolves.toBe(42);
     expect(events).toEqual(['first:start', 'second:start']);
   });
+
+  it('runs higher-priority meeting work before queued maintenance work', async () => {
+    const events: string[] = [];
+    let releaseActive!: () => void;
+    const run = createSerializedTaskGate<string, string>();
+
+    const active = run('active', () => {
+      events.push('active');
+      return new Promise<string>((resolve) => {
+        releaseActive = () => resolve('active');
+      });
+    });
+    const maintenance = run(
+      'maintenance',
+      async () => {
+        events.push('maintenance');
+        return 'maintenance';
+      },
+      0,
+    );
+    const meeting = run(
+      'meeting',
+      async () => {
+        events.push('meeting');
+        return 'meeting';
+      },
+      10,
+    );
+
+    await vi.waitFor(() => expect(events).toEqual(['active']));
+    releaseActive();
+    await Promise.all([active, maintenance, meeting]);
+    expect(events).toEqual(['active', 'meeting', 'maintenance']);
+  });
+
+  it('lets a multi-pass high-priority workflow enqueue its next pass before maintenance', async () => {
+    const events: string[] = [];
+    const run = createSerializedTaskGate<string, string>();
+
+    const firstPass = run(
+      'meeting-pass-1',
+      async () => {
+        events.push('meeting-pass-1');
+        return 'first';
+      },
+      10,
+    );
+    const maintenance = run(
+      'maintenance',
+      async () => {
+        events.push('maintenance');
+        return 'maintenance';
+      },
+      0,
+    );
+    await firstPass;
+    const secondPass = run(
+      'meeting-pass-2',
+      async () => {
+        events.push('meeting-pass-2');
+        return 'second';
+      },
+      10,
+    );
+
+    await Promise.all([maintenance, secondPass]);
+    expect(events).toEqual(['meeting-pass-1', 'meeting-pass-2', 'maintenance']);
+  });
 });

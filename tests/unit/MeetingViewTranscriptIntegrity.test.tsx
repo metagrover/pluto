@@ -30,6 +30,37 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).toBe('');
   });
 
+  it('labels analyzed capture gaps as partial instead of a retry error', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          causes: [{ code: 'capture_gap_detected', sourceScope: 'mic' }],
+          evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+          recovery: {
+            source: 'capture_journal',
+            gapDetected: true,
+            sourceScope: 'mic',
+            acknowledgedChunkCount: 4,
+            recoveredChunkCount: 3,
+          },
+        })}
+        transcriptJson={JSON.stringify({
+          lifecycleStatus: 'needs_attention',
+          segments: [{ speaker: 'Me', text: 'Synthetic' }],
+        })}
+        hasExistingAnalysis
+      />,
+    );
+
+    expect(markup).toContain('Partial transcript');
+    expect(markup).toContain('Analysis uses the available transcript');
+    expect(markup).not.toContain('Transcript needs attention');
+    expect(markup).not.toContain('Retry transcript validation');
+  });
+
   it('shows recovered recordings without claiming speech loss', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel

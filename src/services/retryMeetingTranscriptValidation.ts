@@ -19,6 +19,8 @@ import {
 import {
   advanceDownstreamProcessingLease,
   buildDownstreamProcessingLease,
+  buildPartialCaptureGapProcessingLease,
+  completeDownstreamProcessing,
   selectDownstreamResumeStage,
 } from './downstreamProcessingLease.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
@@ -108,7 +110,13 @@ export const shouldAutoProcessMeetingAnalysis = (
     const hasCaptureGap = integrity.causes?.some(
       (cause) => cause.code === 'capture_gap_detected',
     );
-    return !hasCaptureGap || genericTitleRepairNeeded;
+    const partialCaptureGapEligible =
+      hasTranscriptText(meeting.transcript_json) &&
+      typeof meeting.capture_journal_generation === 'string' &&
+      meeting.capture_journal_generation.length > 0;
+    return (
+      !hasCaptureGap || genericTitleRepairNeeded || partialCaptureGapEligible
+    );
   } catch {
     return false;
   }
@@ -360,7 +368,16 @@ export const retryMeetingTranscriptValidation = async (
       meeting = { ...meeting, title: generatedTitle };
     }
   }
-  if (meeting.transcript_status === 'validated') {
+  const canProcessPartialCaptureGap =
+    meeting.transcript_status === 'needs_attention' &&
+    hasCaptureGap &&
+    hasTranscriptText(meeting.transcript_json) &&
+    typeof meeting.capture_journal_generation === 'string' &&
+    meeting.capture_journal_generation.length > 0;
+  if (
+    meeting.transcript_status === 'validated' ||
+    canProcessPartialCaptureGap
+  ) {
     let downstreamState: unknown = null;
     try {
       downstreamState = JSON.parse(
@@ -374,16 +391,27 @@ export const retryMeetingTranscriptValidation = async (
       meeting.analysis_json &&
       !meetingTitleNeedsGeneration(meeting.title)
     ) {
-      return { status: 'validated' };
+      return {
+        status: canProcessPartialCaptureGap ? 'needs_attention' : 'validated',
+      };
     }
 
     let resumeStage = selectDownstreamResumeStage(meeting);
-    const downstreamLease = buildDownstreamProcessingLease({
-      runId: crypto.randomUUID(),
-      transcriptValidatedAt: meeting.transcript_validated_at || '',
-      now: options.now?.(),
-      stage: resumeStage,
-    });
+    const downstreamLease = canProcessPartialCaptureGap
+      ? await buildPartialCaptureGapProcessingLease({
+          runId: crypto.randomUUID(),
+          transcriptJson: meeting.transcript_json || '',
+          transcriptIntegrityJson: meeting.transcript_integrity_json || '',
+          captureJournalGeneration: meeting.capture_journal_generation || '',
+          now: options.now?.(),
+          stage: resumeStage,
+        })
+      : buildDownstreamProcessingLease({
+          runId: crypto.randomUUID(),
+          transcriptValidatedAt: meeting.transcript_validated_at || '',
+          now: options.now?.(),
+          stage: resumeStage,
+        });
     const claimed = await invoke(
       'CLAIM_DOWNSTREAM_PROCESSING',
       meetingId,
@@ -394,7 +422,6 @@ export const retryMeetingTranscriptValidation = async (
     const transcript = parseSegments(meeting.transcript_json)
       .map((segment) => `${segment.speaker}: ${segment.text}`)
       .join('\n');
-    const validatedAt = meeting.transcript_validated_at || '';
     try {
       let current = meeting;
       if (meetingTitleNeedsGeneration(current.title)) {
@@ -474,11 +501,9 @@ export const retryMeetingTranscriptValidation = async (
         'SAVE_MEETING',
         {
           ...latest,
-          downstream_processing_json: JSON.stringify({
-            schemaVersion: 1,
-            state: 'complete',
-            transcriptValidatedAt: validatedAt,
-          }),
+          downstream_processing_json: JSON.stringify(
+            completeDownstreamProcessing(downstreamLease),
+          ),
         },
         { expectedDownstreamRunId: downstreamLease.runId },
       );
@@ -489,18 +514,30 @@ export const retryMeetingTranscriptValidation = async (
         'SAVE_MEETING',
         {
           ...latest,
-          downstream_processing_json: JSON.stringify({
-            schemaVersion: 1,
-            state: 'failed',
-            transcriptValidatedAt: validatedAt,
-            stage: 'knowledge_synthesis',
-            failure: 'generation_failed',
-          }),
+          downstream_processing_json: JSON.stringify(
+            downstreamLease.schemaVersion === 2
+              ? {
+                  schemaVersion: 2,
+                  state: 'failed',
+                  source: downstreamLease.source,
+                  stage: 'knowledge_synthesis',
+                  failure: 'generation_failed',
+                }
+              : {
+                  schemaVersion: 1,
+                  state: 'failed',
+                  transcriptValidatedAt: downstreamLease.transcriptValidatedAt,
+                  stage: 'knowledge_synthesis',
+                  failure: 'generation_failed',
+                },
+          ),
         },
         { expectedDownstreamRunId: downstreamLease.runId },
       );
     }
-    return { status: 'validated' };
+    return {
+      status: canProcessPartialCaptureGap ? 'needs_attention' : 'validated',
+    };
   }
 
   const runId = crypto.randomUUID();

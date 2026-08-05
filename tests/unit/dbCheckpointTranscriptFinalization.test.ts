@@ -17,6 +17,7 @@ import {
   addMeetingEntity,
   claimMeetingDownstreamProcessing,
   claimMeetingTranscriptValidationRetry,
+  expireInterruptedDownstreamProcessing,
   finalizeCheckpointTranscript,
   getMeeting,
   getMeetingEntities,
@@ -28,6 +29,7 @@ import {
   upsertEntity,
 } from '../../electron/db';
 import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
+import { buildPartialCaptureGapProcessingLease } from '../../src/services/downstreamProcessingLease';
 import { parseMeetingDownstreamProcessing } from '../../src/utils/transcriptTrustState';
 
 afterAll(() => {
@@ -145,6 +147,73 @@ it('allows only one durable downstream owner and fences stale saves', () => {
       first.runId,
     ),
   ).toBe(true);
+});
+
+it('claims partial intelligence only for the exact capture-gap evidence', async () => {
+  const id = 'partial-capture-gap-single-flight';
+  const transcriptJson = JSON.stringify({
+    schemaVersion: 2,
+    lifecycleStatus: 'needs_attention',
+    segments: [{ speaker: 'Me', text: 'Checkpoint transcript' }],
+  });
+  const transcriptIntegrityJson = JSON.stringify({
+    schemaVersion: 2,
+    state: 'needs_attention',
+    causes: [{ code: 'capture_gap_detected', sourceScope: 'mic' }],
+    evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+    recovery: {
+      source: 'capture_journal',
+      gapDetected: true,
+      sourceScope: 'mic',
+      acknowledgedChunkCount: 4,
+      recoveredChunkCount: 3,
+    },
+  });
+  saveMeeting({
+    id,
+    title: 'Partial meeting',
+    transcript_status: 'needs_attention',
+    transcript_json: transcriptJson,
+    transcript_integrity_json: transcriptIntegrityJson,
+    transcript_validated_at: null,
+    finalization_status: 'finalized',
+    capture_journal_generation: journalGeneration,
+  });
+  const lease = await buildPartialCaptureGapProcessingLease({
+    runId: 'partial-owner',
+    transcriptJson,
+    transcriptIntegrityJson,
+    captureJournalGeneration: journalGeneration,
+    now: Date.parse('2026-08-04T00:00:00.000Z'),
+    stage: 'analysis',
+  });
+
+  expect(claimMeetingDownstreamProcessing(id, lease)).toBe(true);
+  expect(expireInterruptedDownstreamProcessing()).toBeGreaterThanOrEqual(1);
+  expect(
+    JSON.parse(String(getMeeting(id)?.downstream_processing_json)),
+  ).toEqual({
+    schemaVersion: 2,
+    state: 'failed',
+    source: lease.source,
+    stage: 'analysis',
+    failure: 'interrupted',
+  });
+  expect(
+    claimMeetingDownstreamProcessing(id, {
+      ...lease,
+      runId: 'replacement-owner',
+      startedAt: '2026-08-04T00:00:01.000Z',
+      deadlineAt: '2026-08-04T00:30:01.000Z',
+    }),
+  ).toBe(true);
+  expect(
+    claimMeetingDownstreamProcessing(id, {
+      ...lease,
+      runId: 'stale-source',
+      source: { ...lease.source, transcriptSha256: '0'.repeat(64) },
+    }),
+  ).toBe(false);
 });
 
 it('preserves the MID across later whole-meeting saves', () => {

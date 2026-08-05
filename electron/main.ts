@@ -1397,7 +1397,7 @@ app.whenReady().then(async () => {
           : null;
       const claimValidationLease = options?.claimValidationLease;
       const transcriptOwnedFieldsOnly = options?.transcriptOwnedFieldsOnly;
-      return saveMeetingWithParticipantSideEffects({
+      const result = saveMeetingWithParticipantSideEffects({
         meeting,
         saveMeeting: () =>
           expectedDownstreamRunId
@@ -1431,15 +1431,31 @@ app.whenReady().then(async () => {
         upsertEntity: db.upsertEntity,
         addMeetingEntity: db.addMeetingEntity,
       });
+      if (expectedDownstreamRunId && result !== false) {
+        let downstreamState: unknown = null;
+        try {
+          downstreamState = JSON.parse(
+            meeting.downstream_processing_json || '{}',
+          ).state;
+        } catch {
+          downstreamState = null;
+        }
+        if (downstreamState !== 'processing') {
+          setKnowledgeDocSynthesisPaused(false);
+        }
+      }
+      return result;
     } catch (e) {
       console.error('[Pluto] SAVE_MEETING failed:', e);
       throw e;
     }
   });
 
-  ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) =>
-    db.claimMeetingDownstreamProcessing(meetingId, lease),
-  );
+  ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) => {
+    const claimed = db.claimMeetingDownstreamProcessing(meetingId, lease);
+    if (claimed) setKnowledgeDocSynthesisPaused(true);
+    return claimed;
+  });
   ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) =>
     db.updateMeetingTitleIfCurrent(input),
   );
@@ -2480,6 +2496,12 @@ app.whenReady().then(async () => {
     console.log('[Pluto] WhisperX will start on first transcription request');
   });
 
+  const interruptedDownstreamRuns = db.expireInterruptedDownstreamProcessing();
+  if (interruptedDownstreamRuns > 0) {
+    console.log(
+      `[Pluto] Released ${interruptedDownstreamRuns} interrupted downstream processing lease(s)`,
+    );
+  }
   initializeKnowledgeDocs().catch((error) => {
     console.error(
       '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
