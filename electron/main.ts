@@ -1440,6 +1440,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) =>
     db.claimMeetingDownstreamProcessing(meetingId, lease),
   );
+  ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) =>
+    db.updateMeetingTitleIfCurrent(input),
+  );
   ipcMain.handle(
     'CLAIM_TRANSCRIPT_VALIDATION_RETRY',
     (_event, meetingId, lease) =>
