@@ -1047,9 +1047,12 @@ export class UnifiedLLMProvider implements LLMProvider {
     jsonMode,
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel();
-    const estimatedTokens = Math.ceil(prompt.length / 3) + 1000; // rough char-to-token heuristic + buffer
+    const outputTokenBudget = task === 'knowledgeDoc' ? 4096 : 2500;
+    const estimatedTokens =
+      Math.ceil(prompt.length / 3) +
+      (task === 'knowledgeDoc' ? outputTokenBudget : 1000);
     const num_ctx = Math.min(
-      8192,
+      task === 'knowledgeDoc' ? 16384 : 8192,
       Math.max(2048, Math.ceil(estimatedTokens / 1024) * 1024),
     );
 
@@ -1059,7 +1062,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       stream: false,
       options: {
         num_ctx,
-        num_predict: 2500, // strict cap to prevent massive infinite loops, but large enough for a legitimate 5-section structured JSON
+        num_predict: outputTokenBudget,
         temperature: this.getTemperature(task),
         num_thread: 8, // Ensure multi-threading is utilized
       },
