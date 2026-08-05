@@ -461,6 +461,82 @@ git commit -m "feat(ui): add DreamLogDrawer component for viewing consolidation 
 
 ---
 
+### Task 5: Memory Decay & Correction Feedback Integrator
+
+**Files:**
+- Create: `electron/dreaming/memoryDecay.ts`
+- Test: `electron/dreaming/__tests__/memoryDecay.test.ts`
+
+- [ ] **Step 1: Write failing test for `memoryDecay`**
+
+Create `electron/dreaming/__tests__/memoryDecay.test.ts`:
+```typescript
+import { describe, it, expect } from 'vitest';
+import { calculateNodeDecay } from '../memoryDecay';
+
+describe('Memory Decay Calculator', () => {
+  it('decays saliency score based on unreferenced days', () => {
+    const initialSaliency = 1.0;
+    const daysUnreferenced = 10;
+    const decayed = calculateNodeDecay(initialSaliency, daysUnreferenced);
+
+    // 1.0 * (0.95 ^ 10) ≈ 0.5987
+    expect(decayed.newSaliency).toBeCloseTo(0.5987, 3);
+    expect(decayed.isArchived).toBe(false);
+  });
+
+  it('marks node as archived when saliency drops below threshold', () => {
+    const initialSaliency = 0.15;
+    const daysUnreferenced = 30;
+    const decayed = calculateNodeDecay(initialSaliency, daysUnreferenced);
+
+    expect(decayed.isArchived).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm run test electron/dreaming/__tests__/memoryDecay.test.ts`
+Expected: FAIL with "Cannot find module '../memoryDecay'"
+
+- [ ] **Step 3: Implement `electron/dreaming/memoryDecay.ts`**
+
+```typescript
+export interface DecayResult {
+  newSaliency: number;
+  isArchived: boolean;
+}
+
+export function calculateNodeDecay(
+  currentSaliency: number,
+  daysUnreferenced: number,
+  archiveThreshold = 0.1
+): DecayResult {
+  const decayFactor = Math.pow(0.95, daysUnreferenced);
+  const newSaliency = currentSaliency * decayFactor;
+  return {
+    newSaliency,
+    isArchived: newSaliency < archiveThreshold,
+  };
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm run test electron/dreaming/__tests__/memoryDecay.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add electron/dreaming/memoryDecay.ts electron/dreaming/__tests__/memoryDecay.test.ts
+git commit -m "feat(dreaming): implement memory decay calculation and archival logic"
+```
+
+---
+
 ## Execution Handoff
 
 Plan complete and saved to `docs/superpowers/plans/2026-08-04-memory-dreaming-engine.md`.
+

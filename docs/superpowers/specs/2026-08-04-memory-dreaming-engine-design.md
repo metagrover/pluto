@@ -218,3 +218,26 @@ export interface KnowledgeDreamingRun {
    - Test `START_DREAMING_RUN` and `REVERT_DREAMING_RUN` IPC flows.
 3. **UI Component Verification:**
    - Verify `DreamLogDrawer` renders diff cards accurately and responds to revert clicks.
+
+---
+
+## 9. Advanced Memory Architecture Principles
+
+To align Pluto's Dreaming Engine with cutting-edge AI memory consolidation literature, four core architectural principles govern its memory lifecycle:
+
+### 9.1 Explicit Episodic → Semantic Memory Distillation
+- **Principle:** Post-meeting extractions store time-bound quotes (*Episodic Memory*). The Dreaming Engine distills these raw snippets into enduring, generalizable core facts (*Semantic Memory*).
+- **Implementation:** During synthesis, `DreamingSynthesisEngine` extracts higher-level entity properties (e.g. participant domain expertise, recurring project constraints) while marking individual transcript quotes as consolidated.
+
+### 9.2 Algorithmic Memory Decay & Pruning
+- **Principle:** Unreferenced, low-saliency nodes decay over time to prevent knowledge graph bloat and context window clutter.
+- **Implementation:** Each dreaming run calculates node decay: `saliency = saliency * (0.95 ^ days_unreferenced)`. Nodes falling below `saliency < 0.1` are moved to an `archived` state, keeping the active Knowledge Graph crisp and high-signal.
+
+### 9.3 Correction Feedback Loops (`knowledge_corrections`)
+- **Principle:** User feedback and rejections steer future background dreaming cycles.
+- **Implementation:** When users edit or reject graph nodes/edges, entries are appended to `knowledge_corrections`. `DreamingSynthesisEngine` loads active corrections as negative constraints during cluster synthesis to prevent repeating discredited inferences.
+
+### 9.4 Dual-Store Provenance & Isolation
+- **Principle:** Raw transcripts and initial post-meeting journals remain immutable **Episodic Evidence**. Dreaming operates exclusively on the derived **Semantic Graph Layer**.
+- **Implementation:** Reverting a dreaming pass via `DreamLogDrawer` resets the semantic graph tables without modifying or invalidating canonical meeting transcripts or raw capture evidence.
+
