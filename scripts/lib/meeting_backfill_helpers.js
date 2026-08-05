@@ -16,6 +16,7 @@ export const parseBackfillArgs = (args) => {
   return {
     dryRun: !write,
     write,
+    titleOnly: args.includes('--title-only'),
     dbPath: readFlagValue(args, '--db'),
     meetingId: readFlagValue(args, '--meeting-id'),
     title: readFlagValue(args, '--title'),

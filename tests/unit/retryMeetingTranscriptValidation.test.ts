@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  meetingTitleNeedsGeneration,
   retryMeetingTranscriptValidation,
   shouldAutoProcessMeetingAnalysis,
 } from '../../src/services/retryMeetingTranscriptValidation';
@@ -54,6 +55,25 @@ const meeting = {
   transcript_status: 'needs_attention',
   transcript_json: JSON.stringify({ segments: [] }),
 };
+
+describe('meetingTitleNeedsGeneration', () => {
+  it.each([
+    'Meeting',
+    'New Meeting',
+    'Meeting (Mic Only)',
+    'Recovered recording',
+    'Untitled Meeting',
+    '  ',
+  ])('recognizes the generic title %j', (title) => {
+    expect(meetingTitleNeedsGeneration(title)).toBe(true);
+  });
+
+  it('preserves a descriptive title', () => {
+    expect(meetingTitleNeedsGeneration('Quarterly Planning Review')).toBe(
+      false,
+    );
+  });
+});
 
 describe('retryMeetingTranscriptValidation', () => {
   beforeEach(() => {
@@ -218,6 +238,7 @@ describe('retryMeetingTranscriptValidation', () => {
   it('resumes at knowledge synthesis when analysis and MID are already durable', async () => {
     let current: Record<string, unknown> = {
       ...meeting,
+      title: 'Synthetic meeting',
       transcript_status: 'validated',
       transcript_validated_at: '2026-08-04T00:00:00.000Z',
       transcript_json: JSON.stringify({
@@ -254,6 +275,46 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(
       JSON.parse(String(current.downstream_processing_json)),
     ).toMatchObject({ state: 'complete' });
+  });
+
+  it('repairs a generic title even when downstream artifacts are complete', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      title: 'Recovered recording',
+      transcript_status: 'validated',
+      transcript_validated_at: '2026-08-04T00:00:00.000Z',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [{ speaker: 'Me', text: 'Synthetic statement.' }],
+      }),
+      analysis_json: JSON.stringify({ analysis_schema_version: 3 }),
+      mid_json: JSON.stringify({ mid_version: 1 }),
+      downstream_processing_json: JSON.stringify({
+        schemaVersion: 1,
+        state: 'complete',
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
+      if (channel === 'GENERATE_TITLE') return 'Synthetic meeting';
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'REFRESH_KNOWLEDGE_FOR_MEETING_NOW') {
+        return { requested: 1, completed: 1 };
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      retryMeetingTranscriptValidation('synthetic-id', invoke),
+    ).resolves.toEqual({ status: 'validated' });
+    expect(current.title).toBe('Synthetic meeting');
+    expect(invoke).toHaveBeenCalledWith('GENERATE_TITLE', {
+      transcript: 'Me: Synthetic statement.',
+    });
   });
 
   it('processes a newly validated meeting without transcribing it a second time', async () => {
@@ -1298,10 +1359,26 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
     ).toBe(true);
   });
 
+  it('repairs a generic title on an otherwise complete validated meeting', () => {
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...meeting,
+        title: 'Recovered recording',
+        transcript_status: 'validated',
+        analysis_json: JSON.stringify({ overview: 'existing' }),
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'complete',
+        }),
+      }),
+    ).toBe(true);
+  });
+
   it('does not replace existing analysis or retry recovery-required meetings', () => {
     expect(
       shouldAutoProcessMeetingAnalysis({
         ...meeting,
+        title: 'Existing analyzed meeting',
         analysis_json: JSON.stringify({ overview: 'existing' }),
       }),
     ).toBe(false);
