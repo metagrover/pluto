@@ -938,8 +938,14 @@ export class UnifiedLLMProvider implements LLMProvider {
       case 'gemini':
         return this.generateWithGemini(options);
       case 'ollama':
-        return runWithOllamaGenerationGate(Symbol(options.task), async () =>
-          this.generateWithOllama(options),
+        return runWithOllamaGenerationGate(
+          Symbol(options.task),
+          async () => this.generateWithOllama(options),
+          options.task === 'knowledgeDoc'
+            ? 0
+            : options.task === 'askPluto'
+              ? 20
+              : 10,
         );
       default:
         throw new Error(`Unsupported provider: ${this.providerType}`);

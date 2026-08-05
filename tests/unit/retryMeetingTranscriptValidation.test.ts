@@ -109,7 +109,7 @@ describe('retryMeetingTranscriptValidation', () => {
     );
   });
 
-  it('repairs a capture-gap title without validating or generating analysis', async () => {
+  it('converges partial capture-gap intelligence without claiming validation', async () => {
     let current: Record<string, unknown> = {
       ...meeting,
       title: 'Recovered recording',
@@ -121,9 +121,17 @@ describe('retryMeetingTranscriptValidation', () => {
       transcript_integrity_json: JSON.stringify({
         schemaVersion: 2,
         state: 'needs_attention',
-        causes: [{ code: 'capture_gap_detected' }],
-        recovery: { gapDetected: true },
+        causes: [{ code: 'capture_gap_detected', sourceScope: 'mic' }],
+        evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+        recovery: {
+          source: 'capture_journal',
+          gapDetected: true,
+          sourceScope: 'mic',
+          acknowledgedChunkCount: 4,
+          recoveredChunkCount: 3,
+        },
       }),
+      capture_journal_generation: 'journal-1',
     };
     const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
       if (channel === 'GET_MEETING') return current;
@@ -134,6 +142,22 @@ describe('retryMeetingTranscriptValidation', () => {
         current = { ...current, title: input.title };
         return 'updated';
       }
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        return {
+          markdown: 'Partial synthetic analysis',
+          analysis: { analysis_schema_version: 3 },
+          signals: {},
+        };
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(args[0] as Record<string, unknown>) };
+        return true;
+      }
+      if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
+      if (channel === 'REFRESH_KNOWLEDGE_FOR_MEETING_NOW') {
+        return { requested: 1, completed: 1 };
+      }
       throw new Error(`Unexpected channel: ${channel}`);
     });
 
@@ -142,15 +166,22 @@ describe('retryMeetingTranscriptValidation', () => {
     ).resolves.toEqual({ status: 'needs_attention' });
     expect(current.title).toBe('Recovered Planning Discussion');
     expect(current.transcript_status).toBe('needs_attention');
-    expect(invoke).not.toHaveBeenCalledWith(
+    expect(invoke).toHaveBeenCalledWith(
       'GENERATE_ANALYSIS_V2',
       expect.anything(),
     );
-    expect(invoke).not.toHaveBeenCalledWith(
+    expect(invoke).toHaveBeenCalledWith(
       'CLAIM_DOWNSTREAM_PROCESSING',
       expect.anything(),
       expect.anything(),
     );
+    expect(
+      JSON.parse(String(current.downstream_processing_json)),
+    ).toMatchObject({
+      schemaVersion: 2,
+      state: 'complete',
+      source: { kind: 'partial_capture_gap' },
+    });
   });
 
   it('generates downstream artifacts exactly once after validation succeeds', async () => {
@@ -1418,7 +1449,7 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
     ).toBe(true);
   });
 
-  it('selects a generic capture-gap title for metadata-only repair', () => {
+  it('selects a capture-gap transcript until partial intelligence completes', () => {
     const captureGap = {
       ...meeting,
       title: 'Recovered recording',
@@ -1431,12 +1462,25 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
         state: 'needs_attention',
         causes: [{ code: 'capture_gap_detected' }],
       }),
+      capture_journal_generation: 'journal-1',
     };
     expect(shouldAutoProcessMeetingAnalysis(captureGap)).toBe(true);
     expect(
       shouldAutoProcessMeetingAnalysis({
         ...captureGap,
         title: 'Recovered Planning Discussion',
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...captureGap,
+        title: 'Recovered Planning Discussion',
+        analysis_json: JSON.stringify({ overview: 'partial' }),
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 2,
+          state: 'complete',
+          source: { kind: 'partial_capture_gap' },
+        }),
       }),
     ).toBe(false);
   });
