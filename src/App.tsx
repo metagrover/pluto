@@ -31,7 +31,9 @@ import type {
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
 import {
+  forgetExpiredMeetingProcessingAttempts,
   meetingProcessingFingerprint,
+  nextMeetingProcessingWakeDelay,
   rememberMeetingProcessingOutcome,
   selectNextMeetingForProcessing,
 } from './services/postMeetingProcessingCoordinator';
@@ -473,16 +475,19 @@ function App() {
     if (!meetingId || transcriptValidationRetrying) return;
     setTranscriptValidationRetrying(true);
     try {
-      await retryMeetingTranscriptValidation(meetingId, (channel, ...args) =>
-        window.ipcRenderer.invoke(channel, ...args),
+      const result = await retryMeetingTranscriptValidation(
+        meetingId,
+        (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
       );
       const refreshedMeetings = await fetchMeetings();
-      rememberMeetingProcessingOutcome(
-        autoAnalysisAttemptsRef.current,
-        refreshedMeetings.find(
-          (meeting) => String(meeting.id) === String(meetingId),
-        ),
-      );
+      if (result.status !== 'superseded') {
+        rememberMeetingProcessingOutcome(
+          autoAnalysisAttemptsRef.current,
+          refreshedMeetings.find(
+            (meeting) => String(meeting.id) === String(meetingId),
+          ),
+        );
+      }
     } catch (error) {
       console.error('[Pluto] Transcript validation retry failed', error);
     } finally {
@@ -522,6 +527,24 @@ function App() {
       meetingProcessingFingerprint(candidate),
     );
     void handleRetryTranscriptValidation(candidate.id);
+  }, [safeMeetings, transcriptValidationRetrying]);
+
+  useEffect(() => {
+    if (transcriptValidationRetrying) return;
+    const delay = nextMeetingProcessingWakeDelay(
+      safeMeetings,
+      Date.now(),
+      autoAnalysisAttemptsRef.current,
+    );
+    if (delay === null) return;
+    const timeout = window.setTimeout(() => {
+      forgetExpiredMeetingProcessingAttempts(
+        safeMeetings,
+        autoAnalysisAttemptsRef.current,
+      );
+      void fetchMeetings();
+    }, delay);
+    return () => window.clearTimeout(timeout);
   }, [safeMeetings, transcriptValidationRetrying]);
 
   const filteredMeetings = safeMeetings.filter(
