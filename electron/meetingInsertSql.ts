@@ -1,5 +1,5 @@
 export const MEETING_INSERT_SQL = `
-  INSERT OR REPLACE INTO meetings (
+  INSERT INTO meetings (
     id, title, meeting_type, started_at, ended_at, duration_seconds, 
     audio_path, transcript_json, user_notes, enhanced_notes, analysis_json, analysis_schema_version,
     analysis_format_pass, analysis_retry_count, analysis_fallback_used, analysis_provider, analysis_model,
@@ -9,4 +9,41 @@ export const MEETING_INSERT_SQL = `
     finalization_status, finalization_error_category, downstream_processing_json, capture_journal_generation,
     mid_json, created_at
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+  ON CONFLICT(id) DO UPDATE SET
+    title = excluded.title,
+    meeting_type = excluded.meeting_type,
+    started_at = excluded.started_at,
+    ended_at = excluded.ended_at,
+    duration_seconds = excluded.duration_seconds,
+    audio_path = excluded.audio_path,
+    transcript_json = excluded.transcript_json,
+    user_notes = excluded.user_notes,
+    enhanced_notes = excluded.enhanced_notes,
+    analysis_json = excluded.analysis_json,
+    analysis_schema_version = excluded.analysis_schema_version,
+    analysis_format_pass = excluded.analysis_format_pass,
+    analysis_retry_count = excluded.analysis_retry_count,
+    analysis_fallback_used = excluded.analysis_fallback_used,
+    analysis_provider = excluded.analysis_provider,
+    analysis_model = excluded.analysis_model,
+    analysis_generation_path = excluded.analysis_generation_path,
+    analysis_prompt_version = excluded.analysis_prompt_version,
+    analysis_generated_at = excluded.analysis_generated_at,
+    analysis_error_categories_json = excluded.analysis_error_categories_json,
+    value_signals_json = excluded.value_signals_json,
+    follow_up_drafts_json = excluded.follow_up_drafts_json,
+    folder_id = excluded.folder_id,
+    is_favorite = excluded.is_favorite,
+    end_reason = excluded.end_reason,
+    user_edits_json = excluded.user_edits_json,
+    transcript_status = excluded.transcript_status,
+    transcript_integrity_json = excluded.transcript_integrity_json,
+    system_audio_path = excluded.system_audio_path,
+    mixed_audio_path = excluded.mixed_audio_path,
+    transcript_validated_at = excluded.transcript_validated_at,
+    finalization_status = excluded.finalization_status,
+    finalization_error_category = excluded.finalization_error_category,
+    downstream_processing_json = excluded.downstream_processing_json,
+    capture_journal_generation = excluded.capture_journal_generation,
+    mid_json = excluded.mid_json
 `;

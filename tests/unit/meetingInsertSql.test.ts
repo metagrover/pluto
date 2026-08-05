@@ -7,7 +7,7 @@ const countMatches = (input: string, pattern: RegExp) =>
 describe('MEETING_INSERT_SQL', () => {
   test('has one placeholder for each inserted meeting column', () => {
     const columnsSection = MEETING_INSERT_SQL.match(
-      /INSERT OR REPLACE INTO meetings \(([\s\S]*?)\)\s*VALUES/i,
+      /INSERT INTO meetings \(([\s\S]*?)\)\s*VALUES/i,
     )?.[1];
     expect(columnsSection).toBeTruthy();
 
@@ -30,5 +30,7 @@ describe('MEETING_INSERT_SQL', () => {
     expect(columns).toContain('capture_journal_generation');
     expect(columns).toContain('mid_json');
     expect(MEETING_INSERT_SQL).toContain('COALESCE(?, CURRENT_TIMESTAMP)');
+    expect(MEETING_INSERT_SQL).not.toMatch(/INSERT OR REPLACE/i);
+    expect(MEETING_INSERT_SQL).toContain('ON CONFLICT(id) DO UPDATE SET');
   });
 });

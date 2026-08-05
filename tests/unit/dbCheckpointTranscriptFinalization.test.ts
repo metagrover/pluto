@@ -14,14 +14,17 @@ vi.mock('electron', () => ({
 }));
 
 import {
+  addMeetingEntity,
   claimMeetingDownstreamProcessing,
   claimMeetingTranscriptValidationRetry,
   finalizeCheckpointTranscript,
   getMeeting,
+  getMeetingEntities,
   getMeetingMid,
   saveMeeting,
   saveMeetingIfDownstreamRunCurrent,
   saveMeetingMid,
+  upsertEntity,
 } from '../../electron/db';
 import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
 import { parseMeetingDownstreamProcessing } from '../../src/utils/transcriptTrustState';
@@ -168,6 +171,26 @@ it('preserves the MID across later whole-meeting saves', () => {
   saveMeeting(getMeeting(id) as Parameters<typeof saveMeeting>[0]);
 
   expect(getMeetingMid(id)).toMatchObject({ meeting_id: id });
+});
+
+it('preserves meeting-owned entity associations across later whole-meeting saves', () => {
+  const id = 'entity-association-survives-save';
+  saveMeeting({ id, title: 'Meeting' });
+  const entity = upsertEntity({
+    id: 'entity-association-survives-save-topic',
+    type: 'topic',
+    name: 'Durable topic',
+  });
+  addMeetingEntity({ meeting_id: id, entity_id: entity.id });
+
+  saveMeeting({
+    ...(getMeeting(id) as Parameters<typeof saveMeeting>[0]),
+    enhanced_notes: 'Analysis is complete.',
+  });
+
+  expect(getMeetingEntities(id)).toEqual([
+    expect.objectContaining({ id: entity.id, type: 'topic' }),
+  ]);
 });
 
 const input = (meetingId: string) => ({

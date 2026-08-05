@@ -33,6 +33,19 @@ import {
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
+const GENERIC_MEETING_TITLES = new Set([
+  '',
+  'meeting',
+  'new meeting',
+  'meeting (mic only)',
+  'recovered recording',
+  'untitled meeting',
+]);
+
+export const meetingTitleNeedsGeneration = (
+  title: string | null | undefined,
+): boolean => GENERIC_MEETING_TITLES.has((title || '').trim().toLowerCase());
+
 export const shouldAutoProcessMeetingAnalysis = (
   meeting: Partial<Meeting> | null | undefined,
 ) => {
@@ -51,7 +64,8 @@ export const shouldAutoProcessMeetingAnalysis = (
     meeting.finalization_status === 'recovery_required' ||
     (Boolean(meeting.analysis_json || meeting.enhanced_notes) &&
       downstreamState !== 'processing' &&
-      downstreamState !== 'failed') ||
+      downstreamState !== 'failed' &&
+      !meetingTitleNeedsGeneration(meeting.title)) ||
     !meeting.transcript_json ||
     !(
       meeting.audio_path ||
@@ -294,7 +308,11 @@ export const retryMeetingTranscriptValidation = async (
     } catch {
       downstreamState = null;
     }
-    if (downstreamState === 'complete' && meeting.analysis_json) {
+    if (
+      downstreamState === 'complete' &&
+      meeting.analysis_json &&
+      !meetingTitleNeedsGeneration(meeting.title)
+    ) {
       return { status: 'validated' };
     }
 
@@ -318,19 +336,19 @@ export const retryMeetingTranscriptValidation = async (
     const validatedAt = meeting.transcript_validated_at || '';
     try {
       let current = meeting;
+      if (meetingTitleNeedsGeneration(current.title)) {
+        const generatedTitle = (await invoke('GENERATE_TITLE', {
+          transcript,
+        })) as string;
+        current = { ...current, title: generatedTitle };
+      }
       if (resumeStage === 'analysis') {
-        const generatedTitle =
-          current.title === 'Meeting'
-            ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
-            : current.title;
         const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
           transcript,
           userNotes: current.user_notes || '',
         })) as { markdown?: string; analysis?: unknown; signals?: unknown };
         current = {
           ...current,
-          title:
-            current.title === meeting.title ? generatedTitle : current.title,
           enhanced_notes: artifacts.markdown || '',
           analysis_json: JSON.stringify(artifacts.analysis ?? null),
           value_signals_json: JSON.stringify(artifacts.signals ?? null),
@@ -857,10 +875,9 @@ export const retryMeetingTranscriptValidation = async (
     | 'knowledge_extraction'
     | 'knowledge_synthesis' = 'analysis';
   try {
-    const generatedTitle =
-      current.title === 'Meeting'
-        ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
-        : current.title;
+    const generatedTitle = meetingTitleNeedsGeneration(current.title)
+      ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
+      : current.title;
     const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
       transcript,
       userNotes: current.user_notes || '',

@@ -11,10 +11,17 @@ describe('meeting intelligence backfill helpers', () => {
     expect(parseBackfillArgs([])).toEqual({
       dryRun: true,
       write: false,
+      titleOnly: false,
       dbPath: null,
       meetingId: null,
       title: null,
     });
+  });
+
+  it('parses title-only repair mode', () => {
+    expect(
+      parseBackfillArgs(['--write', '--title-only', '--meeting-id', 'abc']),
+    ).toMatchObject({ write: true, titleOnly: true, meetingId: 'abc' });
   });
 
   it('parses write mode and meeting id target', () => {

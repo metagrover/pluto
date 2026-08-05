@@ -118,6 +118,7 @@ describe('post-meeting processing coordinator', () => {
     };
     const complete = {
       ...incomplete('complete'),
+      title: 'Completed synthetic meeting',
       transcript_status: 'validated' as const,
       analysis_json: '{}',
     };
