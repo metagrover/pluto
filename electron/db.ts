@@ -1679,6 +1679,28 @@ export const patchStopToValidatedLatency = (input: {
     return result.changes === 1 ? 'updated' : 'conflict';
   })();
 
+export const updateMeetingTitleIfCurrent = (input: {
+  meetingId: string | number;
+  expectedTitle: string;
+  title: string;
+}): ConditionalMeetingUpdateOutcome =>
+  db.transaction(() => {
+    const result = db
+      .prepare('UPDATE meetings SET title = ? WHERE id = ? AND title = ?')
+      .run(input.title, String(input.meetingId), input.expectedTitle);
+    if (result.changes === 1) {
+      const updated = getMeeting(input.meetingId) as
+        | PersistedMeeting
+        | undefined;
+      if (!updated) return 'missing';
+      refreshMeetingFts(updated);
+      return 'updated';
+    }
+    const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+    if (!current) return 'missing';
+    return current.title === input.title ? 'already_current' : 'conflict';
+  })();
+
 export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
   meetingId: string | number;
   expectedTranscriptJson: string;

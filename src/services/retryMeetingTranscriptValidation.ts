@@ -46,6 +46,28 @@ export const meetingTitleNeedsGeneration = (
   title: string | null | undefined,
 ): boolean => GENERIC_MEETING_TITLES.has((title || '').trim().toLowerCase());
 
+const hasTranscriptText = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const segments = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { segments?: unknown[] })?.segments;
+    return (
+      Array.isArray(segments) &&
+      segments.some(
+        (segment) =>
+          Boolean(segment) &&
+          typeof segment === 'object' &&
+          typeof (segment as { text?: unknown }).text === 'string' &&
+          Boolean((segment as { text: string }).text.trim()),
+      )
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const shouldAutoProcessMeetingAnalysis = (
   meeting: Partial<Meeting> | null | undefined,
 ) => {
@@ -57,6 +79,10 @@ export const shouldAutoProcessMeetingAnalysis = (
   } catch {
     downstreamState = null;
   }
+  const genericTitleRepairNeeded =
+    typeof meeting?.title === 'string' &&
+    meetingTitleNeedsGeneration(meeting?.title) &&
+    hasTranscriptText(meeting?.transcript_json);
   if (
     !meeting ||
     (meeting.transcript_status !== 'needs_attention' &&
@@ -79,9 +105,10 @@ export const shouldAutoProcessMeetingAnalysis = (
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       causes?: Array<{ code?: unknown }>;
     };
-    return !integrity.causes?.some(
+    const hasCaptureGap = integrity.causes?.some(
       (cause) => cause.code === 'capture_gap_detected',
     );
+    return !hasCaptureGap || genericTitleRepairNeeded;
   } catch {
     return false;
   }
@@ -297,8 +324,42 @@ export const retryMeetingTranscriptValidation = async (
   invoke: Invoke,
   options: { now?: () => number; validationTimeoutMs?: number } = {},
 ): Promise<{ status: 'validated' | 'needs_attention' | 'superseded' }> => {
-  const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
+  let meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
   if (!meeting) throw new Error('Meeting not found');
+  let hasCaptureGap = false;
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      causes?: Array<{ code?: unknown }>;
+    };
+    hasCaptureGap = Boolean(
+      integrity.causes?.some((cause) => cause.code === 'capture_gap_detected'),
+    );
+  } catch {
+    hasCaptureGap = false;
+  }
+  if (
+    hasCaptureGap &&
+    meetingTitleNeedsGeneration(meeting.title) &&
+    hasTranscriptText(meeting.transcript_json)
+  ) {
+    const transcript = parseSegments(meeting.transcript_json)
+      .map((segment) => `${segment.speaker}: ${segment.text}`)
+      .join('\n');
+    const generatedTitle = (await invoke('GENERATE_TITLE', {
+      transcript,
+    })) as string;
+    if (!meetingTitleNeedsGeneration(generatedTitle)) {
+      const titleOutcome = await invoke('UPDATE_MEETING_TITLE_IF_CURRENT', {
+        meetingId: String(meeting.id),
+        expectedTitle: meeting.title,
+        title: generatedTitle,
+      });
+      if (titleOutcome === 'conflict' || titleOutcome === 'missing') {
+        return { status: 'superseded' };
+      }
+      meeting = { ...meeting, title: generatedTitle };
+    }
+  }
   if (meeting.transcript_status === 'validated') {
     let downstreamState: unknown = null;
     try {

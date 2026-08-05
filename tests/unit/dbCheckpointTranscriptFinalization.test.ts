@@ -24,6 +24,7 @@ import {
   saveMeeting,
   saveMeetingIfDownstreamRunCurrent,
   saveMeetingMid,
+  updateMeetingTitleIfCurrent,
   upsertEntity,
 } from '../../electron/db';
 import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
@@ -191,6 +192,48 @@ it('preserves meeting-owned entity associations across later whole-meeting saves
   expect(getMeetingEntities(id)).toEqual([
     expect.objectContaining({ id: entity.id, type: 'topic' }),
   ]);
+});
+
+it('updates a generic title atomically without changing transcript trust', () => {
+  const id = 'conditional-title-repair';
+  saveMeeting({
+    id,
+    title: 'Recovered recording',
+    transcript_status: 'needs_attention',
+    transcript_json: JSON.stringify({
+      schemaVersion: 2,
+      lifecycleStatus: 'needs_attention',
+      segments: [{ speaker: 'Me', text: 'Checkpoint transcript' }],
+    }),
+    transcript_integrity_json: JSON.stringify({
+      schemaVersion: 2,
+      state: 'needs_attention',
+      causes: [{ code: 'capture_gap_detected', sourceScope: 'mic' }],
+      evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+    }),
+  });
+  const before = getMeeting(id) as Record<string, unknown>;
+
+  expect(
+    updateMeetingTitleIfCurrent({
+      meetingId: id,
+      expectedTitle: 'Recovered recording',
+      title: 'Recovered Planning Discussion',
+    }),
+  ).toBe('updated');
+  expect(getMeeting(id)).toMatchObject({
+    title: 'Recovered Planning Discussion',
+    transcript_status: before.transcript_status,
+    transcript_json: before.transcript_json,
+    transcript_integrity_json: before.transcript_integrity_json,
+  });
+  expect(
+    updateMeetingTitleIfCurrent({
+      meetingId: id,
+      expectedTitle: 'Recovered recording',
+      title: 'Stale overwrite',
+    }),
+  ).toBe('conflict');
 });
 
 const input = (meetingId: string) => ({

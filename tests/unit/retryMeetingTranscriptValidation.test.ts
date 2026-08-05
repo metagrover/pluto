@@ -109,6 +109,50 @@ describe('retryMeetingTranscriptValidation', () => {
     );
   });
 
+  it('repairs a capture-gap title without validating or generating analysis', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      title: 'Recovered recording',
+      transcript_status: 'needs_attention',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'needs_attention',
+        segments: [{ speaker: 'Me', text: 'Synthetic statement.' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [{ code: 'capture_gap_detected' }],
+        recovery: { gapDetected: true },
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'GENERATE_TITLE') return 'Recovered Planning Discussion';
+      if (channel === 'UPDATE_MEETING_TITLE_IF_CURRENT') {
+        const input = args[0] as { expectedTitle: string; title: string };
+        if (current.title !== input.expectedTitle) return 'conflict';
+        current = { ...current, title: input.title };
+        return 'updated';
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      retryMeetingTranscriptValidation('synthetic-id', invoke),
+    ).resolves.toEqual({ status: 'needs_attention' });
+    expect(current.title).toBe('Recovered Planning Discussion');
+    expect(current.transcript_status).toBe('needs_attention');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_ANALYSIS_V2',
+      expect.anything(),
+    );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'CLAIM_DOWNSTREAM_PROCESSING',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('generates downstream artifacts exactly once after validation succeeds', async () => {
     const responsiveness = {
       schemaVersion: 1,
@@ -1372,6 +1416,29 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
         }),
       }),
     ).toBe(true);
+  });
+
+  it('selects a generic capture-gap title for metadata-only repair', () => {
+    const captureGap = {
+      ...meeting,
+      title: 'Recovered recording',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'needs_attention',
+        segments: [{ speaker: 'Me', text: 'Synthetic statement.' }],
+      }),
+      transcript_integrity_json: JSON.stringify({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [{ code: 'capture_gap_detected' }],
+      }),
+    };
+    expect(shouldAutoProcessMeetingAnalysis(captureGap)).toBe(true);
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...captureGap,
+        title: 'Recovered Planning Discussion',
+      }),
+    ).toBe(false);
   });
 
   it('does not replace existing analysis or retry recovery-required meetings', () => {
