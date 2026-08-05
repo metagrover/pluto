@@ -133,6 +133,23 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('reserves enough Ollama context for complete knowledge JSON output', async () => {
+    let options: Record<string, unknown> = {};
+    installFetchMock((_url, init) => {
+      const body = parseRequestBody(init);
+      options = body.options as Record<string, unknown>;
+      return jsonResponse({ response: '{}' });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    await provider.synthesizeKnowledgeDocument('x'.repeat(12_000));
+
+    expect(options.num_predict).toBe(4096);
+    expect(Number(options.num_ctx)).toBeGreaterThanOrEqual(8192);
+  });
+
   it('prefers phi4-mini variant when auto-detecting ollama model', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
