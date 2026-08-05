@@ -62,18 +62,15 @@ export const nextMeetingProcessingWakeDelay = (
   now = Date.now(),
   attemptedFingerprints: ReadonlySet<string> = new Set(),
 ): number | null => {
-  const delays = meetings.flatMap((meeting) => {
-    const lease = readDownstreamProcessingLease(
-      meeting.downstream_processing_json,
-    );
-    const deadline = lease ? Date.parse(lease.deadlineAt) : Number.NaN;
-    if (!Number.isFinite(deadline)) return [];
-    if (deadline > now) {
-      return [deadline - now + PROCESSING_WAKE_GRACE_MS];
-    }
-    return attemptedFingerprints.has(meetingProcessingFingerprint(meeting))
-      ? []
-      : [PROCESSING_WAKE_GRACE_MS];
-  });
-  return delays.length > 0 ? Math.min(...delays) : null;
+  const head = meetings.find(shouldAutoProcessMeetingAnalysis) ?? null;
+  if (!head) return null;
+  const lease = readDownstreamProcessingLease(head.downstream_processing_json);
+  const deadline = lease ? Date.parse(lease.deadlineAt) : Number.NaN;
+  if (!Number.isFinite(deadline)) return null;
+  if (deadline > now) {
+    return deadline - now + PROCESSING_WAKE_GRACE_MS;
+  }
+  return attemptedFingerprints.has(meetingProcessingFingerprint(head))
+    ? null
+    : PROCESSING_WAKE_GRACE_MS;
 };
