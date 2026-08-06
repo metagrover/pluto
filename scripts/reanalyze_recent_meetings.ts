@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { UnifiedLLMProvider } from '../electron/llm/unifiedProvider.ts';
-import { analysisDocumentToMarkdown } from '../electron/llm/analysisDocument.ts';
+import { analysisDocumentV3ToMarkdown } from '../electron/llm/analysisDocumentV3.ts';
 import { mergeAdjacentSpeakerSegments, scrubTranscriptArtifacts } from '../src/utils/transcriptSchema.ts';
 
 const dbPath = path.join(
@@ -113,7 +113,7 @@ async function main() {
       );
       const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
 
-      const enhancedNotes = analysisDocumentToMarkdown(analysisDoc);
+      const enhancedNotes = analysisDocumentV3ToMarkdown(analysisDoc);
       const analysisJsonStr = JSON.stringify(analysisDoc);
       const nowIso = new Date().toISOString();
 
