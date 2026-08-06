@@ -207,168 +207,174 @@ export class UnifiedLLMProvider implements LLMProvider {
     userNotes?: string,
   ): Promise<AnalysisDocumentV3> {
     const errorCategories: AnalysisErrorCategory[] = [];
-    // Pass 1: Topic segmentation
-    let topicSegments: Array<{
-      title: string;
-      start_segment: number;
-      end_segment: number;
-    }> = [];
-
-    try {
-      const segmentationPrompt = getTopicSegmentationPrompt(transcript);
-      const segRaw = await this.generateText({
-        prompt: segmentationPrompt,
-        task: 'topicSegmentation',
-        jsonMode: true,
-      });
-      const segParsed = JSON.parse(this.cleanJsonText(segRaw)) as Record<
-        string,
-        unknown
-      >;
-      if (Array.isArray(segParsed.topics)) {
-        topicSegments = segParsed.topics
-          .filter(
-            (t): t is Record<string, unknown> =>
-              t !== null && typeof t === 'object',
-          )
-          .map((t) => ({
-            title: typeof t.title === 'string' ? t.title.trim() : 'Discussion',
-            start_segment:
-              typeof t.start_segment === 'number' ? t.start_segment : 0,
-            end_segment: typeof t.end_segment === 'number' ? t.end_segment : 0,
-          }))
-          .filter((t) => t.title.length > 0);
-      }
-    } catch (e) {
-      console.warn(
-        `[${this.name}] Topic segmentation failed, using single-topic fallback:`,
-        e,
-      );
-    }
-
-    // If segmentation failed or returned nothing, treat whole transcript as one topic
-    if (topicSegments.length === 0) {
-      this.pushErrorCategory(errorCategories, 'empty_topics');
-      topicSegments = [
-        { title: 'General Discussion', start_segment: 0, end_segment: 9999 },
-      ];
-    }
-
-    // Split transcript into lines for slicing
-    const transcriptLines = transcript.split('\n');
-
-    // Pass 2: Per-topic analysis
+    const windows = sliceTranscriptWindows(transcript, 120, 15);
     const topics: TopicSection[] = [];
-    const allActionItems: ActionItemV3[] = [];
-    const allDecisions: DecisionV3[] = [];
+    const rawActionItems: ActionItemV3[] = [];
+    const rawDecisions: DecisionV3[] = [];
 
-    for (const segment of topicSegments) {
-      const slice = transcriptLines
-        .slice(segment.start_segment, segment.end_segment + 1)
-        .join('\n');
-
-      if (!slice.trim()) continue;
+    for (const win of windows) {
+      const winTranscript = win.lines.join('\n');
+      let topicSegments: Array<{
+        title: string;
+        start_segment: number;
+        end_segment: number;
+      }> = [];
 
       try {
-        const topicPrompt = getTopicAnalysisPrompt(
-          segment.title,
-          slice,
-          userNotes,
-        );
-        const topicRaw = await this.generateText({
-          prompt: topicPrompt,
-          task: 'topicAnalysis',
+        const segmentationPrompt = getTopicSegmentationPrompt(winTranscript);
+        const segRaw = await this.generateText({
+          prompt: segmentationPrompt,
+          task: 'topicSegmentation',
           jsonMode: true,
         });
-        const topicParsed = JSON.parse(this.cleanJsonText(topicRaw)) as Record<
+        const segParsed = JSON.parse(this.cleanJsonText(segRaw)) as Record<
           string,
           unknown
         >;
-
-        const key_points = Array.isArray(topicParsed.key_points)
-          ? topicParsed.key_points
-              .filter(
-                (p): p is Record<string, unknown> =>
-                  p !== null && typeof p === 'object',
-              )
-              .map((p) => ({
-                text: typeof p.text === 'string' ? p.text.trim() : '',
-                speaker:
-                  typeof p.speaker === 'string'
-                    ? p.speaker.trim() || undefined
-                    : undefined,
-                from_user_notes: p.from_user_notes === true ? true : undefined,
-              }))
-              .filter((p) => p.text.length > 0)
-          : [];
-
-        const decisions = Array.isArray(topicParsed.decisions)
-          ? topicParsed.decisions
-              .filter(
-                (d): d is Record<string, unknown> =>
-                  d !== null && typeof d === 'object',
-              )
-              .map((d) => ({
-                text: typeof d.text === 'string' ? d.text.trim() : '',
-                decided_by:
-                  typeof d.decided_by === 'string'
-                    ? d.decided_by.trim() || undefined
-                    : undefined,
-                rationale:
-                  typeof d.rationale === 'string'
-                    ? d.rationale.trim() || undefined
-                    : undefined,
-              }))
-              .filter((d) => d.text.length > 0)
-          : [];
-
-        const action_items = Array.isArray(topicParsed.action_items)
-          ? topicParsed.action_items
-              .filter(
-                (a): a is Record<string, unknown> =>
-                  a !== null && typeof a === 'object',
-              )
-              .map((a) => ({
-                text: typeof a.text === 'string' ? a.text.trim() : '',
-                assignee:
-                  typeof a.assignee === 'string'
-                    ? a.assignee.trim() || undefined
-                    : undefined,
-                due:
-                  typeof a.due === 'string'
-                    ? a.due.trim() || undefined
-                    : undefined,
-                topic: segment.title,
-              }))
-              .filter((a) => a.text.length > 0)
-          : [];
-
-        const open_questions = Array.isArray(topicParsed.open_questions)
-          ? topicParsed.open_questions.filter(
-              (q): q is string => typeof q === 'string' && q.trim().length > 0,
+        if (Array.isArray(segParsed.topics)) {
+          topicSegments = segParsed.topics
+            .filter(
+              (t): t is Record<string, unknown> =>
+                t !== null && typeof t === 'object',
             )
-          : [];
-
-        topics.push({
-          title: segment.title,
-          summary:
-            typeof topicParsed.summary === 'string'
-              ? topicParsed.summary.trim()
-              : '',
-          key_points,
-          decisions,
-          action_items,
-          open_questions,
-          transcript_range: [segment.start_segment, segment.end_segment],
-        });
-
-        allActionItems.push(...action_items);
-        allDecisions.push(...decisions);
+            .map((t) => ({
+              title:
+                typeof t.title === 'string' ? t.title.trim() : 'Discussion',
+              start_segment:
+                typeof t.start_segment === 'number'
+                  ? t.start_segment + win.startSegment
+                  : win.startSegment,
+              end_segment:
+                typeof t.end_segment === 'number'
+                  ? t.end_segment + win.startSegment
+                  : win.endSegment,
+            }))
+            .filter((t) => t.title.length > 0);
+        }
       } catch (e) {
         console.warn(
-          `[${this.name}] Per-topic analysis failed for "${segment.title}":`,
+          `[${this.name}] Topic segmentation failed for window ${win.windowIndex}, using single-topic fallback:`,
           e,
         );
+      }
+
+      if (topicSegments.length === 0) {
+        this.pushErrorCategory(errorCategories, 'empty_topics');
+        topicSegments = [
+          {
+            title: windows.length > 1 ? `Discussion Part ${win.windowIndex + 1}` : 'General Discussion',
+            start_segment: win.startSegment,
+            end_segment: win.endSegment,
+          },
+        ];
+      }
+
+      for (const segment of topicSegments) {
+        const slice = win.lines.join('\n');
+        if (!slice.trim()) continue;
+
+        try {
+          const topicPrompt = getTopicAnalysisPrompt(
+            segment.title,
+            slice,
+            userNotes,
+          );
+          const topicRaw = await this.generateText({
+            prompt: topicPrompt,
+            task: 'topicAnalysis',
+            jsonMode: true,
+          });
+          const topicParsed = JSON.parse(
+            this.cleanJsonText(topicRaw),
+          ) as Record<string, unknown>;
+
+          const key_points = Array.isArray(topicParsed.key_points)
+            ? topicParsed.key_points
+                .filter(
+                  (p): p is Record<string, unknown> =>
+                    p !== null && typeof p === 'object',
+                )
+                .map((p) => ({
+                  text: typeof p.text === 'string' ? p.text.trim() : '',
+                  speaker:
+                    typeof p.speaker === 'string'
+                      ? p.speaker.trim() || undefined
+                      : undefined,
+                  from_user_notes:
+                    p.from_user_notes === true ? true : undefined,
+                }))
+                .filter((p) => p.text.length > 0)
+            : [];
+
+          const decisions = Array.isArray(topicParsed.decisions)
+            ? topicParsed.decisions
+                .filter(
+                  (d): d is Record<string, unknown> =>
+                    d !== null && typeof d === 'object',
+                )
+                .map((d) => ({
+                  text: typeof d.text === 'string' ? d.text.trim() : '',
+                  decided_by:
+                    typeof d.decided_by === 'string'
+                      ? d.decided_by.trim() || undefined
+                      : undefined,
+                  rationale:
+                    typeof d.rationale === 'string'
+                      ? d.rationale.trim() || undefined
+                      : undefined,
+                }))
+                .filter((d) => d.text.length > 0)
+            : [];
+
+          const action_items = Array.isArray(topicParsed.action_items)
+            ? topicParsed.action_items
+                .filter(
+                  (a): a is Record<string, unknown> =>
+                    a !== null && typeof a === 'object',
+                )
+                .map((a) => ({
+                  text: typeof a.text === 'string' ? a.text.trim() : '',
+                  assignee:
+                    typeof a.assignee === 'string'
+                      ? a.assignee.trim() || undefined
+                      : undefined,
+                  due:
+                    typeof a.due === 'string'
+                      ? a.due.trim() || undefined
+                      : undefined,
+                  topic: segment.title,
+                }))
+                .filter((a) => a.text.length > 0)
+            : [];
+
+          const open_questions = Array.isArray(topicParsed.open_questions)
+            ? topicParsed.open_questions.filter(
+                (q): q is string =>
+                  typeof q === 'string' && q.trim().length > 0,
+              )
+            : [];
+
+          topics.push({
+            title: segment.title,
+            summary:
+              typeof topicParsed.summary === 'string'
+                ? topicParsed.summary.trim()
+                : '',
+            key_points,
+            decisions,
+            action_items,
+            open_questions,
+            transcript_range: [segment.start_segment, segment.end_segment],
+          });
+
+          rawActionItems.push(...action_items);
+          rawDecisions.push(...decisions);
+        } catch (e) {
+          console.warn(
+            `[${this.name}] Per-topic analysis failed for "${segment.title}":`,
+            e,
+          );
+        }
       }
     }
 
@@ -378,20 +384,31 @@ export class UnifiedLLMProvider implements LLMProvider {
       ]);
     }
 
+    const allDecisions = deduplicateExtractedItems(
+      rawDecisions,
+      (d) => d.text,
+      (d) => d.decided_by,
+    );
+    const allActionItems = deduplicateExtractedItems(
+      rawActionItems,
+      (a) => a.text,
+      (a) => a.assignee,
+    );
+
     // Generate overview from topics
     const overview =
       topics
         .map((t) => t.summary)
         .filter(Boolean)
         .join(' ')
-        .slice(0, 500) ||
+        .slice(0, 1000) ||
       'Conversation captured. See topics below for details.';
 
     return this.finalizeStructuredAnalysis({
       analysis: {
         analysis_schema_version: 3,
         overview,
-        topics,
+        topics: deduplicateExtractedItems(topics, (t) => t.title),
         all_action_items: allActionItems,
         all_decisions: allDecisions,
         meeting_type: 'general',
@@ -1048,14 +1065,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     jsonMode,
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel();
-    const outputTokenBudget = task === 'knowledgeDoc' ? 4096 : 2500;
-    const estimatedTokens =
-      Math.ceil(prompt.length / 3) +
-      (task === 'knowledgeDoc' ? outputTokenBudget : 1000);
-    const num_ctx = Math.min(
-      task === 'knowledgeDoc' ? 16384 : 8192,
-      Math.max(2048, Math.ceil(estimatedTokens / 1024) * 1024),
-    );
+    const { num_ctx, num_predict } = calculateOllamaContextBudget(prompt, task);
 
     const requestBody: Record<string, unknown> = {
       model,
@@ -1063,7 +1073,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       stream: false,
       options: {
         num_ctx,
-        num_predict: outputTokenBudget,
+        num_predict,
         temperature: this.getTemperature(task),
         num_thread: 8, // Ensure multi-threading is utilized
       },
@@ -1352,3 +1362,120 @@ export class UnifiedLLMProvider implements LLMProvider {
     };
   }
 }
+
+export function calculateOllamaContextBudget(
+  prompt: string,
+  task: string,
+): { num_ctx: number; num_predict: number } {
+  const outputTokenBudget =
+    task === 'knowledgeDoc' ||
+    task === 'structuredAnalysis' ||
+    task === 'summary'
+      ? 4096
+      : 2500;
+  const estimatedInputTokens = Math.ceil(prompt.length / 3);
+  const totalNeeded = estimatedInputTokens + outputTokenBudget;
+  const maxCap = task === 'knowledgeDoc' ? 32768 : 16384;
+  const num_ctx = Math.min(
+    maxCap,
+    Math.max(4096, Math.ceil(totalNeeded / 1024) * 1024),
+  );
+  return { num_ctx, num_predict: outputTokenBudget };
+}
+
+export interface TranscriptWindow {
+  windowIndex: number;
+  startSegment: number;
+  endSegment: number;
+  lines: string[];
+}
+
+export function sliceTranscriptWindows(
+  transcript: string,
+  maxLinesPerWindow = 120,
+  overlapLines = 15,
+): TranscriptWindow[] {
+  const allLines = transcript.split('\n').filter((l) => l.trim().length > 0);
+  if (allLines.length <= maxLinesPerWindow) {
+    return [
+      {
+        windowIndex: 0,
+        startSegment: 0,
+        endSegment: Math.max(0, allLines.length - 1),
+        lines: allLines,
+      },
+    ];
+  }
+
+  const windows: TranscriptWindow[] = [];
+  let start = 0;
+  let idx = 0;
+
+  while (start < allLines.length) {
+    const end = Math.min(allLines.length, start + maxLinesPerWindow);
+    const windowLines = allLines.slice(start, end);
+    windows.push({
+      windowIndex: idx,
+      startSegment: start,
+      endSegment: end - 1,
+      lines: windowLines,
+    });
+
+    if (end >= allLines.length) break;
+    start = end - overlapLines;
+    idx += 1;
+  }
+
+  return windows;
+}
+
+function calculateJaccardSimilarity(strA: string, strB: string): number {
+  const setA = new Set(strA.toLowerCase().match(/\w+/g) || []);
+  const setB = new Set(strB.toLowerCase().match(/\w+/g) || []);
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let intersection = 0;
+  for (const word of setA) {
+    if (setB.has(word)) intersection += 1;
+  }
+  const union = new Set([...setA, ...setB]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+export function deduplicateExtractedItems<T>(
+  items: T[],
+  getText: (item: T) => string,
+  getAssignee?: (item: T) => string | undefined,
+): T[] {
+  if (!items || items.length === 0) return [];
+  const result: T[] = [];
+
+  for (const item of items) {
+    const text = getText(item)?.trim() || '';
+    if (!text) continue;
+
+    const assignee = getAssignee
+      ? getAssignee(item)?.trim().toLowerCase()
+      : undefined;
+
+    const isDuplicate = result.some((existing) => {
+      const existingText = getText(existing)?.trim() || '';
+      const existingAssignee = getAssignee
+        ? getAssignee(existing)?.trim().toLowerCase()
+        : undefined;
+
+      if (assignee && existingAssignee && assignee !== existingAssignee) {
+        return false;
+      }
+
+      const similarity = calculateJaccardSimilarity(text, existingText);
+      return similarity >= 0.70;
+    });
+
+    if (!isDuplicate) {
+      result.push(item);
+    }
+  }
+
+  return result;
+}
+

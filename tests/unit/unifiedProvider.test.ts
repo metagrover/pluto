@@ -22,7 +22,12 @@ vi.mock('@google/generative-ai', () => {
 
 import { getAllSettings, getProvider } from '../../electron/llm/factory';
 import type { LLMSettings } from '../../electron/llm/provider';
-import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
+import {
+  UnifiedLLMProvider,
+  calculateOllamaContextBudget,
+  deduplicateExtractedItems,
+  sliceTranscriptWindows,
+} from '../../electron/llm/unifiedProvider';
 
 const validAnalysisMarkdown = `## Summary
 Security hardening progress is visible and practical.
@@ -596,3 +601,37 @@ describe('LLM factory', () => {
     expect(settings.ollama_model).toBeUndefined();
   });
 });
+
+describe('Ollama Budgeting & Adaptive Windowing', () => {
+  it('calculateOllamaContextBudget allocates up to 16384 context tokens for long analysis prompts', () => {
+    const longPrompt = 'a'.repeat(30_000); // ~10,000 tokens
+    const budget = calculateOllamaContextBudget(longPrompt, 'structuredAnalysis');
+    expect(budget.num_ctx).toBeGreaterThanOrEqual(12288);
+    expect(budget.num_predict).toBe(4096);
+  });
+
+  it('sliceTranscriptWindows slices transcript into overlapping windows when line count exceeds maxLinesPerWindow', () => {
+    const lines = Array.from({ length: 300 }, (_, i) => `[Me] (${i * 5}s): Line content ${i}`).join('\n');
+    const windows = sliceTranscriptWindows(lines, 100);
+    expect(windows.length).toBeGreaterThan(1);
+    expect(windows[0].startSegment).toBe(0);
+    expect(windows[0].endSegment).toBeLessThan(300);
+  });
+
+  it('deduplicateExtractedItems merges duplicate action items and respects distinct assignees', () => {
+    const items = [
+      { text: 'Deploy the Snowflake integration script on Friday.', assignee: 'Alain' },
+      { text: 'Deploy Snowflake integration script on Friday', assignee: 'Alain' },
+      { text: 'Deploy Snowflake integration script on Friday', assignee: 'Deepak' },
+      { text: 'Write project timeline documentation.', assignee: 'Deepak' },
+    ];
+    const deduped = deduplicateExtractedItems(
+      items,
+      (item) => item.text,
+      (item) => item.assignee
+    );
+    expect(deduped.length).toBe(3);
+    expect(deduped[0].text).toBe('Deploy the Snowflake integration script on Friday.');
+  });
+});
+
