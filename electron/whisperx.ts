@@ -306,7 +306,12 @@ export class WhisperXManager {
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'python');
     }
-    return path.join(app.getAppPath(), 'python');
+    const appPath = app.getAppPath();
+    const directPath = path.join(appPath, 'python');
+    if (fs.existsSync(directPath)) return directPath;
+    const parentPath = path.join(appPath, '..', 'python');
+    if (fs.existsSync(parentPath)) return parentPath;
+    return path.join(process.cwd(), 'python');
   }
 
   /**

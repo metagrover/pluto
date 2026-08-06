@@ -739,9 +739,13 @@ app.whenReady().then(async () => {
 
   const getAudioCapExecPath = () => {
     const isDev = !app.isPackaged;
-    return isDev
-      ? path.join(app.getAppPath(), 'resources/bin/audiocap')
-      : path.join(process.resourcesPath, 'bin', 'audiocap');
+    if (!isDev) return path.join(process.resourcesPath, 'bin', 'audiocap');
+    const appPath = app.getAppPath();
+    const directPath = path.join(appPath, 'resources/bin/audiocap');
+    if (fs.existsSync(directPath)) return directPath;
+    const parentPath = path.join(appPath, '..', 'resources/bin/audiocap');
+    if (fs.existsSync(parentPath)) return parentPath;
+    return path.join(process.cwd(), 'resources/bin/audiocap');
   };
 
   const runAudioProbe = async ({
