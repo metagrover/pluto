@@ -8,6 +8,8 @@ import {
   TRANSCRIPT_JSON_SCHEMA_VERSION,
   buildTranscriptJsonPayload,
   buildTranscriptSpeakerAttribution,
+  mergeAdjacentSpeakerSegments,
+  scrubTranscriptArtifacts,
 } from '../../src/utils/transcriptSchema';
 
 describe('transcriptSchema', () => {
@@ -225,4 +227,34 @@ describe('transcriptSchema', () => {
     expect(payload.integrity?.reasons).toEqual(['local_speech_unaccounted']);
     expect(JSON.stringify(payload.integrity)).not.toContain('text');
   });
+
+  describe('scrubTranscriptArtifacts', () => {
+    it('removes common Whisper YouTube/hallucination phrases', () => {
+      const rawText = 'Thank you for watching. Subtitles by Amara.org';
+      const cleaned = scrubTranscriptArtifacts(rawText);
+      expect(cleaned).toBe('');
+    });
+
+    it('preserves valid meeting speech', () => {
+      const rawText = 'We need to deploy the database migration on Friday.';
+      const cleaned = scrubTranscriptArtifacts(rawText);
+      expect(cleaned).toBe('We need to deploy the database migration on Friday.');
+    });
+  });
+
+  describe('mergeAdjacentSpeakerSegments', () => {
+    it('combines consecutive segments from the same speaker within 1.5s gap', () => {
+      const segments = [
+        { id: '1', speaker: 'Me', start: 0, end: 2.0, text: 'Hey everyone.' },
+        { id: '2', speaker: 'Me', start: 2.5, end: 5.0, text: 'Let us start the meeting.' },
+        { id: '3', speaker: 'Them', start: 5.5, end: 8.0, text: 'Sounds good.' },
+      ];
+      const merged = mergeAdjacentSpeakerSegments(segments as any);
+      expect(merged.length).toBe(2);
+      expect(merged[0].text).toBe('Hey everyone. Let us start the meeting.');
+      expect(merged[0].start).toBe(0);
+      expect(merged[0].end).toBe(5.0);
+    });
+  });
 });
+

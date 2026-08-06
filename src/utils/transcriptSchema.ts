@@ -258,3 +258,63 @@ export const withTranscriptLifecycleStatus = (
     return JSON.stringify({ segments: [], lifecycleStatus });
   }
 };
+
+const WHISPER_HALLUCINATION_PATTERNS = [
+  /thank\s+you\s+for\s+watching/i,
+  /subtitles?\s+by/i,
+  /amara\.org/i,
+  /subscribe\s+to\s+my\s+channel/i,
+  /thanks?\s+for\s+watching/i,
+];
+
+export function scrubTranscriptArtifacts(text: string): string {
+  if (!text) return '';
+  let cleaned = text;
+  for (const pattern of WHISPER_HALLUCINATION_PATTERNS) {
+    cleaned = cleaned.replace(pattern, '').trim();
+  }
+  if (/^[\s.,!?-]+$/.test(cleaned)) {
+    return '';
+  }
+  return cleaned;
+}
+
+export function mergeAdjacentSpeakerSegments<
+  T extends { speaker?: string; start: number; end: number; text: string },
+>(segments: T[]): T[] {
+  if (!segments || segments.length === 0) return [];
+  const result: T[] = [];
+  let current: T | null = null;
+
+  for (const seg of segments) {
+    const cleanText = scrubTranscriptArtifacts(seg.text);
+    if (!cleanText) continue;
+
+    if (!current) {
+      current = { ...seg, text: cleanText };
+      continue;
+    }
+
+    const sameSpeaker =
+      (current.speaker || 'Unknown') === (seg.speaker || 'Unknown');
+    const closeGap = seg.start - current.end <= 1.5;
+
+    if (sameSpeaker && closeGap) {
+      current.end = Math.max(current.end, seg.end);
+      const endsWithPunct = /[.!?]$/.test(current.text);
+      current.text = endsWithPunct
+        ? `${current.text} ${cleanText}`.trim()
+        : `${current.text}. ${cleanText}`.trim();
+    } else {
+      result.push(current);
+      current = { ...seg, text: cleanText };
+    }
+  }
+
+  if (current) {
+    result.push(current);
+  }
+
+  return result;
+}
+
