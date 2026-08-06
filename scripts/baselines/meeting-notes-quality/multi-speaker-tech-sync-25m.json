@@ -1,0 +1,105 @@
+{
+  "meeting_id": "c7a31756-8c0f-422c-9199-226dda99b8f7",
+  "label": "Data Integration & Pipeline Optimization Plan (25 min)",
+  "reviewed_at": "2026-08-05",
+  "reviewer_notes": "Human-reviewed baseline fixture for multi-speaker pipeline optimization meeting.",
+  "transcript": [
+    "Me: We decided to load Databricks view first before sending data to persona.",
+    "Deepak: Agreed, I'll meet with Maruti once data attributes are ready.",
+    "Sharad: I will provide the IPV migration pattern notes by Friday."
+  ],
+  "generated_analysis": {
+    "analysis_schema_version": 3,
+    "overview": "The team agreed to load Databricks views first and assigned clear data integration tasks across Deepak and Sharad.",
+    "topics": [
+      {
+        "title": "Databricks Pipeline Integration",
+        "summary": "Agreed to load Databricks view first and coordinate with Maruti on persona data loading.",
+        "key_points": [
+          {
+            "speaker": "Me",
+            "text": "Databricks view will be loaded first before sending data to persona."
+          }
+        ],
+        "decisions": [
+          {
+            "text": "Load Databricks view first before sending data to persona"
+          }
+        ],
+        "action_items": [
+          {
+            "text": "Meet with Maruti once data attributes are ready",
+            "assignee": "Deepak"
+          },
+          {
+            "text": "Provide IPV migration pattern notes",
+            "assignee": "Sharad",
+            "due": "Friday"
+          }
+        ],
+        "open_questions": [],
+        "transcript_range": [0, 2]
+      }
+    ],
+    "all_action_items": [
+      {
+        "text": "Meet with Maruti once data attributes are ready",
+        "assignee": "Deepak",
+        "topic": "Databricks Pipeline Integration"
+      },
+      {
+        "text": "Provide IPV migration pattern notes",
+        "assignee": "Sharad",
+        "due": "Friday",
+        "topic": "Databricks Pipeline Integration"
+      }
+    ],
+    "all_decisions": [
+      {
+        "text": "Load Databricks view first before sending data to persona"
+      }
+    ],
+    "meeting_type": "team_sync",
+    "quality": {
+      "format_pass": true,
+      "retry_count": 0,
+      "fallback_used": false,
+      "issues": []
+    },
+    "generation_metadata": {
+      "provider": "ollama",
+      "model": "qwen2.5:7b-instruct",
+      "generation_path": "adaptive_windowed",
+      "prompt_version": "notes-v4",
+      "generated_at": "2026-08-05T20:00:00.000Z",
+      "error_categories": []
+    }
+  },
+  "expected": {
+    "summary_must_include": ["load Databricks views first"],
+    "summary_must_exclude": [],
+    "decisions": {
+      "must_include": ["Load Databricks view first before sending data to persona"],
+      "must_exclude": []
+    },
+    "action_items": {
+      "must_include": [
+        {
+          "text": "Meet with Maruti once data attributes are ready"
+        },
+        {
+          "text": "Provide IPV migration pattern notes"
+        }
+      ],
+      "must_exclude": []
+    },
+    "attributions": [
+      {
+        "speaker": "Me",
+        "text": "Databricks view will be loaded first"
+      }
+    ],
+    "must_include_topics": ["Databricks Pipeline Integration"],
+    "unsupported_inference_must_exclude": []
+  }
+}

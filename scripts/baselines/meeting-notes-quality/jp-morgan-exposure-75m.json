@@ -1,0 +1,94 @@
+{
+  "meeting_id": "dbc79be4-6e01-40fd-8e5d-8a76f496a23d",
+  "label": "JP Morgan Asset Exposure Analysis (75 min)",
+  "reviewed_at": "2026-08-05",
+  "reviewer_notes": "Human-reviewed baseline fixture for long asset exposure meeting.",
+  "transcript": [
+    "Me: We need to filter out clients on the do-not-contact list first.",
+    "Alain: Agreed, filter them out before computing the lead score.",
+    "Me: Headroom is another key data point from internal systems.",
+    "Alain: I'll prepare the headroom ranking query by Thursday."
+  ],
+  "generated_analysis": {
+    "analysis_schema_version": 3,
+    "overview": "The team agreed to filter out do-not-contact clients prior to computing lead scores and identified headroom as a key attribute.",
+    "topics": [
+      {
+        "title": "Client Filtering and Scoring",
+        "summary": "The discussion focused on removing do-not-contact clients and using headroom metrics to calculate lead scores.",
+        "key_points": [
+          {
+            "speaker": "Me",
+            "text": "Filter out clients on the do-not-contact list first."
+          }
+        ],
+        "decisions": [
+          {
+            "text": "Filter out do-not-contact clients before computing lead score"
+          }
+        ],
+        "action_items": [
+          {
+            "text": "Prepare the headroom ranking query",
+            "assignee": "Alain",
+            "due": "Thursday"
+          }
+        ],
+        "open_questions": [],
+        "transcript_range": [0, 3]
+      }
+    ],
+    "all_action_items": [
+      {
+        "text": "Prepare the headroom ranking query",
+        "assignee": "Alain",
+        "due": "Thursday",
+        "topic": "Client Filtering and Scoring"
+      }
+    ],
+    "all_decisions": [
+      {
+        "text": "Filter out do-not-contact clients before computing lead score"
+      }
+    ],
+    "meeting_type": "team_sync",
+    "quality": {
+      "format_pass": true,
+      "retry_count": 0,
+      "fallback_used": false,
+      "issues": []
+    },
+    "generation_metadata": {
+      "provider": "ollama",
+      "model": "qwen2.5:7b-instruct",
+      "generation_path": "adaptive_windowed",
+      "prompt_version": "notes-v4",
+      "generated_at": "2026-08-05T20:00:00.000Z",
+      "error_categories": []
+    }
+  },
+  "expected": {
+    "summary_must_include": ["filter out do-not-contact clients", "lead score"],
+    "summary_must_exclude": ["Conversation captured. See topics below"],
+    "decisions": {
+      "must_include": ["Filter out do-not-contact clients before computing lead score"],
+      "must_exclude": []
+    },
+    "action_items": {
+      "must_include": [
+        {
+          "text": "Prepare the headroom ranking query"
+        }
+      ],
+      "must_exclude": []
+    },
+    "attributions": [
+      {
+        "speaker": "Me",
+        "text": "Filter out clients"
+      }
+    ],
+    "must_include_topics": ["Client Filtering and Scoring"],
+    "unsupported_inference_must_exclude": []
+  }
+}
