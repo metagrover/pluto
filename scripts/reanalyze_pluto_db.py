@@ -6,7 +6,9 @@ import sqlite3
 import time
 import urllib.request
 
-DB_PATH = os.path.expanduser('~/Library/Application Support/Pluto/pluto.db')
+DB_PATH = os.path.expanduser('~/Library/Application Support/pluto/pluto.db')
+if not os.path.exists(DB_PATH):
+    DB_PATH = os.path.expanduser('~/Library/Application Support/Pluto/pluto.db')
 OLLAMA_URL = 'http://127.0.0.1:11434/api/generate'
 MODEL = 'phi4-mini:3.8b'
 
