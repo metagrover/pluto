@@ -189,7 +189,7 @@ def main():
             if txt:
                 transcript_lines.append(f"{spk}: {txt}")
 
-        windows = window_transcript(transcript_lines, window_size=120, overlap=15)
+        windows = window_transcript(transcript_lines, window_size=60, overlap=10)
         print(f"  Transcript: {len(transcript_lines)} lines -> {len(windows)} window(s)")
 
         all_topics = []
@@ -200,18 +200,19 @@ def main():
         start_time = time.time()
         for w_idx, win in enumerate(windows):
             chunk_text = "\n".join(win)
-            res = analyze_window(chunk_text, user_notes)
-            
-            if res.get('overview'):
-                overviews.append(res['overview'])
-            
-            for t in res.get('topics', []):
-                all_topics.append(t)
-                for dec in t.get('decisions', []):
-                    all_decisions.append(dec)
-                for act in t.get('action_items', []):
-                    act['topic'] = t.get('title', '')
-                    all_action_items.append(act)
+            try:
+                res = analyze_window(chunk_text, user_notes)
+                if res.get('overview'):
+                    overviews.append(res['overview'])
+                for t in res.get('topics', []):
+                    all_topics.append(t)
+                    for dec in t.get('decisions', []):
+                        all_decisions.append(dec)
+                    for act in t.get('action_items', []):
+                        act['topic'] = t.get('title', '')
+                        all_action_items.append(act)
+            except Exception as w_err:
+                print(f"    [Warn] Window {w_idx+1}/{len(windows)} failed: {w_err}")
 
         # Merge & Deduplicate
         dedup_decisions = deduplicate_items(all_decisions, text_key='text', assignee_key='decided_by')
