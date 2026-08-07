@@ -2,16 +2,11 @@
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 datas = []
-datas += copy_metadata('whisperx')
-datas += copy_metadata('torch')
-datas += copy_metadata('tqdm')
-datas += copy_metadata('regex')
-datas += copy_metadata('requests')
-datas += copy_metadata('packaging')
-datas += copy_metadata('filelock')
-datas += copy_metadata('numpy')
-datas += copy_metadata('tokenizers')
-datas += copy_metadata('huggingface_hub')
+for pkg in ['whisperx', 'torch', 'tqdm', 'regex', 'requests', 'packaging', 'filelock', 'numpy', 'tokenizers', 'huggingface_hub']:
+    try:
+        datas += copy_metadata(pkg)
+    except Exception:
+        pass
 sherpa_datas, sherpa_binaries, sherpa_hiddenimports = collect_all('sherpa_onnx')
 datas += sherpa_datas
 

@@ -1525,7 +1525,7 @@ export const AudioManager = ({
                 micChunkFormat,
                 chunkStartSec,
                 chunkEndSec,
-                true,
+                hasSystemRecorderRef.current,
               );
               if (systemBlob) {
                 handleChunkBlob(
