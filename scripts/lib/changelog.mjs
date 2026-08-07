@@ -1,11 +1,16 @@
-const FILENAME_PATTERN = /^(\d{4}-\d{2}-\d{2})-(\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/;
-const FIELD_PATTERN = /^- \*\*(Issue|PR|Changed|Why|Replaced|Notes):\*\*(?:\s+(.*))?$/;
+const FILENAME_PATTERN =
+  /^(\d{4}-\d{2}-\d{2})-(\d+)-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$/;
+const FIELD_PATTERN =
+  /^- \*\*(Issue|PR|Changed|Why|Replaced|Notes):\*\*(?:\s+(.*))?$/;
 const REQUIRED_FIELDS = ['Issue', 'PR', 'Changed', 'Why', 'Replaced', 'Notes'];
 const MERGE_MARKER_PATTERN = /^(?:<<<<<<<|=======|>>>>>>>)(?:\s|$)/m;
 
 const isCalendarDate = (value) => {
   const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+  return (
+    !Number.isNaN(parsed.valueOf()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
 };
 
 const inspectFragment = ({ path, body }) => {
@@ -21,7 +26,9 @@ const inspectFragment = ({ path, body }) => {
       `${path}: filename must match YYYY-MM-DD-<issue-number>-<short-slug>.md`,
     );
   } else if (!isCalendarDate(filenameMatch[1])) {
-    errors.push(`${path}: filename contains invalid calendar date ${filenameMatch[1]}`);
+    errors.push(
+      `${path}: filename contains invalid calendar date ${filenameMatch[1]}`,
+    );
   }
 
   if (MERGE_MARKER_PATTERN.test(body)) {
@@ -35,7 +42,10 @@ const inspectFragment = ({ path, body }) => {
 
   const fields = body
     .split(/\r?\n/)
-    .map((line, index) => ({ match: line.match(FIELD_PATTERN), line: index + 1 }))
+    .map((line, index) => ({
+      match: line.match(FIELD_PATTERN),
+      line: index + 1,
+    }))
     .filter(({ match }) => match);
 
   for (const name of REQUIRED_FIELDS) {
@@ -54,7 +64,9 @@ const inspectFragment = ({ path, body }) => {
     actualOrder.length === REQUIRED_FIELDS.length &&
     actualOrder.some((name, index) => name !== REQUIRED_FIELDS[index])
   ) {
-    errors.push(`${path}: fields must appear in ${REQUIRED_FIELDS.join(', ')} order`);
+    errors.push(
+      `${path}: fields must appear in ${REQUIRED_FIELDS.join(', ')} order`,
+    );
   }
 
   const issueFields = fields.filter(({ match }) => match[1] === 'Issue');
@@ -62,7 +74,9 @@ const inspectFragment = ({ path, body }) => {
     const issueValue = issueFields[0].match[2] ?? '';
     const issueMatch = issueValue.match(/#(\d+)/);
     if (!issueMatch) {
-      errors.push(`${path}: Issue field must contain an issue number such as #${metadata.issue}`);
+      errors.push(
+        `${path}: Issue field must contain an issue number such as #${metadata.issue}`,
+      );
     } else if (Number(issueMatch[1]) !== metadata.issue) {
       errors.push(
         `${path}: Issue field #${issueMatch[1]} does not match filename issue #${metadata.issue}`,

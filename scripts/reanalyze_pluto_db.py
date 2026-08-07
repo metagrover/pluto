@@ -24,14 +24,21 @@ def ollama_generate(prompt: str, json_mode: bool = True, num_ctx: int = 16384) -
     if json_mode:
         payload["format"] = "json"
     
-    req = urllib.request.Request(
-        OLLAMA_URL,
-        data=json.dumps(payload).encode('utf-8'),
-        headers={'Content-Type': 'application/json'}
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read().decode('utf-8'))
-        return data.get('response', '')
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(
+                OLLAMA_URL,
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'}
+            )
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                return data.get('response', '')
+        except Exception as e:
+            if attempt == 2:
+                raise
+            time.sleep(2)
+    return ""
 
 def calculate_jaccard_similarity(str_a: str, str_b: str) -> float:
     words_a = set(re.findall(r'\w+', str_a.lower()))

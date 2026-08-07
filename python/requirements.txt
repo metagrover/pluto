@@ -18,3 +18,6 @@ tokenizers
 huggingface-hub
 scikit-learn
 sherpa-onnx==1.13.4
+# Native Apple Silicon MLX framework for macOS transcription
+mlx; sys_platform == 'darwin' and platform_machine == 'arm64'
+mlx-whisper; sys_platform == 'darwin' and platform_machine == 'arm64'

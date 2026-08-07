@@ -23,6 +23,7 @@ interface ZenModeProps {
   currentNotes: string;
   setCurrentNotes: (value: string) => void;
   liveTranscript: LiveTranscriptSegment[];
+  interimText?: string;
   captureHealth: CaptureHealthState;
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
   recordingStartedAtMs: number | null;
@@ -40,6 +41,7 @@ export const ZenMode = ({
   currentNotes,
   setCurrentNotes,
   liveTranscript,
+  interimText = '',
   captureHealth,
   liveTranscriptIntegrity,
   recordingStartedAtMs,
@@ -60,10 +62,11 @@ export const ZenMode = ({
         captureDurability: captureHealth.captureDurability,
         liveTranscriptIntegrity,
         segments: liveTranscript,
-        interimText: '',
+        interimText,
       }),
     [
       captureHealth,
+      interimText,
       isProcessing,
       liveTranscript,
       liveTranscriptIntegrity,

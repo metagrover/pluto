@@ -1,13 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { UnifiedLLMProvider } from '../electron/llm/unifiedProvider.ts';
 import { analysisDocumentV3ToMarkdown } from '../electron/llm/analysisDocumentV3.ts';
-import { mergeAdjacentSpeakerSegments, scrubTranscriptArtifacts } from '../src/utils/transcriptSchema.ts';
+import { UnifiedLLMProvider } from '../electron/llm/unifiedProvider.ts';
+import {
+  mergeAdjacentSpeakerSegments,
+  scrubTranscriptArtifacts,
+} from '../src/utils/transcriptSchema.ts';
 
 const dbPath = path.join(
   process.env.HOME || '',
-  'Library/Application Support/Pluto/pluto.db'
+  'Library/Application Support/Pluto/pluto.db',
 );
 
 if (!fs.existsSync(dbPath)) {
@@ -22,12 +25,14 @@ async function main() {
   console.log(`[Reanalyze] Opening database at ${dbPath}...`);
   console.log(`[Reanalyze] Fetching last ${limit} meetings...`);
 
-  const meetings = db.prepare(`
+  const meetings = db
+    .prepare(`
     SELECT rowid, id, title, started_at, duration_seconds, transcript_json, user_notes, analysis_model
     FROM meetings
     ORDER BY started_at DESC
     LIMIT ?
-  `).all(limit) as Array<{
+  `)
+    .all(limit) as Array<{
     rowid: number;
     id: string;
     title: string;
@@ -46,7 +51,9 @@ async function main() {
 
   const isAvailable = await provider.isAvailable();
   if (!isAvailable) {
-    console.error('[Reanalyze] Ollama is not available at http://127.0.0.1:11434. Please ensure Ollama is running.');
+    console.error(
+      '[Reanalyze] Ollama is not available at http://127.0.0.1:11434. Please ensure Ollama is running.',
+    );
     process.exit(1);
   }
 
@@ -74,12 +81,17 @@ async function main() {
 
   for (let i = 0; i < meetings.length; i += 1) {
     const m = meetings[i];
-    console.log(`\n---------------------------------------------------------`);
+    console.log('\n---------------------------------------------------------');
     console.log(`[${i + 1}/${meetings.length}] Processing meeting ${m.id}`);
     console.log(`  Title: "${m.title}"`);
     console.log(`  Started: ${m.started_at} (${m.duration_seconds}s)`);
 
-    let rawSegments: Array<{ speaker?: string; start: number; end: number; text: string }> = [];
+    let rawSegments: Array<{
+      speaker?: string;
+      start: number;
+      end: number;
+      text: string;
+    }> = [];
     try {
       const parsed = JSON.parse(m.transcript_json || '{}');
       if (Array.isArray(parsed)) {
@@ -88,28 +100,35 @@ async function main() {
         rawSegments = parsed.segments;
       }
     } catch (_e) {
-      console.warn(`  [Warning] Failed to parse transcript_json for meeting ${m.id}`);
+      console.warn(
+        `  [Warning] Failed to parse transcript_json for meeting ${m.id}`,
+      );
     }
 
     if (rawSegments.length === 0) {
-      console.log(`  [Skip] Transcript has 0 segments.`);
+      console.log('  [Skip] Transcript has 0 segments.');
       continue;
     }
 
     // Apply artifact scrubbing & paragraph merging
     const mergedSegments = mergeAdjacentSpeakerSegments(rawSegments);
     const transcriptText = mergedSegments
-      .map((s, idx) => `[${s.speaker || 'Unknown'}] (${s.start?.toFixed?.(1) || 0}s): ${s.text}`)
+      .map(
+        (s, idx) =>
+          `[${s.speaker || 'Unknown'}] (${s.start?.toFixed?.(1) || 0}s): ${s.text}`,
+      )
       .join('\n');
 
-    console.log(`  Segments: ${rawSegments.length} raw -> ${mergedSegments.length} merged`);
-    console.log(`  Re-analyzing via Ollama adaptive pipeline...`);
+    console.log(
+      `  Segments: ${rawSegments.length} raw -> ${mergedSegments.length} merged`,
+    );
+    console.log('  Re-analyzing via Ollama adaptive pipeline...');
 
     const startMs = Date.now();
     try {
       const analysisDoc = await provider.generateStructuredAnalysis(
         transcriptText,
-        m.user_notes || undefined
+        m.user_notes || undefined,
       );
       const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
 
@@ -122,7 +141,7 @@ async function main() {
         analysisJsonStr,
         'phi4-mini:3.8b',
         nowIso,
-        m.rowid
+        m.rowid,
       );
 
       try {
@@ -135,14 +154,18 @@ async function main() {
       console.log(`     Overview: ${analysisDoc.overview?.slice(0, 120)}...`);
       console.log(`     Topics: ${analysisDoc.topics?.length || 0}`);
       console.log(`     Decisions: ${analysisDoc.all_decisions?.length || 0}`);
-      console.log(`     Action Items: ${analysisDoc.all_action_items?.length || 0}`);
+      console.log(
+        `     Action Items: ${analysisDoc.all_action_items?.length || 0}`,
+      );
     } catch (err) {
       console.error(`  ❌ Error re-analyzing meeting ${m.id}:`, err);
     }
   }
 
-  console.log(`\n=========================================================`);
-  console.log(`[Reanalyze] Completed retroactive re-analysis for recent meetings.`);
+  console.log('\n=========================================================');
+  console.log(
+    '[Reanalyze] Completed retroactive re-analysis for recent meetings.',
+  );
 }
 
 main().catch((err) => {

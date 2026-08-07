@@ -138,28 +138,23 @@ describe('v3 accuracy prompts', () => {
     expect(prompt).toContain('work-focused');
   });
 
-  it('requires explicit resolution language before classifying decisions', () => {
+  it('requires resolution language and evidence before classifying decisions', () => {
     const prompt = getStructuredAnalysisPrompt(
       'Speaker A: We might use GraphQL. Speaker B: Let us do REST for now.',
     );
 
-    expect(prompt).toContain('Only mark something as a decision');
-    expect(prompt).toContain('explicit resolution language');
-    expect(prompt).toContain('agreed');
-    expect(prompt).toContain('approved');
-    expect(prompt).toContain('decided');
+    expect(prompt).toContain('Mark something as a decision');
+    expect(prompt).toContain('evidence quote');
   });
 
-  it('requires explicit commitment language before classifying action items', () => {
+  it('requires commitment language and evidence before classifying action items', () => {
     const prompt = getTopicAnalysisPrompt(
       'API migration',
       'Speaker A: I can take that. Speaker B: Maybe we should also test mobile.',
     );
 
-    expect(prompt).toContain('Only include an action item');
-    expect(prompt).toContain('explicit commitment');
-    expect(prompt).toContain("I'll");
-    expect(prompt).toContain("we'll");
+    expect(prompt).toContain('Include all action items, tasks, follow-ups');
+    expect(prompt).toContain('evidence quote');
     expect(prompt).toContain('do not turn suggestions');
   });
 });

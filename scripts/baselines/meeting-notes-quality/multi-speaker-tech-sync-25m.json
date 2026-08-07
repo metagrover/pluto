@@ -79,7 +79,9 @@
     "summary_must_include": ["load Databricks views first"],
     "summary_must_exclude": [],
     "decisions": {
-      "must_include": ["Load Databricks view first before sending data to persona"],
+      "must_include": [
+        "Load Databricks view first before sending data to persona"
+      ],
       "must_exclude": []
     },
     "action_items": {

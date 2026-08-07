@@ -71,7 +71,9 @@
     "summary_must_include": ["filter out do-not-contact clients", "lead score"],
     "summary_must_exclude": ["Conversation captured. See topics below"],
     "decisions": {
-      "must_include": ["Filter out do-not-contact clients before computing lead score"],
+      "must_include": [
+        "Filter out do-not-contact clients before computing lead score"
+      ],
       "must_exclude": []
     },
     "action_items": {

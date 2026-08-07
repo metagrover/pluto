@@ -317,4 +317,3 @@ export function mergeAdjacentSpeakerSegments<
 
   return result;
 }
-

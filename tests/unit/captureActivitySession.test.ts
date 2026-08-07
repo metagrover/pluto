@@ -284,7 +284,7 @@ describe('capture activity session', () => {
     expect(session.hasDurabilityFailure()).toBe(false);
   });
 
-  it('latches a stop at the active window start without persisting empty evidence', async () => {
+  it('closes a stop at the active window start without latching durability failure', async () => {
     const persistSnapshot = vi.fn(async () => {});
     const session = createCaptureActivitySession({ producer, persistSnapshot });
 
@@ -292,8 +292,14 @@ describe('capture activity session', () => {
     await session.closeAt(5);
 
     expect(session.windows()).toEqual([]);
-    expect(persistSnapshot).not.toHaveBeenCalled();
-    expect(session.hasDurabilityFailure()).toBe(true);
+    expect(persistSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaVersion: 2,
+        source: 'capture_activity_v2',
+        windows: [],
+      }),
+    );
+    expect(session.hasDurabilityFailure()).toBe(false);
   });
 
   it('blocks sealing when the connected session rejected an audio append', async () => {

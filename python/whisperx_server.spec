@@ -15,15 +15,29 @@ datas += copy_metadata('huggingface_hub')
 sherpa_datas, sherpa_binaries, sherpa_hiddenimports = collect_all('sherpa_onnx')
 datas += sherpa_datas
 
+try:
+    mlx_datas, mlx_binaries, mlx_hiddenimports = collect_all('mlx')
+    datas += mlx_datas
+except Exception:
+    mlx_binaries, mlx_hiddenimports = [], []
+
+try:
+    mlx_w_datas, mlx_w_binaries, mlx_w_hiddenimports = collect_all('mlx_whisper')
+    datas += mlx_w_datas
+except Exception:
+    mlx_w_binaries, mlx_w_hiddenimports = [], []
+
 block_cipher = None
 
 a = Analysis(
     ['whisperx_server.py'],
     pathex=[],
-    binaries=sherpa_binaries,
+    binaries=sherpa_binaries + mlx_binaries + mlx_w_binaries,
     datas=datas,
     hiddenimports=[
         'whisperx',
+        'mlx',
+        'mlx_whisper',
         'pytorch_lightning.loops.fit_loop',
         'pytorch_lightning.loops.epoch.training_epoch_loop',
         'pytorch_lightning.loops.batch.training_batch_loop',
@@ -31,7 +45,7 @@ a = Analysis(
         'sklearn.neighbors._quad_tree',
         'sklearn.tree',
         'sklearn.tree._utils',
-    ] + sherpa_hiddenimports,
+    ] + sherpa_hiddenimports + mlx_hiddenimports + mlx_w_hiddenimports,
     hookspath=['hooks'],
     hooksconfig={},
     runtime_hooks=[],

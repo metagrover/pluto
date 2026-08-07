@@ -1,8 +1,12 @@
-
 import os
 import io
 import torch
-import whisperx
+try:
+    import whisperx
+    WHISPERX_AVAILABLE = True
+except ImportError:
+    whisperx = None
+    WHISPERX_AVAILABLE = False
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File
@@ -23,13 +27,28 @@ from sherpa_diarization_runtime import (
 )
 from aligned_audio_energy import aligned_energy_windows
 
+try:
+    import mlx_whisper
+    MLX_WHISPER_AVAILABLE = True
+except ImportError:
+    MLX_WHISPER_AVAILABLE = False
+
+MLX_MODEL_MAP = {
+    "tiny": "mlx-community/whisper-tiny",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "large-v2": "mlx-community/whisper-large-v2-mlx",
+    "large-v3": "mlx-community/whisper-large-v3-turbo",
+}
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("whisperx_server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting WhisperX Server on {model_config['device']} ({model_config['compute_type']})")
+    logger.info(f"Starting WhisperX Server on {model_config['device']} ({model_config['compute_type']}) [mlx_available={MLX_WHISPER_AVAILABLE}]")
     try:
         load_model_if_needed({})
     except Exception as e:
@@ -42,18 +61,16 @@ app = FastAPI(title="Pluto WhisperX Server", lifespan=lifespan)
 model = None
 diarize_model = None
 model_lock = threading.RLock()
-# Force CPU for PyTorch 2.0.1 compatibility (MPS not fully supported by WhisperX with this version)
+
 model_config = {
     "device": "cpu",
-    "compute_type": "int8",  # Use int8 for faster CPU inference
+    "compute_type": "int8",
     "model_name": "small",
     "language": "en"
 }
 
 class TranscribeRequest(BaseModel):
     audio_path: str
-    # Deprecated runtime override. We keep it for backward compatibility
-    # but model changes should happen via /config.
     model: Optional[str] = None
     device: Optional[str] = None
     compute_type: Optional[str] = None
@@ -78,45 +95,66 @@ def load_model_if_needed(new_config):
     global model, model_config
     
     with model_lock:
+        target_device = new_config.get("device", model_config["device"])
+        target_model = new_config.get("model", model_config["model_name"])
+        target_compute = new_config.get("compute_type", model_config["compute_type"])
+
         needs_reload = False
-        if model is None:
+        if model is None and target_device != "mlx":
             needs_reload = True
-        if "model" in new_config and new_config.get("model") != model_config["model_name"]:
+        if target_model != model_config["model_name"]:
             needs_reload = True
-        if "device" in new_config and new_config.get("device") != model_config["device"]:
+        if target_device != model_config["device"]:
             needs_reload = True
-        if "compute_type" in new_config and new_config.get("compute_type") != model_config["compute_type"]:
+        if target_compute != model_config["compute_type"]:
             needs_reload = True
             
         if needs_reload:
-            logger.info(f"Loading model {new_config.get('model', model_config['model_name'])}...")
+            logger.info(f"Updating model config: model={target_model}, device={target_device}, compute={target_compute}")
             
-            # Update config
-            if "model" in new_config: model_config["model_name"] = new_config["model"]
-            if "device" in new_config: model_config["device"] = new_config["device"]
-            if "compute_type" in new_config: model_config["compute_type"] = new_config["compute_type"]
+            model_config["model_name"] = target_model
+            model_config["device"] = target_device
+            model_config["compute_type"] = target_compute
             
-            try:
-                model = whisperx.load_model(
-                    model_config["model_name"], 
-                    model_config["device"], 
-                    compute_type=model_config["compute_type"]
-                )
-                logger.info("Model loaded successfully")
-            except Exception as e:
-                logger.error(f"Failed to load model: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
+            if target_device == "mlx":
+                if not MLX_WHISPER_AVAILABLE:
+                    logger.warning("mlx_whisper is requested but not available. Falling back to CPU int8.")
+                    model_config["device"] = "cpu"
+                    model_config["compute_type"] = "int8"
+                    target_device = "cpu"
+                else:
+                    logger.info("Configured Apple Silicon MLX Whisper engine")
+                    model_config["compute_type"] = "float16"
+                    return
+
+            if target_device != "mlx":
+                try:
+                    logger.info(f"Loading PyTorch WhisperX model {model_config['model_name']} on {model_config['device']}...")
+                    model = whisperx.load_model(
+                        model_config["model_name"], 
+                        model_config["device"], 
+                        compute_type=model_config["compute_type"]
+                    )
+                    logger.info("Model loaded successfully")
+                except Exception as e:
+                    logger.error(f"Failed to load PyTorch WhisperX model: {e}")
+                    raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
 
 @app.get("/health")
 def health():
+    supported_devices = ["cpu", "cuda"]
+    if MLX_WHISPER_AVAILABLE:
+        supported_devices.append("mlx")
+
     return {
         "status": "ok",
         "device": model_config["device"],
         "model": model_config["model_name"],
         "compute_type": model_config["compute_type"],
-        "model_loaded": model is not None,
-        "supported_devices": ["cpu", "cuda"],
-        "supported_compute_types": ["int8", "float32"],
+        "model_loaded": (model is not None or model_config["device"] == "mlx"),
+        "mlx_available": MLX_WHISPER_AVAILABLE,
+        "supported_devices": supported_devices,
+        "supported_compute_types": ["int8", "float16", "float32"],
     }
 
 @app.get("/models")
@@ -139,7 +177,6 @@ def update_config(request: ConfigRequest):
     if request.device: new_conf["device"] = request.device
     if request.compute_type: new_conf["compute_type"] = request.compute_type
     
-    # Language is just stored for preference, not requiring reload usually unless model is language specific
     if request.language: model_config["language"] = request.language
     
     load_model_if_needed(new_conf)
@@ -207,9 +244,6 @@ def attribution_aligned_energy(request: AlignedEnergyRequest):
 
 @app.post("/transcribe")
 def transcribe(request: TranscribeRequest):
-    # WhisperX/faster-whisper mutate shared tokenizer and alignment state.
-    # FastAPI runs synchronous handlers in a thread pool, so serialize the
-    # complete request rather than protecting model loading alone.
     with model_lock:
         return _transcribe_locked(request)
 
@@ -224,16 +258,87 @@ def _transcribe_locked(request: TranscribeRequest):
     if request.compute_type:
         request_conf["compute_type"] = request.compute_type
 
-    # Ensure model is loaded
     load_model_if_needed(request_conf)
     
     if not os.path.exists(request.audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
         
     try:
-        logger.info(f"Transcribing {request.audio_path}...")
+        active_device = request_conf.get("device", model_config["device"])
         
-        # 1. Transcribe
+        # MLX Whisper execution path for Apple Silicon
+        if active_device == "mlx" and MLX_WHISPER_AVAILABLE:
+            model_name = request_conf.get("model", model_config["model_name"])
+            repo_id = MLX_MODEL_MAP.get(model_name, f"mlx-community/whisper-{model_name}")
+            language = request.language or "en"
+            logger.info(f"Transcribing {request.audio_path} using MLX ({repo_id}, language={language})...")
+            
+            mlx_kwargs = {"path_or_hf_repo": repo_id, "word_timestamps": True}
+            if language and language != "auto":
+                mlx_kwargs["language"] = language
+                
+            mlx_result = mlx_whisper.transcribe(request.audio_path, **mlx_kwargs)
+            raw_segments = mlx_result.get("segments", [])
+            formatted_segments = []
+            for seg in raw_segments:
+                formatted_words = []
+                for w in seg.get("words", []):
+                    formatted_words.append({
+                        "word": w.get("word", ""),
+                        "start": float(w.get("start", 0.0)),
+                        "end": float(w.get("end", 0.0)),
+                        "score": float(w.get("probability", 1.0)),
+                    })
+                formatted_segments.append({
+                    "start": float(seg.get("start", 0.0)),
+                    "end": float(seg.get("end", 0.0)),
+                    "text": seg.get("text", "").strip(),
+                    "words": formatted_words,
+                })
+                
+            detected_language = mlx_result.get("language", language or "en")
+            
+            result = {
+                "segments": formatted_segments,
+                "language": detected_language,
+                "duration": float(mlx_result.get("duration", 0.0)),
+                "vad": {
+                    "status": "speech" if formatted_segments else "no_speech",
+                    "speechSeconds": sum(
+                        max(0.0, float(s["end"]) - float(s["start"]))
+                        for s in formatted_segments
+                    ),
+                },
+                "active_config": {
+                    "model": model_name,
+                    "device": "mlx",
+                    "compute_type": "float16",
+                },
+            }
+
+            if request.diarize:
+                try:
+                    if diarize_model is None:
+                        logger.info("Loading diarization model...")
+                        diarize_model = whisperx.DiarizationPipeline(
+                            use_auth_token=request.hf_token,
+                            device="cpu",
+                        )
+                    diarize_segments = diarize_model(request.audio_path)
+                    result = whisperx.assign_word_speakers(diarize_segments, result)
+                except Exception as e:
+                    logger.warning(
+                        "Diarization skipped (no usable model/token or runtime error): %s",
+                        e,
+                    )
+                    diarize_model = None
+
+            logger.info("MLX Transcription complete")
+            return result
+
+        # Standard PyTorch WhisperX execution path
+        logger.info(f"Transcribing {request.audio_path} using PyTorch WhisperX...")
+        
         try:
             language = request.language or "en"
             logger.info(f"Transcribing {request.audio_path} (language={language})...")
@@ -262,7 +367,6 @@ def _transcribe_locked(request: TranscribeRequest):
                 "vad": {"status": "no_speech", "speechSeconds": 0}
             }
         
-        # 2. Align for word-level timestamps
         try:
             align_model, align_metadata = whisperx.load_align_model(
                 language_code=detected_language,
@@ -280,9 +384,6 @@ def _transcribe_locked(request: TranscribeRequest):
         except Exception as e:
             logger.warning("Alignment skipped (unsupported language or error): %s", e)
         
-        # 3. Diarize (optional, power-user)
-        # Pyannote diarization is gated on HuggingFace; most users won't set hf_token.
-        # Never fail the whole transcribe: fall back to non-diarized segments.
         if request.diarize:
             try:
                 if diarize_model is None:
@@ -304,7 +405,7 @@ def _transcribe_locked(request: TranscribeRequest):
         return {
             "segments": result["segments"],
             "language": detected_language,
-            "duration": 0, # TODO: Calculate duration
+            "duration": 0,
             "vad": {
                 "status": "speech",
                 "speechSeconds": sum(

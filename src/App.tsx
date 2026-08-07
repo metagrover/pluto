@@ -139,6 +139,7 @@ function App() {
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
+  const [interimTranscript, setInterimTranscript] = useState('');
   const [recordingStartedAtMs, setRecordingStartedAtMs] = useState<
     number | null
   >(null);
@@ -693,11 +694,13 @@ function App() {
           onStartSessionRef={startSessionRef}
           onAnalyserReadyRef={onAnalyserReadyRef}
           onLiveTranscript={setLiveTranscript}
+          onInterimTranscript={setInterimTranscript}
           onCaptureHealthChange={setCaptureHealth}
           onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
           onRecordingStarted={(startedAtMs) => {
             setRecordingStartedAtMs(startedAtMs);
             setLiveTranscript([]);
+            setInterimTranscript('');
             setLiveTranscriptIntegrity('healthy');
           }}
           userTitle={meetingTitle}
@@ -760,6 +763,7 @@ function App() {
           currentNotes={currentNotes}
           setCurrentNotes={setCurrentNotes}
           liveTranscript={liveTranscript}
+          interimText={interimTranscript}
           captureHealth={captureHealth}
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}

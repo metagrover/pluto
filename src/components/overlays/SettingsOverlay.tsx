@@ -275,6 +275,31 @@ export const SettingsOverlay = ({
           </Section>
 
           <Section title="Recording">
+            <Field
+              htmlFor="settings-transcription-backend"
+              label="Transcription Engine"
+              helper="Choose between standard PyTorch WhisperX or Apple Silicon MLX framework."
+            >
+              <select
+                id="settings-transcription-backend"
+                value={transcriptionBackend}
+                onChange={(e) => {
+                  const value = e.target.value as TranscriptionBackend;
+                  setTranscriptionBackend(value);
+                  persistSetting('transcription_backend', value);
+                }}
+                className={controlClass}
+              >
+                <option value="whisperx_current">
+                  WhisperX Current (PyTorch CPU)
+                </option>
+                <option value="whisperx_tuned">WhisperX Tuned</option>
+                <option value="local_alt_apple_silicon">
+                  Local Alt (Apple Silicon MLX)
+                </option>
+              </select>
+            </Field>
+
             <div className="flex items-center justify-between gap-6 rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
               <div className="space-y-1.5">
                 <div className="text-[14px] font-black tracking-tight text-pro-text-main">

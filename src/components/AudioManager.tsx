@@ -110,6 +110,7 @@ interface AudioManagerProps {
   onProcessingChange?: (isProcessing: boolean) => void;
   onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
   onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
+  onInterimTranscript?: (text: string) => void;
   onCaptureHealthChange?: (health: CaptureHealthState) => void;
   onLiveTranscriptIntegrityChange?: (state: LiveTranscriptIntegrity) => void;
   onRecordingStarted?: (startedAtMs: number) => void;
@@ -415,6 +416,7 @@ export const AudioManager = ({
   onAnalyserReadyRef,
   onSpeakingChange,
   onLiveTranscript,
+  onInterimTranscript,
   onCaptureHealthChange,
   onLiveTranscriptIntegrityChange,
   onRecordingStarted,
@@ -436,6 +438,10 @@ export const AudioManager = ({
   const resolvedTranscriptionSettings = resolveTranscriptionSettings(
     transcriptionSettings,
   );
+  const CHUNK_SECONDS =
+    resolvedTranscriptionSettings.backend === 'local_alt_apple_silicon'
+      ? 5
+      : 30;
   const resolvedLanguage = resolveTranscriptionLanguage(
     transcriptionSettings?.language,
   );
@@ -1703,7 +1709,6 @@ export const AudioManager = ({
   const CHUNK_FLUSH_MAX_SEGMENTS = TRANSCRIPTION_TUNING.chunkFlush.maxSegments;
   const CHUNK_FLUSH_MAX_FULL_COVERAGE_RATIO =
     TRANSCRIPTION_TUNING.chunkFlush.maxFullCoverageRatio;
-  const CHUNK_SECONDS = 30;
   const ENABLE_CHUNK_ARBITRATION = true;
   const ENABLE_CHUNK_FLUSH = true;
   const getRecorderOptions = (): MediaRecorderOptions | undefined => {
@@ -3804,7 +3809,10 @@ export const AudioManager = ({
       }));
     liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
       acceptedSegments,
-      () => onLiveTranscript?.(liveTranscript),
+      () => {
+        onInterimTranscript?.('');
+        onLiveTranscript?.(liveTranscript);
+      },
     );
   };
 
@@ -3925,6 +3933,7 @@ export const AudioManager = ({
       console.warn('[Pluto] Ignoring duplicate or orphaned stop request');
       return;
     }
+    stopSpeakingMonitor();
     frozenLiveTranscriptResponsivenessRef.current =
       liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
     startStopToValidatedLatencyAfterAcceptedStop({

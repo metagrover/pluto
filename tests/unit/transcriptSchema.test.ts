@@ -238,7 +238,9 @@ describe('transcriptSchema', () => {
     it('preserves valid meeting speech', () => {
       const rawText = 'We need to deploy the database migration on Friday.';
       const cleaned = scrubTranscriptArtifacts(rawText);
-      expect(cleaned).toBe('We need to deploy the database migration on Friday.');
+      expect(cleaned).toBe(
+        'We need to deploy the database migration on Friday.',
+      );
     });
   });
 
@@ -246,8 +248,20 @@ describe('transcriptSchema', () => {
     it('combines consecutive segments from the same speaker within 1.5s gap', () => {
       const segments = [
         { id: '1', speaker: 'Me', start: 0, end: 2.0, text: 'Hey everyone.' },
-        { id: '2', speaker: 'Me', start: 2.5, end: 5.0, text: 'Let us start the meeting.' },
-        { id: '3', speaker: 'Them', start: 5.5, end: 8.0, text: 'Sounds good.' },
+        {
+          id: '2',
+          speaker: 'Me',
+          start: 2.5,
+          end: 5.0,
+          text: 'Let us start the meeting.',
+        },
+        {
+          id: '3',
+          speaker: 'Them',
+          start: 5.5,
+          end: 8.0,
+          text: 'Sounds good.',
+        },
       ];
       const merged = mergeAdjacentSpeakerSegments(segments as any);
       expect(merged.length).toBe(2);
@@ -257,4 +271,3 @@ describe('transcriptSchema', () => {
     });
   });
 });
-

@@ -1,6 +1,6 @@
+import { deriveCitationTrustStatus } from '../../src/utils/trustStatus';
 import { getEntity, getMeetingMid } from '../db';
 import type { CitationChain, RetrievalResult } from './intelligenceTypes';
-import { deriveCitationTrustStatus } from '../../src/utils/trustStatus';
 
 /**
  * Extract the sentence surrounding a given character index in a text.
@@ -149,7 +149,9 @@ export const auditCitations = (citations: CitationChain[]): CitationChain[] => {
     return {
       ...citation,
       evidence_valid,
-      trust_status: deriveCitationTrustStatus({ evidenceValid: evidence_valid }),
+      trust_status: deriveCitationTrustStatus({
+        evidenceValid: evidence_valid,
+      }),
     };
   });
 };

@@ -547,10 +547,16 @@ describe('UnifiedLLMProvider', () => {
     );
 
     expect(analysis.all_decisions).toEqual([
+      { text: 'Use GraphQL for the rollout' },
       { text: 'Use REST for the rollout' },
     ]);
     expect(analysis.all_action_items).toEqual([
-      { text: 'Send rollout email', topic: 'API migration' },
+      {
+        text: 'Send rollout email',
+        assignee: 'Bob',
+        due: 'next Tuesday',
+        topic: 'API migration',
+      },
     ]);
     expect(analysis.generation_metadata?.error_categories).toEqual(
       expect.arrayContaining([
@@ -605,13 +611,19 @@ describe('LLM factory', () => {
 describe('Ollama Budgeting & Adaptive Windowing', () => {
   it('calculateOllamaContextBudget allocates up to 16384 context tokens for long analysis prompts', () => {
     const longPrompt = 'a'.repeat(30_000); // ~10,000 tokens
-    const budget = calculateOllamaContextBudget(longPrompt, 'structuredAnalysis');
+    const budget = calculateOllamaContextBudget(
+      longPrompt,
+      'structuredAnalysis',
+    );
     expect(budget.num_ctx).toBeGreaterThanOrEqual(12288);
     expect(budget.num_predict).toBe(4096);
   });
 
   it('sliceTranscriptWindows slices transcript into overlapping windows when line count exceeds maxLinesPerWindow', () => {
-    const lines = Array.from({ length: 300 }, (_, i) => `[Me] (${i * 5}s): Line content ${i}`).join('\n');
+    const lines = Array.from(
+      { length: 300 },
+      (_, i) => `[Me] (${i * 5}s): Line content ${i}`,
+    ).join('\n');
     const windows = sliceTranscriptWindows(lines, 100);
     expect(windows.length).toBeGreaterThan(1);
     expect(windows[0].startSegment).toBe(0);
@@ -620,18 +632,28 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
 
   it('deduplicateExtractedItems merges duplicate action items and respects distinct assignees', () => {
     const items = [
-      { text: 'Deploy the Snowflake integration script on Friday.', assignee: 'Alain' },
-      { text: 'Deploy Snowflake integration script on Friday', assignee: 'Alain' },
-      { text: 'Deploy Snowflake integration script on Friday', assignee: 'Deepak' },
+      {
+        text: 'Deploy the Snowflake integration script on Friday.',
+        assignee: 'Alain',
+      },
+      {
+        text: 'Deploy Snowflake integration script on Friday',
+        assignee: 'Alain',
+      },
+      {
+        text: 'Deploy Snowflake integration script on Friday',
+        assignee: 'Deepak',
+      },
       { text: 'Write project timeline documentation.', assignee: 'Deepak' },
     ];
     const deduped = deduplicateExtractedItems(
       items,
       (item) => item.text,
-      (item) => item.assignee
+      (item) => item.assignee,
     );
     expect(deduped.length).toBe(3);
-    expect(deduped[0].text).toBe('Deploy the Snowflake integration script on Friday.');
+    expect(deduped[0].text).toBe(
+      'Deploy the Snowflake integration script on Friday.',
+    );
   });
 });
-
