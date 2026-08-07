@@ -33,7 +33,7 @@ def ollama_generate(prompt: str, json_mode: bool = True, num_ctx: int = 16384) -
                 data=json.dumps(payload).encode('utf-8'),
                 headers={'Content-Type': 'application/json'}
             )
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=900) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
                 return data.get('response', '')
         except Exception as e:
