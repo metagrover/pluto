@@ -94,16 +94,8 @@ fi
 pip install --upgrade pip "setuptools<82" wheel
 
 if [ -f "$PYTHON_DIR/requirements.txt" ]; then
-    WHISPERX_SPEC=$(grep -E "whisperx" "$PYTHON_DIR/requirements.txt" | grep -v '^\s*#' | head -n 1 | tr -d '\r' || true)
-    if [ -n "$WHISPERX_SPEC" ]; then
-        TMP_REQUIREMENTS=$(mktemp)
-        grep -v "whisperx" "$PYTHON_DIR/requirements.txt" > "$TMP_REQUIREMENTS"
-        pip install -r "$TMP_REQUIREMENTS"
-        rm -f "$TMP_REQUIREMENTS"
-        pip install --no-build-isolation "$WHISPERX_SPEC"
-    else
-        pip install -r "$PYTHON_DIR/requirements.txt"
-    fi
+    pip install -r "$PYTHON_DIR/requirements.txt"
+    pip install --no-deps -r "$PYTHON_DIR/requirements-mlx.txt"
 else
     echo "Warning: requirements.txt not found!"
 fi

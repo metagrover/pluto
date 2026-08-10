@@ -324,17 +324,17 @@ describe('recording finalization helpers', () => {
         language: 'en',
       }),
     ).toMatchObject({
-      backend: 'whisperx_tuned',
+      backend: 'local_alt_apple_silicon',
       preset: 'accuracy_first',
       model: 'large-v3',
-      computeType: 'float32',
+      computeType: 'float16',
     });
   });
 
   it('does not request a stronger speaker-attribution policy when already strongest', () => {
     expect(
       getStrongerSpeakerAttributionPolicy({
-        backend: 'whisperx_tuned',
+        backend: 'local_alt_apple_silicon',
         preset: 'accuracy_first',
         model: 'large-v3',
         device: 'cpu',
@@ -363,7 +363,7 @@ describe('recording finalization helpers', () => {
       shouldRetry: true,
       reason: 'retry-with-stronger-policy',
       strongerOptions: {
-        backend: 'whisperx_tuned',
+        backend: 'local_alt_apple_silicon',
         preset: 'accuracy_first',
       },
     });

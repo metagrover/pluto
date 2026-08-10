@@ -20,7 +20,7 @@ This document describes the high-level architecture of Pluto's local meeting cap
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 2. Native Apple Silicon MLX Whisper (`mlx-whisper` / `whisperx_server`)│
+│ 2. Native Apple Silicon MLX Whisper (`mlx-whisper` sidecar)            │
 │    • Acceleration: Apple Neural Engine (ANE) + Metal GPU               │
 │    • Responsibility: Converts raw audio to text & word timestamps      │
 └───────────────────────────────────┬────────────────────────────────────┘
@@ -53,9 +53,9 @@ This document describes the high-level architecture of Pluto's local meeting cap
 - **Engine:** Apple `mlx-whisper` (`local_alt_apple_silicon`)
 - **Purpose:** Converts raw 16kHz PCM audio into accurate text transcripts with millisecond word-level timestamps.
 - **Why MLX?**
-  - Runs natively on Apple Neural Engine (ANE) and Metal GPU via unified memory.
-  - Achieves 15x–25x real-time speed on Apple Silicon (M1/M2/M3/M4) with zero accuracy degradation.
-  - Falls back to PyTorch `whisperx` CPU execution on non-Apple-Silicon platforms.
+  - Runs natively with Apple's MLX framework and unified memory.
+  - Produces word timestamps used by Pluto's live and final transcript evidence.
+  - Fails explicitly when MLX is unavailable; Pluto does not switch to a CPU recognizer.
 
 ### 3. Local Speaker Diarization (`python/sherpa_diarization_runtime.py`)
 - **Engine:** `sherpa-onnx` (C++ ONNX Runtime)
@@ -69,7 +69,7 @@ This document describes the high-level architecture of Pluto's local meeting cap
 ## 🔒 IPC & Process Lifecycle
 
 1. **Electron Main Process (`electron/main.ts`):**
-   - Manages the lifecycle of the bundled `whisperx_server` executable (`resources/bin/whisperx_server`) on `localhost:5123`.
+   - Manages the lifecycle of the bundled local transcription executable on `localhost:5123`.
    - Spawns Swift capture binaries when a meeting recording starts.
 2. **Sidecar Communication (`electron/transcription.ts`):**
    - Communicates via HTTP REST endpoints (`/transcribe`, `/diarize`, `/attribution/aligned-energy`, `/health`).

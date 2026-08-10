@@ -21,7 +21,10 @@
   ],
   "mac": {
     "target": [
-      "dmg"
+      {
+        "target": "dmg",
+        "arch": ["arm64"]
+      }
     ],
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}",
     "extendInfo": {
@@ -29,28 +32,5 @@
       "NSCameraUsageDescription": "Pluto needs camera access for screen sharing and meeting contexts.",
       "NSAudioCaptureUsageDescription": "Pluto needs permission to capture system audio for transcription."
     }
-  },
-  "win": {
-    "target": [
-      {
-        "target": "nsis",
-        "arch": [
-          "x64"
-        ]
-      }
-    ],
-    "artifactName": "${productName}-Windows-${version}-Setup.${ext}"
-  },
-  "nsis": {
-    "oneClick": false,
-    "perMachine": false,
-    "allowToChangeInstallationDirectory": true,
-    "deleteAppDataOnUninstall": false
-  },
-  "linux": {
-    "target": [
-      "AppImage"
-    ],
-    "artifactName": "${productName}-Linux-${version}.${ext}"
   }
 }

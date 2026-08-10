@@ -25,6 +25,7 @@ import {
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
 import {
+  isMlxCheckpointConfig,
   recoverInterruptedCaptureJournals,
   repairStoppingCaptureJournalTranscript,
   verifySealedCaptureJournalTranscriptEvidence,
@@ -67,6 +68,23 @@ describe('capture journal recovery', () => {
         algorithmVersion: 'speaker_activity_v1',
       },
     );
+
+  it('treats backend labels with CPU provenance as legacy checkpoints', () => {
+    expect(
+      isMlxCheckpointConfig({
+        backend: 'local_alt_apple_silicon',
+        device: 'cpu',
+        computeType: 'int8',
+      }),
+    ).toBe(false);
+    expect(
+      isMlxCheckpointConfig({
+        backend: 'local_alt_apple_silicon',
+        device: 'mlx',
+        computeType: 'float16',
+      }),
+    ).toBe(true);
+  });
 
   const recoverSingleMeeting = async (root: string) => {
     const saveMeeting = vi.fn();
@@ -685,26 +703,31 @@ describe('capture journal recovery', () => {
       expectedRevision: manifest.revision,
     });
 
-    const transcribeChunk = vi.fn(async () => ({
+    const transcribeChunk = vi.fn(async (audioPath: string) => ({
       detectedLanguage: 'en',
       providerLabel: 'local',
-      segments: [],
+      segments: audioPath.includes('mic-')
+        ? [{ start: 0.2, end: 0.8, text: 'Synthetic migrated statement' }]
+        : [],
     }));
+    const mlxConfig = {
+      ...transcriptionConfig,
+      backend: 'local_alt_apple_silicon',
+      model: 'large-v3',
+      device: 'mlx',
+      computeType: 'float16',
+    } as const;
     const repaired = await repairStoppingCaptureJournalTranscript(root, {
       meetingId,
       transcribeChunk,
-      transcriptionConfig: {
-        ...transcriptionConfig,
-        model: 'large-v3',
-        computeType: 'float32',
-      },
+      transcriptionConfig: mlxConfig,
     });
 
     expect(savedMic.checkpoint.source).toBe('mic');
-    expect(transcribeChunk).toHaveBeenCalledTimes(1);
+    expect(transcribeChunk).toHaveBeenCalledTimes(2);
     expect(transcribeChunk).toHaveBeenCalledWith(
       expect.any(String),
-      transcriptionConfig,
+      mlxConfig,
       2,
     );
     expect(repaired.transcriptCheckpoints).toHaveLength(2);
@@ -718,13 +741,8 @@ describe('capture journal recovery', () => {
       stitchWavSegments: async (_segments, outputTag) =>
         join(root, `${outputTag}.wav`),
       transcribeChunk,
-      // Recovery must retain the persisted recording-time config even when
-      // the user changes settings before relaunch.
-      transcriptionConfig: {
-        ...transcriptionConfig,
-        model: 'large-v3',
-        computeType: 'float32',
-      },
+      // Legacy checkpoints must be replaced as one complete MLX provenance set.
+      transcriptionConfig: mlxConfig,
       nowMs: 4_000,
     });
 

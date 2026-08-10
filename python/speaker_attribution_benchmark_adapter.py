@@ -29,7 +29,6 @@ SCHEMA_VERSION = 1
 PIPELINE_VERSION = "speaker-attribution-adapter-v1"
 KNOWN_CANDIDATES = {
     "synthetic",
-    "current-whisperx",
     "apple-silicon-asr",
     "pyannote-community-1",
     "nemo-local",
@@ -175,8 +174,6 @@ def _identity(candidate_id: str, version: str) -> dict[str, str]:
 def _probe(candidate_id: str, config: dict[str, Any]) -> tuple[list[dict[str, str]], str]:
     if candidate_id == "synthetic":
         return [_identity("synthetic", "1")], _hardware()
-    if candidate_id == "current-whisperx":
-        return [_identity("whisperx", _package_version("whisperx"))], _hardware()
     if candidate_id == "apple-silicon-asr":
         if platform.system() != "Darwin" or platform.machine() != "arm64":
             raise CandidateError(
@@ -326,16 +323,6 @@ def _parse_rttm(output_path: Path) -> list[dict[str, Any]]:
 
 def _transcribe(candidate_id: str, request: dict[str, Any], config: dict[str, Any]) -> tuple[Any, Any, list[Any], str]:
     model_name = str(config.get("model", "small"))
-    if candidate_id == "current-whisperx":
-        version = _package_version("whisperx")
-        audio_path = _safe_audio_path(request)
-        whisperx = importlib.import_module("whisperx")
-        device = str(config.get("device", "cpu"))
-        compute_type = str(config.get("computeType", "int8"))
-        model = whisperx.load_model(model_name, device, compute_type=compute_type)
-        result = model.transcribe(audio_path, language=config.get("language", "en"))
-        words, segments = _normalize_transcript(result)
-        return words, segments, [_identity(f"whisperx:{model_name}", version)], device
     if candidate_id == "apple-silicon-asr":
         models, hardware = _probe(candidate_id, config)
         audio_path = _safe_audio_path(request)
