@@ -230,6 +230,10 @@
   .transcript-turn p {
     @apply text-[15px] leading-7 text-pro-text-main;
   }
+  .transcript-typewriter-caret {
+    @apply ml-0.5 inline-block h-[1em] w-px translate-y-[0.12em] bg-pro-accent;
+    animation: transcript-caret 900ms steps(2, jump-none) infinite;
+  }
   .transcript-interim {
     @apply ml-[116px] py-5 text-[15px] leading-7 text-pro-text-muted opacity-70;
   }
@@ -322,6 +326,9 @@
     .recording-workspace * {
       scroll-behavior: auto !important;
       animation-duration: 0.01ms !important;
+    }
+    .transcript-typewriter-caret {
+      display: none;
     }
   }
 }
@@ -418,6 +425,18 @@
 }
 
 /* Advanced Animations */
+@keyframes transcript-caret {
+  0%,
+  45% {
+    opacity: 1;
+  }
+
+  55%,
+  100% {
+    opacity: 0.2;
+  }
+}
+
 @keyframes nebula-float {
   0%,
   100% {
