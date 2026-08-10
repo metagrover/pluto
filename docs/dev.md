@@ -2,51 +2,28 @@
 
 This doc captures setup issues we hit on macOS during initial onboarding and the fixes that worked. Use it as a checklist when someone new sets up the project.
 
-## 1) WhisperX install fails with `ModuleNotFoundError: No module named 'pkg_resources'`
+## 1) MLX transcription is unavailable
 
 **Symptoms**
 
-- `Getting requirements to build wheel did not run successfully`
-- Stack trace ends with: `ModuleNotFoundError: No module named 'pkg_resources'`
-- Often appears while installing `git+https://github.com/m-bain/whisperx.git@v3.3.1`
+- The transcription health endpoint reports `engine: unavailable`.
+- Startup reports that MLX Whisper is unavailable.
 
 **Root cause**
 
-- `setuptools` 82 removed `pkg_resources`. WhisperX (or its build step) still imports it.
+- Pluto transcription currently requires an Apple Silicon Mac and the project-managed Python environment.
 
 **Fix**
 
-- Pin setuptools to `<82` and keep that pin in place for installs.
+- Verify `uname -m` reports `arm64`, then rebuild the managed environment.
 
 **Commands**
-
-```bash
-source python/venv/bin/activate
-pip install --force-reinstall "setuptools<82" wheel
-```
-
-If installing requirements manually:
-
-```bash
-PIP_CONSTRAINT=python/constraints.txt pip install -r python/requirements.txt
-```
-
-## 2) `pnpm install` reintroduces the WhisperX error
-
-**Symptoms**
-
-- `pnpm install` runs `pnpm run setup-python` (via `postinstall`) and reinstalling requirements re-upgrades `setuptools` back to 82.
-
-**Fix**
-
-- `scripts/setup_python.sh` now pins `setuptools<82` and applies `python/constraints.txt` automatically.
-- If you still see the error, re-run:
 
 ```bash
 pnpm run setup-python
 ```
 
-## 3) Electron native module ABI mismatch (NODE_MODULE_VERSION)
+## 2) Electron native module ABI mismatch (NODE_MODULE_VERSION)
 
 **Symptoms**
 
@@ -82,7 +59,7 @@ pnpm rebuild better-sqlite3
 
 Default contributor verification uses `pnpm run lint` and `pnpm test -- --run`. Local database / provider probe tests now live behind `pnpm run test:manual` so contributors do not need a warmed personal database to get a green baseline.
 
-## 4) Swift build error: duplicate method redeclaration
+## 3) Swift build error: duplicate method redeclaration
 
 **Symptoms**
 
@@ -92,7 +69,7 @@ Default contributor verification uses `pnpm run lint` and `pnpm test -- --run`. 
 
 - Remove the duplicate `stream(_:didStopWithError:)` implementation so it appears only once.
 
-## 5) Xcode Command Line Tools
+## 4) Xcode Command Line Tools
 
 **Check if installed**
 
@@ -115,7 +92,7 @@ xcode-select --install
 4. `pnpm run build-native`
 5. `pnpm run lint`
 6. `pnpm test -- --run`
-7. If WhisperX fails: pin `setuptools<82` (see above) and re-run `pnpm run setup-python`
+7. If MLX is unavailable: verify Apple Silicon and re-run `pnpm run setup-python`
 8. If Electron throws ABI mismatch: run `pnpm exec electron-rebuild -f -w better-sqlite3`
 
 ## Code Formatting with Biome

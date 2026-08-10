@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Build the standalone WhisperX executable
+# Build the standalone transcription executable
 # This script assumes 'setup_python.sh' has been run and venv exists.
 
 set -e
@@ -12,7 +12,7 @@ VENV_DIR="$PYTHON_DIR/venv"
 RESOURCES_DIR="$PROJECT_ROOT/resources"
 BIN_DIR="$RESOURCES_DIR/bin"
 
-echo "Building WhisperX Server Executable..."
+echo "Building local transcription server executable..."
 
 # Activate Virtual Env
 if [ -f "$VENV_DIR/bin/activate" ]; then
@@ -35,11 +35,7 @@ rm -rf "$PYTHON_DIR/dist"
 # Build with PyInstaller
 # We run from python/ dir so relative paths in spec work
 cd "$PYTHON_DIR"
-# Mitigate OpenMP shared-memory failures during PyInstaller hook analysis (torch import)
-export KMP_SHM_ENABLE=0
-export KMP_INIT_AT_FORK=FALSE
 export OMP_NUM_THREADS=1
-export MKL_NUM_THREADS=1
 "$PYINSTALLER_BIN" whisperx_server.spec
 
 # Move output to resources/bin

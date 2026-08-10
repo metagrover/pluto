@@ -29,11 +29,11 @@ export interface TranscriptionSettings {
 export const DEFAULT_TRANSCRIPTION_SETTINGS: Required<
   Omit<TranscriptionSettings, 'language'>
 > & { language: string } = {
-  backend: 'whisperx_current',
+  backend: 'local_alt_apple_silicon',
   preset: 'balanced',
   model: 'small',
-  device: 'cpu',
-  computeType: 'int8',
+  device: 'mlx',
+  computeType: 'float16',
   language: 'en',
 };
 
@@ -60,13 +60,9 @@ export const resolveTranscriptionLanguage = (
 };
 
 export const resolveTranscriptionBackend = (
-  backend?: string | null,
+  _backend?: string | null,
 ): TranscriptionBackend => {
-  return backend === 'whisperx_tuned' ||
-    backend === 'local_alt_apple_silicon' ||
-    backend === 'whisperx_current'
-    ? backend
-    : 'whisperx_current';
+  return 'local_alt_apple_silicon';
 };
 
 export const resolveTranscriptionPreset = (

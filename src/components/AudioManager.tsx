@@ -119,7 +119,6 @@ interface AudioManagerProps {
   participants?: string[];
   systemAudioStatus?: string;
   transcriptionSettings?: TranscriptionSettings;
-  hfToken?: string;
 
   onStopSessionRef?: React.MutableRefObject<
     ((endReason?: string) => void) | null
@@ -410,7 +409,6 @@ export const AudioManager = ({
   userTitle = '',
   participants = [],
   transcriptionSettings,
-  hfToken,
   onStopSessionRef,
   onStartSessionRef,
   onAnalyserReadyRef,
@@ -445,7 +443,6 @@ export const AudioManager = ({
   const resolvedLanguage = resolveTranscriptionLanguage(
     transcriptionSettings?.language,
   );
-  const hfTokenValue = typeof hfToken === 'string' ? hfToken.trim() : '';
   const resolvedChunkModel = resolveLiveChunkModel(
     resolvedTranscriptionSettings.model,
   );
@@ -4789,7 +4786,7 @@ export const AudioManager = ({
       if (
         diarizationEnabled &&
         diarizationAudioPath &&
-        resolveProductionDiarizationProvider(hfTokenValue) === 'sherpa_local'
+        resolveProductionDiarizationProvider() === 'sherpa_local'
       ) {
         try {
           const readiness = await window.ipcRenderer.invoke(
@@ -4868,9 +4865,7 @@ export const AudioManager = ({
             buildTranscriptionOptions({
               ...diarizationOptions,
               diarize: true,
-              hfToken: hfTokenValue,
-              diarizationProvider:
-                resolveProductionDiarizationProvider(hfTokenValue),
+              diarizationProvider: resolveProductionDiarizationProvider(),
               meetingId: currentMeetingIdRef.current,
             }),
           );
@@ -5041,7 +5036,7 @@ export const AudioManager = ({
             diarizationEnabled,
             mappingConfident: initialDiarizationAttempt.mappingConfident,
             retryAlreadyUsed: false,
-            providerHasStrongerPolicy: hfTokenValue.length > 0,
+            providerHasStrongerPolicy: false,
             settings: resolvedTranscriptionSettings,
           });
           transcriptPipeline.speakerAttributionRetryPlan =

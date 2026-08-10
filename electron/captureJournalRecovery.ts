@@ -107,6 +107,20 @@ type RecoveryDependencies = {
   };
 };
 
+type RecoveryTranscriptionConfig = NonNullable<
+  RecoveryDependencies['transcriptionConfig']
+>;
+
+export const isMlxCheckpointConfig = (
+  config: Pick<
+    RecoveryTranscriptionConfig,
+    'backend' | 'device' | 'computeType'
+  >,
+): boolean =>
+  config.backend === 'local_alt_apple_silicon' &&
+  config.device === 'mlx' &&
+  config.computeType === 'float16';
+
 export type CaptureJournalRecoveryResult = {
   recoveredCount: number;
   failedRecoveryCount: number;
@@ -391,12 +405,13 @@ const repairV3TranscriptGaps = async (
       ? { transcriptionConfig: fallbackConfig }
       : null;
   if (!templateSidecar) return manifest;
+  const targetConfig =
+    !isMlxCheckpointConfig(templateSidecar.transcriptionConfig) &&
+    fallbackConfig
+      ? fallbackConfig
+      : templateSidecar.transcriptionConfig;
   const configKey = computeChecksum(
-    Buffer.from(
-      canonicalizeTranscriptCheckpointConfig(
-        templateSidecar.transcriptionConfig,
-      ),
-    ),
+    Buffer.from(canonicalizeTranscriptCheckpointConfig(targetConfig)),
   );
   for (const interval of manifest.intervals) {
     const acceptedSpeechSources = await readAcceptedSpeechSources(
@@ -501,10 +516,15 @@ const repairV3TranscriptGaps = async (
         inspection.structurallyReusable &&
         (!inspection.emptyWithActivity || correlatedSpeechAccepted);
       const existing = inspection.existing;
-      if (reusable || existing?.repairAttempted) continue;
+      if (
+        reusable ||
+        (existing?.repairAttempted &&
+          existing.transcriptionConfigKey === configKey)
+      )
+        continue;
       const result = await transcribeChunk(
         join(rootDir, disposition.repairRelativePath),
-        templateSidecar.transcriptionConfig,
+        targetConfig,
         interval.chunkEndSec - interval.chunkStartSec,
       );
       const normalizedSegments = normalizeCheckpointWords(
@@ -534,7 +554,7 @@ const repairV3TranscriptGaps = async (
           chunkChecksumSha256: disposition.repairChecksumSha256,
           chunkStartSec: interval.chunkStartSec,
           chunkEndSec: interval.chunkEndSec,
-          transcriptionConfig: templateSidecar.transcriptionConfig,
+          transcriptionConfig: targetConfig,
           backendResult: {
             detectedLanguage: result.detectedLanguage ?? null,
             providerLabel: result.providerLabel ?? 'local',

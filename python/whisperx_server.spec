@@ -2,7 +2,7 @@
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 datas = []
-for pkg in ['whisperx', 'torch', 'tqdm', 'regex', 'requests', 'packaging', 'filelock', 'numpy', 'tokenizers', 'huggingface_hub']:
+for pkg in ['tqdm', 'regex', 'requests', 'packaging', 'filelock', 'numpy', 'tokenizers', 'huggingface_hub']:
     try:
         datas += copy_metadata(pkg)
     except Exception:
@@ -18,6 +18,9 @@ except Exception:
 
 try:
     mlx_w_datas, mlx_w_binaries, mlx_w_hiddenimports = collect_all('mlx_whisper')
+    mlx_w_datas = [
+        item for item in mlx_w_datas if not item[0].endswith('torch_whisper.py')
+    ]
     datas += mlx_w_datas
 except Exception:
     mlx_w_binaries, mlx_w_hiddenimports = [], []
@@ -30,21 +33,13 @@ a = Analysis(
     binaries=sherpa_binaries + mlx_binaries + mlx_w_binaries,
     datas=datas,
     hiddenimports=[
-        'whisperx',
         'mlx',
         'mlx_whisper',
-        'pytorch_lightning.loops.fit_loop',
-        'pytorch_lightning.loops.epoch.training_epoch_loop',
-        'pytorch_lightning.loops.batch.training_batch_loop',
-        'sklearn.neighbors._typedefs',
-        'sklearn.neighbors._quad_tree',
-        'sklearn.tree',
-        'sklearn.tree._utils',
     ] + sherpa_hiddenimports + mlx_hiddenimports + mlx_w_hiddenimports,
     hookspath=['hooks'],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['torch', 'torchaudio', 'whisperx', 'mlx_whisper.torch_whisper'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

@@ -237,10 +237,10 @@ describe('speaker attribution benchmark adapter', () => {
     },
   );
 
-  it('probes the current WhisperX installation deterministically', async () => {
+  it('probes the Apple Silicon MLX installation deterministically', async () => {
     const result = await runAdapter([
-      request('whisperx-one', 'probe', 'current-whisperx'),
-      request('whisperx-two', 'probe', 'current-whisperx'),
+      request('mlx-one', 'probe', 'apple-silicon-asr'),
+      request('mlx-two', 'probe', 'apple-silicon-asr'),
     ]);
 
     expect(result.responses).toHaveLength(2);
@@ -254,7 +254,7 @@ describe('speaker attribution benchmark adapter', () => {
         result.responses[0].output.runtime.models,
       );
       expect(result.responses[0].output.runtime.models[0]).toMatchObject({
-        id: 'whisperx',
+        id: 'mlx-whisper',
         version: expect.any(String),
       });
     }
@@ -369,30 +369,30 @@ describe('speaker attribution benchmark adapter', () => {
   });
 
   it('rejects malformed optional ASR output without leaking its contents', async () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'pluto-fake-whisperx-'));
+    const root = mkdtempSync(path.join(tmpdir(), 'pluto-fake-mlx-'));
     try {
       writeFileSync(path.join(root, 'audio.wav'), 'synthetic');
       writeFileSync(
-        path.join(root, 'whisperx.py'),
-        "class Model:\n def transcribe(self,*args,**kwargs):\n  if kwargs.get('language')=='bad-words': return {'segments':[{'start':0,'end':1,'text':'private transcript','words':'not-a-list'}]}\n  return {'segments':[{'start':'not-time','end':1,'text':'private transcript'}]}\ndef load_model(*args,**kwargs): return Model()\n",
+        path.join(root, 'mlx_whisper.py'),
+        "def transcribe(*args,**kwargs):\n if kwargs.get('path_or_hf_repo')=='bad-words': return {'segments':[{'start':0,'end':1,'text':'private transcript','words':'not-a-list'}]}\n return {'segments':[{'start':'not-time','end':1,'text':'private transcript'}]}\n",
       );
-      const metadata = path.join(root, 'whisperx-9.9.dist-info');
+      const metadata = path.join(root, 'mlx_whisper-9.9.dist-info');
       mkdirSync(metadata);
       writeFileSync(
         path.join(metadata, 'METADATA'),
-        'Metadata-Version: 2.1\nName: whisperx\nVersion: 9.9\n',
+        'Metadata-Version: 2.1\nName: mlx-whisper\nVersion: 9.9\n',
       );
       const badTime = request(
         'malformed-asr',
         'transcribe',
-        'current-whisperx',
-        { language: 'bad-time' },
+        'apple-silicon-asr',
+        { model: 'bad-time' },
       );
       const badWords = request(
         'malformed-words',
         'transcribe',
-        'current-whisperx',
-        { language: 'bad-words' },
+        'apple-silicon-asr',
+        { model: 'bad-words' },
       );
       badTime.case.audio.mixedPath = path.join(root, 'audio.wav');
       badWords.case.audio.mixedPath = path.join(root, 'audio.wav');

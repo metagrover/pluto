@@ -175,15 +175,15 @@ const getSetting = (key: unknown) => {
     case 'auto_end_enabled':
       return 'true';
     case 'transcription_backend':
-      return 'whisperx_current';
+      return 'local_alt_apple_silicon';
     case 'transcription_preset':
       return 'balanced';
     case 'whisper_model':
       return 'small';
     case 'whisper_device':
-      return 'cpu';
+      return 'mlx';
     case 'whisper_compute_type':
-      return 'int8';
+      return 'float16';
     case 'whisper_language':
       return '';
     default:

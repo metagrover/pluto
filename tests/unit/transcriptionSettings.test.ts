@@ -45,7 +45,7 @@ describe('transcription settings', () => {
 
   it('normalizes backend and preset values', () => {
     expect(resolveTranscriptionBackend('whisperx_tuned')).toBe(
-      'whisperx_tuned',
+      'local_alt_apple_silicon',
     );
     expect(resolveTranscriptionBackend('unknown')).toBe(
       DEFAULT_TRANSCRIPTION_SETTINGS.backend,

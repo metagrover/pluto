@@ -1,7 +1,5 @@
-export type DiarizationProvider = 'sherpa_local' | 'whisperx_hf';
+export type DiarizationProvider = 'sherpa_local';
 
 export const resolveProductionDiarizationProvider = (
-  hfToken: string,
-): DiarizationProvider => {
-  return hfToken.trim().length > 0 ? 'whisperx_hf' : 'sherpa_local';
-};
+  _legacyHfToken = '',
+): DiarizationProvider => 'sherpa_local';

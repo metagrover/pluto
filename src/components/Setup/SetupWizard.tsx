@@ -13,7 +13,6 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     version?: string;
     error?: string;
   } | null>(null);
-  const [hfToken, setHfToken] = useState('');
   const [llmProvider, setLlmProvider] = useState('ollama');
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
@@ -23,10 +22,9 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
   useEffect(() => {
     const load = async () => {
-      const [setupComplete, savedStep, savedHf, savedLlm] = await Promise.all([
+      const [setupComplete, savedStep, savedLlm] = await Promise.all([
         window.ipcRenderer.invoke('GET_SETTING', 'setup_complete'),
         window.ipcRenderer.invoke('GET_SETTING', 'setup_step'),
-        window.ipcRenderer.invoke('GET_SETTING', 'hf_token'),
         window.ipcRenderer.invoke('GET_SETTING', 'llm_provider'),
       ]);
       if (setupComplete === 'true') {
@@ -37,7 +35,6 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         ? Math.min(4, Math.max(1, Number(savedStep)))
         : 1;
       setStep(stepNum);
-      setHfToken(savedHf ?? '');
       setLlmProvider(savedLlm ?? 'ollama');
       setHydrated(true);
     };
@@ -84,10 +81,6 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       await window.ipcRenderer.invoke('SET_SETTING', {
         key: 'setup_complete',
         value: 'true',
-      });
-      await window.ipcRenderer.invoke('SET_SETTING', {
-        key: 'hf_token',
-        value: hfToken,
       });
       await window.ipcRenderer.invoke('SET_SETTING', {
         key: 'llm_provider',
@@ -227,29 +220,15 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 Speaker ID
               </h2>
               <p className="text-base text-pro-text-muted/60 font-bold uppercase tracking-widest leading-relaxed">
-                Local speaker attribution is included. A token is optional.
+                Local speaker attribution is included and credential-free.
               </p>
             </div>
 
             <div className="text-left space-y-4">
-              <label
-                htmlFor="setup-hf-token"
-                className="block text-[10px] font-bold text-pro-text-muted/40 uppercase tracking-[0.2em] mb-4 pl-4"
-              >
-                Hugging Face Token
-              </label>
-              <input
-                id="setup-hf-token"
-                type="password"
-                placeholder="hf_..."
-                value={hfToken}
-                onChange={(e) => setHfToken(e.target.value)}
-                className="w-full h-16 p-6 bg-pro-surface border border-pro-border rounded-2xl text-sm focus:outline-none focus:ring-4 focus:ring-pro-accent/10 transition-all font-mono shadow-sm placeholder:text-pro-text-muted/20"
-              />
               <div className="p-6 bg-pro-bg/50 rounded-2xl border border-pro-border">
                 <p className="text-[10px] text-pro-text-muted/50 font-medium leading-loose italic">
-                  Pluto uses verified local models by default. Add a token only
-                  if you want the optional Hugging Face-backed provider.
+                  Pluto uses verified local models for speaker attribution. No
+                  account or external service is required.
                 </p>
               </div>
             </div>
@@ -265,16 +244,12 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               <button
                 type="button"
                 onClick={async () => {
-                  await window.ipcRenderer.invoke('SET_SETTING', {
-                    key: 'hf_token',
-                    value: hfToken,
-                  });
                   await persistStep(4);
                   setStep(4);
                 }}
                 className="flex-[2] h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
               >
-                {hfToken ? 'Continue' : 'Skip Step'}
+                Continue
               </button>
             </div>
           </div>

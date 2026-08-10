@@ -174,7 +174,6 @@ import {
 } from '../src/utils/transcriptionBackendConfig';
 import {
   type TranscriptionSettings,
-  resolveLiveChunkComputeType,
   resolveLiveChunkModel,
   resolveTranscriptionSettings,
 } from '../src/utils/transcriptionSettings';
@@ -307,7 +306,7 @@ app.whenReady().then(async () => {
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
 
-  // WhisperX handlers
+  // Local transcription handlers. IPC names remain stable for compatibility.
   ipcMain.handle('WHISPERX_CHECK_PYTHON', async () => {
     return await whisperX.checkPython();
   });
@@ -389,14 +388,7 @@ app.whenReady().then(async () => {
     'WHISPER_TRANSCRIBE',
     async (_event, audioPath, options = {}) => {
       const meetingId = options.meetingId ? String(options.meetingId) : null;
-      if (meetingId) {
-        console.log(
-          `[Pluto] Transcribing file for meeting ${meetingId}:`,
-          audioPath,
-        );
-      } else {
-        console.log('[Pluto] Transcribing file (no meeting ID):', audioPath);
-      }
+      console.log('[Pluto] Transcription request started');
 
       const start = Date.now();
       beginTranscriptionWork();
@@ -414,17 +406,17 @@ app.whenReady().then(async () => {
         return result;
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') {
-          console.log(`[Pluto] Transcription aborted for meeting ${meetingId}`);
+          console.log('[Pluto] Transcription request aborted');
           return {
             segments: [],
             language: 'en',
             duration: 0,
             meta: {
-              backend: options.backend || 'whisperx_current',
+              backend: 'local_alt_apple_silicon',
               preset: options.preset || 'balanced',
               model: options.model || 'small',
-              device: options.device || 'cpu',
-              computeType: options.computeType || 'int8',
+              device: 'mlx',
+              computeType: 'float16',
               canonicalSource: options.canonicalSource,
               diarization: Boolean(options.diarize),
               elapsedMs: Date.now() - start,
@@ -2448,8 +2440,8 @@ app.whenReady().then(async () => {
     );
     await whisperX.setConfig({
       model: resolvedStartup.model,
-      device: resolvedStartup.device,
-      computeType: resolvedStartup.computeType,
+      device: 'mlx',
+      computeType: 'float16',
       language: resolvedStartup.language,
     });
     const activeHealth = await whisperX.health();
@@ -2467,8 +2459,8 @@ app.whenReady().then(async () => {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn('[Pluto] WhisperX failed to start:', message);
-    console.log('[Pluto] WhisperX will start on first transcription request');
+    console.warn('[Pluto] Transcription engine failed to start:', message);
+    console.log('[Pluto] Transcription engine will retry on first request');
   }
 
   const interruptedDownstreamRuns = db.expireInterruptedDownstreamProcessing();
@@ -2501,6 +2493,12 @@ app.whenReady().then(async () => {
       computeType: db.getSetting('whisper_compute_type'),
       language: db.getSetting('whisper_language'),
     } as TranscriptionSettings);
+    const resolvedRecoveryTranscription = resolveBackendOptions({
+      backend: 'local_alt_apple_silicon',
+      preset: recoveryTranscriptionSettings.preset ?? 'balanced',
+      model: recoveryTranscriptionSettings.model,
+      language: recoveryTranscriptionSettings.language,
+    });
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),
       {
@@ -2600,18 +2598,16 @@ app.whenReady().then(async () => {
           };
         },
         transcriptionConfig: {
-          backend: recoveryTranscriptionSettings.backend,
-          preset: recoveryTranscriptionSettings.preset,
-          model: resolveLiveChunkModel(recoveryTranscriptionSettings.model),
-          device: recoveryTranscriptionSettings.device,
-          computeType: resolveLiveChunkComputeType(
-            recoveryTranscriptionSettings.computeType,
-          ),
-          languageMode: recoveryTranscriptionSettings.language
+          backend: resolvedRecoveryTranscription.backend,
+          preset: resolvedRecoveryTranscription.preset,
+          model: resolveLiveChunkModel(resolvedRecoveryTranscription.model),
+          device: 'mlx',
+          computeType: 'float16',
+          languageMode: resolvedRecoveryTranscription.language
             ? 'fixed'
             : 'detected',
           requestedLanguage:
-            recoveryTranscriptionSettings.language?.toLowerCase() || null,
+            resolvedRecoveryTranscription.language?.toLowerCase() || null,
           pipelineVersion: 'live_chunk_v1',
         },
       },

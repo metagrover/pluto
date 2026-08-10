@@ -70,7 +70,6 @@ const toWhisperOptions = (
     computeType: resolved.computeType,
     language: resolved.language,
     diarize: options.diarize,
-    hfToken: options.hfToken,
     signal: options.signal,
   };
 };

@@ -3,10 +3,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('transcription startup boundary', () => {
-  it('persists a capability-proven default before interrupted journal recovery', () => {
+  it('prepares and persists the fixed MLX runtime before interrupted journal recovery', () => {
     const main = readFileSync('electron/main.ts', 'utf8');
-    const selection = main.indexOf('resolvePreferredTranscriptionBackend({');
-    const preparation = main.indexOf('await whisperX.setConfig({', selection);
+    const preparation = main.indexOf('await whisperX.setConfig({');
+    const mlxDevice = main.indexOf("device: 'mlx'", preparation);
+    const mlxCompute = main.indexOf("computeType: 'float16'", preparation);
     const activeHealth = main.indexOf(
       'const activeHealth = await whisperX.health()',
       preparation,
@@ -16,10 +17,20 @@ describe('transcription startup boundary', () => {
     );
     const recovery = main.indexOf('recoverInterruptedCaptureJournals(');
 
-    expect(selection).toBeGreaterThan(-1);
-    expect(preparation).toBeGreaterThan(selection);
+    expect(preparation).toBeGreaterThan(-1);
+    expect(mlxDevice).toBeGreaterThan(preparation);
+    expect(mlxCompute).toBeGreaterThan(mlxDevice);
     expect(activeHealth).toBeGreaterThan(preparation);
     expect(persistence).toBeGreaterThan(activeHealth);
     expect(recovery).toBeGreaterThan(persistence);
+  });
+
+  it('keeps transcription runtime diagnostics generic and content-free', () => {
+    const main = readFileSync('electron/main.ts', 'utf8');
+    const manager = readFileSync('electron/whisperx.ts', 'utf8');
+    expect(main).not.toContain('[Pluto] Transcribing file');
+    expect(main).not.toContain('[Pluto] WhisperX');
+    expect(manager).not.toContain('[WhisperX]');
+    expect(manager).toContain('[Transcription]');
   });
 });
