@@ -88,13 +88,18 @@ const getSupportedDevices = (
   runtimePlatform: PlutoRuntimePlatform,
 ): WhisperDevice[] => {
   if (backend === 'local_alt_apple_silicon') {
-    return ['cpu'];
+    return ['mlx'];
   }
   return runtimePlatform.platform === 'linux' ||
     runtimePlatform.platform === 'win32'
     ? ['cpu', 'cuda']
     : ['cpu'];
 };
+
+const getSupportedComputeTypes = (
+  backend: TranscriptionBackend,
+): WhisperComputeType[] =>
+  backend === 'local_alt_apple_silicon' ? ['float16'] : ['int8', 'float32'];
 
 const getSupportedPresets = (
   backend: TranscriptionBackend,
@@ -115,8 +120,8 @@ export const getTranscriptionCapabilities = (
       backend,
       available: false,
       providerLabel: TRANSCRIPTION_BACKEND_LABELS[backend],
-      supportedDevices: ['cpu'],
-      supportedComputeTypes: ['int8', 'float32'],
+      supportedDevices: ['mlx'],
+      supportedComputeTypes: ['float16'],
       supportedModels: ALL_MODELS,
       supportedPresets: getSupportedPresets(backend),
       reason: 'Requires Apple Silicon hardware for benchmarking.',
@@ -128,12 +133,12 @@ export const getTranscriptionCapabilities = (
     available: true,
     providerLabel: TRANSCRIPTION_BACKEND_LABELS[backend],
     supportedDevices: getSupportedDevices(backend, runtimePlatform),
-    supportedComputeTypes: ['int8', 'float32'],
+    supportedComputeTypes: getSupportedComputeTypes(backend),
     supportedModels: ALL_MODELS,
     supportedPresets: getSupportedPresets(backend),
     reason:
       backend === 'local_alt_apple_silicon'
-        ? 'Runs on the current WhisperX sidecar until a dedicated Apple Silicon runtime is added.'
+        ? 'Runs locally with MLX Whisper on Apple Silicon.'
         : undefined,
   };
 };
@@ -152,9 +157,36 @@ const getPresetDefaults = (
     return { model: 'medium', device: 'cpu', computeType: 'int8' };
   }
   if (preset === 'accuracy_first') {
-    return { model: 'large-v3', device: 'cpu', computeType: 'float32' };
+    return { model: 'large-v3', device: 'mlx', computeType: 'float16' };
   }
-  return { model: 'medium', device: 'cpu', computeType: 'int8' };
+  return { model: 'medium', device: 'mlx', computeType: 'float16' };
+};
+
+export const resolvePreferredTranscriptionBackend = ({
+  configuredBackend,
+  runtime,
+  health,
+}: {
+  configuredBackend?: string | null;
+  runtime?: RuntimePlatformInput;
+  health: { mlxAvailable: boolean };
+}): { backend: TranscriptionBackend; shouldPersist: boolean } => {
+  if (
+    configuredBackend === 'whisperx_current' ||
+    configuredBackend === 'whisperx_tuned' ||
+    configuredBackend === 'local_alt_apple_silicon'
+  ) {
+    return { backend: configuredBackend, shouldPersist: false };
+  }
+  const normalizedRuntime = resolveRuntimePlatform(runtime);
+  if (
+    normalizedRuntime.platform === 'darwin' &&
+    normalizedRuntime.arch === 'arm64' &&
+    health.mlxAvailable
+  ) {
+    return { backend: 'local_alt_apple_silicon', shouldPersist: true };
+  }
+  return { backend: 'whisperx_current', shouldPersist: false };
 };
 
 export const resolveBackendOptions = (

@@ -111,21 +111,21 @@ def load_model_if_needed(new_config):
             
         if needs_reload:
             logger.info(f"Updating model config: model={target_model}, device={target_device}, compute={target_compute}")
+
+            if target_device == "mlx" and not MLX_WHISPER_AVAILABLE:
+                raise HTTPException(
+                    status_code=503,
+                    detail="MLX Whisper is unavailable",
+                )
             
             model_config["model_name"] = target_model
             model_config["device"] = target_device
             model_config["compute_type"] = target_compute
             
             if target_device == "mlx":
-                if not MLX_WHISPER_AVAILABLE:
-                    logger.warning("mlx_whisper is requested but not available. Falling back to CPU int8.")
-                    model_config["device"] = "cpu"
-                    model_config["compute_type"] = "int8"
-                    target_device = "cpu"
-                else:
-                    logger.info("Configured Apple Silicon MLX Whisper engine")
-                    model_config["compute_type"] = "float16"
-                    return
+                logger.info("Configured Apple Silicon MLX Whisper engine")
+                model_config["compute_type"] = "float16"
+                return
 
             if target_device != "mlx":
                 try:
@@ -148,11 +148,22 @@ def health():
 
     return {
         "status": "ok",
+        "engine": (
+            "mlx_whisper"
+            if model_config["device"] == "mlx" and MLX_WHISPER_AVAILABLE
+            else "whisperx"
+            if WHISPERX_AVAILABLE
+            else "unavailable"
+        ),
+        "whisperx_available": WHISPERX_AVAILABLE,
+        "mlx_available": MLX_WHISPER_AVAILABLE,
         "device": model_config["device"],
         "model": model_config["model_name"],
         "compute_type": model_config["compute_type"],
-        "model_loaded": (model is not None or model_config["device"] == "mlx"),
-        "mlx_available": MLX_WHISPER_AVAILABLE,
+        "model_loaded": (
+            model is not None
+            or (model_config["device"] == "mlx" and MLX_WHISPER_AVAILABLE)
+        ),
         "supported_devices": supported_devices,
         "supported_compute_types": ["int8", "float16", "float32"],
     }

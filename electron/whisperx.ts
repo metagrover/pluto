@@ -19,7 +19,7 @@ const { Agent } = require('undici') as {
 // Types
 export interface WhisperXConfig {
   model: 'tiny' | 'base' | 'small' | 'medium' | 'large-v2' | 'large-v3';
-  device: 'cpu' | 'cuda' | 'mps';
+  device: 'cpu' | 'cuda' | 'mps' | 'mlx';
   computeType: 'float16' | 'float32' | 'int8';
   language?: string;
 }
@@ -101,6 +101,9 @@ export interface AlignedEnergyResult {
 export interface HealthStatus {
   status: 'ok' | 'error';
   whisperx_version?: string;
+  engine?: 'whisperx' | 'mlx_whisper' | 'unavailable';
+  whisperx_available?: boolean;
+  mlx_available?: boolean;
   device?: string;
   model?: string;
   model_loaded?: boolean;

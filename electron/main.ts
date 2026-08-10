@@ -33,7 +33,6 @@ import {
 } from './captureJournal';
 import {
   recoverInterruptedCaptureJournals,
-  repairStoppingCaptureJournalTranscript,
   verifySealedCaptureJournalTranscriptEvidence,
 } from './captureJournalRecovery';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
@@ -156,66 +155,6 @@ const getMeetingArtifactsRootDir = () => {
   return meetingsDir;
 };
 
-const getTranscriptCheckpointRepairConfig = () => {
-  const resolved = resolveTranscriptionSettings({
-    backend: db.getSetting('transcription_backend'),
-    preset: db.getSetting('transcription_preset'),
-    model: db.getSetting('whisper_model'),
-    device: db.getSetting('whisper_device'),
-    computeType: db.getSetting('whisper_compute_type'),
-    language: db.getSetting('whisper_language'),
-  } as TranscriptionSettings);
-  return {
-    backend: resolved.backend,
-    preset: resolved.preset,
-    model: resolveLiveChunkModel(resolved.model),
-    device: resolved.device,
-    computeType: resolveLiveChunkComputeType(resolved.computeType),
-    languageMode: resolved.language
-      ? ('fixed' as const)
-      : ('detected' as const),
-    requestedLanguage: resolved.language?.toLowerCase() || null,
-    pipelineVersion: 'live_chunk_v1' as const,
-  };
-};
-
-const transcribeTranscriptCheckpointChunk = async (
-  inputPath: string,
-  config: ReturnType<typeof getTranscriptCheckpointRepairConfig>,
-  journalDurationSeconds: number,
-) => {
-  const result = await transcribeWithBackend(inputPath, {
-    backend: config.backend,
-    preset: config.preset,
-    model: config.model,
-    device: config.device,
-    computeType: config.computeType,
-    language:
-      config.languageMode === 'fixed'
-        ? (config.requestedLanguage ?? undefined)
-        : undefined,
-    diarize: false,
-  } as Parameters<typeof transcribeWithBackend>[1]);
-  return {
-    detectedLanguage: result.language ?? null,
-    providerLabel:
-      typeof result.meta?.providerLabel === 'string'
-        ? result.meta.providerLabel
-        : 'local',
-    segments: Array.isArray(result.segments)
-      ? normalizeCheckpointWords(
-          result.segments.map((segment) => ({
-            start: segment.start,
-            end: segment.end,
-            text: segment.text,
-            ...(segment.words ? { words: segment.words } : {}),
-          })),
-          journalDurationSeconds,
-        )
-      : [],
-  };
-};
-
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
@@ -229,6 +168,10 @@ app.on('activate', () => {
   }
 });
 
+import {
+  resolveBackendOptions,
+  resolvePreferredTranscriptionBackend,
+} from '../src/utils/transcriptionBackendConfig';
 import {
   type TranscriptionSettings,
   resolveLiveChunkComputeType,
@@ -703,24 +646,6 @@ app.whenReady().then(async () => {
     'AUDIO_CAPTURE_JOURNAL_SEAL',
     async (_event, { meetingId, endedAtMs } = {}) => {
       const normalizedMeetingId = String(meetingId || '');
-      const manifest = await readCaptureJournalManifest(
-        getMeetingArtifactsRootDir(),
-        normalizedMeetingId,
-      );
-      if (
-        manifest.schemaVersion === 3 &&
-        manifest.lifecycleState === 'stopping'
-      ) {
-        const transcriptionConfig = getTranscriptCheckpointRepairConfig();
-        await repairStoppingCaptureJournalTranscript(
-          getMeetingArtifactsRootDir(),
-          {
-            meetingId: normalizedMeetingId,
-            transcribeChunk: transcribeTranscriptCheckpointChunk,
-            transcriptionConfig,
-          },
-        );
-      }
       return await sealCaptureJournal(getMeetingArtifactsRootDir(), {
         meetingId: normalizedMeetingId,
         endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
@@ -2494,11 +2419,57 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  // Start WhisperX server in background (don't block app startup)
-  whisperX.start().catch((err) => {
-    console.warn('[Pluto] WhisperX failed to start:', err.message);
+  try {
+    await whisperX.start();
+    const health = await whisperX.health();
+    const startupBackend = resolvePreferredTranscriptionBackend({
+      configuredBackend: db.getSetting('transcription_backend'),
+      runtime: { platform: process.platform, arch: process.arch },
+      health: { mlxAvailable: health.mlx_available === true },
+    });
+    const startupSettings = resolveTranscriptionSettings({
+      backend: startupBackend.backend,
+      preset: db.getSetting('transcription_preset'),
+      model: db.getSetting('whisper_model'),
+      device: db.getSetting('whisper_device'),
+      computeType: db.getSetting('whisper_compute_type'),
+      language: db.getSetting('whisper_language'),
+    } as TranscriptionSettings);
+    const resolvedStartup = resolveBackendOptions(
+      {
+        backend: startupBackend.backend,
+        preset: startupSettings.preset ?? 'balanced',
+        model: startupSettings.model,
+        device: startupSettings.device,
+        computeType: startupSettings.computeType,
+        language: startupSettings.language,
+      },
+      { platform: process.platform, arch: process.arch },
+    );
+    await whisperX.setConfig({
+      model: resolvedStartup.model,
+      device: resolvedStartup.device,
+      computeType: resolvedStartup.computeType,
+      language: resolvedStartup.language,
+    });
+    const activeHealth = await whisperX.health();
+    if (
+      startupBackend.backend === 'local_alt_apple_silicon' &&
+      activeHealth.engine !== 'mlx_whisper'
+    ) {
+      throw new Error('MLX Whisper did not become the active engine');
+    }
+    if (startupBackend.shouldPersist) {
+      db.setSetting('transcription_backend', startupBackend.backend);
+    }
+    console.log(
+      `[Pluto] Transcription engine ready: ${activeHealth.engine ?? 'unknown'} (${startupBackend.backend})`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[Pluto] WhisperX failed to start:', message);
     console.log('[Pluto] WhisperX will start on first transcription request');
-  });
+  }
 
   const interruptedDownstreamRuns = db.expireInterruptedDownstreamProcessing();
   if (interruptedDownstreamRuns > 0) {
