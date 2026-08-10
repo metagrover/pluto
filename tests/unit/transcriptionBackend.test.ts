@@ -4,6 +4,7 @@ import {
   listTranscriptionBackends,
   normalizePlutoRuntimePlatform,
   resolveBackendOptions,
+  resolvePreferredTranscriptionBackend,
 } from '../../src/utils/transcriptionBackendConfig';
 
 describe('transcription backend registry', () => {
@@ -57,6 +58,56 @@ describe('transcription backend registry', () => {
         (backend) => backend.backend === 'local_alt_apple_silicon',
       )?.available,
     ).toBe(false);
+  });
+
+  it('selects MLX for an unset backend only when Apple Silicon runtime health proves it is available', () => {
+    expect(
+      resolvePreferredTranscriptionBackend({
+        configuredBackend: null,
+        runtime: { platform: 'darwin', arch: 'arm64' },
+        health: { mlxAvailable: true },
+      }),
+    ).toEqual({
+      backend: 'local_alt_apple_silicon',
+      shouldPersist: true,
+    });
+
+    expect(
+      resolvePreferredTranscriptionBackend({
+        configuredBackend: null,
+        runtime: { platform: 'darwin', arch: 'arm64' },
+        health: { mlxAvailable: false },
+      }),
+    ).toEqual({ backend: 'whisperx_current', shouldPersist: false });
+  });
+
+  it('preserves an explicit backend choice instead of overriding it with MLX', () => {
+    expect(
+      resolvePreferredTranscriptionBackend({
+        configuredBackend: 'whisperx_current',
+        runtime: { platform: 'darwin', arch: 'arm64' },
+        health: { mlxAvailable: true },
+      }),
+    ).toEqual({ backend: 'whisperx_current', shouldPersist: false });
+  });
+
+  it('models MLX as the actual Apple Silicon device and compute contract', () => {
+    const capabilities = listTranscriptionBackends({
+      platform: 'darwin',
+      arch: 'arm64',
+    }).find((backend) => backend.backend === 'local_alt_apple_silicon');
+    const resolved = resolveBackendOptions(
+      {
+        backend: 'local_alt_apple_silicon',
+        preset: 'balanced',
+      },
+      { platform: 'darwin', arch: 'arm64' },
+    );
+
+    expect(capabilities?.supportedDevices).toEqual(['mlx']);
+    expect(capabilities?.supportedComputeTypes).toEqual(['float16']);
+    expect(resolved.device).toBe('mlx');
+    expect(resolved.computeType).toBe('float16');
   });
 
   it('only exposes CUDA with an explicit supported operating system', () => {

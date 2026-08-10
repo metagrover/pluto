@@ -6,7 +6,7 @@ export type WhisperModel =
   | 'large-v2'
   | 'large-v3';
 
-export type WhisperDevice = 'cpu' | 'cuda' | 'mps';
+export type WhisperDevice = 'cpu' | 'cuda' | 'mps' | 'mlx';
 
 export type WhisperComputeType = 'float16' | 'float32' | 'int8';
 

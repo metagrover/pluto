@@ -66,10 +66,7 @@ const toWhisperOptions = (
 ): WhisperTranscribeOptions => {
   return {
     model: resolved.model,
-    device:
-      resolved.backend === 'local_alt_apple_silicon'
-        ? ('mlx' as any)
-        : resolved.device,
+    device: resolved.device,
     computeType: resolved.computeType,
     language: resolved.language,
     diarize: options.diarize,
