@@ -14,6 +14,21 @@ const liveSegment = {
   confirmed: true,
 };
 
+const continuedSegment = {
+  ...liveSegment,
+  id: 'continued-turn',
+  text: 'The same thought continues.',
+  timestampMs: 14_000,
+};
+
+const otherSpeakerSegment = {
+  ...liveSegment,
+  id: 'other-speaker',
+  speaker: 'Them' as const,
+  text: 'Now another person responds.',
+  timestampMs: 18_000,
+};
+
 describe('LiveTranscript word reveal', () => {
   let container: HTMLDivElement;
 
@@ -83,6 +98,134 @@ describe('LiveTranscript word reveal', () => {
       container.querySelector('.transcript-revealed-text')?.textContent,
     ).toBe('Shipping today works.');
     expect(container.querySelector('.transcript-typewriter-caret')).toBeNull();
+
+    act(() => root.unmount());
+  });
+
+  it('renders consecutive same-speaker segments as one stable reading turn', () => {
+    setReducedMotion(false);
+    const root = createRoot(container);
+    act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[liveSegment, continuedSegment, otherSpeakerSegment]}
+          interimText=""
+        />,
+      ),
+    );
+
+    expect(container.querySelectorAll('.transcript-turn')).toHaveLength(2);
+    expect(
+      [...container.querySelectorAll('.transcript-speaker strong')].map(
+        (label) => label.textContent,
+      ),
+    ).toEqual(['Me', 'Them']);
+    expect(
+      container.querySelectorAll('.transcript-revealed-text'),
+    ).toHaveLength(3);
+    expect(
+      container.querySelectorAll('.transcript-typewriter-caret'),
+    ).toHaveLength(1);
+
+    act(() => root.unmount());
+  });
+
+  it('follows new speech until the user scrolls away and returns on request', () => {
+    setReducedMotion(true);
+    const root = createRoot(container);
+    act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
+
+    const scrollElement = container.querySelector<HTMLElement>(
+      '.live-transcript-scroll',
+    );
+    expect(scrollElement).not.toBeNull();
+    Object.defineProperties(scrollElement, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+    });
+
+    act(() =>
+      root.render(<LiveTranscript segments={[liveSegment]} interimText="" />),
+    );
+    expect(scrollElement?.scrollTop).toBe(600);
+
+    if (!scrollElement) throw new Error('Missing transcript scroll element');
+    act(() => {
+      scrollElement.scrollTop = 120;
+      scrollElement.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    expect(
+      [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Return to live',
+      ),
+    ).toBeDefined();
+
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[liveSegment, continuedSegment]}
+          interimText=""
+        />,
+      ),
+    );
+    expect(scrollElement.scrollTop).toBe(120);
+
+    const returnToLive = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === 'Return to live',
+    );
+    act(() => returnToLive?.click());
+    expect(scrollElement.scrollTop).toBe(600);
+    expect(
+      [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Return to live',
+      ),
+    ).toBeUndefined();
+
+    act(() => root.unmount());
+  });
+
+  it('restores follow mode when the user manually reaches the live edge', () => {
+    setReducedMotion(true);
+    const root = createRoot(container);
+    act(() => root.render(<LiveTranscript segments={[]} interimText="" />));
+
+    const scrollElement = container.querySelector<HTMLElement>(
+      '.live-transcript-scroll',
+    );
+    if (!scrollElement) throw new Error('Missing transcript scroll element');
+    Object.defineProperties(scrollElement, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 600 },
+    });
+
+    act(() =>
+      root.render(<LiveTranscript segments={[liveSegment]} interimText="" />),
+    );
+    act(() => {
+      scrollElement.scrollTop = 120;
+      scrollElement.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    act(() => {
+      scrollElement.scrollTop = 400;
+      scrollElement.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+
+    expect(
+      [...container.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Return to live',
+      ),
+    ).toBeUndefined();
+
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[liveSegment, otherSpeakerSegment]}
+          interimText=""
+        />,
+      ),
+    );
+    expect(scrollElement.scrollTop).toBe(600);
 
     act(() => root.unmount());
   });

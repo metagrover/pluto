@@ -197,7 +197,10 @@
     grid-template-columns: minmax(0, 1fr) 48px;
   }
   .live-transcript {
-    @apply min-w-0 overflow-y-auto px-8 pb-20 pt-8;
+    @apply relative min-h-0 min-w-0 overflow-hidden;
+  }
+  .live-transcript-scroll {
+    @apply h-full overflow-y-auto px-8 pb-20 pt-8;
   }
   .live-transcript-heading,
   .live-transcript-body {
@@ -229,6 +232,12 @@
   }
   .transcript-turn p {
     @apply text-[15px] leading-7 text-pro-text-main;
+  }
+  .live-transcript-follow-control {
+    @apply pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-4;
+  }
+  .live-transcript-follow-control button {
+    @apply pointer-events-auto flex min-h-11 items-center gap-2 rounded-full border border-pro-border bg-pro-surface px-4 text-xs font-semibold text-pro-text-main shadow-sm transition-[background-color,transform,box-shadow] duration-150 hover:bg-pro-bg hover:shadow-md active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-bg;
   }
   .transcript-typewriter-caret {
     @apply ml-0.5 inline-block h-[1em] w-px translate-y-[0.12em] bg-pro-accent;
