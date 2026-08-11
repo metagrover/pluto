@@ -683,22 +683,17 @@ app.whenReady().then(async () => {
     },
   );
 
-  ipcMain.handle(
-    'AUDIO_CAPTURE_JOURNAL_STOP',
-    async (event, request = {}) => {
-      const normalizedMeetingId = String(request.meetingId || '');
-      const manifest = await stopCaptureJournal(getMeetingArtifactsRootDir(), {
-        ...request,
-        meetingId: normalizedMeetingId,
-      });
-      if (
-        captureSessionLease.release(normalizedMeetingId, event.sender.id)
-      ) {
-        console.log('[CaptureLease] released: capture_stopped');
-      }
-      return manifest;
-    },
-  );
+  ipcMain.handle('AUDIO_CAPTURE_JOURNAL_STOP', async (event, request = {}) => {
+    const normalizedMeetingId = String(request.meetingId || '');
+    const manifest = await stopCaptureJournal(getMeetingArtifactsRootDir(), {
+      ...request,
+      meetingId: normalizedMeetingId,
+    });
+    if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
+      console.log('[CaptureLease] released: capture_stopped');
+    }
+    return manifest;
+  });
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_SEAL',
@@ -708,9 +703,7 @@ app.whenReady().then(async () => {
         meetingId: normalizedMeetingId,
         endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
       });
-      if (
-        captureSessionLease.release(normalizedMeetingId, event.sender.id)
-      ) {
+      if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
         console.log('[CaptureLease] released: capture_sealed');
       }
       return manifest;

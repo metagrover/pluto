@@ -1138,7 +1138,9 @@ export const AudioManager = ({
         captureJournalCheckpointsRef.current.clear();
       } catch (journalErr) {
         if (isCaptureSessionAlreadyActiveError(journalErr)) {
-          console.warn('[Pluto] Recording start rejected: capture already active');
+          console.warn(
+            '[Pluto] Recording start rejected: capture already active',
+          );
           currentMeetingIdRef.current = null;
           liveTranscriptResponsivenessRef.current.abortStart();
           frozenLiveTranscriptResponsivenessRef.current = null;

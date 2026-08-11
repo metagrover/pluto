@@ -1,5 +1,4 @@
-export const CAPTURE_SESSION_ALREADY_ACTIVE =
-  'capture_session_already_active';
+export const CAPTURE_SESSION_ALREADY_ACTIVE = 'capture_session_already_active';
 
 export type CaptureSessionLease = {
   meetingId: string;

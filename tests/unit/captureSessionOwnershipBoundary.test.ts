@@ -62,7 +62,9 @@ describe('capture session production ownership boundary', () => {
     expect(nativeStartHandler).not.toContain(
       "win.webContents.send('NATIVE_AUDIO_CHUNK', chunk)",
     );
-    expect(nativeStopHandler).toContain('nativeAudioOwner.id !== event.sender.id');
+    expect(nativeStopHandler).toContain(
+      'nativeAudioOwner.id !== event.sender.id',
+    );
   });
 
   it('releases an owner whose webContents is destroyed', () => {
