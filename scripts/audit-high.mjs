@@ -23,7 +23,7 @@ const collectVersions = (node, packages, fallbackName = null) => {
   if (!node || typeof node !== 'object') return;
 
   const name =
-    typeof node.name === 'string' ? node.name : fallbackName ?? null;
+    typeof node.name === 'string' ? node.name : (fallbackName ?? null);
   const version = typeof node.version === 'string' ? node.version : null;
   const isPrivateRoot = node.private === true;
   if (name && version && !isPrivateRoot) {

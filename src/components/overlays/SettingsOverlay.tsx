@@ -1,9 +1,6 @@
 import { useState } from 'react';
 import type {
-  TranscriptionBackend,
   TranscriptionPreset,
-  WhisperComputeType,
-  WhisperDevice,
   WhisperModel,
 } from '../../utils/transcriptionSettings';
 
@@ -12,8 +9,6 @@ interface SettingsOverlayProps {
   setSettingsVisible: (val: boolean) => void;
   llmProvider: 'ollama' | 'gemini' | 'openai' | 'claude';
   setLlmProvider: (val: 'ollama' | 'gemini' | 'openai' | 'claude') => void;
-  hfToken: string;
-  setHfToken: (val: string) => void;
   geminiApiKey: string;
   setGeminiApiKey: (val: string) => void;
   openaiApiKey: string;
@@ -22,20 +17,14 @@ interface SettingsOverlayProps {
   setClaudeApiKey: (val: string) => void;
   ollamaModel: string;
   setOllamaModel: (val: string) => void;
-  transcriptionBackend: TranscriptionBackend;
-  setTranscriptionBackend: (val: TranscriptionBackend) => void;
   transcriptionPreset: TranscriptionPreset;
   setTranscriptionPreset: (val: TranscriptionPreset) => void;
-  autoEndEnabled: boolean;
-  setAutoEndEnabled: (val: boolean) => void;
   whisperModel: WhisperModel;
   setWhisperModel: (val: WhisperModel) => void;
-  whisperDevice: WhisperDevice;
-  setWhisperDevice: (val: WhisperDevice) => void;
-  whisperComputeType: WhisperComputeType;
-  setWhisperComputeType: (val: WhisperComputeType) => void;
   whisperLanguage: string;
   setWhisperLanguage: (val: string) => void;
+  autoEndEnabled: boolean;
+  setAutoEndEnabled: (val: boolean) => void;
   fetchMeetings: () => void;
   setSelectedMeetingId: (id: string | number | null) => void;
   theme: 'light' | 'dark' | 'system';
@@ -105,8 +94,6 @@ export const SettingsOverlay = ({
   setSettingsVisible,
   llmProvider,
   setLlmProvider,
-  hfToken,
-  setHfToken,
   geminiApiKey,
   setGeminiApiKey,
   openaiApiKey,
@@ -115,6 +102,12 @@ export const SettingsOverlay = ({
   setClaudeApiKey,
   ollamaModel,
   setOllamaModel,
+  transcriptionPreset,
+  setTranscriptionPreset,
+  whisperModel,
+  setWhisperModel,
+  whisperLanguage,
+  setWhisperLanguage,
   autoEndEnabled,
   setAutoEndEnabled,
   fetchMeetings,
@@ -275,6 +268,86 @@ export const SettingsOverlay = ({
           </Section>
 
           <Section title="Recording">
+            <div className="rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
+              <div className="text-[14px] font-black tracking-tight text-pro-text-main">
+                Local transcription
+              </div>
+              <p className={helperClass}>
+                Runs locally with MLX on Apple Silicon.
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field
+                htmlFor="settings-transcription-preset"
+                label="Quality"
+                helper="Balanced is faster; Accuracy First favors higher-quality finalization."
+              >
+                <select
+                  id="settings-transcription-preset"
+                  value={transcriptionPreset}
+                  onChange={(event) => {
+                    const value = event.target.value as TranscriptionPreset;
+                    setTranscriptionPreset(value);
+                    persistSetting('transcription_preset', value);
+                  }}
+                  className={controlClass}
+                >
+                  <option value="balanced">Balanced</option>
+                  <option value="accuracy_first">Accuracy First</option>
+                </select>
+              </Field>
+
+              <Field
+                htmlFor="settings-whisper-model"
+                label="Model"
+                helper="Choose a specific MLX Whisper model."
+              >
+                <select
+                  id="settings-whisper-model"
+                  value={whisperModel}
+                  onChange={(event) => {
+                    const value = event.target.value as WhisperModel;
+                    setWhisperModel(value);
+                    persistSetting('whisper_model', value);
+                  }}
+                  className={controlClass}
+                >
+                  {[
+                    'tiny',
+                    'base',
+                    'small',
+                    'medium',
+                    'large-v2',
+                    'large-v3',
+                  ].map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            <Field
+              htmlFor="settings-whisper-language"
+              label="Language"
+              helper="Use an ISO language code such as en, es, or fr. Leave blank for English."
+            >
+              <input
+                id="settings-whisper-language"
+                type="text"
+                value={whisperLanguage}
+                placeholder="en"
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setWhisperLanguage(value);
+                  persistSetting('whisper_language', value);
+                }}
+                className={controlClass}
+              />
+            </Field>
+
             <div className="flex items-center justify-between gap-6 rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
               <div className="space-y-1.5">
                 <div className="text-[14px] font-black tracking-tight text-pro-text-main">
@@ -338,34 +411,6 @@ export const SettingsOverlay = ({
                 />
               </button>
             </div>
-
-            <Field
-              htmlFor="settings-hf-token"
-              label="Speaker Diarization Token"
-              helper="Optional enhancement. Pluto's default speaker attribution is local and credential-free."
-            >
-              <input
-                id="settings-hf-token"
-                type="password"
-                placeholder="Hugging Face token"
-                value={hfToken}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setHfToken(value);
-                  persistSetting('hf_token', value);
-                }}
-                className={controlClass}
-              />
-            </Field>
-
-            <a
-              className="inline-flex text-[11px] font-bold text-pro-accent hover:underline"
-              href="https://huggingface.co/settings/tokens"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open Hugging Face token settings
-            </a>
           </Section>
 
           <Section title="Appearance">

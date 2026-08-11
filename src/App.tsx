@@ -61,10 +61,7 @@ import {
   resolveSystemAudioStatus,
 } from './utils/permissions';
 import type {
-  TranscriptionBackend,
   TranscriptionPreset,
-  WhisperComputeType,
-  WhisperDevice,
   WhisperModel,
 } from './utils/transcriptionSettings';
 
@@ -101,20 +98,14 @@ function App() {
   const [llmProvider, setLlmProvider] = useState<
     'ollama' | 'gemini' | 'openai' | 'claude'
   >('ollama');
-  const [hfToken, setHfToken] = useState('');
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [claudeApiKey, setClaudeApiKey] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [transcriptionBackend, setTranscriptionBackend] =
-    useState<TranscriptionBackend>('whisperx_current');
   const [transcriptionPreset, setTranscriptionPreset] =
     useState<TranscriptionPreset>('balanced');
   const [whisperModel, setWhisperModel] = useState<WhisperModel>('small');
-  const [whisperDevice, setWhisperDevice] = useState<WhisperDevice>('cpu');
-  const [whisperComputeType, setWhisperComputeType] =
-    useState<WhisperComputeType>('int8');
   const [whisperLanguage, setWhisperLanguage] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
@@ -139,6 +130,7 @@ function App() {
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
+  const [interimTranscript, setInterimTranscript] = useState('');
   const [recordingStartedAtMs, setRecordingStartedAtMs] = useState<
     number | null
   >(null);
@@ -368,9 +360,6 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'llm_provider').then((val) => {
       if (val) setLlmProvider(val as 'ollama' | 'gemini' | 'openai' | 'claude');
     });
-    window.ipcRenderer.invoke('GET_SETTING', 'hf_token').then((val) => {
-      if (val) setHfToken(val);
-    });
     window.ipcRenderer.invoke('GET_SETTING', 'gemini_api_key').then((val) => {
       if (val) setGeminiApiKey(val);
     });
@@ -390,11 +379,6 @@ function App() {
       if (val) setTheme(val as 'light' | 'dark' | 'system');
     });
     window.ipcRenderer
-      .invoke('GET_SETTING', 'transcription_backend')
-      .then((val) => {
-        if (val) setTranscriptionBackend(val as TranscriptionBackend);
-      });
-    window.ipcRenderer
       .invoke('GET_SETTING', 'transcription_preset')
       .then((val) => {
         if (val) setTranscriptionPreset(val as TranscriptionPreset);
@@ -402,14 +386,6 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'whisper_model').then((val) => {
       if (val) setWhisperModel(val as WhisperModel);
     });
-    window.ipcRenderer.invoke('GET_SETTING', 'whisper_device').then((val) => {
-      if (val) setWhisperDevice(val as WhisperDevice);
-    });
-    window.ipcRenderer
-      .invoke('GET_SETTING', 'whisper_compute_type')
-      .then((val) => {
-        if (val) setWhisperComputeType(val as WhisperComputeType);
-      });
     window.ipcRenderer.invoke('GET_SETTING', 'whisper_language').then((val) => {
       if (val !== null && val !== undefined) setWhisperLanguage(String(val));
     });
@@ -681,23 +657,24 @@ function App() {
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
           transcriptionSettings={{
-            backend: transcriptionBackend,
+            backend: 'local_alt_apple_silicon',
             preset: transcriptionPreset,
             model: whisperModel,
-            device: whisperDevice,
-            computeType: whisperComputeType,
+            device: 'mlx',
+            computeType: 'float16',
             language: whisperLanguage,
           }}
-          hfToken={hfToken}
           onStopSessionRef={stopSessionRef}
           onStartSessionRef={startSessionRef}
           onAnalyserReadyRef={onAnalyserReadyRef}
           onLiveTranscript={setLiveTranscript}
+          onInterimTranscript={setInterimTranscript}
           onCaptureHealthChange={setCaptureHealth}
           onLiveTranscriptIntegrityChange={setLiveTranscriptIntegrity}
           onRecordingStarted={(startedAtMs) => {
             setRecordingStartedAtMs(startedAtMs);
             setLiveTranscript([]);
+            setInterimTranscript('');
             setLiveTranscriptIntegrity('healthy');
           }}
           userTitle={meetingTitle}
@@ -760,6 +737,7 @@ function App() {
           currentNotes={currentNotes}
           setCurrentNotes={setCurrentNotes}
           liveTranscript={liveTranscript}
+          interimText={interimTranscript}
           captureHealth={captureHealth}
           liveTranscriptIntegrity={liveTranscriptIntegrity}
           recordingStartedAtMs={recordingStartedAtMs}
@@ -1011,8 +989,6 @@ function App() {
         setSettingsVisible={setSettingsVisible}
         llmProvider={llmProvider}
         setLlmProvider={setLlmProvider}
-        hfToken={hfToken}
-        setHfToken={setHfToken}
         geminiApiKey={geminiApiKey}
         setGeminiApiKey={setGeminiApiKey}
         openaiApiKey={openaiApiKey}
@@ -1021,20 +997,14 @@ function App() {
         setClaudeApiKey={setClaudeApiKey}
         ollamaModel={ollamaModel}
         setOllamaModel={setOllamaModel}
-        transcriptionBackend={transcriptionBackend}
-        setTranscriptionBackend={setTranscriptionBackend}
         transcriptionPreset={transcriptionPreset}
         setTranscriptionPreset={setTranscriptionPreset}
-        autoEndEnabled={autoEndEnabled}
-        setAutoEndEnabled={setAutoEndEnabled}
         whisperModel={whisperModel}
         setWhisperModel={setWhisperModel}
-        whisperDevice={whisperDevice}
-        setWhisperDevice={setWhisperDevice}
-        whisperComputeType={whisperComputeType}
-        setWhisperComputeType={setWhisperComputeType}
         whisperLanguage={whisperLanguage}
         setWhisperLanguage={setWhisperLanguage}
+        autoEndEnabled={autoEndEnabled}
+        setAutoEndEnabled={setAutoEndEnabled}
         fetchMeetings={fetchMeetings}
         setSelectedMeetingId={setSelectedMeetingId}
         theme={theme}

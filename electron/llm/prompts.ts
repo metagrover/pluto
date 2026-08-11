@@ -534,17 +534,17 @@ Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON 
         { "text": "specific insight or statement", "speaker": "Name or null", "from_user_notes": false }
       ],
       "decisions": [
-        { "text": "what was decided", "decided_by": "Name or null", "rationale": "why, if stated" }
+        { "text": "what was decided", "decided_by": "Name or null", "rationale": "why, if stated", "evidence": "short quote from transcript or null" }
       ],
       "action_items": [
-        { "text": "task description", "assignee": "Name or null", "due": "natural language deadline or null" }
+        { "text": "task description", "assignee": "Name or null", "due": "natural language deadline or null", "evidence": "short quote from transcript or null" }
       ],
       "open_questions": ["unresolved thread or question"],
       "transcript_range": [startSegmentIndex, endSegmentIndex]
     }
   ],
-  "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title"}],
-  "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null"}],
+  "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title", "evidence": "short quote from transcript or null"}],
+  "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null", "evidence": "short quote from transcript or null"}],
   "meeting_type": "one_on_one | team_sync | brainstorm | presentation | general"
 }
 
@@ -553,15 +553,15 @@ Rules:
 - For each topic, extract speaker-attributed key points, decisions (with who decided), action items (with assignee and due date), and open questions.
 - Map each topic to approximate transcript segment index ranges.
 - Use only transcript${userNotes ? ' and user-note' : ''} details. Never invent facts, owners, decisions, or deadlines.
+- Preserve exact acronym definitions, proper nouns, and technical terms directly as stated in the transcript (for example, if PLP is defined in the transcript as "Professional Loan Program", do NOT replace or expand it with generic external terms like "Personal Learning Plan").
 - Keep technical meaning exact. Do not flip problem/solution, cause/effect, shipped/planned, or agreed/questioned.
 - Treat the transcript as source of truth. User notes sharpen emphasis but do not override.
 - Brief rapport and personal check-ins may be included as minor context, but Do not make them major topics or lead the overview when most of the meeting is work-focused.
 - If a personal topic is sustained, produces follow-up, or is the clear purpose of the meeting, represent it normally.
 - If discussion is exploratory, say that. Do not convert brainstorming into decisions.
 - Distinguish between explicit decisions, proposals/recommendations, and unresolved questions.
-- Only mark something as a decision when the transcript shows explicit resolution language such as "decided", "agreed", "approved", "we will", "let's do that", or another clear commitment to a chosen path.
-- Do not treat brainstorming, options, preferences, concerns, or tentative recommendations as decisions.
-- Only include an action item when the transcript shows an explicit commitment or assignment such as "I'll", "we'll", "I will", "can you", "please", or another direct ownership signal.
+- Mark something as a decision when participants agree on a path forward, choice, or resolution. Include a brief evidence quote from the transcript when possible.
+- Include action items for any concrete task, follow-up, assignment, or commitment made by any participant. Include a brief evidence quote from the transcript when possible.
 - If the task is mentioned without a clear owner or timing, keep the task text but leave owner and due fields null.
 - Roll up all action items and decisions into the top-level arrays.
 - Classify the meeting type.
@@ -590,8 +590,8 @@ Rules:
 - Keep technical meaning exact.
 - Brief rapport and personal check-ins may be included as minor context, but Do not make them major topics or lead the overview when most of the meeting is work-focused.
 - If a personal topic is sustained, produces follow-up, or is the clear purpose of the meeting, represent it normally.
-- Only mark something as a decision when the transcript shows explicit resolution language.
-- Only include an action item when the transcript shows an explicit commitment or assignment.
+- Mark decisions when participants agree on a path forward or resolution.
+- Include action items for concrete tasks or commitments.
 - Keep unresolved questions out of decisions.
 - Do not add commentary, markdown fences, or explanation.
 
@@ -651,20 +651,24 @@ Return valid JSON only in this exact shape:
     { "text": "specific insight", "speaker": "Name or null", "from_user_notes": false }
   ],
   "decisions": [
-    { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null" }
+    { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null", "evidence": "short quote from transcript or null" }
   ],
   "action_items": [
-    { "text": "task description", "assignee": "Name or null", "due": "deadline or null" }
+    { "text": "task description", "assignee": "Name or null", "due": "deadline or null", "evidence": "short quote from transcript or null" }
   ],
   "open_questions": ["unresolved question"]
 }
 
 Rules:
 - Use only the transcript text provided. Never invent facts.
+- Preserve exact acronym definitions, proper nouns, and technical terms directly as stated in the transcript (e.g. if PLP is defined as "Professional Loan Program", do NOT replace or expand it with generic external terms like "Personal Learning Plan").
 - Speaker attribution: use name when clearly identifiable, null otherwise.
-- Only include explicit decisions, not proposals or suggestions.
-- Only include an action item when there is an explicit commitment or assignment.
-- Explicit commitment examples: "I'll", "we'll", "I will", "can you", "please do", "let me take".
+- Include all explicit and implied decisions or agreed resolutions. Include a brief evidence quote when possible.
+- Include all action items, tasks, follow-ups, and commitments discussed. Include a brief evidence quote when possible.
+- Treat explicit third-person commitments such as "Person will do task by date" as action items, preserving the owner and deadline.
+- Preserve numeric targets and success metrics as key points; do not round, omit, or generalize them.
+- Preserve dates, conditions, and qualifiers in decisions so conditional agreements remain conditional.
+- Check every transcript sentence for distinct commitments, decisions, blockers, metrics, and follow-ups before responding.
 - If owner or due date is not directly supported by the transcript, leave that field null.
 - Use explicit commitment language to distinguish real follow-through from brainstorming; do not turn suggestions, ideas, or hypothetical work into action items.
 - If discussion is exploratory, reflect that in the summary.

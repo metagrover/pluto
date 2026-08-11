@@ -1,0 +1,94 @@
+{
+  "meeting_id": "3a276496-86ad-4737-bac0-f333c19f1b18",
+  "label": "Project Planning and Timeline Review (90 min)",
+  "reviewed_at": "2026-08-05",
+  "reviewer_notes": "Human-reviewed baseline fixture for 90-minute project planning meeting.",
+  "transcript": [
+    "Me: What does PLP stand for?",
+    "Them: Professional Loan Program.",
+    "Me: We decided to keep PLP separate from RSUs in the data model.",
+    "Them: I'll update the database schema for PLP tomorrow."
+  ],
+  "generated_analysis": {
+    "analysis_schema_version": 3,
+    "overview": "The team clarified the PLP acronym and agreed to keep PLP separate from RSUs in the data model.",
+    "topics": [
+      {
+        "title": "PLP Data Architecture",
+        "summary": "Clarified that PLP stands for Professional Loan Program and agreed on schema separation from RSUs.",
+        "key_points": [
+          {
+            "speaker": "Me",
+            "text": "PLP stands for Professional Loan Program."
+          }
+        ],
+        "decisions": [
+          {
+            "text": "Keep PLP separate from RSUs in data model"
+          }
+        ],
+        "action_items": [
+          {
+            "text": "Update the database schema for PLP",
+            "assignee": "Them",
+            "due": "tomorrow"
+          }
+        ],
+        "open_questions": [],
+        "transcript_range": [0, 3]
+      }
+    ],
+    "all_action_items": [
+      {
+        "text": "Update the database schema for PLP",
+        "assignee": "Them",
+        "due": "tomorrow",
+        "topic": "PLP Data Architecture"
+      }
+    ],
+    "all_decisions": [
+      {
+        "text": "Keep PLP separate from RSUs in data model"
+      }
+    ],
+    "meeting_type": "team_sync",
+    "quality": {
+      "format_pass": true,
+      "retry_count": 0,
+      "fallback_used": false,
+      "issues": []
+    },
+    "generation_metadata": {
+      "provider": "ollama",
+      "model": "qwen2.5:7b-instruct",
+      "generation_path": "adaptive_windowed",
+      "prompt_version": "notes-v4",
+      "generated_at": "2026-08-05T20:00:00.000Z",
+      "error_categories": []
+    }
+  },
+  "expected": {
+    "summary_must_include": ["PLP separate from RSUs"],
+    "summary_must_exclude": [],
+    "decisions": {
+      "must_include": ["Keep PLP separate from RSUs in data model"],
+      "must_exclude": []
+    },
+    "action_items": {
+      "must_include": [
+        {
+          "text": "Update the database schema for PLP"
+        }
+      ],
+      "must_exclude": []
+    },
+    "attributions": [
+      {
+        "speaker": "Me",
+        "text": "PLP stands for Professional Loan Program"
+      }
+    ],
+    "must_include_topics": ["PLP Data Architecture"],
+    "unsupported_inference_must_exclude": []
+  }
+}

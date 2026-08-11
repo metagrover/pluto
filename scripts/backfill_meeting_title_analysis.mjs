@@ -119,6 +119,24 @@ print(json.dumps({"updated": con.total_changes}))
     [dbPath, String(rowid), JSON.stringify(update)],
   );
 
+const updateMeetingTitle = (dbPath, rowid, title) =>
+  runPythonJson(
+    `
+import json, sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+rowid = int(sys.argv[2])
+title = sys.argv[3]
+row = con.execute("select id from meetings where rowid = ?", (rowid,)).fetchone()
+if row is None:
+  raise SystemExit(f"meeting rowid {rowid} not found")
+con.execute("update meetings set title = ? where rowid = ?", (title, rowid))
+con.execute("update meetings_fts set title = ? where meeting_id = ?", (title, row[0]))
+con.commit()
+print(json.dumps({"updated": con.total_changes}))
+`,
+    [dbPath, String(rowid), title],
+  );
+
 const transcriptTextFromJson = (transcriptJson) => {
   const parsed = JSON.parse(transcriptJson || '[]');
   const segments = Array.isArray(parsed)
@@ -339,6 +357,11 @@ const main = async () => {
     }
     const titleResult = await ollamaGenerate(titlePrompt(transcript), settings);
     const title = titleResult.text.trim().replace(/["']/g, '') || 'Meeting';
+    if (options.titleOnly) {
+      updateMeetingTitle(dbPath, row.rowid, title);
+      console.log(`[Backfill] Updated title for rowid=${row.rowid}.`);
+      continue;
+    }
     const analysisResult = await ollamaGenerate(
       analysisPrompt(transcript, row.user_notes || ''),
       settings,

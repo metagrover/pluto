@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -1587,6 +1587,7 @@ export const finalizeCheckpointTranscript = (
       current.transcript_json === input.canonicalTranscriptJson &&
       current.transcript_integrity_json === input.transcriptIntegrityJson &&
       current.transcript_validated_at === input.transcriptValidatedAt &&
+      currentDownstreamLease?.schemaVersion === 1 &&
       currentDownstreamLease?.runId === input.downstreamRunId &&
       currentDownstreamLease.transcriptValidatedAt ===
         input.transcriptValidatedAt;
@@ -1677,6 +1678,28 @@ export const patchStopToValidatedLatency = (input: {
         input.expectedTranscriptValidatedAt,
       );
     return result.changes === 1 ? 'updated' : 'conflict';
+  })();
+
+export const updateMeetingTitleIfCurrent = (input: {
+  meetingId: string | number;
+  expectedTitle: string;
+  title: string;
+}): ConditionalMeetingUpdateOutcome =>
+  db.transaction(() => {
+    const result = db
+      .prepare('UPDATE meetings SET title = ? WHERE id = ? AND title = ?')
+      .run(input.title, String(input.meetingId), input.expectedTitle);
+    if (result.changes === 1) {
+      const updated = getMeeting(input.meetingId) as
+        | PersistedMeeting
+        | undefined;
+      if (!updated) return 'missing';
+      refreshMeetingFts(updated);
+      return 'updated';
+    }
+    const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+    if (!current) return 'missing';
+    return current.title === input.title ? 'already_current' : 'conflict';
   })();
 
 export const saveDerivedMeetingFieldsIfTranscriptCurrent = (input: {
@@ -1803,7 +1826,44 @@ export const claimMeetingDownstreamProcessing = (
 ) =>
   db.transaction(() => {
     const current = getMeeting(meetingId) as PersistedMeeting | undefined;
-    if (!current || current.transcript_status !== 'validated') return false;
+    if (!current) return false;
+    if (lease.schemaVersion === 1) {
+      if (
+        current.transcript_status !== 'validated' ||
+        current.transcript_validated_at !== lease.transcriptValidatedAt
+      ) {
+        return false;
+      }
+    } else {
+      let hasCaptureGap = false;
+      try {
+        const integrity = JSON.parse(
+          current.transcript_integrity_json || '{}',
+        ) as { causes?: Array<{ code?: unknown }> };
+        hasCaptureGap = Boolean(
+          integrity.causes?.some(
+            (cause) => cause.code === 'capture_gap_detected',
+          ),
+        );
+      } catch {
+        return false;
+      }
+      const hash = (value: string | null | undefined) =>
+        createHash('sha256')
+          .update(value || '')
+          .digest('hex');
+      if (
+        current.transcript_status !== 'needs_attention' ||
+        !hasCaptureGap ||
+        current.capture_journal_generation !==
+          lease.source.captureJournalGeneration ||
+        hash(current.transcript_json) !== lease.source.transcriptSha256 ||
+        hash(current.transcript_integrity_json) !==
+          lease.source.transcriptIntegritySha256
+      ) {
+        return false;
+      }
+    }
     const active = readDownstreamProcessingLease(
       current.downstream_processing_json,
     );
@@ -1820,6 +1880,55 @@ export const claimMeetingDownstreamProcessing = (
         )
         .run(JSON.stringify(lease), String(meetingId), prior).changes === 1
     );
+  })();
+
+export const expireInterruptedDownstreamProcessing = (): number =>
+  db.transaction(() => {
+    const rows = db
+      .prepare(
+        `SELECT id, downstream_processing_json
+         FROM meetings
+         WHERE json_extract(downstream_processing_json, '$.state') = 'processing'`,
+      )
+      .all() as Array<{
+      id: string;
+      downstream_processing_json: string | null;
+    }>;
+    let expired = 0;
+    for (const row of rows) {
+      const lease = readDownstreamProcessingLease(
+        row.downstream_processing_json,
+      );
+      if (!lease) continue;
+      const failed =
+        lease.schemaVersion === 2
+          ? {
+              schemaVersion: 2,
+              state: 'failed',
+              source: lease.source,
+              stage: lease.stage,
+              failure: 'interrupted',
+            }
+          : {
+              schemaVersion: 1,
+              state: 'failed',
+              transcriptValidatedAt: lease.transcriptValidatedAt,
+              stage: lease.stage,
+              failure: 'interrupted',
+            };
+      expired += db
+        .prepare(
+          `UPDATE meetings
+           SET downstream_processing_json = ?
+           WHERE id = ? AND downstream_processing_json IS ?`,
+        )
+        .run(
+          JSON.stringify(failed),
+          row.id,
+          row.downstream_processing_json,
+        ).changes;
+    }
+    return expired;
   })();
 
 export const saveMeetingIfDownstreamRunCurrent = (

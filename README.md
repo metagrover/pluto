@@ -8,7 +8,8 @@ Intelligent meeting assistant and "second brain" application.
 
 - **Node.js** (v24.11)
 - **pnpm** (enable via `corepack enable` or install directly)
-- **Python** (v3.10.x recommended, via `pyenv`)
+- **Apple Silicon Mac** (Intel macOS, Windows, and Linux are not currently supported)
+- **Python** (v3.10+ recommended, via `pyenv`)
     - *Note: You do NOT need to install Python libraries globally. The project handles this for you.*
 - **FFmpeg** (`brew install ffmpeg` on macOS)
 - **macOS only:** Xcode Command Line Tools (`xcode-select --install`) for Swift builds
@@ -28,7 +29,7 @@ Intelligent meeting assistant and "second brain" application.
     This installs JavaScript dependencies only. Python and native capture tooling stay explicit so setup is easier to reason about.
 
 3.  **Set up Python Environment**
-    This installs WhisperX and ML dependencies into a local virtual environment. This may take a few minutes.
+    This installs MLX Whisper and local speaker-attribution dependencies into a local virtual environment. This may take a few minutes.
     ```bash
     pnpm run setup-python
     ```
@@ -98,6 +99,6 @@ The output DMG will be in `release/`.
 ## 🛠 Project Structure
 
 - `src/` - React/Electron source code
-- `python/` - Python server (WhisperX) and requirements
+- `python/` - Local MLX transcription and speaker-attribution server
 - `scripts/` - Build and setup automation scripts
 - `resources/` - Assets and bundled binaries (built by `pnpm run build-native`)

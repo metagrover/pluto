@@ -301,13 +301,19 @@ describe('benchmark-only oracle cluster mapping', () => {
 
   it('is invariant to arbitrary cluster renames and input permutations', () => {
     const first = composeCandidateAttributedTurns(
-      output([[0, 2, 'speaker-99'], [2, 5, 'speaker-01']]),
+      output([
+        [0, 2, 'speaker-99'],
+        [2, 5, 'speaker-01'],
+      ]),
       candidate,
       undefined,
       reference,
     );
     const renamed = composeCandidateAttributedTurns(
-      output([[0, 2, 'z'], [2, 5, 'a']]),
+      output([
+        [0, 2, 'z'],
+        [2, 5, 'a'],
+      ]),
       candidate,
       undefined,
       reference,
@@ -316,7 +322,10 @@ describe('benchmark-only oracle cluster mapping', () => {
     expect(renamed.map(({ speaker }) => speaker)).toEqual(['Me', 'Them']);
     expect(
       composeCandidateAttributedTurns(
-        output([[0, 2, 'Them'], [2, 5, 'Me']]),
+        output([
+          [0, 2, 'Them'],
+          [2, 5, 'Me'],
+        ]),
         candidate,
         undefined,
         reference,
@@ -346,9 +355,9 @@ describe('benchmark-only oracle cluster mapping', () => {
     expect(
       metrics.me.predictedSeconds - metrics.me.truePositiveSeconds,
     ).toBeCloseTo(0.5);
-    expect(
-      metrics.me.referenceSeconds - metrics.me.truePositiveSeconds,
-    ).toBe(0);
+    expect(metrics.me.referenceSeconds - metrics.me.truePositiveSeconds).toBe(
+      0,
+    );
   });
 
   it('uses deterministic Them tie-breaking for overlaps and empty references', () => {

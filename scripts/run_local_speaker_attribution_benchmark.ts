@@ -227,7 +227,8 @@ const speakerFor = (
 ): BenchmarkSpeaker => {
   if (oracleMap) return oracleMap.get(cluster) ?? 'Them';
   if (cluster === 'Me' || cluster === 'Them') return cluster;
-  const map = candidate.id === 'synthetic' ? candidate.config.speakerMap : undefined;
+  const map =
+    candidate.id === 'synthetic' ? candidate.config.speakerMap : undefined;
   if (typeof map === 'object' && map !== null && !Array.isArray(map)) {
     const mapped = (map as Record<string, unknown>)[cluster];
     if (mapped === 'Me' || mapped === 'Them') return mapped;

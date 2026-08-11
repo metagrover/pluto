@@ -1,6 +1,6 @@
 /**
- * WhisperX Manager for Pluto
- * Manages the Python WhisperX server process and provides a TypeScript API.
+ * Transcription Manager for Pluto
+ * Manages the Python transcription server process and provides a TypeScript API.
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
@@ -17,21 +17,21 @@ const { Agent } = require('undici') as {
 };
 
 // Types
-export interface WhisperXConfig {
+export interface TranscriptionEngineConfig {
   model: 'tiny' | 'base' | 'small' | 'medium' | 'large-v2' | 'large-v3';
-  device: 'cpu' | 'cuda' | 'mps';
-  computeType: 'float16' | 'float32' | 'int8';
+  device: 'mlx';
+  computeType: 'float16';
   language?: string;
 }
 
 export interface TranscribeOptions {
-  model?: WhisperXConfig['model'];
-  device?: WhisperXConfig['device'];
-  computeType?: WhisperXConfig['computeType'];
+  model?: TranscriptionEngineConfig['model'];
+  device?: TranscriptionEngineConfig['device'];
+  computeType?: TranscriptionEngineConfig['computeType'];
   language?: string;
   diarize?: boolean;
-  hfToken?: string;
-  diarizationProvider?: 'sherpa_local' | 'whisperx_hf';
+  wordTimestamps?: boolean;
+  diarizationProvider?: 'sherpa_local';
   signal?: AbortSignal;
 }
 
@@ -100,7 +100,8 @@ export interface AlignedEnergyResult {
 
 export interface HealthStatus {
   status: 'ok' | 'error';
-  whisperx_version?: string;
+  engine?: 'mlx_whisper' | 'unavailable';
+  mlx_available?: boolean;
   device?: string;
   model?: string;
   model_loaded?: boolean;
@@ -112,18 +113,18 @@ const WHISPERX_DEFAULT_PORT = 5123;
 const HEALTH_CHECK_INTERVAL = 1000;
 const MAX_HEALTH_CHECK_RETRIES = 30;
 const WHISPERX_FETCH_AGENT = new Agent({
-  // WhisperX transcription can be long-running; increase headers/body timeouts
+  // transcription can be long-running; increase headers/body timeouts
   // so undici doesn't fail before the server responds.
   headersTimeout: 30 * 60 * 1000,
   bodyTimeout: 30 * 60 * 1000,
 });
 
-export class WhisperXManager {
+export class TranscriptionManager {
   private process: ChildProcess | null = null;
   private pythonPath = '';
   private port: number = WHISPERX_DEFAULT_PORT;
   private externalServer = false;
-  private appliedConfig: Partial<WhisperXConfig> = {};
+  private appliedConfig: Partial<TranscriptionEngineConfig> = {};
   private recyclePromise: Promise<boolean> | null = null;
 
   constructor() {
@@ -204,14 +205,14 @@ export class WhisperXManager {
         'whisperx_server',
         'whisperx_server',
       );
-      console.log(`[WhisperX] Using bundled executable: ${bundledPath}`);
+      console.log(`[Transcription] Using bundled executable: ${bundledPath}`);
       return bundledPath;
     }
 
     // 2. Development: Use local venv
     const venvPython = path.join(this.getPythonDir(), 'venv', 'bin', 'python');
     if (fs.existsSync(venvPython)) {
-      console.log(`[WhisperX] Using local venv execution: ${venvPython}`);
+      console.log(`[Transcription] Using local venv execution: ${venvPython}`);
       this.pythonPath = venvPython;
       return venvPython; // This will be used as the executable to spawn
     }
@@ -296,7 +297,7 @@ export class WhisperXManager {
         return candidate;
       }
     }
-    throw new Error('No available port found for WhisperX server');
+    throw new Error('No available port found for transcription server');
   }
 
   /**
@@ -306,16 +307,21 @@ export class WhisperXManager {
     if (app.isPackaged) {
       return path.join(process.resourcesPath, 'python');
     }
-    return path.join(app.getAppPath(), 'python');
+    const appPath = app.getAppPath();
+    const directPath = path.join(appPath, 'python');
+    if (fs.existsSync(directPath)) return directPath;
+    const parentPath = path.join(appPath, '..', 'python');
+    if (fs.existsSync(parentPath)) return parentPath;
+    return path.join(process.cwd(), 'python');
   }
 
   /**
-   * Start the WhisperX Python server
+   * Start the local transcription server
    */
   private startPromise: Promise<void> | null = null;
 
   /**
-   * Start the WhisperX Python server
+   * Start the local transcription server
    */
   async start(): Promise<void> {
     if (this.startPromise) {
@@ -324,7 +330,7 @@ export class WhisperXManager {
 
     this.startPromise = (async () => {
       if (this.process || this.externalServer) {
-        console.log('[WhisperX] Server already running');
+        console.log('[Transcription] Server already running');
         return;
       }
 
@@ -333,7 +339,9 @@ export class WhisperXManager {
         if (existingHealth.status === 'ok') {
           this.port = WHISPERX_DEFAULT_PORT;
           this.externalServer = true;
-          console.log(`[WhisperX] Using existing server on port ${this.port}`);
+          console.log(
+            `[Transcription] Using existing server on port ${this.port}`,
+          );
           return;
         }
 
@@ -348,7 +356,7 @@ export class WhisperXManager {
           const serverPath = path.join(cwd, 'whisperx_server.py');
           if (!fs.existsSync(serverPath)) {
             throw new Error(
-              `WhisperX server script not found at ${serverPath}`,
+              `transcription server script not found at ${serverPath}`,
             );
           }
           spawnArgs = [serverPath];
@@ -357,7 +365,7 @@ export class WhisperXManager {
         }
 
         console.log(
-          `[WhisperX] Starting server using: ${executable} ${spawnArgs.join(' ')} (port ${this.port})`,
+          `[Transcription] Starting server using: ${executable} ${spawnArgs.join(' ')} (port ${this.port})`,
         );
 
         // Detect ffmpeg path
@@ -367,9 +375,12 @@ export class WhisperXManager {
           if (app.isPackaged) {
             ffmpegPath = ffmpegPath.replace('app.asar', 'app.asar.unpacked');
           }
-          console.log(`[WhisperX] Using ffmpeg at: ${ffmpegPath}`);
+          console.log(`[Transcription] Using ffmpeg at: ${ffmpegPath}`);
         } catch (e) {
-          console.warn('[WhisperX] Could not detect ffmpeg-static path', e);
+          console.warn(
+            '[Transcription] Could not detect ffmpeg-static path',
+            e,
+          );
         }
 
         // Set environment variables
@@ -397,17 +408,17 @@ export class WhisperXManager {
 
         // Log stdout
         child.stdout?.on('data', (data) => {
-          console.log(`[WhisperX] ${data.toString().trim()}`);
+          console.log(`[Transcription] ${data.toString().trim()}`);
         });
 
         // Log stderr
         child.stderr?.on('data', (data) => {
-          console.error(`[WhisperX] ${data.toString().trim()}`);
+          console.error(`[Transcription] ${data.toString().trim()}`);
         });
 
         // Handle process exit
         child.on('close', (code) => {
-          console.log(`[WhisperX] Server exited with code ${code}`);
+          console.log(`[Transcription] Server exited with code ${code}`);
           if (this.process === child) {
             this.process = null;
             this.startPromise = null; // Reset promise so it can be restarted
@@ -417,7 +428,9 @@ export class WhisperXManager {
         });
 
         child.on('error', (err) => {
-          console.error(`[WhisperX] Failed to start server: ${err.message}`);
+          console.error(
+            `[Transcription] Failed to start server: ${err.message}`,
+          );
           if (this.process === child) {
             this.process = null;
             this.startPromise = null;
@@ -429,7 +442,7 @@ export class WhisperXManager {
         // Wait for server to be ready
         await this.waitForServer();
 
-        console.log('[WhisperX] Server is ready');
+        console.log('[Transcription] Server is ready');
       } catch (e) {
         this.startPromise = null;
         throw e;
@@ -456,19 +469,19 @@ export class WhisperXManager {
         setTimeout(resolve, HEALTH_CHECK_INTERVAL),
       );
     }
-    throw new Error('WhisperX server failed to start');
+    throw new Error('transcription server failed to start');
   }
 
   /**
-   * Stop the WhisperX server
+   * Stop the transcription server
    */
   async stop(): Promise<void> {
     if (this.externalServer && !this.process) {
-      console.log('[WhisperX] External server in use; skipping stop');
+      console.log('[Transcription] External server in use; skipping stop');
       return;
     }
     if (this.process) {
-      console.log('[WhisperX] Stopping server');
+      console.log('[Transcription] Stopping server');
       const child = this.process;
       const closed = new Promise<void>((resolve) => {
         child.once('close', () => resolve());
@@ -534,13 +547,13 @@ export class WhisperXManager {
   private async applyConfigFromOptions(
     options: TranscribeOptions,
   ): Promise<void> {
-    const next: Partial<WhisperXConfig> = {};
+    const next: Partial<TranscriptionEngineConfig> = {};
     if (options.model) next.model = options.model;
     if (options.device) next.device = options.device;
     if (options.computeType) next.computeType = options.computeType;
     if (options.language) next.language = options.language;
 
-    const keys = Object.keys(next) as Array<keyof WhisperXConfig>;
+    const keys = Object.keys(next) as Array<keyof TranscriptionEngineConfig>;
     const needsUpdate = keys.some(
       (key) => this.appliedConfig[key] !== next[key],
     );
@@ -571,7 +584,7 @@ export class WhisperXManager {
         audio_path: audioPath,
         language: options.language,
         diarize: options.diarize,
-        hf_token: options.hfToken,
+        word_timestamps: options.wordTimestamps,
       }),
     } as RequestInit & { dispatcher: typeof WHISPERX_FETCH_AGENT });
 
@@ -684,7 +697,7 @@ export class WhisperXManager {
   /**
    * Update server configuration
    */
-  async setConfig(config: Partial<WhisperXConfig>): Promise<void> {
+  async setConfig(config: Partial<TranscriptionEngineConfig>): Promise<void> {
     const response = await fetch(`${this.getBaseUrl()}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -722,4 +735,6 @@ export class WhisperXManager {
 }
 
 // Export singleton instance
-export const whisperX = new WhisperXManager();
+// Compatibility export while callers migrate away from the historical name.
+export { TranscriptionManager as WhisperXManager };
+export const whisperX = new TranscriptionManager();

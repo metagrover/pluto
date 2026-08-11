@@ -21,54 +21,63 @@ const { owner, name } = parseRepoSlug(repo);
 const auth = runCommand('gh', ['auth', 'status', '--hostname', 'github.com'], {
   env: githubEnv,
 });
-const api = runCommand('curl', [
-  '-fsSIL',
-  '--connect-timeout',
-  '10',
-  '--max-time',
-  '20',
-  'https://api.github.com',
-], {
-  env: githubEnv,
-});
-const issueList = runCommand('gh', [
-  'issue',
-  'list',
-  '--repo',
-  repo,
-  '--limit',
-  '1',
-], {
-  env: githubEnv,
-});
-const permissionProbe = runCommand('gh', [
-  'api',
-  'graphql',
-  '-f',
-  `owner=${owner}`,
-  '-f',
-  `name=${name}`,
-  '-f',
-  'query=query($owner:String!, $name:String!) { repository(owner: $owner, name: $name) { viewerPermission } }',
-], {
-  env: githubEnv,
-});
+const api = runCommand(
+  'curl',
+  [
+    '-fsSIL',
+    '--connect-timeout',
+    '10',
+    '--max-time',
+    '20',
+    'https://api.github.com',
+  ],
+  {
+    env: githubEnv,
+  },
+);
+const issueList = runCommand(
+  'gh',
+  ['issue', 'list', '--repo', repo, '--limit', '1'],
+  {
+    env: githubEnv,
+  },
+);
+const permissionProbe = runCommand(
+  'gh',
+  [
+    'api',
+    'graphql',
+    '-f',
+    `owner=${owner}`,
+    '-f',
+    `name=${name}`,
+    '-f',
+    'query=query($owner:String!, $name:String!) { repository(owner: $owner, name: $name) { viewerPermission } }',
+  ],
+  {
+    env: githubEnv,
+  },
+);
 const viewerPermission =
   permissionProbe.exitCode === 0
     ? parseViewerPermission(permissionProbe.stdout)
     : null;
 const mutation = runMutationCheck
-  ? runCommand('gh', [
-      'issue',
-      'comment',
-      mutationIssueNumber,
-      '--repo',
-      repo,
-      '--body',
-      `PM housekeeping mutation preflight passed at ${new Date().toISOString()}.`,
-    ], {
-      env: githubEnv,
-    })
+  ? runCommand(
+      'gh',
+      [
+        'issue',
+        'comment',
+        mutationIssueNumber,
+        '--repo',
+        repo,
+        '--body',
+        `PM housekeeping mutation preflight passed at ${new Date().toISOString()}.`,
+      ],
+      {
+        env: githubEnv,
+      },
+    )
   : { exitCode: 0 };
 
 const classification = classifyPreflightResult({

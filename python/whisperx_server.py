@@ -1,17 +1,17 @@
-
 import os
 import io
-import torch
-import whisperx
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Literal, Optional
 from pathlib import Path
 import json
 import logging
+import math
+import re
 import threading
+import wave
 from sherpa_diarization_runtime import (
     SherpaDiarizationError,
     diarize as run_sherpa_diarization,
@@ -23,48 +23,59 @@ from sherpa_diarization_runtime import (
 )
 from aligned_audio_energy import aligned_energy_windows
 
+try:
+    import mlx_whisper
+    MLX_WHISPER_AVAILABLE = True
+except ImportError:
+    MLX_WHISPER_AVAILABLE = False
+
+MLX_MODEL_MAP = {
+    "tiny": "mlx-community/whisper-tiny",
+    "base": "mlx-community/whisper-base-mlx",
+    "small": "mlx-community/whisper-small-mlx",
+    "medium": "mlx-community/whisper-medium-mlx",
+    "large-v2": "mlx-community/whisper-large-v2-mlx",
+    "large-v3": "mlx-community/whisper-large-v3-turbo",
+}
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("whisperx_server")
+logger = logging.getLogger("transcription_server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting WhisperX Server on {model_config['device']} ({model_config['compute_type']})")
+    logger.info("Starting local transcription server [engine=mlx, available=%s]", MLX_WHISPER_AVAILABLE)
     try:
         load_model_if_needed({})
     except Exception as e:
         logger.error(f"Failed to pre-load model: {e}")
     yield
 
-app = FastAPI(title="Pluto WhisperX Server", lifespan=lifespan)
+app = FastAPI(title="Pluto Transcription Server", lifespan=lifespan)
 
 # Global state
-model = None
-diarize_model = None
 model_lock = threading.RLock()
-# Force CPU for PyTorch 2.0.1 compatibility (MPS not fully supported by WhisperX with this version)
+
 model_config = {
-    "device": "cpu",
-    "compute_type": "int8",  # Use int8 for faster CPU inference
-    "model_name": "small",
+    "device": "mlx",
+    "compute_type": "float16",
+    "model_name": "medium",
     "language": "en"
 }
 
 class TranscribeRequest(BaseModel):
     audio_path: str
-    # Deprecated runtime override. We keep it for backward compatibility
-    # but model changes should happen via /config.
     model: Optional[str] = None
-    device: Optional[str] = None
-    compute_type: Optional[str] = None
+    device: Optional[Literal["mlx"]] = None
+    compute_type: Optional[Literal["float16"]] = None
     language: Optional[str] = None
     diarize: Optional[bool] = False
-    hf_token: Optional[str] = None
+    word_timestamps: Optional[bool] = True
 
 class ConfigRequest(BaseModel):
     model: Optional[str] = None
-    device: Optional[str] = None
-    compute_type: Optional[str] = None
+    device: Optional[Literal["mlx"]] = None
+    compute_type: Optional[Literal["float16"]] = None
     language: Optional[str] = None
 
 class DiarizeRequest(BaseModel):
@@ -75,48 +86,39 @@ class AlignedEnergyRequest(BaseModel):
     system_audio_path: str
 
 def load_model_if_needed(new_config):
-    global model, model_config
-    
     with model_lock:
-        needs_reload = False
-        if model is None:
-            needs_reload = True
-        if "model" in new_config and new_config.get("model") != model_config["model_name"]:
-            needs_reload = True
-        if "device" in new_config and new_config.get("device") != model_config["device"]:
-            needs_reload = True
-        if "compute_type" in new_config and new_config.get("compute_type") != model_config["compute_type"]:
-            needs_reload = True
-            
-        if needs_reload:
-            logger.info(f"Loading model {new_config.get('model', model_config['model_name'])}...")
-            
-            # Update config
-            if "model" in new_config: model_config["model_name"] = new_config["model"]
-            if "device" in new_config: model_config["device"] = new_config["device"]
-            if "compute_type" in new_config: model_config["compute_type"] = new_config["compute_type"]
-            
-            try:
-                model = whisperx.load_model(
-                    model_config["model_name"], 
-                    model_config["device"], 
-                    compute_type=model_config["compute_type"]
-                )
-                logger.info("Model loaded successfully")
-            except Exception as e:
-                logger.error(f"Failed to load model: {e}")
-                raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
+        target_model = new_config.get("model", model_config["model_name"])
+        if not MLX_WHISPER_AVAILABLE:
+            raise HTTPException(status_code=503, detail="MLX Whisper is unavailable")
+        if target_model != model_config["model_name"]:
+            logger.info("Updating transcription model: model=%s", target_model)
+        model_config["model_name"] = target_model
+
+
+def audio_duration_seconds(audio_path: str) -> Optional[float]:
+    try:
+        with wave.open(audio_path, "rb") as audio:
+            frame_rate = audio.getframerate()
+            if frame_rate <= 0:
+                return None
+            return audio.getnframes() / frame_rate
+    except (OSError, EOFError, wave.Error):
+        return None
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
+        "engine": (
+            "mlx_whisper" if MLX_WHISPER_AVAILABLE else "unavailable"
+        ),
+        "mlx_available": MLX_WHISPER_AVAILABLE,
         "device": model_config["device"],
         "model": model_config["model_name"],
         "compute_type": model_config["compute_type"],
-        "model_loaded": model is not None,
-        "supported_devices": ["cpu", "cuda"],
-        "supported_compute_types": ["int8", "float32"],
+        "model_loaded": MLX_WHISPER_AVAILABLE,
+        "supported_devices": ["mlx"],
+        "supported_compute_types": ["float16"],
     }
 
 @app.get("/models")
@@ -139,7 +141,6 @@ def update_config(request: ConfigRequest):
     if request.device: new_conf["device"] = request.device
     if request.compute_type: new_conf["compute_type"] = request.compute_type
     
-    # Language is just stored for preference, not requiring reload usually unless model is language specific
     if request.language: model_config["language"] = request.language
     
     load_model_if_needed(new_conf)
@@ -207,15 +208,10 @@ def attribution_aligned_energy(request: AlignedEnergyRequest):
 
 @app.post("/transcribe")
 def transcribe(request: TranscribeRequest):
-    # WhisperX/faster-whisper mutate shared tokenizer and alignment state.
-    # FastAPI runs synchronous handlers in a thread pool, so serialize the
-    # complete request rather than protecting model loading alone.
     with model_lock:
         return _transcribe_locked(request)
 
 def _transcribe_locked(request: TranscribeRequest):
-    global model, diarize_model
-
     request_conf = {}
     if request.model:
         request_conf["model"] = request.model
@@ -224,100 +220,115 @@ def _transcribe_locked(request: TranscribeRequest):
     if request.compute_type:
         request_conf["compute_type"] = request.compute_type
 
-    # Ensure model is loaded
     load_model_if_needed(request_conf)
     
     if not os.path.exists(request.audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
         
     try:
-        logger.info(f"Transcribing {request.audio_path}...")
-        
-        # 1. Transcribe
-        try:
+        if MLX_WHISPER_AVAILABLE:
+            model_name = request_conf.get("model", model_config["model_name"])
+            repo_id = MLX_MODEL_MAP.get(model_name, f"mlx-community/whisper-{model_name}")
             language = request.language or "en"
-            logger.info(f"Transcribing {request.audio_path} (language={language})...")
-            result = model.transcribe(
-                request.audio_path,
-                batch_size=16,
-                language=language
-            )
-        except IndexError as e:
-            logger.warning(f"No active speech detected or VAD error: {e}")
-            return {
-                "segments": [],
-                "language": "en",
-                "duration": 0,
-                "vad": {"status": "failed", "speechSeconds": 0}
-            }
-        
-        detected_language = result["language"]
-        
-        if not result["segments"]:
-            logger.info("No segments detected, skipping alignment")
-            return {
-                "segments": [],
-                "language": detected_language,
-                "duration": 0,
-                "vad": {"status": "no_speech", "speechSeconds": 0}
-            }
-        
-        # 2. Align for word-level timestamps
-        try:
-            align_model, align_metadata = whisperx.load_align_model(
-                language_code=detected_language,
-                device=model_config["device"],
-            )
-            result = whisperx.align(
-                result["segments"],
-                align_model,
-                align_metadata,
-                request.audio_path,
-                model_config["device"],
-                return_char_alignments=False,
-            )
-            logger.info("Word-level alignment complete")
-        except Exception as e:
-            logger.warning("Alignment skipped (unsupported language or error): %s", e)
-        
-        # 3. Diarize (optional, power-user)
-        # Pyannote diarization is gated on HuggingFace; most users won't set hf_token.
-        # Never fail the whole transcribe: fall back to non-diarized segments.
-        if request.diarize:
-            try:
-                if diarize_model is None:
-                    logger.info("Loading diarization model...")
-                    diarize_model = whisperx.DiarizationPipeline(
-                        use_auth_token=request.hf_token,
-                        device=model_config["device"],
-                    )
-                diarize_segments = diarize_model(request.audio_path)
-                result = whisperx.assign_word_speakers(diarize_segments, result)
-            except Exception as e:
-                logger.warning(
-                    "Diarization skipped (no usable model/token or runtime error): %s",
-                    e,
-                )
-                diarize_model = None
+            logger.info("Transcribing managed audio using MLX [model=%s, language=%s]", model_name, language)
             
-        logger.info("Transcription complete")
-        return {
-            "segments": result["segments"],
-            "language": detected_language,
-            "duration": 0, # TODO: Calculate duration
-            "vad": {
-                "status": "speech",
-                "speechSeconds": sum(
-                    max(0, float(segment.get("end", 0)) - float(segment.get("start", 0)))
-                    for segment in result["segments"]
-                ),
-            },
-            "active_config": {
-                "model": model_config["model_name"],
-                "device": model_config["device"],
-                "compute_type": model_config["compute_type"],
-            },
-        }
+            mlx_kwargs = {
+                "path_or_hf_repo": repo_id,
+                "word_timestamps": request.word_timestamps is not False,
+                "condition_on_previous_text": request.word_timestamps is not False,
+            }
+            if language and language != "auto":
+                mlx_kwargs["language"] = language
+                
+            mlx_result = mlx_whisper.transcribe(request.audio_path, **mlx_kwargs)
+            raw_segments = mlx_result.get("segments", [])
+            measured_duration = audio_duration_seconds(request.audio_path)
+            result_duration = measured_duration or float(mlx_result.get("duration", 0.0))
+            normalized_text_counts = {}
+            for seg in raw_segments:
+                normalized_text = re.sub(
+                    r"[^a-z0-9]+", " ", str(seg.get("text", "")).lower()
+                ).strip()
+                if normalized_text:
+                    normalized_text_counts[normalized_text] = (
+                        normalized_text_counts.get(normalized_text, 0) + 1
+                    )
+            formatted_segments = []
+            for seg in raw_segments:
+                normalized_text = re.sub(
+                    r"[^a-z0-9]+", " ", str(seg.get("text", "")).lower()
+                ).strip()
+                high_no_speech_probability = (
+                    float(seg.get("no_speech_prob", 0.0)) >= 0.6
+                )
+                repeated_text = normalized_text_counts.get(normalized_text, 0) > 1
+                if high_no_speech_probability and (
+                    request.word_timestamps is False or repeated_text
+                ):
+                    continue
+                start = max(0.0, float(seg.get("start", 0.0)))
+                end = float(seg.get("end", 0.0))
+                if not math.isfinite(start) or not math.isfinite(end):
+                    continue
+                if result_duration > 0:
+                    if start >= result_duration:
+                        continue
+                    end = min(end, result_duration)
+                text = seg.get("text", "").strip()
+                if end <= start or not text:
+                    continue
+                formatted_words = []
+                for w in seg.get("words", []):
+                    word_start = max(0.0, float(w.get("start", 0.0)))
+                    word_end = float(w.get("end", 0.0))
+                    if result_duration > 0:
+                        if word_start >= result_duration:
+                            continue
+                        word_end = min(word_end, result_duration)
+                    word_text = w.get("word", "").strip()
+                    if word_end <= word_start or not word_text:
+                        continue
+                    formatted_words.append({
+                        "word": word_text,
+                        "start": word_start,
+                        "end": word_end,
+                        "score": float(w.get("probability", 1.0)),
+                    })
+                formatted_segment = {
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                }
+                if formatted_words:
+                    formatted_segment["words"] = formatted_words
+                formatted_segments.append(formatted_segment)
+                
+            detected_language = mlx_result.get("language", language or "en")
+            
+            result = {
+                "segments": formatted_segments,
+                "language": detected_language,
+                "duration": result_duration,
+                "vad": {
+                    "status": "speech" if formatted_segments else "no_speech",
+                    "speechSeconds": sum(
+                        max(0.0, float(s["end"]) - float(s["start"]))
+                        for s in formatted_segments
+                    ),
+                },
+                "active_config": {
+                    "model": model_name,
+                    "device": "mlx",
+                    "compute_type": "float16",
+                },
+            }
+
+            if request.diarize:
+                raise HTTPException(status_code=422, detail="Use the local diarization endpoint")
+
+            logger.info("Transcription complete [engine=mlx]")
+            return result
+        raise HTTPException(status_code=503, detail="MLX Whisper is unavailable")
         
     except Exception as e:
         logger.error(f"Transcription failed: {e}")

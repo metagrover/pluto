@@ -29,12 +29,14 @@ const TRUST_STATUS_META: Record<TrustStatus, TrustStatusMeta> = {
   weak_evidence: {
     label: 'Weak evidence',
     tone: 'warning',
-    description: 'Too little supporting evidence is attached to trust this yet.',
+    description:
+      'Too little supporting evidence is attached to trust this yet.',
   },
   stale: {
     label: 'Stale',
     tone: 'warning',
-    description: 'The evidence has aged and should be refreshed before relying on it.',
+    description:
+      'The evidence has aged and should be refreshed before relying on it.',
   },
   synthesis_failed: {
     label: 'Synthesis failed',

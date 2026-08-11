@@ -1,243 +1,336 @@
-# Design Spec: Pluto Asynchronous Memory Dreaming Engine
+# Design Spec: Proposal-First Memory Dreaming Engine
 
-**Issue:** [#586](https://github.com/metagrover/pluto/issues/586)  
-**Author:** Antigravity  
-**Date:** 2026-08-04  
-**Status:** Approved  
+**Issue:** [#586](https://github.com/metagrover/pluto/issues/586)
+**PR:** [#587](https://github.com/metagrover/pluto/pull/587)
+**Original date:** 2026-08-04
+**Revised:** 2026-08-11
+**Status:** Approved direction; implementation pending
 
----
+## 1. Problem
 
-## 1. Overview & Objectives
+Pluto derives knowledge from one meeting at a time. That preserves source boundaries, but accumulated knowledge can become fragmented:
 
-Pluto is an intelligent meeting assistant and second brain. Historically, Pluto extracted entities and knowledge graph edges point-in-time immediately after a single meeting finalized. Over weeks of usage across dozens of meetings, this point-in-time model exhibits three key limitations:
+- the same entity may appear under multiple names;
+- a later meeting may supersede an earlier project state;
+- summaries can grow as disconnected snippets;
+- user corrections may not constrain later synthesis consistently;
+- old, low-value material can crowd current context.
 
-1. **Fragmented Summaries:** Entity summaries are collections of per-meeting snippets rather than a cohesive narrative across meetings.
-2. **Outdated Temporal Facts:** Chronological updates (e.g., *"Target launch is Aug 10"* in Meeting 1 vs *"Launch delayed to Aug 25"* in Meeting 4) remain as conflicting quotes without state resolution.
-3. **Graph Clutter & Duplicates:** Near-duplicate entity nodes (e.g., `"Q3 Roadmap"` and `"Q3-Planning"`) accumulate over time.
+Cross-meeting consolidation is a higher-risk operation than ordinary summarization. A false merge or incorrect state transition can make one unsupported inference look like durable truth everywhere Pluto uses that knowledge. The engine therefore needs less model authority, not more.
 
-Inspired by OpenAI's **Memory Dreaming** architecture, the **Pluto Dreaming Engine** introduces an offline, asynchronous consolidation process that periodically re-analyzes accumulated interaction data and subgraphs to:
-- Deduplicate and merge entity nodes.
-- Reconcile temporal status transitions across meetings.
-- Re-synthesize narrative entity and project profiles.
-- Record all background modifications in a user-inspectable **Dream Log**.
+## 2. Outcome
 
----
+Pluto periodically builds bounded evidence clusters while the app is idle and asks a local model for structured consolidation proposals. Deterministic code validates those proposals against immutable source evidence and graph invariants. Safe proposals can be reviewed and applied transactionally, and every applied change can be restored exactly.
 
-## 2. Architecture & Data Flow
+This design does not ship the engine. It defines the contracts and delivery gates implementation must satisfy.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        ELECTRON MAIN PROCESS                           │
-│                                                                        │
-│   ┌───────────────────┐               ┌───────────────────────────┐    │
-│   │   Idle Detector   │               │ Knowledge Workspace DB    │    │
-│   │ (Power/Activity)  │               │  - nodes / edges / docs   │    │
-│   └─────────┬─────────┘               │  - dreaming_runs & logs   │    │
-│             │ (Trigger: Idle/Manual)  └─────────────▲─────────────┘    │
-│             ▼                                       │ (Atomic Commit)  │
-│   ┌─────────────────────────────────────────────────┴─────────────┐    │
-│   │              Dreaming Processing Coordinator                  │    │
-│   │                                                               │    │
-│   │ ┌──────────────────┐  ┌─────────────────┐  ┌────────────────┐ │    │
-│   │ │ Cluster Extractor│──►│ Synthesis Engine│──►│  Reconciler    │ │    │
-│   │ │ (Dirty Subgraphs)│  │ (LLM / Prompts) │  │(Graph & Diffs) │ │    │
-│   │ └──────────────────┘  └─────────────────┘  └────────────────┘ │    │
-│   └───────────────────────────────────────────────────────────────┘    │
-└────────────────────────────────────▲───────────────────────────────────┘
-                                     │ IPC: START_DREAMING_RUN / GET_DREAM_LOGS
-┌────────────────────────────────────┴───────────────────────────────────┐
-│                           REACT FRONTEND                               │
-│                                                                        │
-│   ┌───────────────────────────────────────────────────────────────┐    │
-│   │ Knowledge Workspace UI                                        │    │
-│   │  - "Consolidate Knowledge" Button                             │    │
-│   │  - Dream Log Drawer (View Diffs, Undo Merges, Review Updates) │    │
-│   └───────────────────────────────────────────────────────────────┘    │
-└────────────────────────────────────────────────────────────────────────┘
-```
+## 3. Product principles
 
-### Flow Sequence
-1. **Trigger:** Idle monitor (10m inactivity on AC power) or manual button click in UI.
-2. **Extraction:** `ClusterExtractor` finds entities/docs marked `dirty = 1` and isolates subgraphs.
-3. **LLM Synthesis:** `DreamingSynthesisEngine` prompts LLM for temporal normalization, entity deduplication, and narrative re-synthesis.
-4. **Reconciliation:** `GraphReconciler` transactionally updates graph nodes/edges and logs a `KnowledgeDreamingRun`.
-5. **UI Notification:** Main process sends IPC event to React frontend to show a subtle toast and update the Dream Log Drawer.
+1. **Evidence before synthesis.** Every semantic claim points to supplied source records. Model confidence is not evidence.
+2. **Proposals before mutation.** The model never writes to SQLite or chooses identifiers outside its bounded input.
+3. **Ambiguity is a valid result.** `unresolved` and `no_change` are better than forced consolidation.
+4. **Risk controls authority.** Entity identity, temporal state, archival, deletion, and corrections require review initially.
+5. **Episodic evidence is immutable.** Dreaming operates on derived semantic state only.
+6. **Restoration is exact.** A Dream Log entry is not a rollback mechanism unless it preserves enough prior state to restore the graph.
+7. **Foreground work always wins.** Recording, transcript validation, and user-requested analysis preempt dreaming.
+8. **Local and private.** Meeting text, evidence quotes, identities, and graph content never enter production logs or telemetry.
 
----
+## 4. Model decision
 
-## 3. Data Schemas & Models
+Pluto keeps Phi for latency-sensitive foreground work. `qwen3.5:9b` is the preferred background dreaming candidate to evaluate because idle work can tolerate its higher latency and a local 2026-08-10 benchmark showed stronger exact evidence grounding:
 
-### 3.1 Database Schema Additions
+| Model | Meeting-analysis score | Precision cases | Exact evidence support | Total benchmark time | Resident model |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `phi4-mini:3.8b` | 30/48 | 1/3 | 7/13 | 88.2 s | 3.1 GB |
+| `qwen3.5:9b`, thinking disabled | 30/48 | 2/3 | 13/13 | 207.4 s | 5.5 GB |
 
-```sql
--- Track dirty status on entity nodes and docs
-ALTER TABLE knowledge_nodes ADD COLUMN dirty INTEGER DEFAULT 1;
-ALTER TABLE knowledge_docs ADD COLUMN dirty INTEGER DEFAULT 1;
+This is a candidate selection, not a quality claim. Qwen still produced false commitments in exploratory material and did not improve the aggregate meeting-analysis score. The dreaming benchmark must compare it with Phi and at least one credible local alternative before the default is locked.
 
--- Table to store historical dreaming runs
-CREATE TABLE IF NOT EXISTS knowledge_dreaming_runs (
-  id TEXT PRIMARY KEY,
-  trigger_type TEXT NOT NULL, -- 'idle' | 'manual'
-  status TEXT NOT NULL,       -- 'running' | 'completed' | 'failed'
-  clusters_processed INTEGER NOT NULL DEFAULT 0,
-  nodes_merged_count INTEGER NOT NULL DEFAULT 0,
-  edges_updated_count INTEGER NOT NULL DEFAULT 0,
-  summaries_rewritten_count INTEGER NOT NULL DEFAULT 0,
-  diff_json TEXT NOT NULL,   -- Structured diff payload
-  error_message TEXT,
-  started_at TEXT NOT NULL,
-  completed_at TEXT
-);
+For strict JSON output, the final Qwen pass uses thinking disabled unless a separately tested two-pass design reserves independent reasoning and final-output budgets. A hidden reasoning stream must never consume the JSON token budget.
+
+## 5. Architecture
+
+```text
+Immutable meeting evidence          Derived knowledge state
+           |                                  |
+           v                                  v
+  Revision-safe cluster builder ----> bounded cluster package
+                                             |
+                                             v
+                                  Qwen synthesis proposal
+                                             |
+                                             v
+                                  deterministic validator
+                                   | rejected/unresolved
+                                   v
+                                  persisted proposal
+                                             |
+                                  review and risk policy
+                                             |
+                                             v
+                                  transactional reconciler
+                                             |
+                                             v
+                              applied snapshot + Dream Log
 ```
 
-### 3.2 TypeScript Interfaces
+### 5.1 Deterministic cluster builder
+
+The cluster builder:
+
+- selects dirty knowledge documents, working-memory snapshots, entities, and relationships using durable revisions or source cursors;
+- gathers bounded one-hop neighbors and chronological evidence records;
+- generates alias and temporal-conflict candidates using deterministic rules;
+- includes active user corrections as explicit constraints;
+- assigns stable IDs to every supplied record;
+- records the exact source revision at claim time;
+- never places unrestricted database access or arbitrary transcript search behind the model call.
+
+A completed run clears dirty state only when the current record revision still equals the claimed revision. New changes made during a run remain dirty.
+
+### 5.2 Synthesis engine
+
+The synthesis engine receives one bounded cluster and may propose:
+
+- `entity_alias`: two supplied entities likely refer to the same real entity;
+- `temporal_transition`: a supplied state was explicitly superseded or resolved;
+- `narrative_refresh`: a source-backed summary over existing facts;
+- `archive_candidate`: material may be stale or low-value, for review only;
+- `unresolved`: evidence conflicts or is insufficient;
+- `no_change`: the cluster is already coherent.
+
+Every proposal contains only supplied graph IDs, source IDs, evidence references, and a reason. Narrative facts carry their own evidence references. The model cannot emit database operations.
+
+### 5.3 Deterministic validator
+
+The validator rejects output when:
+
+- the schema is malformed or truncated;
+- an identifier was not supplied in the cluster;
+- an evidence reference cannot resolve to the cited source;
+- a quote or fact fails the documented evidence-normalization rule;
+- a correction is ignored or contradicted;
+- a transition violates allowed state semantics;
+- a merge creates a self-edge, duplicate invariant violation, or provenance loss;
+- the output contains mutually inconsistent proposals;
+- the run was cancelled, its lease expired, or any claimed source revision changed.
+
+Rejected output is recorded through content-free categories and counts. It never appears as an applied or successful consolidation.
+
+### 5.4 Proposal store and reconciler
+
+Validated proposals are persisted separately from the live semantic graph. The reconciler applies only proposals permitted by the risk policy and current review state.
+
+Application uses one SQLite transaction that:
+
+1. rechecks proposal status, lease, source revisions, and graph preconditions;
+2. stores complete prior state for every affected row and association;
+3. applies the semantic change;
+4. stores the complete resulting state;
+5. advances proposal and run status;
+6. preserves immutable episodic evidence;
+7. marks downstream working-memory views dirty for regeneration.
+
+No partial graph change survives a failed transaction.
+
+## 6. Persistence contracts
+
+Exact column names can follow existing `electron/db.ts` conventions, but the logical model requires the following.
+
+### 6.1 Dreaming run
 
 ```typescript
-export type DreamingTriggerType = 'idle' | 'manual';
-export type DreamingRunStatus = 'running' | 'completed' | 'failed';
+type DreamingRunStatus =
+  | 'queued'
+  | 'running'
+  | 'cancelling'
+  | 'proposed'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'reverted';
 
-export interface DreamingNodeMergeDiff {
-  winnerId: string;
-  loserId: string;
-  mergedLabel: string;
-  reassignedEdgeIds: string[];
-}
-
-export interface DreamingEdgeStatusDiff {
-  edgeId: string;
-  oldState: string;
-  newState: string;
-  reason: string;
-}
-
-export interface DreamingSummaryDiff {
-  entityId: string;
-  entityLabel: string;
-  previousSentenceCount: number;
-  newSentenceCount: number;
-  updatedAt: string;
-}
-
-export interface KnowledgeDreamingDiffPayload {
-  mergedNodes: DreamingNodeMergeDiff[];
-  updatedEdges: DreamingEdgeStatusDiff[];
-  rewrittenSummaries: DreamingSummaryDiff[];
-}
-
-export interface KnowledgeDreamingRun {
+interface KnowledgeDreamingRun {
   id: string;
-  triggerType: DreamingTriggerType;
+  triggerType: 'idle' | 'manual';
   status: DreamingRunStatus;
-  clustersProcessed: number;
-  nodesMergedCount: number;
-  edgesUpdatedCount: number;
-  summariesRewrittenCount: number;
-  diff: KnowledgeDreamingDiffPayload;
-  errorMessage?: string;
+  model: string;
+  promptVersion: string;
+  generationConfig: Record<string, unknown>;
+  leaseToken: string;
+  sourceRevision: string;
+  contentFreeMetrics: Record<string, number | string | boolean>;
   startedAt: string;
   completedAt?: string;
+  errorCategory?: string;
 }
 ```
 
----
+### 6.2 Proposal
 
-## 4. Main Process Components
+```typescript
+type DreamingProposalKind =
+  | 'entity_alias'
+  | 'temporal_transition'
+  | 'narrative_refresh'
+  | 'archive_candidate';
 
-### 4.1 `IdleMonitor` (`electron/dreaming/idleMonitor.ts`)
-- Listens to Electron's `powerMonitor` state and mouse/keyboard idle timers.
-- Triggers a dreaming run when:
-  - App has been idle for >= 10 minutes.
-  - Device is connected to AC power (battery safeguard).
-  - No active recording/diarization call is currently running.
+type DreamingProposalStatus =
+  | 'pending_review'
+  | 'approved'
+  | 'rejected'
+  | 'applied'
+  | 'reverted'
+  | 'invalidated';
 
-### 4.2 `ClusterExtractor` (`electron/dreaming/clusterExtractor.ts`)
-- Queries database for `dirty = 1` nodes.
-- For each dirty node, gathers its 1-hop connected neighbors and associated meeting transcript quotes.
-- Groups connected components into discrete `EntityCluster` payloads for parallel or batch processing.
+interface KnowledgeDreamingProposal {
+  id: string;
+  runId: string;
+  clusterId: string;
+  kind: DreamingProposalKind;
+  risk: 'low' | 'high';
+  status: DreamingProposalStatus;
+  affectedIds: string[];
+  evidenceRefs: Array<{ sourceId: string; evidenceId: string }>;
+  proposalPayload: unknown;
+  validationVersion: string;
+  reviewedAt?: string;
+  appliedAt?: string;
+}
+```
 
-### 4.3 `DreamingSynthesisEngine` (`electron/dreaming/synthesisEngine.ts`)
-- Constructs structured prompts for the LLM containing the entity cluster + transcript snippets.
-- Instructs the LLM to output JSON adhering to strict schemas:
-  - Identifies duplicate node pairs `(winner, loser)` to merge.
-  - Identifies state transitions on edges (e.g. `proposed` -> `active` or `deprecated`).
-  - Rewrites entity summaries as consolidated bullet points with explicit meeting source IDs.
+### 6.3 Applied snapshot
 
-### 4.4 `GraphReconciler` (`electron/dreaming/graphReconciler.ts`)
-- Executes SQLite transaction:
-  1. Merges target nodes (reassigns edges, marks loser node deleted).
-  2. Updates edge states and confidence levels.
-  3. Replaces `entity_summaries` records.
-  4. Resets `dirty = 0` on processed nodes/docs.
-  5. Inserts `knowledge_dreaming_runs` record.
+An applied snapshot stores canonical serialized before-and-after rows for every affected node, edge, document, summary, provenance record, confidence field, archive marker, and source association. Counts, sentence totals, loser IDs, or reassigned edge IDs alone are insufficient.
 
----
+Snapshots include:
 
-## 5. UI Components (React)
+- the graph revision at application;
+- the exact affected-row set;
+- before and after hashes;
+- dependency information for later runs;
+- a restoration eligibility result.
 
-### 5.1 "Consolidate Knowledge" Header Action (`src/components/knowledge/ConsolidateKnowledgeButton.tsx`)
-- Located in the Knowledge Workspace header.
-- Displays dreaming state (Idle, Consolidating..., Last consolidated 2h ago).
-- Clicking manually triggers `START_DREAMING_RUN`.
+If later mutations make exact restoration unsafe, the UI disables one-click revert and explains that a new compensating proposal is required.
 
-### 5.2 `DreamLogDrawer` (`src/components/knowledge/DreamLogDrawer.tsx`)
-- Slide-over drawer opening from Knowledge Workspace.
-- Lists past `KnowledgeDreamingRun` items with timestamps, trigger type, and metrics.
-- Expandable cards showing exact node merges, status changes, and rewritten summaries.
-- Includes a **Revert Run** button allowing users to undo a dreaming pass if desired.
+## 7. Initial risk policy
 
----
+### Low risk
 
-## 6. IPC Channel Contracts
+An evidence-preserving narrative refresh may become auto-applicable only after the dreaming benchmark passes. It must not delete facts, alter identity or temporal state, remove provenance, override a correction, or affect unrelated records. Complete prior state is still required.
 
-| Channel Name | Direction | Payload | Return Value |
-| :--- | :--- | :--- | :--- |
-| `START_DREAMING_RUN` | Renderer → Main | `{ triggerType: 'manual' \| 'idle' }` | `Promise<KnowledgeDreamingRun>` |
-| `GET_DREAMING_RUNS` | Renderer → Main | `{ limit?: number }` | `Promise<KnowledgeDreamingRun[]>` |
-| `REVERT_DREAMING_RUN` | Renderer → Main | `{ runId: string }` | `Promise<{ success: boolean }>` |
-| `DREAMING_RUN_PROGRESS` | Main → Renderer | `{ stage: string, progress: number }` | Event Stream |
-| `DREAMING_RUN_COMPLETED` | Main → Renderer | `KnowledgeDreamingRun` | Event Stream |
+### High risk
 
----
+The following require explicit review initially:
 
-## 7. Error Handling & Safeguards
+- entity merge or split;
+- relationship rewrite;
+- temporal transition;
+- correction override;
+- archival or deletion;
+- any proposal with conflicting or incomplete evidence.
 
-1. **Battery Protection:** Automatically cancels or delays idle dreaming runs if laptop disconnects from power.
-2. **Transaction Atomicity:** SQLite transaction rollbacks ensure database stays pristine if LLM call or reconciliation fails mid-flight.
-3. **Recording Priority:** Immediate cancellation of dreaming run if a user starts recording a meeting.
-4. **Reversibility:** Every dreaming run records an explicit inverse diff allowing single-click rollback.
+The first shipped release may choose review-first for every proposal. Broader automation requires a later decision-log update supported by benchmark and dogfood evidence.
 
----
+## 8. Scheduling and resource safety
 
-## 8. Verification & Testing Strategy
+Idle dreaming begins only when:
 
-1. **Unit Tests (Vitest):**
-   - `ClusterExtractor.test.ts`: Verify dirty node grouping and boundary isolation.
-   - `GraphReconciler.test.ts`: Verify node merge edge reassignment and diff generation.
-   - `DreamingSynthesisEngine.test.ts`: Test JSON output validation and fallback handling.
-2. **IPC Integration Tests:**
-   - Test `START_DREAMING_RUN` and `REVERT_DREAMING_RUN` IPC flows.
-3. **UI Component Verification:**
-   - Verify `DreamLogDrawer` renders diff cards accurately and responds to revert clicks.
+- the app has been idle for the configured interval;
+- the machine is on AC power for automatic runs;
+- no recording, transcript validation, post-meeting analysis, or other foreground Ollama request is active or queued;
+- memory and thermal pressure are within tested bounds;
+- no other dreaming run owns the lease.
 
----
+The coordinator:
 
-## 9. Advanced Memory Architecture Principles
+- processes bounded clusters sequentially;
+- rechecks eligibility between clusters;
+- cancels immediately when foreground work begins;
+- invalidates late responses with the lease token;
+- persists finite terminal states across shutdown and startup;
+- unloads Qwen promptly after completion or cancellation instead of using the foreground one-hour keep-alive;
+- caps cluster size, context, output, retries, per-cluster time, and total run duration.
 
-To align Pluto's Dreaming Engine with cutting-edge AI memory consolidation literature, four core architectural principles govern its memory lifecycle:
+Manual runs may relax idle and AC requirements, but never recording priority, memory safety, validation, or mutation policy.
 
-### 9.1 Explicit Episodic → Semantic Memory Distillation
-- **Principle:** Post-meeting extractions store time-bound quotes (*Episodic Memory*). The Dreaming Engine distills these raw snippets into enduring, generalizable core facts (*Semantic Memory*).
-- **Implementation:** During synthesis, `DreamingSynthesisEngine` extracts higher-level entity properties (e.g. participant domain expertise, recurring project constraints) while marking individual transcript quotes as consolidated.
+## 9. Dream Log UX
 
-### 9.2 Algorithmic Memory Decay & Pruning
-- **Principle:** Unreferenced, low-saliency nodes decay over time to prevent knowledge graph bloat and context window clutter.
-- **Implementation:** Each dreaming run calculates node decay: `saliency = saliency * (0.95 ^ days_unreferenced)`. Nodes falling below `saliency < 0.1` are moved to an `archived` state, keeping the active Knowledge Graph crisp and high-signal.
+The Knowledge Workspace exposes a consolidation history and review surface. Users can distinguish:
 
-### 9.3 Correction Feedback Loops (`knowledge_corrections`)
-- **Principle:** User feedback and rejections steer future background dreaming cycles.
-- **Implementation:** When users edit or reject graph nodes/edges, entries are appended to `knowledge_corrections`. `DreamingSynthesisEngine` loads active corrections as negative constraints during cluster synthesis to prevent repeating discredited inferences.
+- processing;
+- proposed changes awaiting review;
+- applied changes;
+- rejected or invalidated proposals;
+- cancelled or failed runs;
+- reverted changes.
 
-### 9.4 Dual-Store Provenance & Isolation
-- **Principle:** Raw transcripts and initial post-meeting journals remain immutable **Episodic Evidence**. Dreaming operates exclusively on the derived **Semantic Graph Layer**.
-- **Implementation:** Reverting a dreaming pass via `DreamLogDrawer` resets the semantic graph tables without modifying or invalidating canonical meeting transcripts or raw capture evidence.
+Each proposal shows its change type, affected records, source meetings, evidence, ambiguity, risk tier, and current state. Review supports individual decisions and safe batching. The UI does not call a run completed when structured generation fell back to an empty result.
 
+## 10. Corrections and decay
+
+User corrections are authoritative constraints, not optional prompt context. A proposal contradicting an active correction is invalid unless the product introduces a separate explicit correction-review flow.
+
+Time-based decay is only a candidate signal. A fixed formula such as `saliency * 0.95^days` cannot archive material by itself because rare knowledge may remain important. Archive proposals require provenance, current-use signals, correction checks, and review initially.
+
+## 11. Evaluation gate
+
+The maintained benchmark invokes the real production provider, prompts, schema, and validator with content-free reporting.
+
+Human-reviewed fixtures cover:
+
+- true aliases and look-alike non-duplicates;
+- renamed projects;
+- explicit temporal transitions and competing proposals;
+- later corrections and negated facts;
+- stale facts and rare-but-important entities;
+- contradictory meetings;
+- invalid identifiers and missing evidence;
+- cancellation and source-revision races;
+- exact application and restoration.
+
+Metrics include:
+
+- merge precision and recall;
+- false-merge count;
+- temporal-state accuracy;
+- correction adherence;
+- unsupported-inference rate;
+- exact evidence support;
+- structured-output and fallback rate;
+- latency and memory pressure;
+- cancellation and late-response rejection;
+- restoration fidelity.
+
+Release gates:
+
+- zero false merges in the release fixture set;
+- 100% resolvable evidence for every auto-applicable proposal;
+- no schema fallback presented as success;
+- no mutation after cancellation or revision drift;
+- exact restoration for every applied fixture;
+- safe operation on the supported 16 GB Apple Silicon baseline without degrading recording or post-meeting processing.
+
+## 12. Relationship to #594
+
+[Issue #594](https://github.com/metagrover/pluto/issues/594) owns shared local-model foundations: prompt consistency, evidence validation, explicit Ollama capabilities, structured-output budgeting, privacy-safe real-provider benchmarks, and cancellation semantics. This issue owns dreaming-specific schemas, fixtures, lifecycle, risk policy, reconciliation, restoration, and UI.
+
+Deterministic cluster and persistence work can proceed independently. Model integration and trust decisions should reuse the #594 provider and evaluation work.
+
+## 13. Non-goals
+
+- Changing transcription engines.
+- Cross-platform inference support in the first release.
+- Sending private content to a cloud model.
+- Letting model confidence substitute for source evidence.
+- Automatically merging or deleting knowledge because a model recommends it.
+- Treating high extraction volume as quality.
+- Implementing the engine in this design PR.
+
+## 14. Open decisions for implementation
+
+- Whether the first release is review-first even for narrative refreshes.
+- The bounded evidence-normalization rule for transcript formatting differences.
+- How pending proposals interact with later runs over the same records.
+- Which third local model joins Phi and Qwen in the benchmark.
+- Whether Qwen is installed on demand when the user enables dreaming.

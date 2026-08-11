@@ -528,11 +528,28 @@ describe('buildFollowUpDraftContext', () => {
     const context = buildFollowUpDraftContext({
       fallbackActionItems: [],
       linkedEntities: [
-        makeEntity({ id: 'action-1', type: 'action_item', name: 'Confirm launch plan' }),
+        makeEntity({
+          id: 'action-1',
+          type: 'action_item',
+          name: 'Confirm launch plan',
+        }),
       ],
       linkedAttentionItems: [
-        { id: 'attention-1', kind: 'blocker', status: 'active', reason: 'Blocked by legal approval.', related_entity_ids: ['action-1'] },
-        { id: 'attention-2', kind: 'blocker', status: 'active', reason: 'Blocked by legal approval while finance waits on updated contract redlines.', related_entity_ids: ['action-1'] },
+        {
+          id: 'attention-1',
+          kind: 'blocker',
+          status: 'active',
+          reason: 'Blocked by legal approval.',
+          related_entity_ids: ['action-1'],
+        },
+        {
+          id: 'attention-2',
+          kind: 'blocker',
+          status: 'active',
+          reason:
+            'Blocked by legal approval while finance waits on updated contract redlines.',
+          related_entity_ids: ['action-1'],
+        },
       ],
     });
 

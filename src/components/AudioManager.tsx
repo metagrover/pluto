@@ -38,6 +38,7 @@ import {
   type LiveTranscriptResponsivenessSummary,
   createLiveTranscriptResponsivenessRuntime,
 } from '../utils/liveTranscriptResponsiveness';
+import { LiveTranscriptionQueue } from '../utils/liveTranscriptionQueue';
 import { isGrantedStatus } from '../utils/permissions';
 import {
   beginRecordingFinalization,
@@ -45,6 +46,7 @@ import {
   buildRecoverableSealFailureMeeting,
   buildSpeakerAttributionRetryPlan,
   createSealedCaptureActivityHandoff,
+  planForegroundTranscriptValidation,
   resolveFinalizationCleanupPaths,
   sealCaptureJournalBeforeFinalization,
 } from '../utils/recordingFinalization';
@@ -110,6 +112,7 @@ interface AudioManagerProps {
   onProcessingChange?: (isProcessing: boolean) => void;
   onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
   onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
+  onInterimTranscript?: (text: string) => void;
   onCaptureHealthChange?: (health: CaptureHealthState) => void;
   onLiveTranscriptIntegrityChange?: (state: LiveTranscriptIntegrity) => void;
   onRecordingStarted?: (startedAtMs: number) => void;
@@ -118,7 +121,6 @@ interface AudioManagerProps {
   participants?: string[];
   systemAudioStatus?: string;
   transcriptionSettings?: TranscriptionSettings;
-  hfToken?: string;
 
   onStopSessionRef?: React.MutableRefObject<
     ((endReason?: string) => void) | null
@@ -409,12 +411,12 @@ export const AudioManager = ({
   userTitle = '',
   participants = [],
   transcriptionSettings,
-  hfToken,
   onStopSessionRef,
   onStartSessionRef,
   onAnalyserReadyRef,
   onSpeakingChange,
   onLiveTranscript,
+  onInterimTranscript,
   onCaptureHealthChange,
   onLiveTranscriptIntegrityChange,
   onRecordingStarted,
@@ -436,10 +438,13 @@ export const AudioManager = ({
   const resolvedTranscriptionSettings = resolveTranscriptionSettings(
     transcriptionSettings,
   );
+  const CHUNK_SECONDS =
+    resolvedTranscriptionSettings.backend === 'local_alt_apple_silicon'
+      ? 5
+      : 30;
   const resolvedLanguage = resolveTranscriptionLanguage(
     transcriptionSettings?.language,
   );
-  const hfTokenValue = typeof hfToken === 'string' ? hfToken.trim() : '';
   const resolvedChunkModel = resolveLiveChunkModel(
     resolvedTranscriptionSettings.model,
   );
@@ -467,10 +472,14 @@ export const AudioManager = ({
         : resolvedTranscriptionSettings.computeType,
       language: resolvedLanguage,
       meetingId: currentMeetingIdRef.current,
+      wordTimestamps: !isChunkTranscription,
       ...overrides,
     };
   };
-  const diarizationEnabled = true;
+  // Mic/system channel ownership already provides the user-facing Me/Them
+  // labels. Keep speaker clustering off the stop critical path so the
+  // checkpoint transcript can become visible immediately.
+  const diarizationEnabled = false;
 
   // Refs - Dual Recording for source-based speaker labeling
   const micRecorderRef = useRef<MediaRecorder | null>(null);
@@ -527,7 +536,14 @@ export const AudioManager = ({
   const savedSystemChunkAudioRef = useRef<Map<number, TimedAudioChunk>>(
     new Map(),
   );
-  const processingQueueRef = useRef(Promise.resolve());
+  const processingQueueRef = useRef(
+    new LiveTranscriptionQueue({
+      onError: (error) => {
+        console.error('[Pluto] Background transcription job failed:', error);
+      },
+    }),
+  );
+  const liveTranscriptionGenerationRef = useRef(0);
   const liveTranscriptResponsivenessRef = useRef(
     createLiveTranscriptResponsivenessRuntime({
       now: () => performance.now(),
@@ -1062,6 +1078,12 @@ export const AudioManager = ({
     try {
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
+      liveTranscriptionGenerationRef.current += 1;
+      processingQueueRef.current = new LiveTranscriptionQueue({
+        onError: (error) => {
+          console.error('[Pluto] Background transcription job failed:', error);
+        },
+      });
       startTimeRef.current = Date.now();
       stopToValidatedLatencyRef.current =
         createStopToValidatedLatencyAccumulator();
@@ -1519,7 +1541,7 @@ export const AudioManager = ({
                 micChunkFormat,
                 chunkStartSec,
                 chunkEndSec,
-                true,
+                hasSystemRecorderRef.current,
               );
               if (systemBlob) {
                 handleChunkBlob(
@@ -1703,9 +1725,8 @@ export const AudioManager = ({
   const CHUNK_FLUSH_MAX_SEGMENTS = TRANSCRIPTION_TUNING.chunkFlush.maxSegments;
   const CHUNK_FLUSH_MAX_FULL_COVERAGE_RATIO =
     TRANSCRIPTION_TUNING.chunkFlush.maxFullCoverageRatio;
-  const CHUNK_SECONDS = 30;
   const ENABLE_CHUNK_ARBITRATION = true;
-  const ENABLE_CHUNK_FLUSH = true;
+  const ENABLE_CHUNK_FLUSH = false;
   const getRecorderOptions = (): MediaRecorderOptions | undefined => {
     const candidates = [
       'audio/webm;codecs=opus',
@@ -3055,12 +3076,11 @@ export const AudioManager = ({
     onSpeakingChange?.(null);
   };
 
-  const enqueueBackgroundJob = (job: () => Promise<void>) => {
-    processingQueueRef.current = processingQueueRef.current
-      .then(job)
-      .catch((e) => {
-        console.error('[Pluto] Background transcription job failed:', e);
-      });
+  const enqueueBackgroundJob = (sequence: number, job: () => Promise<void>) => {
+    const admission = processingQueueRef.current.enqueue(sequence, job);
+    if (admission === 'replaced') {
+      onLiveTranscriptIntegrityChange?.('lagging');
+    }
   };
 
   const handleChunkBlob = (
@@ -3101,7 +3121,8 @@ export const AudioManager = ({
       pendingMicChunksRef.current.delete(chunkIndex);
       if (systemBlob) pendingSystemChunksRef.current.delete(chunkIndex);
 
-      enqueueBackgroundJob(() =>
+      const generation = liveTranscriptionGenerationRef.current;
+      enqueueBackgroundJob(chunkIndex, () =>
         transcribeChunkPair({
           micBlob,
           micFormat: micFormatForChunk,
@@ -3109,6 +3130,7 @@ export const AudioManager = ({
           chunkIndex,
           chunkStartSec: micPending.chunkStartSec,
           chunkEndSec: micPending.chunkEndSec,
+          generation,
         }),
       );
     }
@@ -3122,6 +3144,7 @@ export const AudioManager = ({
     chunkStartSec?: number;
     chunkEndSec?: number;
     retryCount?: number;
+    generation: number;
   }): Promise<void> => {
     const chunkStartSec =
       typeof opts.chunkStartSec === 'number'
@@ -3452,6 +3475,7 @@ export const AudioManager = ({
       processStream('Me', opts.micBlob, opts.micFormat),
       processStream('Them', opts.systemBlob, 'wav'),
     ]);
+    if (opts.generation !== liveTranscriptionGenerationRef.current) return;
     const checkpointMeetingId = currentMeetingIdRef.current;
     const micActivitySeconds = getSpeakerActivityCoverage(
       chunkStartSec,
@@ -3804,7 +3828,10 @@ export const AudioManager = ({
       }));
     liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
       acceptedSegments,
-      () => onLiveTranscript?.(liveTranscript),
+      () => {
+        onInterimTranscript?.('');
+        onLiveTranscript?.(liveTranscript);
+      },
     );
   };
 
@@ -3925,6 +3952,7 @@ export const AudioManager = ({
       console.warn('[Pluto] Ignoring duplicate or orphaned stop request');
       return;
     }
+    stopSpeakingMonitor();
     frozenLiveTranscriptResponsivenessRef.current =
       liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
     startStopToValidatedLatencyAfterAcceptedStop({
@@ -3941,6 +3969,22 @@ export const AudioManager = ({
       endReason ? `(reason: ${endReason})` : '',
     );
     setIsProcessing(true);
+
+    const liveQueueAtStop = processingQueueRef.current;
+    liveTranscriptionGenerationRef.current += 1;
+    const discardedLiveWork = liveQueueAtStop.close();
+    if (discardedLiveWork.discardedSequence !== null) {
+      console.warn('[Pluto] Discarded queued live transcription at stop');
+    }
+    const cancelLiveTranscription = window.ipcRenderer
+      .invoke('CANCEL_MEETING_TRANSCRIPTION', stopSnapshot.meetingId)
+      .catch((error) => {
+        console.warn(
+          '[Pluto] Failed to cancel active live transcription:',
+          error,
+        );
+        return null;
+      });
 
     let primaryAudioPath = '';
     let systemAudioPath = '';
@@ -4065,26 +4109,15 @@ export const AudioManager = ({
       setIsRecording(false);
 
       await captureActivitySessionRef.current?.drain();
-      for (const [
-        chunkIndex,
-        micPending,
-      ] of pendingMicChunksRef.current.entries()) {
-        const sysB = pendingSystemChunksRef.current.get(chunkIndex);
-        enqueueBackgroundJob(() =>
-          transcribeChunkPair({
-            micBlob: micPending.blob,
-            micFormat: micPending.format,
-            systemBlob: sysB,
-            chunkIndex,
-            chunkStartSec: micPending.chunkStartSec,
-            chunkEndSec: micPending.chunkEndSec,
-          }),
-        );
-      }
       pendingMicChunksRef.current.clear();
       pendingSystemChunksRef.current.clear();
       zeroMicChunkStreakRef.current = 0;
-      await processingQueueRef.current;
+      await cancelLiveTranscription;
+      if (!(await liveQueueAtStop.waitForIdle(2_500))) {
+        console.warn(
+          '[Pluto] Live transcription did not settle before finalization; stale results are fenced',
+        );
+      }
 
       const journalSealOutcome = await sealCaptureJournalBeforeFinalization({
         drainAppends: async () => {
@@ -4244,8 +4277,7 @@ export const AudioManager = ({
       // Notify completion
       // ... (rest of logic)
 
-      // Wait for background chunk processing to finish
-      await processingQueueRef.current;
+      // Live work was closed and bounded before the capture journal was sealed.
       const totalSpeakerWindowSeconds = speakerTimelineRef.current.reduce(
         (sum, window) => sum + Math.max(0, window.endTime - window.startTime),
         0,
@@ -4780,7 +4812,7 @@ export const AudioManager = ({
       if (
         diarizationEnabled &&
         diarizationAudioPath &&
-        resolveProductionDiarizationProvider(hfTokenValue) === 'sherpa_local'
+        resolveProductionDiarizationProvider() === 'sherpa_local'
       ) {
         try {
           const readiness = await window.ipcRenderer.invoke(
@@ -4859,9 +4891,7 @@ export const AudioManager = ({
             buildTranscriptionOptions({
               ...diarizationOptions,
               diarize: true,
-              hfToken: hfTokenValue,
-              diarizationProvider:
-                resolveProductionDiarizationProvider(hfTokenValue),
+              diarizationProvider: resolveProductionDiarizationProvider(),
               meetingId: currentMeetingIdRef.current,
             }),
           );
@@ -5032,7 +5062,7 @@ export const AudioManager = ({
             diarizationEnabled,
             mappingConfident: initialDiarizationAttempt.mappingConfident,
             retryAlreadyUsed: false,
-            providerHasStrongerPolicy: hfTokenValue.length > 0,
+            providerHasStrongerPolicy: false,
             settings: resolvedTranscriptionSettings,
           });
           transcriptPipeline.speakerAttributionRetryPlan =
@@ -5236,6 +5266,9 @@ export const AudioManager = ({
       const meetingTiming = buildMeetingTiming(stopSnapshot);
       const checkpointEvidenceVerified =
         await hasCompleteCaptureJournalCheckpoints(stopSnapshot.meetingId);
+      const foregroundValidationPlan = planForegroundTranscriptValidation({
+        checkpointEvidenceVerified,
+      });
       const integrityValidation = await sealedActivityHandoff.runValidation(
         async (activityWindows) =>
           await runRecordingTranscriptValidation({
@@ -5246,10 +5279,9 @@ export const AudioManager = ({
             systemAudioPath,
             provisionalSegments: newTranscription,
             activityWindows,
-            canonicalMode: checkpointEvidenceVerified
-              ? 'checkpointed'
-              : 'full_mix',
-            checkpointEvidenceVerified,
+            canonicalMode: foregroundValidationPlan.canonicalMode,
+            checkpointEvidenceVerified:
+              foregroundValidationPlan.checkpointEvidenceVerified,
             transcribe: async (audioPath, options) =>
               await window.ipcRenderer.invoke(
                 'WHISPER_TRANSCRIBE',

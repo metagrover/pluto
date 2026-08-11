@@ -66,14 +66,18 @@ const main = async () => {
   }
 
   if (options.command === 'check') {
-    process.stdout.write(`Validated ${fragments.length} changelog fragment(s).\n`);
+    process.stdout.write(
+      `Validated ${fragments.length} changelog fragment(s).\n`,
+    );
     return;
   }
 
   const assembled = assembleChangelog(fragments);
   if (options.output) {
     await writeFile(options.output, assembled);
-    process.stdout.write(`Wrote ${fragments.length} changelog fragment(s) to ${options.output}.\n`);
+    process.stdout.write(
+      `Wrote ${fragments.length} changelog fragment(s) to ${options.output}.\n`,
+    );
   } else {
     process.stdout.write(assembled);
   }

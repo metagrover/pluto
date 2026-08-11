@@ -115,7 +115,6 @@ export const TranscriptIntegrityPanel = ({
   onRetry?: () => void;
   retrying?: boolean;
 }) => {
-  if (hasExistingAnalysis) return null;
   let micActivitySeconds = 0;
   let systemActivitySeconds = 0;
   let retryStage: string | null = null;
@@ -182,6 +181,7 @@ export const TranscriptIntegrityPanel = ({
     },
     capabilities,
   );
+  if (hasExistingAnalysis && trust.kind !== 'capture_gap') return null;
   if (
     trust.kind === 'validated' ||
     trust.kind === 'legacy_complete' ||
@@ -207,8 +207,9 @@ export const TranscriptIntegrityPanel = ({
     validation_in_progress: validatingDetail,
     recovered_awaiting_validation:
       'Recording recovered. Validate the transcript before creating intelligence.',
-    capture_gap:
-      'Pluto recovered the available recording, but some captured audio is missing.',
+    capture_gap: hasExistingAnalysis
+      ? 'Analysis uses the available transcript. Some captured audio could not be recovered, so this transcript remains partial.'
+      : 'Pluto recovered the available recording, but some captured audio is missing.',
     speech_unaccounted:
       'The recording is safe, but Pluto could not account for all captured speech.',
     integrity_needs_attention:
@@ -228,11 +229,13 @@ export const TranscriptIntegrityPanel = ({
   const preparingAnalysis = retrying || trust.kind === 'validation_in_progress';
   const title = preparingAnalysis
     ? 'Preparing meeting analysis'
-    : trust.kind === 'capture_recovery_required'
-      ? 'Recording saved'
-      : trust.kind === 'validation_in_progress'
-        ? 'Validating transcript'
-        : 'Transcript needs attention';
+    : trust.kind === 'capture_gap' && hasExistingAnalysis
+      ? 'Partial transcript'
+      : trust.kind === 'capture_recovery_required'
+        ? 'Recording saved'
+        : trust.kind === 'validation_in_progress'
+          ? 'Validating transcript'
+          : 'Transcript needs attention';
   return (
     <section
       aria-live="polite"

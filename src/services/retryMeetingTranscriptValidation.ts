@@ -19,6 +19,8 @@ import {
 import {
   advanceDownstreamProcessingLease,
   buildDownstreamProcessingLease,
+  buildPartialCaptureGapProcessingLease,
+  completeDownstreamProcessing,
   selectDownstreamResumeStage,
 } from './downstreamProcessingLease.ts';
 import { runRecordingTranscriptValidation } from './recordingTranscriptValidation.ts';
@@ -33,6 +35,41 @@ import {
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
+const GENERIC_MEETING_TITLES = new Set([
+  '',
+  'meeting',
+  'new meeting',
+  'meeting (mic only)',
+  'recovered recording',
+  'untitled meeting',
+]);
+
+export const meetingTitleNeedsGeneration = (
+  title: string | null | undefined,
+): boolean => GENERIC_MEETING_TITLES.has((title || '').trim().toLowerCase());
+
+const hasTranscriptText = (value: string | null | undefined): boolean => {
+  if (!value) return false;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    const segments = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { segments?: unknown[] })?.segments;
+    return (
+      Array.isArray(segments) &&
+      segments.some(
+        (segment) =>
+          Boolean(segment) &&
+          typeof segment === 'object' &&
+          typeof (segment as { text?: unknown }).text === 'string' &&
+          Boolean((segment as { text: string }).text.trim()),
+      )
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const shouldAutoProcessMeetingAnalysis = (
   meeting: Partial<Meeting> | null | undefined,
 ) => {
@@ -44,6 +81,10 @@ export const shouldAutoProcessMeetingAnalysis = (
   } catch {
     downstreamState = null;
   }
+  const genericTitleRepairNeeded =
+    typeof meeting?.title === 'string' &&
+    meetingTitleNeedsGeneration(meeting?.title) &&
+    hasTranscriptText(meeting?.transcript_json);
   if (
     !meeting ||
     (meeting.transcript_status !== 'needs_attention' &&
@@ -51,7 +92,8 @@ export const shouldAutoProcessMeetingAnalysis = (
     meeting.finalization_status === 'recovery_required' ||
     (Boolean(meeting.analysis_json || meeting.enhanced_notes) &&
       downstreamState !== 'processing' &&
-      downstreamState !== 'failed') ||
+      downstreamState !== 'failed' &&
+      !meetingTitleNeedsGeneration(meeting.title)) ||
     !meeting.transcript_json ||
     !(
       meeting.audio_path ||
@@ -65,8 +107,15 @@ export const shouldAutoProcessMeetingAnalysis = (
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       causes?: Array<{ code?: unknown }>;
     };
-    return !integrity.causes?.some(
+    const hasCaptureGap = integrity.causes?.some(
       (cause) => cause.code === 'capture_gap_detected',
+    );
+    const partialCaptureGapEligible =
+      hasTranscriptText(meeting.transcript_json) &&
+      typeof meeting.capture_journal_generation === 'string' &&
+      meeting.capture_journal_generation.length > 0;
+    return (
+      !hasCaptureGap || genericTitleRepairNeeded || partialCaptureGapEligible
     );
   } catch {
     return false;
@@ -283,9 +332,52 @@ export const retryMeetingTranscriptValidation = async (
   invoke: Invoke,
   options: { now?: () => number; validationTimeoutMs?: number } = {},
 ): Promise<{ status: 'validated' | 'needs_attention' | 'superseded' }> => {
-  const meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
+  let meeting = (await invoke('GET_MEETING', meetingId)) as Meeting | null;
   if (!meeting) throw new Error('Meeting not found');
-  if (meeting.transcript_status === 'validated') {
+  let hasCaptureGap = false;
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      causes?: Array<{ code?: unknown }>;
+    };
+    hasCaptureGap = Boolean(
+      integrity.causes?.some((cause) => cause.code === 'capture_gap_detected'),
+    );
+  } catch {
+    hasCaptureGap = false;
+  }
+  if (
+    hasCaptureGap &&
+    meetingTitleNeedsGeneration(meeting.title) &&
+    hasTranscriptText(meeting.transcript_json)
+  ) {
+    const transcript = parseSegments(meeting.transcript_json)
+      .map((segment) => `${segment.speaker}: ${segment.text}`)
+      .join('\n');
+    const generatedTitle = (await invoke('GENERATE_TITLE', {
+      transcript,
+    })) as string;
+    if (!meetingTitleNeedsGeneration(generatedTitle)) {
+      const titleOutcome = await invoke('UPDATE_MEETING_TITLE_IF_CURRENT', {
+        meetingId: String(meeting.id),
+        expectedTitle: meeting.title,
+        title: generatedTitle,
+      });
+      if (titleOutcome === 'conflict' || titleOutcome === 'missing') {
+        return { status: 'superseded' };
+      }
+      meeting = { ...meeting, title: generatedTitle };
+    }
+  }
+  const canProcessPartialCaptureGap =
+    meeting.transcript_status === 'needs_attention' &&
+    hasCaptureGap &&
+    hasTranscriptText(meeting.transcript_json) &&
+    typeof meeting.capture_journal_generation === 'string' &&
+    meeting.capture_journal_generation.length > 0;
+  if (
+    meeting.transcript_status === 'validated' ||
+    canProcessPartialCaptureGap
+  ) {
     let downstreamState: unknown = null;
     try {
       downstreamState = JSON.parse(
@@ -294,17 +386,32 @@ export const retryMeetingTranscriptValidation = async (
     } catch {
       downstreamState = null;
     }
-    if (downstreamState === 'complete' && meeting.analysis_json) {
-      return { status: 'validated' };
+    if (
+      downstreamState === 'complete' &&
+      meeting.analysis_json &&
+      !meetingTitleNeedsGeneration(meeting.title)
+    ) {
+      return {
+        status: canProcessPartialCaptureGap ? 'needs_attention' : 'validated',
+      };
     }
 
     let resumeStage = selectDownstreamResumeStage(meeting);
-    const downstreamLease = buildDownstreamProcessingLease({
-      runId: crypto.randomUUID(),
-      transcriptValidatedAt: meeting.transcript_validated_at || '',
-      now: options.now?.(),
-      stage: resumeStage,
-    });
+    const downstreamLease = canProcessPartialCaptureGap
+      ? await buildPartialCaptureGapProcessingLease({
+          runId: crypto.randomUUID(),
+          transcriptJson: meeting.transcript_json || '',
+          transcriptIntegrityJson: meeting.transcript_integrity_json || '',
+          captureJournalGeneration: meeting.capture_journal_generation || '',
+          now: options.now?.(),
+          stage: resumeStage,
+        })
+      : buildDownstreamProcessingLease({
+          runId: crypto.randomUUID(),
+          transcriptValidatedAt: meeting.transcript_validated_at || '',
+          now: options.now?.(),
+          stage: resumeStage,
+        });
     const claimed = await invoke(
       'CLAIM_DOWNSTREAM_PROCESSING',
       meetingId,
@@ -315,22 +422,21 @@ export const retryMeetingTranscriptValidation = async (
     const transcript = parseSegments(meeting.transcript_json)
       .map((segment) => `${segment.speaker}: ${segment.text}`)
       .join('\n');
-    const validatedAt = meeting.transcript_validated_at || '';
     try {
       let current = meeting;
+      if (meetingTitleNeedsGeneration(current.title)) {
+        const generatedTitle = (await invoke('GENERATE_TITLE', {
+          transcript,
+        })) as string;
+        current = { ...current, title: generatedTitle };
+      }
       if (resumeStage === 'analysis') {
-        const generatedTitle =
-          current.title === 'Meeting'
-            ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
-            : current.title;
         const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
           transcript,
           userNotes: current.user_notes || '',
         })) as { markdown?: string; analysis?: unknown; signals?: unknown };
         current = {
           ...current,
-          title:
-            current.title === meeting.title ? generatedTitle : current.title,
           enhanced_notes: artifacts.markdown || '',
           analysis_json: JSON.stringify(artifacts.analysis ?? null),
           value_signals_json: JSON.stringify(artifacts.signals ?? null),
@@ -395,11 +501,9 @@ export const retryMeetingTranscriptValidation = async (
         'SAVE_MEETING',
         {
           ...latest,
-          downstream_processing_json: JSON.stringify({
-            schemaVersion: 1,
-            state: 'complete',
-            transcriptValidatedAt: validatedAt,
-          }),
+          downstream_processing_json: JSON.stringify(
+            completeDownstreamProcessing(downstreamLease),
+          ),
         },
         { expectedDownstreamRunId: downstreamLease.runId },
       );
@@ -410,18 +514,30 @@ export const retryMeetingTranscriptValidation = async (
         'SAVE_MEETING',
         {
           ...latest,
-          downstream_processing_json: JSON.stringify({
-            schemaVersion: 1,
-            state: 'failed',
-            transcriptValidatedAt: validatedAt,
-            stage: 'knowledge_synthesis',
-            failure: 'generation_failed',
-          }),
+          downstream_processing_json: JSON.stringify(
+            downstreamLease.schemaVersion === 2
+              ? {
+                  schemaVersion: 2,
+                  state: 'failed',
+                  source: downstreamLease.source,
+                  stage: 'knowledge_synthesis',
+                  failure: 'generation_failed',
+                }
+              : {
+                  schemaVersion: 1,
+                  state: 'failed',
+                  transcriptValidatedAt: downstreamLease.transcriptValidatedAt,
+                  stage: 'knowledge_synthesis',
+                  failure: 'generation_failed',
+                },
+          ),
         },
         { expectedDownstreamRunId: downstreamLease.runId },
       );
     }
-    return { status: 'validated' };
+    return {
+      status: canProcessPartialCaptureGap ? 'needs_attention' : 'validated',
+    };
   }
 
   const runId = crypto.randomUUID();
@@ -857,10 +973,9 @@ export const retryMeetingTranscriptValidation = async (
     | 'knowledge_extraction'
     | 'knowledge_synthesis' = 'analysis';
   try {
-    const generatedTitle =
-      current.title === 'Meeting'
-        ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
-        : current.title;
+    const generatedTitle = meetingTitleNeedsGeneration(current.title)
+      ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
+      : current.title;
     const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
       transcript,
       userNotes: current.user_notes || '',

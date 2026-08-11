@@ -22,7 +22,13 @@ vi.mock('@google/generative-ai', () => {
 
 import { getAllSettings, getProvider } from '../../electron/llm/factory';
 import type { LLMSettings } from '../../electron/llm/provider';
-import { UnifiedLLMProvider } from '../../electron/llm/unifiedProvider';
+import {
+  UnifiedLLMProvider,
+  calculateOllamaContextBudget,
+  deduplicateExtractedItems,
+  getOllamaTimeoutMs,
+  sliceTranscriptWindows,
+} from '../../electron/llm/unifiedProvider';
 
 const validAnalysisMarkdown = `## Summary
 Security hardening progress is visible and practical.
@@ -231,6 +237,105 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModel).toBe('kimike:latest');
   });
 
+  it('analyzes only the transcript lines assigned to each Ollama topic', async () => {
+    const topicPrompts: string[] = [];
+    let segmentationTemperature: number | undefined;
+    const topicTemperatures: number[] = [];
+    installFetchMock((url, init) => {
+      expect(url).toContain('/api/generate');
+      const body = parseRequestBody(init);
+      const prompt = String(body.prompt || '');
+      const options = body.options as Record<string, unknown>;
+      if (prompt.includes('meeting topic segmenter')) {
+        segmentationTemperature = Number(options.temperature);
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
+              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
+            ],
+          }),
+        });
+      }
+      topicPrompts.push(prompt);
+      topicTemperatures.push(Number(options.temperature));
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'Grounded summary',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    await provider.generateStructuredAnalysis(
+      ['Me: alpha-only detail', 'Them: beta-only detail'].join('\n'),
+    );
+
+    expect(topicPrompts).toHaveLength(2);
+    expect(topicPrompts[0]).toContain('alpha-only detail');
+    expect(topicPrompts[0]).not.toContain('beta-only detail');
+    expect(topicPrompts[1]).toContain('beta-only detail');
+    expect(topicPrompts[1]).not.toContain('alpha-only detail');
+    expect(segmentationTemperature).toBe(0.1);
+    expect(topicTemperatures).toEqual([0.1, 0.1]);
+  });
+
+  it('covers transcript lines omitted between Ollama topic ranges exactly once', async () => {
+    const topicPrompts: string[] = [];
+    installFetchMock((_url, init) => {
+      const body = parseRequestBody(init);
+      const prompt = String(body.prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Opening', start_segment: 0, end_segment: 0 },
+              { title: 'Closing', start_segment: 3, end_segment: 3 },
+            ],
+          }),
+        });
+      }
+      topicPrompts.push(prompt);
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'Grounded summary',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    await provider.generateStructuredAnalysis(
+      [
+        'Me: detail-zero',
+        'Me: detail-one',
+        'Me: detail-two',
+        'Me: detail-three',
+      ].join('\n'),
+    );
+
+    const combinedPrompts = topicPrompts.join('\n');
+    for (const detail of [
+      'detail-zero',
+      'detail-one',
+      'detail-two',
+      'detail-three',
+    ]) {
+      expect(combinedPrompts.split(detail)).toHaveLength(2);
+    }
+  });
+
   it('falls back to default ollama model when model listing fails', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
@@ -249,6 +354,20 @@ describe('UnifiedLLMProvider', () => {
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
     expect(selectedModel).toBe('phi4-mini:3.8b');
+  });
+
+  it('stops the multi-pass pipeline after a local model timeout', async () => {
+    const fetchMock = installFetchMock(() =>
+      Promise.reject(new DOMException('aborted', 'AbortError')),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+
+    await expect(
+      provider.generateStructuredAnalysis('Me: status update'),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('routes openai user-analysis generation through chat completions', async () => {
@@ -542,10 +661,16 @@ describe('UnifiedLLMProvider', () => {
     );
 
     expect(analysis.all_decisions).toEqual([
+      { text: 'Use GraphQL for the rollout' },
       { text: 'Use REST for the rollout' },
     ]);
     expect(analysis.all_action_items).toEqual([
-      { text: 'Send rollout email', topic: 'API migration' },
+      {
+        text: 'Send rollout email',
+        assignee: 'Bob',
+        due: 'next Tuesday',
+        topic: 'API migration',
+      },
     ]);
     expect(analysis.generation_metadata?.error_categories).toEqual(
       expect.arrayContaining([
@@ -594,5 +719,61 @@ describe('LLM factory', () => {
     expect(settings.llm_provider).toBe('ollama');
     expect(settings.openai_api_key).toBe('openai-key');
     expect(settings.ollama_model).toBeUndefined();
+  });
+});
+
+describe('Ollama Budgeting & Adaptive Windowing', () => {
+  it('bounds meeting analysis requests while preserving the knowledge-doc budget', () => {
+    expect(getOllamaTimeoutMs('topicSegmentation')).toBe(90_000);
+    expect(getOllamaTimeoutMs('topicAnalysis')).toBe(90_000);
+    expect(getOllamaTimeoutMs('knowledgeDoc')).toBe(900_000);
+  });
+
+  it('calculateOllamaContextBudget allocates up to 16384 context tokens for long analysis prompts', () => {
+    const longPrompt = 'a'.repeat(30_000); // ~10,000 tokens
+    const budget = calculateOllamaContextBudget(
+      longPrompt,
+      'structuredAnalysis',
+    );
+    expect(budget.num_ctx).toBeGreaterThanOrEqual(12288);
+    expect(budget.num_predict).toBe(4096);
+  });
+
+  it('sliceTranscriptWindows slices transcript into overlapping windows when line count exceeds maxLinesPerWindow', () => {
+    const lines = Array.from(
+      { length: 300 },
+      (_, i) => `[Me] (${i * 5}s): Line content ${i}`,
+    ).join('\n');
+    const windows = sliceTranscriptWindows(lines, 100);
+    expect(windows.length).toBeGreaterThan(1);
+    expect(windows[0].startSegment).toBe(0);
+    expect(windows[0].endSegment).toBeLessThan(300);
+  });
+
+  it('deduplicateExtractedItems merges duplicate action items and respects distinct assignees', () => {
+    const items = [
+      {
+        text: 'Deploy the Snowflake integration script on Friday.',
+        assignee: 'Alain',
+      },
+      {
+        text: 'Deploy Snowflake integration script on Friday',
+        assignee: 'Alain',
+      },
+      {
+        text: 'Deploy Snowflake integration script on Friday',
+        assignee: 'Deepak',
+      },
+      { text: 'Write project timeline documentation.', assignee: 'Deepak' },
+    ];
+    const deduped = deduplicateExtractedItems(
+      items,
+      (item) => item.text,
+      (item) => item.assignee,
+    );
+    expect(deduped.length).toBe(3);
+    expect(deduped[0].text).toBe(
+      'Deploy the Snowflake integration script on Friday.',
+    );
   });
 });

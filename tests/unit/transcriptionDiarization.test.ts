@@ -7,9 +7,9 @@ describe('production diarization provider selection', () => {
     expect(resolveProductionDiarizationProvider('')).toBe('sherpa_local');
   });
 
-  it('preserves token-backed WhisperX as an explicit optional provider', () => {
+  it('ignores legacy tokens and keeps attribution on the local runtime', () => {
     expect(resolveProductionDiarizationProvider('hf_example')).toBe(
-      'whisperx_hf',
+      'sherpa_local',
     );
   });
 });

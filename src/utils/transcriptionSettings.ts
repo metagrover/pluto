@@ -6,7 +6,7 @@ export type WhisperModel =
   | 'large-v2'
   | 'large-v3';
 
-export type WhisperDevice = 'cpu' | 'cuda' | 'mps';
+export type WhisperDevice = 'cpu' | 'cuda' | 'mps' | 'mlx';
 
 export type WhisperComputeType = 'float16' | 'float32' | 'int8';
 
@@ -29,11 +29,11 @@ export interface TranscriptionSettings {
 export const DEFAULT_TRANSCRIPTION_SETTINGS: Required<
   Omit<TranscriptionSettings, 'language'>
 > & { language: string } = {
-  backend: 'whisperx_current',
+  backend: 'local_alt_apple_silicon',
   preset: 'balanced',
   model: 'small',
-  device: 'cpu',
-  computeType: 'int8',
+  device: 'mlx',
+  computeType: 'float16',
   language: 'en',
 };
 
@@ -60,13 +60,9 @@ export const resolveTranscriptionLanguage = (
 };
 
 export const resolveTranscriptionBackend = (
-  backend?: string | null,
+  _backend?: string | null,
 ): TranscriptionBackend => {
-  return backend === 'whisperx_tuned' ||
-    backend === 'local_alt_apple_silicon' ||
-    backend === 'whisperx_current'
-    ? backend
-    : 'whisperx_current';
+  return 'local_alt_apple_silicon';
 };
 
 export const resolveTranscriptionPreset = (
@@ -92,7 +88,7 @@ export const resolveTranscriptionSettings = (
 };
 
 export const resolveLiveChunkModel = (model: WhisperModel): WhisperModel =>
-  model === 'large-v2' || model === 'large-v3' ? 'medium' : model;
+  model === 'tiny' ? 'tiny' : 'base';
 
 export const resolveLiveChunkComputeType = (
   computeType: WhisperComputeType,

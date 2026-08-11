@@ -33,7 +33,6 @@ import {
 } from './captureJournal';
 import {
   recoverInterruptedCaptureJournals,
-  repairStoppingCaptureJournalTranscript,
   verifySealedCaptureJournalTranscriptEvidence,
 } from './captureJournalRecovery';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
@@ -156,66 +155,6 @@ const getMeetingArtifactsRootDir = () => {
   return meetingsDir;
 };
 
-const getTranscriptCheckpointRepairConfig = () => {
-  const resolved = resolveTranscriptionSettings({
-    backend: db.getSetting('transcription_backend'),
-    preset: db.getSetting('transcription_preset'),
-    model: db.getSetting('whisper_model'),
-    device: db.getSetting('whisper_device'),
-    computeType: db.getSetting('whisper_compute_type'),
-    language: db.getSetting('whisper_language'),
-  } as TranscriptionSettings);
-  return {
-    backend: resolved.backend,
-    preset: resolved.preset,
-    model: resolveLiveChunkModel(resolved.model),
-    device: resolved.device,
-    computeType: resolveLiveChunkComputeType(resolved.computeType),
-    languageMode: resolved.language
-      ? ('fixed' as const)
-      : ('detected' as const),
-    requestedLanguage: resolved.language?.toLowerCase() || null,
-    pipelineVersion: 'live_chunk_v1' as const,
-  };
-};
-
-const transcribeTranscriptCheckpointChunk = async (
-  inputPath: string,
-  config: ReturnType<typeof getTranscriptCheckpointRepairConfig>,
-  journalDurationSeconds: number,
-) => {
-  const result = await transcribeWithBackend(inputPath, {
-    backend: config.backend,
-    preset: config.preset,
-    model: config.model,
-    device: config.device,
-    computeType: config.computeType,
-    language:
-      config.languageMode === 'fixed'
-        ? (config.requestedLanguage ?? undefined)
-        : undefined,
-    diarize: false,
-  } as Parameters<typeof transcribeWithBackend>[1]);
-  return {
-    detectedLanguage: result.language ?? null,
-    providerLabel:
-      typeof result.meta?.providerLabel === 'string'
-        ? result.meta.providerLabel
-        : 'local',
-    segments: Array.isArray(result.segments)
-      ? normalizeCheckpointWords(
-          result.segments.map((segment) => ({
-            start: segment.start,
-            end: segment.end,
-            text: segment.text,
-            ...(segment.words ? { words: segment.words } : {}),
-          })),
-          journalDurationSeconds,
-        )
-      : [],
-  };
-};
-
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
@@ -230,8 +169,11 @@ app.on('activate', () => {
 });
 
 import {
+  resolveBackendOptions,
+  resolvePreferredTranscriptionBackend,
+} from '../src/utils/transcriptionBackendConfig';
+import {
   type TranscriptionSettings,
-  resolveLiveChunkComputeType,
   resolveLiveChunkModel,
   resolveTranscriptionSettings,
 } from '../src/utils/transcriptionSettings';
@@ -364,7 +306,7 @@ app.whenReady().then(async () => {
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
 
-  // WhisperX handlers
+  // Local transcription handlers. IPC names remain stable for compatibility.
   ipcMain.handle('WHISPERX_CHECK_PYTHON', async () => {
     return await whisperX.checkPython();
   });
@@ -446,14 +388,7 @@ app.whenReady().then(async () => {
     'WHISPER_TRANSCRIBE',
     async (_event, audioPath, options = {}) => {
       const meetingId = options.meetingId ? String(options.meetingId) : null;
-      if (meetingId) {
-        console.log(
-          `[Pluto] Transcribing file for meeting ${meetingId}:`,
-          audioPath,
-        );
-      } else {
-        console.log('[Pluto] Transcribing file (no meeting ID):', audioPath);
-      }
+      console.log('[Pluto] Transcription request started');
 
       const start = Date.now();
       beginTranscriptionWork();
@@ -471,17 +406,17 @@ app.whenReady().then(async () => {
         return result;
       } catch (err: unknown) {
         if (err instanceof Error && err.name === 'AbortError') {
-          console.log(`[Pluto] Transcription aborted for meeting ${meetingId}`);
+          console.log('[Pluto] Transcription request aborted');
           return {
             segments: [],
             language: 'en',
             duration: 0,
             meta: {
-              backend: options.backend || 'whisperx_current',
+              backend: 'local_alt_apple_silicon',
               preset: options.preset || 'balanced',
               model: options.model || 'small',
-              device: options.device || 'cpu',
-              computeType: options.computeType || 'int8',
+              device: 'mlx',
+              computeType: 'float16',
               canonicalSource: options.canonicalSource,
               diarization: Boolean(options.diarize),
               elapsedMs: Date.now() - start,
@@ -703,24 +638,6 @@ app.whenReady().then(async () => {
     'AUDIO_CAPTURE_JOURNAL_SEAL',
     async (_event, { meetingId, endedAtMs } = {}) => {
       const normalizedMeetingId = String(meetingId || '');
-      const manifest = await readCaptureJournalManifest(
-        getMeetingArtifactsRootDir(),
-        normalizedMeetingId,
-      );
-      if (
-        manifest.schemaVersion === 3 &&
-        manifest.lifecycleState === 'stopping'
-      ) {
-        const transcriptionConfig = getTranscriptCheckpointRepairConfig();
-        await repairStoppingCaptureJournalTranscript(
-          getMeetingArtifactsRootDir(),
-          {
-            meetingId: normalizedMeetingId,
-            transcribeChunk: transcribeTranscriptCheckpointChunk,
-            transcriptionConfig,
-          },
-        );
-      }
       return await sealCaptureJournal(getMeetingArtifactsRootDir(), {
         meetingId: normalizedMeetingId,
         endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
@@ -739,9 +656,13 @@ app.whenReady().then(async () => {
 
   const getAudioCapExecPath = () => {
     const isDev = !app.isPackaged;
-    return isDev
-      ? path.join(app.getAppPath(), 'resources/bin/audiocap')
-      : path.join(process.resourcesPath, 'bin', 'audiocap');
+    if (!isDev) return path.join(process.resourcesPath, 'bin', 'audiocap');
+    const appPath = app.getAppPath();
+    const directPath = path.join(appPath, 'resources/bin/audiocap');
+    if (fs.existsSync(directPath)) return directPath;
+    const parentPath = path.join(appPath, '..', 'resources/bin/audiocap');
+    if (fs.existsSync(parentPath)) return parentPath;
+    return path.join(process.cwd(), 'resources/bin/audiocap');
   };
 
   const runAudioProbe = async ({
@@ -1397,7 +1318,7 @@ app.whenReady().then(async () => {
           : null;
       const claimValidationLease = options?.claimValidationLease;
       const transcriptOwnedFieldsOnly = options?.transcriptOwnedFieldsOnly;
-      return saveMeetingWithParticipantSideEffects({
+      const result = saveMeetingWithParticipantSideEffects({
         meeting,
         saveMeeting: () =>
           expectedDownstreamRunId
@@ -1431,14 +1352,33 @@ app.whenReady().then(async () => {
         upsertEntity: db.upsertEntity,
         addMeetingEntity: db.addMeetingEntity,
       });
+      if (expectedDownstreamRunId && result !== false) {
+        let downstreamState: unknown = null;
+        try {
+          downstreamState = JSON.parse(
+            meeting.downstream_processing_json || '{}',
+          ).state;
+        } catch {
+          downstreamState = null;
+        }
+        if (downstreamState !== 'processing') {
+          setKnowledgeDocSynthesisPaused(false);
+        }
+      }
+      return result;
     } catch (e) {
       console.error('[Pluto] SAVE_MEETING failed:', e);
       throw e;
     }
   });
 
-  ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) =>
-    db.claimMeetingDownstreamProcessing(meetingId, lease),
+  ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) => {
+    const claimed = db.claimMeetingDownstreamProcessing(meetingId, lease);
+    if (claimed) setKnowledgeDocSynthesisPaused(true);
+    return claimed;
+  });
+  ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) =>
+    db.updateMeetingTitleIfCurrent(input),
   );
   ipcMain.handle(
     'CLAIM_TRANSCRIPT_VALIDATION_RETRY',
@@ -2471,12 +2411,64 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  // Start WhisperX server in background (don't block app startup)
-  whisperX.start().catch((err) => {
-    console.warn('[Pluto] WhisperX failed to start:', err.message);
-    console.log('[Pluto] WhisperX will start on first transcription request');
-  });
+  try {
+    await whisperX.start();
+    const health = await whisperX.health();
+    const startupBackend = resolvePreferredTranscriptionBackend({
+      configuredBackend: db.getSetting('transcription_backend'),
+      runtime: { platform: process.platform, arch: process.arch },
+      health: { mlxAvailable: health.mlx_available === true },
+    });
+    const startupSettings = resolveTranscriptionSettings({
+      backend: startupBackend.backend,
+      preset: db.getSetting('transcription_preset'),
+      model: db.getSetting('whisper_model'),
+      device: db.getSetting('whisper_device'),
+      computeType: db.getSetting('whisper_compute_type'),
+      language: db.getSetting('whisper_language'),
+    } as TranscriptionSettings);
+    const resolvedStartup = resolveBackendOptions(
+      {
+        backend: startupBackend.backend,
+        preset: startupSettings.preset ?? 'balanced',
+        model: startupSettings.model,
+        device: startupSettings.device,
+        computeType: startupSettings.computeType,
+        language: startupSettings.language,
+      },
+      { platform: process.platform, arch: process.arch },
+    );
+    await whisperX.setConfig({
+      model: resolvedStartup.model,
+      device: 'mlx',
+      computeType: 'float16',
+      language: resolvedStartup.language,
+    });
+    const activeHealth = await whisperX.health();
+    if (
+      startupBackend.backend === 'local_alt_apple_silicon' &&
+      activeHealth.engine !== 'mlx_whisper'
+    ) {
+      throw new Error('MLX Whisper did not become the active engine');
+    }
+    if (startupBackend.shouldPersist) {
+      db.setSetting('transcription_backend', startupBackend.backend);
+    }
+    console.log(
+      `[Pluto] Transcription engine ready: ${activeHealth.engine ?? 'unknown'} (${startupBackend.backend})`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn('[Pluto] Transcription engine failed to start:', message);
+    console.log('[Pluto] Transcription engine will retry on first request');
+  }
 
+  const interruptedDownstreamRuns = db.expireInterruptedDownstreamProcessing();
+  if (interruptedDownstreamRuns > 0) {
+    console.log(
+      `[Pluto] Released ${interruptedDownstreamRuns} interrupted downstream processing lease(s)`,
+    );
+  }
   initializeKnowledgeDocs().catch((error) => {
     console.error(
       '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
@@ -2501,6 +2493,12 @@ app.whenReady().then(async () => {
       computeType: db.getSetting('whisper_compute_type'),
       language: db.getSetting('whisper_language'),
     } as TranscriptionSettings);
+    const resolvedRecoveryTranscription = resolveBackendOptions({
+      backend: 'local_alt_apple_silicon',
+      preset: recoveryTranscriptionSettings.preset ?? 'balanced',
+      model: recoveryTranscriptionSettings.model,
+      language: recoveryTranscriptionSettings.language,
+    });
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),
       {
@@ -2600,18 +2598,16 @@ app.whenReady().then(async () => {
           };
         },
         transcriptionConfig: {
-          backend: recoveryTranscriptionSettings.backend,
-          preset: recoveryTranscriptionSettings.preset,
-          model: resolveLiveChunkModel(recoveryTranscriptionSettings.model),
-          device: recoveryTranscriptionSettings.device,
-          computeType: resolveLiveChunkComputeType(
-            recoveryTranscriptionSettings.computeType,
-          ),
-          languageMode: recoveryTranscriptionSettings.language
+          backend: resolvedRecoveryTranscription.backend,
+          preset: resolvedRecoveryTranscription.preset,
+          model: resolveLiveChunkModel(resolvedRecoveryTranscription.model),
+          device: 'mlx',
+          computeType: 'float16',
+          languageMode: resolvedRecoveryTranscription.language
             ? 'fixed'
             : 'detected',
           requestedLanguage:
-            recoveryTranscriptionSettings.language?.toLowerCase() || null,
+            resolvedRecoveryTranscription.language?.toLowerCase() || null,
           pipelineVersion: 'live_chunk_v1',
         },
       },

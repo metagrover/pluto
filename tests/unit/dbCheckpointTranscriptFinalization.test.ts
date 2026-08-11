@@ -14,16 +14,22 @@ vi.mock('electron', () => ({
 }));
 
 import {
+  addMeetingEntity,
   claimMeetingDownstreamProcessing,
   claimMeetingTranscriptValidationRetry,
+  expireInterruptedDownstreamProcessing,
   finalizeCheckpointTranscript,
   getMeeting,
+  getMeetingEntities,
   getMeetingMid,
   saveMeeting,
   saveMeetingIfDownstreamRunCurrent,
   saveMeetingMid,
+  updateMeetingTitleIfCurrent,
+  upsertEntity,
 } from '../../electron/db';
 import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
+import { buildPartialCaptureGapProcessingLease } from '../../src/services/downstreamProcessingLease';
 import { parseMeetingDownstreamProcessing } from '../../src/utils/transcriptTrustState';
 
 afterAll(() => {
@@ -143,6 +149,73 @@ it('allows only one durable downstream owner and fences stale saves', () => {
   ).toBe(true);
 });
 
+it('claims partial intelligence only for the exact capture-gap evidence', async () => {
+  const id = 'partial-capture-gap-single-flight';
+  const transcriptJson = JSON.stringify({
+    schemaVersion: 2,
+    lifecycleStatus: 'needs_attention',
+    segments: [{ speaker: 'Me', text: 'Checkpoint transcript' }],
+  });
+  const transcriptIntegrityJson = JSON.stringify({
+    schemaVersion: 2,
+    state: 'needs_attention',
+    causes: [{ code: 'capture_gap_detected', sourceScope: 'mic' }],
+    evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+    recovery: {
+      source: 'capture_journal',
+      gapDetected: true,
+      sourceScope: 'mic',
+      acknowledgedChunkCount: 4,
+      recoveredChunkCount: 3,
+    },
+  });
+  saveMeeting({
+    id,
+    title: 'Partial meeting',
+    transcript_status: 'needs_attention',
+    transcript_json: transcriptJson,
+    transcript_integrity_json: transcriptIntegrityJson,
+    transcript_validated_at: null,
+    finalization_status: 'finalized',
+    capture_journal_generation: journalGeneration,
+  });
+  const lease = await buildPartialCaptureGapProcessingLease({
+    runId: 'partial-owner',
+    transcriptJson,
+    transcriptIntegrityJson,
+    captureJournalGeneration: journalGeneration,
+    now: Date.parse('2026-08-04T00:00:00.000Z'),
+    stage: 'analysis',
+  });
+
+  expect(claimMeetingDownstreamProcessing(id, lease)).toBe(true);
+  expect(expireInterruptedDownstreamProcessing()).toBeGreaterThanOrEqual(1);
+  expect(
+    JSON.parse(String(getMeeting(id)?.downstream_processing_json)),
+  ).toEqual({
+    schemaVersion: 2,
+    state: 'failed',
+    source: lease.source,
+    stage: 'analysis',
+    failure: 'interrupted',
+  });
+  expect(
+    claimMeetingDownstreamProcessing(id, {
+      ...lease,
+      runId: 'replacement-owner',
+      startedAt: '2026-08-04T00:00:01.000Z',
+      deadlineAt: '2026-08-04T00:30:01.000Z',
+    }),
+  ).toBe(true);
+  expect(
+    claimMeetingDownstreamProcessing(id, {
+      ...lease,
+      runId: 'stale-source',
+      source: { ...lease.source, transcriptSha256: '0'.repeat(64) },
+    }),
+  ).toBe(false);
+});
+
 it('preserves the MID across later whole-meeting saves', () => {
   const id = 'mid-survives-save';
   saveMeeting({ id, title: 'Meeting' });
@@ -168,6 +241,68 @@ it('preserves the MID across later whole-meeting saves', () => {
   saveMeeting(getMeeting(id) as Parameters<typeof saveMeeting>[0]);
 
   expect(getMeetingMid(id)).toMatchObject({ meeting_id: id });
+});
+
+it('preserves meeting-owned entity associations across later whole-meeting saves', () => {
+  const id = 'entity-association-survives-save';
+  saveMeeting({ id, title: 'Meeting' });
+  const entity = upsertEntity({
+    id: 'entity-association-survives-save-topic',
+    type: 'topic',
+    name: 'Durable topic',
+  });
+  addMeetingEntity({ meeting_id: id, entity_id: entity.id });
+
+  saveMeeting({
+    ...(getMeeting(id) as Parameters<typeof saveMeeting>[0]),
+    enhanced_notes: 'Analysis is complete.',
+  });
+
+  expect(getMeetingEntities(id)).toEqual([
+    expect.objectContaining({ id: entity.id, type: 'topic' }),
+  ]);
+});
+
+it('updates a generic title atomically without changing transcript trust', () => {
+  const id = 'conditional-title-repair';
+  saveMeeting({
+    id,
+    title: 'Recovered recording',
+    transcript_status: 'needs_attention',
+    transcript_json: JSON.stringify({
+      schemaVersion: 2,
+      lifecycleStatus: 'needs_attention',
+      segments: [{ speaker: 'Me', text: 'Checkpoint transcript' }],
+    }),
+    transcript_integrity_json: JSON.stringify({
+      schemaVersion: 2,
+      state: 'needs_attention',
+      causes: [{ code: 'capture_gap_detected', sourceScope: 'mic' }],
+      evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+    }),
+  });
+  const before = getMeeting(id) as Record<string, unknown>;
+
+  expect(
+    updateMeetingTitleIfCurrent({
+      meetingId: id,
+      expectedTitle: 'Recovered recording',
+      title: 'Recovered Planning Discussion',
+    }),
+  ).toBe('updated');
+  expect(getMeeting(id)).toMatchObject({
+    title: 'Recovered Planning Discussion',
+    transcript_status: before.transcript_status,
+    transcript_json: before.transcript_json,
+    transcript_integrity_json: before.transcript_integrity_json,
+  });
+  expect(
+    updateMeetingTitleIfCurrent({
+      meetingId: id,
+      expectedTitle: 'Recovered recording',
+      title: 'Stale overwrite',
+    }),
+  ).toBe('conflict');
 });
 
 const input = (meetingId: string) => ({

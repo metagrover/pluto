@@ -10,11 +10,31 @@ import {
   collectDisposableRecordingArtifactPaths,
   createSealedCaptureActivityHandoff,
   getStrongerSpeakerAttributionPolicy,
+  planForegroundTranscriptValidation,
   resolveFinalizationCleanupPaths,
   sealCaptureJournalBeforeFinalization,
 } from '../../src/utils/recordingFinalization';
 
 describe('recording finalization helpers', () => {
+  it('never runs full-session ASR in the foreground after capture stops', () => {
+    expect(
+      planForegroundTranscriptValidation({
+        checkpointEvidenceVerified: true,
+      }),
+    ).toEqual({
+      canonicalMode: 'checkpointed',
+      checkpointEvidenceVerified: true,
+    });
+    expect(
+      planForegroundTranscriptValidation({
+        checkpointEvidenceVerified: false,
+      }),
+    ).toEqual({
+      canonicalMode: 'checkpointed',
+      checkpointEvidenceVerified: false,
+    });
+  });
+
   it('invokes validation and every integrity save with the exact sealed evidence', async () => {
     const sealed = await buildCaptureActivityEvidence(
       [{ startTime: 0, endTime: 1, speaker: 'Me' }],
@@ -324,17 +344,17 @@ describe('recording finalization helpers', () => {
         language: 'en',
       }),
     ).toMatchObject({
-      backend: 'whisperx_tuned',
+      backend: 'local_alt_apple_silicon',
       preset: 'accuracy_first',
       model: 'large-v3',
-      computeType: 'float32',
+      computeType: 'float16',
     });
   });
 
   it('does not request a stronger speaker-attribution policy when already strongest', () => {
     expect(
       getStrongerSpeakerAttributionPolicy({
-        backend: 'whisperx_tuned',
+        backend: 'local_alt_apple_silicon',
         preset: 'accuracy_first',
         model: 'large-v3',
         device: 'cpu',
@@ -363,7 +383,7 @@ describe('recording finalization helpers', () => {
       shouldRetry: true,
       reason: 'retry-with-stronger-policy',
       strongerOptions: {
-        backend: 'whisperx_tuned',
+        backend: 'local_alt_apple_silicon',
         preset: 'accuracy_first',
       },
     });

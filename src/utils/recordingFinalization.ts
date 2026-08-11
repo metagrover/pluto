@@ -29,7 +29,7 @@ export type SpeakerAttributionRetryPlan = {
 };
 
 const STRONGEST_ATTRIBUTION_POLICY = resolveBackendOptions({
-  backend: 'whisperx_tuned',
+  backend: 'local_alt_apple_silicon',
   preset: 'accuracy_first',
 });
 
@@ -224,6 +224,15 @@ export type JournalSealResult =
       status: 'recovery_required';
       reason: CaptureJournalFinalizationFailure;
     };
+
+export const planForegroundTranscriptValidation = ({
+  checkpointEvidenceVerified,
+}: {
+  checkpointEvidenceVerified: boolean;
+}) => ({
+  canonicalMode: 'checkpointed' as const,
+  checkpointEvidenceVerified,
+});
 
 export const createSealedCaptureActivityHandoff = (
   activityEvidence: CaptureActivityEvidence,

@@ -42,7 +42,7 @@ import type {
   ProviderType,
 } from './provider';
 
-const OLLAMA_TIMEOUT_MS = 120_000;
+const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v4';
@@ -66,6 +66,13 @@ type LLMTask =
   | 'askPluto'
   | 'queryClassification'
   | 'followUps';
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.name === 'AbortError' || /\babort(?:ed)?\b/i.test(error.message));
+
+export const getOllamaTimeoutMs = (task: string): number =>
+  task === 'knowledgeDoc' ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS : OLLAMA_TIMEOUT_MS;
 
 type PersonEntity = ExtractedEntities['people'][number];
 type TopicEntity = ExtractedEntities['topics'][number];
@@ -207,168 +214,225 @@ export class UnifiedLLMProvider implements LLMProvider {
     userNotes?: string,
   ): Promise<AnalysisDocumentV3> {
     const errorCategories: AnalysisErrorCategory[] = [];
-    // Pass 1: Topic segmentation
-    let topicSegments: Array<{
-      title: string;
-      start_segment: number;
-      end_segment: number;
-    }> = [];
-
-    try {
-      const segmentationPrompt = getTopicSegmentationPrompt(transcript);
-      const segRaw = await this.generateText({
-        prompt: segmentationPrompt,
-        task: 'topicSegmentation',
-        jsonMode: true,
-      });
-      const segParsed = JSON.parse(this.cleanJsonText(segRaw)) as Record<
-        string,
-        unknown
-      >;
-      if (Array.isArray(segParsed.topics)) {
-        topicSegments = segParsed.topics
-          .filter(
-            (t): t is Record<string, unknown> =>
-              t !== null && typeof t === 'object',
-          )
-          .map((t) => ({
-            title: typeof t.title === 'string' ? t.title.trim() : 'Discussion',
-            start_segment:
-              typeof t.start_segment === 'number' ? t.start_segment : 0,
-            end_segment: typeof t.end_segment === 'number' ? t.end_segment : 0,
-          }))
-          .filter((t) => t.title.length > 0);
-      }
-    } catch (e) {
-      console.warn(
-        `[${this.name}] Topic segmentation failed, using single-topic fallback:`,
-        e,
-      );
-    }
-
-    // If segmentation failed or returned nothing, treat whole transcript as one topic
-    if (topicSegments.length === 0) {
-      this.pushErrorCategory(errorCategories, 'empty_topics');
-      topicSegments = [
-        { title: 'General Discussion', start_segment: 0, end_segment: 9999 },
-      ];
-    }
-
-    // Split transcript into lines for slicing
-    const transcriptLines = transcript.split('\n');
-
-    // Pass 2: Per-topic analysis
+    const windows = sliceTranscriptWindows(transcript, 120, 15);
     const topics: TopicSection[] = [];
-    const allActionItems: ActionItemV3[] = [];
-    const allDecisions: DecisionV3[] = [];
+    const rawActionItems: ActionItemV3[] = [];
+    const rawDecisions: DecisionV3[] = [];
 
-    for (const segment of topicSegments) {
-      const slice = transcriptLines
-        .slice(segment.start_segment, segment.end_segment + 1)
-        .join('\n');
-
-      if (!slice.trim()) continue;
+    for (const win of windows) {
+      const winTranscript = win.lines.join('\n');
+      let topicSegments: Array<{
+        title: string;
+        start_segment: number;
+        end_segment: number;
+      }> = [];
 
       try {
-        const topicPrompt = getTopicAnalysisPrompt(
-          segment.title,
-          slice,
-          userNotes,
-        );
-        const topicRaw = await this.generateText({
-          prompt: topicPrompt,
-          task: 'topicAnalysis',
+        const segmentationPrompt = getTopicSegmentationPrompt(winTranscript);
+        const segRaw = await this.generateText({
+          prompt: segmentationPrompt,
+          task: 'topicSegmentation',
           jsonMode: true,
         });
-        const topicParsed = JSON.parse(this.cleanJsonText(topicRaw)) as Record<
+        const segParsed = JSON.parse(this.cleanJsonText(segRaw)) as Record<
           string,
           unknown
         >;
-
-        const key_points = Array.isArray(topicParsed.key_points)
-          ? topicParsed.key_points
-              .filter(
-                (p): p is Record<string, unknown> =>
-                  p !== null && typeof p === 'object',
-              )
-              .map((p) => ({
-                text: typeof p.text === 'string' ? p.text.trim() : '',
-                speaker:
-                  typeof p.speaker === 'string'
-                    ? p.speaker.trim() || undefined
-                    : undefined,
-                from_user_notes: p.from_user_notes === true ? true : undefined,
-              }))
-              .filter((p) => p.text.length > 0)
-          : [];
-
-        const decisions = Array.isArray(topicParsed.decisions)
-          ? topicParsed.decisions
-              .filter(
-                (d): d is Record<string, unknown> =>
-                  d !== null && typeof d === 'object',
-              )
-              .map((d) => ({
-                text: typeof d.text === 'string' ? d.text.trim() : '',
-                decided_by:
-                  typeof d.decided_by === 'string'
-                    ? d.decided_by.trim() || undefined
-                    : undefined,
-                rationale:
-                  typeof d.rationale === 'string'
-                    ? d.rationale.trim() || undefined
-                    : undefined,
-              }))
-              .filter((d) => d.text.length > 0)
-          : [];
-
-        const action_items = Array.isArray(topicParsed.action_items)
-          ? topicParsed.action_items
-              .filter(
-                (a): a is Record<string, unknown> =>
-                  a !== null && typeof a === 'object',
-              )
-              .map((a) => ({
-                text: typeof a.text === 'string' ? a.text.trim() : '',
-                assignee:
-                  typeof a.assignee === 'string'
-                    ? a.assignee.trim() || undefined
-                    : undefined,
-                due:
-                  typeof a.due === 'string'
-                    ? a.due.trim() || undefined
-                    : undefined,
-                topic: segment.title,
-              }))
-              .filter((a) => a.text.length > 0)
-          : [];
-
-        const open_questions = Array.isArray(topicParsed.open_questions)
-          ? topicParsed.open_questions.filter(
-              (q): q is string => typeof q === 'string' && q.trim().length > 0,
+        if (Array.isArray(segParsed.topics)) {
+          topicSegments = segParsed.topics
+            .filter(
+              (t): t is Record<string, unknown> =>
+                t !== null && typeof t === 'object',
             )
-          : [];
-
-        topics.push({
-          title: segment.title,
-          summary:
-            typeof topicParsed.summary === 'string'
-              ? topicParsed.summary.trim()
-              : '',
-          key_points,
-          decisions,
-          action_items,
-          open_questions,
-          transcript_range: [segment.start_segment, segment.end_segment],
-        });
-
-        allActionItems.push(...action_items);
-        allDecisions.push(...decisions);
+            .map((t) => ({
+              title:
+                typeof t.title === 'string' ? t.title.trim() : 'Discussion',
+              start_segment:
+                typeof t.start_segment === 'number'
+                  ? t.start_segment + win.startSegment
+                  : win.startSegment,
+              end_segment:
+                typeof t.end_segment === 'number'
+                  ? t.end_segment + win.startSegment
+                  : win.endSegment,
+            }))
+            .filter((t) => t.title.length > 0);
+        }
       } catch (e) {
+        if (isAbortError(e)) throw e;
         console.warn(
-          `[${this.name}] Per-topic analysis failed for "${segment.title}":`,
+          `[${this.name}] Topic segmentation failed for window ${win.windowIndex}, using single-topic fallback:`,
           e,
         );
+      }
+
+      if (topicSegments.length === 0) {
+        this.pushErrorCategory(errorCategories, 'empty_topics');
+        topicSegments = [
+          {
+            title:
+              windows.length > 1
+                ? `Discussion Part ${win.windowIndex + 1}`
+                : 'General Discussion',
+            start_segment: win.startSegment,
+            end_segment: win.endSegment,
+          },
+        ];
+      }
+
+      const topicsByStart = topicSegments
+        .map((topic) => ({
+          ...topic,
+          start_segment: Math.max(
+            win.startSegment,
+            Math.min(win.endSegment, Math.floor(topic.start_segment)),
+          ),
+        }))
+        .sort((left, right) => left.start_segment - right.start_segment)
+        .filter(
+          (topic, index, topics) =>
+            index === 0 ||
+            topic.start_segment !== topics[index - 1].start_segment,
+        );
+      topicSegments = topicsByStart.map((topic, index) => {
+        const nextStart = topicsByStart[index + 1]?.start_segment;
+        return {
+          ...topic,
+          start_segment: index === 0 ? win.startSegment : topic.start_segment,
+          end_segment: nextStart === undefined ? win.endSegment : nextStart - 1,
+        };
+      });
+
+      for (const segment of topicSegments) {
+        const lastLineIndex = Math.max(0, win.lines.length - 1);
+        const requestedStart = Math.floor(
+          segment.start_segment - win.startSegment,
+        );
+        const requestedEnd = Math.floor(segment.end_segment - win.startSegment);
+        const relativeStart = Math.max(
+          0,
+          Math.min(lastLineIndex, Math.min(requestedStart, requestedEnd)),
+        );
+        const relativeEnd = Math.max(
+          relativeStart,
+          Math.min(lastLineIndex, Math.max(requestedStart, requestedEnd)),
+        );
+        const slice = win.lines
+          .slice(relativeStart, relativeEnd + 1)
+          .join('\n');
+        if (!slice.trim()) continue;
+
+        try {
+          const topicPrompt = getTopicAnalysisPrompt(
+            segment.title,
+            slice,
+            userNotes,
+          );
+          const topicRaw = await this.generateText({
+            prompt: topicPrompt,
+            task: 'topicAnalysis',
+            jsonMode: true,
+          });
+          const topicParsed = JSON.parse(
+            this.cleanJsonText(topicRaw),
+          ) as Record<string, unknown>;
+
+          const key_points = Array.isArray(topicParsed.key_points)
+            ? topicParsed.key_points
+                .filter(
+                  (p): p is Record<string, unknown> =>
+                    p !== null && typeof p === 'object',
+                )
+                .map((p) => ({
+                  text: typeof p.text === 'string' ? p.text.trim() : '',
+                  speaker:
+                    typeof p.speaker === 'string'
+                      ? p.speaker.trim() || undefined
+                      : undefined,
+                  from_user_notes:
+                    p.from_user_notes === true ? true : undefined,
+                }))
+                .filter((p) => p.text.length > 0)
+            : [];
+
+          const decisions = Array.isArray(topicParsed.decisions)
+            ? topicParsed.decisions
+                .filter(
+                  (d): d is Record<string, unknown> =>
+                    d !== null && typeof d === 'object',
+                )
+                .map((d) => ({
+                  text: typeof d.text === 'string' ? d.text.trim() : '',
+                  decided_by:
+                    typeof d.decided_by === 'string'
+                      ? d.decided_by.trim() || undefined
+                      : undefined,
+                  rationale:
+                    typeof d.rationale === 'string'
+                      ? d.rationale.trim() || undefined
+                      : undefined,
+                  evidence:
+                    typeof d.evidence === 'string'
+                      ? d.evidence.trim() || undefined
+                      : undefined,
+                }))
+                .filter((d) => d.text.length > 0)
+            : [];
+
+          const action_items = Array.isArray(topicParsed.action_items)
+            ? topicParsed.action_items
+                .filter(
+                  (a): a is Record<string, unknown> =>
+                    a !== null && typeof a === 'object',
+                )
+                .map((a) => ({
+                  text: typeof a.text === 'string' ? a.text.trim() : '',
+                  assignee:
+                    typeof a.assignee === 'string'
+                      ? a.assignee.trim() || undefined
+                      : undefined,
+                  due:
+                    typeof a.due === 'string'
+                      ? a.due.trim() || undefined
+                      : undefined,
+                  evidence:
+                    typeof a.evidence === 'string'
+                      ? a.evidence.trim() || undefined
+                      : undefined,
+                  topic: segment.title,
+                }))
+                .filter((a) => a.text.length > 0)
+            : [];
+
+          const open_questions = Array.isArray(topicParsed.open_questions)
+            ? topicParsed.open_questions.filter(
+                (q): q is string =>
+                  typeof q === 'string' && q.trim().length > 0,
+              )
+            : [];
+
+          topics.push({
+            title: segment.title,
+            summary:
+              typeof topicParsed.summary === 'string'
+                ? topicParsed.summary.trim()
+                : '',
+            key_points,
+            decisions,
+            action_items,
+            open_questions,
+            transcript_range: [segment.start_segment, segment.end_segment],
+          });
+
+          rawActionItems.push(...action_items);
+          rawDecisions.push(...decisions);
+        } catch (e) {
+          if (isAbortError(e)) throw e;
+          console.warn(
+            `[${this.name}] Per-topic analysis failed for "${segment.title}":`,
+            e,
+          );
+        }
       }
     }
 
@@ -378,20 +442,31 @@ export class UnifiedLLMProvider implements LLMProvider {
       ]);
     }
 
+    const allDecisions = deduplicateExtractedItems(
+      rawDecisions,
+      (d) => d.text,
+      (d) => d.decided_by,
+    );
+    const allActionItems = deduplicateExtractedItems(
+      rawActionItems,
+      (a) => a.text,
+      (a) => a.assignee,
+    );
+
     // Generate overview from topics
     const overview =
       topics
         .map((t) => t.summary)
         .filter(Boolean)
         .join(' ')
-        .slice(0, 500) ||
+        .slice(0, 1000) ||
       'Conversation captured. See topics below for details.';
 
     return this.finalizeStructuredAnalysis({
       analysis: {
         analysis_schema_version: 3,
         overview,
-        topics,
+        topics: deduplicateExtractedItems(topics, (t) => t.title),
         all_action_items: allActionItems,
         all_decisions: allDecisions,
         meeting_type: 'general',
@@ -436,60 +511,60 @@ export class UnifiedLLMProvider implements LLMProvider {
     transcript: string,
     errorCategories: AnalysisErrorCategory[],
   ): AnalysisDocumentV3 {
+    const transcriptLower = transcript.toLowerCase();
+
     const topics = analysis.topics.map((topic) => {
-      const decisions = topic.decisions.filter((decision) => {
-        const supported = this.hasSupportInTranscript(
-          decision.text,
-          transcript,
-          this.decisionSupportKeywords(),
-        );
+      const decisions = topic.decisions.map((decision) => {
+        const supported =
+          (decision.evidence &&
+            transcriptLower.includes(decision.evidence.toLowerCase().trim())) ||
+          this.hasTranscriptTokenSupport(decision.text, transcript);
         if (!supported) {
           this.pushErrorCategory(errorCategories, 'unsupported_decision');
         }
-        return supported;
+        return decision;
       });
 
-      const action_items = topic.action_items
-        .map((item) => {
-          const supported = this.hasSupportInTranscript(
-            item.text,
-            transcript,
-            this.actionSupportKeywords(),
-          );
-          if (!supported) {
-            this.pushErrorCategory(errorCategories, 'unsupported_action_item');
-            return null;
-          }
+      const action_items = topic.action_items.map((item) => {
+        const supported =
+          (item.evidence &&
+            transcriptLower.includes(item.evidence.toLowerCase().trim())) ||
+          this.hasTranscriptTokenSupport(item.text, transcript);
+        if (!supported) {
+          this.pushErrorCategory(errorCategories, 'unsupported_action_item');
+        }
 
-          const normalized: ActionItemV3 = {
-            text: item.text,
-            topic: topic.title,
-          };
-          if (
-            item.assignee &&
-            this.supportsFieldValue(item.assignee, transcript, item.text)
-          ) {
-            normalized.assignee = item.assignee;
-          } else if (item.assignee) {
-            this.pushErrorCategory(
-              errorCategories,
-              'unsupported_action_item_owner',
-            );
-          }
-          if (
-            item.due &&
-            this.supportsFieldValue(item.due, transcript, item.text)
-          ) {
-            normalized.due = item.due;
-          } else if (item.due) {
-            this.pushErrorCategory(
-              errorCategories,
-              'unsupported_action_item_due',
-            );
-          }
-          return normalized;
-        })
-        .filter((item): item is ActionItemV3 => item !== null);
+        const normalized: ActionItemV3 = {
+          text: item.text,
+          topic: topic.title,
+          evidence: item.evidence,
+        };
+        if (
+          item.assignee &&
+          this.supportsFieldValue(item.assignee, transcript, item.text)
+        ) {
+          normalized.assignee = item.assignee;
+        } else if (item.assignee) {
+          this.pushErrorCategory(
+            errorCategories,
+            'unsupported_action_item_owner',
+          );
+          normalized.assignee = item.assignee;
+        }
+        if (
+          item.due &&
+          this.supportsFieldValue(item.due, transcript, item.text)
+        ) {
+          normalized.due = item.due;
+        } else if (item.due) {
+          this.pushErrorCategory(
+            errorCategories,
+            'unsupported_action_item_due',
+          );
+          normalized.due = item.due;
+        }
+        return normalized;
+      });
 
       return {
         ...topic,
@@ -504,6 +579,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         assignee: item.assignee,
         due: item.due,
         topic: topic.title,
+        evidence: item.evidence,
       })),
     );
     const all_decisions = topics.flatMap((topic) =>
@@ -511,6 +587,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         text: decision.text,
         decided_by: decision.decided_by,
         rationale: decision.rationale,
+        evidence: decision.evidence,
       })),
     );
 
@@ -582,36 +659,6 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
   }
 
-  private decisionSupportKeywords(): string[] {
-    return [
-      'decided',
-      'agreed',
-      'approved',
-      'we will',
-      "we'll",
-      "let's",
-      'going with',
-      'ship',
-      'rollout',
-      'use ',
-    ];
-  }
-
-  private actionSupportKeywords(): string[] {
-    return [
-      "i'll",
-      'i will',
-      "we'll",
-      'we will',
-      'can you',
-      'please',
-      'send',
-      'draft',
-      'follow up',
-      'take that',
-    ];
-  }
-
   private supportsFieldValue(
     fieldValue: string,
     transcript: string,
@@ -624,30 +671,27 @@ export class UnifiedLLMProvider implements LLMProvider {
     return this.bestTokenOverlap(fieldValue, contextText) >= 0.5;
   }
 
-  private hasSupportInTranscript(
+  private hasTranscriptTokenSupport(
     claim: string,
     transcript: string,
-    supportKeywords: string[],
   ): boolean {
+    if (transcript.toLowerCase().includes(claim.toLowerCase())) {
+      return true;
+    }
     const segments = transcript
       .split('\n')
       .map((segment) => segment.trim())
       .filter(Boolean);
-    let bestSegment = '';
     let bestScore = 0;
 
     for (const segment of segments) {
       const score = this.bestTokenOverlap(claim, segment);
       if (score > bestScore) {
         bestScore = score;
-        bestSegment = segment.toLowerCase();
       }
     }
 
-    if (bestScore < 0.6) {
-      return false;
-    }
-    return supportKeywords.some((keyword) => bestSegment.includes(keyword));
+    return bestScore >= 0.6;
   }
 
   private bestTokenOverlap(a: string, b: string): number {
@@ -938,8 +982,14 @@ export class UnifiedLLMProvider implements LLMProvider {
       case 'gemini':
         return this.generateWithGemini(options);
       case 'ollama':
-        return runWithOllamaGenerationGate(Symbol(options.task), async () =>
-          this.generateWithOllama(options),
+        return runWithOllamaGenerationGate(
+          Symbol(options.task),
+          async () => this.generateWithOllama(options),
+          options.task === 'knowledgeDoc'
+            ? 0
+            : options.task === 'askPluto'
+              ? 20
+              : 10,
         );
       default:
         throw new Error(`Unsupported provider: ${this.providerType}`);
@@ -1042,14 +1092,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     jsonMode,
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel();
-    const outputTokenBudget = task === 'knowledgeDoc' ? 4096 : 2500;
-    const estimatedTokens =
-      Math.ceil(prompt.length / 3) +
-      (task === 'knowledgeDoc' ? outputTokenBudget : 1000);
-    const num_ctx = Math.min(
-      task === 'knowledgeDoc' ? 16384 : 8192,
-      Math.max(2048, Math.ceil(estimatedTokens / 1024) * 1024),
-    );
+    const { num_ctx, num_predict } = calculateOllamaContextBudget(prompt, task);
 
     const requestBody: Record<string, unknown> = {
       model,
@@ -1057,7 +1100,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       stream: false,
       options: {
         num_ctx,
-        num_predict: outputTokenBudget,
+        num_predict,
         temperature: this.getTemperature(task),
         num_thread: 8, // Ensure multi-threading is utilized
       },
@@ -1084,9 +1127,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       },
-      task === 'knowledgeDoc'
-        ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
-        : OLLAMA_TIMEOUT_MS,
+      getOllamaTimeoutMs(task),
     );
 
     if (!response.ok) {
@@ -1237,8 +1278,8 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   private getTemperature(task: LLMTask): number {
     if (task === 'structuredAnalysis') return 0.7;
-    if (task === 'topicSegmentation') return 0.3;
-    if (task === 'topicAnalysis') return 0.5;
+    if (task === 'topicSegmentation') return 0.1;
+    if (task === 'topicAnalysis') return 0.1;
     if (task === 'summary') return 0.7;
     if (task === 'summaryRepair') return 0.2;
     if (task === 'valueSignals') return 0.2;
@@ -1345,4 +1386,120 @@ export class UnifiedLLMProvider implements LLMProvider {
       extra_tags: [],
     };
   }
+}
+
+export function calculateOllamaContextBudget(
+  prompt: string,
+  task: string,
+): { num_ctx: number; num_predict: number } {
+  const outputTokenBudget =
+    task === 'knowledgeDoc' ||
+    task === 'structuredAnalysis' ||
+    task === 'summary'
+      ? 4096
+      : 2500;
+  const estimatedInputTokens = Math.ceil(prompt.length / 3);
+  const totalNeeded = estimatedInputTokens + outputTokenBudget;
+  const maxCap = task === 'knowledgeDoc' ? 32768 : 16384;
+  const num_ctx = Math.min(
+    maxCap,
+    Math.max(4096, Math.ceil(totalNeeded / 1024) * 1024),
+  );
+  return { num_ctx, num_predict: outputTokenBudget };
+}
+
+export interface TranscriptWindow {
+  windowIndex: number;
+  startSegment: number;
+  endSegment: number;
+  lines: string[];
+}
+
+export function sliceTranscriptWindows(
+  transcript: string,
+  maxLinesPerWindow = 120,
+  overlapLines = 15,
+): TranscriptWindow[] {
+  const allLines = transcript.split('\n').filter((l) => l.trim().length > 0);
+  if (allLines.length <= maxLinesPerWindow) {
+    return [
+      {
+        windowIndex: 0,
+        startSegment: 0,
+        endSegment: Math.max(0, allLines.length - 1),
+        lines: allLines,
+      },
+    ];
+  }
+
+  const windows: TranscriptWindow[] = [];
+  let start = 0;
+  let idx = 0;
+
+  while (start < allLines.length) {
+    const end = Math.min(allLines.length, start + maxLinesPerWindow);
+    const windowLines = allLines.slice(start, end);
+    windows.push({
+      windowIndex: idx,
+      startSegment: start,
+      endSegment: end - 1,
+      lines: windowLines,
+    });
+
+    if (end >= allLines.length) break;
+    start = end - overlapLines;
+    idx += 1;
+  }
+
+  return windows;
+}
+
+function calculateJaccardSimilarity(strA: string, strB: string): number {
+  const setA = new Set(strA.toLowerCase().match(/\w+/g) || []);
+  const setB = new Set(strB.toLowerCase().match(/\w+/g) || []);
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let intersection = 0;
+  for (const word of setA) {
+    if (setB.has(word)) intersection += 1;
+  }
+  const union = new Set([...setA, ...setB]).size;
+  return union > 0 ? intersection / union : 0;
+}
+
+export function deduplicateExtractedItems<T>(
+  items: T[],
+  getText: (item: T) => string,
+  getAssignee?: (item: T) => string | undefined,
+): T[] {
+  if (!items || items.length === 0) return [];
+  const result: T[] = [];
+
+  for (const item of items) {
+    const text = getText(item)?.trim() || '';
+    if (!text) continue;
+
+    const assignee = getAssignee
+      ? getAssignee(item)?.trim().toLowerCase()
+      : undefined;
+
+    const isDuplicate = result.some((existing) => {
+      const existingText = getText(existing)?.trim() || '';
+      const existingAssignee = getAssignee
+        ? getAssignee(existing)?.trim().toLowerCase()
+        : undefined;
+
+      if (assignee && existingAssignee && assignee !== existingAssignee) {
+        return false;
+      }
+
+      const similarity = calculateJaccardSimilarity(text, existingText);
+      return similarity >= 0.7;
+    });
+
+    if (!isDuplicate) {
+      result.push(item);
+    }
+  }
+
+  return result;
 }

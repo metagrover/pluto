@@ -113,10 +113,6 @@ export const createCaptureActivitySession = ({
       latchDurabilityFailure();
       return queue;
     }
-    if (activeWindow !== null && seconds <= activeWindow.startTime) {
-      latchDurabilityFailure();
-      return queue;
-    }
     latestSeconds = seconds;
     const persistedFinalWindow = closeActiveWindow(seconds);
     if (!persistedFinalWindow) enqueueSnapshot();

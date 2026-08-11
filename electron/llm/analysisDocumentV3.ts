@@ -102,6 +102,9 @@ const parseDecisionV3 = (raw: unknown): DecisionV3 | null => {
   if (typeof record.rationale === 'string' && record.rationale.trim()) {
     decision.rationale = record.rationale.trim();
   }
+  if (typeof record.evidence === 'string' && record.evidence.trim()) {
+    decision.evidence = record.evidence.trim();
+  }
   return decision;
 };
 
@@ -119,6 +122,9 @@ const parseActionItemV3 = (raw: unknown): ActionItemV3 | null => {
   }
   if (typeof record.topic === 'string' && record.topic.trim()) {
     item.topic = record.topic.trim();
+  }
+  if (typeof record.evidence === 'string' && record.evidence.trim()) {
+    item.evidence = record.evidence.trim();
   }
   return item;
 };

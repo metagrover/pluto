@@ -63,7 +63,6 @@ export const ActiveCallAlertWindow = () => {
     window.close();
   };
 
-
   useEffect(() => {
     rafRef.current = window.requestAnimationFrame(updateProgress);
     const handleKeyDown = (event: KeyboardEvent) => {
