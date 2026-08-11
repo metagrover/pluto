@@ -53,6 +53,7 @@ export const CAPTURE_SESSION_ALREADY_ACTIVE =
 export type CaptureSessionLease = {
   meetingId: string;
   ownerId: number;
+  phase: 'recording' | 'stopped';
 };
 
 export const createCaptureSessionLeaseRegistry = () => {
@@ -60,16 +61,32 @@ export const createCaptureSessionLeaseRegistry = () => {
   return {
     acquire(meetingId: string, ownerId: number) {
       if (!active) {
-        active = { meetingId, ownerId };
+        active = { meetingId, ownerId, phase: 'recording' };
         return { status: 'acquired' as const, lease: { ...active } };
       }
-      if (active.meetingId === meetingId && active.ownerId === ownerId) {
+      if (
+        active.meetingId === meetingId &&
+        active.ownerId === ownerId &&
+        active.phase === 'recording'
+      ) {
         return { status: 'already_owned' as const, lease: { ...active } };
       }
       throw new Error(CAPTURE_SESSION_ALREADY_ACTIVE);
     },
     activeForOwner(ownerId: number) {
       return active?.ownerId === ownerId ? { ...active } : null;
+    },
+    recordingForOwner(ownerId: number) {
+      return active?.ownerId === ownerId && active.phase === 'recording'
+        ? { ...active }
+        : null;
+    },
+    markStopped(meetingId: string, ownerId: number) {
+      if (active?.meetingId !== meetingId || active.ownerId !== ownerId) {
+        throw new Error('capture_session_not_owned');
+      }
+      active = { ...active, phase: 'stopped' };
+      return { ...active };
     },
     release(meetingId: string, ownerId: number) {
       if (active?.meetingId !== meetingId || active.ownerId !== ownerId) {
@@ -108,9 +125,11 @@ Read `electron/main.ts` as source and assert that:
 expect(main).toContain('createCaptureSessionLeaseRegistry()');
 expect(journalStartHandler).toContain('captureSessionLease.acquire(');
 expect(journalStartHandler).toContain('capture_session_already_active');
-expect(journalStopHandler).toContain('captureSessionLease.release(');
+expect(journalStopHandler).toContain('captureSessionLease.markStopped(');
+expect(journalStopHandler).not.toContain('captureSessionLease.release(');
+expect(journalSealHandler).toContain('captureSessionLease.requireStoppedOwner(');
 expect(journalSealHandler).toContain('captureSessionLease.release(');
-expect(nativeStartHandler).toContain('activeForOwner(');
+expect(nativeStartHandler).toContain('recordingForOwner(');
 expect(nativeStartHandler).not.toContain("win.webContents.send('NATIVE_AUDIO_CHUNK'");
 expect(nativeStartHandler).toContain("captureOwner.send('NATIVE_AUDIO_CHUNK'");
 expect(main).toContain("owner.once('destroyed'");
@@ -155,16 +174,16 @@ try {
 
 Log only the transition and reason. Do not log meeting IDs, owner IDs, paths, or content.
 
-- [ ] **Step 4: Release only at explicit stop/seal boundaries**
+- [ ] **Step 4: Retain ownership through the stop/seal boundary**
 
-After a successful `stopCaptureJournal`, release the matching lease. After a successful `sealCaptureJournal`, also attempt an idempotent release for callers that reached seal through a legacy path. A failed stop or seal must not release the lease.
+Require the matching owner before mutating stop or seal state. After a successful `stopCaptureJournal`, transition the runtime lease from `recording` to `stopped` and keep it until seal completes. Release after a successful seal; if seal fails after the journal already stopped, release with the explicit `seal_failed_after_stop` reason so durable recovery remains available without blocking future recordings. A failed stop retains the recording lease.
 
 - [ ] **Step 5: Bind native audio to the lease owner**
 
 Require `NATIVE_AUDIO_START` to find the sender's active lease. Store the starting `WebContents` as the native owner and send chunks only through it:
 
 ```ts
-const lease = captureSessionLease.activeForOwner(event.sender.id);
+const lease = captureSessionLease.recordingForOwner(event.sender.id);
 if (!lease) throw new Error('capture_session_not_owned');
 if (nativeAudioProcess) return nativeAudioOwner?.id === event.sender.id;
 const spawnedProcess = spawn(execPath);

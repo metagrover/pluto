@@ -13,7 +13,7 @@ describe('capture session production ownership boundary', () => {
   const main = readFileSync('electron/main.ts', 'utf8');
   const audioManager = readFileSync('src/components/AudioManager.tsx', 'utf8');
 
-  it('acquires before journal creation and releases at stop or seal', () => {
+  it('acquires before journal creation and retains ownership until seal', () => {
     const startHandler = sliceBetween(
       main,
       "'AUDIO_CAPTURE_JOURNAL_START'",
@@ -36,8 +36,18 @@ describe('capture session production ownership boundary', () => {
       startHandler.indexOf('createCaptureJournal('),
     );
     expect(startHandler).toContain('captureSessionLease.release(');
-    expect(stopHandler).toContain('captureSessionLease.release(');
+    expect(stopHandler).toContain('captureSessionLease.requireRecordingOwner(');
+    expect(stopHandler).toContain('captureSessionLease.markStopped(');
+    expect(stopHandler).not.toContain('captureSessionLease.release(');
+    expect(
+      stopHandler.indexOf('captureSessionLease.requireRecordingOwner('),
+    ).toBeLessThan(stopHandler.indexOf('stopCaptureJournal('));
+    expect(sealHandler).toContain('captureSessionLease.requireStoppedOwner(');
     expect(sealHandler).toContain('captureSessionLease.release(');
+    expect(
+      sealHandler.indexOf('captureSessionLease.requireStoppedOwner('),
+    ).toBeLessThan(sealHandler.indexOf('sealCaptureJournal('));
+    expect(sealHandler).toContain('seal_failed_after_stop');
   });
 
   it('routes native audio only to the renderer that owns the lease', () => {
@@ -52,7 +62,7 @@ describe('capture session production ownership boundary', () => {
       "'AUDIO_SAVE_AND_CONVERT'",
     );
 
-    expect(nativeStartHandler).toContain('activeForOwner(');
+    expect(nativeStartHandler).toContain('recordingForOwner(');
     expect(nativeStartHandler).toContain(
       "captureOwner.send('NATIVE_AUDIO_CHUNK', chunk)",
     );

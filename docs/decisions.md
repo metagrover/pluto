@@ -18,7 +18,7 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 ## 2026-08-11 - Make the Electron main process authoritative for active capture
 - **Status:** Accepted
 - **Source:** [Issue #601](https://github.com/metagrover/pluto/issues/601), [PR #604](https://github.com/metagrover/pluto/pull/604)
-- **Decision:** Pluto grants at most one runtime capture lease from the Electron main process. The lease binds a recording key and renderer owner, and native system-audio output remains bound to that owner until an explicit stop, seal, or owner-destruction boundary.
+- **Decision:** Pluto grants at most one runtime capture lease from the Electron main process. The lease binds a recording key and renderer owner, transitions from recording to stopped only for that owner, remains held until seal finishes, and keeps native system-audio output bound to the recording owner.
 - **Rationale:** Renderer-local state can reset during reload, remount, or secondary-window activity while capture resources continue independently. Main-process authority is the smallest boundary shared by every renderer and the singleton native audio process.
 - **Consequences:** Conflicting starts fail before microphone acquisition, active recording pages prevent navigation, native chunks cannot move to another renderer, and an owner destroyed before finalization releases runtime resources while leaving its durable journal for existing recovery.
 

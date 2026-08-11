@@ -685,13 +685,16 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('AUDIO_CAPTURE_JOURNAL_STOP', async (event, request = {}) => {
     const normalizedMeetingId = String(request.meetingId || '');
+    captureSessionLease.requireRecordingOwner(
+      normalizedMeetingId,
+      event.sender.id,
+    );
     const manifest = await stopCaptureJournal(getMeetingArtifactsRootDir(), {
       ...request,
       meetingId: normalizedMeetingId,
     });
-    if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
-      console.log('[CaptureLease] released: capture_stopped');
-    }
+    captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
+    console.log('[CaptureLease] transitioned: capture_stopped');
     return manifest;
   });
 
@@ -699,10 +702,22 @@ app.whenReady().then(async () => {
     'AUDIO_CAPTURE_JOURNAL_SEAL',
     async (event, { meetingId, endedAtMs } = {}) => {
       const normalizedMeetingId = String(meetingId || '');
-      const manifest = await sealCaptureJournal(getMeetingArtifactsRootDir(), {
-        meetingId: normalizedMeetingId,
-        endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
-      });
+      captureSessionLease.requireStoppedOwner(
+        normalizedMeetingId,
+        event.sender.id,
+      );
+      let manifest: Awaited<ReturnType<typeof sealCaptureJournal>>;
+      try {
+        manifest = await sealCaptureJournal(getMeetingArtifactsRootDir(), {
+          meetingId: normalizedMeetingId,
+          endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
+        });
+      } catch (error) {
+        if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
+          console.warn('[CaptureLease] released: seal_failed_after_stop');
+        }
+        throw error;
+      }
       if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
         console.log('[CaptureLease] released: capture_sealed');
       }
@@ -867,7 +882,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('NATIVE_AUDIO_START', async (event) => {
-    if (!captureSessionLease.activeForOwner(event.sender.id)) {
+    if (!captureSessionLease.recordingForOwner(event.sender.id)) {
       console.warn('[CaptureLease] native audio rejected: owner_missing');
       throw new Error('capture_session_not_owned');
     }

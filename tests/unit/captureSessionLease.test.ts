@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CAPTURE_SESSION_ALREADY_ACTIVE,
+  CAPTURE_SESSION_NOT_OWNED,
   createCaptureSessionLeaseRegistry,
 } from '../../electron/captureSessionLease';
 
@@ -45,10 +46,37 @@ describe('capture session lease registry', () => {
     expect(registry.activeForOwner(11)).toEqual({
       meetingId: 'meeting-alpha',
       ownerId: 11,
+      phase: 'recording',
     });
     expect(registry.release('meeting-alpha', 11)).toBe(true);
     expect(registry.activeForOwner(11)).toBeNull();
     expect(registry.acquire('meeting-beta', 22).status).toBe('acquired');
+  });
+
+  it('retains ownership from stop until the seal boundary', () => {
+    const registry = createCaptureSessionLeaseRegistry();
+    registry.acquire('meeting-alpha', 11);
+
+    expect(() => registry.markStopped('meeting-alpha', 22)).toThrow(
+      CAPTURE_SESSION_NOT_OWNED,
+    );
+    expect(registry.markStopped('meeting-alpha', 11)).toEqual({
+      meetingId: 'meeting-alpha',
+      ownerId: 11,
+      phase: 'stopped',
+    });
+    expect(registry.activeForOwner(11)?.phase).toBe('stopped');
+    expect(registry.recordingForOwner(11)).toBeNull();
+    expect(() => registry.acquire('meeting-alpha', 11)).toThrow(
+      CAPTURE_SESSION_ALREADY_ACTIVE,
+    );
+    expect(() => registry.requireStoppedOwner('meeting-alpha', 22)).toThrow(
+      CAPTURE_SESSION_NOT_OWNED,
+    );
+    expect(registry.requireStoppedOwner('meeting-alpha', 11).phase).toBe(
+      'stopped',
+    );
+    expect(registry.release('meeting-alpha', 11)).toBe(true);
   });
 
   it('releases the lease when its renderer owner is destroyed', () => {
@@ -59,6 +87,7 @@ describe('capture session lease registry', () => {
     expect(registry.releaseOwner(22)).toEqual({
       meetingId: 'meeting-beta',
       ownerId: 22,
+      phase: 'recording',
     });
     expect(registry.activeForOwner(22)).toBeNull();
   });
