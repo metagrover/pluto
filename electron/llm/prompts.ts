@@ -665,6 +665,10 @@ Rules:
 - Speaker attribution: use name when clearly identifiable, null otherwise.
 - Include all explicit and implied decisions or agreed resolutions. Include a brief evidence quote when possible.
 - Include all action items, tasks, follow-ups, and commitments discussed. Include a brief evidence quote when possible.
+- Treat explicit third-person commitments such as "Person will do task by date" as action items, preserving the owner and deadline.
+- Preserve numeric targets and success metrics as key points; do not round, omit, or generalize them.
+- Preserve dates, conditions, and qualifiers in decisions so conditional agreements remain conditional.
+- Check every transcript sentence for distinct commitments, decisions, blockers, metrics, and follow-ups before responding.
 - If owner or due date is not directly supported by the transcript, leave that field null.
 - Use explicit commitment language to distinguish real follow-through from brainstorming; do not turn suggestions, ideas, or hypothetical work into action items.
 - If discussion is exploratory, reflect that in the summary.

@@ -10,11 +10,31 @@ import {
   collectDisposableRecordingArtifactPaths,
   createSealedCaptureActivityHandoff,
   getStrongerSpeakerAttributionPolicy,
+  planForegroundTranscriptValidation,
   resolveFinalizationCleanupPaths,
   sealCaptureJournalBeforeFinalization,
 } from '../../src/utils/recordingFinalization';
 
 describe('recording finalization helpers', () => {
+  it('never runs full-session ASR in the foreground after capture stops', () => {
+    expect(
+      planForegroundTranscriptValidation({
+        checkpointEvidenceVerified: true,
+      }),
+    ).toEqual({
+      canonicalMode: 'checkpointed',
+      checkpointEvidenceVerified: true,
+    });
+    expect(
+      planForegroundTranscriptValidation({
+        checkpointEvidenceVerified: false,
+      }),
+    ).toEqual({
+      canonicalMode: 'checkpointed',
+      checkpointEvidenceVerified: false,
+    });
+  });
+
   it('invokes validation and every integrity save with the exact sealed evidence', async () => {
     const sealed = await buildCaptureActivityEvidence(
       [{ startTime: 0, endTime: 1, speaker: 'Me' }],

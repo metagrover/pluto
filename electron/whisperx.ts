@@ -30,6 +30,7 @@ export interface TranscribeOptions {
   computeType?: TranscriptionEngineConfig['computeType'];
   language?: string;
   diarize?: boolean;
+  wordTimestamps?: boolean;
   diarizationProvider?: 'sherpa_local';
   signal?: AbortSignal;
 }
@@ -583,6 +584,7 @@ export class TranscriptionManager {
         audio_path: audioPath,
         language: options.language,
         diarize: options.diarize,
+        word_timestamps: options.wordTimestamps,
       }),
     } as RequestInit & { dispatcher: typeof WHISPERX_FETCH_AGENT });
 

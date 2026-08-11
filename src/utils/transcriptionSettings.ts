@@ -88,7 +88,7 @@ export const resolveTranscriptionSettings = (
 };
 
 export const resolveLiveChunkModel = (model: WhisperModel): WhisperModel =>
-  model === 'large-v2' || model === 'large-v3' ? 'medium' : model;
+  model === 'tiny' ? 'tiny' : 'base';
 
 export const resolveLiveChunkComputeType = (
   computeType: WhisperComputeType,

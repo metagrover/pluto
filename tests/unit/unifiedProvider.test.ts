@@ -26,6 +26,7 @@ import {
   UnifiedLLMProvider,
   calculateOllamaContextBudget,
   deduplicateExtractedItems,
+  getOllamaTimeoutMs,
   sliceTranscriptWindows,
 } from '../../electron/llm/unifiedProvider';
 
@@ -236,6 +237,105 @@ describe('UnifiedLLMProvider', () => {
     expect(selectedModel).toBe('kimike:latest');
   });
 
+  it('analyzes only the transcript lines assigned to each Ollama topic', async () => {
+    const topicPrompts: string[] = [];
+    let segmentationTemperature: number | undefined;
+    const topicTemperatures: number[] = [];
+    installFetchMock((url, init) => {
+      expect(url).toContain('/api/generate');
+      const body = parseRequestBody(init);
+      const prompt = String(body.prompt || '');
+      const options = body.options as Record<string, unknown>;
+      if (prompt.includes('meeting topic segmenter')) {
+        segmentationTemperature = Number(options.temperature);
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
+              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
+            ],
+          }),
+        });
+      }
+      topicPrompts.push(prompt);
+      topicTemperatures.push(Number(options.temperature));
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'Grounded summary',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    await provider.generateStructuredAnalysis(
+      ['Me: alpha-only detail', 'Them: beta-only detail'].join('\n'),
+    );
+
+    expect(topicPrompts).toHaveLength(2);
+    expect(topicPrompts[0]).toContain('alpha-only detail');
+    expect(topicPrompts[0]).not.toContain('beta-only detail');
+    expect(topicPrompts[1]).toContain('beta-only detail');
+    expect(topicPrompts[1]).not.toContain('alpha-only detail');
+    expect(segmentationTemperature).toBe(0.1);
+    expect(topicTemperatures).toEqual([0.1, 0.1]);
+  });
+
+  it('covers transcript lines omitted between Ollama topic ranges exactly once', async () => {
+    const topicPrompts: string[] = [];
+    installFetchMock((_url, init) => {
+      const body = parseRequestBody(init);
+      const prompt = String(body.prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Opening', start_segment: 0, end_segment: 0 },
+              { title: 'Closing', start_segment: 3, end_segment: 3 },
+            ],
+          }),
+        });
+      }
+      topicPrompts.push(prompt);
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'Grounded summary',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    await provider.generateStructuredAnalysis(
+      [
+        'Me: detail-zero',
+        'Me: detail-one',
+        'Me: detail-two',
+        'Me: detail-three',
+      ].join('\n'),
+    );
+
+    const combinedPrompts = topicPrompts.join('\n');
+    for (const detail of [
+      'detail-zero',
+      'detail-one',
+      'detail-two',
+      'detail-three',
+    ]) {
+      expect(combinedPrompts.split(detail)).toHaveLength(2);
+    }
+  });
+
   it('falls back to default ollama model when model listing fails', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
@@ -254,6 +354,20 @@ describe('UnifiedLLMProvider', () => {
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
     expect(selectedModel).toBe('phi4-mini:3.8b');
+  });
+
+  it('stops the multi-pass pipeline after a local model timeout', async () => {
+    const fetchMock = installFetchMock(() =>
+      Promise.reject(new DOMException('aborted', 'AbortError')),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+
+    await expect(
+      provider.generateStructuredAnalysis('Me: status update'),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('routes openai user-analysis generation through chat completions', async () => {
@@ -609,6 +723,12 @@ describe('LLM factory', () => {
 });
 
 describe('Ollama Budgeting & Adaptive Windowing', () => {
+  it('bounds meeting analysis requests while preserving the knowledge-doc budget', () => {
+    expect(getOllamaTimeoutMs('topicSegmentation')).toBe(90_000);
+    expect(getOllamaTimeoutMs('topicAnalysis')).toBe(90_000);
+    expect(getOllamaTimeoutMs('knowledgeDoc')).toBe(900_000);
+  });
+
   it('calculateOllamaContextBudget allocates up to 16384 context tokens for long analysis prompts', () => {
     const longPrompt = 'a'.repeat(30_000); // ~10,000 tokens
     const budget = calculateOllamaContextBudget(

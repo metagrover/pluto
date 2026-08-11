@@ -42,7 +42,7 @@ import type {
   ProviderType,
 } from './provider';
 
-const OLLAMA_TIMEOUT_MS = 300_000;
+const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v4';
@@ -66,6 +66,13 @@ type LLMTask =
   | 'askPluto'
   | 'queryClassification'
   | 'followUps';
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.name === 'AbortError' || /\babort(?:ed)?\b/i.test(error.message));
+
+export const getOllamaTimeoutMs = (task: string): number =>
+  task === 'knowledgeDoc' ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS : OLLAMA_TIMEOUT_MS;
 
 type PersonEntity = ExtractedEntities['people'][number];
 type TopicEntity = ExtractedEntities['topics'][number];
@@ -252,6 +259,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             .filter((t) => t.title.length > 0);
         }
       } catch (e) {
+        if (isAbortError(e)) throw e;
         console.warn(
           `[${this.name}] Topic segmentation failed for window ${win.windowIndex}, using single-topic fallback:`,
           e,
@@ -272,8 +280,46 @@ export class UnifiedLLMProvider implements LLMProvider {
         ];
       }
 
+      const topicsByStart = topicSegments
+        .map((topic) => ({
+          ...topic,
+          start_segment: Math.max(
+            win.startSegment,
+            Math.min(win.endSegment, Math.floor(topic.start_segment)),
+          ),
+        }))
+        .sort((left, right) => left.start_segment - right.start_segment)
+        .filter(
+          (topic, index, topics) =>
+            index === 0 ||
+            topic.start_segment !== topics[index - 1].start_segment,
+        );
+      topicSegments = topicsByStart.map((topic, index) => {
+        const nextStart = topicsByStart[index + 1]?.start_segment;
+        return {
+          ...topic,
+          start_segment: index === 0 ? win.startSegment : topic.start_segment,
+          end_segment: nextStart === undefined ? win.endSegment : nextStart - 1,
+        };
+      });
+
       for (const segment of topicSegments) {
-        const slice = win.lines.join('\n');
+        const lastLineIndex = Math.max(0, win.lines.length - 1);
+        const requestedStart = Math.floor(
+          segment.start_segment - win.startSegment,
+        );
+        const requestedEnd = Math.floor(segment.end_segment - win.startSegment);
+        const relativeStart = Math.max(
+          0,
+          Math.min(lastLineIndex, Math.min(requestedStart, requestedEnd)),
+        );
+        const relativeEnd = Math.max(
+          relativeStart,
+          Math.min(lastLineIndex, Math.max(requestedStart, requestedEnd)),
+        );
+        const slice = win.lines
+          .slice(relativeStart, relativeEnd + 1)
+          .join('\n');
         if (!slice.trim()) continue;
 
         try {
@@ -381,6 +427,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           rawActionItems.push(...action_items);
           rawDecisions.push(...decisions);
         } catch (e) {
+          if (isAbortError(e)) throw e;
           console.warn(
             `[${this.name}] Per-topic analysis failed for "${segment.title}":`,
             e,
@@ -1080,9 +1127,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       },
-      task === 'knowledgeDoc'
-        ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
-        : OLLAMA_TIMEOUT_MS,
+      getOllamaTimeoutMs(task),
     );
 
     if (!response.ok) {
@@ -1233,8 +1278,8 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   private getTemperature(task: LLMTask): number {
     if (task === 'structuredAnalysis') return 0.7;
-    if (task === 'topicSegmentation') return 0.3;
-    if (task === 'topicAnalysis') return 0.5;
+    if (task === 'topicSegmentation') return 0.1;
+    if (task === 'topicAnalysis') return 0.1;
     if (task === 'summary') return 0.7;
     if (task === 'summaryRepair') return 0.2;
     if (task === 'valueSignals') return 0.2;

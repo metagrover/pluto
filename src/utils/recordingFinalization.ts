@@ -225,6 +225,15 @@ export type JournalSealResult =
       reason: CaptureJournalFinalizationFailure;
     };
 
+export const planForegroundTranscriptValidation = ({
+  checkpointEvidenceVerified,
+}: {
+  checkpointEvidenceVerified: boolean;
+}) => ({
+  canonicalMode: 'checkpointed' as const,
+  checkpointEvidenceVerified,
+});
+
 export const createSealedCaptureActivityHandoff = (
   activityEvidence: CaptureActivityEvidence,
 ) => ({
