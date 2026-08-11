@@ -7,6 +7,7 @@ import {
   BrowserWindow,
   Menu,
   Tray,
+  type WebContents,
   app,
   ipcMain,
   nativeImage,
@@ -35,6 +36,7 @@ import {
   recoverInterruptedCaptureJournals,
   verifySealedCaptureJournalTranscriptEvidence,
 } from './captureJournalRecovery';
+import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
 import {
   canReuseRunningCaptureForProbe,
@@ -138,6 +140,9 @@ function createWindow() {
   // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', new Date().toLocaleString());
+  });
+  win.webContents.on('will-prevent-unload', () => {
+    console.warn('[CaptureLease] navigation prevented: capture_active');
   });
 
   if (VITE_DEV_SERVER_URL) {
@@ -434,6 +439,31 @@ app.whenReady().then(async () => {
 
   // Audio recording handlers
   let recorderProcess: ChildProcess | null = null;
+  let nativeAudioProcess: ChildProcess | null = null;
+  let nativeAudioOwner: WebContents | null = null;
+  const captureSessionLease = createCaptureSessionLeaseRegistry();
+  const watchedCaptureOwners = new Set<number>();
+
+  const stopNativeAudioCapture = () => {
+    const processToStop = nativeAudioProcess;
+    nativeAudioProcess = null;
+    nativeAudioOwner = null;
+    processToStop?.kill('SIGINT');
+  };
+
+  const watchCaptureOwner = (owner: WebContents) => {
+    if (watchedCaptureOwners.has(owner.id)) return;
+    watchedCaptureOwners.add(owner.id);
+    owner.once('destroyed', () => {
+      watchedCaptureOwners.delete(owner.id);
+      const ownsNativeAudio = nativeAudioOwner?.id === owner.id;
+      const released = captureSessionLease.releaseOwner(owner.id);
+      if (ownsNativeAudio) stopNativeAudioCapture();
+      if (released) {
+        console.warn('[CaptureLease] released: owner_destroyed');
+      }
+    });
+  };
 
   ipcMain.handle('AUDIO_RECORDER_START', async (_event) => {
     console.log('[Pluto] Request to start native recorder...');
@@ -507,16 +537,44 @@ app.whenReady().then(async () => {
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_START',
     async (
-      _event,
+      event,
       { meetingId, startedAtMs, expectedSources, sourceAvailability } = {},
     ) => {
-      return await createCaptureJournal(getMeetingArtifactsRootDir(), {
-        meetingId: String(meetingId || ''),
-        startedAtMs: typeof startedAtMs === 'number' ? startedAtMs : Date.now(),
-        schemaVersion: 3,
-        expectedSources,
-        sourceAvailability,
-      });
+      const normalizedMeetingId = String(meetingId || '');
+      let acquisition: ReturnType<typeof captureSessionLease.acquire>;
+      try {
+        acquisition = captureSessionLease.acquire(
+          normalizedMeetingId,
+          event.sender.id,
+        );
+      } catch (error) {
+        console.warn('[CaptureLease] rejected: active_capture_exists');
+        throw error;
+      }
+      watchCaptureOwner(event.sender);
+      try {
+        const manifest = await createCaptureJournal(
+          getMeetingArtifactsRootDir(),
+          {
+            meetingId: normalizedMeetingId,
+            startedAtMs:
+              typeof startedAtMs === 'number' ? startedAtMs : Date.now(),
+            schemaVersion: 3,
+            expectedSources,
+            sourceAvailability,
+          },
+        );
+        console.log(`[CaptureLease] ${acquisition.status}`);
+        return manifest;
+      } catch (error) {
+        if (
+          acquisition.status === 'acquired' &&
+          captureSessionLease.release(normalizedMeetingId, event.sender.id)
+        ) {
+          console.warn('[CaptureLease] released: journal_start_failed');
+        }
+        throw error;
+      }
     },
   );
 
@@ -625,28 +683,49 @@ app.whenReady().then(async () => {
     },
   );
 
-  ipcMain.handle(
-    'AUDIO_CAPTURE_JOURNAL_STOP',
-    async (_event, request = {}) =>
-      await stopCaptureJournal(getMeetingArtifactsRootDir(), {
-        ...request,
-        meetingId: String(request.meetingId || ''),
-      }),
-  );
+  ipcMain.handle('AUDIO_CAPTURE_JOURNAL_STOP', async (event, request = {}) => {
+    const normalizedMeetingId = String(request.meetingId || '');
+    captureSessionLease.requireRecordingOwner(
+      normalizedMeetingId,
+      event.sender.id,
+    );
+    const manifest = await stopCaptureJournal(getMeetingArtifactsRootDir(), {
+      ...request,
+      meetingId: normalizedMeetingId,
+    });
+    captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
+    console.log('[CaptureLease] transitioned: capture_stopped');
+    return manifest;
+  });
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_SEAL',
-    async (_event, { meetingId, endedAtMs } = {}) => {
+    async (event, { meetingId, endedAtMs } = {}) => {
       const normalizedMeetingId = String(meetingId || '');
-      return await sealCaptureJournal(getMeetingArtifactsRootDir(), {
-        meetingId: normalizedMeetingId,
-        endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
-      });
+      captureSessionLease.requireStoppedOwner(
+        normalizedMeetingId,
+        event.sender.id,
+      );
+      let manifest: Awaited<ReturnType<typeof sealCaptureJournal>>;
+      try {
+        manifest = await sealCaptureJournal(getMeetingArtifactsRootDir(), {
+          meetingId: normalizedMeetingId,
+          endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
+        });
+      } catch (error) {
+        if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
+          console.warn('[CaptureLease] released: seal_failed_after_stop');
+        }
+        throw error;
+      }
+      if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
+        console.log('[CaptureLease] released: capture_sealed');
+      }
+      return manifest;
     },
   );
 
   // --- NATIVE AUDIO CAPTURE (AUDIOCAP) ---
-  let nativeAudioProcess: ChildProcess | null = null;
   let bootProbeDone = false;
   const activeCallAlertController = createActiveCallAlertController({
     preloadPath: getPreloadPath(),
@@ -802,8 +881,14 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  ipcMain.handle('NATIVE_AUDIO_START', async (_event) => {
-    if (nativeAudioProcess) return true;
+  ipcMain.handle('NATIVE_AUDIO_START', async (event) => {
+    if (!captureSessionLease.recordingForOwner(event.sender.id)) {
+      console.warn('[CaptureLease] native audio rejected: owner_missing');
+      throw new Error('capture_session_not_owned');
+    }
+    if (nativeAudioProcess) {
+      return nativeAudioOwner?.id === event.sender.id;
+    }
 
     // Locate binary: In dev 'resources/bin/audiocap', in prod 'process.resourcesPath/bin/audiocap'
     const execPath = getAudioCapExecPath();
@@ -816,44 +901,63 @@ app.whenReady().then(async () => {
         return false;
       }
 
-      nativeAudioProcess = spawn(execPath);
+      const spawnedProcess = spawn(execPath);
+      const captureOwner = event.sender;
+      nativeAudioProcess = spawnedProcess;
+      nativeAudioOwner = captureOwner;
 
-      nativeAudioProcess.stdout?.on('data', (chunk) => {
+      spawnedProcess.stdout?.on('data', (chunk) => {
         // chunk is Buffer (PCM data)
-        if (win) {
-          win.webContents.send('NATIVE_AUDIO_CHUNK', chunk);
+        if (
+          nativeAudioProcess === spawnedProcess &&
+          !captureOwner.isDestroyed()
+        ) {
+          captureOwner.send('NATIVE_AUDIO_CHUNK', chunk);
         }
       });
 
-      nativeAudioProcess.stderr?.on('data', (data) => {
+      spawnedProcess.stderr?.on('data', (data) => {
         console.error('[Pluto-AudioCap]', data.toString());
       });
 
-      nativeAudioProcess.on('close', (code) => {
+      spawnedProcess.on('close', (code) => {
         console.log('[Pluto] AudioCap exited with code', code);
-        nativeAudioProcess = null;
+        if (nativeAudioProcess === spawnedProcess) {
+          nativeAudioProcess = null;
+          nativeAudioOwner = null;
+        }
       });
 
-      const nativeStarted = await waitForNativeAudioSpawn(nativeAudioProcess);
+      const nativeStarted = await waitForNativeAudioSpawn(spawnedProcess);
       if (!nativeStarted) {
         console.error('[Pluto] AudioCap failed to spawn');
-        nativeAudioProcess = null;
+        if (nativeAudioProcess === spawnedProcess) {
+          nativeAudioProcess = null;
+          nativeAudioOwner = null;
+        }
         return false;
       }
 
       return true;
     } catch (e) {
       console.error('[Pluto] Failed to spawn audiocap:', e);
+      nativeAudioProcess = null;
+      nativeAudioOwner = null;
       return false;
     }
   });
 
-  ipcMain.handle('NATIVE_AUDIO_STOP', async () => {
-    if (nativeAudioProcess) {
-      console.log('[Pluto] Stopping AudioCap...');
-      nativeAudioProcess.kill('SIGINT'); // Graceful stop
-      nativeAudioProcess = null;
+  ipcMain.handle('NATIVE_AUDIO_STOP', async (event) => {
+    if (
+      nativeAudioProcess &&
+      nativeAudioOwner &&
+      nativeAudioOwner.id !== event.sender.id
+    ) {
+      console.warn('[CaptureLease] native audio stop rejected: owner_mismatch');
+      return false;
     }
+    if (nativeAudioProcess) console.log('[Pluto] Stopping AudioCap...');
+    stopNativeAudioCapture();
     return true;
   });
 
