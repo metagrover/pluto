@@ -454,6 +454,50 @@ describe('retryMeetingTranscriptValidation', () => {
     ).toMatchObject({ state: 'complete' });
   });
 
+  it('persists a truthful analysis failure when the stage deadline expires', async () => {
+    let current: Record<string, unknown> = {
+      ...meeting,
+      title: 'Synthetic planning review',
+      transcript_status: 'validated',
+      transcript_validated_at: '2026-08-04T00:00:00.000Z',
+      transcript_json: JSON.stringify({
+        lifecycleStatus: 'validated',
+        segments: [{ speaker: 'Me', text: 'Synthetic statement.' }],
+      }),
+      downstream_processing_json: JSON.stringify({
+        schemaVersion: 1,
+        state: 'failed',
+        stage: 'analysis',
+      }),
+    };
+    const invoke = vi.fn(async (channel: string, payload?: unknown) => {
+      if (channel === 'GET_MEETING') return current;
+      if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        return await new Promise(() => undefined);
+      }
+      if (channel === 'SAVE_MEETING') {
+        current = { ...current, ...(payload as Record<string, unknown>) };
+        return true;
+      }
+      throw new Error(`Unexpected channel: ${channel}`);
+    });
+
+    await expect(
+      retryMeetingTranscriptValidation('synthetic-id', invoke, {
+        downstreamStageTimeoutMs: { analysis: 5 },
+      }),
+    ).resolves.toEqual({ status: 'validated' });
+
+    expect(
+      JSON.parse(String(current.downstream_processing_json)),
+    ).toMatchObject({
+      state: 'failed',
+      stage: 'analysis',
+      failure: 'stage_timeout',
+    });
+  });
+
   it('reuses verified recovered checkpoints without invoking Whisper', async () => {
     const activityEvidence = await buildCaptureActivityEvidence(
       [

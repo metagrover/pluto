@@ -43,6 +43,7 @@ import {
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
 import { createPauseReasonCoordinator } from './pauseReasonCoordinator';
+import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
   normalizeCheckpointWords,
   transcribeJournalAlignedAudio,
@@ -116,6 +117,13 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
 
 let win: BrowserWindow | null;
 let tray: Tray | null = null;
+const postMeetingBackgroundActivity = createPostMeetingBackgroundActivity(
+  (allowed) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.setBackgroundThrottling(allowed);
+    }
+  },
+);
 
 const getPreloadPath = () => {
   const preloadPathMjs = path.join(__dirname, 'preload.mjs');
@@ -140,6 +148,7 @@ function createWindow() {
 
   // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
+    postMeetingBackgroundActivity.reset();
     win?.webContents.send('main-process-message', new Date().toLocaleString());
   });
   win.webContents.on('will-prevent-unload', () => {
@@ -318,6 +327,17 @@ app.whenReady().then(async () => {
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
+
+  ipcMain.handle(
+    'SET_POST_MEETING_PROCESSING_ACTIVE',
+    (_event, { runId, active }) => {
+      postMeetingBackgroundActivity.setActive(
+        String(runId || ''),
+        active === true,
+      );
+      return { activeRuns: postMeetingBackgroundActivity.activeCount() };
+    },
+  );
 
   // Local transcription handlers. IPC names remain stable for compatibility.
   ipcMain.handle('WHISPERX_CHECK_PYTHON', async () => {
