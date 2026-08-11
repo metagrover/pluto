@@ -1,542 +1,439 @@
-# Memory Dreaming Engine Implementation Plan
+# Proposal-First Memory Dreaming Engine Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+**Issue:** [#586](https://github.com/metagrover/pluto/issues/586)
+**Design:** `docs/superpowers/specs/2026-08-04-memory-dreaming-engine-design.md`
+**Related foundation:** [#594](https://github.com/metagrover/pluto/issues/594)
+**Status:** Ready for issue-sized implementation slices after this design PR lands
 
-**Goal:** Implement an asynchronous background Memory Dreaming Engine that extracts dirty entity subgraphs, reconciles temporal state updates, deduplicates nodes, re-synthesizes narrative profiles across meetings, and exposes diffs in a React UI Dream Log Drawer.
+## Goal
 
-**Architecture:** Electron main process coordinator coupled with SQLite schema updates (`dirty` flags, `knowledge_dreaming_runs`), LLM cluster synthesis, and React IPC channel bindings with single-click revert support.
+Deliver a local background consolidation system that turns bounded cross-meeting evidence into inspectable proposals, validates every proposal deterministically, applies only risk-policy-approved changes, and restores applied changes exactly.
 
-**Tech Stack:** TypeScript, Electron, SQLite (knex/better-sqlite3), React, Vitest.
+The model never receives direct database authority. Qwen is a candidate to benchmark, not a preselected autonomous decision-maker.
 
----
+## Delivery rules
 
-### Task 1: Database Migration and Type Definitions
+- Use issue-driven development. Split this parent outcome into focused implementation issues and PRs rather than landing the whole engine at once.
+- Follow TDD for all lifecycle, validation, reconciliation, and persistence logic.
+- Keep production diagnostics content-free.
+- Preserve immutable meeting transcripts and episodic evidence.
+- Reuse #594 provider capabilities and benchmark infrastructure instead of building a second Ollama transport.
+- Do not enable auto-application until the dreaming-specific release gate passes and the decision log is updated.
+- Re-run final verification on the final merged HEAD of every slice.
 
-**Files:**
-- Modify: `src/api/knowledgeWorkspace.ts`
+## Target architecture
+
+```text
+dirty revisions -> bounded cluster -> model proposal -> deterministic validation
+                                                   -> persisted proposal
+                                                   -> review/risk policy
+                                                   -> atomic application
+                                                   -> complete restoration snapshot
+```
+
+## Slice 1: Persistence types and lifecycle contract
+
+**Likely files**
+
 - Create: `electron/dreaming/types.ts`
-- Test: `electron/dreaming/__tests__/types.test.ts`
+- Test: `tests/unit/dreamingTypes.test.ts`
+- Modify: `src/api/knowledgeWorkspace.ts` only if renderer-facing types belong there
 
-- [ ] **Step 1: Write the failing test for Dreaming Types and Interfaces**
+### RED
 
-Create `electron/dreaming/__tests__/types.test.ts`:
-```typescript
-import { describe, it, expect } from 'vitest';
-import type { KnowledgeDreamingRun, KnowledgeDreamingDiffPayload } from '../types';
+Write tests that require:
 
-describe('KnowledgeDreamingRun Type Structure', () => {
-  it('instantiates valid dreaming run payload', () => {
-    const diff: KnowledgeDreamingDiffPayload = {
-      mergedNodes: [{ winnerId: 'n1', loserId: 'n2', mergedLabel: 'Project Titan', reassignedEdgeIds: ['e1'] }],
-      updatedEdges: [{ edgeId: 'e1', oldState: 'proposed', newState: 'active', reason: 'Verified in meeting 2' }],
-      rewrittenSummaries: [{ entityId: 'n1', entityLabel: 'Project Titan', previousSentenceCount: 1, newSentenceCount: 3, updatedAt: '2026-08-04T22:00:00Z' }],
-    };
+- finite run states: queued, running, cancelling, proposed, completed, failed, cancelled, and reverted;
+- proposal states: pending review, approved, rejected, applied, reverted, and invalidated;
+- explicit proposal kind and risk tier;
+- stable source and evidence references;
+- model, prompt version, generation configuration, lease token, and source revision metadata;
+- content-free error categories rather than raw model or evidence output.
 
-    const run: KnowledgeDreamingRun = {
-      id: 'run-123',
-      triggerType: 'idle',
-      status: 'completed',
-      clustersProcessed: 1,
-      nodesMergedCount: 1,
-      edgesUpdatedCount: 1,
-      summariesRewrittenCount: 1,
-      diff,
-      startedAt: '2026-08-04T22:00:00Z',
-      completedAt: '2026-08-04T22:01:00Z',
-    };
+### GREEN
 
-    expect(run.status).toBe('completed');
-    expect(run.diff.mergedNodes).toHaveLength(1);
-  });
-});
-```
+Implement the smallest serializable types and runtime parsers. Reject unknown lifecycle states and unsafe payload shapes at the boundary.
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pnpm run test electron/dreaming/__tests__/types.test.ts`
-Expected: FAIL with "Cannot find module '../types'"
-
-- [ ] **Step 3: Create `electron/dreaming/types.ts`**
-
-```typescript
-export type DreamingTriggerType = 'idle' | 'manual';
-export type DreamingRunStatus = 'running' | 'completed' | 'failed';
-
-export interface DreamingNodeMergeDiff {
-  winnerId: string;
-  loserId: string;
-  mergedLabel: string;
-  reassignedEdgeIds: string[];
-}
-
-export interface DreamingEdgeStatusDiff {
-  edgeId: string;
-  oldState: string;
-  newState: string;
-  reason: string;
-}
-
-export interface DreamingSummaryDiff {
-  entityId: string;
-  entityLabel: string;
-  previousSentenceCount: number;
-  newSentenceCount: number;
-  updatedAt: string;
-}
-
-export interface KnowledgeDreamingDiffPayload {
-  mergedNodes: DreamingNodeMergeDiff[];
-  updatedEdges: DreamingEdgeStatusDiff[];
-  rewrittenSummaries: DreamingSummaryDiff[];
-}
-
-export interface KnowledgeDreamingRun {
-  id: string;
-  triggerType: DreamingTriggerType;
-  status: DreamingRunStatus;
-  clustersProcessed: number;
-  nodesMergedCount: number;
-  edgesUpdatedCount: number;
-  summariesRewrittenCount: number;
-  diff: KnowledgeDreamingDiffPayload;
-  errorMessage?: string;
-  startedAt: string;
-  completedAt?: string;
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pnpm run test electron/dreaming/__tests__/types.test.ts`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+### Verify
 
 ```bash
-git add electron/dreaming/types.ts electron/dreaming/__tests__/types.test.ts
-git commit -m "feat(dreaming): add core dreaming types and schemas"
+pnpm exec vitest run tests/unit/dreamingTypes.test.ts
 ```
 
----
+## Slice 2: Database schema, proposal store, and stale-run recovery
 
-### Task 2: Dirty Cluster Extractor
+**Likely files**
 
-**Files:**
-- Create: `electron/dreaming/clusterExtractor.ts`
-- Test: `electron/dreaming/__tests__/clusterExtractor.test.ts`
+- Modify: `electron/db.ts`
+- Test: `tests/unit/dreamingPersistence.test.ts`
 
-- [ ] **Step 1: Write failing test for `ClusterExtractor`**
+### RED
 
-Create `electron/dreaming/__tests__/clusterExtractor.test.ts`:
-```typescript
-import { describe, it, expect } from 'vitest';
-import { groupDirtyNodesIntoClusters, EntityClusterInput } from '../clusterExtractor';
+Cover:
 
-describe('ClusterExtractor', () => {
-  it('groups connected dirty nodes into single cluster', () => {
-    const nodes: EntityClusterInput['nodes'] = [
-      { id: 'n1', label: 'Project Alpha', dirty: 1 },
-      { id: 'n2', label: 'Alpha Launch', dirty: 1 },
-      { id: 'n3', label: 'Unrelated Entity', dirty: 0 },
-    ];
-    const edges: EntityClusterInput['edges'] = [
-      { id: 'e1', source_entity_id: 'n1', target_entity_id: 'n2' },
-    ];
+- idempotent schema migration;
+- run and proposal round trips;
+- revision and lease-token persistence;
+- one active writer per cluster;
+- stale running/cancelling leases resolving to a truthful terminal state on startup;
+- no transcript text, evidence quote, identity, or model response in content-free metrics;
+- foreign-key cleanup that cannot remove immutable meeting evidence.
 
-    const clusters = groupDirtyNodesIntoClusters(nodes, edges);
-    expect(clusters).toHaveLength(1);
-    expect(clusters[0].nodes.map(n => n.id)).toEqual(['n1', 'n2']);
-  });
-});
-```
+### GREEN
 
-- [ ] **Step 2: Run test to verify it fails**
+Add tables and indexes following existing `electron/db.ts` migration conventions. Store proposal payloads and restoration snapshots separately from live knowledge state. Expose narrow prepared-statement helpers rather than raw SQL to the model coordinator.
 
-Run: `pnpm run test electron/dreaming/__tests__/clusterExtractor.test.ts`
-Expected: FAIL with "Cannot find module '../clusterExtractor'"
-
-- [ ] **Step 3: Implement `electron/dreaming/clusterExtractor.ts`**
-
-```typescript
-export interface NodeMinimal {
-  id: string;
-  label: string;
-  dirty: number;
-}
-
-export interface EdgeMinimal {
-  id: string;
-  source_entity_id: string;
-  target_entity_id: string;
-}
-
-export interface EntityClusterInput {
-  nodes: NodeMinimal[];
-  edges: EdgeMinimal[];
-}
-
-export interface EntityCluster {
-  id: string;
-  nodes: NodeMinimal[];
-  edges: EdgeMinimal[];
-}
-
-export function groupDirtyNodesIntoClusters(
-  nodes: NodeMinimal[],
-  edges: EdgeMinimal[]
-): EntityCluster[] {
-  const dirtyNodes = nodes.filter(n => n.dirty === 1);
-  if (dirtyNodes.length === 0) return [];
-
-  const dirtyIds = new Set(dirtyNodes.map(n => n.id));
-  const visited = new Set<string>();
-  const clusters: EntityCluster[] = [];
-
-  // Build adjacency list
-  const adj = new Map<string, Set<string>>();
-  for (const node of nodes) {
-    adj.set(node.id, new Set());
-  }
-  for (const edge of edges) {
-    adj.get(edge.source_entity_id)?.add(edge.target_entity_id);
-    adj.get(edge.target_entity_id)?.add(edge.source_entity_id);
-  }
-
-  let clusterIdx = 1;
-  for (const dirtyNode of dirtyNodes) {
-    if (visited.has(dirtyNode.id)) continue;
-
-    const clusterNodes: NodeMinimal[] = [];
-    const queue = [dirtyNode.id];
-    visited.add(dirtyNode.id);
-
-    while (queue.length > 0) {
-      const currentId = queue.shift()!;
-      const nodeObj = nodes.find(n => n.id === currentId);
-      if (nodeObj) clusterNodes.push(nodeObj);
-
-      const neighbors = adj.get(currentId) || new Set();
-      for (const neighborId of neighbors) {
-        if (!visited.has(neighborId) && dirtyIds.has(neighborId)) {
-          visited.add(neighborId);
-          queue.push(neighborId);
-        }
-      }
-    }
-
-    const clusterNodeIds = new Set(clusterNodes.map(n => n.id));
-    const clusterEdges = edges.filter(
-      e => clusterNodeIds.has(e.source_entity_id) && clusterNodeIds.has(e.target_entity_id)
-    );
-
-    clusters.push({
-      id: `cluster-${clusterIdx++}`,
-      nodes: clusterNodes,
-      edges: clusterEdges,
-    });
-  }
-
-  return clusters;
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pnpm run test electron/dreaming/__tests__/clusterExtractor.test.ts`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+### Verify
 
 ```bash
-git add electron/dreaming/clusterExtractor.ts electron/dreaming/__tests__/clusterExtractor.test.ts
-git commit -m "feat(dreaming): implement cluster extractor for dirty nodes"
+pnpm exec vitest run tests/unit/dreamingPersistence.test.ts
 ```
 
----
+## Slice 3: Revision-safe dirty tracking
 
-### Task 3: Graph Reconciler and Rollback Engine
+**Likely files**
 
-**Files:**
-- Create: `electron/dreaming/graphReconciler.ts`
-- Test: `electron/dreaming/__tests__/graphReconciler.test.ts`
+- Modify: `electron/db.ts`
+- Modify: `electron/knowledgeV2.ts`
+- Modify: `electron/knowledgeSynthesis.ts`
+- Modify: `electron/workingMemory.ts`
+- Test: `tests/unit/dreamingDirtyTracking.test.ts`
 
-- [ ] **Step 1: Write failing test for `GraphReconciler`**
+### RED
 
-Create `electron/dreaming/__tests__/graphReconciler.test.ts`:
-```typescript
-import { describe, it, expect } from 'vitest';
-import { reconcileNodeMerge, ReconcileMergeInput } from '../graphReconciler';
+Prove that:
 
-describe('GraphReconciler', () => {
-  it('calculates node merge diff correctly', () => {
-    const input: ReconcileMergeInput = {
-      winnerId: 'node-1',
-      loserId: 'node-2',
-      mergedLabel: 'Project Alpha',
-      edges: [
-        { id: 'e1', source_entity_id: 'node-2', target_entity_id: 'node-3' },
-      ],
-    };
+- relevant semantic writes advance a durable revision or source cursor;
+- claiming work records the exact revision;
+- completion clears dirty state only when the revision is unchanged;
+- a concurrent correction or meeting update remains dirty;
+- failed and cancelled runs do not lose dirty work;
+- marking derived knowledge dirty never mutates canonical transcript state.
 
-    const diff = reconcileNodeMerge(input);
-    expect(diff.winnerId).toBe('node-1');
-    expect(diff.loserId).toBe('node-2');
-    expect(diff.reassignedEdgeIds).toContain('e1');
-  });
-});
-```
+### GREEN
 
-- [ ] **Step 2: Run test to verify it fails**
+Introduce the smallest revision-aware dirty contract compatible with current knowledge documents, corrections, entities, and working-memory snapshots. Avoid a single boolean when it cannot distinguish changes created during a run.
 
-Run: `pnpm run test electron/dreaming/__tests__/graphReconciler.test.ts`
-Expected: FAIL with "Cannot find module '../graphReconciler'"
-
-- [ ] **Step 3: Implement `electron/dreaming/graphReconciler.ts`**
-
-```typescript
-import type { DreamingNodeMergeDiff } from './types';
-
-export interface ReconcileMergeInput {
-  winnerId: string;
-  loserId: string;
-  mergedLabel: string;
-  edges: Array<{ id: string; source_entity_id: string; target_entity_id: string }>;
-}
-
-export function reconcileNodeMerge(input: ReconcileMergeInput): DreamingNodeMergeDiff {
-  const reassignedEdgeIds = input.edges
-    .filter(e => e.source_entity_id === input.loserId || e.target_entity_id === input.loserId)
-    .map(e => e.id);
-
-  return {
-    winnerId: input.winnerId,
-    loserId: input.loserId,
-    mergedLabel: input.mergedLabel,
-    reassignedEdgeIds,
-  };
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pnpm run test electron/dreaming/__tests__/graphReconciler.test.ts`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+### Verify
 
 ```bash
-git add electron/dreaming/graphReconciler.ts electron/dreaming/__tests__/graphReconciler.test.ts
-git commit -m "feat(dreaming): implement graph reconciler logic"
+pnpm exec vitest run tests/unit/dreamingDirtyTracking.test.ts
 ```
 
----
+## Slice 4: Deterministic cluster builder
 
-### Task 4: React Dream Log Drawer UI Component
+**Likely files**
 
-**Files:**
-- Create: `src/components/knowledge/DreamLogDrawer.tsx`
-- Test: `src/components/knowledge/__tests__/DreamLogDrawer.test.tsx`
+- Create: `electron/dreaming/clusterBuilder.ts`
+- Test: `tests/unit/dreamingClusterBuilder.test.ts`
 
-- [ ] **Step 1: Write failing test for `DreamLogDrawer`**
+### RED
 
-Create `src/components/knowledge/__tests__/DreamLogDrawer.test.tsx`:
-```typescript
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import React from 'react';
-import { DreamLogDrawer } from '../DreamLogDrawer';
-import type { KnowledgeDreamingRun } from '../../../../electron/dreaming/types';
+Cover:
 
-describe('DreamLogDrawer Component', () => {
-  it('renders dreaming run list and metrics', () => {
-    const mockRuns: KnowledgeDreamingRun[] = [
-      {
-        id: 'run-1',
-        triggerType: 'idle',
-        status: 'completed',
-        clustersProcessed: 2,
-        nodesMergedCount: 1,
-        edgesUpdatedCount: 3,
-        summariesRewrittenCount: 2,
-        diff: { mergedNodes: [], updatedEdges: [], rewrittenSummaries: [] },
-        startedAt: '2026-08-04T22:00:00Z',
-      },
-    ];
+- bounded one-hop grouping;
+- stable ordering and IDs;
+- chronological source records;
+- active corrections included as constraints;
+- look-alike entities remaining separate candidates;
+- cluster limits for nodes, evidence records, and estimated tokens;
+- no unrestricted transcript search;
+- no records outside the claimed revision set;
+- deterministic output for the same database snapshot.
 
-    render(<DreamLogDrawer isOpen={true} onClose={() => {}} runs={mockRuns} />);
-    expect(screen.getByText(/Knowledge Consolidation History/i)).toBeInTheDocument();
-    expect(screen.getByText(/Idle Consolidation/i)).toBeInTheDocument();
-  });
-});
-```
+### GREEN
 
-- [ ] **Step 2: Run test to verify it fails**
+Build a content-bearing in-memory cluster package for local inference and a separate content-free metrics summary. Generate candidate pairs and conflicts deterministically. The model receives only supplied stable IDs.
 
-Run: `pnpm run test src/components/knowledge/__tests__/DreamLogDrawer.test.tsx`
-Expected: FAIL with "Cannot find module '../DreamLogDrawer'"
-
-- [ ] **Step 3: Implement `src/components/knowledge/DreamLogDrawer.tsx`**
-
-```tsx
-import React from 'react';
-import type { KnowledgeDreamingRun } from '../../../electron/dreaming/types';
-
-interface DreamLogDrawerProps {
-  isOpen: boolean;
-  onClose: () => void;
-  runs: KnowledgeDreamingRun[];
-  onRevertRun?: (runId: string) => void;
-}
-
-export const DreamLogDrawer: React.FC<DreamLogDrawerProps> = ({
-  isOpen,
-  onClose,
-  runs,
-  onRevertRun,
-}) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-y-0 right-0 w-96 bg-zinc-900 border-l border-zinc-800 shadow-xl z-50 flex flex-col p-4 text-zinc-100">
-      <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
-        <h2 className="text-lg font-semibold">Knowledge Consolidation History</h2>
-        <button
-          onClick={onClose}
-          className="text-zinc-400 hover:text-white px-2 py-1 rounded"
-        >
-          ✕
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto py-4 space-y-4">
-        {runs.length === 0 ? (
-          <p className="text-sm text-zinc-500">No dreaming consolidation runs recorded yet.</p>
-        ) : (
-          runs.map(run => (
-            <div key={run.id} className="p-3 bg-zinc-800/60 rounded-lg border border-zinc-700/50 space-y-2">
-              <div className="flex items-center justify-between text-xs font-medium">
-                <span className="capitalize px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
-                  {run.triggerType} Consolidation
-                </span>
-                <span className="text-zinc-400">
-                  {new Date(run.startedAt).toLocaleTimeString()}
-                </span>
-              </div>
-
-              <div className="text-xs text-zinc-300 grid grid-cols-2 gap-2 pt-1">
-                <div>Nodes Merged: <span className="font-semibold text-white">{run.nodesMergedCount}</span></div>
-                <div>Edges Updated: <span className="font-semibold text-white">{run.edgesUpdatedCount}</span></div>
-                <div>Summaries: <span className="font-semibold text-white">{run.summariesRewrittenCount}</span></div>
-                <div>Clusters: <span className="font-semibold text-white">{run.clustersProcessed}</span></div>
-              </div>
-
-              {onRevertRun && (
-                <button
-                  onClick={() => onRevertRun(run.id)}
-                  className="w-full text-xs py-1 mt-2 text-red-400 hover:bg-red-950/40 rounded border border-red-800/40 transition-colors"
-                >
-                  Revert Consolidation Pass
-                </button>
-              )}
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-};
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pnpm run test src/components/knowledge/__tests__/DreamLogDrawer.test.tsx`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+### Verify
 
 ```bash
-git add src/components/knowledge/DreamLogDrawer.tsx src/components/knowledge/__tests__/DreamLogDrawer.test.tsx
-git commit -m "feat(ui): add DreamLogDrawer component for viewing consolidation diffs"
+pnpm exec vitest run tests/unit/dreamingClusterBuilder.test.ts
 ```
 
----
+## Slice 5: Dreaming fixture corpus and scorer
 
-### Task 5: Memory Decay & Correction Feedback Integrator
+**Likely files**
 
-**Files:**
-- Create: `electron/dreaming/memoryDecay.ts`
-- Test: `electron/dreaming/__tests__/memoryDecay.test.ts`
+- Create: `scripts/baselines/memory-dreaming/`
+- Create: `scripts/lib/memory_dreaming_quality.js`
+- Create: `scripts/evaluate_memory_dreaming_quality.js`
+- Modify: `package.json`
+- Test: `tests/unit/memoryDreamingQuality.test.ts`
 
-- [ ] **Step 1: Write failing test for `memoryDecay`**
+### RED
 
-Create `electron/dreaming/__tests__/memoryDecay.test.ts`:
-```typescript
-import { describe, it, expect } from 'vitest';
-import { calculateNodeDecay } from '../memoryDecay';
+Define human-reviewed expectations for:
 
-describe('Memory Decay Calculator', () => {
-  it('decays saliency score based on unreferenced days', () => {
-    const initialSaliency = 1.0;
-    const daysUnreferenced = 10;
-    const decayed = calculateNodeDecay(initialSaliency, daysUnreferenced);
+- true aliases;
+- similar but distinct entities;
+- renamed projects;
+- explicit temporal transitions;
+- competing proposals and unresolved conflicts;
+- later corrections and negated facts;
+- stale facts and rare-but-important entities;
+- unknown identifiers and unsupported evidence;
+- cancellation, revision races, and restoration.
 
-    // 1.0 * (0.95 ^ 10) ≈ 0.5987
-    expect(decayed.newSaliency).toBeCloseTo(0.5987, 3);
-    expect(decayed.isArchived).toBe(false);
-  });
+### GREEN
 
-  it('marks node as archived when saliency drops below threshold', () => {
-    const initialSaliency = 0.15;
-    const daysUnreferenced = 30;
-    const decayed = calculateNodeDecay(initialSaliency, daysUnreferenced);
+Implement a content-free scorer for merge precision/recall, false merges, temporal accuracy, correction adherence, unsupported inference, exact evidence support, schema/fallback rate, cancellation integrity, and restoration fidelity.
 
-    expect(decayed.isArchived).toBe(true);
-  });
-});
-```
+Add `pnpm run benchmark:memory-dreaming` for checked-in outputs and a separate opt-in real-provider mode for local model execution.
 
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pnpm run test electron/dreaming/__tests__/memoryDecay.test.ts`
-Expected: FAIL with "Cannot find module '../memoryDecay'"
-
-- [ ] **Step 3: Implement `electron/dreaming/memoryDecay.ts`**
-
-```typescript
-export interface DecayResult {
-  newSaliency: number;
-  isArchived: boolean;
-}
-
-export function calculateNodeDecay(
-  currentSaliency: number,
-  daysUnreferenced: number,
-  archiveThreshold = 0.1
-): DecayResult {
-  const decayFactor = Math.pow(0.95, daysUnreferenced);
-  const newSaliency = currentSaliency * decayFactor;
-  return {
-    newSaliency,
-    isArchived: newSaliency < archiveThreshold,
-  };
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pnpm run test electron/dreaming/__tests__/memoryDecay.test.ts`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+### Verify
 
 ```bash
-git add electron/dreaming/memoryDecay.ts electron/dreaming/__tests__/memoryDecay.test.ts
-git commit -m "feat(dreaming): implement memory decay calculation and archival logic"
+pnpm exec vitest run tests/unit/memoryDreamingQuality.test.ts
+pnpm run benchmark:memory-dreaming
 ```
 
----
+## Slice 6: Shared Ollama capability prerequisite
 
-## Execution Handoff
+**Owner:** #594 unless already shipped
 
-Plan complete and saved to `docs/superpowers/plans/2026-08-04-memory-dreaming-engine.md`.
+Before the synthesis engine uses Qwen, verify the shared provider supports:
 
+- explicit structured-output thinking control;
+- task-specific context, output, timeout, and keep-alive policy;
+- cancellation that destroys or invalidates the active request;
+- model and generation-configuration provenance;
+- malformed/truncated response classification;
+- a final JSON budget independent from any optional reasoning pass.
+
+Do not add Qwen model-name substring checks inside dreaming code. Use a provider capability or explicit task configuration.
+
+### Gate
+
+Focused provider tests from #594 pass and a Qwen structured probe completes without fallback using the intended final-output configuration.
+
+## Slice 7: Structured synthesis contract
+
+**Likely files**
+
+- Create: `electron/dreaming/prompts.ts`
+- Create: `electron/dreaming/synthesisEngine.ts`
+- Modify: `electron/llm/analysisTypes.ts` only if the shared provider needs a new task type
+- Test: `tests/unit/dreamingSynthesisEngine.test.ts`
+
+### RED
+
+Require:
+
+- only supplied IDs in output;
+- evidence references for every proposal and narrative fact;
+- explicit `unresolved` and `no_change` results;
+- correction constraints retained;
+- no database-operation language in the schema;
+- Qwen final structured pass with thinking disabled or a separately budgeted tested two-pass flow;
+- malformed, truncated, timed-out, and cancelled output never becoming an empty successful run.
+
+### GREEN
+
+Implement one bounded-cluster call at a time through `UnifiedLLMProvider`. Persist model, prompt version, and generation configuration with the run. Keep prompt content out of logs.
+
+### Verify
+
+```bash
+pnpm exec vitest run tests/unit/dreamingSynthesisEngine.test.ts tests/unit/unifiedProvider.test.ts
+```
+
+## Slice 8: Deterministic validator and proposal persistence
+
+**Likely files**
+
+- Create: `electron/dreaming/proposalValidator.ts`
+- Create: `electron/dreaming/proposalService.ts`
+- Test: `tests/unit/dreamingProposalValidator.test.ts`
+
+### RED
+
+Reject:
+
+- unknown graph or source IDs;
+- missing or unresolvable evidence;
+- unsupported facts after documented normalization;
+- ignored corrections;
+- illegal temporal transitions;
+- self-edges, duplicate invariants, and provenance loss;
+- mutually inconsistent proposals;
+- expired leases, cancelled runs, or changed source revisions.
+
+Prove rejected output records only content-free categories and cannot reach approved/applied state.
+
+### GREEN
+
+Validate first, then persist proposals separately from live semantic state. Classify risk in deterministic code. Do not trust a model-provided confidence or risk label.
+
+### Verify
+
+```bash
+pnpm exec vitest run tests/unit/dreamingProposalValidator.test.ts
+```
+
+## Slice 9: Transactional application and exact restoration
+
+**Likely files**
+
+- Create: `electron/dreaming/reconciler.ts`
+- Create: `electron/dreaming/restoration.ts`
+- Modify: `electron/db.ts`
+- Test: `tests/unit/dreamingReconciler.test.ts`
+- Test: `tests/unit/dreamingRestoration.test.ts`
+
+### RED
+
+Cover:
+
+- risk-tier and review-state enforcement;
+- precondition recheck at application time;
+- complete before-and-after rows and associations;
+- atomic merge, transition, summary refresh, and archive-candidate handling;
+- downstream working-memory invalidation;
+- rollback on injected database failures;
+- exact restoration of nodes, edges, documents, summaries, provenance, confidence, archive state, and source associations;
+- safe refusal when later runs make direct restoration invalid;
+- immutable episodic evidence throughout apply and restore.
+
+### GREEN
+
+Implement application and restoration as explicit transactions. A diff with counts or reassigned IDs alone is not accepted as a restoration record.
+
+### Verify
+
+```bash
+pnpm exec vitest run tests/unit/dreamingReconciler.test.ts tests/unit/dreamingRestoration.test.ts
+```
+
+## Slice 10: Coordinator, priority, and resource lifecycle
+
+**Likely files**
+
+- Create: `electron/dreaming/coordinator.ts`
+- Create: `electron/dreaming/eligibility.ts`
+- Modify: `electron/main.ts`
+- Modify: `electron/serializedTaskGate.ts` only if shared priority/cancellation support is required
+- Test: `tests/unit/dreamingCoordinator.test.ts`
+- Test: `tests/unit/dreamingEligibility.test.ts`
+
+### RED
+
+Prove:
+
+- automatic runs require idle state and AC power;
+- manual runs still obey recording, foreground, memory, and mutation safeguards;
+- recording, transcript validation, or foreground analysis preempts dreaming;
+- eligibility is rechecked between clusters;
+- late model responses cannot persist after cancellation;
+- startup resolves stale leases;
+- memory and thermal pressure delay or stop work;
+- model unload occurs after completion, cancellation, and failure;
+- cluster, context, output, retry, and total-run caps terminate predictably;
+- only one run owns a cluster.
+
+### GREEN
+
+Process clusters sequentially under a generation/lease token. Integrate with current serialized local-model work rather than creating a competing queue. Use a dreaming-specific keep-alive that unloads Qwen promptly.
+
+### Verify
+
+```bash
+pnpm exec vitest run tests/unit/dreamingCoordinator.test.ts tests/unit/dreamingEligibility.test.ts tests/unit/serializedTaskGate.test.ts
+```
+
+## Slice 11: IPC and Dream Log review UI
+
+**Likely files**
+
+- Modify: `electron/main.ts`
+- Modify: Electron preload allowlist and browser fallback files used by current IPC conventions
+- Modify: `src/api/knowledgeWorkspace.ts`
+- Create: `src/components/KnowledgeGraph/DreamLogDrawer.tsx`
+- Create: `src/components/KnowledgeGraph/DreamLogDrawer.css`
+- Modify: `src/components/KnowledgeGraph/MainStage.tsx`
+- Test: `tests/unit/dreamingApi.test.ts`
+- Test: `tests/unit/DreamLogDrawer.test.tsx`
+
+### RED
+
+Cover:
+
+- allowlisted start, list, review, apply, and restore IPC contracts;
+- proposed/applied/rejected/invalidated/cancelled/failed/reverted presentation;
+- evidence and affected-record disclosure without production logging;
+- individual accept/reject and safe batch review;
+- disabled actions for stale proposals and unsafe restoration;
+- no success copy for fallback or empty analysis;
+- keyboard, focus, loading, error, and reduced-motion behavior.
+
+### GREEN
+
+Build the smallest review-first surface within current Knowledge Workspace patterns. Avoid utility-class assumptions not present in Pluto's CSS system. Keep manual consolidation status truthful and interruptible.
+
+### Verify
+
+```bash
+pnpm exec vitest run tests/unit/dreamingApi.test.ts tests/unit/DreamLogDrawer.test.tsx tests/unit/knowledgeMainStage.test.tsx
+```
+
+Perform real Electron visual acceptance before landing the UI slice.
+
+## Slice 12: End-to-end model evaluation and controlled enablement
+
+### Real-provider benchmark
+
+Run Phi, Qwen, and the selected third local candidate through the exact production cluster builder, prompt, schema, validator, and scorer. Use deterministic seeds or a documented repeat count. Record:
+
+- model tag and hardware;
+- prompt and fixture revisions;
+- context/output/temperature/thinking/keep-alive configuration;
+- quality metrics;
+- schema and fallback counts;
+- latency and memory pressure;
+- cancellation and unload behavior.
+
+### Release gates
+
+- zero false merges in release fixtures;
+- 100% resolvable evidence for every auto-applicable proposal;
+- zero post-cancellation mutations;
+- zero dirty-revision loss;
+- exact restoration for every applied fixture;
+- no structured fallback presented as success;
+- safe operation on the supported 16 GB Apple Silicon baseline;
+- foreground recording and analysis remain responsive during attempted preemption.
+
+### Dogfood
+
+Use an isolated Pluto profile and content-free diagnostics. Review every proposal manually. Verify that a full run can be cancelled by recording start, resumed later without duplicate application, reviewed, applied, and restored.
+
+Do not enable an auto-application tier until the benchmark passes and `docs/decisions.md` records the resulting policy. The first release may remain entirely review-first.
+
+## Final verification for every shipping slice
+
+```bash
+pnpm test
+pnpm run lint
+pnpm run changelog:check
+pnpm run audit:high
+```
+
+For model or lifecycle slices, also run:
+
+```bash
+pnpm run benchmark:meeting-notes-quality
+pnpm run benchmark:memory-dreaming
+```
+
+Run the production Vite/Electron bundle when main-process, preload, IPC, or renderer code changes. Report existing repository-wide type errors separately; do not claim they were introduced or fixed without changed-file evidence.
+
+## Traceability at completion
+
+Each implementation PR must:
+
+- link its child issue and parent #586;
+- state which risk tier and lifecycle states it changes;
+- include content-free verification evidence;
+- update #586 when scope or gates change;
+- record any durable policy change in `docs/decisions.md`;
+- add one uniquely named changelog fragment when product behavior ships.
