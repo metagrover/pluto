@@ -4006,20 +4006,6 @@ export const AudioManager = ({
     setIsProcessing(true);
 
     const liveQueueAtStop = processingQueueRef.current;
-    liveTranscriptionGenerationRef.current += 1;
-    const discardedLiveWork = liveQueueAtStop.close();
-    if (discardedLiveWork.discardedSequence !== null) {
-      console.warn('[Pluto] Discarded queued live transcription at stop');
-    }
-    const cancelLiveTranscription = window.ipcRenderer
-      .invoke('CANCEL_MEETING_TRANSCRIPTION', stopSnapshot.meetingId)
-      .catch((error) => {
-        console.warn(
-          '[Pluto] Failed to cancel active live transcription:',
-          error,
-        );
-        return null;
-      });
 
     let primaryAudioPath = '';
     let systemAudioPath = '';
@@ -4143,11 +4129,30 @@ export const AudioManager = ({
       setIsRecording(false);
 
       await captureActivitySessionRef.current?.drain();
+      liveQueueAtStop.close({ drainQueued: true });
+      const finalIntervalSettled = await liveQueueAtStop.waitForIdle(2_500);
+      if (!finalIntervalSettled) {
+        const discardedLiveWork = liveQueueAtStop.close();
+        if (discardedLiveWork.discardedSequence !== null) {
+          console.warn(
+            '[Pluto] Discarded queued live transcription after stop-boundary timeout',
+          );
+        }
+      }
+      liveTranscriptionGenerationRef.current += 1;
+      await window.ipcRenderer
+        .invoke('CANCEL_MEETING_TRANSCRIPTION', stopSnapshot.meetingId)
+        .catch((error) => {
+          console.warn(
+            '[Pluto] Failed to cancel active live transcription:',
+            error,
+          );
+          return null;
+        });
       pendingMicChunksRef.current.clear();
       pendingSystemChunksRef.current.clear();
       zeroMicChunkStreakRef.current = 0;
-      await cancelLiveTranscription;
-      if (!(await liveQueueAtStop.waitForIdle(2_500))) {
+      if (!finalIntervalSettled) {
         console.warn(
           '[Pluto] Live transcription did not settle before finalization; stale results are fenced',
         );

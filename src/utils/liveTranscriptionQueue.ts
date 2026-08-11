@@ -9,6 +9,10 @@ type LiveTranscriptionQueueOptions = {
   onError?: (error: unknown) => void;
 };
 
+type LiveTranscriptionQueueCloseOptions = {
+  drainQueued?: boolean;
+};
+
 export type LiveTranscriptionQueueAdmission =
   | 'started'
   | 'queued'
@@ -20,6 +24,7 @@ export class LiveTranscriptionQueue {
   private active: QueuedJob | null = null;
   private queued: QueuedJob | null = null;
   private replacedCount = 0;
+  private drainQueuedAfterClose = false;
   private idleWaiters = new Set<() => void>();
   private readonly onError: (error: unknown) => void;
 
@@ -46,10 +51,15 @@ export class LiveTranscriptionQueue {
     return 'queued';
   }
 
-  close(): { discardedSequence: number | null } {
+  close(options: LiveTranscriptionQueueCloseOptions = {}): {
+    discardedSequence: number | null;
+  } {
     this.accepting = false;
-    const discardedSequence = this.queued?.sequence ?? null;
-    this.queued = null;
+    this.drainQueuedAfterClose = options.drainQueued === true;
+    const discardedSequence = this.drainQueuedAfterClose
+      ? null
+      : (this.queued?.sequence ?? null);
+    if (!this.drainQueuedAfterClose) this.queued = null;
     if (!this.active) this.resolveIdle();
     return { discardedSequence };
   }
@@ -90,8 +100,10 @@ export class LiveTranscriptionQueue {
       .finally(() => {
         if (this.active !== job) return;
         this.active = null;
-        const next = this.accepting ? this.queued : null;
+        const next =
+          this.accepting || this.drainQueuedAfterClose ? this.queued : null;
         this.queued = null;
+        this.drainQueuedAfterClose = false;
         if (next) this.start(next);
         else this.resolveIdle();
       });
