@@ -42,6 +42,7 @@ import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
+import { createPauseReasonCoordinator } from './pauseReasonCoordinator';
 import {
   normalizeCheckpointWords,
   transcribeJournalAlignedAudio,
@@ -237,24 +238,30 @@ import { whisperX } from './whisperx';
 const activeMeetingTasks = new Map<string, AbortController>();
 let activeTranscriptionCount = 0;
 const activeTranscriptionMeetings = new Map<string, number>();
+const knowledgeSynthesisPause = createPauseReasonCoordinator(
+  setKnowledgeDocSynthesisPaused,
+);
 
 function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
+  knowledgeSynthesisPause.acquire('transcription');
   if (activeTranscriptionCount === 1) {
     console.log(
       '[Pluto] Pausing queued knowledge-doc synthesis during transcription',
     );
-    setKnowledgeDocSynthesisPaused(true);
   }
 }
 
 function endTranscriptionWork() {
+  const hadActiveTranscription = activeTranscriptionCount > 0;
   activeTranscriptionCount = Math.max(0, activeTranscriptionCount - 1);
+  if (hadActiveTranscription) {
+    knowledgeSynthesisPause.release('transcription');
+  }
   if (activeTranscriptionCount === 0) {
     console.log(
       '[Pluto] Resuming queued knowledge-doc synthesis after transcription',
     );
-    setKnowledgeDocSynthesisPaused(false);
   }
 }
 
@@ -460,6 +467,7 @@ app.whenReady().then(async () => {
       const released = captureSessionLease.releaseOwner(owner.id);
       if (ownsNativeAudio) stopNativeAudioCapture();
       if (released) {
+        knowledgeSynthesisPause.release('capture');
         console.warn('[CaptureLease] released: owner_destroyed');
       }
     });
@@ -552,6 +560,9 @@ app.whenReady().then(async () => {
         throw error;
       }
       watchCaptureOwner(event.sender);
+      if (acquisition.status === 'acquired') {
+        knowledgeSynthesisPause.acquire('capture');
+      }
       try {
         const manifest = await createCaptureJournal(
           getMeetingArtifactsRootDir(),
@@ -571,10 +582,37 @@ app.whenReady().then(async () => {
           acquisition.status === 'acquired' &&
           captureSessionLease.release(normalizedMeetingId, event.sender.id)
         ) {
+          knowledgeSynthesisPause.release('capture');
           console.warn('[CaptureLease] released: journal_start_failed');
         }
         throw error;
       }
+    },
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_ABORT_START',
+    async (event, { meetingId } = {}) => {
+      const normalizedMeetingId = String(meetingId || '');
+      captureSessionLease.requireRecordingOwner(
+        normalizedMeetingId,
+        event.sender.id,
+      );
+      if (nativeAudioOwner?.id === event.sender.id) {
+        stopNativeAudioCapture();
+      }
+      try {
+        await deleteCaptureJournal(
+          getMeetingArtifactsRootDir(),
+          normalizedMeetingId,
+        );
+      } finally {
+        if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
+          knowledgeSynthesisPause.release('capture');
+          console.warn('[CaptureLease] released: capture_start_aborted');
+        }
+      }
+      return true;
     },
   );
 
@@ -714,11 +752,13 @@ app.whenReady().then(async () => {
         });
       } catch (error) {
         if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
+          knowledgeSynthesisPause.release('capture');
           console.warn('[CaptureLease] released: seal_failed_after_stop');
         }
         throw error;
       }
       if (captureSessionLease.release(normalizedMeetingId, event.sender.id)) {
+        knowledgeSynthesisPause.release('capture');
         console.log('[CaptureLease] released: capture_sealed');
       }
       return manifest;
@@ -1466,7 +1506,7 @@ app.whenReady().then(async () => {
           downstreamState = null;
         }
         if (downstreamState !== 'processing') {
-          setKnowledgeDocSynthesisPaused(false);
+          knowledgeSynthesisPause.release('downstream');
         }
       }
       return result;
@@ -1478,7 +1518,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) => {
     const claimed = db.claimMeetingDownstreamProcessing(meetingId, lease);
-    if (claimed) setKnowledgeDocSynthesisPaused(true);
+    if (claimed) knowledgeSynthesisPause.acquire('downstream');
     return claimed;
   });
   ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) =>

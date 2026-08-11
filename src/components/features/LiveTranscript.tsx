@@ -1,6 +1,8 @@
 import { ArrowDown } from 'lucide-react';
 import {
   Fragment,
+  memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -8,18 +10,114 @@ import {
   useState,
 } from 'react';
 import {
-  advanceLiveTranscriptReveal,
-  createLiveTranscriptRevealState,
-  getActiveLiveTranscriptRevealId,
+  advanceTranscriptRevealText,
   getLiveTranscriptRevealDelay,
-  getPendingLiveTranscriptWordCount,
-  getRevealedTranscriptText,
-  reconcileLiveTranscriptReveal,
+  getPendingTranscriptWordCount,
 } from '../../utils/liveTranscriptReveal';
-import { buildLiveTranscriptTurns } from './liveTranscriptPresentation';
+import {
+  type LiveTranscriptTurn,
+  buildLiveTranscriptTurns,
+} from './liveTranscriptPresentation';
 import type { LiveTranscriptSegment } from './recordingWorkspaceModel';
 
 const LIVE_EDGE_TOLERANCE_PX = 48;
+
+const RevealedTranscriptText = memo(
+  ({
+    text,
+    revealOnMount,
+    prefersReducedMotion,
+    onRevealProgress,
+  }: {
+    text: string;
+    revealOnMount: boolean;
+    prefersReducedMotion: boolean;
+    onRevealProgress: () => void;
+  }) => {
+    const [revealedText, setRevealedText] = useState(() =>
+      revealOnMount && !prefersReducedMotion ? '' : text,
+    );
+
+    useEffect(() => {
+      setRevealedText((current) => {
+        if (prefersReducedMotion || !text.startsWith(current)) return text;
+        return current;
+      });
+    }, [prefersReducedMotion, text]);
+
+    useEffect(() => {
+      if (prefersReducedMotion) return;
+      const delay = getLiveTranscriptRevealDelay(
+        getPendingTranscriptWordCount(text, revealedText),
+      );
+      if (delay === null) return;
+      const timeout = window.setTimeout(
+        () =>
+          setRevealedText((current) =>
+            advanceTranscriptRevealText(text, current),
+          ),
+        delay,
+      );
+      return () => window.clearTimeout(timeout);
+    }, [prefersReducedMotion, revealedText, text]);
+
+    useLayoutEffect(onRevealProgress, [onRevealProgress, revealedText]);
+
+    const revealing = revealedText !== text;
+    return (
+      <>
+        <span className="transcript-revealed-text" aria-hidden="true">
+          {revealedText}
+        </span>
+        {revealing && (
+          <span className="transcript-typewriter-caret" aria-hidden="true" />
+        )}
+      </>
+    );
+  },
+);
+
+const TranscriptTurn = memo(
+  ({
+    turn,
+    newestSegmentId,
+    knownSegmentIds,
+    prefersReducedMotion,
+    onRevealProgress,
+  }: {
+    turn: LiveTranscriptTurn;
+    newestSegmentId: string | null;
+    knownSegmentIds: Set<string>;
+    prefersReducedMotion: boolean;
+    onRevealProgress: () => void;
+  }) => (
+    <article className="transcript-turn">
+      <div className="transcript-speaker">
+        <strong>{turn.speaker}</strong>
+        <time>{new Date(turn.timestampMs).toISOString().slice(14, 19)}</time>
+      </div>
+      <p>
+        {turn.segments.map((segment, index) => (
+          <Fragment key={segment.id}>
+            {index > 0 && <span aria-hidden="true"> </span>}
+            <RevealedTranscriptText
+              text={segment.text}
+              revealOnMount={
+                segment.id === newestSegmentId &&
+                !knownSegmentIds.has(segment.id)
+              }
+              prefersReducedMotion={prefersReducedMotion}
+              onRevealProgress={onRevealProgress}
+            />
+          </Fragment>
+        ))}
+        <span className="sr-only">
+          {turn.segments.map((segment) => segment.text).join(' ')}
+        </span>
+      </p>
+    </article>
+  ),
+);
 
 const usePrefersReducedMotion = () => {
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
@@ -45,11 +143,12 @@ export const LiveTranscript = ({
   const prefersReducedMotion = usePrefersReducedMotion();
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingLiveRef = useRef(true);
-  const [isFollowingLive, setIsFollowingLive] = useState(true);
-  const [revealState, setRevealState] = useState(() =>
-    createLiveTranscriptRevealState(segments),
+  const knownSegmentIdsRef = useRef(
+    new Set(segments.map((segment) => segment.id)),
   );
+  const [isFollowingLive, setIsFollowingLive] = useState(true);
   const turns = useMemo(() => buildLiveTranscriptTurns(segments), [segments]);
+  const newestSegmentId = segments.at(-1)?.id ?? null;
 
   const updateFollowingLive = (following: boolean) => {
     followingLiveRef.current = following;
@@ -62,35 +161,24 @@ export const LiveTranscript = ({
     if (element) element.scrollTop = element.scrollHeight;
   };
 
-  useEffect(() => {
-    setRevealState((current) =>
-      reconcileLiveTranscriptReveal(current, segments, {
-        revealImmediately: prefersReducedMotion,
-      }),
-    );
-  }, [prefersReducedMotion, segments]);
+  const followRevealProgress = useCallback(() => {
+    const element = scrollRef.current;
+    if (element && followingLiveRef.current) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, []);
 
-  useEffect(() => {
-    if (prefersReducedMotion) return;
-    const delay = getLiveTranscriptRevealDelay(
-      getPendingLiveTranscriptWordCount(revealState),
-    );
-    if (delay === null) return;
-
-    const timeout = window.setTimeout(
-      () => setRevealState((current) => advanceLiveTranscriptReveal(current)),
-      delay,
-    );
-    return () => window.clearTimeout(timeout);
-  }, [prefersReducedMotion, revealState]);
+  useLayoutEffect(() => {
+    for (const segment of segments) {
+      knownSegmentIdsRef.current.add(segment.id);
+    }
+  }, [segments]);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (!element || !followingLiveRef.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [interimText, revealState]);
-
-  const activeRevealId = getActiveLiveTranscriptRevealId(revealState);
+  }, [interimText, segments]);
 
   return (
     <section
@@ -130,36 +218,14 @@ export const LiveTranscript = ({
             </div>
           ) : (
             turns.map((turn) => (
-              <article className="transcript-turn" key={turn.id}>
-                <div className="transcript-speaker">
-                  <strong>{turn.speaker}</strong>
-                  <time>
-                    {new Date(turn.timestampMs).toISOString().slice(14, 19)}
-                  </time>
-                </div>
-                <p>
-                  {turn.segments.map((segment, index) => (
-                    <Fragment key={segment.id}>
-                      {index > 0 && <span aria-hidden="true"> </span>}
-                      <span
-                        className="transcript-revealed-text"
-                        aria-hidden="true"
-                      >
-                        {getRevealedTranscriptText(revealState, segment.id)}
-                      </span>
-                      {activeRevealId === segment.id && (
-                        <span
-                          className="transcript-typewriter-caret"
-                          aria-hidden="true"
-                        />
-                      )}
-                    </Fragment>
-                  ))}
-                  <span className="sr-only">
-                    {turn.segments.map((segment) => segment.text).join(' ')}
-                  </span>
-                </p>
-              </article>
+              <TranscriptTurn
+                key={turn.id}
+                turn={turn}
+                newestSegmentId={newestSegmentId}
+                knownSegmentIds={knownSegmentIdsRef.current}
+                prefersReducedMotion={prefersReducedMotion}
+                onRevealProgress={followRevealProgress}
+              />
             ))
           )}
           {interimText && (

@@ -1,4 +1,3 @@
-import { Loader2, Mic } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   buildInitialValidatedMeetingPayload,
@@ -30,6 +29,7 @@ import {
   resolvePcmTimelineSampleRate,
   trimPcmLeadingOverflow,
 } from '../utils/audio';
+import { startBoundedSampler } from '../utils/boundedSampler';
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
 import { createCaptureJournalMutationCoordinator } from '../utils/captureJournalMutationCoordinator';
@@ -130,9 +130,6 @@ interface AudioManagerProps {
     ((endReason?: string) => void) | null
   >;
   onStartSessionRef?: React.MutableRefObject<(() => void) | null>;
-  onAnalyserReadyRef?: React.MutableRefObject<
-    ((analyser: AnalyserNode) => void) | null
-  >;
 }
 
 interface TranscriptionSegment {
@@ -417,7 +414,6 @@ export const AudioManager = ({
   transcriptionSettings,
   onStopSessionRef,
   onStartSessionRef,
-  onAnalyserReadyRef,
   onSpeakingChange,
   onLiveTranscript,
   onInterimTranscript,
@@ -437,7 +433,6 @@ export const AudioManager = ({
     onRecordingChange?.(isRecording);
   }, [isRecording, onRecordingChange]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
 
   const resolvedTranscriptionSettings = resolveTranscriptionSettings(
     transcriptionSettings,
@@ -516,7 +511,7 @@ export const AudioManager = ({
   const systemAudioHealthRef = useRef<CaptureHealth>('warning');
   const cancelSystemAudioHealthTimeoutRef = useRef<(() => void) | null>(null);
 
-  const speakingLoopRef = useRef<number | null>(null);
+  const stopSpeakingSamplerRef = useRef<(() => void) | null>(null);
   const lastSpeakerRef = useRef<'Me' | 'Them' | null>(null);
   const lastSpeakerTsRef = useRef<number>(0);
   const speakerTimelineRef = useRef<SpeakerActivityWindow[]>([]);
@@ -1069,6 +1064,16 @@ export const AudioManager = ({
     }
   };
 
+  const abortUnstartedCapture = async (meetingId: string) => {
+    try {
+      await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_ABORT_START', {
+        meetingId,
+      });
+    } catch (error) {
+      console.warn('[Pluto] Failed to release unstarted capture');
+    }
+  };
+
   const startSession = async () => {
     if (
       isRecordingRef.current ||
@@ -1159,8 +1164,17 @@ export const AudioManager = ({
           '[Pluto] Failed to initialize capture journal:',
           journalErr,
         );
-        captureActivitySessionRef.current.markDurabilityFailure();
-        warnCaptureDurability();
+        currentMeetingIdRef.current = null;
+        liveTranscriptResponsivenessRef.current.abortStart();
+        frozenLiveTranscriptResponsivenessRef.current = null;
+        captureActivitySessionRef.current = null;
+        startTimeRef.current = 0;
+        recordingEndedAtRef.current = 0;
+        stopInFlightRef.current = false;
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        alert('Recording could not start securely. Please try again.');
+        return;
       }
 
       onRecordingStarted?.(startTimeRef.current);
@@ -1204,6 +1218,7 @@ export const AudioManager = ({
             detail: { micStatus, systemAudioStatus },
           }),
         );
+        await abortUnstartedCapture(meetingId);
         currentMeetingIdRef.current = null;
         liveTranscriptResponsivenessRef.current.abortStart();
         frozenLiveTranscriptResponsivenessRef.current = null;
@@ -1227,7 +1242,8 @@ export const AudioManager = ({
         }
       }
 
-      // 3. Setup Audio Context & Visualizer (Immediate Feedback)
+      // 3. Setup the audio context used for durable PCM capture and bounded
+      // acoustic speaker sampling.
       const audioContext = new (
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext })
@@ -1236,13 +1252,8 @@ export const AudioManager = ({
       audioContextRef.current = audioContext;
       if (audioContext.state === 'suspended') await audioContext.resume();
 
-      const visAnalyser = audioContext.createAnalyser();
-      visAnalyser.fftSize = 256;
-      setAnalyser(visAnalyser);
-
       if (micStream) {
         const micSource = audioContext.createMediaStreamSource(micStream);
-        micSource.connect(visAnalyser);
         micPcmSampleRateRef.current = audioContext.sampleRate;
         micPcmChunksRef.current = [];
         try {
@@ -1271,7 +1282,6 @@ export const AudioManager = ({
         }
       }
 
-      if (onAnalyserReadyRef?.current) onAnalyserReadyRef.current(visAnalyser);
       startSpeakingMonitor(audioContext, micStream);
 
       // 4. System Audio: Native AudioCap
@@ -1601,6 +1611,13 @@ export const AudioManager = ({
       // 6. No restart loop needed
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
+      const unstartedMeetingId = currentMeetingIdRef.current;
+      if (
+        unstartedMeetingId &&
+        (!micRecorderRef.current || micRecorderRef.current.state === 'inactive')
+      ) {
+        await abortUnstartedCapture(unstartedMeetingId);
+      }
       currentMeetingIdRef.current = null;
       liveTranscriptResponsivenessRef.current.abortStart();
       frozenLiveTranscriptResponsivenessRef.current = null;
@@ -1682,16 +1699,16 @@ export const AudioManager = ({
         recordSpeakerActivity(nextSpeaker, getMeetingElapsedSeconds());
         onSpeakingChange?.(nextSpeaker);
       }
-      speakingLoopRef.current = requestAnimationFrame(tick);
     };
-    speakingLoopRef.current = requestAnimationFrame(tick);
+    stopSpeakingSamplerRef.current = startBoundedSampler(
+      tick,
+      TRANSCRIPTION_TUNING.speaking.sampleIntervalMs,
+    );
   };
 
   const stopAllTracks = () => {
-    if (speakingLoopRef.current) {
-      cancelAnimationFrame(speakingLoopRef.current);
-      speakingLoopRef.current = null;
-    }
+    stopSpeakingSamplerRef.current?.();
+    stopSpeakingSamplerRef.current = null;
     if (micPcmProcessorRef.current) {
       micPcmProcessorRef.current.onaudioprocess = null;
       micPcmProcessorRef.current.disconnect();
@@ -3085,10 +3102,8 @@ export const AudioManager = ({
   };
 
   const stopSpeakingMonitor = () => {
-    if (speakingLoopRef.current) {
-      cancelAnimationFrame(speakingLoopRef.current);
-      speakingLoopRef.current = null;
-    }
+    stopSpeakingSamplerRef.current?.();
+    stopSpeakingSamplerRef.current = null;
     micAnalyserRef.current = null;
     activeSpeakerWindowRef.current = null;
     lastSpeakerRef.current = null;
@@ -4104,7 +4119,7 @@ export const AudioManager = ({
       hasMicRecorderRef.current = false;
       hasSystemRecorderRef.current = false;
 
-      // Cleanup visualization
+      // Cleanup capture-time audio resources.
       stopSpeakingMonitor();
       const frozenDurationSeconds = Math.max(
         0,
@@ -4124,7 +4139,6 @@ export const AudioManager = ({
         }
         visStreamRef.current = null;
       }
-      setAnalyser(null);
       isRecordingRef.current = false;
       setIsRecording(false);
 
@@ -6081,220 +6095,5 @@ export const AudioManager = ({
     }
   });
 
-  const toggleSession = () => {
-    if (isRecording) {
-      stopSession();
-    } else if (!isProcessing) {
-      startSession();
-    }
-  };
-
-  return (
-    <div className="w-full space-y-4">
-      {/* Waveform Visualizer + Recording Button */}
-      <WaveformVisualizer
-        analyser={analyser}
-        isRecording={isRecording}
-        isProcessing={isProcessing}
-        onToggle={toggleSession}
-      />
-
-      {/* Local-First Badge */}
-      <div className="flex justify-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-pro-surface border border-pro-border/40 shadow-sm">
-          <div className="flex -space-x-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-pro-accent" />
-            <div className="w-1.5 h-1.5 rounded-full bg-pro-accent/30 animate-pulse" />
-          </div>
-          <span className="text-[9px] font-bold text-pro-text-muted/60 uppercase tracking-widest">
-            Local Session
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const WaveformVisualizer = ({
-  analyser,
-  isRecording,
-  isProcessing,
-  onToggle,
-}: {
-  analyser: AnalyserNode | null;
-  isRecording: boolean;
-  isProcessing: boolean;
-  onToggle: () => void;
-}) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [elapsed, setElapsed] = useState(0);
-
-  // Timer logic
-  useEffect(() => {
-    if (!isRecording) {
-      setElapsed(0);
-      return;
-    }
-    const interval = setInterval(() => {
-      setElapsed((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [isRecording]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  // Visualize waveform
-  useEffect(() => {
-    if (!analyser || !canvasRef.current || !isRecording) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    let animationId: number;
-
-    const draw = () => {
-      analyser.getByteFrequencyData(dataArray);
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const barCount = 48;
-      const barWidth = 2;
-      const gap = 3;
-      const cornerRadius = 1;
-
-      const totalWidth = barCount * (barWidth + gap);
-      const startX = (canvas.width - totalWidth) / 2;
-
-      for (let i = 0; i < barCount; i++) {
-        const dataIndex = Math.floor((i / barCount) * (dataArray.length / 2));
-        const value = dataArray[dataIndex];
-        const percent = value / 255;
-        const barHeight = Math.max(2, percent * canvas.height * 0.8);
-
-        const x = startX + i * (barWidth + gap);
-        const y = (canvas.height - barHeight) / 2;
-
-        ctx.fillStyle = '#C6AA79'; // Pro Accent Gold
-
-        // Draw rounded rect
-        ctx.beginPath();
-        ctx.roundRect(x, y, barWidth, barHeight, cornerRadius);
-        ctx.fill();
-      }
-
-      animationId = requestAnimationFrame(draw);
-    };
-
-    draw();
-    return () => cancelAnimationFrame(animationId);
-  }, [analyser, isRecording]);
-
-  return (
-    <div className="relative w-full group">
-      {/* Premium Glass Card */}
-      <div
-        className={`
-        relative w-full h-[280px] rounded-[2.5rem] overflow-hidden transition-all duration-700 ease-out
-        border border-white/50 bg-gradient-to-b from-white/80 via-white/40 to-white/30 backdrop-blur-2xl
-        shadow-[0_20px_40px_-12px_rgba(0,0,0,0.05)]
-        ${isRecording ? 'shadow-[0_25px_50px_-12px_rgba(99,102,241,0.15)] ring-1 ring-pro-accent/20' : 'hover:shadow-[0_30px_60px_-12px_rgba(0,0,0,0.08)] hover:scale-[1.01]'}
-      `}
-      >
-        {/* Subtle internal gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/20 to-white/40 pointer-events-none" />
-
-        {/* Status Indicator (Top Center) */}
-        <div className="absolute top-8 left-0 right-0 flex justify-center pointer-events-none">
-          {isRecording ? (
-            <div className="flex flex-col items-center gap-1 animate-in fade-in zoom-in duration-500">
-              <span className="text-[10px] font-bold text-pro-accent uppercase tracking-[0.2em]">
-                {formatTime(elapsed)}
-              </span>
-              <div className="flex items-center gap-1.5 opacity-60">
-                <div className="w-1 h-1 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[9px] font-bold text-pro-text-main">
-                  REC
-                </span>
-              </div>
-            </div>
-          ) : (
-            <span className="text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-[0.2em]">
-              Ready to Capture
-            </span>
-          )}
-        </div>
-
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-10 translate-y-2">
-          {/* Visualization Area */}
-          <div className="h-12 w-full flex items-center justify-center gap-1.5">
-            {isRecording ? (
-              <div className="relative w-full max-w-[200px] h-full opacity-80 mix-blend-multiply">
-                <canvas
-                  ref={canvasRef}
-                  className="w-full h-full"
-                  width={400}
-                  height={56}
-                />
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 h-full opacity-20 group-hover:opacity-40 transition-opacity duration-500">
-                {/* Static Equalizer (reacts to hover only) */}
-                {Array.from({ length: 5 }, (_, barIndex) => barIndex).map(
-                  (barIndex) => (
-                    <div
-                      key={barIndex}
-                      className="w-1 rounded-full bg-pro-text-main transition-all duration-500 ease-out h-1 group-hover:h-2"
-                    />
-                  ),
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Primary Action Button */}
-          <button
-            type="button"
-            onClick={onToggle}
-            disabled={isProcessing}
-            className={`
-                  relative group/btn flex items-center justify-center gap-3 px-8 py-4 rounded-full font-black text-[11px] uppercase tracking-[0.2em] transition-all duration-300
-                  ${
-                    isProcessing
-                      ? 'bg-pro-bg text-pro-text-muted cursor-not-allowed border border-pro-border'
-                      : isRecording
-                        ? 'bg-pro-surface text-pro-text-main shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 border border-transparent ring-2 ring-red-50/50'
-                        : 'bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] shadow-[0_10px_20px_-5px_rgba(0,0,0,0.2)] hover:shadow-[0_15px_30px_-5px_rgba(0,0,0,0.3)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm'
-                  }
-                `}
-          >
-            {isProcessing ? (
-              <>
-                <Loader2 size={14} className="animate-spin" />
-                <span>Processing</span>
-              </>
-            ) : isRecording ? (
-              <>
-                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.5)]" />
-                <span>Finish</span>
-              </>
-            ) : (
-              <>
-                <Mic
-                  size={16}
-                  className="text-white/80 dark:text-[#1A2340]/80 group-hover/btn:scale-110 transition-transform"
-                />
-                <span>Start Session</span>
-              </>
-            )}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  return null;
 };
