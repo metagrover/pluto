@@ -154,6 +154,14 @@ During capture, Pluto treats recording health and the live conversation as the p
 
 This keeps the user in the conversation, makes capture trust visible, and reserves the full-page note editor pattern for contexts where writing is actually the primary task.
 
+## 2026-08-11 - Give active capture an explicit local compute budget
+
+- **Status:** Accepted
+- **Source:** [Issue #603](https://github.com/metagrover/pluto/issues/603), capture thermal investigation
+- **Decision:** While a capture lease exists, Pluto gives durable audio capture and live MLX transcription priority over decorative renderer work and queued local-LLM synthesis. Acoustic speaker classification runs at a fixed bounded cadence, the live word reveal updates only the active turn, and hidden legacy presentation work is not mounted.
+- **Rationale:** Capture-time work previously included frame-rate-driven loops and background jobs whose cost was unrelated to new speech. A foreground resource lease makes the performance policy deterministic and keeps the live meeting responsive throughout long recordings.
+- **Consequences:** Queued knowledge synthesis resumes only after all foreground pause reasons clear; transcript completeness and capture-journal evidence remain unchanged; performance tests and logs use synthetic inputs and content-free aggregate measurements.
+
 ## 2026-07-17 - Pin credential-free diarization and require acoustic near-end evidence
 - **Status:** Accepted
 - **Source:** [Issue #465](https://github.com/metagrover/pluto/issues/465), [Issue #509](https://github.com/metagrover/pluto/issues/509), [PR #510](https://github.com/metagrover/pluto/pull/510)

@@ -82,6 +82,24 @@ describe('capture session production ownership boundary', () => {
     expect(main).toContain('captureSessionLease.releaseOwner(owner.id)');
   });
 
+  it('releases an unstarted capture after microphone setup fails', () => {
+    const abortHandler = sliceBetween(
+      main,
+      "'AUDIO_CAPTURE_JOURNAL_ABORT_START'",
+      "'AUDIO_CAPTURE_JOURNAL_READ'",
+    );
+
+    expect(abortHandler).toContain(
+      'captureSessionLease.requireRecordingOwner(',
+    );
+    expect(abortHandler).toContain('deleteCaptureJournal(');
+    expect(abortHandler).toContain('captureSessionLease.release(');
+    expect(abortHandler).toContain(
+      "knowledgeSynthesisPause.release('capture')",
+    );
+    expect(audioManager).toContain("'AUDIO_CAPTURE_JOURNAL_ABORT_START'");
+  });
+
   it('hard-rejects lease conflicts before microphone acquisition', () => {
     const startSession = sliceBetween(
       audioManager,
@@ -102,6 +120,10 @@ describe('capture session production ownership boundary', () => {
     expect(startSession.indexOf('onRecordingStarted?.(')).toBeGreaterThan(
       startSession.indexOf("'AUDIO_CAPTURE_JOURNAL_START'"),
     );
+    expect(startSession).not.toContain(
+      'captureActivitySessionRef.current.markDurabilityFailure()',
+    );
+    expect(startSession).toContain('Recording could not start securely');
   });
 
   it('prevents renderer unload while capture work is active', () => {

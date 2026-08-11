@@ -127,6 +127,43 @@ describe('LiveTranscript word reveal', () => {
     expect(
       container.querySelectorAll('.transcript-typewriter-caret'),
     ).toHaveLength(1);
+    expect(
+      [...container.querySelectorAll('.transcript-revealed-text')].map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(['Shipping today works.', 'The same thought continues.', '']);
+
+    act(() => root.unmount());
+  });
+
+  it('keeps a long confirmed history visible while only the live edge reveals', () => {
+    setReducedMotion(false);
+    const root = createRoot(container);
+    const history = Array.from({ length: 300 }, (_, index) => ({
+      ...liveSegment,
+      id: `history-${index}`,
+      text: `Confirmed synthetic phrase ${index}.`,
+      timestampMs: index * 1_000,
+    }));
+    act(() =>
+      root.render(<LiveTranscript segments={history} interimText="" />),
+    );
+
+    const firstText = container.querySelector('.transcript-revealed-text');
+    expect(firstText?.textContent).toBe('Confirmed synthetic phrase 0.');
+
+    act(() =>
+      root.render(
+        <LiveTranscript segments={[...history, liveSegment]} interimText="" />,
+      ),
+    );
+    const texts = container.querySelectorAll('.transcript-revealed-text');
+    expect(texts.item(0)).toBe(firstText);
+    expect(texts.item(texts.length - 1).textContent).toBe('');
+
+    act(() => vi.advanceTimersByTime(85));
+    expect(texts.item(0).textContent).toBe('Confirmed synthetic phrase 0.');
+    expect(texts.item(texts.length - 1).textContent).toBe('Shipping ');
 
     act(() => root.unmount());
   });

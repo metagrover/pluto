@@ -200,7 +200,7 @@
     @apply relative min-h-0 min-w-0 overflow-hidden;
   }
   .live-transcript-scroll {
-    @apply h-full overflow-y-auto px-8 pb-20 pt-8;
+    @apply h-full overscroll-contain overflow-y-auto px-8 pb-20 pt-8;
   }
   .live-transcript-heading,
   .live-transcript-body {
@@ -256,7 +256,7 @@
     @apply mt-2 block text-sm text-pro-text-muted;
   }
   .recording-rail {
-    @apply relative min-w-0 border-l border-pro-border bg-pro-surface;
+    @apply relative min-h-0 min-w-0 border-l border-pro-border bg-pro-surface;
   }
   .recording-rail--collapsed {
     @apply w-12;
@@ -268,7 +268,7 @@
     @apply rotate-180;
   }
   .recording-rail-content {
-    @apply flex h-full flex-col gap-6 overflow-y-auto p-5 pt-8;
+    @apply flex h-full flex-col gap-6 overscroll-contain overflow-y-auto p-5 pt-8;
   }
   .rail-heading h2 {
     @apply mt-1 text-lg font-semibold;

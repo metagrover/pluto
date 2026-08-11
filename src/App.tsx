@@ -124,9 +124,6 @@ function App() {
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
   const startSessionRef = useRef<(() => void) | null>(null);
-  const onAnalyserReadyRef = useRef<((node: AnalyserNode) => void) | null>(
-    null,
-  );
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
@@ -141,9 +138,6 @@ function App() {
   });
   const [liveTranscriptIntegrity, setLiveTranscriptIntegrity] =
     useState<LiveTranscriptIntegrity>('healthy');
-
-  // Connect the ref
-  onAnalyserReadyRef.current = () => {};
 
   useActiveCallMonitor({
     setupNeeded,
@@ -666,7 +660,6 @@ function App() {
           }}
           onStopSessionRef={stopSessionRef}
           onStartSessionRef={startSessionRef}
-          onAnalyserReadyRef={onAnalyserReadyRef}
           onLiveTranscript={setLiveTranscript}
           onInterimTranscript={setInterimTranscript}
           onCaptureHealthChange={setCaptureHealth}

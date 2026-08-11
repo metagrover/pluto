@@ -1,5 +1,6 @@
 export const TRANSCRIPTION_TUNING = {
   speaking: {
+    sampleIntervalMs: 200,
     rmsWindowSeconds: 0.5,
     rmsThreshold: 0.012,
     minIntervalMs: 200,
