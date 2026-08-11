@@ -22,6 +22,7 @@ from sherpa_diarization_runtime import (
     rollback_model_artifacts,
 )
 from aligned_audio_energy import aligned_energy_windows
+from chunk_cleanup_engine import clean_transcript_chunk
 
 try:
     import mlx_whisper
@@ -278,6 +279,7 @@ def _transcribe_locked(request: TranscribeRequest):
                         continue
                     end = min(end, result_duration)
                 text = seg.get("text", "").strip()
+                text = clean_transcript_chunk(text)
                 if end <= start or not text:
                     continue
                 formatted_words = []
