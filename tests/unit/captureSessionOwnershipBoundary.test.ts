@@ -105,10 +105,11 @@ describe('capture session production ownership boundary', () => {
   });
 
   it('prevents renderer unload while capture work is active', () => {
-    expect(audioManager).toContain("window.addEventListener('beforeunload'");
-    expect(audioManager).toContain('shouldPreventCaptureUnload({');
-    expect(audioManager).toContain('recording: isRecordingRef.current');
-    expect(audioManager).toContain('processing: isProcessingRef.current');
+    expect(audioManager).toContain('attachCaptureUnloadGuard(window');
+    expect(audioManager).toContain('isRecording: () => isRecordingRef.current');
+    expect(audioManager).toContain(
+      'isProcessing: () => isProcessingRef.current',
+    );
     expect(main).toContain("win.webContents.on('will-prevent-unload'");
   });
 });

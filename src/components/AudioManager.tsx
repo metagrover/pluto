@@ -34,8 +34,8 @@ import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscript
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
 import { createCaptureJournalMutationCoordinator } from '../utils/captureJournalMutationCoordinator';
 import {
+  attachCaptureUnloadGuard,
   isCaptureSessionAlreadyActiveError,
-  shouldPreventCaptureUnload,
 } from '../utils/captureSessionGuard';
 import { resolveProductionDiarizationProvider } from '../utils/diarizationProvider';
 import {
@@ -6006,21 +6006,10 @@ export const AudioManager = ({
   };
 
   useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (
-        !shouldPreventCaptureUnload({
-          recording: isRecordingRef.current,
-          processing: isProcessingRef.current,
-        })
-      ) {
-        return;
-      }
-      event.preventDefault();
-      event.returnValue = '';
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    return attachCaptureUnloadGuard(window, {
+      isRecording: () => isRecordingRef.current,
+      isProcessing: () => isProcessingRef.current,
+    });
   }, []);
 
   // Set up event listeners for external control (e.g., "End Meeting" button)
