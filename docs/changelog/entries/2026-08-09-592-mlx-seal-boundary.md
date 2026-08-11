@@ -1,7 +1,7 @@
 ### Make MLX Live Transcription and Meeting Finalization Honest
 
 - **Issue:** [#592](https://github.com/metagrover/pluto/issues/592), [#593](https://github.com/metagrover/pluto/issues/593)
-- **PR:** [#595](https://github.com/metagrover/pluto/pull/595), Pending.
+- **PR:** [#595](https://github.com/metagrover/pluto/pull/595), [#598](https://github.com/metagrover/pluto/pull/598)
 - **Changed:** Pluto selects and persists the native MLX backend only when Apple Silicon runtime health proves it is available, reveals accepted live speech word by word, and schedules bounded five-second base-model chunks without waiting for stale queued audio. Stop persists the best checkpoint transcript immediately; medium-model source validation and local analysis continue in the background without whole-session foreground recognition or speaker clustering. MLX output is constrained to the audio duration and filters repeated high-no-speech hallucinations, while topic analysis receives only its assigned transcript slice and terminates cleanly on a bounded local-model timeout.
 - **Why:** An unset backend kept the app on an unavailable CPU recognizer, stop-time transcript repair mislabeled derived processing failure as recording recovery failure, stale live chunks delayed speech, and repeated recognition or local-model failures made completed meetings appear permanently stuck.
 - **Replaced:** Implicit CPU defaults, an untyped MLX device bridge, silent unavailable-engine fallback, transcription-coupled capture sealing, unbounded live transcription backlog, foreground whole-session final ASR and clustering, unconstrained MLX timestamps, repeated analysis requests after timeout, and per-topic prompts that each received the complete transcript window.
