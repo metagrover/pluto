@@ -125,6 +125,21 @@ const postMeetingBackgroundActivity = createPostMeetingBackgroundActivity(
   },
 );
 
+const readDownstreamActivity = (value: unknown) => {
+  try {
+    const parsed = JSON.parse(typeof value === 'string' ? value : '{}') as {
+      runId?: unknown;
+      state?: unknown;
+    };
+    return {
+      runId: typeof parsed.runId === 'string' ? parsed.runId : null,
+      state: typeof parsed.state === 'string' ? parsed.state : null,
+    };
+  } catch {
+    return { runId: null, state: null };
+  }
+};
+
 const getPreloadPath = () => {
   const preloadPathMjs = path.join(__dirname, 'preload.mjs');
   const preloadPathJs = path.join(__dirname, 'preload.js');
@@ -327,17 +342,6 @@ app.whenReady().then(async () => {
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
-
-  ipcMain.handle(
-    'SET_POST_MEETING_PROCESSING_ACTIVE',
-    (_event, { runId, active }) => {
-      postMeetingBackgroundActivity.setActive(
-        String(runId || ''),
-        active === true,
-      );
-      return { activeRuns: postMeetingBackgroundActivity.activeCount() };
-    },
-  );
 
   // Local transcription handlers. IPC names remain stable for compatibility.
   ipcMain.handle('WHISPERX_CHECK_PYTHON', async () => {
@@ -1542,6 +1546,10 @@ app.whenReady().then(async () => {
         }
         if (downstreamState !== 'processing') {
           knowledgeSynthesisPause.release('downstream');
+          postMeetingBackgroundActivity.setActive(
+            expectedDownstreamRunId,
+            false,
+          );
         }
       }
       return result;
@@ -1553,7 +1561,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) => {
     const claimed = db.claimMeetingDownstreamProcessing(meetingId, lease);
-    if (claimed) knowledgeSynthesisPause.acquire('downstream');
+    if (claimed) {
+      knowledgeSynthesisPause.acquire('downstream');
+      postMeetingBackgroundActivity.setActive(String(lease?.runId || ''), true);
+    }
     return claimed;
   });
   ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) =>
@@ -1569,9 +1580,20 @@ app.whenReady().then(async () => {
     (_event, meetingId, runId, stage) =>
       db.updateMeetingTranscriptValidationRetryStage(meetingId, runId, stage),
   );
-  ipcMain.handle('FINALIZE_CHECKPOINT_TRANSCRIPT', (_event, input) =>
-    db.finalizeCheckpointTranscript(input),
-  );
+  ipcMain.handle('FINALIZE_CHECKPOINT_TRANSCRIPT', (_event, input) => {
+    const outcome = db.finalizeCheckpointTranscript(input);
+    if (
+      outcome === 'committed_and_claimed' ||
+      outcome === 'already_committed'
+    ) {
+      knowledgeSynthesisPause.acquire('downstream');
+      postMeetingBackgroundActivity.setActive(
+        String(input?.downstreamRunId || ''),
+        true,
+      );
+    }
+    return outcome;
+  });
   ipcMain.handle('PATCH_STOP_TO_VALIDATED_LATENCY', (_event, input) =>
     runConditionalMeetingUpdateForIpc(() =>
       db.patchStopToValidatedLatency(input),
@@ -1679,11 +1701,24 @@ app.whenReady().then(async () => {
   ipcMain.handle('DELETE_MEETING', async (_event, id) => {
     try {
       const meetingId = String(id);
+      const meeting = db.getMeeting(meetingId) as
+        | db.PersistedMeeting
+        | undefined;
+      const downstreamActivity = readDownstreamActivity(
+        meeting?.downstream_processing_json,
+      );
 
       // Abort any active background tasks for this meeting
       abortMeetingTasks(meetingId);
 
       const result = db.deleteMeeting(id);
+      if (downstreamActivity.runId) {
+        knowledgeSynthesisPause.release('downstream');
+        postMeetingBackgroundActivity.setActive(
+          downstreamActivity.runId,
+          false,
+        );
+      }
       await deleteCaptureJournal(getMeetingArtifactsRootDir(), meetingId).catch(
         (error) => {
           console.warn('[Pluto] Failed to delete capture journal:', error);

@@ -443,13 +443,8 @@ function App() {
     meetingId: string | number | null = selectedMeetingId,
   ) => {
     if (!meetingId || transcriptValidationRetrying) return;
-    const backgroundRunId = crypto.randomUUID();
     setTranscriptValidationRetrying(true);
     try {
-      await window.ipcRenderer.invoke('SET_POST_MEETING_PROCESSING_ACTIVE', {
-        runId: backgroundRunId,
-        active: true,
-      });
       const result = await retryMeetingTranscriptValidation(
         meetingId,
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
@@ -466,12 +461,6 @@ function App() {
     } catch (error) {
       console.error('[Pluto] Transcript validation retry failed', error);
     } finally {
-      await window.ipcRenderer
-        .invoke('SET_POST_MEETING_PROCESSING_ACTIVE', {
-          runId: backgroundRunId,
-          active: false,
-        })
-        .catch(() => null);
       setTranscriptValidationRetrying(false);
     }
   };
