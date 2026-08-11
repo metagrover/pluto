@@ -40,8 +40,11 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
           ? {
               active: true,
               appName,
-              confidence: 'high',
-              reason: 'call-app-running-with-active-audio',
+              confidence: 'medium',
+              reason:
+                appName === 'Zoom'
+                  ? 'call-app-running-silent-fallback'
+                  : 'browser-call-tab-open-silent-fallback',
             }
           : {
               active: false,
@@ -64,6 +67,10 @@ describe.each(['Zoom', 'Chrome'])('useAutoEndMonitor for %s', (appName) => {
       await Promise.resolve();
     });
     expect(invoke).toHaveBeenCalledWith('DETECT_ACTIVE_CALL');
+    expect(invoke).toHaveBeenCalledWith('LOG_AUTO_END_EVENT', {
+      reason_code: 'call_app_locked',
+      app_name: appName,
+    });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);

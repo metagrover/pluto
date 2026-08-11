@@ -22,8 +22,14 @@ export type AutoEndAction =
 
 export function autoEndDecision(input: AutoEndInput): AutoEndAction {
   const { poll, trackedApp, graceActive } = input;
+  const hasAttachedCallEvidence =
+    poll.confidence === 'medium' &&
+    (poll.reason === 'call-app-running-silent-fallback' ||
+      poll.reason === 'browser-call-tab-open-silent-fallback');
   const isConfirmedActive =
-    poll.active && Boolean(poll.appName) && poll.confidence === 'high';
+    poll.active &&
+    Boolean(poll.appName) &&
+    (poll.confidence === 'high' || hasAttachedCallEvidence);
 
   // Phase 1: No app locked yet — waiting to discover which call app is in use
   if (!trackedApp) {
@@ -42,12 +48,13 @@ export function autoEndDecision(input: AutoEndInput): AutoEndAction {
 
   // Tracked app is inactive — start grace if not already running
   if (!graceActive) {
-    const reasonCode =
-      poll.reason === 'no-call-app-running'
-        ? 'call_app_exited'
-        : 'audio_inactive_timeout';
-    const graceMs =
-      poll.reason === 'no-call-app-running' ? GRACE_SHORT_MS : GRACE_LONG_MS;
+    const hasExplicitExitEvidence =
+      poll.reason === 'no-call-app-running' ||
+      poll.reason === 'browser-call-tab-closed';
+    const reasonCode = hasExplicitExitEvidence
+      ? 'call_app_exited'
+      : 'audio_inactive_timeout';
+    const graceMs = hasExplicitExitEvidence ? GRACE_SHORT_MS : GRACE_LONG_MS;
     return { type: 'start_grace', graceMs, reasonCode };
   }
 
