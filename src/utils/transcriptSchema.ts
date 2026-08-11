@@ -30,6 +30,8 @@ export type TranscriptTranscriptionMeta = {
   elapsedMs: number;
   providerLabel?: string;
   warnings?: string[];
+  vocabularyHintPolicyVersion?: string;
+  vocabularyHintCount?: number;
   diarizationRuntime?: {
     engine: 'sherpa-onnx';
     engineVersion: string;

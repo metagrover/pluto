@@ -103,6 +103,109 @@ def test_live_transcription_can_skip_word_timestamps(tmp_path, monkeypatch):
     assert 'words' not in response.json()['segments'][0]
 
 
+def test_transcription_forwards_bounded_name_prompt_without_logging_content(
+    tmp_path, monkeypatch, caplog
+):
+    audio_path = tmp_path / 'names.wav'
+    audio_path.write_bytes(b'RIFF')
+    calls = []
+    synthetic_prompt = 'Person names: Nira Vale, Milo North.'
+
+    def fake_transcribe(path, **kwargs):
+        calls.append((path, kwargs))
+        return {
+            'segments': [{'start': 0, 'end': 1, 'text': 'synthetic speech'}],
+            'language': 'en',
+            'duration': 1,
+        }
+
+    monkeypatch.setattr(server, 'MLX_WHISPER_AVAILABLE', True)
+    monkeypatch.setattr(server.mlx_whisper, 'transcribe', fake_transcribe)
+
+    response = client.post(
+        '/transcribe',
+        json={
+            'audio_path': str(audio_path),
+            'model': 'base',
+            'language': 'en',
+            'initial_prompt': synthetic_prompt,
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls[0][1]['initial_prompt'] == synthetic_prompt
+    assert synthetic_prompt not in caplog.text
+
+
+def test_transcription_omits_empty_name_prompt(tmp_path, monkeypatch):
+    audio_path = tmp_path / 'empty-prompt.wav'
+    audio_path.write_bytes(b'RIFF')
+    calls = []
+
+    def fake_transcribe(path, **kwargs):
+        calls.append((path, kwargs))
+        return {'segments': [], 'language': 'en', 'duration': 0}
+
+    monkeypatch.setattr(server, 'MLX_WHISPER_AVAILABLE', True)
+    monkeypatch.setattr(server.mlx_whisper, 'transcribe', fake_transcribe)
+
+    response = client.post(
+        '/transcribe',
+        json={
+            'audio_path': str(audio_path),
+            'model': 'base',
+            'language': 'en',
+            'initial_prompt': '',
+        },
+    )
+
+    assert response.status_code == 200
+    assert 'initial_prompt' not in calls[0][1]
+
+
+def test_transcription_rejects_oversized_name_prompt(tmp_path):
+    audio_path = tmp_path / 'oversized-prompt.wav'
+    audio_path.write_bytes(b'RIFF')
+
+    response = client.post(
+        '/transcribe',
+        json={
+            'audio_path': str(audio_path),
+            'initial_prompt': 'A' * 241,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_transcription_failure_does_not_echo_name_prompt(
+    tmp_path, monkeypatch, caplog, capsys
+):
+    audio_path = tmp_path / 'private-error.wav'
+    audio_path.write_bytes(b'RIFF')
+    synthetic_prompt = 'Person names: Nira Vale.'
+
+    def fake_transcribe(_path, **_kwargs):
+        raise RuntimeError(f'decode failed near {synthetic_prompt}')
+
+    monkeypatch.setattr(server, 'MLX_WHISPER_AVAILABLE', True)
+    monkeypatch.setattr(server.mlx_whisper, 'transcribe', fake_transcribe)
+
+    response = client.post(
+        '/transcribe',
+        json={
+            'audio_path': str(audio_path),
+            'initial_prompt': synthetic_prompt,
+        },
+    )
+
+    captured = capsys.readouterr()
+    assert response.status_code == 500
+    assert synthetic_prompt not in caplog.text
+    assert synthetic_prompt not in captured.err
+    assert synthetic_prompt not in response.text
+
+
 def test_live_transcription_rejects_no_speech_and_bounds_segments(tmp_path, monkeypatch):
     audio_path = tmp_path / 'live.wav'
     with wave.open(str(audio_path), 'wb') as audio:

@@ -183,6 +183,7 @@ import {
   resolveLiveChunkModel,
   resolveTranscriptionSettings,
 } from '../src/utils/transcriptionSettings';
+import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
 import * as db from './db';
@@ -336,6 +337,20 @@ app.whenReady().then(async () => {
   ipcMain.handle('WHISPERX_HEALTH', async () => {
     return await whisperX.health();
   });
+
+  ipcMain.handle(
+    'GET_TRANSCRIPTION_VOCABULARY',
+    (_event, { participants } = {}) =>
+      selectTranscriptionVocabulary({
+        participants: Array.isArray(participants)
+          ? participants.filter(
+              (participant): participant is string =>
+                typeof participant === 'string',
+            )
+          : [],
+        candidates: db.getTranscriptionPersonCandidates(),
+      }),
+  );
 
   ipcMain.handle('CANCEL_MEETING_TRANSCRIPTION', async (_event, meetingId) => {
     const normalizedMeetingId = String(meetingId);

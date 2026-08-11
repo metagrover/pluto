@@ -3175,6 +3175,47 @@ export interface KnowledgeDocPersonCandidate {
   last_mentioned_at: string | null;
 }
 
+export interface TranscriptionPersonCandidate {
+  name: string;
+  saliencyScore: number;
+  meetingCount: number;
+  mentionCount: number;
+  lastMentionedAt: string | null;
+}
+
+export const getTranscriptionPersonCandidates =
+  (): TranscriptionPersonCandidate[] => {
+    const rows = db
+      .prepare(`
+      SELECT
+        e.name,
+        COALESCE(e.saliency_score, 0) AS saliency_score,
+        COUNT(DISTINCT me.meeting_id) AS meeting_count,
+        COALESCE(SUM(me.mention_count), 0) AS mention_count,
+        MAX(COALESCE(m.started_at, m.created_at, me.created_at, e.updated_at)) AS last_mentioned_at
+      FROM entities e
+      JOIN meeting_entities me ON me.entity_id = e.id
+      JOIN meetings m ON m.id = me.meeting_id
+      WHERE e.type = 'person'
+      GROUP BY e.id, e.name, e.saliency_score
+    `)
+      .all() as Array<{
+      name: string;
+      saliency_score: number;
+      meeting_count: number;
+      mention_count: number;
+      last_mentioned_at: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      name: row.name,
+      saliencyScore: row.saliency_score,
+      meetingCount: row.meeting_count,
+      mentionCount: row.mention_count,
+      lastMentionedAt: row.last_mentioned_at,
+    }));
+  };
+
 /**
  * Get person entities eligible for person_context knowledge docs.
  */

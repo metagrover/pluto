@@ -100,6 +100,10 @@ import {
   resolveTranscriptionSettings,
 } from '../utils/transcriptionSettings';
 import {
+  KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
+  type TranscriptionVocabularySelection,
+} from '../utils/transcriptionVocabulary';
+import {
   type CaptureHealth,
   type CaptureHealthState,
   type LiveTranscriptIntegrity,
@@ -472,6 +476,12 @@ export const AudioManager = ({
       language: resolvedLanguage,
       meetingId: currentMeetingIdRef.current,
       wordTimestamps: !isChunkTranscription,
+      initialPrompt:
+        transcriptionVocabularyRef.current.initialPrompt ?? undefined,
+      vocabularyHintPolicyVersion:
+        transcriptionVocabularyRef.current.provenance.policyVersion,
+      vocabularyHintCount:
+        transcriptionVocabularyRef.current.provenance.hintCount,
       ...overrides,
     };
   };
@@ -543,6 +553,13 @@ export const AudioManager = ({
     }),
   );
   const liveTranscriptionGenerationRef = useRef(0);
+  const transcriptionVocabularyRef = useRef<TranscriptionVocabularySelection>({
+    initialPrompt: null,
+    provenance: {
+      policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
+      hintCount: 0,
+    },
+  });
   const liveTranscriptResponsivenessRef = useRef(
     createLiveTranscriptResponsivenessRuntime({
       now: () => performance.now(),
@@ -1087,6 +1104,13 @@ export const AudioManager = ({
     try {
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
+      transcriptionVocabularyRef.current = {
+        initialPrompt: null,
+        provenance: {
+          policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
+          hintCount: 0,
+        },
+      };
       liveTranscriptionGenerationRef.current += 1;
       processingQueueRef.current = new LiveTranscriptionQueue({
         onError: (error) => {
@@ -1175,6 +1199,34 @@ export const AudioManager = ({
         setIsRecording(false);
         alert('Recording could not start securely. Please try again.');
         return;
+      }
+
+      try {
+        const vocabulary = (await window.ipcRenderer.invoke(
+          'GET_TRANSCRIPTION_VOCABULARY',
+          { participants },
+        )) as TranscriptionVocabularySelection;
+        const initialPrompt =
+          typeof vocabulary?.initialPrompt === 'string' &&
+          vocabulary.initialPrompt.length <= 240
+            ? vocabulary.initialPrompt
+            : null;
+        const hintCount = Number.isInteger(vocabulary?.provenance?.hintCount)
+          ? Math.max(0, Math.min(12, vocabulary.provenance.hintCount))
+          : 0;
+        transcriptionVocabularyRef.current = {
+          initialPrompt,
+          provenance: {
+            policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
+            hintCount: initialPrompt ? hintCount : 0,
+          },
+        };
+        console.log(
+          '[Pluto] Transcription vocabulary ready',
+          transcriptionVocabularyRef.current.provenance,
+        );
+      } catch {
+        console.warn('[Pluto] Transcription vocabulary unavailable');
       }
 
       onRecordingStarted?.(startTimeRef.current);
@@ -5367,6 +5419,19 @@ export const AudioManager = ({
               pipelineMode,
               canonicalSource: mixedAudioPath ? 'mix' : 'mic',
               postHydrationBleedPass: false,
+              transcription: {
+                backend: String(resolvedTranscriptionSettings.backend),
+                preset: String(resolvedTranscriptionSettings.preset),
+                model: String(resolvedChunkModel),
+                device: String(resolvedTranscriptionSettings.device),
+                computeType: String(resolvedChunkComputeType),
+                diarization: false,
+                elapsedMs: 0,
+                vocabularyHintPolicyVersion:
+                  transcriptionVocabularyRef.current.provenance.policyVersion,
+                vocabularyHintCount:
+                  transcriptionVocabularyRef.current.provenance.hintCount,
+              },
               speakerAttribution,
               liveTranscriptResponsiveness:
                 frozenLiveTranscriptResponsivenessRef.current ?? undefined,
@@ -5464,6 +5529,10 @@ export const AudioManager = ({
             computeType: String(resolvedChunkComputeType),
             diarization: false,
             elapsedMs: 0,
+            vocabularyHintPolicyVersion:
+              transcriptionVocabularyRef.current.provenance.policyVersion,
+            vocabularyHintCount:
+              transcriptionVocabularyRef.current.provenance.hintCount,
           },
           sessionFallbackTranscription: sessionTranscriptionMeta
             ? {
@@ -5477,6 +5546,10 @@ export const AudioManager = ({
                 elapsedMs: sessionTranscriptionMeta.elapsedMs || 0,
                 providerLabel: sessionTranscriptionMeta.providerLabel,
                 warnings: sessionTranscriptionMeta.warnings,
+                vocabularyHintPolicyVersion:
+                  sessionTranscriptionMeta.vocabularyHintPolicyVersion,
+                vocabularyHintCount:
+                  sessionTranscriptionMeta.vocabularyHintCount,
               }
             : undefined,
           speakerAttribution,
@@ -5688,6 +5761,10 @@ export const AudioManager = ({
         computeType: String(resolvedChunkComputeType),
         diarization: false,
         elapsedMs: 0,
+        vocabularyHintPolicyVersion:
+          transcriptionVocabularyRef.current.provenance.policyVersion,
+        vocabularyHintCount:
+          transcriptionVocabularyRef.current.provenance.hintCount,
       };
       const sessionFallbackTranscriptMeta = sessionTranscriptionMeta
         ? {
@@ -5701,6 +5778,9 @@ export const AudioManager = ({
             elapsedMs: sessionTranscriptionMeta.elapsedMs || 0,
             providerLabel: sessionTranscriptionMeta.providerLabel,
             warnings: sessionTranscriptionMeta.warnings,
+            vocabularyHintPolicyVersion:
+              sessionTranscriptionMeta.vocabularyHintPolicyVersion,
+            vocabularyHintCount: sessionTranscriptionMeta.vocabularyHintCount,
           }
         : undefined;
       const transcriptMeta = {
@@ -5711,6 +5791,9 @@ export const AudioManager = ({
         computeType: String(chunkTranscriptMeta.computeType),
         diarization: chunkTranscriptMeta.diarization,
         elapsedMs: chunkTranscriptMeta.elapsedMs,
+        vocabularyHintPolicyVersion:
+          chunkTranscriptMeta.vocabularyHintPolicyVersion,
+        vocabularyHintCount: chunkTranscriptMeta.vocabularyHintCount,
       };
 
       const currentMeetingId = currentMeetingIdRef.current;
