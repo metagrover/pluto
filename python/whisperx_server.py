@@ -8,7 +8,10 @@ from typing import Literal, Optional
 from pathlib import Path
 import json
 import logging
+import math
+import re
 import threading
+import wave
 from sherpa_diarization_runtime import (
     SherpaDiarizationError,
     diarize as run_sherpa_diarization,
@@ -67,6 +70,7 @@ class TranscribeRequest(BaseModel):
     compute_type: Optional[Literal["float16"]] = None
     language: Optional[str] = None
     diarize: Optional[bool] = False
+    word_timestamps: Optional[bool] = True
 
 class ConfigRequest(BaseModel):
     model: Optional[str] = None
@@ -89,6 +93,17 @@ def load_model_if_needed(new_config):
         if target_model != model_config["model_name"]:
             logger.info("Updating transcription model: model=%s", target_model)
         model_config["model_name"] = target_model
+
+
+def audio_duration_seconds(audio_path: str) -> Optional[float]:
+    try:
+        with wave.open(audio_path, "rb") as audio:
+            frame_rate = audio.getframerate()
+            if frame_rate <= 0:
+                return None
+            return audio.getnframes() / frame_rate
+    except (OSError, EOFError, wave.Error):
+        return None
 
 @app.get("/health")
 def health():
@@ -217,35 +232,83 @@ def _transcribe_locked(request: TranscribeRequest):
             language = request.language or "en"
             logger.info("Transcribing managed audio using MLX [model=%s, language=%s]", model_name, language)
             
-            mlx_kwargs = {"path_or_hf_repo": repo_id, "word_timestamps": True}
+            mlx_kwargs = {
+                "path_or_hf_repo": repo_id,
+                "word_timestamps": request.word_timestamps is not False,
+                "condition_on_previous_text": request.word_timestamps is not False,
+            }
             if language and language != "auto":
                 mlx_kwargs["language"] = language
                 
             mlx_result = mlx_whisper.transcribe(request.audio_path, **mlx_kwargs)
             raw_segments = mlx_result.get("segments", [])
+            measured_duration = audio_duration_seconds(request.audio_path)
+            result_duration = measured_duration or float(mlx_result.get("duration", 0.0))
+            normalized_text_counts = {}
+            for seg in raw_segments:
+                normalized_text = re.sub(
+                    r"[^a-z0-9]+", " ", str(seg.get("text", "")).lower()
+                ).strip()
+                if normalized_text:
+                    normalized_text_counts[normalized_text] = (
+                        normalized_text_counts.get(normalized_text, 0) + 1
+                    )
             formatted_segments = []
             for seg in raw_segments:
+                normalized_text = re.sub(
+                    r"[^a-z0-9]+", " ", str(seg.get("text", "")).lower()
+                ).strip()
+                high_no_speech_probability = (
+                    float(seg.get("no_speech_prob", 0.0)) >= 0.6
+                )
+                repeated_text = normalized_text_counts.get(normalized_text, 0) > 1
+                if high_no_speech_probability and (
+                    request.word_timestamps is False or repeated_text
+                ):
+                    continue
+                start = max(0.0, float(seg.get("start", 0.0)))
+                end = float(seg.get("end", 0.0))
+                if not math.isfinite(start) or not math.isfinite(end):
+                    continue
+                if result_duration > 0:
+                    if start >= result_duration:
+                        continue
+                    end = min(end, result_duration)
+                text = seg.get("text", "").strip()
+                if end <= start or not text:
+                    continue
                 formatted_words = []
                 for w in seg.get("words", []):
+                    word_start = max(0.0, float(w.get("start", 0.0)))
+                    word_end = float(w.get("end", 0.0))
+                    if result_duration > 0:
+                        if word_start >= result_duration:
+                            continue
+                        word_end = min(word_end, result_duration)
+                    word_text = w.get("word", "").strip()
+                    if word_end <= word_start or not word_text:
+                        continue
                     formatted_words.append({
-                        "word": w.get("word", ""),
-                        "start": float(w.get("start", 0.0)),
-                        "end": float(w.get("end", 0.0)),
+                        "word": word_text,
+                        "start": word_start,
+                        "end": word_end,
                         "score": float(w.get("probability", 1.0)),
                     })
-                formatted_segments.append({
-                    "start": float(seg.get("start", 0.0)),
-                    "end": float(seg.get("end", 0.0)),
-                    "text": seg.get("text", "").strip(),
-                    "words": formatted_words,
-                })
+                formatted_segment = {
+                    "start": start,
+                    "end": end,
+                    "text": text,
+                }
+                if formatted_words:
+                    formatted_segment["words"] = formatted_words
+                formatted_segments.append(formatted_segment)
                 
             detected_language = mlx_result.get("language", language or "en")
             
             result = {
                 "segments": formatted_segments,
                 "language": detected_language,
-                "duration": float(mlx_result.get("duration", 0.0)),
+                "duration": result_duration,
                 "vad": {
                     "status": "speech" if formatted_segments else "no_speech",
                     "speechSeconds": sum(

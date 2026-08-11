@@ -11,9 +11,12 @@ import {
 } from '../../src/utils/transcriptionSettings';
 
 describe('live chunk transcription settings', () => {
-  it('uses bounded settings consistently for live and repair transcription', () => {
-    expect(resolveLiveChunkModel('large-v3')).toBe('medium');
-    expect(resolveLiveChunkModel('small')).toBe('small');
+  it('uses the low-latency base model for live chunks without changing final transcription settings', () => {
+    expect(resolveLiveChunkModel('large-v3')).toBe('base');
+    expect(resolveLiveChunkModel('medium')).toBe('base');
+    expect(resolveLiveChunkModel('small')).toBe('base');
+    expect(resolveLiveChunkModel('base')).toBe('base');
+    expect(resolveLiveChunkModel('tiny')).toBe('tiny');
     expect(resolveLiveChunkComputeType('float32')).toBe('int8');
     expect(resolveLiveChunkComputeType('float16')).toBe('float16');
   });

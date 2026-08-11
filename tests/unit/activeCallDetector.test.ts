@@ -63,6 +63,7 @@ describe('createActiveCallDetector', () => {
     expect(result.active).toBe(false);
     expect(result.appName).toBe('Chrome');
     expect(result.confidence).toBe('low');
+    expect(result.reason).toBe('browser-call-tab-closed');
     expect(runAudioProbe).not.toHaveBeenCalled();
   });
 
@@ -104,6 +105,13 @@ describe('createActiveCallDetector', () => {
           name: 'zoom.us',
           command: '/Applications/zoom.us.app/Contents/MacOS/zoom.us',
         },
+        {
+          pid: 302,
+          ppid: 301,
+          name: 'cpthost',
+          command:
+            '/Applications/zoom.us.app/Contents/Frameworks/CptHost.app/Contents/MacOS/CptHost',
+        },
       ],
       runAudioProbe,
       browserProviders: new Map(),
@@ -125,10 +133,17 @@ describe('createActiveCallDetector', () => {
     const detector = createDetector({
       processes: [
         {
-          pid: 302,
+          pid: 303,
           ppid: 1,
           name: 'zoom.us',
           command: '/Applications/zoom.us.app/Contents/MacOS/zoom.us',
+        },
+        {
+          pid: 304,
+          ppid: 303,
+          name: 'cpthost',
+          command:
+            '/Applications/zoom.us.app/Contents/Frameworks/CptHost.app/Contents/MacOS/CptHost',
         },
       ],
       runAudioProbe,
@@ -141,6 +156,36 @@ describe('createActiveCallDetector', () => {
     expect(result.appName).toBe('Zoom');
     expect(result.confidence).toBe('medium');
     expect(result.reason).toBe('call-app-running-silent-fallback');
+  });
+
+  it('rejects idle Zoom when only its persistent generic audio host remains', async () => {
+    setPlatform('darwin');
+    const runAudioProbe = vi.fn(async () => true);
+    const detector = createDetector({
+      processes: [
+        {
+          pid: 305,
+          ppid: 1,
+          name: 'zoom.us',
+          command: '/Applications/zoom.us.app/Contents/MacOS/zoom.us',
+        },
+        {
+          pid: 306,
+          ppid: 305,
+          name: 'caphost',
+          command:
+            '/Applications/zoom.us.app/Contents/Frameworks/caphost.app/Contents/MacOS/caphost',
+        },
+      ],
+      runAudioProbe,
+      browserProviders: new Map(),
+    });
+
+    const result = await detector();
+
+    expect(result.active).toBe(false);
+    expect(result.reason).toBe('no-call-app-running');
+    expect(runAudioProbe).not.toHaveBeenCalled();
   });
 
   it('falls back to medium confidence for supported browser calls when audio probe is silent', async () => {

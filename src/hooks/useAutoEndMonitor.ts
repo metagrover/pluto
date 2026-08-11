@@ -92,6 +92,10 @@ export const useAutoEndMonitor = ({
         switch (action.type) {
           case 'lock_app':
             trackedAppRef.current = action.appName;
+            void window.ipcRenderer.invoke('LOG_AUTO_END_EVENT', {
+              reason_code: 'call_app_locked',
+              app_name: action.appName,
+            });
             break;
 
           case 'cancel_grace':

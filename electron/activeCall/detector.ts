@@ -25,6 +25,7 @@ type CallProvider = 'google-meet' | 'zoom' | 'teams' | 'slack';
 type CallAppMatcher = {
   label: string;
   patterns: RegExp[];
+  requiredProcessPatterns?: RegExp[];
   allowSilentFallback: boolean;
   browserId?: BrowserId;
 };
@@ -114,6 +115,7 @@ const CALL_APP_MATCHERS: CallAppMatcher[] = [
   {
     label: 'Zoom',
     patterns: [/zoom\.us/i, /\bzoom\b/i, /cpthost/i],
+    requiredProcessPatterns: [/cpthost/i],
     allowSilentFallback: true,
   },
   {
@@ -389,7 +391,14 @@ export const createActiveCallDetector = ({
     };
 
     const matchedApps: MatchedCallApp[] = CALL_APP_MATCHERS.map((matcher) => {
-      const directPids = processes
+      const hasRequiredProcess =
+        !matcher.requiredProcessPatterns ||
+        matcher.requiredProcessPatterns.some((pattern) =>
+          processes.some(
+            (proc) => pattern.test(proc.name) || pattern.test(proc.command),
+          ),
+        );
+      const directPids = (hasRequiredProcess ? processes : [])
         .filter((proc) =>
           matcher.patterns.some(
             (pattern) => pattern.test(proc.name) || pattern.test(proc.command),
@@ -471,12 +480,19 @@ export const createActiveCallDetector = ({
       }
     }
 
+    const firstMatchedApp = matchedApps[0];
+    const browserCallTabClosed =
+      Boolean(firstMatchedApp?.browserId) &&
+      !browserCallProviderByLabel.has(firstMatchedApp.label);
+
     return {
       active: false,
-      appName: matchedApps[0] ? toDisplayLabel(matchedApps[0].label) : null,
-      pidCount: matchedApps[0]?.pids.length || null,
+      appName: firstMatchedApp ? toDisplayLabel(firstMatchedApp.label) : null,
+      pidCount: firstMatchedApp?.pids.length || null,
       confidence: 'low',
-      reason: 'call-app-running-without-target-audio',
+      reason: browserCallTabClosed
+        ? 'browser-call-tab-closed'
+        : 'call-app-running-without-target-audio',
     };
   };
 };

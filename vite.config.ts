@@ -20,7 +20,10 @@ export default defineConfig({
         // Shortcut of `build.lib.entry`.
         entry: 'electron/main.ts',
         onstart({ startup }) {
-          return startup(['.']);
+          const userDataArg = process.env.PLUTO_USER_DATA_DIR
+            ? `--user-data-dir=${process.env.PLUTO_USER_DATA_DIR}`
+            : null;
+          return startup(userDataArg ? ['.', userDataArg] : ['.']);
         },
         vite: {
           build: {

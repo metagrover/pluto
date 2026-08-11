@@ -156,6 +156,9 @@ describe('v3 accuracy prompts', () => {
     expect(prompt).toContain('Include all action items, tasks, follow-ups');
     expect(prompt).toContain('evidence quote');
     expect(prompt).toContain('do not turn suggestions');
+    expect(prompt).toContain('Person will do task by date');
+    expect(prompt).toContain('numeric targets and success metrics');
+    expect(prompt).toContain('dates, conditions, and qualifiers');
   });
 });
 

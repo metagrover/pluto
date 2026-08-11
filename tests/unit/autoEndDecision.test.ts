@@ -47,13 +47,27 @@ describe('autoEndDecision', () => {
     expect(result).toEqual({ type: 'no_op' });
   });
 
-  it('does not lock onto an unconfirmed silent call app', () => {
+  it('locks onto a silent desktop call with an attached audio process', () => {
     const result = autoEndDecision({
       poll: {
         active: true,
         appName: 'Zoom',
         confidence: 'medium',
         reason: 'call-app-running-silent-fallback',
+      },
+      trackedApp: null,
+      graceActive: false,
+    });
+    expect(result).toEqual({ type: 'lock_app', appName: 'Zoom' });
+  });
+
+  it('still rejects generic medium-confidence activity', () => {
+    const result = autoEndDecision({
+      poll: {
+        active: true,
+        appName: 'Zoom',
+        confidence: 'medium',
+        reason: 'ambiguous-process-match',
       },
       trackedApp: null,
       graceActive: false,
@@ -133,7 +147,25 @@ describe('autoEndDecision', () => {
     });
   });
 
-  it('starts grace when a confirmed call falls back to a silent attached app', () => {
+  it('returns start_grace (60s) when a tracked browser meeting tab closes', () => {
+    const result = autoEndDecision({
+      poll: {
+        active: false,
+        appName: 'Chrome',
+        confidence: 'low',
+        reason: 'browser-call-tab-closed',
+      },
+      trackedApp: 'Chrome',
+      graceActive: false,
+    });
+    expect(result).toEqual({
+      type: 'start_grace',
+      graceMs: GRACE_SHORT_MS,
+      reasonCode: 'call_app_exited',
+    });
+  });
+
+  it('keeps a tracked call active when its audio process remains silently attached', () => {
     const result = autoEndDecision({
       poll: {
         active: true,
@@ -144,11 +176,7 @@ describe('autoEndDecision', () => {
       trackedApp: 'Zoom',
       graceActive: false,
     });
-    expect(result).toEqual({
-      type: 'start_grace',
-      graceMs: GRACE_LONG_MS,
-      reasonCode: 'audio_inactive_timeout',
-    });
+    expect(result).toEqual({ type: 'no_op' });
   });
 
   it('returns no_op when tracked app inactive but grace already running', () => {
