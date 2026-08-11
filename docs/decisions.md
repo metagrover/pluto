@@ -162,6 +162,14 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Rationale:** Capture-time work previously included frame-rate-driven loops and background jobs whose cost was unrelated to new speech. A foreground resource lease makes the performance policy deterministic and keeps the live meeting responsive throughout long recordings.
 - **Consequences:** Queued knowledge synthesis resumes only after all foreground pause reasons clear; transcript completeness and capture-journal evidence remain unchanged; performance tests and logs use synthetic inputs and content-free aggregate measurements.
 
+## 2026-08-11 - Hint local transcription with bounded known-person context
+
+- **Status:** Accepted
+- **Source:** [Issue #602](https://github.com/metagrover/pluto/issues/602), `docs/superpowers/specs/2026-08-11-known-person-transcription-vocabulary-design.md`
+- **Decision:** Each recording resolves one local `known_person_v1` vocabulary snapshot: explicit participants first, then a deterministic saliency/recency/frequency ranking of linked person entities, capped at 12 sanitized names and 240 prompt characters. The snapshot is passed only to MLX `initial_prompt`; transcript text is never rewritten after recognition.
+- **Rationale:** Pluto already has relevant person context, while MLX supports a bounded prompt that can disambiguate acoustically similar names. A deterministic local hint improves recognition without sending the graph elsewhere or asserting a name when the audio does not support it.
+- **Consequences:** Live and normal final transcription share the immutable recording snapshot; empty context omits the prompt; production logs and persisted transcript metadata retain only policy version and hint count; synthetic ambiguity and negative-control replays gate quality claims.
+
 ## 2026-07-17 - Pin credential-free diarization and require acoustic near-end evidence
 - **Status:** Accepted
 - **Source:** [Issue #465](https://github.com/metagrover/pluto/issues/465), [Issue #509](https://github.com/metagrover/pluto/issues/509), [PR #510](https://github.com/metagrover/pluto/pull/510)

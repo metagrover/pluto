@@ -3,7 +3,7 @@ import io
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal, Optional
 from pathlib import Path
 import json
@@ -71,6 +71,7 @@ class TranscribeRequest(BaseModel):
     language: Optional[str] = None
     diarize: Optional[bool] = False
     word_timestamps: Optional[bool] = True
+    initial_prompt: Optional[str] = Field(default=None, max_length=240)
 
 class ConfigRequest(BaseModel):
     model: Optional[str] = None
@@ -239,6 +240,8 @@ def _transcribe_locked(request: TranscribeRequest):
             }
             if language and language != "auto":
                 mlx_kwargs["language"] = language
+            if request.initial_prompt:
+                mlx_kwargs["initial_prompt"] = request.initial_prompt
                 
             mlx_result = mlx_whisper.transcribe(request.audio_path, **mlx_kwargs)
             raw_segments = mlx_result.get("segments", [])
@@ -330,11 +333,11 @@ def _transcribe_locked(request: TranscribeRequest):
             return result
         raise HTTPException(status_code=503, detail="MLX Whisper is unavailable")
         
-    except Exception as e:
-        logger.error(f"Transcription failed: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        logger.error(
+            "Transcription failed [error_type=%s]", type(error).__name__
+        )
+        raise HTTPException(status_code=500, detail="Transcription failed") from error
 
 if __name__ == "__main__":
     port = int(os.environ.get("WHISPERX_PORT", 5123))

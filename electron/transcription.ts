@@ -33,6 +33,8 @@ export interface TranscriptionMeta {
   elapsedMs: number;
   providerLabel: string;
   warnings?: string[];
+  vocabularyHintPolicyVersion?: string;
+  vocabularyHintCount?: number;
   diarizationRuntime?: {
     engine: 'sherpa-onnx';
     engineVersion: string;
@@ -71,6 +73,9 @@ const toWhisperOptions = (
     language: resolved.language,
     diarize: options.diarize,
     wordTimestamps: options.wordTimestamps,
+    initialPrompt: options.initialPrompt,
+    vocabularyHintPolicyVersion: options.vocabularyHintPolicyVersion,
+    vocabularyHintCount: options.vocabularyHintCount,
     signal: options.signal,
   };
 };
@@ -147,6 +152,8 @@ export const transcribeWithBackend = async (
       elapsedMs: Date.now() - start,
       providerLabel: resolved.providerLabel,
       warnings: resolved.warnings.length > 0 ? resolved.warnings : undefined,
+      vocabularyHintPolicyVersion: options.vocabularyHintPolicyVersion,
+      vocabularyHintCount: options.vocabularyHintCount,
     },
   };
 };

@@ -31,6 +31,9 @@ export interface TranscribeOptions {
   language?: string;
   diarize?: boolean;
   wordTimestamps?: boolean;
+  initialPrompt?: string;
+  vocabularyHintPolicyVersion?: string;
+  vocabularyHintCount?: number;
   diarizationProvider?: 'sherpa_local';
   signal?: AbortSignal;
 }
@@ -585,6 +588,7 @@ export class TranscriptionManager {
         language: options.language,
         diarize: options.diarize,
         word_timestamps: options.wordTimestamps,
+        initial_prompt: options.initialPrompt,
       }),
     } as RequestInit & { dispatcher: typeof WHISPERX_FETCH_AGENT });
 
