@@ -33,6 +33,10 @@ import {
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
 import { createCaptureJournalMutationCoordinator } from '../utils/captureJournalMutationCoordinator';
+import {
+  isCaptureSessionAlreadyActiveError,
+  shouldPreventCaptureUnload,
+} from '../utils/captureSessionGuard';
 import { resolveProductionDiarizationProvider } from '../utils/diarizationProvider';
 import {
   type LiveTranscriptResponsivenessSummary,
@@ -1113,21 +1117,7 @@ export const AudioManager = ({
           });
         },
       });
-      onRecordingStarted?.(startTimeRef.current);
-      recordingEndedAtRef.current = 0;
-      stopInFlightRef.current = false;
-      isRecordingRef.current = true;
-      setIsRecording(true);
-      systemAudioHealthRef.current = 'warning';
-      publishCaptureHealth({
-        microphone: 'healthy',
-        systemAudio: systemAudioHealthRef.current,
-        captureDurability: 'healthy',
-      });
-
-      console.log(
-        `[Pluto] Starting session ${meetingId} (Robust Mic First)...`,
-      );
+      console.log('[Pluto] Starting recording session (Robust Mic First)...');
       try {
         const manifest = (await window.ipcRenderer.invoke(
           'AUDIO_CAPTURE_JOURNAL_START',
@@ -1147,6 +1137,22 @@ export const AudioManager = ({
         captureJournalReceiptsRef.current.clear();
         captureJournalCheckpointsRef.current.clear();
       } catch (journalErr) {
+        if (isCaptureSessionAlreadyActiveError(journalErr)) {
+          console.warn('[Pluto] Recording start rejected: capture already active');
+          currentMeetingIdRef.current = null;
+          liveTranscriptResponsivenessRef.current.abortStart();
+          frozenLiveTranscriptResponsivenessRef.current = null;
+          captureActivitySessionRef.current = null;
+          startTimeRef.current = 0;
+          recordingEndedAtRef.current = 0;
+          stopInFlightRef.current = false;
+          isRecordingRef.current = false;
+          setIsRecording(false);
+          alert(
+            'Another recording is already active. Finish it before starting a new recording.',
+          );
+          return;
+        }
         console.warn(
           '[Pluto] Failed to initialize capture journal:',
           journalErr,
@@ -1154,6 +1160,18 @@ export const AudioManager = ({
         captureActivitySessionRef.current.markDurabilityFailure();
         warnCaptureDurability();
       }
+
+      onRecordingStarted?.(startTimeRef.current);
+      recordingEndedAtRef.current = 0;
+      stopInFlightRef.current = false;
+      isRecordingRef.current = true;
+      setIsRecording(true);
+      systemAudioHealthRef.current = 'warning';
+      publishCaptureHealth({
+        microphone: 'healthy',
+        systemAudio: systemAudioHealthRef.current,
+        captureDurability: 'healthy',
+      });
 
       // 0. Acquire Microphone Stream (Critical Path)
       let micStream: MediaStream | null = null;
@@ -5984,6 +6002,24 @@ export const AudioManager = ({
       currentMeetingIdRef.current = null;
     }
   };
+
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (
+        !shouldPreventCaptureUnload({
+          recording: isRecordingRef.current,
+          processing: isProcessingRef.current,
+        })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   // Set up event listeners for external control (e.g., "End Meeting" button)
   useEffect(() => {
