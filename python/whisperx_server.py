@@ -279,7 +279,6 @@ def _transcribe_locked(request: TranscribeRequest):
                         continue
                     end = min(end, result_duration)
                 text = seg.get("text", "").strip()
-                text = clean_transcript_chunk(text)
                 if end <= start or not text:
                     continue
                 formatted_words = []
