@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getEntitiesPrompt,
-  getFollowUpDraftsPrompt,
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
   getStructuredAnalysisPrompt,
@@ -192,56 +191,6 @@ describe('getEntitiesPrompt', () => {
   });
 });
 
-describe('getFollowUpDraftsPrompt', () => {
-  it('coordinates three formats around the same evidence without internal labels', () => {
-    const prompt = getFollowUpDraftsPrompt({
-      meetingTitle: 'Launch review',
-      overview: ['The launch remains on track.'],
-      participants: ['Maya'],
-      entityContext: ['Project: Atlas'],
-      decisions: ['Use a staged rollout (Why: lower risk)'],
-      actionItems: ['Publish release notes (Owner: Maya)'],
-      openQuestions: [],
-    });
-
-    expect(prompt).toContain('three coordinated formats of the same follow-up');
-    expect(prompt).toContain('Omit unsupported or empty sections');
-    expect(prompt).toContain('Do not expose Pluto-internal labels');
-    expect(prompt).toContain(
-      'Never invent recipients, owners, decisions, or questions',
-    );
-    expect(prompt).not.toContain('three distinct follow-up drafts');
-    expect(prompt).not.toContain('using emoji and bolding where appropriate');
-  });
-
-  it('includes overview context when provided', () => {
-    const prompt = getFollowUpDraftsPrompt({
-      meetingTitle: 'API Migration Review',
-      overview: ['The team aligned on the rollout shape and timing.'],
-      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
-      decisions: ['Use REST for the rollout'],
-      actionItems: ['Send rollout email'],
-    });
-
-    expect(prompt).toContain('Overview:');
-    expect(prompt).toContain(
-      '- The team aligned on the rollout shape and timing.',
-    );
-  });
-
-  it('falls back cleanly when overview context is absent', () => {
-    const prompt = getFollowUpDraftsPrompt({
-      meetingTitle: 'API Migration Review',
-      overview: [' ', ''],
-      participants: ['Sarah Chen'],
-      decisions: ['Use REST for the rollout'],
-      actionItems: ['Send rollout email'],
-    });
-
-    expect(prompt).toContain('Overview:\n- None recorded');
-  });
-});
-
 describe('knowledge document prompts', () => {
   it('asks knowledge synthesis for durable dashboard context instead of imperative tasks', () => {
     const prompt = getKnowledgeDocumentPrompt({
@@ -314,96 +263,5 @@ describe('knowledge document prompts', () => {
     expect(prompt).toContain('"schema_version": 2');
     expect(prompt).toContain('Preserve item classifications');
     expect(prompt).not.toContain('Available meeting evidence (newest first):');
-  });
-});
-
-describe('getFollowUpDraftsPrompt', () => {
-  it('includes linked entity context alongside participants, decisions, and action items', () => {
-    const prompt = getFollowUpDraftsPrompt({
-      meetingTitle: 'API Migration Review',
-      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
-      entityContext: ['Project: Apollo rollout', 'Topic: API migration'],
-      decisions: ['Use REST for the rollout'],
-      actionItems: ['Send rollout email (Owner: Sarah Chen | Due: May 30)'],
-      customPrompt: 'Keep it concise.',
-    });
-
-    expect(prompt).toContain(
-      'Participants:\n- Sarah Chen (Engineering Lead)\n- Alex Rivera',
-    );
-    expect(prompt).toContain(
-      'Linked Context:\n- Project: Apollo rollout\n- Topic: API migration',
-    );
-    expect(prompt).toContain('Decisions:\n- Use REST for the rollout');
-    expect(prompt).toContain(
-      'Action Items:\n- Send rollout email (Owner: Sarah Chen | Due: May 30)',
-    );
-    expect(prompt).toContain('Additional Instruction: Keep it concise.');
-  });
-});
-
-describe('getFollowUpDraftsPrompt', () => {
-  it('includes participant context alongside decisions and action items', () => {
-    const prompt = getFollowUpDraftsPrompt({
-      meetingTitle: 'API Migration Review',
-      participants: ['Sarah Chen (Engineering Lead)', 'Alex Rivera'],
-      topicSummaries: ['API Migration: The team aligned on rollout scope.'],
-      decisions: ['Use REST for the rollout'],
-      actionItems: ['Send rollout email (Owner: Sarah Chen | Due: Friday)'],
-      openQuestions: [
-        'API Migration: Should the mobile client move in the same release?',
-      ],
-      discussionPoints: [
-        'The team needs provenance on each API response.',
-        'The graph schema still needs validation before rollout.',
-      ],
-    });
-
-    expect(prompt).toContain('Participants:');
-    expect(prompt).toContain('- Sarah Chen (Engineering Lead)');
-    expect(prompt).toContain('- Alex Rivera');
-    expect(prompt).toContain('Discussion Context:');
-    expect(prompt).toContain(
-      '- API Migration: The team aligned on rollout scope.',
-    );
-    expect(prompt).toContain(
-      '- The team needs provenance on each API response.',
-    );
-    expect(prompt).toContain('Decisions:');
-    expect(prompt).toContain('Action Items:');
-    expect(prompt).toContain(
-      'Use participant names only when they appear in the participant list or action/decision evidence.',
-    );
-    expect(prompt).toContain('Open Questions:');
-    expect(prompt).toContain(
-      '- API Migration: Should the mobile client move in the same release?',
-    );
-  });
-
-  it('passes topic-aware decision lines through without stripping the topic label', () => {
-    const prompt = getFollowUpDraftsPrompt({
-      meetingTitle: 'API Migration Review',
-      participants: ['Sarah Chen'],
-      decisions: ['Use REST for the rollout (Topic: API migration)'],
-      actionItems: ['Send rollout email'],
-    });
-
-    expect(prompt).toContain(
-      'Decisions:\n- Use REST for the rollout (Topic: API migration)',
-    );
-  });
-
-  it('falls back to a safe no-participants block when none are available', () => {
-    const prompt = getFollowUpDraftsPrompt({
-      meetingTitle: 'Launch Review',
-      actionItems: [],
-      decisions: [],
-    });
-
-    expect(prompt).toContain('Participants:');
-    expect(prompt).toContain('- None recorded');
-    expect(prompt).toContain('Open Questions:');
-    expect(prompt).toContain('Discussion Context:');
-    expect(prompt).toContain('- None recorded');
   });
 });

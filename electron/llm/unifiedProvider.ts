@@ -20,7 +20,6 @@ import type {
 import { ollamaHttpFetch } from './ollamaHttpTransport';
 import {
   getEntitiesPrompt,
-  getFollowUpDraftsPrompt,
   getSpeakerIdentityPrompt,
   getStructuredAnalysisPrompt,
   getStructuredAnalysisRepairPrompt,
@@ -64,8 +63,7 @@ type LLMTask =
   | 'valueSignals'
   | 'knowledgeDoc'
   | 'askPluto'
-  | 'queryClassification'
-  | 'followUps';
+  | 'queryClassification';
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error &&
@@ -896,38 +894,6 @@ export class UnifiedLLMProvider implements LLMProvider {
     });
   }
 
-  async generateFollowUpDrafts(params: {
-    meetingTitle: string;
-    overview?: string[];
-    participants?: string[];
-    entityContext?: string[];
-    topicSummaries?: string[];
-    actionItems: string[];
-    decisions: string[];
-    openQuestions?: string[];
-    discussionPoints?: string[];
-    customPrompt?: string;
-  }): Promise<{ drafts: Array<{ title: string; content: string }> }> {
-    const prompt = getFollowUpDraftsPrompt(params);
-
-    try {
-      const raw = await this.generateText({
-        prompt,
-        task: 'followUps',
-        jsonMode: true,
-      });
-      const parsed = JSON.parse(this.cleanJsonText(raw)) as {
-        drafts: Array<{ title: string; content: string }>;
-      };
-      return {
-        drafts: Array.isArray(parsed.drafts) ? parsed.drafts : [],
-      };
-    } catch (e) {
-      console.error(`[${this.name}] Failed to generate follow-up drafts:`, e);
-      return { drafts: [] };
-    }
-  }
-
   async extractEntities(
     transcript: string,
     context?: EntityExtractionContext,
@@ -1255,9 +1221,6 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'knowledgeDoc') {
       return 'You are an expert at generating strict citation-grounded knowledge documents. Always respond with valid JSON only.';
     }
-    if (task === 'followUps') {
-      return 'You are an expert communications assistant. Always respond with valid JSON only.';
-    }
     if (task === 'summaryRepair') {
       return 'You are a strict formatting assistant. Return only corrected markdown.';
     }
@@ -1284,7 +1247,6 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'summaryRepair') return 0.2;
     if (task === 'valueSignals') return 0.2;
     if (task === 'knowledgeDoc') return 0.2;
-    if (task === 'followUps') return 0.7;
     if (task === 'title') return 0.5;
     if (task === 'askPluto') return 0.4;
     if (task === 'queryClassification') return 0.1;
@@ -1302,7 +1264,6 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'knowledgeDoc') return 4096;
     if (task === 'askPluto') return 2048;
     if (task === 'queryClassification') return 128;
-    if (task === 'followUps') return 2048;
     return 50;
   }
 
