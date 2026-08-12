@@ -15,6 +15,13 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-08-11 - Remove the Meeting View follow-up email draft surface
+- **Status:** Accepted
+- **Source:** [Issue #613](https://github.com/metagrover/pluto/issues/613), owner direction on 2026-08-11
+- **Decision:** Pluto removes the Meeting View follow-up draft/export composer, including the Email/Internal/Slack variants and LLM refinement path, until a clearer business need exists.
+- **Rationale:** The current email-shaped surface was weak enough to reduce trust and overlapped with the broader commitment lifecycle work in [Issue #61](https://github.com/metagrover/pluto/issues/61). Pluto should keep action-item accountability visible without presenting generic send-ready prose as a core meeting outcome.
+- **Consequences:** Meeting View still shows extracted follow-ups and durable lifecycle controls, but no longer offers a follow-up email or draft editor. Legacy saved draft data remains inert for compatibility, and any future recap/export experience should start from an explicit user need with cited evidence and review semantics.
+
 ## 2026-08-11 - Make the Electron main process authoritative for active capture
 - **Status:** Accepted
 - **Source:** [Issue #601](https://github.com/metagrover/pluto/issues/601), [PR #604](https://github.com/metagrover/pluto/pull/604)

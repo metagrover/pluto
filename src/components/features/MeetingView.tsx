@@ -53,17 +53,7 @@ import {
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
-import { FollowUpDrafts } from './FollowUpDrafts';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
-import {
-  buildFollowUpDraftContext,
-  buildFollowUpDraftDecisions,
-  buildFollowUpDraftDiscussionPoints,
-  buildFollowUpDraftOpenQuestions,
-  buildFollowUpDraftTopicSummaries,
-  formatFollowUpDraftActionItem,
-} from './followUpDraftContext';
-import { getMeetingParticipants } from './followUpDraftParticipants';
 import {
   type MeetingActionEntity,
   type MeetingActionItemCard,
@@ -681,43 +671,6 @@ export const MeetingView = ({
   }, [selectedMeeting.id]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const fetchMeetingEntities = async () => {
-      try {
-        const entities = await getMeetingEntities(String(selectedMeeting.id));
-        if (cancelled) return;
-        setMeetingEntities(entities);
-      } catch (error) {
-        if (cancelled) return;
-        console.error(
-          'Failed to fetch meeting entities for follow-up drafts:',
-          error,
-        );
-        setMeetingEntities([]);
-      }
-    };
-
-    const handleEntitiesUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ meetingId?: string | number }>)
-        .detail;
-      if (!detail?.meetingId) return;
-      if (String(detail.meetingId) !== String(selectedMeeting.id)) return;
-      void fetchMeetingEntities();
-    };
-
-    void fetchMeetingEntities();
-    window.addEventListener('MEETING_ENTITIES_UPDATED', handleEntitiesUpdated);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(
-        'MEETING_ENTITIES_UPDATED',
-        handleEntitiesUpdated,
-      );
-    };
-  }, [selectedMeeting.id]);
-
-  useEffect(() => {
     if (!selectedEntity) {
       setEntityMeetings([]);
       setRelatedEntities([]);
@@ -766,47 +719,11 @@ export const MeetingView = ({
   const summaryParagraphs = v2?.summary?.length
     ? v2.summary
     : ['No summary was generated for this meeting.'];
-  const followUpDraftOverview = (
-    v3?.overview ? [v3.overview] : v2?.summary || []
-  )
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
   const keyPoints = v2?.key_points || [];
   const actionItems =
-    v3?.all_action_items.map((item) => {
-      return formatFollowUpDraftActionItem({
-        text: item.text,
-        topic: item.topic,
-        assignee: item.assignee,
-        due: item.due,
-      });
-    }) ||
-    v2?.action_items ||
-    [];
-  const decisions = buildFollowUpDraftDecisions({
-    fallbackDecisions:
-      v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [],
-    analysis: v3,
-  });
-  const discussionPoints = buildFollowUpDraftDiscussionPoints(v3?.topics);
-  const followUpDraftTopicSummaries = v3
-    ? buildFollowUpDraftTopicSummaries(v3.topics)
-    : [];
-  const followUpDraftContext = buildFollowUpDraftContext({
-    fallbackActionItems: actionItems,
-    fallbackDecisions: decisions,
-    linkedEntities: meetingEntities,
-    linkedAttentionItems: meetingAttentionItems,
-  });
-  const followUpDraftParticipants = Array.from(
-    new Set([
-      ...followUpDraftContext.participants,
-      ...getMeetingParticipants(selectedMeeting),
-    ]),
-  );
-  const followUpDraftOpenQuestions = buildFollowUpDraftOpenQuestions(
-    v3?.topics,
-  );
+    v3?.all_action_items.map((item) => item.text) || v2?.action_items || [];
+  const decisions =
+    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
   const totalEntityMentions = entityMeetings.reduce(
     (sum, meeting) => sum + meeting.mention_count,
     0,
@@ -1305,21 +1222,6 @@ export const MeetingView = ({
 
       {/* Discovery Hub - Related Entities (Knowledge Graph) */}
       <div className="mb-12 space-y-6">
-        {canGenerateMeetingIntelligence(selectedMeeting) ? (
-          <FollowUpDrafts
-            meeting={selectedMeeting}
-            overview={followUpDraftOverview}
-            actionItems={followUpDraftContext.actionItems}
-            decisions={followUpDraftContext.decisions}
-            entityContext={followUpDraftContext.entityContext}
-            discussionPoints={discussionPoints}
-            participants={followUpDraftParticipants}
-            openQuestions={followUpDraftOpenQuestions}
-            topicSummaries={followUpDraftTopicSummaries}
-            fetchMeetings={fetchMeetings}
-          />
-        ) : null}
-
         <EntitySidebar
           meetingId={String(selectedMeeting.id)}
           onEntityClick={(entity) => {

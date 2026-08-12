@@ -1638,18 +1638,6 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('GET_MEETINGS', () => db.getMeetings());
   ipcMain.handle('GET_MEETING', (_event, id) => db.getMeeting(id));
-  ipcMain.handle(
-    'UPDATE_MEETING_FOLLOW_UP_DRAFTS',
-    (_event, meetingId, followUpDraftsJson) => {
-      if (
-        (typeof meetingId !== 'string' && typeof meetingId !== 'number') ||
-        (typeof followUpDraftsJson !== 'string' && followUpDraftsJson !== null)
-      ) {
-        throw new Error('Invalid follow-up draft update');
-      }
-      return db.updateMeetingFollowUpDrafts(meetingId, followUpDraftsJson);
-    },
-  );
   ipcMain.handle('SEARCH_MEETINGS', (_event, query) =>
     db.searchMeetings(query),
   );
@@ -2353,49 +2341,6 @@ app.whenReady().then(async () => {
       } catch (error) {
         console.error('[LLM] Entity extraction and processing failed:', error);
         throw error;
-      }
-    },
-  );
-
-  // Process pre-extracted entities (save to knowledge graph)
-  ipcMain.handle(
-    'GENERATE_FOLLOW_UPS',
-    async (
-      _event,
-      {
-        meetingTitle,
-        overview,
-        participants,
-        entityContext,
-        topicSummaries,
-        actionItems,
-        decisions,
-        openQuestions,
-        discussionPoints,
-        customPrompt,
-      },
-    ) => {
-      try {
-        const settings = await getAllSettings(db);
-        const provider = await getProvider(settings);
-        console.log(
-          `[LLM] Generating follow-up drafts with provider: ${provider.name}`,
-        );
-        return await provider.generateFollowUpDrafts({
-          meetingTitle,
-          overview,
-          participants,
-          entityContext,
-          topicSummaries,
-          actionItems,
-          decisions,
-          openQuestions,
-          discussionPoints,
-          customPrompt,
-        });
-      } catch (error) {
-        console.error('[LLM] Follow-up generation failed:', error);
-        return { drafts: [] };
       }
     },
   );
