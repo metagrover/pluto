@@ -1442,9 +1442,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('SAVE_MEETING', (_event, meeting, options) => {
     try {
-      const shouldRunTranscriptCleanup =
-        meeting?.run_transcript_cleanup === true;
-      if (shouldRunTranscriptCleanup) {
+      if (meeting?.transcript_json) {
         const cleanup = cleanupTranscriptJson(meeting?.transcript_json);
         if (cleanup) {
           meeting.transcript_json = cleanup.cleanedTranscriptJson;

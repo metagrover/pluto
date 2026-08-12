@@ -230,6 +230,21 @@ const mergeConsecutiveSegments = (
   return { segments: output, mergedPairs };
 };
 
+export const stripFillers = (text: string): string => {
+  return text.replace(/\b(um|uh|you know|sort of|like)\b\s*/gi, '').replace(/\s+/g, ' ').trim();
+};
+
+export const resolveSelfCorrections = (text: string): string => {
+  return text.replace(/(\S+)\s*(?:\.\.\.|,)?\s*(?:no wait|actually|scratch that|I mean)\s*,?\s*(\S+)/gi, '$2').trim();
+};
+
+export const cleanSegmentText = (text: string): string => {
+  if (!text || !text.trim()) return text;
+  const stripped = stripFillers(text);
+  const resolved = resolveSelfCorrections(stripped || text);
+  return resolved.trim() || text.trim();
+};
+
 export const cleanTranscriptSegments = (
   rawSegments: TranscriptSegmentLike[],
 ): TranscriptCleanupResult => {
@@ -237,13 +252,17 @@ export const cleanTranscriptSegments = (
   const dedupedThem = filterDuplicateSpeakerSegments(sanitized, 'Them');
   const dedupedMe = filterDuplicateSpeakerSegments(dedupedThem.segments, 'Me');
   const merged = mergeConsecutiveSegments(dedupedMe.segments, 3);
+  const cleanedSegments = merged.segments.map((seg) => ({
+    ...seg,
+    text: cleanSegmentText(seg.text || ''),
+  }));
 
   return {
-    segments: merged.segments,
+    segments: cleanedSegments,
     stats: {
       input: rawSegments.length,
       after_dedupe: dedupedMe.segments.length,
-      output: merged.segments.length,
+      output: cleanedSegments.length,
       dropped_duplicates: dedupedThem.dropped + dedupedMe.dropped,
       merged_pairs: merged.mergedPairs,
     },
