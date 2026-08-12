@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   type TranscriptSegmentLike,
-  cleanTranscriptSegments,
-  stripFillers,
-  resolveSelfCorrections,
   cleanSegmentText,
+  cleanTranscriptSegments,
+  resolveSelfCorrections,
+  stripFillers,
 } from '../../electron/transcriptCleanup';
 
 describe('cleanTranscriptSegments', () => {

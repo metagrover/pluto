@@ -236,10 +236,16 @@ export const runRecordingTranscriptValidation = async (input: {
     );
     const localWordCount = coverageSegments
       .filter((s) => s.source === 'Me')
-      .reduce((count, s) => count + s.text.split(/\s+/).filter(Boolean).length, 0);
+      .reduce(
+        (count, s) => count + s.text.split(/\s+/).filter(Boolean).length,
+        0,
+      );
     const remoteWordCount = coverageSegments
       .filter((s) => s.source === 'Them')
-      .reduce((count, s) => count + s.text.split(/\s+/).filter(Boolean).length, 0);
+      .reduce(
+        (count, s) => count + s.text.split(/\s+/).filter(Boolean).length,
+        0,
+      );
     const validation = validateTranscriptIntegrity({
       recordingDurationSeconds: input.recordingDurationSeconds,
       micAudioDurationSeconds: input.recordingDurationSeconds,
@@ -384,10 +390,16 @@ export const runRecordingTranscriptValidation = async (input: {
       );
   const localWordCount = reconciliation.segments
     .filter((s) => s.source === 'Me')
-    .reduce((count, s) => count + s.text.split(/\s+/).filter(Boolean).length, 0);
+    .reduce(
+      (count, s) => count + s.text.split(/\s+/).filter(Boolean).length,
+      0,
+    );
   const remoteWordCount = reconciliation.segments
     .filter((s) => s.source === 'Them')
-    .reduce((count, s) => count + s.text.split(/\s+/).filter(Boolean).length, 0);
+    .reduce(
+      (count, s) => count + s.text.split(/\s+/).filter(Boolean).length,
+      0,
+    );
 
   const validation = validateTranscriptIntegrity({
     recordingDurationSeconds: input.recordingDurationSeconds,

@@ -1311,7 +1311,7 @@ export const AudioManager = ({
         try {
           const processor = audioContext.createScriptProcessor(4096, 1, 1);
           const sink = audioContext.createGain();
-          sink.gain.value = 0;
+          sink.gain.value = 0.00001;
           processor.onaudioprocess = (evt: AudioProcessingEvent) => {
             const input = evt.inputBuffer.getChannelData(0);
             if (!input || input.length === 0) return;

@@ -231,11 +231,19 @@ const mergeConsecutiveSegments = (
 };
 
 export const stripFillers = (text: string): string => {
-  return text.replace(/\b(um|uh|you know|sort of|like)\b\s*/gi, '').replace(/\s+/g, ' ').trim();
+  return text
+    .replace(/\b(um|uh|you know|sort of|like)\b\s*/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 };
 
 export const resolveSelfCorrections = (text: string): string => {
-  return text.replace(/(\S+)\s*(?:\.\.\.|,)?\s*(?:no wait|actually|scratch that|I mean)\s*,?\s*(\S+)/gi, '$2').trim();
+  return text
+    .replace(
+      /(\S+)\s*(?:\.\.\.|,)?\s*(?:no wait|actually|scratch that|I mean)\s*,?\s*(\S+)/gi,
+      '$2',
+    )
+    .trim();
 };
 
 export const cleanSegmentText = (text: string): string => {
