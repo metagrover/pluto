@@ -42,9 +42,9 @@ flowchart LR
 
 ## 3. Auto-Learning Jargon & Vocabulary Dictionary
 
-### 3.1 Edit Observer & Diff Engine
-* Monitors user text edits in Pluto meeting notes and transcript documents.
-* When a user manually corrects a transcribed word (e.g. `Kubernets` → `Kubernetes`), the diff engine captures `(original, corrected)`.
+### 3.1 Edit Observer & Diff Engine (Pluto Knowledge Base Integration)
+* Hooks into Pluto's existing document edit system (`knowledge_doc_user_edits` table in `electron/db.ts` and `user_edits_json` in `meetings`).
+* When a user inline-edits a meeting note or knowledge document inside Pluto's UI, the diff engine compares the generated `knowledge_doc` text against `knowledge_doc_user_edits.edited_content` to extract `(original_word, corrected_word)` candidates.
 
 ### 3.2 Filtering & Qualification
 * **Zipf Frequency Filter**: Ignores common English dictionary words (Zipf score $\ge 3.5$).
