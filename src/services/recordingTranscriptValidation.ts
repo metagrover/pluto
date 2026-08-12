@@ -234,6 +234,12 @@ export const runRecordingTranscriptValidation = async (input: {
       coverageSegments,
       'Them',
     );
+    const localWordCount = coverageSegments
+      .filter((s) => s.source === 'Me')
+      .reduce((count, s) => count + s.text.split(/\s+/).filter(Boolean).length, 0);
+    const remoteWordCount = coverageSegments
+      .filter((s) => s.source === 'Them')
+      .reduce((count, s) => count + s.text.split(/\s+/).filter(Boolean).length, 0);
     const validation = validateTranscriptIntegrity({
       recordingDurationSeconds: input.recordingDurationSeconds,
       micAudioDurationSeconds: input.recordingDurationSeconds,
@@ -242,6 +248,8 @@ export const runRecordingTranscriptValidation = async (input: {
       systemActivitySeconds,
       localTranscriptCoveredSeconds,
       remoteTranscriptCoveredSeconds,
+      localWordCount,
+      remoteWordCount,
       unresolvedAmbiguousSeconds: 0,
       requiredSourcesSucceeded: input.checkpointEvidenceVerified === true,
     });
@@ -374,6 +382,13 @@ export const runRecordingTranscriptValidation = async (input: {
           hasSuccessfulSourceResult(mix, mixedSegments) &&
           hasSuccessfulSourceResult(system, systemSegments),
       );
+  const localWordCount = reconciliation.segments
+    .filter((s) => s.source === 'Me')
+    .reduce((count, s) => count + s.text.split(/\s+/).filter(Boolean).length, 0);
+  const remoteWordCount = reconciliation.segments
+    .filter((s) => s.source === 'Them')
+    .reduce((count, s) => count + s.text.split(/\s+/).filter(Boolean).length, 0);
+
   const validation = validateTranscriptIntegrity({
     recordingDurationSeconds: input.recordingDurationSeconds,
     micAudioDurationSeconds:
@@ -394,6 +409,8 @@ export const runRecordingTranscriptValidation = async (input: {
     remoteTranscriptCoveredSeconds: systemVadVerified
       ? asrConfirmedRemoteCoveredSeconds
       : candidateRemoteCoveredSeconds,
+    localWordCount,
+    remoteWordCount,
     collapsedPassThroughSeconds:
       reconciliation.evidence.collapsedPassThroughSeconds,
     unresolvedAmbiguousSeconds:
