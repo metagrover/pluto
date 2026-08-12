@@ -12,6 +12,7 @@ import {
 interface ZenModeProps {
   isProcessing: boolean;
   onEndMeeting: () => void;
+  onBackHome: () => void;
   meetingTitle: string;
   setMeetingTitle: (value: string) => void;
   meetingParticipants: string[];
@@ -32,6 +33,7 @@ interface ZenModeProps {
 export const ZenMode = ({
   isProcessing,
   onEndMeeting,
+  onBackHome,
   meetingTitle,
   setMeetingTitle,
   meetingParticipants,
@@ -89,8 +91,7 @@ export const ZenMode = ({
         microphone={model.microphone}
         systemAudio={model.systemAudio}
         liveTranscriptIntegrity={liveTranscriptIntegrity}
-        title={meetingTitle}
-        onTitleChange={setMeetingTitle}
+        onBackHome={onBackHome}
         onFinish={onEndMeeting}
       />
       <div className="recording-workspace-grid">
@@ -99,6 +100,8 @@ export const ZenMode = ({
           interimText={model.interimText}
         />
         <RecordingMeetingRail
+          title={meetingTitle}
+          onTitleChange={setMeetingTitle}
           participants={meetingParticipants}
           participantInput={participantInput}
           onParticipantInputChange={setParticipantInput}
