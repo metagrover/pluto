@@ -604,6 +604,31 @@ export class TranscriptionManager {
     return await response.json();
   }
 
+  async reconcile(
+    segments: any[],
+    fullContextText?: string,
+  ): Promise<{ segments: any[]; corrections: number }> {
+    await this.start();
+    try {
+      const response = await fetch(`${this.getBaseUrl()}/reconcile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        dispatcher: WHISPERX_FETCH_AGENT,
+        body: JSON.stringify({
+          segments,
+          full_context_text: fullContextText || '',
+        }),
+      } as RequestInit & { dispatcher: typeof WHISPERX_FETCH_AGENT });
+
+      if (!response.ok) {
+        return { segments, corrections: 0 };
+      }
+      return await response.json();
+    } catch {
+      return { segments, corrections: 0 };
+    }
+  }
+
   async diarize(
     audioPath: string,
     signal?: AbortSignal,

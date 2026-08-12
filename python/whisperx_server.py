@@ -340,6 +340,23 @@ def _transcribe_locked(request: TranscribeRequest):
         )
         raise HTTPException(status_code=500, detail="Transcription failed") from error
 
+from rolling_reconciliation_worker import reconcile_transcript_segments
+
+class ReconcileRequest(BaseModel):
+    segments: List[Dict[str, Any]]
+    full_context_text: Optional[str] = None
+
+@app.post("/reconcile")
+def reconcile_transcript_endpoint(request: ReconcileRequest):
+    try:
+        segments = request.segments
+        context = request.full_context_text or ""
+        updated_segments, corrections = reconcile_transcript_segments(segments, context)
+        return {"segments": updated_segments, "corrections": corrections}
+    except Exception as err:
+        logger.error("Reconciliation endpoint error: %s", err)
+        return {"segments": request.segments, "corrections": 0}
+
 if __name__ == "__main__":
     port = int(os.environ.get("WHISPERX_PORT", 5123))
     uvicorn.run(app, host="127.0.0.1", port=port)
