@@ -14,7 +14,8 @@ describe('extractLearnedWordCandidate', () => {
 
   it('handles diffs with extra added context words', () => {
     const original = 'we discussed graphql backend architecture in the standup';
-    const edited = 'we discussed GraphQL backend architecture in the team standup today';
+    const edited =
+      'we discussed GraphQL backend architecture in the team standup today';
     const candidate = extractLearnedWordCandidate(original, edited);
     expect(candidate).toEqual({
       original: 'graphql',

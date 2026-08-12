@@ -1,10 +1,64 @@
 const COMMON_WORDS = new Set([
-  'the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i',
-  'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at',
-  'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she',
-  'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what',
-  'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me',
-  'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know', 'take'
+  'the',
+  'be',
+  'to',
+  'of',
+  'and',
+  'a',
+  'in',
+  'that',
+  'have',
+  'i',
+  'it',
+  'for',
+  'not',
+  'on',
+  'with',
+  'he',
+  'as',
+  'you',
+  'do',
+  'at',
+  'this',
+  'but',
+  'his',
+  'by',
+  'from',
+  'they',
+  'we',
+  'say',
+  'her',
+  'she',
+  'or',
+  'an',
+  'will',
+  'my',
+  'one',
+  'all',
+  'would',
+  'there',
+  'their',
+  'what',
+  'so',
+  'up',
+  'out',
+  'if',
+  'about',
+  'who',
+  'get',
+  'which',
+  'go',
+  'me',
+  'when',
+  'make',
+  'can',
+  'like',
+  'time',
+  'no',
+  'just',
+  'him',
+  'know',
+  'take',
 ]);
 
 export interface WordCorrectionCandidate {
@@ -28,7 +82,7 @@ function levenshteinDistance(a: string, b: string): number {
         matrix[i][j] = Math.min(
           matrix[i - 1][j - 1] + 1,
           matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
+          matrix[i - 1][j] + 1,
         );
       }
     }
@@ -38,7 +92,7 @@ function levenshteinDistance(a: string, b: string): number {
 
 export function extractLearnedWordCandidate(
   originalText: string,
-  editedText: string
+  editedText: string,
 ): WordCorrectionCandidate | null {
   if (!originalText || !editedText || originalText === editedText) {
     return null;
@@ -53,7 +107,10 @@ export function extractLearnedWordCandidate(
       const isJargon = e[0] === e[0].toUpperCase() || /[A-Z]/.test(e);
       if (isJargon && !origWords.includes(e)) {
         const match = origWords.find(
-          (o) => o.toLowerCase() === eLower || (Math.abs(o.length - e.length) <= 3 && levenshteinDistance(o.toLowerCase(), eLower) <= 2)
+          (o) =>
+            o.toLowerCase() === eLower ||
+            (Math.abs(o.length - e.length) <= 3 &&
+              levenshteinDistance(o.toLowerCase(), eLower) <= 2),
         );
         if (match && match !== e) {
           return { original: match, corrected: e };
