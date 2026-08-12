@@ -12,6 +12,7 @@ import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
 import { Sidebar } from './components/layout/Sidebar';
 
 import { updateAlertStatus } from './api/intelligence';
+import type { Entity } from './api/knowledgeGraph';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
@@ -41,6 +42,7 @@ import {
 import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 
 import {
+  searchEntities,
   updateActionCommitmentState,
   updateEntityStatus,
 } from './api/knowledgeGraph';
@@ -53,6 +55,7 @@ import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecut
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { SettingsOverlay } from './components/overlays/SettingsOverlay';
+import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel';
 
 // Types
 import type { Meeting } from './types';
@@ -90,6 +93,9 @@ function App() {
     !window.__PLUTO_BROWSER_PREVIEW__,
   );
   const [searchVisible, setSearchVisible] = useState(false);
+  const [searchEntitiesResults, setSearchEntitiesResults] = useState<Entity[]>(
+    [],
+  );
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [permissionsVisible, setPermissionsVisible] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState({
@@ -415,6 +421,10 @@ function App() {
         e.preventDefault();
         setAskPlutoVisible(true);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+        e.preventDefault();
+        setSearchVisible(true);
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
         setSettingsVisible(true);
@@ -534,13 +544,33 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [safeMeetings, transcriptValidationRetrying]);
 
-  const filteredMeetings = safeMeetings.filter(
-    (m) =>
-      (m.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (m.enhanced_notes || '')
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase()),
-  );
+  const searchPlutoResults = buildSearchPlutoResults({
+    query: searchQuery,
+    meetings: safeMeetings,
+    entities: searchEntitiesResults,
+  });
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!searchVisible || !trimmed) {
+      setSearchEntitiesResults([]);
+      return;
+    }
+
+    let cancelled = false;
+    searchEntities(trimmed)
+      .then((entities) => {
+        if (!cancelled) setSearchEntitiesResults(entities);
+      })
+      .catch((error) => {
+        console.error('Failed to search entities', error);
+        if (!cancelled) setSearchEntitiesResults([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchQuery, searchVisible]);
 
   const probeMicrophonePermission = async () => {
     try {
@@ -716,6 +746,7 @@ function App() {
                 startSessionRef.current();
               }
             }}
+            onOpenSearch={() => setSearchVisible(true)}
             handleDeleteMeeting={handleDeleteMeeting}
             setSettingsVisible={setSettingsVisible}
             theme={theme}
@@ -1001,8 +1032,19 @@ function App() {
         setSearchVisible={setSearchVisible}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
-        filteredMeetings={filteredMeetings}
-        setSelectedMeetingId={setSelectedMeetingId}
+        results={searchPlutoResults}
+        onOpenMeeting={(meetingId) => {
+          setSelectedMeetingId(meetingId);
+          setActiveTab('hub');
+        }}
+        onOpenProjects={() => {
+          setActiveTab('projects');
+          setSelectedMeetingId(null);
+        }}
+        onOpenPeople={() => {
+          setActiveTab('people');
+          setSelectedMeetingId(null);
+        }}
       />
 
       <SettingsOverlay
