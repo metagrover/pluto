@@ -1323,8 +1323,10 @@ export const AudioManager = ({
           micPcmSourceRef.current = micSource;
           micPcmProcessorRef.current = processor;
           micPcmSinkRef.current = sink;
-          (window as unknown as Record<string, unknown>).__plutoMicProcessor = processor;
-          (window as unknown as Record<string, unknown>).__plutoMicSource = micSource;
+          (window as unknown as Record<string, unknown>).__plutoMicProcessor =
+            processor;
+          (window as unknown as Record<string, unknown>).__plutoMicSource =
+            micSource;
           console.log(
             `[Pluto] Mic PCM chunk capture active at ${audioContext.sampleRate}Hz`,
           );

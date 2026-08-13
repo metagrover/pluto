@@ -1102,7 +1102,8 @@ const pruneSourceEchoBleed = (
       if (gapMs > maxGapMs) continue;
 
       const isSubset = tokenCoverage(segment.text, other.text) >= 0.5;
-      const isSimilar = jaccardSimilarity(segment.text, other.text) >= similarityThreshold;
+      const isSimilar =
+        jaccardSimilarity(segment.text, other.text) >= similarityThreshold;
       if (!isSubset && !isSimilar) continue;
 
       const themTokens = tokenize(other.text);
