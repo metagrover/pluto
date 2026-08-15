@@ -87,21 +87,21 @@ export const resolveTranscriptionPolicy = (role: TranscriptionPolicyRole) =>
 - Modify: `package.json`
 - Modify: `electron-builder.json5`
 
-- [ ] **Step 1: Write failing tests for immutable activation state, failed preparation preserving the active version, one-time model loading, serialized requests, fresh decoder state, and content-free errors**
+- [x] **Step 1: Write failing tests for immutable activation state, failed preparation preserving the active version, one-time model loading, serialized requests, fresh decoder state, and content-free errors**
 
-- [ ] **Step 2: Run the Swift core suite and verify the missing implementations fail**
+- [x] **Step 2: Run the Swift core suite and verify the missing implementations fail**
 
-- [ ] **Step 3: Pin FluidAudio 0.15.5 in `Package.swift`; implement `ModelStore` around a Pluto-owned root and an injected downloader/loader so lifecycle tests remain offline**
+- [x] **Step 3: Pin FluidAudio 0.15.5 in `Package.swift`; implement `ModelStore` around a Pluto-owned root and an injected downloader/loader so lifecycle tests remain offline**
 
-- [ ] **Step 4: Implement the production engine with `AsrModels.downloadAndLoad(to:version:encoderPrecision:)`, `AsrManager`, `.cpuAndNeuralEngine`, disk-backed long-form transcription, token timings, explicit language, confidence, and VAD-compatible empty output**
+- [x] **Step 4: Implement the production engine with `AsrModels.downloadAndLoad(to:version:encoderPrecision:)`, `AsrManager`, `.cpuAndNeuralEngine`, disk-backed long-form transcription, token timings, explicit language, confidence, and VAD-compatible empty output**
 
-- [ ] **Step 5: Add bounded known-person vocabulary rescoring using FluidAudio's CTC spotter/rescorer; persist only vocabulary policy/count**
+- [x] **Step 5: Add bounded known-person vocabulary rescoring using FluidAudio's CTC spotter/rescorer; persist only vocabulary policy/count**
 
-- [ ] **Step 6: Implement the persistent service read loop, request correlation, cancellation, serialized ASR actor, and sanitized stderr behavior**
+- [x] **Step 6: Implement the persistent service read loop, request correlation, cancellation, serialized ASR actor, and sanitized stderr behavior**
 
-- [ ] **Step 7: Add `build:parakeet` to produce/sign `resources/bin/parakeet-runtime`, include manifests/notices in `extraResources`, and run `swift test` plus `pnpm run build:parakeet`**
+- [x] **Step 7: Add `build:parakeet` to produce/sign `resources/bin/parakeet-runtime`, include manifests/notices in `extraResources`, and run `swift test` plus `pnpm run build:parakeet`**
 
-- [ ] **Step 8: Commit the native runtime and build integration**
+- [x] **Step 8: Commit the native runtime and build integration**
 
 ### Task 4: Electron Parakeet process client
 
@@ -110,7 +110,7 @@ export const resolveTranscriptionPolicy = (role: TranscriptionPolicyRole) =>
 - Create: `electron/transcription/nativeJsonLineProcess.ts`
 - Test: `tests/unit/parakeetFinalClient.test.ts`
 
-- [ ] **Step 1: Write failing tests with a fake child process for one shared start, request correlation, sequential submission, cancellation, timeout, malformed lines, child exit, approved roots, and sanitized diagnostics**
+- [x] **Step 1: Write failing tests with a fake child process for one shared start, request correlation, sequential submission, cancellation, timeout, malformed lines, child exit, approved roots, and sanitized diagnostics**
 
 ```ts
 const first = client.transcribe(firstRequest);
@@ -121,13 +121,13 @@ await first;
 expect(child.stdin.write).toHaveBeenCalledTimes(2);
 ```
 
-- [ ] **Step 2: Run the focused Vitest file and verify RED**
+- [x] **Step 2: Run the focused Vitest file and verify RED**
 
-- [ ] **Step 3: Implement the JSON-line process adapter and Parakeet client with injected spawn/clock/path resolution**
+- [x] **Step 3: Implement the JSON-line process adapter and Parakeet client with injected spawn/clock/path resolution**
 
-- [ ] **Step 4: Re-run the client tests and verify GREEN**
+- [x] **Step 4: Re-run the client tests and verify GREEN**
 
-- [ ] **Step 5: Commit the Electron client**
+- [x] **Step 5: Commit the Electron client**
 
 ### Task 5: Timing validation and provider-neutral segmentation
 
