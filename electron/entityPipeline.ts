@@ -760,6 +760,7 @@ export async function extractAndProcessEntities(
   transcript: string,
   meetingId: string,
   context?: EntityExtractionContext,
+  options: { canCommit?: () => boolean } = {},
 ): Promise<ProcessedEntities> {
   console.log(`[EntityPipeline] Starting extraction for meeting ${meetingId}`);
 
@@ -768,6 +769,9 @@ export async function extractAndProcessEntities(
     ...extracted,
     people: filterUngroundedPeople(extracted.people || [], transcript),
   };
+  if (options.canCommit && !options.canCommit()) {
+    throw new Error('entity_extraction_superseded');
+  }
   return processExtractedEntities(
     groundedExtraction,
     meetingId,

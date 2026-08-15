@@ -54,6 +54,7 @@ import {
 } from '../../utils/transcriptTrustState';
 import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
 import { V3AnalysisViewer } from './V3AnalysisViewer';
+import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import {
   type MeetingActionEntity,
   type MeetingActionItemCard,
@@ -251,6 +252,56 @@ export const TranscriptIntegrityPanel = ({
               : 'Retry transcript validation'}
         </button>
       ) : null}
+    </section>
+  );
+};
+
+export const DownstreamProcessingPanel = ({
+  meeting,
+  onRetry,
+  retrying = false,
+}: {
+  meeting: Partial<Meeting>;
+  onRetry?: () => void;
+  retrying?: boolean;
+}) => {
+  const presentation = getDownstreamProcessingPresentation(meeting);
+  if (!presentation || presentation.state === 'ready') return null;
+  const processing = presentation.state === 'processing';
+  return (
+    <section
+      aria-live="polite"
+      className={`rounded-2xl border p-5 ${
+        processing
+          ? 'border-pro-accent/25 bg-pro-accent/5'
+          : 'border-amber-500/25 bg-amber-500/5'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {processing ? (
+          <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-pro-accent" />
+        ) : (
+          <Sparkles className="mt-0.5 h-4 w-4 text-amber-500" />
+        )}
+        <div>
+          <strong className="text-sm text-pro-text">
+            {presentation.title}
+          </strong>
+          <p className="mt-1 text-sm text-pro-text-muted">
+            {presentation.detail}
+          </p>
+          {presentation.canRetry && onRetry ? (
+            <button
+              type="button"
+              disabled={retrying}
+              onClick={onRetry}
+              className="mt-4 rounded-xl bg-pro-accent px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
+            >
+              {retrying ? 'Retrying analysis…' : 'Retry meeting analysis'}
+            </button>
+          ) : null}
+        </div>
+      </div>
     </section>
   );
 };
@@ -708,6 +759,8 @@ export const MeetingView = ({
   }, [selectedEntity]);
 
   const { version, v2, v3 } = resolveMeetingAnalysis(selectedMeeting);
+  const downstreamPresentation =
+    getDownstreamProcessingPresentation(selectedMeeting);
   const editsMap = parseUserEditsJson(selectedMeeting.user_edits_json);
 
   const canonicalAnalysisMarkdown = v3
@@ -1025,6 +1078,11 @@ export const MeetingView = ({
         onRetry={onRetryTranscriptValidation}
         retrying={transcriptValidationRetrying}
       />
+      <DownstreamProcessingPanel
+        meeting={selectedMeeting}
+        onRetry={onRetryTranscriptValidation}
+        retrying={transcriptValidationRetrying}
+      />
       {/* Clean Hero Header */}
       <div className="flex flex-col md:flex-row items-start justify-between gap-8 border-b border-pro-border/40 pb-12">
         <div className="space-y-4 flex-1">
@@ -1032,7 +1090,11 @@ export const MeetingView = ({
             <span className="text-[10px] font-bold text-pro-accent uppercase tracking-widest bg-pro-accent/5 px-2 py-1 rounded">
               {selectedMeeting.finalization_status === 'recovery_required'
                 ? 'Recovery required'
-                : 'Synthesis Ready'}
+                : downstreamPresentation?.state === 'ready'
+                  ? 'Synthesis ready'
+                  : downstreamPresentation?.state === 'processing'
+                    ? 'Synthesis in progress'
+                    : 'Analysis not ready'}
             </span>
             <span className="text-[10px] text-pro-text-muted/60 font-medium uppercase tracking-widest">
               {new Date(

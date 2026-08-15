@@ -44,6 +44,7 @@ import {
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
 import { createPauseReasonCoordinator } from './pauseReasonCoordinator';
+import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
   normalizeCheckpointWords,
   transcribeJournalAlignedAudio,
@@ -117,6 +118,34 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
 
 let win: BrowserWindow | null;
 let tray: Tray | null = null;
+const postMeetingBackgroundActivity = createPostMeetingBackgroundActivity(
+  (allowed) => {
+    if (win && !win.isDestroyed()) {
+      win.webContents.setBackgroundThrottling(allowed);
+    }
+  },
+);
+
+const readDownstreamActivity = (value: unknown) => {
+  try {
+    const parsed = JSON.parse(typeof value === 'string' ? value : '{}') as {
+      runId?: unknown;
+      state?: unknown;
+    };
+    return {
+      runId: typeof parsed.runId === 'string' ? parsed.runId : null,
+      state: typeof parsed.state === 'string' ? parsed.state : null,
+    };
+  } catch {
+    return { runId: null, state: null };
+  }
+};
+
+const isDownstreamRunCurrent = (meetingId: string, runId: string): boolean => {
+  const meeting = db.getMeeting(meetingId) as db.PersistedMeeting | undefined;
+  const activity = readDownstreamActivity(meeting?.downstream_processing_json);
+  return activity.state === 'processing' && activity.runId === runId;
+};
 
 const getPreloadPath = () => {
   const preloadPathMjs = path.join(__dirname, 'preload.mjs');
@@ -141,6 +170,7 @@ function createWindow() {
 
   // Test active push message to Renderer-process.
   win.webContents.on('did-finish-load', () => {
+    postMeetingBackgroundActivity.reset();
     win?.webContents.send('main-process-message', new Date().toLocaleString());
   });
   win.webContents.on('will-prevent-unload', () => {
@@ -1524,6 +1554,10 @@ app.whenReady().then(async () => {
         }
         if (downstreamState !== 'processing') {
           knowledgeSynthesisPause.release('downstream');
+          postMeetingBackgroundActivity.setActive(
+            expectedDownstreamRunId,
+            false,
+          );
         }
       }
       return result;
@@ -1535,7 +1569,10 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('CLAIM_DOWNSTREAM_PROCESSING', (_event, meetingId, lease) => {
     const claimed = db.claimMeetingDownstreamProcessing(meetingId, lease);
-    if (claimed) knowledgeSynthesisPause.acquire('downstream');
+    if (claimed) {
+      knowledgeSynthesisPause.acquire('downstream');
+      postMeetingBackgroundActivity.setActive(String(lease?.runId || ''), true);
+    }
     return claimed;
   });
   ipcMain.handle('UPDATE_MEETING_TITLE_IF_CURRENT', (_event, input) =>
@@ -1551,9 +1588,20 @@ app.whenReady().then(async () => {
     (_event, meetingId, runId, stage) =>
       db.updateMeetingTranscriptValidationRetryStage(meetingId, runId, stage),
   );
-  ipcMain.handle('FINALIZE_CHECKPOINT_TRANSCRIPT', (_event, input) =>
-    db.finalizeCheckpointTranscript(input),
-  );
+  ipcMain.handle('FINALIZE_CHECKPOINT_TRANSCRIPT', (_event, input) => {
+    const outcome = db.finalizeCheckpointTranscript(input);
+    if (
+      outcome === 'committed_and_claimed' ||
+      outcome === 'already_committed'
+    ) {
+      knowledgeSynthesisPause.acquire('downstream');
+      postMeetingBackgroundActivity.setActive(
+        String(input?.downstreamRunId || ''),
+        true,
+      );
+    }
+    return outcome;
+  });
   ipcMain.handle('PATCH_STOP_TO_VALIDATED_LATENCY', (_event, input) =>
     runConditionalMeetingUpdateForIpc(() =>
       db.patchStopToValidatedLatency(input),
@@ -1649,11 +1697,24 @@ app.whenReady().then(async () => {
   ipcMain.handle('DELETE_MEETING', async (_event, id) => {
     try {
       const meetingId = String(id);
+      const meeting = db.getMeeting(meetingId) as
+        | db.PersistedMeeting
+        | undefined;
+      const downstreamActivity = readDownstreamActivity(
+        meeting?.downstream_processing_json,
+      );
 
       // Abort any active background tasks for this meeting
       abortMeetingTasks(meetingId);
 
       const result = db.deleteMeeting(id);
+      if (downstreamActivity.runId) {
+        knowledgeSynthesisPause.release('downstream');
+        postMeetingBackgroundActivity.setActive(
+          downstreamActivity.runId,
+          false,
+        );
+      }
       await deleteCaptureJournal(getMeetingArtifactsRootDir(), meetingId).catch(
         (error) => {
           console.warn('[Pluto] Failed to delete capture journal:', error);
@@ -1773,8 +1834,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
-    async (_event, meetingId) =>
-      await refreshKnowledgeDocsForMeetingNow(String(meetingId)),
+    async (
+      _event,
+      meetingId,
+      options?: { expectedDownstreamRunId?: unknown },
+    ) => {
+      const normalizedMeetingId = String(meetingId);
+      const expectedRunId =
+        typeof options?.expectedDownstreamRunId === 'string'
+          ? options.expectedDownstreamRunId
+          : null;
+      return await refreshKnowledgeDocsForMeetingNow(normalizedMeetingId, {
+        canCommit: expectedRunId
+          ? () => isDownstreamRunCurrent(normalizedMeetingId, expectedRunId)
+          : undefined,
+      });
+    },
   );
   ipcMain.handle(
     'GET_WORKING_MEMORY_SNAPSHOT',
@@ -2199,6 +2274,7 @@ app.whenReady().then(async () => {
         valueSignals,
         priorityHints,
         awaitKnowledgeSynthesis,
+        expectedDownstreamRunId,
       },
     ) => {
       try {
@@ -2214,6 +2290,14 @@ app.whenReady().then(async () => {
           priorityHints,
         );
         const signal = getAbortSignalForMeeting(String(meetingId));
+        const canCommit =
+          typeof expectedDownstreamRunId === 'string'
+            ? () =>
+                isDownstreamRunCurrent(
+                  String(meetingId),
+                  expectedDownstreamRunId,
+                )
+            : undefined;
         if (signal.aborted) {
           console.log(
             `[LLM] Skipping entity extraction for meeting ${meetingId} (aborted)`,
@@ -2233,6 +2317,7 @@ app.whenReady().then(async () => {
             valueSignals: normalizedSignals,
             priorityHints: mergedPriorityHints,
           },
+          { canCommit },
         );
 
         if (signal.aborted) {

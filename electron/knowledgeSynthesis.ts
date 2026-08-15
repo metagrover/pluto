@@ -1563,6 +1563,22 @@ type KnowledgeSynthesisRequest = {
   doc: db.KnowledgeDoc;
   corrections: ReturnType<typeof db.getKnowledgeCorrections>;
   sourceMeetings: SynthSourceMeeting[];
+  canCommit?: () => boolean;
+};
+
+class KnowledgeSynthesisSupersededError extends Error {
+  constructor() {
+    super('knowledge_synthesis_superseded');
+    this.name = 'KnowledgeSynthesisSupersededError';
+  }
+}
+
+const assertKnowledgeSynthesisCurrent = (
+  request: KnowledgeSynthesisRequest,
+): void => {
+  if (request.canCommit?.() === false) {
+    throw new KnowledgeSynthesisSupersededError();
+  }
 };
 
 const buildKnowledgeSynthesisRequest = (
@@ -1601,6 +1617,8 @@ const synthesizeKnowledgeDocNowInternal = async (
     isKnowledgeV2Document(structured)
       ? applyKnowledgeCorrectionsToDocument(structured, knowledgeCorrections)
       : structured;
+
+  assertKnowledgeSynthesisCurrent(request);
 
   db.upsertKnowledgeDoc({
     id: doc.id,
@@ -1708,6 +1726,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       // Flush partial content to DB after each chunk so the UI can render
       // real content progressively instead of waiting for the full merge.
       onChunkProgress: (partial) => {
+        if (request.canCommit?.() === false) return;
         try {
           const correctedPartial = applyCorrections(partial);
           const partialRendered = renderStructuredDocument(correctedPartial);
@@ -1726,6 +1745,7 @@ const synthesizeKnowledgeDocNowInternal = async (
         }
       },
     });
+    assertKnowledgeSynthesisCurrent(request);
     const correctedStructured = applyCorrections(structured);
 
     const rendered = renderStructuredDocument(correctedStructured);
@@ -1802,6 +1822,12 @@ const synthesizeKnowledgeDocNowInternal = async (
 
     return savedDoc;
   } catch (error) {
+    if (
+      error instanceof KnowledgeSynthesisSupersededError ||
+      request.canCommit?.() === false
+    ) {
+      return db.getKnowledgeDoc(doc.id);
+    }
     console.error(`[KnowledgeDoc] Synthesis failed for doc ${doc.id}:`, error);
     return db.upsertKnowledgeDoc({
       id: doc.id,
@@ -2068,6 +2094,7 @@ export const queueKnowledgeDocsRefreshForMeeting = (
 
 export const refreshKnowledgeDocsForMeetingNow = async (
   meetingId: string,
+  options: { canCommit?: () => boolean } = {},
 ): Promise<{ requested: number; completed: number }> => {
   const docIds = [...getKnowledgeDocIdsForMeeting(meetingId)];
   let completed = 0;
@@ -2092,7 +2119,10 @@ export const refreshKnowledgeDocsForMeetingNow = async (
       completed += 1;
       continue;
     }
-    const request = buildKnowledgeSynthesisRequest(docId);
+    const baseRequest = buildKnowledgeSynthesisRequest(docId);
+    const request = baseRequest
+      ? { ...baseRequest, canCommit: options.canCommit }
+      : null;
     if (!request) throw new Error('knowledge_document_refresh_failed');
     let refreshed = await runKnowledgeDocWithGlobalSynthesisGate(
       request.key,
@@ -2100,7 +2130,10 @@ export const refreshKnowledgeDocsForMeetingNow = async (
     );
     if (!refreshed) throw new Error('knowledge_document_refresh_failed');
     if (!satisfiesMeetingRefresh()) {
-      const retryRequest = buildKnowledgeSynthesisRequest(docId);
+      const retryBaseRequest = buildKnowledgeSynthesisRequest(docId);
+      const retryRequest = retryBaseRequest
+        ? { ...retryBaseRequest, canCommit: options.canCommit }
+        : null;
       if (!retryRequest) throw new Error('knowledge_document_refresh_failed');
       refreshed = await runKnowledgeDocWithGlobalSynthesisGate(
         retryRequest.key,
