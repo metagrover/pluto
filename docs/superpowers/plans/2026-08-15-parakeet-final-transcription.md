@@ -55,7 +55,7 @@ export const resolveTranscriptionPolicy = (role: TranscriptionPolicyRole) =>
 - Create: `native/parakeet-runtime/Tests/ParakeetRuntimeCoreTests/ProtocolTests.swift`
 - Create: `native/parakeet-runtime/Tests/ParakeetRuntimeCoreTests/PathPolicyTests.swift`
 
-- [ ] **Step 1: Add Swift tests for decoding prepare/transcribe/cancel requests, encoding sanitized failures, and rejecting relative, escaped, symlinked, or outside-root paths**
+- [x] **Step 1: Add Swift tests for decoding prepare/transcribe/cancel requests, encoding sanitized failures, and rejecting relative, escaped, symlinked, or outside-root paths**
 
 ```swift
 #expect(throws: RuntimeFailure.self) {
@@ -65,13 +65,13 @@ export const resolveTranscriptionPolicy = (role: TranscriptionPolicyRole) =>
 #expect(encodedResponse.contains("private.wav") == false)
 ```
 
-- [ ] **Step 2: Run `swift test --package-path native/parakeet-runtime --filter 'ProtocolTests|PathPolicyTests'` and verify RED**
+- [x] **Step 2: Run `swift test --package-path native/parakeet-runtime --filter 'ProtocolTests|PathPolicyTests'` and verify RED**
 
-- [ ] **Step 3: Implement a versioned JSON-lines protocol and canonical descendant validation using standardized/resolved URLs and regular-file checks**
+- [x] **Step 3: Implement a versioned JSON-lines protocol and canonical descendant validation using standardized/resolved URLs and regular-file checks**
 
-- [ ] **Step 4: Re-run Swift tests and verify GREEN**
+- [x] **Step 4: Re-run Swift tests and verify GREEN**
 
-- [ ] **Step 5: Commit `native/parakeet-runtime` protocol/core files**
+- [x] **Step 5: Commit `native/parakeet-runtime` protocol/core files**
 
 ### Task 3: Managed Parakeet model and ASR engine
 
