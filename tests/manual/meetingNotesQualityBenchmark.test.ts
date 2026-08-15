@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -29,6 +30,7 @@ type ProviderBaseline = {
   model: string;
   prompt_version: string;
   seed: number;
+  fixture_order_sha256: string;
   reviewed_scores: number[];
 };
 
@@ -50,6 +52,17 @@ const loadFixtures = (): Fixture[] => {
   );
   return [...reviewed, ...precision];
 };
+
+const reviewedFixtureOrderSha256 = (): string =>
+  createHash('sha256')
+    .update(
+      fs
+        .readdirSync(path.resolve('scripts/baselines/meeting-notes-quality'))
+        .filter((name) => name.endsWith('.json'))
+        .sort()
+        .join('\n'),
+    )
+    .digest('hex');
 
 const loadProviderBaseline = (): ProviderBaseline =>
   readJson<ProviderBaseline>(
@@ -94,6 +107,8 @@ suite('real-provider meeting notes quality benchmark', () => {
       if (
         providerBaseline.prompt_version !==
           STRUCTURED_ANALYSIS_PROMPT_VERSION ||
+        providerBaseline.fixture_order_sha256 !==
+          reviewedFixtureOrderSha256() ||
         providerBaseline.reviewed_scores.length !== reviewedFixtureCount
       ) {
         throw new Error(
