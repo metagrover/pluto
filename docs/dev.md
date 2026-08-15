@@ -48,6 +48,20 @@ Private quality manifests contain absolute paths only and must stay outside vers
 pnpm run benchmark:private-transcription:validate -- --manifest /absolute/private/manifest.json
 ```
 
+To replay recent local meetings and create an owner-only blind-review page, keep the output under Pluto's private application-data directory:
+
+```bash
+pnpm run benchmark:private-parakeet -- \
+  --runtime /absolute/path/to/resources/bin/parakeet-runtime \
+  --database /absolute/private/pluto.db \
+  --model-root /absolute/private/models/transcription/parakeet \
+  --audio-root /absolute/private/meetings \
+  --limit 2 \
+  --review-out /absolute/private/evaluations/parakeet-review.html
+```
+
+The console emits aggregate metrics only. The review page contains private audio references and transcript excerpts, is written with owner-only permissions, must remain outside the repository, and exports content-free A/B ratings.
+
 ## 2) Electron native module ABI mismatch (NODE_MODULE_VERSION)
 
 **Symptoms**

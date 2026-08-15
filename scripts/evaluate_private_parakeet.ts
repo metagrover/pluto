@@ -3,8 +3,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import readline from 'node:readline';
+import { pathToFileURL } from 'node:url';
 
 import { segmentRecognizedWords } from '../src/services/finalTranscription/segmentRecognizedWords.ts';
+import {
+  distributeTimedTokens,
+  matchTimeAlignedTokens,
+  multisetTokenIntersectionSize,
+  normalizeTranscriptTokens,
+  transcriptEditDistance,
+} from '../src/services/privateTranscriptionMetrics.ts';
 import { runRecordingTranscriptValidation } from '../src/services/recordingTranscriptValidation.ts';
 
 type MeetingRow = {
@@ -52,43 +60,11 @@ const option = (name: string, fallback?: string) => {
   return value;
 };
 
-const normalizeTokens = (text: string) =>
-  text
-    .toLocaleLowerCase('en')
-    .replace(/[^\p{L}\p{N}' ]/gu, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-
-const editDistance = (left: string[], right: string[]) => {
-  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
-    const current = [leftIndex];
-    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
-      current[rightIndex] = Math.min(
-        current[rightIndex - 1] + 1,
-        previous[rightIndex] + 1,
-        previous[rightIndex - 1] +
-          Number(left[leftIndex - 1] !== right[rightIndex - 1]),
-      );
-    }
-    previous = current;
-  }
-  return previous[right.length];
-};
-
-const multisetIntersectionSize = (left: string[], right: string[]) => {
-  const remaining = new Map<string, number>();
-  for (const token of right) {
-    remaining.set(token, (remaining.get(token) || 0) + 1);
-  }
-  let intersection = 0;
-  for (const token of left) {
-    const count = remaining.get(token) || 0;
-    if (count <= 0) continue;
-    intersection += 1;
-    remaining.set(token, count - 1);
-  }
-  return intersection;
+const optionalOption = (name: string) => {
+  const index = process.argv.indexOf(name);
+  return index >= 0 && process.argv[index + 1]
+    ? path.resolve(process.argv[index + 1])
+    : undefined;
 };
 
 const runtimePath = path.resolve(option('--runtime'));
@@ -96,6 +72,7 @@ const databasePath = path.resolve(option('--database'));
 const modelRoot = path.resolve(option('--model-root'));
 const audioRoot = path.resolve(option('--audio-root'));
 const meetingLimit = Math.max(1, Math.min(5, Number(option('--limit', '2'))));
+const reviewOut = optionalOption('--review-out');
 
 for (const [label, filePath] of [
   ['runtime', runtimePath],
@@ -211,6 +188,32 @@ let canonicalReferenceWordCount = 0;
 let canonicalCandidateWordCount = 0;
 let canonicalEditCount = 0;
 let canonicalTokenIntersectionCount = 0;
+let timeAlignedReferenceWordCount = 0;
+const timeAlignedMatchCounts = new Map<number, number>([
+  [2, 0],
+  [5, 0],
+  [10, 0],
+]);
+const timeAlignedCandidateWordCounts = new Map<number, number>([
+  [2, 0],
+  [5, 0],
+  [10, 0],
+]);
+let maximumSourceDurationMismatchSeconds = 0;
+let maximumReferenceEndMismatchSeconds = 0;
+let minimumReferenceTimelineCoverageRatio = 1;
+let minimumCandidateTimelineCoverageRatio = 1;
+let invalidReferenceSegmentCount = 0;
+const reviewCandidates: Array<{
+  score: number;
+  caseLabel: string;
+  start: number;
+  end: number;
+  referenceText: string;
+  candidateText: string;
+  micAudioPath?: string;
+  systemAudioPath?: string;
+}> = [];
 let canonicalValidationFailureCount = 0;
 let timestampFailureCount = 0;
 let overlappingWordCount = 0;
@@ -237,7 +240,7 @@ for (const meeting of meetings) {
       source === 'mic' ? meeting.audio_path : meeting.system_audio_path;
     if (!audioPath || !fs.existsSync(audioPath)) continue;
     const expectedSpeaker = source === 'mic' ? 'Me' : 'Them';
-    const referenceTokens = normalizeTokens(
+    const referenceTokens = normalizeTranscriptTokens(
       reference
         .filter((segment) => segment.speaker === expectedSpeaker)
         .map((segment) => String(segment.text || ''))
@@ -254,12 +257,16 @@ for (const meeting of meetings) {
     }
     const transcription = response.result.transcription;
     sourceTranscriptions[source] = transcription;
-    const candidateTokens = normalizeTokens(transcription.text);
-    editCount += editDistance(referenceTokens, candidateTokens);
+    const candidateTokens = normalizeTranscriptTokens(transcription.text);
+    editCount += transcriptEditDistance(referenceTokens, candidateTokens);
     referenceWordCount += Math.max(1, referenceTokens.length);
     candidateWordCount += candidateTokens.length;
     sourceCount += 1;
     totalAudioSeconds += transcription.durationSeconds;
+    maximumSourceDurationMismatchSeconds = Math.max(
+      maximumSourceDurationMismatchSeconds,
+      Math.abs(transcription.durationSeconds - meeting.duration_seconds),
+    );
     if (transcription.noSpeech && referenceTokens.length > 0) {
       noSpeechContradictionCount += 1;
     }
@@ -334,28 +341,169 @@ for (const meeting of meetings) {
     probeDuration: async () => meeting.duration_seconds,
   });
   if (validation.status !== 'validated') canonicalValidationFailureCount += 1;
-  const canonicalReferenceTokens = normalizeTokens(
+  const canonicalReferenceTokens = normalizeTranscriptTokens(
     reference.map((segment) => String(segment.text || '')).join(' '),
   );
-  const canonicalCandidateTokens = normalizeTokens(
+  const canonicalCandidateTokens = normalizeTranscriptTokens(
     validation.segments.map((segment) => segment.text).join(' '),
   );
   canonicalReferenceWordCount += Math.max(1, canonicalReferenceTokens.length);
   canonicalCandidateWordCount += canonicalCandidateTokens.length;
-  canonicalEditCount += editDistance(
+  canonicalEditCount += transcriptEditDistance(
     canonicalReferenceTokens,
     canonicalCandidateTokens,
   );
-  canonicalTokenIntersectionCount += multisetIntersectionSize(
+  canonicalTokenIntersectionCount += multisetTokenIntersectionSize(
     canonicalReferenceTokens,
     canonicalCandidateTokens,
   );
+  const boundedReference = reference.flatMap((segment) => {
+    const start = Number(segment.startTime);
+    const end = Number(segment.endTime);
+    if (
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      end <= start ||
+      start >= meeting.duration_seconds
+    ) {
+      invalidReferenceSegmentCount += 1;
+      return [];
+    }
+    if (end > meeting.duration_seconds) invalidReferenceSegmentCount += 1;
+    return [
+      {
+        text: String(segment.text || ''),
+        start,
+        end: Math.min(end, meeting.duration_seconds),
+      },
+    ];
+  });
+  const timedReference = distributeTimedTokens(boundedReference);
+  const maximumReferenceEnd = reference.reduce(
+    (maximum, segment) => Math.max(maximum, Number(segment.endTime) || 0),
+    0,
+  );
+  maximumReferenceEndMismatchSeconds = Math.max(
+    maximumReferenceEndMismatchSeconds,
+    Math.abs(maximumReferenceEnd - meeting.duration_seconds),
+  );
+  minimumReferenceTimelineCoverageRatio = Math.min(
+    minimumReferenceTimelineCoverageRatio,
+    maximumReferenceEnd / Math.max(1, meeting.duration_seconds),
+  );
+  const timedCandidate = validation.segments.flatMap((segment) =>
+    segment.words?.length
+      ? segment.words
+          .map((word) => ({
+            token: normalizeTranscriptTokens(word.word)[0] || '',
+            at: (word.start + word.end) / 2,
+          }))
+          .filter((word) => word.token)
+      : distributeTimedTokens([
+          {
+            text: segment.text,
+            start: segment.startTime,
+            end: segment.endTime,
+          },
+        ]),
+  );
+  if (reviewOut) {
+    for (let start = 0; start < meeting.duration_seconds; start += 30) {
+      const end = Math.min(meeting.duration_seconds, start + 30);
+      const referenceText = reference
+        .filter(
+          (segment) =>
+            Number(segment.startTime) < end && Number(segment.endTime) > start,
+        )
+        .map((segment) => String(segment.text || ''))
+        .join(' ')
+        .trim();
+      const candidateText = validation.segments
+        .filter((segment) => segment.startTime < end && segment.endTime > start)
+        .map((segment) => segment.text)
+        .join(' ')
+        .trim();
+      const referenceTokens = normalizeTranscriptTokens(referenceText);
+      const candidateTokens = normalizeTranscriptTokens(candidateText);
+      if (referenceTokens.length < 10 || candidateTokens.length < 10) continue;
+      reviewCandidates.push({
+        score:
+          transcriptEditDistance(referenceTokens, candidateTokens) /
+          Math.max(referenceTokens.length, candidateTokens.length),
+        caseLabel: `meeting-${meetings.indexOf(meeting) + 1}`,
+        start,
+        end,
+        referenceText,
+        candidateText,
+        micAudioPath: meeting.audio_path || undefined,
+        systemAudioPath: meeting.system_audio_path || undefined,
+      });
+    }
+  }
+  const maximumCandidateEnd = validation.segments.reduce(
+    (maximum, segment) => Math.max(maximum, segment.endTime),
+    0,
+  );
+  minimumCandidateTimelineCoverageRatio = Math.min(
+    minimumCandidateTimelineCoverageRatio,
+    maximumCandidateEnd / Math.max(1, meeting.duration_seconds),
+  );
+  timeAlignedReferenceWordCount += timedReference.length;
+  for (const tolerance of timeAlignedMatchCounts.keys()) {
+    const coveredCandidate = timedCandidate.filter(
+      (entry) => entry.at <= maximumReferenceEnd + tolerance,
+    );
+    const aligned = matchTimeAlignedTokens(
+      timedReference,
+      coveredCandidate,
+      tolerance,
+    );
+    timeAlignedMatchCounts.set(
+      tolerance,
+      (timeAlignedMatchCounts.get(tolerance) || 0) + aligned.matched,
+    );
+    timeAlignedCandidateWordCounts.set(
+      tolerance,
+      (timeAlignedCandidateWordCounts.get(tolerance) || 0) +
+        coveredCandidate.length,
+    );
+  }
 }
 
 const elapsedSeconds = (performance.now() - startedAt) / 1000;
 await request({ method: 'shutdown' });
 child.stdin.end();
 clearInterval(sampleRss);
+
+if (reviewOut) {
+  const escapeHtml = (value: string) =>
+    value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  const selected = reviewCandidates
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 6);
+  const cards = selected
+    .map((entry, index) => {
+      const media = [
+        entry.micAudioPath
+          ? `<label>Mic<audio controls preload="metadata" src="${pathToFileURL(entry.micAudioPath).href}#t=${entry.start},${entry.end}"></audio></label>`
+          : '',
+        entry.systemAudioPath
+          ? `<label>System<audio controls preload="metadata" src="${pathToFileURL(entry.systemAudioPath).href}#t=${entry.start},${entry.end}"></audio></label>`
+          : '',
+      ].join('');
+      return `<article data-case="review-${index + 1}"><h2>Excerpt ${index + 1}</h2><p class="meta">${escapeHtml(entry.caseLabel)} · ${Math.round(entry.start)}–${Math.round(entry.end)} seconds</p><div class="audio">${media}</div><div class="comparison"><section><h3>Transcript A</h3><p>${escapeHtml(entry.referenceText)}</p></section><section><h3>Transcript B</h3><p>${escapeHtml(entry.candidateText)}</p></section></div><label class="rating">Which is more accurate?<select><option value="">Choose…</option><option value="a">A</option><option value="b">B</option><option value="tie">Tie</option><option value="unclear">Unclear</option></select></label></article>`;
+    })
+    .join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Private transcription review</title><style>body{font:16px system-ui;max-width:1100px;margin:40px auto;padding:0 24px;color:#171717;background:#f6f4ef}h1{font-size:32px}article{background:white;border:1px solid #ddd6c8;border-radius:16px;padding:24px;margin:24px 0;box-shadow:0 8px 30px #493b2412}.meta{color:#686158}.audio{display:grid;grid-template-columns:1fr 1fr;gap:16px}.audio label{font-weight:650}.audio audio{width:100%;display:block;margin-top:8px}.comparison{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}.comparison section{background:#f7f5f1;border-radius:10px;padding:16px}.comparison p{white-space:pre-wrap;line-height:1.5}.rating{font-weight:650}.rating select{margin-left:12px;padding:8px}button{padding:10px 16px;border:0;border-radius:8px;background:#222;color:white;font-weight:700}@media(max-width:750px){.audio,.comparison{grid-template-columns:1fr}}</style></head><body><h1>Private transcription review</h1><p>Listen before reading. A and B are intentionally neutral labels. Nothing in this file is uploaded.</p>${cards}<button id="download">Download content-free ratings</button><script>document.querySelector('#download').addEventListener('click',()=>{const ratings=[...document.querySelectorAll('article')].map(card=>({caseId:card.dataset.case,rating:card.querySelector('select').value}));const blob=new Blob([JSON.stringify({schemaVersion:1,ratings},null,2)],{type:'application/json'});const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='parakeet-review-ratings.json';link.click();URL.revokeObjectURL(link.href)});</script></body></html>`;
+  fs.mkdirSync(path.dirname(reviewOut), { recursive: true });
+  fs.writeFileSync(reviewOut, html, { encoding: 'utf8', mode: 0o600 });
+}
 
 console.log(
   JSON.stringify({
@@ -387,6 +535,35 @@ console.log(
         Math.max(1, canonicalReferenceWordCount)
       ).toFixed(4),
     ),
+    timeAlignedMetrics: Object.fromEntries(
+      [...timeAlignedMatchCounts.entries()].map(([tolerance, matched]) => [
+        `${tolerance}s`,
+        {
+          precision: Number(
+            (
+              matched /
+              Math.max(1, timeAlignedCandidateWordCounts.get(tolerance) || 0)
+            ).toFixed(4),
+          ),
+          recall: Number(
+            (matched / Math.max(1, timeAlignedReferenceWordCount)).toFixed(4),
+          ),
+        },
+      ]),
+    ),
+    minimumReferenceTimelineCoverageRatio: Number(
+      minimumReferenceTimelineCoverageRatio.toFixed(4),
+    ),
+    minimumCandidateTimelineCoverageRatio: Number(
+      minimumCandidateTimelineCoverageRatio.toFixed(4),
+    ),
+    invalidReferenceSegmentCount,
+    maximumSourceDurationMismatchSeconds: Number(
+      maximumSourceDurationMismatchSeconds.toFixed(3),
+    ),
+    maximumReferenceEndMismatchSeconds: Number(
+      maximumReferenceEndMismatchSeconds.toFixed(3),
+    ),
     canonicalValidationFailureCount,
     timestampFailureCount,
     overlappingWordCount,
@@ -398,5 +575,8 @@ console.log(
       (elapsedSeconds / Math.max(1, totalAudioSeconds)).toFixed(4),
     ),
     peakChildRssMiB: Number((peakRssBytes / 1024 / 1024).toFixed(1)),
+    reviewCaseCount: reviewOut
+      ? Math.min(6, reviewCandidates.length)
+      : undefined,
   }),
 );

@@ -8,6 +8,7 @@ import {
   reconcileCanonicalTranscript,
   validateTranscriptIntegrity,
 } from '../utils/transcriptIntegrity.ts';
+import { collapseCrossChannelWordBleed } from './finalTranscription/collapseCrossChannelWordBleed.ts';
 
 type RawWhisperSegment = {
   start: number;
@@ -339,9 +340,21 @@ export const runRecordingTranscriptValidation = async (input: {
     probeDuration(input.probeDuration, input.systemAudioPath),
   ]);
 
-  const micSegments = toSegments(mic.result, 'Me', 'mic');
+  const rawMicSegments = toSegments(mic.result, 'Me', 'mic');
   const mixedSegments = toSegments(mix.result, 'Unknown', 'mix');
-  const systemSegments = toSegments(system.result, 'Them', 'system');
+  const rawSystemSegments = toSegments(system.result, 'Them', 'system');
+  const collapsedChannels =
+    input.canonicalMode === 'recovered_channels'
+      ? collapseCrossChannelWordBleed({
+          micSegments: rawMicSegments,
+          systemSegments: rawSystemSegments,
+        })
+      : {
+          micSegments: rawMicSegments,
+          systemSegments: rawSystemSegments,
+        };
+  const micSegments = collapsedChannels.micSegments;
+  const systemSegments = collapsedChannels.systemSegments;
   const recoveredChannelSegments = [...micSegments, ...systemSegments].sort(
     (left, right) => left.startTime - right.startTime,
   );
