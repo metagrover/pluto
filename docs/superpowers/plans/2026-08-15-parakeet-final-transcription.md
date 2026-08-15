@@ -17,7 +17,7 @@
 - Create: `src/services/transcription/policy.ts`
 - Test: `tests/unit/transcriptionPolicy.test.ts`
 
-- [ ] **Step 1: Write the failing policy tests**
+- [x] **Step 1: Write the failing policy tests**
 
 ```ts
 expect(resolveTranscriptionPolicy('live_preview')).toMatchObject({
@@ -31,9 +31,9 @@ expect(() => assertPolicySupported('final_validation', { platform: 'linux', arch
   .toThrow('transcription_platform_unsupported');
 ```
 
-- [ ] **Step 2: Run `pnpm exec vitest run tests/unit/transcriptionPolicy.test.ts` and verify the missing-module failure**
+- [x] **Step 2: Run `pnpm exec vitest run tests/unit/transcriptionPolicy.test.ts` and verify the missing-module failure**
 
-- [ ] **Step 3: Implement exact role, engine, result, word, VAD, health, and metadata types plus the fixed Apple Silicon resolver**
+- [x] **Step 3: Implement exact role, engine, result, word, VAD, health, and metadata types plus the fixed Apple Silicon resolver**
 
 ```ts
 export type TranscriptionPolicyRole = 'live_preview' | 'final_validation';
@@ -42,9 +42,9 @@ export const resolveTranscriptionPolicy = (role: TranscriptionPolicyRole) =>
   role === 'live_preview' ? LIVE_PREVIEW_POLICY : FINAL_VALIDATION_POLICY;
 ```
 
-- [ ] **Step 4: Re-run the test and verify it passes**
+- [x] **Step 4: Re-run the test and verify it passes**
 
-- [ ] **Step 5: Commit with `git commit -am "feat(transcription): define live and final policies (#441)"`**
+- [x] **Step 5: Commit with `git commit -am "feat(transcription): define live and final policies (#441)"`**
 
 ### Task 2: Native protocol and path safety
 
