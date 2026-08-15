@@ -156,6 +156,31 @@ describe('UnifiedLLMProvider', () => {
     expect(Number(options.num_ctx)).toBeGreaterThanOrEqual(8192);
   });
 
+  it('uses explicit structured-thinking and seed capabilities without model-name checks', async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    installFetchMock((_url, init) => {
+      requestBodies.push(parseRequestBody(init));
+      return jsonResponse({
+        response: JSON.stringify({
+          topics: [{ title: 'Synthetic', start_segment: 0, end_segment: 0 }],
+        }),
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'synthetic-model:latest',
+      ollama_structured_thinking: false,
+      ollama_seed: 42,
+    });
+
+    await provider.generateStructuredAnalysis('Nira: Synthetic update.');
+
+    expect(requestBodies.length).toBeGreaterThan(0);
+    for (const body of requestBodies) {
+      expect(body.think).toBe(false);
+      expect(body.options).toMatchObject({ seed: 42 });
+    }
+  });
+
   it('waits for the local generation slot before starting another Ollama timeout', async () => {
     let releaseFirst: ((response: Response) => void) | undefined;
     const firstResponse = new Promise<Response>((resolve) => {
@@ -619,27 +644,41 @@ describe('UnifiedLLMProvider', () => {
                   {
                     ...validStructuredAnalysis.topics[0],
                     decisions: [
-                      { text: 'Use GraphQL for the rollout' },
-                      { text: 'Use REST for the rollout' },
+                      {
+                        text: 'Use GraphQL for the rollout',
+                        evidence: 'We discussed GraphQL as one option.',
+                      },
+                      {
+                        text: 'Use REST for the rollout',
+                        evidence: 'Agreed, we will use REST for the rollout.',
+                      },
                     ],
                     action_items: [
                       {
                         text: 'Send rollout email',
                         assignee: 'Bob',
                         due: 'next Tuesday',
+                        evidence: "I'll send the rollout email.",
                       },
                     ],
                   },
                 ],
                 all_decisions: [
-                  { text: 'Use GraphQL for the rollout' },
-                  { text: 'Use REST for the rollout' },
+                  {
+                    text: 'Use GraphQL for the rollout',
+                    evidence: 'We discussed GraphQL as one option.',
+                  },
+                  {
+                    text: 'Use REST for the rollout',
+                    evidence: 'Agreed, we will use REST for the rollout.',
+                  },
                 ],
                 all_action_items: [
                   {
                     text: 'Send rollout email',
                     assignee: 'Bob',
                     due: 'next Tuesday',
+                    evidence: "I'll send the rollout email.",
                   },
                 ],
               }),
@@ -661,14 +700,15 @@ describe('UnifiedLLMProvider', () => {
     );
 
     expect(analysis.all_decisions).toEqual([
-      { text: 'Use GraphQL for the rollout' },
-      { text: 'Use REST for the rollout' },
+      {
+        text: 'Use REST for the rollout',
+        evidence: 'Agreed, we will use REST for the rollout.',
+      },
     ]);
     expect(analysis.all_action_items).toEqual([
       {
         text: 'Send rollout email',
-        assignee: 'Bob',
-        due: 'next Tuesday',
+        evidence: "I'll send the rollout email.",
         topic: 'API migration',
       },
     ]);
@@ -711,6 +751,8 @@ describe('LLM factory', () => {
         if (key === 'llm_provider') return 'not-a-provider';
         if (key === 'openai_api_key') return 'openai-key';
         if (key === 'ollama_model') return 123; // non-string should be discarded
+        if (key === 'ollama_structured_thinking') return 'false';
+        if (key === 'ollama_seed') return null;
         return undefined;
       },
     };
@@ -719,6 +761,8 @@ describe('LLM factory', () => {
     expect(settings.llm_provider).toBe('ollama');
     expect(settings.openai_api_key).toBe('openai-key');
     expect(settings.ollama_model).toBeUndefined();
+    expect(settings.ollama_structured_thinking).toBe(false);
+    expect(settings.ollama_seed).toBeUndefined();
   });
 });
 

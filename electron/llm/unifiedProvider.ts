@@ -9,6 +9,7 @@ import {
   fallbackAnalysisDocumentV3,
   parseAnalysisDocumentV3,
 } from './analysisDocumentV3';
+import { groundAnalysisDocument } from './analysisGrounding';
 import type {
   ActionItemV3,
   AnalysisDocumentV3,
@@ -44,7 +45,7 @@ import type {
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
-const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v4';
+export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v5';
 
 // The default local Ollama runtime has one generation slot. Queue every
 // generation at the provider boundary so request timeouts measure model work,
@@ -509,110 +510,36 @@ export class UnifiedLLMProvider implements LLMProvider {
     transcript: string,
     errorCategories: AnalysisErrorCategory[],
   ): AnalysisDocumentV3 {
-    const transcriptLower = transcript.toLowerCase();
-
-    const topics = analysis.topics.map((topic) => {
-      const decisions = topic.decisions.map((decision) => {
-        const supported =
-          (decision.evidence &&
-            transcriptLower.includes(decision.evidence.toLowerCase().trim())) ||
-          this.hasTranscriptTokenSupport(decision.text, transcript);
-        if (!supported) {
-          this.pushErrorCategory(errorCategories, 'unsupported_decision');
-        }
-        return decision;
-      });
-
-      const action_items = topic.action_items.map((item) => {
-        const supported =
-          (item.evidence &&
-            transcriptLower.includes(item.evidence.toLowerCase().trim())) ||
-          this.hasTranscriptTokenSupport(item.text, transcript);
-        if (!supported) {
-          this.pushErrorCategory(errorCategories, 'unsupported_action_item');
-        }
-
-        const normalized: ActionItemV3 = {
-          text: item.text,
-          topic: topic.title,
-          evidence: item.evidence,
-        };
-        if (
-          item.assignee &&
-          this.supportsFieldValue(item.assignee, transcript, item.text)
-        ) {
-          normalized.assignee = item.assignee;
-        } else if (item.assignee) {
-          this.pushErrorCategory(
-            errorCategories,
-            'unsupported_action_item_owner',
-          );
-          normalized.assignee = item.assignee;
-        }
-        if (
-          item.due &&
-          this.supportsFieldValue(item.due, transcript, item.text)
-        ) {
-          normalized.due = item.due;
-        } else if (item.due) {
-          this.pushErrorCategory(
-            errorCategories,
-            'unsupported_action_item_due',
-          );
-          normalized.due = item.due;
-        }
-        return normalized;
-      });
-
-      return {
-        ...topic,
-        decisions,
-        action_items,
-      };
-    });
-
-    const all_action_items = topics.flatMap((topic) =>
-      topic.action_items.map((item) => ({
-        text: item.text,
-        assignee: item.assignee,
-        due: item.due,
-        topic: topic.title,
-        evidence: item.evidence,
-      })),
-    );
-    const all_decisions = topics.flatMap((topic) =>
-      topic.decisions.map((decision) => ({
-        text: decision.text,
-        decided_by: decision.decided_by,
-        rationale: decision.rationale,
-        evidence: decision.evidence,
-      })),
-    );
+    const grounded = groundAnalysisDocument(analysis, transcript);
+    for (const category of grounded.errorCategories) {
+      this.pushErrorCategory(errorCategories, category);
+    }
 
     if (
       JSON.stringify(analysis.all_action_items) !==
-        JSON.stringify(all_action_items) ||
-      JSON.stringify(analysis.all_decisions) !== JSON.stringify(all_decisions)
+        JSON.stringify(grounded.analysis.all_action_items) ||
+      JSON.stringify(analysis.all_decisions) !==
+        JSON.stringify(grounded.analysis.all_decisions)
     ) {
       this.pushErrorCategory(errorCategories, 'conflicting_rollups');
     }
 
-    if (topics.length === 0) {
+    if (grounded.analysis.topics.length === 0) {
       this.pushErrorCategory(errorCategories, 'empty_topics');
     } else {
-      const coveredTopics = topics.filter(
+      const coveredTopics = grounded.analysis.topics.filter(
         (topic) => topic.summary.trim().length > 0,
       );
-      if (coveredTopics.length < Math.max(1, Math.ceil(topics.length / 2))) {
+      if (
+        coveredTopics.length <
+        Math.max(1, Math.ceil(grounded.analysis.topics.length / 2))
+      ) {
         this.pushErrorCategory(errorCategories, 'low_topic_coverage');
       }
     }
 
     return {
-      ...analysis,
-      topics,
-      all_action_items,
-      all_decisions,
+      ...grounded.analysis,
     };
   }
 
@@ -627,6 +554,17 @@ export class UnifiedLLMProvider implements LLMProvider {
       prompt_version: STRUCTURED_ANALYSIS_PROMPT_VERSION,
       generated_at: new Date().toISOString(),
       error_categories: [...new Set(errorCategories)],
+      ...(this.providerType === 'ollama'
+        ? {
+            generation_options: {
+              structured_thinking:
+                this.settings.ollama_structured_thinking ?? false,
+              ...(Number.isSafeInteger(this.settings.ollama_seed)
+                ? { seed: this.settings.ollama_seed }
+                : {}),
+            },
+          }
+        : {}),
     };
   }
 
@@ -655,70 +593,6 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (!categories.includes(category)) {
       categories.push(category);
     }
-  }
-
-  private supportsFieldValue(
-    fieldValue: string,
-    transcript: string,
-    contextText: string,
-  ): boolean {
-    const transcriptLower = transcript.toLowerCase();
-    if (transcriptLower.includes(fieldValue.toLowerCase())) {
-      return true;
-    }
-    return this.bestTokenOverlap(fieldValue, contextText) >= 0.5;
-  }
-
-  private hasTranscriptTokenSupport(
-    claim: string,
-    transcript: string,
-  ): boolean {
-    if (transcript.toLowerCase().includes(claim.toLowerCase())) {
-      return true;
-    }
-    const segments = transcript
-      .split('\n')
-      .map((segment) => segment.trim())
-      .filter(Boolean);
-    let bestScore = 0;
-
-    for (const segment of segments) {
-      const score = this.bestTokenOverlap(claim, segment);
-      if (score > bestScore) {
-        bestScore = score;
-      }
-    }
-
-    return bestScore >= 0.6;
-  }
-
-  private bestTokenOverlap(a: string, b: string): number {
-    const ignoredTokens = new Set([
-      'the',
-      'for',
-      'and',
-      'with',
-      'that',
-      'this',
-      'from',
-      'will',
-      'use',
-      'send',
-      'take',
-      'into',
-    ]);
-    const normalize = (value: string): string[] =>
-      value
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter((token) => token.length >= 3 && !ignoredTokens.has(token));
-
-    const aTokens = normalize(a);
-    const bTokens = new Set(normalize(b));
-    if (aTokens.length === 0) return 0;
-    const matches = aTokens.filter((token) => bTokens.has(token)).length;
-    return matches / aTokens.length;
   }
 
   // =============================================
@@ -1075,6 +949,11 @@ export class UnifiedLLMProvider implements LLMProvider {
 
     if (jsonMode) {
       requestBody.format = 'json';
+      requestBody.think = this.settings.ollama_structured_thinking ?? false;
+    }
+    if (Number.isSafeInteger(this.settings.ollama_seed)) {
+      (requestBody.options as Record<string, unknown>).seed =
+        this.settings.ollama_seed;
     }
 
     const start = Date.now();

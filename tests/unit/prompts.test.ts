@@ -5,6 +5,7 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
   getStructuredAnalysisPrompt,
+  getStructuredAnalysisRepairPrompt,
   getSummaryPrompt,
   getSummaryRepairPrompt,
   getTitlePrompt,
@@ -106,6 +107,28 @@ describe('getSummaryRepairPrompt', () => {
   });
 });
 
+describe('structured analysis extraction policy', () => {
+  it('uses one strict taxonomy in single-pass, topic, and repair prompts', () => {
+    const prompts = [
+      getStructuredAnalysisPrompt('Nira: Synthetic transcript.'),
+      getTopicAnalysisPrompt('Synthetic topic', 'Nira: Synthetic transcript.'),
+      getStructuredAnalysisRepairPrompt('Nira: Synthetic transcript.', '{}'),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain('Settled decision: retain only');
+      expect(prompt).toContain('An explicit rejection is itself a decision');
+      expect(prompt).toContain('extract exactly one decision');
+      expect(prompt).toContain('Committed action: retain only');
+      expect(prompt).toContain('Proposal or recommendation:');
+      expect(prompt).toContain('Open question:');
+      expect(prompt).toContain('directly states the extracted claim');
+      expect(prompt).not.toContain('explicit and implied decisions');
+      expect(prompt).not.toContain('when possible');
+    }
+  });
+});
+
 describe('getValueSignalsPrompt', () => {
   it('enforces hybrid internal signal JSON with capped free-form tags', () => {
     const prompt = getValueSignalsPrompt(
@@ -142,8 +165,8 @@ describe('v3 accuracy prompts', () => {
       'Speaker A: We might use GraphQL. Speaker B: Let us do REST for now.',
     );
 
-    expect(prompt).toContain('Mark something as a decision');
-    expect(prompt).toContain('evidence quote');
+    expect(prompt).toContain('Settled decision: retain only');
+    expect(prompt).toContain('required short verbatim quote');
   });
 
   it('requires commitment language and evidence before classifying action items', () => {
@@ -152,9 +175,9 @@ describe('v3 accuracy prompts', () => {
       'Speaker A: I can take that. Speaker B: Maybe we should also test mobile.',
     );
 
-    expect(prompt).toContain('Include all action items, tasks, follow-ups');
-    expect(prompt).toContain('evidence quote');
-    expect(prompt).toContain('do not turn suggestions');
+    expect(prompt).toContain('Committed action: retain only');
+    expect(prompt).toContain('required short verbatim quote');
+    expect(prompt).toContain('Do not turn suggestions');
     expect(prompt).toContain('Person will do task by date');
     expect(prompt).toContain('numeric targets and success metrics');
     expect(prompt).toContain('dates, conditions, and qualifiers');

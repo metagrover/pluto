@@ -1,0 +1,172 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  groundAnalysisDocument,
+  normalizeTranscriptEvidence,
+  resolveTranscriptEvidence,
+} from '../../electron/llm/analysisGrounding';
+import type { AnalysisDocumentV3 } from '../../electron/llm/analysisTypes';
+
+const document = (): AnalysisDocumentV3 => ({
+  analysis_schema_version: 3,
+  overview: 'Synthetic planning discussion.',
+  topics: [
+    {
+      title: 'Synthetic rollout',
+      summary: 'Two options were discussed and one path was selected.',
+      key_points: [],
+      decisions: [
+        {
+          text: 'Use the staged path',
+          decided_by: 'Nira',
+          rationale: 'reduce migration risk',
+          evidence:
+            'Agreed — we will use the staged path to reduce migration risk.',
+        },
+        {
+          text: 'Use the direct path',
+          evidence: 'The direct path might be faster.',
+        },
+        { text: 'Ship without evidence' },
+      ],
+      action_items: [
+        {
+          text: 'Prepare the checklist',
+          assignee: 'Milo',
+          due: 'Friday',
+          evidence: "I'll prepare the checklist by Friday.",
+        },
+        {
+          text: 'Draft a hypothetical memo',
+          evidence: 'A memo could be useful.',
+        },
+      ],
+      open_questions: [],
+    },
+  ],
+  all_action_items: [],
+  all_decisions: [],
+  meeting_type: 'team_sync',
+  quality: {
+    format_pass: true,
+    retry_count: 0,
+    fallback_used: false,
+    issues: [],
+  },
+});
+
+describe('analysis grounding', () => {
+  it('resolves exact evidence after bounded punctuation normalization', () => {
+    expect(normalizeTranscriptEvidence('Agreed — staged!')).toBe(
+      'agreed staged',
+    );
+    expect(
+      resolveTranscriptEvidence(
+        'Agreed, we will use the staged path.',
+        'Nira: Agreed — we will use the staged path.\nMilo: Great.',
+      )?.sourceLine,
+    ).toContain('Nira');
+  });
+
+  it('removes unsupported settled items and clears unsupported fields', () => {
+    const result = groundAnalysisDocument(
+      document(),
+      [
+        'Nira: Agreed — we will use the staged path to reduce migration risk.',
+        "Milo: I'll prepare the checklist by Friday.",
+        'Nira: The direct path might be faster.',
+        'Milo: A memo could be useful.',
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_decisions).toEqual([
+      {
+        text: 'Use the staged path',
+        decided_by: 'Nira',
+        rationale: 'reduce migration risk',
+        evidence:
+          'Agreed — we will use the staged path to reduce migration risk.',
+      },
+    ]);
+    expect(result.analysis.all_action_items).toEqual([
+      {
+        text: 'Prepare the checklist',
+        assignee: 'Milo',
+        due: 'Friday',
+        evidence: "I'll prepare the checklist by Friday.",
+        topic: 'Synthetic rollout',
+      },
+    ]);
+    expect(result.errorCategories).toEqual(
+      expect.arrayContaining([
+        'unsupported_decision',
+        'unsupported_action_item',
+      ]),
+    );
+  });
+
+  it('clears owner, date, decider, and rationale not supported by the evidence line', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use the staged path',
+        decided_by: 'Milo',
+        rationale: 'save licensing cost',
+        evidence: 'Agreed, we will use the staged path.',
+      },
+    ];
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare the checklist',
+        assignee: 'Nira',
+        due: 'Tuesday',
+        evidence: "I'll prepare the checklist.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: Agreed, we will use the staged path.',
+        "Milo: I'll prepare the checklist.",
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_decisions).toEqual([
+      {
+        text: 'Use the staged path',
+        evidence: 'Agreed, we will use the staged path.',
+      },
+    ]);
+    expect(result.analysis.all_action_items).toEqual([
+      {
+        text: 'Prepare the checklist',
+        evidence: "I'll prepare the checklist.",
+        topic: 'Synthetic rollout',
+      },
+    ]);
+    expect(result.errorCategories).toEqual(
+      expect.arrayContaining([
+        'unsupported_decision_decider',
+        'unsupported_decision_rationale',
+        'unsupported_action_item_owner',
+        'unsupported_action_item_due',
+      ]),
+    );
+  });
+
+  it('does not accept token overlap without a resolvable evidence slice', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use the staged path for rollout',
+        evidence: 'staged rollout path',
+      },
+    ];
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We reviewed staged options and the rollout path remained open.',
+    );
+    expect(result.analysis.all_decisions).toEqual([]);
+  });
+});

@@ -238,3 +238,12 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** Keep base MLX transcription on the first-paint path, then admit at most one medium validation of a sealed five-second source chunk after the live queue becomes idle and the 20-second cadence plus macOS battery/thermal policy allow it. A successful result replaces the matching capture-journal checkpoint once, remains linked to the same audio checksum, and updates the live draft through a monotonic time-aligned merge with stable IDs.
 - **Rationale:** Whole-meeting rolling reconciliation is both thermally unsafe and difficult to bind to exact evidence. Sealed capture tuples already provide bounded audio, durable checksums, source ownership, and a finalization reuse seam.
 - **Consequences:** Live work always wins; denied, failed, or cancelled background work leaves the preview untouched; acceptance frames remain immutable until stop-time finalization rebuilds stale links; validated medium checkpoints accelerate finalization without weakening canonical transcript trust.
+
+## 2026-08-14 - Require evidence before presenting settled meeting intelligence
+
+- **Status:** Accepted
+- **Source:** [Issue #594](https://github.com/metagrover/pluto/issues/594), `docs/superpowers/specs/2026-08-14-evidence-grounded-meeting-analysis-design.md`
+- **Decision:** Single-pass, per-topic, and repair analysis use one decision/action taxonomy. Every retained settled item must resolve to a normalized verbatim transcript line and substantially conserve its claim tokens; unsupported items are removed, unsupported attribution fields are cleared, and rollups are rebuilt from grounded topic arrays.
+- **Rationale:** Prompt contradictions and whole-transcript token overlap let exploratory language and unsupported owners reach user-facing analysis even when quality metadata admitted the failure. A larger local model improved quoting but did not fix classification by itself.
+- **Consequences:** Proposals and open questions remain visible without becoming commitments; structured Ollama thinking and evaluation seeds are explicit capabilities; default-model changes require a repeated real-provider quality, latency, and memory gate rather than a single anecdotal run.
+- **Model preflight:** Neither Phi nor Qwen passed the `notes-v5` one-repeat release preflight. Phi remains the foreground default; Qwen remains limited to evaluation for idle/background work until it clears the full gate.
