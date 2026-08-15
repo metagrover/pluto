@@ -508,6 +508,15 @@ Return JSON in this exact shape:
 // v3 Structured Analysis Prompts
 // =============================================
 
+export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
+- Settled decision: retain only when a participant explicitly agrees to, selects, approves, rejects, declares, or resolves a concrete path. An explicit rejection is itself a decision and must not be omitted; when a participant rejects one option and states what the group will keep or do, extract exactly one decision describing the accepted path using the wording of the resolving clause. Options, preferences, recommendations, predictions, and unresolved or conditional exploration are not decisions.
+- Committed action: retain only when a participant explicitly commits to concrete follow-through, accepts a request, receives an explicit assignment, or a mandated follow-up is clearly stated. Mentions of work, possible tasks, questions, suggestions, and hypothetical next steps are not actions.
+- Proposal or recommendation: keep in the topic summary or key points, never in decisions or action items unless the transcript later records explicit agreement or commitment.
+- Open question: keep in open_questions, never in decisions or action items while unresolved.
+- Discussion context: keep factual or exploratory material in summaries and key points without creating a commitment.
+- Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. If no exact evidence slice exists, omit the settled item.
+- Assignee, decider, due date, and rationale fields must be null unless the same evidence line directly supports them.`;
+
 /**
  * Single-pass structured analysis prompt for cloud providers.
  * Returns a complete AnalysisDocumentV3 as JSON.
@@ -522,6 +531,8 @@ export const getStructuredAnalysisPrompt = (
 
   return `You are a rigorous meeting analyst for Pluto. Produce a structured JSON document that reads like well-organized meeting notes.
 
+${STRUCTURED_EXTRACTION_POLICY}
+
 Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON object with this exact schema:
 
 {
@@ -534,17 +545,17 @@ Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON 
         { "text": "specific insight or statement", "speaker": "Name or null", "from_user_notes": false }
       ],
       "decisions": [
-        { "text": "what was decided", "decided_by": "Name or null", "rationale": "why, if stated", "evidence": "short quote from transcript or null" }
+        { "text": "what was decided", "decided_by": "Name or null", "rationale": "why, if stated or null", "evidence": "required short verbatim quote from transcript" }
       ],
       "action_items": [
-        { "text": "task description", "assignee": "Name or null", "due": "natural language deadline or null", "evidence": "short quote from transcript or null" }
+        { "text": "task description", "assignee": "Name or null", "due": "natural language deadline or null", "evidence": "required short verbatim quote from transcript" }
       ],
       "open_questions": ["unresolved thread or question"],
       "transcript_range": [startSegmentIndex, endSegmentIndex]
     }
   ],
-  "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title", "evidence": "short quote from transcript or null"}],
-  "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null", "evidence": "short quote from transcript or null"}],
+  "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title", "evidence": "required short verbatim quote from transcript"}],
+  "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from transcript"}],
   "meeting_type": "one_on_one | team_sync | brainstorm | presentation | general"
 }
 
@@ -560,8 +571,7 @@ Rules:
 - If a personal topic is sustained, produces follow-up, or is the clear purpose of the meeting, represent it normally.
 - If discussion is exploratory, say that. Do not convert brainstorming into decisions.
 - Distinguish between explicit decisions, proposals/recommendations, and unresolved questions.
-- Mark something as a decision when participants agree on a path forward, choice, or resolution. Include a brief evidence quote from the transcript when possible.
-- Include action items for any concrete task, follow-up, assignment, or commitment made by any participant. Include a brief evidence quote from the transcript when possible.
+- Apply the classification policy exactly and omit unsupported settled items.
 - If the task is mentioned without a clear owner or timing, keep the task text but leave owner and due fields null.
 - Roll up all action items and decisions into the top-level arrays.
 - Classify the meeting type.
@@ -583,6 +593,8 @@ export const getStructuredAnalysisRepairPrompt = (
 
   return `Repair this meeting analysis JSON for Pluto.
 
+${STRUCTURED_EXTRACTION_POLICY}
+
 Return valid JSON only in the same schema as the original structured analysis task.
 
 Rules:
@@ -590,9 +602,7 @@ Rules:
 - Keep technical meaning exact.
 - Brief rapport and personal check-ins may be included as minor context, but Do not make them major topics or lead the overview when most of the meeting is work-focused.
 - If a personal topic is sustained, produces follow-up, or is the clear purpose of the meeting, represent it normally.
-- Mark decisions when participants agree on a path forward or resolution.
-- Include action items for concrete tasks or commitments.
-- Keep unresolved questions out of decisions.
+- Apply the classification policy exactly; repair must not upgrade proposals, questions, or discussion into settled items.
 - Do not add commentary, markdown fences, or explanation.
 
 Broken JSON to repair:
@@ -644,6 +654,8 @@ export const getTopicAnalysisPrompt = (
 
   return `You are a meeting analyst. Analyze this transcript slice for the topic "${topicTitle}".
 
+${STRUCTURED_EXTRACTION_POLICY}
+
 Return valid JSON only in this exact shape:
 {
   "summary": "2-4 sentence digest of this topic's discussion",
@@ -651,10 +663,10 @@ Return valid JSON only in this exact shape:
     { "text": "specific insight", "speaker": "Name or null", "from_user_notes": false }
   ],
   "decisions": [
-    { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null", "evidence": "short quote from transcript or null" }
+    { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from transcript" }
   ],
   "action_items": [
-    { "text": "task description", "assignee": "Name or null", "due": "deadline or null", "evidence": "short quote from transcript or null" }
+    { "text": "task description", "assignee": "Name or null", "due": "deadline or null", "evidence": "required short verbatim quote from transcript" }
   ],
   "open_questions": ["unresolved question"]
 }
@@ -663,14 +675,13 @@ Rules:
 - Use only the transcript text provided. Never invent facts.
 - Preserve exact acronym definitions, proper nouns, and technical terms directly as stated in the transcript (e.g. if PLP is defined as "Professional Loan Program", do NOT replace or expand it with generic external terms like "Personal Learning Plan").
 - Speaker attribution: use name when clearly identifiable, null otherwise.
-- Include all explicit and implied decisions or agreed resolutions. Include a brief evidence quote when possible.
-- Include all action items, tasks, follow-ups, and commitments discussed. Include a brief evidence quote when possible.
+- Apply the classification policy exactly. Extraction count is not a quality goal.
 - Treat explicit third-person commitments such as "Person will do task by date" as action items, preserving the owner and deadline.
 - Preserve numeric targets and success metrics as key points; do not round, omit, or generalize them.
 - Preserve dates, conditions, and qualifiers in decisions so conditional agreements remain conditional.
 - Check every transcript sentence for distinct commitments, decisions, blockers, metrics, and follow-ups before responding.
 - If owner or due date is not directly supported by the transcript, leave that field null.
-- Use explicit commitment language to distinguish real follow-through from brainstorming; do not turn suggestions, ideas, or hypothetical work into action items.
+- Do not turn suggestions, ideas, possible tasks, or hypothetical work into action items.
 - If discussion is exploratory, reflect that in the summary.
 
 Return valid JSON only. No markdown fences, no commentary.

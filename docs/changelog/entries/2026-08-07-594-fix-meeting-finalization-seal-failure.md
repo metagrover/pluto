@@ -1,8 +1,8 @@
-### Fix Meeting Finalization Recovery Failure on Meeting End
+### Harden Meeting Finalization and Evidence-Grounded Analysis
 
 - **Issue:** [#594](https://github.com/metagrover/pluto/issues/594)
-- **PR:** [#595](https://github.com/metagrover/pluto/pull/595)
-- **Changed:** Cancelled the speech monitoring animation loop immediately when recording stop is accepted, and allowed zero-duration active speaker windows at recording stop time to close cleanly in `captureActivitySession.ts`.
-- **Why:** Every completed meeting was degrading into `Processing needs recovery before this meeting is complete` because uncancelled speech monitoring ticks during async recorder shutdown triggered false durability failures.
-- **Replaced:** Uncancelled speech monitoring ticks during recorder stop and latching durability failure on zero-duration active speaker windows at session end.
-- **Notes:** Meetings now finalize normally, generating validated transcripts and meeting intelligence cleanly.
+- **PR:** [#595](https://github.com/metagrover/pluto/pull/595) and [#625](https://github.com/metagrover/pluto/pull/625)
+- **Changed:** Cancelled late speech-monitoring writes during recording stop, allowed zero-duration active speaker windows to close safely, unified structured-analysis extraction rules, removed unsupported settled items and attribution fields, and added a repeated real-provider quality gate with explicit Ollama thinking and seed controls.
+- **Why:** Late capture writes caused false recovery failures, while contradictory prompts and warning-only grounding could present exploratory ideas, hypothetical work, owners, and dates as settled facts.
+- **Replaced:** Uncancelled stop-time monitoring, false durability failures, whole-transcript token overlap, retained unsupported fields, implied-decision instructions, model-behavior assumptions, and fixture-only scoring as the model-change gate.
+- **Notes:** Meetings finalize normally and settled analysis now requires local transcript evidence. The content-free model preflight retained Phi as the foreground default and Qwen as an idle/background candidate because neither cleared the full release gate.

@@ -1,0 +1,66 @@
+[
+  {
+    "case_id": "courtesies_only",
+    "transcript": [
+      "Nira: Thanks for making time today.",
+      "Milo: Of course. Have a good afternoon."
+    ],
+    "expected_counts": { "actions": 0, "decisions": 0 }
+  },
+  {
+    "case_id": "exploratory_only",
+    "transcript": [
+      "Nira: We could use the staged path, or perhaps keep the direct path.",
+      "Milo: Both are still options. We need more information before choosing."
+    ],
+    "expected_counts": { "actions": 0, "decisions": 0 }
+  },
+  {
+    "case_id": "explicit_commitment_and_decision",
+    "transcript": [
+      "Nira: Agreed, we will use the staged path.",
+      "Milo: I will prepare the migration checklist by Friday."
+    ],
+    "expected_counts": { "actions": 1, "decisions": 1 }
+  },
+  {
+    "case_id": "missing_owner",
+    "transcript": [
+      "Nira: The checklist needs to be reviewed before launch.",
+      "Milo: We have not assigned an owner yet."
+    ],
+    "expected_counts": { "actions": 0, "decisions": 0 }
+  },
+  {
+    "case_id": "missing_date",
+    "transcript": [
+      "Nira: I will prepare the launch notes.",
+      "Milo: The timing is not set yet."
+    ],
+    "expected_counts": { "actions": 1, "decisions": 0, "due_fields": 0 }
+  },
+  {
+    "case_id": "competing_proposals",
+    "transcript": [
+      "Nira: I recommend a staged launch.",
+      "Milo: I prefer a direct launch, but we have not resolved it."
+    ],
+    "expected_counts": { "actions": 0, "decisions": 0 }
+  },
+  {
+    "case_id": "rejected_decision",
+    "transcript": [
+      "Nira: We considered skipping validation.",
+      "Milo: No, we rejected that. We will keep validation required."
+    ],
+    "expected_counts": { "actions": 0, "decisions": 1 }
+  },
+  {
+    "case_id": "unaccepted_request",
+    "transcript": [
+      "Nira: Could someone prepare a launch memo?",
+      "Milo: Let us leave that open until the plan is approved."
+    ],
+    "expected_counts": { "actions": 0, "decisions": 0 }
+  }
+]

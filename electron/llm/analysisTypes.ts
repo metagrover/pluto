@@ -24,6 +24,8 @@ export type AnalysisErrorCategory =
   | 'low_topic_coverage'
   | 'conflicting_rollups'
   | 'unsupported_decision'
+  | 'unsupported_decision_decider'
+  | 'unsupported_decision_rationale'
   | 'unsupported_action_item'
   | 'unsupported_action_item_owner'
   | 'unsupported_action_item_due';
@@ -42,6 +44,10 @@ export interface AnalysisGenerationMetadata {
   prompt_version: string;
   generated_at: string;
   error_categories: AnalysisErrorCategory[];
+  generation_options?: {
+    structured_thinking?: boolean;
+    seed?: number;
+  };
 }
 
 export interface TopicPoint {

@@ -10,6 +10,8 @@ function getSettingsHash(settings: LLMSettings): string {
   return JSON.stringify({
     type: settings.llm_provider || 'ollama',
     ollama: settings.ollama_model,
+    ollamaStructuredThinking: settings.ollama_structured_thinking,
+    ollamaSeed: settings.ollama_seed,
     llm: settings.llm_model,
     gemini: settings.gemini_model,
     openai: settings.openai_model,
@@ -138,6 +140,23 @@ export async function getAllSettings(db: {
     const value = db.getSetting(key);
     return typeof value === 'string' ? value : undefined;
   };
+  const getBooleanSetting = (key: string): boolean | undefined => {
+    const value = db.getSetting(key);
+    if (value === true || value === 1 || value === 'true') return true;
+    if (value === false || value === 0 || value === 'false') return false;
+    return undefined;
+  };
+  const getIntegerSetting = (key: string): number | undefined => {
+    const raw = db.getSetting(key);
+    if (
+      typeof raw !== 'number' &&
+      (typeof raw !== 'string' || raw.trim().length === 0)
+    ) {
+      return undefined;
+    }
+    const value = Number(raw);
+    return Number.isSafeInteger(value) ? value : undefined;
+  };
   const providerValue = db.getSetting('llm_provider');
   const allowedProviders: ProviderType[] = [
     'ollama',
@@ -158,6 +177,8 @@ export async function getAllSettings(db: {
     claude_api_key: getStringSetting('claude_api_key'),
     llm_model: getStringSetting('llm_model'),
     ollama_model: getStringSetting('ollama_model'),
+    ollama_structured_thinking: getBooleanSetting('ollama_structured_thinking'),
+    ollama_seed: getIntegerSetting('ollama_seed'),
     gemini_model: getStringSetting('gemini_model'),
     openai_model: getStringSetting('openai_model'),
     claude_model: getStringSetting('claude_model'),
