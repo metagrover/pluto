@@ -16,12 +16,20 @@ type Fixture = {
   case_id?: string;
   transcript: string[];
   expected?: Record<string, unknown>;
-  generated_analysis?: unknown;
   expected_counts?: {
     actions: number;
     decisions: number;
     due_fields?: number;
   };
+};
+
+type ProviderBaseline = {
+  schema_version: number;
+  provider: string;
+  model: string;
+  prompt_version: string;
+  seed: number;
+  reviewed_scores: number[];
 };
 
 const enabled = process.env.RUN_MEETING_NOTES_PROVIDER_BENCHMARK === '1';
@@ -43,12 +51,18 @@ const loadFixtures = (): Fixture[] => {
   return [...reviewed, ...precision];
 };
 
+const loadProviderBaseline = (): ProviderBaseline =>
+  readJson<ProviderBaseline>(
+    path.resolve(
+      'scripts/baselines/meeting-notes-quality/provider-baselines/phi4-mini-notes-v6.json',
+    ),
+  );
+
 suite('real-provider meeting notes quality benchmark', () => {
   it(
     'runs production prompts and grounding with content-free reporting',
     async () => {
-      const model =
-        process.env.OLLAMA_BENCHMARK_MODEL?.trim() || 'phi4-mini:3.8b';
+      const model = process.env.OLLAMA_BENCHMARK_MODEL?.trim() || 'qwen3.5:9b';
       const repeats = Math.max(
         1,
         Number.parseInt(process.env.OLLAMA_BENCHMARK_REPEATS || '3', 10) || 3,
@@ -58,30 +72,34 @@ suite('real-provider meeting notes quality benchmark', () => {
       const fixtureScope =
         process.env.OLLAMA_BENCHMARK_SUITE === 'precision'
           ? 'precision'
-          : 'full';
+          : process.env.OLLAMA_BENCHMARK_SUITE === 'reviewed'
+            ? 'reviewed'
+            : 'full';
       const selectedCase = process.env.OLLAMA_BENCHMARK_CASE?.trim();
       const fixtures = loadFixtures().filter(
         (fixture) =>
-          (fixtureScope === 'full' || fixture.expected_counts) &&
+          (fixtureScope === 'full' ||
+            (fixtureScope === 'precision'
+              ? fixture.expected_counts
+              : fixture.expected)) &&
           (!selectedCase || fixture.case_id === selectedCase),
       );
       if (fixtures.length === 0) {
         throw new Error('No benchmark fixtures matched the selected scope');
       }
-      const reviewedBaselines = new Map(
-        fixtures.flatMap((fixture, index) => {
-          if (!fixture.expected || !fixture.generated_analysis) return [];
-          return [
-            [
-              index,
-              scoreMeetingNotesQuality({
-                ...fixture,
-                generated_analysis: fixture.generated_analysis,
-              }).total_score,
-            ],
-          ];
-        }),
-      );
+      const providerBaseline = loadProviderBaseline();
+      const reviewedFixtureCount = loadFixtures().filter(
+        (fixture) => fixture.expected,
+      ).length;
+      if (
+        providerBaseline.prompt_version !==
+          STRUCTURED_ANALYSIS_PROMPT_VERSION ||
+        providerBaseline.reviewed_scores.length !== reviewedFixtureCount
+      ) {
+        throw new Error(
+          'Provider baseline does not match the fixture contract',
+        );
+      }
       const runs: Array<{
         fixtureIndex: number;
         fixture: Fixture;
@@ -233,7 +251,8 @@ suite('real-provider meeting notes quality benchmark', () => {
       const reviewedFixtureRegressions = runs.filter(
         ({ fixtureIndex, score }) =>
           score !== null &&
-          score.total_score < (reviewedBaselines.get(fixtureIndex) ?? 0),
+          score.total_score <
+            (providerBaseline.reviewed_scores[fixtureIndex] ?? 0),
       ).length;
       const reviewedFailureCounts = reviewedScores.reduce<
         Record<string, number>
@@ -254,7 +273,13 @@ suite('real-provider meeting notes quality benchmark', () => {
         provider: 'ollama',
         model,
         prompt_version: STRUCTURED_ANALYSIS_PROMPT_VERSION,
-        fixture_revision: 'meeting-notes-quality-v2',
+        fixture_revision: 'meeting-notes-quality-v3',
+        comparison_baseline: {
+          provider: providerBaseline.provider,
+          model: providerBaseline.model,
+          prompt_version: providerBaseline.prompt_version,
+          seed: providerBaseline.seed,
+        },
         fixture_scope: fixtureScope,
         repeats,
         generation: {
@@ -279,6 +304,7 @@ suite('real-provider meeting notes quality benchmark', () => {
         precision_cases_total: precisionRuns.length,
         reviewed_score: totalScore,
         reviewed_max_score: maxScore,
+        reviewed_scores: reviewedScores.map((score) => score.total_score),
         reviewed_fixture_regressions: reviewedFixtureRegressions,
         reviewed_failure_counts: reviewedFailureCounts,
         token_budget: {
@@ -308,6 +334,11 @@ suite('real-provider meeting notes quality benchmark', () => {
         expect(report.reviewed_score).toBeGreaterThan(30 * repeats);
         expect(report.reviewed_max_score).toBe(48 * repeats);
         expect(report.reviewed_fixture_regressions).toBe(0);
+        expect(report.latency_ms.average).toBeLessThanOrEqual(30_000);
+        expect(report.resident_model_bytes).not.toBeNull();
+        expect(
+          report.resident_model_bytes ?? Number.POSITIVE_INFINITY,
+        ).toBeLessThanOrEqual(6.5 * 1024 * 1024 * 1024);
       }
     },
     30 * 60 * 1_000,

@@ -151,6 +151,7 @@ export interface LLMSettings {
   claude_api_key?: string;
   llm_model?: string;
   ollama_model?: string;
+  ollama_analysis_model?: string;
   ollama_structured_thinking?: boolean;
   ollama_seed?: number;
   gemini_model?: string;

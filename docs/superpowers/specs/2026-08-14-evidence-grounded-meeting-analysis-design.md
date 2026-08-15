@@ -51,4 +51,16 @@ The 2026-08-14 one-repeat production-provider preflight used prompt `notes-v5`, 
 | `phi4-mini:3.8b` | 29/48 | 5/8 | 0 | 2/2 | 6.9 s | 3.1 GB |
 | `qwen3.5:9b` | 31/48 | 7/8 | 0 | 9/9 | 15.2 s | 5.5 GB |
 
-Neither candidate passed the release gate, so the three-repeat release run and foreground default-model change were correctly skipped. Qwen remains a promising idle/background candidate, not the foreground analysis default. A targeted Qwen run with structured thinking enabled returned no usable strict-JSON response, confirming that structured thinking stays disabled unless a separately budgeted two-pass design is validated.
+Neither candidate passed that preflight. A targeted Qwen run with structured thinking enabled also returned no usable strict-JSON response, confirming that structured thinking stays disabled unless a separately budgeted two-pass design is validated.
+
+## Promotion result
+
+Prompt `notes-v6` added one generic rejection-resolution pattern without adding another model call. The content-free Phi comparison baseline was 7/12 on each of the four reviewed fixtures. Qwen then passed the three-seed production-provider gate:
+
+- reviewed score: 93/144, or 31/48 on every seed;
+- precision: 24/24 synthetic cases, with zero false positives and zero false negatives;
+- grounding: 30/30 retained settled items resolved to exact transcript evidence;
+- regressions: zero reviewed fixtures below the Phi baseline;
+- performance: 15.9 seconds average per case and 5.5 GB resident model memory.
+
+Pluto therefore uses `qwen3.5:9b` as the default for structured meeting analysis while retaining Phi for other latency-sensitive Ollama tasks. An explicit user model setting still wins. This task-scoped promotion does not change MLX transcription or add recording-time work.

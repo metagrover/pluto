@@ -119,6 +119,8 @@ describe('structured analysis extraction policy', () => {
       expect(prompt).toContain('Settled decision: retain only');
       expect(prompt).toContain('An explicit rejection is itself a decision');
       expect(prompt).toContain('extract exactly one decision');
+      expect(prompt).toContain('We rejected option A');
+      expect(prompt).toContain('We will keep option B');
       expect(prompt).toContain('Committed action: retain only');
       expect(prompt).toContain('Proposal or recommendation:');
       expect(prompt).toContain('Open question:');

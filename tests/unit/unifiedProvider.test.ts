@@ -212,7 +212,7 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('prefers phi4-mini variant when auto-detecting ollama model', async () => {
+  it('keeps Phi for non-analysis tasks when auto-detecting ollama model', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
@@ -220,6 +220,7 @@ describe('UnifiedLLMProvider', () => {
           models: [
             { name: 'kimike:latest' },
             { name: 'phi4-mini:3.8b:latest' },
+            { name: 'qwen3.5:9b' },
           ],
         });
       }
@@ -235,6 +236,43 @@ describe('UnifiedLLMProvider', () => {
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
     expect(selectedModel).toBe('phi4-mini:3.8b:latest');
+  });
+
+  it('prefers promoted Qwen for structured meeting analysis', async () => {
+    const selectedModels: string[] = [];
+    installFetchMock((url, init) => {
+      if (url.endsWith('/api/tags')) {
+        return jsonResponse({
+          models: [{ name: 'phi4-mini:3.8b' }, { name: 'qwen3.5:9b' }],
+        });
+      }
+      const body = parseRequestBody(init);
+      selectedModels.push(String(body.model));
+      if (selectedModels.length === 1) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [{ title: 'Synthetic', start_segment: 0, end_segment: 0 }],
+          }),
+        });
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'Synthetic summary.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {});
+    const analysis = await provider.generateStructuredAnalysis(
+      'Nira: Synthetic update.',
+    );
+
+    expect(analysis.generation_metadata?.model).toBe('qwen3.5:9b');
+    expect(selectedModels).toEqual(['qwen3.5:9b', 'qwen3.5:9b']);
   });
 
   it('avoids embedding-only ollama models during auto-detection', async () => {
