@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import whisperx_server as server
-from whisperx_server import MLX_MODEL_MAP, MLX_WHISPER_AVAILABLE, app
+import mlx_transcription_server as server
+from mlx_transcription_server import MLX_MODEL_MAP, MLX_WHISPER_AVAILABLE, app
 
 client = TestClient(app)
 

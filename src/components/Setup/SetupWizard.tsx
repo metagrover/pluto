@@ -49,7 +49,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   }, [step]);
 
   const checkPython = async () => {
-    const status = await window.ipcRenderer.invoke('WHISPERX_CHECK_PYTHON');
+    const status = await window.ipcRenderer.invoke('MLX_PREVIEW_CHECK_PYTHON');
     setPythonStatus(status);
   };
 

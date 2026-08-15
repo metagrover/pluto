@@ -112,10 +112,10 @@ export interface HealthStatus {
 }
 
 // Constants
-const WHISPERX_DEFAULT_PORT = 5123;
+const MLX_PREVIEW_DEFAULT_PORT = 5123;
 const HEALTH_CHECK_INTERVAL = 1000;
 const MAX_HEALTH_CHECK_RETRIES = 30;
-const WHISPERX_FETCH_AGENT = new Agent({
+const MLX_PREVIEW_FETCH_AGENT = new Agent({
   // transcription can be long-running; increase headers/body timeouts
   // so undici doesn't fail before the server responds.
   headersTimeout: 30 * 60 * 1000,
@@ -125,7 +125,7 @@ const WHISPERX_FETCH_AGENT = new Agent({
 export class TranscriptionManager {
   private process: ChildProcess | null = null;
   private pythonPath = '';
-  private port: number = WHISPERX_DEFAULT_PORT;
+  private port: number = MLX_PREVIEW_DEFAULT_PORT;
   private externalServer = false;
   private appliedConfig: Partial<TranscriptionEngineConfig> = {};
   private recyclePromise: Promise<boolean> | null = null;
@@ -169,7 +169,7 @@ export class TranscriptionManager {
         } else if (
           app.isPackaged &&
           code === 1 &&
-          output.includes('whisperx_server')
+          output.includes('mlx_transcription_server')
         ) {
           // Some executables might exit with 1 on --version if not explicitly handled,
           // but if it's packaged we can be more lenient if the file exists.
@@ -205,8 +205,8 @@ export class TranscriptionManager {
       const bundledPath = path.join(
         process.resourcesPath,
         'bin',
-        'whisperx_server',
-        'whisperx_server',
+        'mlx_transcription_server',
+        'mlx_transcription_server',
       );
       console.log(`[Transcription] Using bundled executable: ${bundledPath}`);
       return bundledPath;
@@ -338,9 +338,11 @@ export class TranscriptionManager {
       }
 
       try {
-        const existingHealth = await this.healthOnPort(WHISPERX_DEFAULT_PORT);
+        const existingHealth = await this.healthOnPort(
+          MLX_PREVIEW_DEFAULT_PORT,
+        );
         if (existingHealth.status === 'ok') {
-          this.port = WHISPERX_DEFAULT_PORT;
+          this.port = MLX_PREVIEW_DEFAULT_PORT;
           this.externalServer = true;
           console.log(
             `[Transcription] Using existing server on port ${this.port}`,
@@ -348,7 +350,7 @@ export class TranscriptionManager {
           return;
         }
 
-        this.port = await this.findAvailablePort(WHISPERX_DEFAULT_PORT);
+        this.port = await this.findAvailablePort(MLX_PREVIEW_DEFAULT_PORT);
 
         const executable = this.detectExecutable();
         let spawnArgs: string[] = [];
@@ -356,7 +358,7 @@ export class TranscriptionManager {
 
         // If in dev (using python interpreter), we need to pass the script script
         if (!app.isPackaged) {
-          const serverPath = path.join(cwd, 'whisperx_server.py');
+          const serverPath = path.join(cwd, 'mlx_transcription_server.py');
           if (!fs.existsSync(serverPath)) {
             throw new Error(
               `transcription server script not found at ${serverPath}`,
@@ -389,7 +391,7 @@ export class TranscriptionManager {
         // Set environment variables
         const env = {
           ...process.env,
-          WHISPERX_PORT: this.port.toString(),
+          MLX_PREVIEW_PORT: this.port.toString(),
           PLUTO_SPEAKER_MODELS_DIR: path.join(
             app.getPath('userData'),
             'models',
@@ -581,7 +583,7 @@ export class TranscriptionManager {
     const response = await fetch(`${this.getBaseUrl()}/transcribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      dispatcher: WHISPERX_FETCH_AGENT,
+      dispatcher: MLX_PREVIEW_FETCH_AGENT,
       signal: options.signal,
       body: JSON.stringify({
         audio_path: audioPath,
@@ -593,7 +595,7 @@ export class TranscriptionManager {
         word_timestamps: options.wordTimestamps,
         initial_prompt: options.initialPrompt,
       }),
-    } as RequestInit & { dispatcher: typeof WHISPERX_FETCH_AGENT });
+    } as RequestInit & { dispatcher: typeof MLX_PREVIEW_FETCH_AGENT });
 
     if (!response.ok) {
       const error = await response
@@ -615,10 +617,10 @@ export class TranscriptionManager {
     const response = await fetch(`${this.getBaseUrl()}/diarize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      dispatcher: WHISPERX_FETCH_AGENT,
+      dispatcher: MLX_PREVIEW_FETCH_AGENT,
       signal,
       body: JSON.stringify({ audio_path: audioPath }),
-    } as RequestInit & { dispatcher: typeof WHISPERX_FETCH_AGENT });
+    } as RequestInit & { dispatcher: typeof MLX_PREVIEW_FETCH_AGENT });
     if (!response.ok) {
       const error = (await response.json().catch(() => ({}))) as {
         detail?: string;
@@ -743,5 +745,5 @@ export class TranscriptionManager {
 
 // Export singleton instance
 // Compatibility export while callers migrate away from the historical name.
-export { TranscriptionManager as WhisperXManager };
-export const whisperX = new TranscriptionManager();
+export { TranscriptionManager as MlxPreviewManager };
+export const mlxPreview = new TranscriptionManager();

@@ -1,8 +1,4 @@
 import { useState } from 'react';
-import type {
-  TranscriptionPreset,
-  WhisperModel,
-} from '../../utils/transcriptionSettings';
 
 interface SettingsOverlayProps {
   settingsVisible: boolean;
@@ -17,10 +13,6 @@ interface SettingsOverlayProps {
   setClaudeApiKey: (val: string) => void;
   ollamaModel: string;
   setOllamaModel: (val: string) => void;
-  transcriptionPreset: TranscriptionPreset;
-  setTranscriptionPreset: (val: TranscriptionPreset) => void;
-  whisperModel: WhisperModel;
-  setWhisperModel: (val: WhisperModel) => void;
   whisperLanguage: string;
   setWhisperLanguage: (val: string) => void;
   autoEndEnabled: boolean;
@@ -102,10 +94,6 @@ export const SettingsOverlay = ({
   setClaudeApiKey,
   ollamaModel,
   setOllamaModel,
-  transcriptionPreset,
-  setTranscriptionPreset,
-  whisperModel,
-  setWhisperModel,
   whisperLanguage,
   setWhisperLanguage,
   autoEndEnabled,
@@ -273,76 +261,25 @@ export const SettingsOverlay = ({
                 Local transcription
               </div>
               <p className={helperClass}>
-                Runs locally with MLX on Apple Silicon.
+                MLX provides responsive live text; Parakeet produces the
+                accuracy-first final transcript locally on Apple Silicon.
               </p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field
-                htmlFor="settings-transcription-preset"
-                label="Quality"
-                helper="Balanced is faster; Accuracy First favors higher-quality finalization."
-              >
-                <select
-                  id="settings-transcription-preset"
-                  value={transcriptionPreset}
-                  onChange={(event) => {
-                    const value = event.target.value as TranscriptionPreset;
-                    setTranscriptionPreset(value);
-                    persistSetting('transcription_preset', value);
-                  }}
-                  className={controlClass}
-                >
-                  <option value="balanced">Balanced</option>
-                  <option value="accuracy_first">Accuracy First</option>
-                </select>
-              </Field>
-
-              <Field
-                htmlFor="settings-whisper-model"
-                label="Model"
-                helper="Choose a specific MLX Whisper model."
-              >
-                <select
-                  id="settings-whisper-model"
-                  value={whisperModel}
-                  onChange={(event) => {
-                    const value = event.target.value as WhisperModel;
-                    setWhisperModel(value);
-                    persistSetting('whisper_model', value);
-                  }}
-                  className={controlClass}
-                >
-                  {[
-                    'tiny',
-                    'base',
-                    'small',
-                    'medium',
-                    'large-v2',
-                    'large-v3',
-                  ].map((model) => (
-                    <option key={model} value={model}>
-                      {model}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </div>
-
             <Field
-              htmlFor="settings-whisper-language"
+              htmlFor="settings-transcription-language"
               label="Language"
               helper="Use an ISO language code such as en, es, or fr. Leave blank for English."
             >
               <input
-                id="settings-whisper-language"
+                id="settings-transcription-language"
                 type="text"
                 value={whisperLanguage}
                 placeholder="en"
                 onChange={(event) => {
                   const value = event.target.value;
                   setWhisperLanguage(value);
-                  persistSetting('whisper_language', value);
+                  persistSetting('transcription_language', value);
                 }}
                 className={controlClass}
               />

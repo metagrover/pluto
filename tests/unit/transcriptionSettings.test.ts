@@ -17,7 +17,6 @@ describe('live chunk transcription settings', () => {
     expect(resolveLiveChunkModel('small')).toBe('base');
     expect(resolveLiveChunkModel('base')).toBe('base');
     expect(resolveLiveChunkModel('tiny')).toBe('tiny');
-    expect(resolveLiveChunkComputeType('float32')).toBe('int8');
     expect(resolveLiveChunkComputeType('float16')).toBe('float16');
   });
 });
@@ -47,13 +46,11 @@ describe('transcription settings', () => {
   });
 
   it('normalizes backend and preset values', () => {
-    expect(resolveTranscriptionBackend('whisperx_tuned')).toBe(
-      'local_alt_apple_silicon',
-    );
+    expect(resolveTranscriptionBackend('obsolete')).toBe('mlx_preview');
     expect(resolveTranscriptionBackend('unknown')).toBe(
       DEFAULT_TRANSCRIPTION_SETTINGS.backend,
     );
-    expect(resolveTranscriptionPreset('accuracy_first')).toBe('accuracy_first');
+    expect(resolveTranscriptionPreset('accuracy_first')).toBe('balanced');
     expect(resolveTranscriptionPreset('unknown')).toBe(
       DEFAULT_TRANSCRIPTION_SETTINGS.preset,
     );

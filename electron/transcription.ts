@@ -19,8 +19,8 @@ import {
   type HealthStatus as WhisperHealthStatus,
   type TranscribeOptions as WhisperTranscribeOptions,
   type Transcript as WhisperTranscript,
-  whisperX,
-} from './whisperx';
+  mlxPreview,
+} from './transcription/mlxPreviewClient';
 
 export interface TranscriptionMeta {
   backend: TranscriptionBackend;
@@ -83,11 +83,11 @@ const toWhisperOptions = (
 export const getTranscriptionBackendStatus = async (
   backend: TranscriptionBackend,
 ): Promise<TranscriptionBackendStatus> => {
-  await whisperX.start();
+  await mlxPreview.start();
   return {
     backend,
     capabilities: getTranscriptionCapabilities(backend),
-    health: await whisperX.health(),
+    health: await mlxPreview.health(),
   };
 };
 
@@ -105,7 +105,7 @@ export const transcribeWithBackend = async (
   });
   const start = Date.now();
   if (options.diarize && options.diarizationProvider === 'sherpa_local') {
-    const diarization = await whisperX.diarize(audioPath, options.signal);
+    const diarization = await mlxPreview.diarize(audioPath, options.signal);
     return {
       segments: diarization.segments.map((segment) => ({
         ...segment,
@@ -134,7 +134,7 @@ export const transcribeWithBackend = async (
       },
     };
   }
-  const result = await whisperX.transcribe(
+  const result = await mlxPreview.transcribe(
     audioPath,
     toWhisperOptions(resolved, options),
   );

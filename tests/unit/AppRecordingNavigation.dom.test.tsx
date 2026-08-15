@@ -89,12 +89,10 @@ describe('App recording navigation', () => {
             if (key === 'theme') return 'system';
             if (key === 'auto_end_enabled') return 'false';
             if (key === 'llm_provider') return 'ollama';
-            if (key === 'transcription_preset') return 'balanced';
-            if (key === 'whisper_model') return 'small';
-            if (key === 'whisper_language') return '';
+            if (key === 'transcription_language') return '';
             return null;
           }
-          if (channel === 'WHISPERX_HEALTH') return { status: 'ok' };
+          if (channel === 'MLX_PREVIEW_HEALTH') return { status: 'ok' };
           if (channel === 'GET_MEETINGS') return [];
           if (channel === 'BOOT_PROBE_STATUS') return true;
           if (channel === 'DETECT_ACTIVE_CALL') return { active: false };

@@ -1100,7 +1100,7 @@ export const runRetryValidationBenchmarkCase = async (
       };
       return true;
     }
-    if (channel === 'WHISPER_TRANSCRIBE') {
+    if (channel === 'TRANSCRIPTION_TRANSCRIBE_PREVIEW') {
       const audioPath = String(args[0] || '');
       return fixture.transcribeByPath[audioPath] || { segments: [] };
     }

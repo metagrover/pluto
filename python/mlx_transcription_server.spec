@@ -28,7 +28,7 @@ except Exception:
 block_cipher = None
 
 a = Analysis(
-    ['whisperx_server.py'],
+    ['mlx_transcription_server.py'],
     pathex=[],
     binaries=sherpa_binaries + mlx_binaries + mlx_w_binaries,
     datas=datas,
@@ -52,7 +52,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='whisperx_server',
+    name='mlx_transcription_server',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -72,5 +72,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='whisperx_server',
+    name='mlx_transcription_server',
 )

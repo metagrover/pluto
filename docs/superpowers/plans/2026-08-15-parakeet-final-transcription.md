@@ -213,15 +213,15 @@ expect(events).toEqual(['commit-canonical', 'start-analysis']);
 - Modify: affected tests and imports
 - Delete: disabled full-session MLX fallback/hydration code made unreachable by the final worker
 
-- [ ] **Step 1: Add/update tests asserting there are no legacy WhisperX/CPU/CUDA/MPS/backend choices or `WHISPER_TRANSCRIBE` callers**
+- [x] **Step 1: Add/update tests asserting there are no legacy WhisperX/CPU/CUDA/MPS/backend choices or `WHISPER_TRANSCRIBE` callers**
 
-- [ ] **Step 2: Verify the cleanup tests fail**
+- [x] **Step 2: Verify the cleanup tests fail**
 
-- [ ] **Step 3: Migrate names/contracts, remove ignored settings and compatibility aliases, extract remaining finalization helpers from `AudioManager.tsx`, and delete dead whole-session MLX branches**
+- [x] **Step 3: Migrate names/contracts, remove ignored settings and compatibility aliases, extract remaining finalization helpers from `AudioManager.tsx`, and delete dead whole-session MLX branches**
 
-- [ ] **Step 4: Run `rg -n "WHISPER_TRANSCRIBE|whisperx_current|whisperx_tuned|local_alt_apple_silicon|device: 'cpu'|device: 'cuda'" src electron python scripts tests` and justify every remaining historical/documentation occurrence**
+- [x] **Step 4: Run `rg -n "WHISPER_TRANSCRIBE|whisperx_current|whisperx_tuned|local_alt_apple_silicon|device: 'cpu'|device: 'cuda'" src electron python scripts tests` and justify every remaining historical/documentation occurrence**
 
-- [ ] **Step 5: Run focused and full tests, then commit cleanup**
+- [x] **Step 5: Run focused and full tests, then commit cleanup**
 
 ### Task 9: Benchmark, decisions, documentation, and changelog
 

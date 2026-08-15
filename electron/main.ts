@@ -209,15 +209,8 @@ app.on('activate', () => {
   }
 });
 
-import {
-  resolveBackendOptions,
-  resolvePreferredTranscriptionBackend,
-} from '../src/utils/transcriptionBackendConfig';
-import {
-  type TranscriptionSettings,
-  resolveLiveChunkModel,
-  resolveTranscriptionSettings,
-} from '../src/utils/transcriptionSettings';
+import { resolveBackendOptions } from '../src/utils/transcriptionBackendConfig';
+import { resolveLiveChunkModel } from '../src/utils/transcriptionSettings';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
@@ -268,8 +261,8 @@ import {
   listTranscriptionBackends,
   transcribeWithBackend,
 } from './transcription';
+import { mlxPreview } from './transcription/mlxPreviewClient';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
-import { whisperX } from './whisperx';
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
@@ -350,7 +343,7 @@ app.on('before-quit', async () => {
   activeMeetingTasks.clear();
   parakeetFinalClient?.close();
   parakeetFinalClient = null;
-  await whisperX.stop();
+  await mlxPreview.stop();
 });
 
 app.whenReady().then(async () => {
@@ -377,22 +370,22 @@ app.whenReady().then(async () => {
   });
 
   // Local transcription handlers. IPC names remain stable for compatibility.
-  ipcMain.handle('WHISPERX_CHECK_PYTHON', async () => {
-    return await whisperX.checkPython();
+  ipcMain.handle('MLX_PREVIEW_CHECK_PYTHON', async () => {
+    return await mlxPreview.checkPython();
   });
 
-  ipcMain.handle('WHISPERX_START', async () => {
-    await whisperX.start();
+  ipcMain.handle('MLX_PREVIEW_START', async () => {
+    await mlxPreview.start();
     return { success: true };
   });
 
-  ipcMain.handle('WHISPERX_STOP', async () => {
-    await whisperX.stop();
+  ipcMain.handle('MLX_PREVIEW_STOP', async () => {
+    await mlxPreview.stop();
     return { success: true };
   });
 
-  ipcMain.handle('WHISPERX_HEALTH', async () => {
-    return await whisperX.health();
+  ipcMain.handle('MLX_PREVIEW_HEALTH', async () => {
+    return await mlxPreview.health();
   });
 
   ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', () => ({
@@ -458,7 +451,7 @@ app.whenReady().then(async () => {
     abortMeetingTasks(normalizedMeetingId);
     const meetingWorkCount =
       activeTranscriptionMeetings.get(normalizedMeetingId) || 0;
-    const sidecarTerminated = await whisperX.recycleOwnedProcessIf(
+    const sidecarTerminated = await mlxPreview.recycleOwnedProcessIf(
       () =>
         activeTranscriptionCount > 0 &&
         activeTranscriptionCount === meetingWorkCount,
@@ -467,40 +460,40 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(
-    'WHISPERX_TRANSCRIBE',
+    'MLX_PREVIEW_TRANSCRIBE',
     async (_event, { audioPath, options }) => {
       beginTranscriptionWork();
       try {
         const signal = options?.meetingId
           ? getAbortSignalForMeeting(options.meetingId)
           : undefined;
-        return await whisperX.transcribe(audioPath, { ...options, signal });
+        return await mlxPreview.transcribe(audioPath, { ...options, signal });
       } finally {
         endTranscriptionWork();
       }
     },
   );
 
-  ipcMain.handle('WHISPERX_LIST_MODELS', async () => {
-    return await whisperX.listModels();
+  ipcMain.handle('MLX_PREVIEW_LIST_MODELS', async () => {
+    return await mlxPreview.listModels();
   });
 
   ipcMain.handle('WHISPER_DIARIZATION_MODEL_STATUS', async () => {
-    return await whisperX.getDiarizationModelReadiness();
+    return await mlxPreview.getDiarizationModelReadiness();
   });
 
   ipcMain.handle('WHISPER_PREPARE_DIARIZATION_MODELS', async () => {
-    return await whisperX.prepareDiarizationModels();
+    return await mlxPreview.prepareDiarizationModels();
   });
 
   ipcMain.handle('WHISPER_ROLLBACK_DIARIZATION_MODELS', async () => {
-    return await whisperX.rollbackDiarizationModels();
+    return await mlxPreview.rollbackDiarizationModels();
   });
 
   ipcMain.handle(
     'WHISPER_ALIGNED_ENERGY',
     async (_event, micAudioPath, systemAudioPath) => {
-      return await whisperX.getAlignedEnergy(micAudioPath, systemAudioPath);
+      return await mlxPreview.getAlignedEnergy(micAudioPath, systemAudioPath);
     },
   );
 
@@ -513,7 +506,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(
-    'WHISPER_TRANSCRIBE',
+    'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
     async (_event, audioPath, options = {}) => {
       const meetingId = options.meetingId ? String(options.meetingId) : null;
       console.log('[Pluto] Transcription request started');
@@ -540,7 +533,7 @@ app.whenReady().then(async () => {
             language: 'en',
             duration: 0,
             meta: {
-              backend: 'local_alt_apple_silicon',
+              backend: 'mlx_preview',
               preset: options.preset || 'balanced',
               model: options.model || 'small',
               device: 'mlx',
@@ -2705,50 +2698,23 @@ app.whenReady().then(async () => {
   });
 
   try {
-    await whisperX.start();
-    const health = await whisperX.health();
-    const startupBackend = resolvePreferredTranscriptionBackend({
-      configuredBackend: db.getSetting('transcription_backend'),
-      runtime: { platform: process.platform, arch: process.arch },
-      health: { mlxAvailable: health.mlx_available === true },
-    });
-    const startupSettings = resolveTranscriptionSettings({
-      backend: startupBackend.backend,
-      preset: db.getSetting('transcription_preset'),
-      model: db.getSetting('whisper_model'),
-      device: db.getSetting('whisper_device'),
-      computeType: db.getSetting('whisper_compute_type'),
-      language: db.getSetting('whisper_language'),
-    } as TranscriptionSettings);
-    const resolvedStartup = resolveBackendOptions(
-      {
-        backend: startupBackend.backend,
-        preset: startupSettings.preset ?? 'balanced',
-        model: startupSettings.model,
-        device: startupSettings.device,
-        computeType: startupSettings.computeType,
-        language: startupSettings.language,
-      },
-      { platform: process.platform, arch: process.arch },
-    );
-    await whisperX.setConfig({
-      model: resolvedStartup.model,
+    await mlxPreview.start();
+    const health = await mlxPreview.health();
+    await mlxPreview.setConfig({
+      model: 'base',
       device: 'mlx',
       computeType: 'float16',
-      language: resolvedStartup.language,
+      language: db.getSetting('transcription_language') || 'en',
     });
-    const activeHealth = await whisperX.health();
+    const activeHealth = await mlxPreview.health();
     if (
-      startupBackend.backend === 'local_alt_apple_silicon' &&
+      health.mlx_available !== true ||
       activeHealth.engine !== 'mlx_whisper'
     ) {
       throw new Error('MLX Whisper did not become the active engine');
     }
-    if (startupBackend.shouldPersist) {
-      db.setSetting('transcription_backend', startupBackend.backend);
-    }
     console.log(
-      `[Pluto] Transcription engine ready: ${activeHealth.engine ?? 'unknown'} (${startupBackend.backend})`,
+      `[Pluto] Live preview engine ready: ${activeHealth.engine ?? 'unknown'}`,
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2793,19 +2759,11 @@ app.whenReady().then(async () => {
   }
 
   try {
-    const recoveryTranscriptionSettings = resolveTranscriptionSettings({
-      backend: db.getSetting('transcription_backend'),
-      preset: db.getSetting('transcription_preset'),
-      model: db.getSetting('whisper_model'),
-      device: db.getSetting('whisper_device'),
-      computeType: db.getSetting('whisper_compute_type'),
-      language: db.getSetting('whisper_language'),
-    } as TranscriptionSettings);
     const resolvedRecoveryTranscription = resolveBackendOptions({
-      backend: 'local_alt_apple_silicon',
-      preset: recoveryTranscriptionSettings.preset ?? 'balanced',
-      model: recoveryTranscriptionSettings.model,
-      language: recoveryTranscriptionSettings.language,
+      backend: 'mlx_preview',
+      preset: 'balanced',
+      model: 'base',
+      language: db.getSetting('transcription_language') || 'en',
     });
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),

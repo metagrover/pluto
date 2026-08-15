@@ -340,5 +340,5 @@ def _transcribe_locked(request: TranscribeRequest):
         raise HTTPException(status_code=500, detail="Transcription failed") from error
 
 if __name__ == "__main__":
-    port = int(os.environ.get("WHISPERX_PORT", 5123))
+    port = int(os.environ.get("MLX_PREVIEW_PORT", 5123))
     uvicorn.run(app, host="127.0.0.1", port=port)

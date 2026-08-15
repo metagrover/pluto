@@ -69,17 +69,17 @@ describe('capture journal recovery', () => {
       },
     );
 
-  it('treats backend labels with CPU provenance as legacy checkpoints', () => {
+  it('rejects checkpoint metadata outside the fixed MLX preview contract', () => {
     expect(
       isMlxCheckpointConfig({
-        backend: 'local_alt_apple_silicon',
-        device: 'cpu',
-        computeType: 'int8',
+        backend: 'mlx_preview',
+        device: 'obsolete_device',
+        computeType: 'float16',
       }),
     ).toBe(false);
     expect(
       isMlxCheckpointConfig({
-        backend: 'local_alt_apple_silicon',
+        backend: 'mlx_preview',
         device: 'mlx',
         computeType: 'float16',
       }),
@@ -259,11 +259,11 @@ describe('capture journal recovery', () => {
       receipts[source] = completed.receipt;
     }
     const transcriptionConfig = {
-      backend: 'whisperx_current',
+      backend: 'mlx_preview',
       preset: 'balanced',
       model: 'small',
-      device: 'cpu',
-      computeType: 'int8',
+      device: 'mlx',
+      computeType: 'float16',
       languageMode: 'detected' as const,
       requestedLanguage: null,
       pipelineVersion: 'live_chunk_v1' as const,
@@ -376,11 +376,11 @@ describe('capture journal recovery', () => {
     });
     manifest = completed.manifest;
     const transcriptionConfig = {
-      backend: 'whisperx_current',
+      backend: 'mlx_preview',
       preset: 'balanced',
       model: 'small',
-      device: 'cpu',
-      computeType: 'int8',
+      device: 'mlx',
+      computeType: 'float16',
       languageMode: 'detected' as const,
       requestedLanguage: null,
       pipelineVersion: 'live_chunk_v1' as const,
@@ -520,11 +520,11 @@ describe('capture journal recovery', () => {
     });
     manifest = completed.manifest;
     const transcriptionConfig = {
-      backend: 'whisperx_current',
+      backend: 'mlx_preview',
       preset: 'balanced',
       model: 'small',
-      device: 'cpu',
-      computeType: 'int8',
+      device: 'mlx',
+      computeType: 'float16',
       languageMode: 'detected' as const,
       requestedLanguage: null,
       pipelineVersion: 'live_chunk_v1' as const,
@@ -664,11 +664,11 @@ describe('capture journal recovery', () => {
       receipts[source] = completed.receipt;
     }
     const transcriptionConfig = {
-      backend: 'whisperx_current',
+      backend: 'mlx_preview',
       preset: 'balanced',
       model: 'small',
-      device: 'cpu',
-      computeType: 'int8',
+      device: 'mlx',
+      computeType: 'float16',
       languageMode: 'detected' as const,
       requestedLanguage: null,
       pipelineVersion: 'live_chunk_v1' as const,
@@ -710,24 +710,17 @@ describe('capture journal recovery', () => {
         ? [{ start: 0.2, end: 0.8, text: 'Synthetic migrated statement' }]
         : [],
     }));
-    const mlxConfig = {
-      ...transcriptionConfig,
-      backend: 'local_alt_apple_silicon',
-      model: 'large-v3',
-      device: 'mlx',
-      computeType: 'float16',
-    } as const;
     const repaired = await repairStoppingCaptureJournalTranscript(root, {
       meetingId,
       transcribeChunk,
-      transcriptionConfig: mlxConfig,
+      transcriptionConfig,
     });
 
     expect(savedMic.checkpoint.source).toBe('mic');
-    expect(transcribeChunk).toHaveBeenCalledTimes(2);
+    expect(transcribeChunk).toHaveBeenCalledTimes(1);
     expect(transcribeChunk).toHaveBeenCalledWith(
       expect.any(String),
-      mlxConfig,
+      transcriptionConfig,
       2,
     );
     expect(repaired.transcriptCheckpoints).toHaveLength(2);
@@ -741,8 +734,7 @@ describe('capture journal recovery', () => {
       stitchWavSegments: async (_segments, outputTag) =>
         join(root, `${outputTag}.wav`),
       transcribeChunk,
-      // Legacy checkpoints must be replaced as one complete MLX provenance set.
-      transcriptionConfig: mlxConfig,
+      transcriptionConfig,
       nowMs: 4_000,
     });
 
@@ -799,11 +791,11 @@ describe('capture journal recovery', () => {
       receipts[source] = completed.receipt;
     }
     const transcriptionConfig = {
-      backend: 'whisperx_current',
+      backend: 'mlx_preview',
       preset: 'balanced',
       model: 'small',
-      device: 'cpu',
-      computeType: 'int8',
+      device: 'mlx',
+      computeType: 'float16',
       languageMode: 'detected' as const,
       requestedLanguage: null,
       pipelineVersion: 'live_chunk_v1' as const,
@@ -961,11 +953,11 @@ describe('capture journal recovery', () => {
         receipts[source] = completed.receipt;
       }
       const transcriptionConfig = {
-        backend: 'whisperx_current',
+        backend: 'mlx_preview',
         preset: 'balanced',
         model: 'small',
-        device: 'cpu',
-        computeType: 'int8',
+        device: 'mlx',
+        computeType: 'float16',
         languageMode: 'detected' as const,
         requestedLanguage: null,
         pipelineVersion: 'live_chunk_v1' as const,

@@ -5,8 +5,11 @@ describe('known-person transcription vocabulary production boundary', () => {
   const audioManager = readFileSync('src/components/AudioManager.tsx', 'utf8');
   const main = readFileSync('electron/main.ts', 'utf8');
   const transcription = readFileSync('electron/transcription.ts', 'utf8');
-  const whisper = readFileSync('electron/whisperx.ts', 'utf8');
-  const server = readFileSync('python/whisperx_server.py', 'utf8');
+  const whisper = readFileSync(
+    'electron/transcription/mlxPreviewClient.ts',
+    'utf8',
+  );
+  const server = readFileSync('python/mlx_transcription_server.py', 'utf8');
 
   it('resolves and caches one vocabulary selection at the recording boundary', () => {
     expect(main).toContain("'GET_TRANSCRIPTION_VOCABULARY'");

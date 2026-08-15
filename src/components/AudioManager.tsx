@@ -1,27 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  buildInitialValidatedMeetingPayload,
   markStopToValidatedLatencyUnavailable,
-  persistDerivedAfterLatencyPatch,
-  persistTranscriptThenRunLatencyPatchAndDownstream,
   startStopToValidatedLatencyAfterAcceptedStop,
 } from '../services/diarizationFirstFinalization';
 import { runFinalTranscription } from '../services/finalTranscription/runFinalTranscription';
-import { runRecordingTranscriptValidation } from '../services/recordingTranscriptValidation';
-import {
-  beginRetryLease,
-  buildRetryDeadline,
-} from '../services/transcriptValidationRetryLease';
-import type { AnalysisDocumentV3 } from '../types';
-import {
-  deriveAttributionEvidence,
-  injectLocalEvidenceWindows,
-  mapDiarizationFromAcousticEvidence,
-} from '../utils/acousticSpeakerAttribution';
-import {
-  analysisDocumentV3ToMarkdown,
-  parseAnalysisDocumentV3Json,
-} from '../utils/analysisDocument';
+import { retryMeetingTranscriptValidation } from '../services/retryMeetingTranscriptValidation';
 import {
   computeRms,
   createWavBlob,
@@ -35,14 +18,12 @@ import {
   type CaptureComputePolicy,
 } from '../utils/backgroundTranscriptValidation';
 import { startBoundedSampler } from '../utils/boundedSampler';
-import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
 import { createCaptureJournalMutationCoordinator } from '../utils/captureJournalMutationCoordinator';
 import {
   attachCaptureUnloadGuard,
   isCaptureSessionAlreadyActiveError,
 } from '../utils/captureSessionGuard';
-import { resolveProductionDiarizationProvider } from '../utils/diarizationProvider';
 import {
   type LiveTranscriptResponsivenessSummary,
   createLiveTranscriptResponsivenessRuntime,
@@ -57,33 +38,16 @@ import {
   beginRecordingFinalization,
   buildMeetingTiming,
   buildRecoverableSealFailureMeeting,
-  buildSpeakerAttributionRetryPlan,
   createSealedCaptureActivityHandoff,
-  planForegroundTranscriptValidation,
-  resolveFinalizationCleanupPaths,
   sealCaptureJournalBeforeFinalization,
 } from '../utils/recordingFinalization';
-import { getSessionFallbackDecision } from '../utils/sessionTranscriptionFallback';
 import {
   type SpeakerActivityWindow,
   type WordTimestamp,
-  applyCrossTurnAttributionRepairs,
-  applyDiarizationRefinement,
-  assignSpeakersToCanonicalSegments,
   decideNextSpeaker,
-  dropShortCrossSpeakerEchoes,
-  resolveCrossChannelDuplicates,
-  resolveCrossChannelNearDuplicates,
-  shouldApplyFullSessionMeRecovery,
   shouldDropBySpeakerActivity,
-  splitCanonicalSegmentsAtChannelBoundaries,
-  splitSegmentsAtDiarizationBoundaries,
-  stripLikelyMeBleedSegments,
 } from '../utils/speakerAttribution';
-import {
-  type StopToValidatedLatencySummary,
-  createStopToValidatedLatencyAccumulator,
-} from '../utils/stopToValidatedLatency';
+import { createStopToValidatedLatencyAccumulator } from '../utils/stopToValidatedLatency';
 import {
   type TimedAudioChunk,
   shouldUseSystemAudioReconstructionFallback,
@@ -92,13 +56,10 @@ import type { CaptureActivityEvidence } from '../utils/transcriptActivityEvidenc
 import { canonicalizeTranscriptCheckpointConfig } from '../utils/transcriptCheckpointConfig';
 import { evaluateLiveTranscriptCoverage } from '../utils/transcriptIntegrity';
 import {
-  type CanonicalTranscriptSource,
   type StoredTranscriptSpeakerAttribution,
   type TranscriptPipelineMode,
-  type TranscriptTranscriptionMeta,
   buildTranscriptJsonPayload,
   buildTranscriptSpeakerAttribution,
-  withTranscriptLifecycleStatus,
 } from '../utils/transcriptSchema';
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
@@ -228,217 +189,6 @@ type ChunkAcceptanceDraft = {
   };
 };
 
-interface InternalSignalTag {
-  tag: string;
-  confidence: number;
-}
-
-interface InternalSignalDocument {
-  analysis_schema_version: number;
-  continuity: string[];
-  accountability_risks: string[];
-  decision_impacts: string[];
-  extra_tags: InternalSignalTag[];
-}
-
-interface AnalysisQuality {
-  format_pass: boolean;
-  retry_count: number;
-  fallback_used: boolean;
-  issues: string[];
-}
-
-interface AnalysisDocument {
-  analysis_schema_version: number;
-  summary: string[];
-  key_points: string[];
-  action_items: string[];
-  decisions: string[];
-  quality: AnalysisQuality;
-}
-
-interface AnalysisArtifacts {
-  analysis: AnalysisDocumentV3 | AnalysisDocument;
-  signals: InternalSignalDocument;
-}
-
-const emptyValueSignals = (): InternalSignalDocument => ({
-  analysis_schema_version: 2,
-  continuity: [],
-  accountability_risks: [],
-  decision_impacts: [],
-  extra_tags: [],
-});
-
-const emptyAnalysisDocument = (): AnalysisDocumentV3 => ({
-  analysis_schema_version: 3,
-  overview: 'Missing analysis document',
-  topics: [],
-  all_action_items: [],
-  all_decisions: [],
-  meeting_type: 'general',
-  quality: {
-    format_pass: false,
-    retry_count: 1,
-    fallback_used: true,
-    issues: ['Missing analysis document'],
-  },
-});
-
-const TRANSCRIPT_DEBUG_ENABLED: boolean =
-  (typeof process !== 'undefined' &&
-    typeof process.env !== 'undefined' &&
-    process.env.PLUTO_TRANSCRIPT_DEBUG === '1') ||
-  Boolean(
-    (globalThis as unknown as { __PLUTO_TRANSCRIPT_DEBUG__?: unknown })
-      .__PLUTO_TRANSCRIPT_DEBUG__ === true,
-  );
-
-/** One-line pipeline summary (canonical splits, hydration mode, diarization). */
-const TRANSCRIPT_PIPELINE_LOG: boolean =
-  TRANSCRIPT_DEBUG_ENABLED ||
-  (typeof process !== 'undefined' &&
-    typeof process.env !== 'undefined' &&
-    process.env.PLUTO_TRANSCRIPT_PIPELINE_LOG === '1');
-
-const normalizeSignalTag = (value: unknown): InternalSignalTag | null => {
-  if (!value || typeof value !== 'object') return null;
-  const record = value as Record<string, unknown>;
-  const tag =
-    typeof record.tag === 'string' ? record.tag.trim().toLowerCase() : '';
-  if (!tag) return null;
-  const confidence =
-    typeof record.confidence === 'number' ? record.confidence : 0.5;
-  return {
-    tag,
-    confidence: Math.max(0, Math.min(1, confidence)),
-  };
-};
-
-const normalizeSignalList = (value: unknown): string[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-    .slice(0, 3);
-};
-
-const normalizeValueSignals = (value: unknown): InternalSignalDocument => {
-  if (!value || typeof value !== 'object') {
-    return emptyValueSignals();
-  }
-  const record = value as Record<string, unknown>;
-  const rawTags = Array.isArray(record.extra_tags) ? record.extra_tags : [];
-  const dedupedTags = new Map<string, number>();
-  for (const rawTag of rawTags) {
-    const tag = normalizeSignalTag(rawTag);
-    if (!tag) continue;
-    const existing = dedupedTags.get(tag.tag);
-    if (existing === undefined || tag.confidence > existing) {
-      dedupedTags.set(tag.tag, tag.confidence);
-    }
-  }
-  return {
-    analysis_schema_version: 2,
-    continuity: normalizeSignalList(record.continuity),
-    accountability_risks: normalizeSignalList(record.accountability_risks),
-    decision_impacts: normalizeSignalList(record.decision_impacts),
-    extra_tags: Array.from(dedupedTags.entries())
-      .map(([tag, confidence]) => ({ tag, confidence }))
-      .slice(0, 8),
-  };
-};
-// We keep these for v2 compatibility but prefer the v3 utilities in new code.
-// The raw artifacts now return v3 by default.
-const normalizeAnalysisDocument = (
-  value: unknown,
-): AnalysisDocumentV3 | AnalysisDocument => {
-  if (!value || typeof value !== 'object') {
-    return emptyAnalysisDocument();
-  }
-  const record = value as Record<string, unknown>;
-
-  if (record.analysis_schema_version === 3) {
-    // Rely on the imported parseAnalysisDocumentV3Json for normalization
-    const v3Doc = parseAnalysisDocumentV3Json(JSON.stringify(value));
-    return v3Doc || emptyAnalysisDocument();
-  }
-
-  // legacy v2 normalization
-  const normalizeList = (raw: unknown): string[] => {
-    if (!Array.isArray(raw)) return [];
-    return raw
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => item.trim())
-      .filter(Boolean);
-  };
-  const quality =
-    record.quality && typeof record.quality === 'object'
-      ? (record.quality as Record<string, unknown>)
-      : {};
-  return {
-    analysis_schema_version: 2,
-    summary: normalizeList(record.summary),
-    key_points: normalizeList(record.key_points),
-    action_items: normalizeList(record.action_items),
-    decisions: normalizeList(record.decisions),
-    quality: {
-      format_pass: Boolean(quality.format_pass),
-      retry_count:
-        typeof quality.retry_count === 'number' ? quality.retry_count : 0,
-      fallback_used: Boolean(quality.fallback_used),
-      issues: Array.isArray(quality.issues)
-        ? quality.issues.filter(
-            (item): item is string => typeof item === 'string',
-          )
-        : [],
-    },
-  };
-};
-
-const analysisDocumentToMarkdownV2 = (doc: AnalysisDocument): string => {
-  const summaryBody =
-    doc.summary.length > 0
-      ? doc.summary.join('\n\n')
-      : 'No summary was generated for this meeting.';
-  const keyPointsBody =
-    doc.key_points.length > 0
-      ? doc.key_points.map((item) => `- ${item}`).join('\n')
-      : '- No key points were captured.';
-  const actionItemsBody =
-    doc.action_items.length > 0
-      ? doc.action_items.map((item) => `- [ ] ${item}`).join('\n')
-      : '- [ ] No concrete action items were explicitly committed.';
-  const decisionsBody =
-    doc.decisions.length > 0
-      ? doc.decisions.map((item) => `- ${item}`).join('\n')
-      : '- No explicit decisions were made.';
-
-  return [
-    '## Summary',
-    summaryBody,
-    '',
-    '## Key Points',
-    keyPointsBody,
-    '',
-    '## Action Items',
-    actionItemsBody,
-    '',
-    '## Decisions',
-    decisionsBody,
-  ].join('\n');
-};
-
-const analysisDocumentToMarkdown = (
-  doc: AnalysisDocument | AnalysisDocumentV3,
-): string => {
-  if (doc.analysis_schema_version === 3) {
-    return analysisDocumentV3ToMarkdown(doc as AnalysisDocumentV3);
-  }
-  return analysisDocumentToMarkdownV2(doc as AnalysisDocument);
-};
-
 export const AudioManager = ({
   onTranscript,
   onSessionComplete,
@@ -474,9 +224,7 @@ export const AudioManager = ({
     transcriptionSettings,
   );
   const CHUNK_SECONDS =
-    resolvedTranscriptionSettings.backend === 'local_alt_apple_silicon'
-      ? 5
-      : 30;
+    resolvedTranscriptionSettings.backend === 'mlx_preview' ? 5 : 30;
   const resolvedLanguage = resolveTranscriptionLanguage(
     transcriptionSettings?.language,
   );
@@ -491,7 +239,7 @@ export const AudioManager = ({
   ) => {
     const canonicalSource =
       overrides.canonicalSource === 'mic' || overrides.canonicalSource === 'mix'
-        ? (overrides.canonicalSource as CanonicalTranscriptSource)
+        ? (overrides.canonicalSource as 'mic' | 'mix')
         : null;
     const isChunkTranscription = canonicalSource === null;
 
@@ -517,11 +265,6 @@ export const AudioManager = ({
       ...overrides,
     };
   };
-  // Mic/system channel ownership already provides the user-facing Me/Them
-  // labels. Keep speaker clustering off the stop critical path so the
-  // checkpoint transcript can become visible immediately.
-  const diarizationEnabled = false;
-
   // Refs - Dual Recording for source-based speaker labeling
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const micMimeTypeRef = useRef<string | null>(null);
@@ -533,7 +276,6 @@ export const AudioManager = ({
   const systemChunkIndexRef = useRef(0);
 
   const systemPcmChunksRef = useRef<Float32Array[]>([]);
-  const fullSessionSystemPcmChunksRef = useRef<Float32Array[]>([]);
   const systemPcmCarryoverBytesRef = useRef<Uint8Array>(new Uint8Array(0));
   const systemPcmSampleRateRef = useRef(48000);
   const systemChunkDecodeDropCountRef = useRef(0);
@@ -1093,7 +835,7 @@ export const AudioManager = ({
 
     const validationModel = 'medium' as const;
     const result = await window.ipcRenderer.invoke(
-      'WHISPER_TRANSCRIBE',
+      'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
       audioPath,
       buildTranscriptionOptions({
         diarize: false,
@@ -1295,92 +1037,6 @@ export const AudioManager = ({
           confirmed: segment.validationState === 'validated',
         })),
     );
-  };
-
-  const hasCompleteCaptureJournalCheckpoints = async (meetingId: string) => {
-    const manifest = (await window.ipcRenderer.invoke(
-      'AUDIO_CAPTURE_JOURNAL_READ',
-      { meetingId },
-    )) as {
-      schemaVersion?: number;
-      lifecycleState?: string;
-      generation?: string;
-      revision?: number;
-      intervals?: Array<{
-        sequence: number;
-        sources: Record<'mic' | 'system', { disposition: string }>;
-      }>;
-      transcriptCheckpoints?: Array<{
-        source: 'mic' | 'system';
-        sequence: number;
-        disposition: string;
-      }>;
-      acceptanceFrames?: Array<{ sequence: number }>;
-    };
-    if (
-      manifest.schemaVersion !== 3 ||
-      manifest.lifecycleState !== 'sealed' ||
-      !Array.isArray(manifest.intervals) ||
-      !Array.isArray(manifest.transcriptCheckpoints) ||
-      !Array.isArray(manifest.acceptanceFrames)
-    ) {
-      return false;
-    }
-    const checkpoints = new Set(
-      manifest.transcriptCheckpoints
-        .filter(
-          (checkpoint) =>
-            checkpoint.disposition === 'transcribed' ||
-            checkpoint.disposition === 'verified_silence',
-        )
-        .map((checkpoint) =>
-          journalTupleKey(checkpoint.source, checkpoint.sequence),
-        ),
-    );
-    const acceptanceSequences = new Set(
-      manifest.acceptanceFrames.map((frame) => frame.sequence),
-    );
-    const structurallyComplete = manifest.intervals.every(
-      (interval) =>
-        acceptanceSequences.has(interval.sequence) &&
-        (['mic', 'system'] as const).every((source) => {
-          const disposition = interval.sources[source]?.disposition;
-          if (
-            disposition === 'verified_silence' ||
-            disposition === 'source_unavailable'
-          ) {
-            return true;
-          }
-          return (
-            disposition === 'captured' &&
-            checkpoints.has(journalTupleKey(source, interval.sequence))
-          );
-        }),
-    );
-    if (!structurallyComplete) return false;
-    try {
-      const verified = (await window.ipcRenderer.invoke(
-        'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
-        {
-          meetingId,
-          expectedConfigKeys: await Promise.all(
-            [
-              buildTranscriptCheckpointConfig(),
-              { ...buildTranscriptCheckpointConfig(), model: 'medium' },
-            ].map(
-              async (config) =>
-                await sha256Hex(canonicalizeTranscriptCheckpointConfig(config)),
-            ),
-          ),
-        },
-      )) as { generation?: string; revision?: number };
-      return (
-        verified.generation === manifest.generation &&
-        verified.revision === manifest.revision
-      );
-    } catch {
-      return false;
-    }
   };
 
   const abortUnstartedCapture = async (meetingId: string) => {
@@ -1754,7 +1410,6 @@ export const AudioManager = ({
               });
             }
             systemPcmChunksRef.current.push(decoded.samples);
-            fullSessionSystemPcmChunksRef.current.push(decoded.samples);
             const rms = computeRms(decoded.samples);
             systemRmsRef.current = rms;
             systemRmsUpdatedAtRef.current = performance.now();
@@ -1784,7 +1439,6 @@ export const AudioManager = ({
       lastMicChunkBoundarySecRef.current = 0;
       processedMicSegmentsRef.current = [];
       micPcmChunksRef.current = [];
-      fullSessionSystemPcmChunksRef.current = [];
       systemPcmCarryoverBytesRef.current = new Uint8Array(0);
       systemPcmSampleRateRef.current = 48000;
       systemChunkDecodeDropCountRef.current = 0;
@@ -1985,7 +1639,6 @@ export const AudioManager = ({
         // healthy. Discard that setup pre-roll at the synchronization point;
         // otherwise system timestamps can extend beyond the journal interval.
         systemPcmChunksRef.current = [];
-        fullSessionSystemPcmChunksRef.current = [];
         systemPcmCarryoverBytesRef.current = new Uint8Array(0);
         micRecorder.start(CHUNK_SECONDS * 1000);
         console.log('[Pluto] Microphone recording started.');
@@ -2119,14 +1772,6 @@ export const AudioManager = ({
   };
 
   // --- Helpers ---
-
-  const extractTitle = (segments: TranscriptionSegment[]): string => {
-    if (segments.length === 0) return 'New Meeting';
-    const firstText = segments[0]?.text || '';
-    return firstText
-      ? firstText.substring(0, 30) + (firstText.length > 30 ? '...' : '')
-      : 'New Meeting';
-  };
 
   type RmsData = { windowSec: number; rms: number[] };
   type SpeechWindow = { startSec: number; endSec: number };
@@ -2982,336 +2627,6 @@ export const AudioManager = ({
     return merged;
   };
 
-  const splitCanonicalSegmentsForAttribution = (
-    segments: TranscriptionSegment[],
-  ): TranscriptionSegment[] => {
-    const expanded: TranscriptionSegment[] = [];
-    for (const segment of segments) {
-      const text = (segment.text || '').trim();
-      if (!text) continue;
-      const pieces = text
-        .split(/(?<=[.!?])\s+/)
-        .map((piece) => piece.trim())
-        .filter(Boolean);
-      if (pieces.length <= 1) {
-        expanded.push(segment);
-        continue;
-      }
-      const totalWeight = pieces.reduce(
-        (sum, piece) => sum + Math.max(1, piece.length),
-        0,
-      );
-      const totalDuration = Math.max(0.01, segment.endTime - segment.startTime);
-      let cursor = segment.startTime;
-      for (let i = 0; i < pieces.length; i++) {
-        const weight = Math.max(1, pieces[i].length);
-        const remaining = Math.max(0.01, segment.endTime - cursor);
-        const allocated =
-          i === pieces.length - 1
-            ? remaining
-            : Math.max(0.01, totalDuration * (weight / totalWeight));
-        const endTime =
-          i === pieces.length - 1
-            ? segment.endTime
-            : Math.min(segment.endTime, cursor + allocated);
-        expanded.push({
-          ...segment,
-          id: `${segment.id}-s${i}`,
-          startTime: cursor,
-          endTime: Math.max(cursor + 0.01, endTime),
-          text: pieces[i],
-        });
-        cursor = Math.max(cursor + 0.01, endTime);
-      }
-    }
-    return expanded;
-  };
-
-  const filterDuplicateSpeakerSegments = (
-    segments: TranscriptionSegment[],
-    speaker: 'Me' | 'Them',
-  ): TranscriptionSegment[] => {
-    const filtered: TranscriptionSegment[] = [];
-    const recentForSpeaker: TranscriptionSegment[] = [];
-    let dropped = 0;
-
-    for (const segment of segments) {
-      if (segment.speaker !== speaker) {
-        filtered.push(segment);
-        continue;
-      }
-
-      const segNorm = normalizeTranscriptText(segment.text);
-      let duplicatePrev: TranscriptionSegment | null = null;
-      const isDuplicate = (() => {
-        for (const prev of recentForSpeaker) {
-          const gap = segment.startTime - prev.endTime;
-          if (gap > 2.5) continue;
-
-          const prevNorm = normalizeTranscriptText(prev.text);
-          if (!segNorm || !prevNorm) continue;
-
-          // Exact match (fast path).
-          if (segNorm === prevNorm) {
-            duplicatePrev = prev;
-            return true;
-          }
-
-          // Near-duplicate: lexical similarity + light containment.
-          const shorter = Math.min(segNorm.length, prevNorm.length);
-          const longer = Math.max(segNorm.length, prevNorm.length);
-          const lengthRatio = longer / Math.max(1, shorter);
-
-          // If the new segment is a strict extension of the previous one,
-          // keep it so we don't lose continuation detail.
-          if (lengthRatio >= 1.25) continue;
-
-          const tokenSim = tokenSimilarity(segment.text, prev.text);
-          if (tokenSim >= 0.64) {
-            duplicatePrev = prev;
-            return true;
-          }
-
-          const prefixSim = tokenPrefixSimilarity(segment.text, prev.text);
-          if (prefixSim >= 0.84) {
-            duplicatePrev = prev;
-            return true;
-          }
-          const containsMatch =
-            shorter >= 30 &&
-            shorter / longer >= 0.9 &&
-            (segNorm.includes(prevNorm) || prevNorm.includes(segNorm));
-          if (containsMatch) {
-            duplicatePrev = prev;
-            return true;
-          }
-        }
-        return false;
-      })();
-
-      if (isDuplicate) {
-        dropped++;
-        if (TRANSCRIPT_DEBUG_ENABLED && dropped <= 6 && duplicatePrev) {
-          console.log(
-            `[Pluto][TranscriptDebug] duplicate(${speaker}) gap~${(
-              segment.startTime - duplicatePrev.endTime
-            ).toFixed(2)}s tokenSim=${tokenSimilarity(
-              segment.text,
-              duplicatePrev.text,
-            ).toFixed(2)} prefixSim=${tokenPrefixSimilarity(
-              segment.text,
-              duplicatePrev.text,
-            ).toFixed(2)}`,
-          );
-        }
-        continue;
-      }
-
-      filtered.push(segment);
-      recentForSpeaker.push(segment);
-      if (recentForSpeaker.length > 6) {
-        recentForSpeaker.shift();
-      }
-    }
-
-    if (dropped > 0) {
-      console.log(
-        `[Pluto] Dropped ${dropped} near-duplicate ${speaker} segments`,
-      );
-    }
-
-    return filtered;
-  };
-
-  const tokenizeWithRawWords = (
-    text: string,
-  ): Array<{ raw: string; norm: string }> => {
-    return text
-      .trim()
-      .split(/\s+/)
-      .map((raw) => ({
-        raw,
-        norm: raw.toLowerCase().replace(/[^a-z0-9]/g, ''),
-      }))
-      .filter((token) => token.norm.length > 0);
-  };
-
-  const trimAdjacentCrossSpeakerEcho = (
-    segments: TranscriptionSegment[],
-  ): TranscriptionSegment[] => {
-    if (segments.length < 2) return segments;
-    const trimmed: TranscriptionSegment[] = [];
-    let trimmedCount = 0;
-    let droppedCount = 0;
-
-    for (const current of segments) {
-      if (trimmed.length === 0) {
-        trimmed.push({ ...current });
-        continue;
-      }
-
-      const prev = trimmed[trimmed.length - 1];
-      const gapSeconds = current.startTime - prev.endTime;
-      if (prev.speaker === current.speaker || gapSeconds > 1.8) {
-        trimmed.push({ ...current });
-        continue;
-      }
-
-      const prevWords = tokenizeWithRawWords(prev.text);
-      const currWords = tokenizeWithRawWords(current.text);
-      if (prevWords.length < 6 || currWords.length < 6) {
-        trimmed.push({ ...current });
-        continue;
-      }
-
-      const maxMatch = Math.min(24, prevWords.length, currWords.length);
-      let matchedPrefixWords = 0;
-      for (let k = maxMatch; k >= 6; k--) {
-        let isMatch = true;
-        for (let i = 0; i < k; i++) {
-          const left = prevWords[prevWords.length - k + i]?.norm;
-          const right = currWords[i]?.norm;
-          if (!left || !right || left !== right) {
-            isMatch = false;
-            break;
-          }
-        }
-        if (isMatch) {
-          const prefixRatio = k / Math.max(1, currWords.length);
-          if (prefixRatio >= 0.45) {
-            matchedPrefixWords = k;
-          }
-          break;
-        }
-      }
-
-      if (matchedPrefixWords === 0) {
-        trimmed.push({ ...current });
-        continue;
-      }
-
-      // Prefer preserving "Them" on cross-speaker overlap by trimming duplicated
-      // text from the "Me" side when possible.
-      const trimCurrentSegment = current.speaker === 'Me';
-
-      if (!trimCurrentSegment) {
-        const prevRawWords = prev.text.trim().split(/\s+/);
-        const remainingPrevWords = prevRawWords.length - matchedPrefixWords;
-        if (remainingPrevWords < 3) {
-          trimmed.pop();
-          droppedCount++;
-        } else {
-          const trimmedPrevText = prevRawWords
-            .slice(0, remainingPrevWords)
-            .join(' ')
-            .trim();
-          if (!trimmedPrevText) {
-            trimmed.pop();
-            droppedCount++;
-          } else {
-            prev.text = trimmedPrevText;
-            trimmedCount++;
-          }
-        }
-        trimmed.push({ ...current });
-        continue;
-      }
-
-      if (currWords.length - matchedPrefixWords < 3) {
-        droppedCount++;
-        continue;
-      }
-
-      const rawWords = current.text.trim().split(/\s+/);
-      const trimmedText = rawWords.slice(matchedPrefixWords).join(' ').trim();
-      if (!trimmedText) {
-        droppedCount++;
-        continue;
-      }
-
-      trimmed.push({
-        ...current,
-        text: trimmedText,
-      });
-      trimmedCount++;
-    }
-
-    if (trimmedCount > 0 || droppedCount > 0) {
-      console.log(
-        `[Pluto] Cross-speaker boundary echo trim: trimmed=${trimmedCount}, dropped=${droppedCount}`,
-      );
-    }
-
-    return trimmed;
-  };
-
-  const detectProbableAudioPassThrough = (
-    segments: TranscriptionSegment[],
-  ): {
-    probable: boolean;
-    overlapPairs: number;
-    similarPairs: number;
-    meCount: number;
-    themCount: number;
-  } => {
-    const meSegments = segments.filter((segment) => segment.speaker === 'Me');
-    const themSegments = segments.filter(
-      (segment) => segment.speaker === 'Them',
-    );
-    if (meSegments.length === 0 || themSegments.length === 0) {
-      return {
-        probable: false,
-        overlapPairs: 0,
-        similarPairs: 0,
-        meCount: meSegments.length,
-        themCount: themSegments.length,
-      };
-    }
-
-    let overlapPairs = 0;
-    let similarPairs = 0;
-
-    for (const me of meSegments) {
-      for (const them of themSegments) {
-        const overlap = overlapSeconds(me, them);
-        if (overlap <= 0) continue;
-
-        const meDur = Math.max(0.01, me.endTime - me.startTime);
-        const themDur = Math.max(0.01, them.endTime - them.startTime);
-        const overlapRatio = overlap / Math.min(meDur, themDur);
-        if (overlapRatio < 0.25) continue;
-
-        overlapPairs++;
-        const meNorm = normalizeTranscriptText(me.text);
-        const themNorm = normalizeTranscriptText(them.text);
-        if (!meNorm || !themNorm) continue;
-        const contains =
-          (meNorm.includes(themNorm) || themNorm.includes(meNorm)) &&
-          Math.min(meNorm.length, themNorm.length) >= 14;
-        const tokenSim = tokenSimilarity(meNorm, themNorm);
-        const prefixSim = tokenPrefixSimilarity(meNorm, themNorm, 10);
-        if (contains || tokenSim >= 0.42 || prefixSim >= 0.55) {
-          similarPairs++;
-        }
-      }
-    }
-
-    const overlapDensity =
-      overlapPairs /
-      Math.max(1, Math.min(meSegments.length, themSegments.length));
-    const similarityRatio = similarPairs / Math.max(1, overlapPairs);
-    const probable =
-      overlapPairs >= 2 && overlapDensity >= 0.3 && similarityRatio >= 0.4;
-
-    return {
-      probable,
-      overlapPairs,
-      similarPairs,
-      meCount: meSegments.length,
-      themCount: themSegments.length,
-    };
-  };
-
   const isBleedDuplicate = (
     mic: TranscriptionSegment,
     system: TranscriptionSegment,
@@ -3735,7 +3050,7 @@ export const AudioManager = ({
           );
           if (cumulativeWavPath) {
             const cumulativeResult = await window.ipcRenderer.invoke(
-              'WHISPER_TRANSCRIBE',
+              'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
               cumulativeWavPath,
               buildTranscriptionOptions({ diarize: false }),
             );
@@ -3865,7 +3180,7 @@ export const AudioManager = ({
               if (!slicePath || !speechWindow) continue;
               attemptedSlices += 1;
               const sliceResult = await window.ipcRenderer.invoke(
-                'WHISPER_TRANSCRIBE',
+                'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
                 slicePath,
                 buildTranscriptionOptions({ diarize: false }),
               );
@@ -3895,7 +3210,7 @@ export const AudioManager = ({
       }
 
       const result = await window.ipcRenderer.invoke(
-        'WHISPER_TRANSCRIBE',
+        'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
         wavPath,
         buildTranscriptionOptions({
           diarize: false,
@@ -3995,7 +3310,7 @@ export const AudioManager = ({
       ) {
         disableMicChunkTranscriptionRef.current = true;
         console.warn(
-          '[Pluto] Disabling per-chunk Me transcription for this meeting; using full-session recovery path',
+          '[Pluto] Disabling per-chunk Me transcription for this meeting; final validation will replace the preview',
         );
       }
     }
@@ -4390,49 +3705,6 @@ export const AudioManager = ({
     return true;
   };
 
-  const normalizeValidationText = (text: string): string =>
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-  const shouldDropUnvalidatedShortThemSegment = (
-    segment: TranscriptionSegment,
-    fullSessionTexts: string[],
-  ): boolean => {
-    if (segment.speaker !== 'Them') return false;
-    if (fullSessionTexts.length === 0) return false;
-    const normalizedSegment = normalizeValidationText(segment.text);
-    if (!normalizedSegment) return true;
-    const words = normalizedSegment.split(' ').filter(Boolean);
-    const durationSec = Math.max(0, segment.endTime - segment.startTime);
-    if (words.length >= 3) return false;
-    if (durationSec >= 0.85 && words.length >= 2) return false;
-
-    let bestSimilarity = 0;
-    for (const candidateRaw of fullSessionTexts) {
-      const candidate = normalizeValidationText(candidateRaw);
-      if (!candidate) continue;
-      if (
-        candidate.includes(normalizedSegment) ||
-        normalizedSegment.includes(candidate)
-      ) {
-        return false;
-      }
-      const similarity = tokenSimilarity(normalizedSegment, candidate);
-      if (similarity > bestSimilarity) bestSimilarity = similarity;
-    }
-    if (bestSimilarity >= 0.08) return false;
-    if (
-      !hasRepeatedPhraseLoop(words) &&
-      !hasLongTokenRun(words) &&
-      words.length >= 2
-    )
-      return false;
-    return true;
-  };
-
   const stopSession = async (endReason?: string) => {
     const stopSnapshot = beginRecordingFinalization({
       meetingId: currentMeetingIdRef.current,
@@ -4469,6 +3741,8 @@ export const AudioManager = ({
     let mixedAudioPath = '';
     let rebuiltSystemAudioPath = '';
     let sealedActivityEvidence: CaptureActivityEvidence | null = null;
+    const finalTranscriptionRunId = crypto.randomUUID();
+    let provisionalMeetingPersisted = false;
 
     try {
       // Helper to stop a recorder and get its blob
@@ -4519,38 +3793,12 @@ export const AudioManager = ({
         nativeAudioListenerRef.current = null;
       }
 
-      // Finalize System Audio
-      let systemBlob: Blob | undefined;
-      let finalizedSystemDurationSec = 0;
-      if (fullSessionSystemPcmChunksRef.current.length > 0) {
-        // Merge remaining
-        let totalLen = 0;
-        for (const c of fullSessionSystemPcmChunksRef.current)
-          totalLen += c.length;
-        const merged = new Float32Array(totalLen);
-        let offset = 0;
-        for (const c of fullSessionSystemPcmChunksRef.current) {
-          merged.set(c, offset);
-          offset += c.length;
-        }
-        systemBlob = createWavBlob(merged, systemPcmSampleRateRef.current, 1);
-        const approximateDurationSec =
-          systemPcmSampleRateRef.current > 0
-            ? merged.length / systemPcmSampleRateRef.current
-            : 0;
-        finalizedSystemDurationSec = approximateDurationSec;
-        console.log(
-          `[Pluto] Finalized System Audio: ${systemBlob.size} bytes, duration≈${approximateDurationSec.toFixed(2)}s`,
-        );
-      } else {
-        console.warn(
-          '[Pluto] Finalized System Audio: no captured system PCM samples were available for the full session',
-        );
-      }
+      // The capture journal owns disk-backed system chunks. Do not retain or
+      // concatenate a second session-length PCM copy in the renderer.
+      const finalizedSystemDurationSec = 0;
       if (systemPcmChunksRef.current.length > 0) {
         systemPcmChunksRef.current = [];
       }
-      fullSessionSystemPcmChunksRef.current = [];
 
       // Stop all tracks
       stopAllTracks();
@@ -4712,20 +3960,6 @@ export const AudioManager = ({
           console.warn('[Pluto] Save failed:', e);
         }
       }
-      if (systemBlob && systemBlob.size > 0) {
-        try {
-          const buffer = await systemBlob.arrayBuffer();
-          const maybePath = await window.ipcRenderer.invoke(
-            'AUDIO_SAVE_AND_CONVERT',
-            buffer,
-            'wav',
-            'session-system',
-          );
-          if (maybePath) systemAudioPath = maybePath;
-        } catch (e) {
-          console.warn('[Pluto] System audio save failed:', e);
-        }
-      }
       const meetingDurationSec = getMeetingElapsedSeconds();
       const savedSystemChunks = Array.from(
         savedSystemChunkAudioRef.current.values(),
@@ -4770,1007 +4004,25 @@ export const AudioManager = ({
           console.warn('[Pluto] Mixed audio build failed:', e);
         }
       }
-      // Notify completion
-      // ... (rest of logic)
-
-      // Live work was closed and bounded before the capture journal was sealed.
-      const totalSpeakerWindowSeconds = speakerTimelineRef.current.reduce(
-        (sum, window) => sum + Math.max(0, window.endTime - window.startTime),
-        0,
-      );
-      console.log(
-        `[Pluto] Speaker activity timeline windows=${speakerTimelineRef.current.length}, totalSeconds=${totalSpeakerWindowSeconds.toFixed(2)}`,
-      );
-      const collectedSegments = processedMicSegmentsRef.current;
-      const collectedSortedSegments = [...collectedSegments].sort(
-        (a, b) => a.startTime - b.startTime,
-      );
-      const baselinePassThroughCheck = detectProbableAudioPassThrough(
-        collectedSortedSegments,
-      );
-      if (baselinePassThroughCheck.probable) {
-        console.warn(
-          `[Pluto] Early pass-through risk detected before full-session recovery (overlapPairs=${baselinePassThroughCheck.overlapPairs}, similarPairs=${baselinePassThroughCheck.similarPairs}).`,
-        );
-      }
-      let timelineSegments = collectedSegments;
-      let fullSessionRecoveredMeSegments: TranscriptionSegment[] = [];
-      let fullSessionCanonicalSegments: TranscriptionSegment[] = [];
-      let fullSessionValidationTexts: string[] = [];
-      let sessionTranscriptionMeta: TranscriptTranscriptionMeta | undefined;
-      let sessionCanonicalSource: CanonicalTranscriptSource = 'mic';
-      let postHydrationBleedPass = false;
-      let postHydrationBleedDroppedMe = 0;
-      const transcriptPipeline: Record<string, string | number> = {};
-      const chunkMeSegments = collectedSegments.filter(
-        (segment) => segment.speaker === 'Me',
-      );
-      const chunkThemSegments = collectedSegments.filter(
-        (segment) => segment.speaker === 'Them',
-      );
-      const hasChunkMeSegments = chunkMeSegments.length > 0;
-      const pipelineMode: TranscriptPipelineMode = 'canonical_session_v2';
-      const chunkWordCount = collectedSegments.reduce((total, segment) => {
-        return total + segment.text.trim().split(/\s+/).filter(Boolean).length;
-      }, 0);
-      const provisionalMeetingDurationSeconds = getMeetingElapsedSeconds();
-      const provisionalFallbackDecision = getSessionFallbackDecision({
-        meetingDurationSeconds: provisionalMeetingDurationSeconds,
-        totalSpeakerWindowSeconds,
-        segmentCount: collectedSegments.length,
-        meSegmentCount: chunkMeSegments.length,
-        themSegmentCount: chunkThemSegments.length,
-        totalWords: chunkWordCount,
-        micChunkConversionFailures: micChunkConversionFailuresRef.current,
-        micTranscriptionDisabled: disableMicChunkTranscriptionRef.current,
-        systemChunkDecodeDropCount: systemChunkDecodeDropCountRef.current,
-      });
-      const sessionFallbackDecision = {
-        ...provisionalFallbackDecision,
-        shouldRun: false,
-      };
-      transcriptPipeline.sessionFallbackUsed = 0;
-      if (provisionalFallbackDecision.reasons.length > 0) {
-        transcriptPipeline.provisionalRecoveryReasons =
-          provisionalFallbackDecision.reasons.join(',');
-      }
-
-      const useMixForCanonical = shouldUseMixForCanonicalTranscript({
-        preferMixDefault:
-          TRANSCRIPTION_TUNING.canonicalTranscript.preferMixSource === true,
-        hasMixedAudioPath: Boolean(mixedAudioPath),
-      });
-      const canonicalAudioPath =
-        sessionFallbackDecision.shouldRun &&
-        useMixForCanonical &&
-        mixedAudioPath
-          ? mixedAudioPath
-          : sessionFallbackDecision.shouldRun
-            ? primaryAudioPath
-            : null;
-
-      const whisperToMicLabeledSegments = (
-        whisperResult: unknown,
-        speaker: string,
-      ): TranscriptionSegment[] => {
-        const raw = whisperResult as {
-          segments?: Array<{
-            start: number;
-            end: number;
-            text: string;
-            words?: Array<{ word: string; start: number; end: number }>;
-          }>;
-        };
-        return raw?.segments
-          ? raw.segments
-              .filter((s) => isValidSegment(s.text))
-              .map((s) => ({
-                id: crypto.randomUUID(),
-                startTime: s.start,
-                endTime: s.end,
-                text: s.text.trim(),
-                speaker,
-                words: s.words?.map((w) => ({
-                  word: w.word,
-                  start: w.start,
-                  end: w.end,
-                })),
-              }))
-          : [];
-      };
-
-      const whisperToValidationTexts = (whisperResult: unknown): string[] => {
-        const raw = whisperResult as { segments?: Array<{ text: string }> };
-        return raw?.segments
-          ? raw.segments
-              .map((s: { text: string }) => (s.text || '').trim())
-              .filter((text: string) => text.length > 0)
-          : [];
-      };
-
-      const extractTranscriptionMeta = (
-        whisperResult: unknown,
-      ): TranscriptTranscriptionMeta | undefined => {
-        const raw = whisperResult as {
-          meta?: TranscriptTranscriptionMeta | null;
-        };
-        return raw?.meta || undefined;
-      };
-
-      if (canonicalAudioPath) {
-        try {
-          const canonicalSource =
-            canonicalAudioPath === mixedAudioPath ? 'mix' : 'mic';
-          const canonicalWhisper = await window.ipcRenderer.invoke(
-            'WHISPER_TRANSCRIBE',
-            canonicalAudioPath,
-            buildTranscriptionOptions({
-              diarize: false,
-              canonicalSource,
-            }),
-          );
-          fullSessionCanonicalSegments = whisperToMicLabeledSegments(
-            canonicalWhisper,
-            'Unknown',
-          );
-          fullSessionValidationTexts =
-            whisperToValidationTexts(canonicalWhisper);
-          sessionCanonicalSource = canonicalSource;
-          sessionTranscriptionMeta =
-            extractTranscriptionMeta(canonicalWhisper) ||
-            sessionTranscriptionMeta;
-
-          if (primaryAudioPath && primaryAudioPath !== canonicalAudioPath) {
-            const micOnlyWhisper = await window.ipcRenderer.invoke(
-              'WHISPER_TRANSCRIBE',
-              primaryAudioPath,
-              buildTranscriptionOptions({
-                diarize: false,
-                canonicalSource: 'mic',
-              }),
-            );
-            fullSessionRecoveredMeSegments = whisperToMicLabeledSegments(
-              micOnlyWhisper,
-              'Me',
-            );
-            sessionTranscriptionMeta =
-              sessionTranscriptionMeta ||
-              extractTranscriptionMeta(micOnlyWhisper);
-            console.log(
-              `[Pluto] Full-session canonical source=${sessionCanonicalSource} (${fullSessionCanonicalSegments.length} segs); mic recovery=${fullSessionRecoveredMeSegments.length} segs`,
-            );
-          } else {
-            fullSessionRecoveredMeSegments = fullSessionCanonicalSegments;
-            console.log(
-              `[Pluto] Full-session transcript source=${sessionCanonicalSource}, segments=${fullSessionCanonicalSegments.length}`,
-            );
-          }
-
-          const recoveredMeSegments = fullSessionRecoveredMeSegments;
-
-          if (recoveredMeSegments.length > 0) {
-            if (
-              shouldApplyFullSessionMeRecovery({
-                hasChunkMeSegments,
-                recoveredMeCount: recoveredMeSegments.length,
-                bleedLikely: baselinePassThroughCheck.probable,
-              })
-            ) {
-              const nonMeSegments = collectedSegments.filter(
-                (segment) => segment.speaker !== 'Me',
-              );
-              const replacedCount =
-                collectedSegments.length - nonMeSegments.length;
-              timelineSegments = [...nonMeSegments, ...recoveredMeSegments];
-              console.log(
-                `[Pluto] Using full-session Me transcript for final assembly: replacedChunkMe=${replacedCount}, recoveredMe=${recoveredMeSegments.length}`,
-              );
-            } else if (
-              !hasChunkMeSegments &&
-              baselinePassThroughCheck.probable
-            ) {
-              console.warn(
-                `[Pluto] Skipping full-session Me recovery due to bleed risk: recoveredMe=${recoveredMeSegments.length}`,
-              );
-            } else {
-              console.log(
-                `[Pluto] Preserving chunk-level Me attribution: chunkMe=${chunkMeSegments.length}, chunkThem=${chunkThemSegments.length}, recoveredMe=${recoveredMeSegments.length}`,
-              );
-            }
-          } else {
-            console.warn(
-              '[Pluto] Full session transcription returned no recoverable Me segments',
-            );
-          }
-        } catch (recoveryErr) {
-          console.error(
-            '[Pluto] Failed full-session transcript / Me recovery:',
-            recoveryErr,
-          );
-        }
-      } else {
-        console.log(
-          '[Pluto] Skipping full-session fallback; chunk transcript looks healthy',
-        );
-      }
-
-      micChunkConversionFailuresRef.current = 0;
-      disableMicChunkTranscriptionRef.current = false;
-      micWebmInitSegmentRef.current = null;
-
-      // Merge by timestamp
-      const sortedSegments = [...timelineSegments].sort(
-        (a, b) => a.startTime - b.startTime,
-      );
-      const crossChannelResolved =
-        resolveCrossChannelDuplicates(sortedSegments);
-      let crossChannelSegments =
-        crossChannelResolved.segments as TranscriptionSegment[];
-      if (TRANSCRIPT_DEBUG_ENABLED) {
-        console.log(
-          '[Pluto][TranscriptDebug] resolveCrossChannelDuplicates',
-          crossChannelResolved.stats,
-        );
-      }
-      if (crossChannelResolved.stats.resolvedPairs > 0) {
-        console.log(
-          `[Pluto] Cross-channel duplicate resolver: candidates=${crossChannelResolved.stats.candidatePairs}, ` +
-            `resolved=${crossChannelResolved.stats.resolvedPairs}, ` +
-            `droppedMe=${crossChannelResolved.stats.droppedMe}, droppedThem=${crossChannelResolved.stats.droppedThem}`,
-        );
-      }
-
-      const nearDupResolved =
-        resolveCrossChannelNearDuplicates(crossChannelSegments);
-      crossChannelSegments = nearDupResolved.segments as TranscriptionSegment[];
-      if (TRANSCRIPT_DEBUG_ENABLED) {
-        console.log(
-          '[Pluto][TranscriptDebug] resolveCrossChannelNearDuplicates',
-          nearDupResolved.stats,
-        );
-      }
-      if (nearDupResolved.stats.resolvedPairs > 0) {
-        console.log(
-          `[Pluto] Cross-channel near-duplicate merge: candidates=${nearDupResolved.stats.candidatePairs}, ` +
-            `resolved=${nearDupResolved.stats.resolvedPairs}, ` +
-            `droppedMe=${nearDupResolved.stats.droppedMe}, droppedThem=${nearDupResolved.stats.droppedThem}`,
-        );
-      }
-
-      if (TRANSCRIPT_DEBUG_ENABLED) {
-        const meSegs = crossChannelSegments.filter((s) => s.speaker === 'Me');
-        const themSegs = crossChannelSegments.filter(
-          (s) => s.speaker === 'Them',
-        );
-        const candidates: Array<{
-          score: number;
-          overlap: number;
-          overlapRatioMin: number;
-          tokenSim: number;
-          me: TranscriptionSegment;
-          them: TranscriptionSegment;
-        }> = [];
-
-        for (const me of meSegs) {
-          for (const them of themSegs) {
-            const ov = overlapSeconds(me, them);
-            if (ov <= 0) continue;
-            const minDur = Math.max(
-              0.01,
-              Math.min(
-                me.endTime - me.startTime,
-                them.endTime - them.startTime,
-              ),
-            );
-            const overlapRatioMin = ov / minDur;
-            if (overlapRatioMin < 0.2) continue;
-            const tokenSim = tokenSimilarity(me.text, them.text);
-            const score = overlapRatioMin + tokenSim * 0.8;
-            candidates.push({
-              score,
-              overlap: ov,
-              overlapRatioMin,
-              tokenSim,
-              me,
-              them,
-            });
-          }
-        }
-
-        candidates.sort((a, b) => b.score - a.score);
-        const top = candidates.slice(0, 5);
-        console.log(
-          '[Pluto][TranscriptDebug] topLikelyMeBleed BEFORE dedupe/trim',
-          top.map((c) => ({
-            me: `${c.me.startTime.toFixed(1)}-${c.me.endTime.toFixed(1)}`,
-            them: `${c.them.startTime.toFixed(1)}-${c.them.endTime.toFixed(1)}`,
-            overlap: Number(c.overlap.toFixed(2)),
-            overlapRatioMin: Number(c.overlapRatioMin.toFixed(2)),
-            tokenSim: Number(c.tokenSim.toFixed(2)),
-            mePrefix: c.me.text.slice(0, 40),
-          })),
-        );
-      }
-
-      const dedupedThemSegments = filterDuplicateSpeakerSegments(
-        crossChannelSegments,
-        'Them',
-      );
-      if (TRANSCRIPT_DEBUG_ENABLED) {
-        const themBefore = crossChannelSegments.filter(
-          (s) => s.speaker === 'Them',
-        ).length;
-        const themAfter = dedupedThemSegments.filter(
-          (s) => s.speaker === 'Them',
-        ).length;
-        console.log('[Pluto][TranscriptDebug] dedupe Them', {
-          themBefore,
-          themAfter,
-          dropped: themBefore - themAfter,
-        });
-      }
-      const dedupedSegments = filterDuplicateSpeakerSegments(
-        dedupedThemSegments,
-        'Me',
-      );
-      if (TRANSCRIPT_DEBUG_ENABLED) {
-        const meBefore = dedupedThemSegments.filter(
-          (s) => s.speaker === 'Me',
-        ).length;
-        const meAfter = dedupedSegments.filter(
-          (s) => s.speaker === 'Me',
-        ).length;
-        console.log('[Pluto][TranscriptDebug] dedupe Me', {
-          meBefore,
-          meAfter,
-          dropped: meBefore - meAfter,
-        });
-      }
-      const echoTrimmedSegments = trimAdjacentCrossSpeakerEcho(dedupedSegments);
-      const shortEchoPruned = dropShortCrossSpeakerEchoes({
-        segments: echoTrimmedSegments as TranscriptionSegment[],
-      });
-      if (TRANSCRIPT_DEBUG_ENABLED) {
-        const beforeTrim = dedupedSegments.length;
-        const afterTrim = echoTrimmedSegments.length;
-        console.log('[Pluto][TranscriptDebug] trimAdjacentCrossSpeakerEcho', {
-          before: beforeTrim,
-          after: afterTrim,
-          dropped: beforeTrim - afterTrim,
-        });
-        console.log('[Pluto][TranscriptDebug] dropShortCrossSpeakerEchoes', {
-          dropped: shortEchoPruned.dropped,
-          after: shortEchoPruned.segments.length,
-        });
-      }
-      if (shortEchoPruned.dropped > 0) {
-        console.log(
-          `[Pluto] Dropped ${shortEchoPruned.dropped} short cross-speaker echo segments`,
-        );
-      }
-      let finalizedSegments =
-        shortEchoPruned.segments as TranscriptionSegment[];
-      const preCleanupChannelSegments = [
-        ...crossChannelSegments,
-      ] as TranscriptionSegment[];
-      const rawSpeakerCounts = crossChannelSegments.reduce(
-        (acc, segment) => {
-          if (segment.speaker === 'Me') acc.me++;
-          if (segment.speaker === 'Them') acc.them++;
-          return acc;
-        },
-        { me: 0, them: 0 },
-      );
-      console.log(
-        `[Pluto] Raw speaker segment counts: Me=${rawSpeakerCounts.me}, Them=${rawSpeakerCounts.them}`,
-      );
-      const passThroughCheck =
-        detectProbableAudioPassThrough(crossChannelSegments);
-      if (passThroughCheck.probable) {
-        console.warn(
-          `[Pluto] Probable audio pass-through detected (overlapPairs=${passThroughCheck.overlapPairs}, similarPairs=${passThroughCheck.similarPairs}, meSegments=${passThroughCheck.meCount}, themSegments=${passThroughCheck.themCount}).`,
-        );
-        console.warn(
-          '[Pluto] Routing guidance: disable pass-through/mixers, ensure call app + OS default devices match, and prefer a headset.',
-        );
-      }
-      const shouldRunMeBleedCleanup =
-        passThroughCheck.probable ||
-        (crossChannelResolved.stats.candidatePairs >= 2 &&
-          crossChannelResolved.stats.droppedThem > 0);
-      if (shouldRunMeBleedCleanup) {
-        const activityWindowsForCleanup = [...speakerTimelineRef.current];
-        const activeWindow = activeSpeakerWindowRef.current;
-        if (activeWindow) {
-          activityWindowsForCleanup.push({
-            startTime: activeWindow.startTime,
-            endTime: getMeetingElapsedSeconds(),
-            speaker: activeWindow.speaker,
-          });
-        }
-        const meBleedStripped = stripLikelyMeBleedSegments(
-          finalizedSegments,
-          activityWindowsForCleanup,
-        );
-
-        if (TRANSCRIPT_DEBUG_ENABLED) {
-          const meSegs = meBleedStripped.segments.filter(
-            (s) => s.speaker === 'Me',
-          );
-          const themSegs = meBleedStripped.segments.filter(
-            (s) => s.speaker === 'Them',
-          );
-          let bleedPairs = 0;
-          for (const me of meSegs) {
-            for (const them of themSegs) {
-              if (overlapSeconds(me, them) > 0.5) bleedPairs++;
-            }
-          }
-          console.log(
-            '[Pluto][TranscriptDebug] after stripLikelyMeBleedSegments',
-            {
-              droppedMe: meBleedStripped.droppedMe,
-              meSegs: meSegs.length,
-              themSegs: themSegs.length,
-              bleedPairsHalfSec: bleedPairs,
-            },
-          );
-        }
-        if (meBleedStripped.droppedMe > 0) {
-          finalizedSegments =
-            meBleedStripped.segments as TranscriptionSegment[];
-          console.warn(
-            `[Pluto] Me-bleed cleanup removed segments: droppedMe=${meBleedStripped.droppedMe}, ` +
-              `reason=${passThroughCheck.probable ? 'pass-through' : 'duplicate-pressure'}`,
-          );
-        }
-      }
-      if (fullSessionValidationTexts.length > 0) {
-        const beforeValidation = finalizedSegments.length;
-        finalizedSegments = finalizedSegments.filter(
-          (segment) =>
-            !shouldDropUnvalidatedShortThemSegment(
-              segment,
-              fullSessionValidationTexts,
-            ),
-        );
-        const droppedByValidation = beforeValidation - finalizedSegments.length;
-        if (droppedByValidation > 0) {
-          console.warn(
-            `[Pluto] Dropped ${droppedByValidation} short Them segments not supported by full-session transcript`,
-          );
-        }
-      }
-      if (rawSpeakerCounts.me === 0 && rawSpeakerCounts.them > 0) {
-        console.warn(
-          '[Pluto] No transcribed mic segments detected. Check selected microphone/input routing.',
-        );
-      }
-
-      const shouldHydrateFromSession =
-        fullSessionCanonicalSegments.length > 0 &&
-        preCleanupChannelSegments.length > 0;
-
-      if (shouldHydrateFromSession) {
-        const channelSplit = splitCanonicalSegmentsAtChannelBoundaries(
-          fullSessionCanonicalSegments,
-          preCleanupChannelSegments,
-        );
-        transcriptPipeline.channelBoundarySplits = channelSplit.splitsApplied;
-        if (channelSplit.splitsApplied > 0) {
-          console.log(
-            `[Pluto] Session fallback channel-boundary splits: ${channelSplit.splitsApplied}`,
-          );
-        }
-
-        const canonicalForAttribution = splitCanonicalSegmentsForAttribution(
-          channelSplit.segments,
-        );
-        const canonicalAttribution = assignSpeakersToCanonicalSegments({
-          canonicalSegments: canonicalForAttribution,
-          attributedSegments: preCleanupChannelSegments,
-        });
-        if (canonicalAttribution.segments.length > 0) {
-          finalizedSegments =
-            canonicalAttribution.segments as TranscriptionSegment[];
-          console.log(
-            `[Pluto] Session fallback transcript: segments=${canonicalAttribution.segments.length}, ` +
-              `channelSplits=${channelSplit.splitsApplied}, ` +
-              `byOverlap=${canonicalAttribution.stats.byOverlap}, ` +
-              `fallback=${canonicalAttribution.stats.byFallback}`,
-          );
-        } else {
-          finalizedSegments = fullSessionCanonicalSegments;
-          console.warn(
-            '[Pluto] Session fallback attribution returned no segments; using session transcript without channel attribution',
-          );
-        }
-      } else if (fullSessionCanonicalSegments.length > 0) {
-        finalizedSegments = fullSessionCanonicalSegments;
-        console.log(
-          '[Pluto] Session fallback: no channel segments, using session transcript directly',
-        );
-      }
-
-      const diarizationAudioPath =
-        mixedAudioPath || systemAudioPath || primaryAudioPath;
-      let speakerAttribution: StoredTranscriptSpeakerAttribution =
-        buildTranscriptSpeakerAttribution({
-          diarizationEnabled,
-          diarizationAttempted: false,
-          fallbackReason: diarizationEnabled
-            ? diarizationAudioPath
-              ? 'unknown_diarization_fallback'
-              : 'missing_diarization_audio'
-            : 'diarization_disabled',
-        });
-      let diarizationCapabilityReady = true;
-      if (
-        diarizationEnabled &&
-        diarizationAudioPath &&
-        resolveProductionDiarizationProvider() === 'sherpa_local'
-      ) {
-        try {
-          const readiness = await window.ipcRenderer.invoke(
-            'WHISPER_DIARIZATION_MODEL_STATUS',
-          );
-          diarizationCapabilityReady = readiness?.ready === true;
-        } catch {
-          diarizationCapabilityReady = false;
-        }
-        if (!diarizationCapabilityReady) {
-          speakerAttribution = buildTranscriptSpeakerAttribution({
-            diarizationEnabled: true,
-            diarizationAttempted: false,
-            fallbackReason: 'diarization_models_unavailable',
-          });
-        }
-      }
-      if (
-        diarizationEnabled &&
-        diarizationAudioPath &&
-        diarizationCapabilityReady
-      ) {
-        let acousticEvidenceWindows: ReturnType<
-          typeof deriveAttributionEvidence
-        > = [];
-        if (primaryAudioPath && (rebuiltSystemAudioPath || systemAudioPath)) {
-          try {
-            const energyResult = await window.ipcRenderer.invoke(
-              'WHISPER_ALIGNED_ENERGY',
-              primaryAudioPath,
-              rebuiltSystemAudioPath || systemAudioPath,
-            );
-            acousticEvidenceWindows = deriveAttributionEvidence(
-              Array.isArray(energyResult?.windows) ? energyResult.windows : [],
-            );
-          } catch (error) {
-            console.warn('[Pluto] Acoustic evidence unavailable:', error);
-          }
-        }
-
-        const runDiarizationRefinementAttempt = async ({
-          attemptLabel,
-          segments,
-          transcriptionOverrides,
-        }: {
-          attemptLabel: string;
-          segments: TranscriptionSegment[];
-          transcriptionOverrides?: Partial<Required<TranscriptionSettings>>;
-        }): Promise<{
-          segments: TranscriptionSegment[];
-          mappingConfident: boolean;
-          mappingReason: string | null;
-          mappingConfidence: number;
-          splitsApplied: number;
-          relabeled: number;
-          injectedLocalWindows: number;
-          falseMeEvidenceSeconds: number;
-          missedMeEvidenceSeconds: number;
-          runtime?: {
-            engineVersion: string;
-            modelChecksums: string[];
-          };
-        }> => {
-          const diarizationOptions = transcriptionOverrides
-            ? {
-                backend: transcriptionOverrides.backend,
-                preset: transcriptionOverrides.preset,
-                model: transcriptionOverrides.model,
-                device: transcriptionOverrides.device,
-                computeType: transcriptionOverrides.computeType,
-              }
-            : {};
-          const diarizationResult = await window.ipcRenderer.invoke(
-            'WHISPER_TRANSCRIBE',
-            diarizationAudioPath,
-            buildTranscriptionOptions({
-              ...diarizationOptions,
-              diarize: true,
-              diarizationProvider: resolveProductionDiarizationProvider(),
-              meetingId: currentMeetingIdRef.current,
-            }),
-          );
-          const diarizationSegments = Array.isArray(diarizationResult?.segments)
-            ? diarizationResult.segments
-                .filter(
-                  (segment: { speaker?: string }) =>
-                    typeof segment.speaker === 'string' &&
-                    segment.speaker.length > 0,
-                )
-                .map(
-                  (segment: {
-                    start: number;
-                    end: number;
-                    text?: string;
-                    speaker: string;
-                  }) => ({
-                    startTime: segment.start,
-                    endTime: segment.end,
-                    text: segment.text || '',
-                    speaker: segment.speaker,
-                  }),
-                )
-            : [];
-
-          if (diarizationSegments.length === 0) {
-            console.log(
-              `[Pluto] ${attemptLabel} diarization refinement skipped: no diarization segments`,
-            );
-            return {
-              segments,
-              mappingConfident: false,
-              mappingReason: 'no diarization segments',
-              mappingConfidence: 0,
-              splitsApplied: 0,
-              relabeled: 0,
-              injectedLocalWindows: 0,
-              falseMeEvidenceSeconds: 0,
-              missedMeEvidenceSeconds: 0,
-            };
-          }
-
-          const acousticMapping = mapDiarizationFromAcousticEvidence({
-            turns: diarizationSegments.map(
-              (segment: {
-                startTime: number;
-                endTime: number;
-                speaker: string;
-              }) => ({
-                startTime: segment.startTime,
-                endTime: segment.endTime,
-                cluster: String(segment.speaker),
-              }),
-            ),
-            evidenceWindows: acousticEvidenceWindows,
-          });
-          const mapping = Object.fromEntries(
-            Object.entries(acousticMapping.mapping).filter(
-              (entry): entry is [string, 'Me' | 'Them'] =>
-                entry[1] === 'Me' || entry[1] === 'Them',
-            ),
-          );
-          const mappingConfident = !Object.values(
-            acousticMapping.mapping,
-          ).includes('Unknown');
-          if (!mappingConfident || Object.keys(mapping).length === 0) {
-            console.log(
-              `[Pluto] ${attemptLabel} acoustic mapping skipped: ${acousticMapping.fallbackReason || 'insufficient confidence'}`,
-            );
-            return {
-              segments,
-              mappingConfident: false,
-              mappingReason:
-                acousticMapping.fallbackReason || 'insufficient confidence',
-              mappingConfidence: acousticMapping.confidence,
-              splitsApplied: 0,
-              relabeled: 0,
-              injectedLocalWindows: 0,
-              falseMeEvidenceSeconds: acousticMapping.falseMeEvidenceSeconds,
-              missedMeEvidenceSeconds: acousticMapping.missedMeEvidenceSeconds,
-              runtime: diarizationResult?.meta?.diarizationRuntime,
-            };
-          }
-
-          let updatedSegments = segments;
-          const diarBoundary = splitSegmentsAtDiarizationBoundaries(
-            updatedSegments,
-            diarizationSegments,
-            mapping,
-          );
-          if (diarBoundary.splitsApplied > 0) {
-            updatedSegments = diarBoundary.segments as TranscriptionSegment[];
-            console.log(
-              `[Pluto] ${attemptLabel} diarization boundary split: applied=${diarBoundary.splitsApplied}, segments=${updatedSegments.length}`,
-            );
-          }
-
-          const applied = applyDiarizationRefinement({
-            segments: updatedSegments,
-            diarizationSegments,
-            mapping,
-          });
-          updatedSegments = applied.segments as TranscriptionSegment[];
-          const meBeforeInjection = updatedSegments.filter(
-            (segment) => segment.speaker === 'Me',
-          ).length;
-          updatedSegments = injectLocalEvidenceWindows(
-            updatedSegments,
-            acousticMapping.injectedLocalWindows,
-          ) as TranscriptionSegment[];
-          const appliedLocalWindows = Math.max(
-            0,
-            updatedSegments.filter((segment) => segment.speaker === 'Me')
-              .length - meBeforeInjection,
-          );
-          if (applied.relabeled > 0) {
-            console.log(
-              `[Pluto] ${attemptLabel} acoustic diarization refinement applied: relabeled=${applied.relabeled}, injected=${appliedLocalWindows}, confidence=${acousticMapping.confidence.toFixed(2)}`,
-            );
-          } else {
-            console.log(
-              `[Pluto] ${attemptLabel} acoustic diarization refinement kept existing labels: confidence=${acousticMapping.confidence.toFixed(2)}`,
-            );
-          }
-
-          return {
-            segments: updatedSegments,
-            mappingConfident: true,
-            mappingReason: null,
-            mappingConfidence: acousticMapping.confidence,
-            splitsApplied: diarBoundary.splitsApplied,
-            relabeled: applied.relabeled,
-            injectedLocalWindows: appliedLocalWindows,
-            falseMeEvidenceSeconds: acousticMapping.falseMeEvidenceSeconds,
-            missedMeEvidenceSeconds: acousticMapping.missedMeEvidenceSeconds,
-            runtime: diarizationResult?.meta?.diarizationRuntime,
-          };
-        };
-
-        try {
-          const initialDiarizationAttempt =
-            await runDiarizationRefinementAttempt({
-              attemptLabel: 'Initial',
-              segments: finalizedSegments,
-            });
-          finalizedSegments = initialDiarizationAttempt.segments;
-          speakerAttribution = buildTranscriptSpeakerAttribution({
-            diarizationEnabled: true,
-            diarizationAttempted: true,
-            mappingApplied: initialDiarizationAttempt.mappingConfident,
-            confidence: initialDiarizationAttempt.mappingConfidence,
-            fallbackReason:
-              initialDiarizationAttempt.mappingReason ?? undefined,
-            acousticEvidenceAttempted: acousticEvidenceWindows.length > 0,
-            engineVersion: initialDiarizationAttempt.runtime?.engineVersion,
-            modelChecksums: initialDiarizationAttempt.runtime?.modelChecksums,
-            injectedLocalWindows:
-              initialDiarizationAttempt.injectedLocalWindows,
-            falseMeEvidenceSeconds:
-              initialDiarizationAttempt.falseMeEvidenceSeconds,
-            missedMeEvidenceSeconds:
-              initialDiarizationAttempt.missedMeEvidenceSeconds,
-          });
-          transcriptPipeline.diarizationBoundarySplits =
-            initialDiarizationAttempt.splitsApplied;
-
-          const speakerAttributionRetryPlan = buildSpeakerAttributionRetryPlan({
-            diarizationEnabled,
-            mappingConfident: initialDiarizationAttempt.mappingConfident,
-            retryAlreadyUsed: false,
-            providerHasStrongerPolicy: false,
-            settings: resolvedTranscriptionSettings,
-          });
-          transcriptPipeline.speakerAttributionRetryPlan =
-            speakerAttributionRetryPlan.reason;
-
-          if (
-            speakerAttributionRetryPlan.shouldRetry &&
-            speakerAttributionRetryPlan.strongerOptions
-          ) {
-            const { backend, preset, model, device, computeType } =
-              speakerAttributionRetryPlan.strongerOptions;
-            console.log(
-              `[Pluto] Retrying speaker attribution with stronger policy: ${backend}/${preset}/${model}/${computeType}`,
-            );
-            const retryDiarizationAttempt =
-              await runDiarizationRefinementAttempt({
-                attemptLabel: 'Retry',
-                segments: finalizedSegments,
-                transcriptionOverrides: {
-                  backend,
-                  preset,
-                  model,
-                  device,
-                  computeType,
-                  language: resolvedTranscriptionSettings.language,
-                },
-              });
-
-            speakerAttribution = buildTranscriptSpeakerAttribution({
-              diarizationEnabled: true,
-              diarizationAttempted: true,
-              mappingApplied: retryDiarizationAttempt.mappingConfident,
-              confidence: retryDiarizationAttempt.mappingConfidence,
-              fallbackReason:
-                retryDiarizationAttempt.mappingReason ?? undefined,
-              acousticEvidenceAttempted: acousticEvidenceWindows.length > 0,
-              engineVersion: retryDiarizationAttempt.runtime?.engineVersion,
-              modelChecksums: retryDiarizationAttempt.runtime?.modelChecksums,
-              injectedLocalWindows:
-                retryDiarizationAttempt.injectedLocalWindows,
-              falseMeEvidenceSeconds:
-                retryDiarizationAttempt.falseMeEvidenceSeconds,
-              missedMeEvidenceSeconds:
-                retryDiarizationAttempt.missedMeEvidenceSeconds,
-            });
-
-            transcriptPipeline.speakerAttributionRetryUsed = 1;
-            transcriptPipeline.speakerAttributionRetryOutcome =
-              retryDiarizationAttempt.mappingConfident
-                ? 'mapping-confident'
-                : (retryDiarizationAttempt.mappingReason ??
-                  'insufficient-confidence');
-
-            if (retryDiarizationAttempt.mappingConfident) {
-              finalizedSegments = retryDiarizationAttempt.segments;
-              transcriptPipeline.diarizationBoundarySplits = Math.max(
-                Number(transcriptPipeline.diarizationBoundarySplits || 0),
-                retryDiarizationAttempt.splitsApplied,
-              );
-            }
-          } else {
-            transcriptPipeline.speakerAttributionRetryUsed = 0;
-            transcriptPipeline.speakerAttributionRetryOutcome =
-              initialDiarizationAttempt.mappingConfident
-                ? 'mapping-confident'
-                : (initialDiarizationAttempt.mappingReason ??
-                  'insufficient-confidence');
-          }
-        } catch (e) {
-          speakerAttribution = buildTranscriptSpeakerAttribution({
-            diarizationEnabled: true,
-            diarizationAttempted: true,
-            fallbackReason: 'diarization_error',
-          });
-          console.warn('[Pluto] Diarization refinement failed:', e);
-        }
-      }
-
-      finalizedSegments = applyCrossTurnAttributionRepairs(
-        finalizedSegments,
-      ) as TranscriptionSegment[];
-
-      const hasBothSpeakersForPostBleed =
-        finalizedSegments.some((s) => s.speaker === 'Me') &&
-        finalizedSegments.some((s) => s.speaker === 'Them');
-      if (hasBothSpeakersForPostBleed) {
-        postHydrationBleedPass = true;
-        const activityWindowsPost = [...speakerTimelineRef.current];
-        const activeWindowPost = activeSpeakerWindowRef.current;
-        if (activeWindowPost) {
-          activityWindowsPost.push({
-            startTime: activeWindowPost.startTime,
-            endTime: getMeetingElapsedSeconds(),
-            speaker: activeWindowPost.speaker,
-          });
-        }
-        const postBleed = stripLikelyMeBleedSegments(
-          finalizedSegments,
-          activityWindowsPost,
-        );
-        postHydrationBleedDroppedMe = postBleed.droppedMe;
-        if (postBleed.droppedMe > 0) {
-          finalizedSegments = postBleed.segments as TranscriptionSegment[];
-          console.warn(
-            `[Pluto] Post-hydration Me-bleed cleanup: droppedMe=${postBleed.droppedMe}`,
-          );
-        }
-      }
-
-      const MERGE_SAME_SPEAKER_GAP_SECONDS = 1;
       const newTranscription = mergeConsecutiveSpeakerSegments(
-        finalizedSegments,
-        MERGE_SAME_SPEAKER_GAP_SECONDS,
+        [...processedMicSegmentsRef.current].sort(
+          (left, right) => left.startTime - right.startTime,
+        ),
       );
-      const mergedSpeakerCounts = newTranscription.reduce(
-        (acc, segment) => {
-          if (segment.speaker === 'Me') acc.me++;
-          if (segment.speaker === 'Them') acc.them++;
-          return acc;
-        },
-        { me: 0, them: 0 },
-      );
-      const bleedLikelyForRescue =
-        baselinePassThroughCheck.probable || passThroughCheck.probable;
-
-      if (
-        sessionFallbackDecision.shouldRun &&
-        mergedSpeakerCounts.me === 0 &&
-        fullSessionRecoveredMeSegments.length > 0 &&
-        !bleedLikelyForRescue
-      ) {
-        console.warn(
-          `[Pluto] Applying Me rescue merge from full-session mic transcript: recovered=${fullSessionRecoveredMeSegments.length}`,
-        );
-
-        const rescueSorted = [
-          ...sortedSegments.filter((segment) => segment.speaker !== 'Me'),
-          ...fullSessionRecoveredMeSegments,
-        ].sort((a, b) => a.startTime - b.startTime);
-        const rescueCrossChannelResolved =
-          resolveCrossChannelDuplicates(rescueSorted);
-        const rescueDedupedThem = filterDuplicateSpeakerSegments(
-          rescueCrossChannelResolved.segments as TranscriptionSegment[],
-          'Them',
-        );
-        const rescueDedupedSegments = filterDuplicateSpeakerSegments(
-          rescueDedupedThem,
-          'Me',
-        );
-        const rescueEchoTrimmedSegments = trimAdjacentCrossSpeakerEcho(
-          rescueDedupedSegments,
-        );
-        const rescueShortEchoPruned = dropShortCrossSpeakerEchoes({
-          segments: rescueEchoTrimmedSegments as TranscriptionSegment[],
+      const pipelineMode: TranscriptPipelineMode = 'canonical_session_v2';
+      const speakerAttribution: StoredTranscriptSpeakerAttribution =
+        buildTranscriptSpeakerAttribution({
+          diarizationEnabled: false,
+          diarizationAttempted: false,
+          fallbackReason: 'diarization_disabled',
         });
-        const rescueFinalizedSegments =
-          rescueShortEchoPruned.segments as TranscriptionSegment[];
-
-        const rescuedTranscription = mergeConsecutiveSpeakerSegments(
-          rescueFinalizedSegments,
-          MERGE_SAME_SPEAKER_GAP_SECONDS,
-        );
-        newTranscription.length = 0;
-        newTranscription.push(...rescuedTranscription);
-
-        mergedSpeakerCounts.me = 0;
-        mergedSpeakerCounts.them = 0;
-        for (const segment of newTranscription) {
-          if (segment.speaker === 'Me') mergedSpeakerCounts.me++;
-          if (segment.speaker === 'Them') mergedSpeakerCounts.them++;
-        }
-      } else if (
-        sessionFallbackDecision.shouldRun &&
-        mergedSpeakerCounts.me === 0 &&
-        fullSessionRecoveredMeSegments.length > 0 &&
-        bleedLikelyForRescue
-      ) {
-        console.warn(
-          `[Pluto] Skipping Me rescue merge because bleed risk remains high: recovered=${fullSessionRecoveredMeSegments.length}`,
-        );
-      }
-
-      console.log(
-        `[Pluto] Merged speaker segment counts: Me=${mergedSpeakerCounts.me}, Them=${mergedSpeakerCounts.them}`,
-      );
-
-      console.log(
-        `[Pluto] Pipeline=${pipelineMode} merged: ${finalizedSegments.length} finalized segments → ${newTranscription.length} merged segments`,
-      );
-
-      if (TRANSCRIPT_PIPELINE_LOG) {
-        console.log('[Pluto][TranscriptPipeline]', {
-          pipelineMode,
-          ...transcriptPipeline,
-          mergedSegments: newTranscription.length,
-          mergedMe: mergedSpeakerCounts.me,
-          mergedThem: mergedSpeakerCounts.them,
-        });
-      }
 
       const meetingTiming = buildMeetingTiming(stopSnapshot);
-      const checkpointEvidenceVerified =
-        await hasCompleteCaptureJournalCheckpoints(stopSnapshot.meetingId);
-      const foregroundValidationPlan = planForegroundTranscriptValidation({
-        checkpointEvidenceVerified,
-      });
       if (!stopSnapshot || !sealedActivityEvidence) {
         throw new Error('final_transcription_evidence_unavailable');
       }
       const finalStopSnapshot = stopSnapshot;
       const finalSealedActivityEvidence = sealedActivityEvidence;
-      const finalTranscriptionRunId = crypto.randomUUID();
       const captureGeneration =
         captureJournalStateRef.current?.generation ?? '';
       const provisionalTranscriptJson = JSON.stringify(
@@ -5842,6 +4094,7 @@ export const AudioManager = ({
         onSessionComplete?.(finalStopSnapshot.meetingId);
         return;
       }
+      provisionalMeetingPersisted = true;
 
       let committedFinalSegments: TranscriptionSegment[] = [];
       const finalOutcome = await sealedActivityHandoff.runValidation(
@@ -5902,7 +4155,7 @@ export const AudioManager = ({
                       preset: 'accuracy_first',
                       model: commit.metadata.model,
                       device: 'coreml',
-                      computeType: 'int8',
+                      computeType: 'float16',
                       canonicalSource: 'recovered_channels',
                       diarization: false,
                       elapsedMs: 0,
@@ -5978,6 +4231,11 @@ export const AudioManager = ({
                     .join(' ');
                   if (fullText) onTranscript?.(fullText);
                 }
+                await retryMeetingTranscriptValidation(
+                  finalStopSnapshot.meetingId,
+                  (channel, ...args) =>
+                    window.ipcRenderer.invoke(channel, ...args),
+                );
                 onSessionComplete?.(finalStopSnapshot.meetingId);
               },
             },
@@ -5987,684 +4245,19 @@ export const AudioManager = ({
         onSessionComplete?.(finalStopSnapshot.meetingId);
       }
       if (finalOutcome.status) return;
-
-      const integrityValidation = await sealedActivityHandoff.runValidation(
-        async (activityWindows) =>
-          await runRecordingTranscriptValidation({
-            meetingId: finalStopSnapshot.meetingId,
-            recordingDurationSeconds: meetingTiming.durationSeconds,
-            micAudioPath: primaryAudioPath,
-            mixAudioPath: mixedAudioPath,
-            systemAudioPath,
-            provisionalSegments: newTranscription,
-            activityWindows,
-            canonicalMode: foregroundValidationPlan.canonicalMode,
-            checkpointEvidenceVerified:
-              foregroundValidationPlan.checkpointEvidenceVerified,
-            transcribe: async (audioPath, options) =>
-              await window.ipcRenderer.invoke(
-                'WHISPER_TRANSCRIBE',
-                audioPath,
-                buildTranscriptionOptions({
-                  diarize: false,
-                  meetingId: stopSnapshot.meetingId,
-                  canonicalSource:
-                    options.canonicalSource === 'mix' ? 'mix' : 'mic',
-                }),
-              ),
-            probeDuration: async (audioPath) =>
-              await window.ipcRenderer.invoke(
-                'AUDIO_PROBE_DURATION',
-                audioPath,
-              ),
-          }),
-      );
-      newTranscription.splice(
-        0,
-        newTranscription.length,
-        ...(integrityValidation.segments as TranscriptionSegment[]),
-      );
-
-      if (integrityValidation.status === 'needs_attention') {
-        const stopToValidatedLatency = markStopToValidatedLatencyUnavailable(
-          stopToValidatedLatencyRef.current,
-          'needs_attention',
-        );
-        const recoverableMeeting = {
-          id: stopSnapshot.meetingId,
-          title: userTitle || 'Meeting',
-          meeting_type: 'Recording',
-          started_at: meetingTiming.startedAtIso,
-          ended_at: meetingTiming.endedAtIso,
-          duration_seconds: meetingTiming.durationSeconds,
-          audio_path: primaryAudioPath || null,
-          system_audio_path: systemAudioPath || null,
-          mixed_audio_path: mixedAudioPath || null,
-          transcript_status: 'needs_attention',
-          transcript_validated_at: null,
-          transcript_json: JSON.stringify(
-            buildTranscriptJsonPayload(newTranscription, {
-              pipelineMode,
-              canonicalSource: mixedAudioPath ? 'mix' : 'mic',
-              postHydrationBleedPass: false,
-              transcription: {
-                backend: String(resolvedTranscriptionSettings.backend),
-                preset: String(resolvedTranscriptionSettings.preset),
-                model: String(resolvedChunkModel),
-                device: String(resolvedTranscriptionSettings.device),
-                computeType: String(resolvedChunkComputeType),
-                diarization: false,
-                elapsedMs: 0,
-                vocabularyHintPolicyVersion:
-                  transcriptionVocabularyRef.current.provenance.policyVersion,
-                vocabularyHintCount:
-                  transcriptionVocabularyRef.current.provenance.hintCount,
-              },
-              speakerAttribution,
-              liveTranscriptResponsiveness:
-                frozenLiveTranscriptResponsivenessRef.current ?? undefined,
-              stopToValidatedLatency,
-              lifecycleStatus: 'needs_attention',
-              integrity: {
-                ...integrityValidation.evidence,
-                reasons: integrityValidation.reasons,
-              },
-            }),
-          ),
-          user_notes: userNotes,
-          enhanced_notes: null,
-          analysis_json: null,
-          value_signals_json: null,
-          participants,
-          capture_journal_generation:
-            captureJournalStateRef.current?.generation ?? null,
-          folder_id: null,
-          is_favorite: false,
-          end_reason: endReason || 'manual',
-          finalization_status: 'finalized',
-          finalization_error_category: null,
-        };
-        await sealedActivityHandoff.persistMeeting(
-          recoverableMeeting,
-          {
-            schemaVersion: 2,
-            state: 'needs_attention',
-            causes: integrityValidation.reasons.map((code) => ({ code })),
-            evidenceProvenance: {
-              kind: 'sealed_capture_activity_v2',
-              digestSha256: sealedActivityEvidence.digestSha256,
-            },
-            activityEvidence: sealedActivityEvidence,
-            evidence: integrityValidation.evidence,
-          },
-          async (meeting) =>
-            await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
-        );
-        onSessionComplete?.(recoverableMeeting.id);
-        return;
-      }
-
-      if (onTranscript && newTranscription.length > 0) {
-        const fullText = newTranscription.map((s) => s.text).join(' ');
-        onTranscript(fullText);
-      }
-      if (newTranscription.length === 0) {
-        console.warn('[Pluto] No transcription segments from either source');
-      }
-
-      const downstreamRunId = crypto.randomUUID();
-      const checkpointValidationRunId = crypto.randomUUID();
-      const attributionPersistenceRecord = buildInitialValidatedMeetingPayload({
-        meeting: {
-          id: stopSnapshot.meetingId,
-          title: userTitle || 'Meeting',
-          meeting_type: 'Recording',
-          started_at: meetingTiming.startedAtIso,
-          ended_at: meetingTiming.endedAtIso,
-          duration_seconds: meetingTiming.durationSeconds,
-          audio_path: primaryAudioPath,
-          system_audio_path: systemAudioPath,
-          mixed_audio_path: mixedAudioPath,
-          transcript_status: 'validated',
-          transcript_validated_at: new Date().toISOString(),
-          user_notes: userNotes,
-          folder_id: null,
-          is_favorite: false,
-          end_reason: endReason || 'manual',
-          downstream_processing_json: JSON.stringify({
-            schemaVersion: 1,
-            state: 'processing',
-            transcriptValidatedAt: '',
-            runId: downstreamRunId,
-            stage: 'analysis',
-          }),
-          capture_journal_generation:
-            captureJournalStateRef.current?.generation ?? null,
-        },
-        segments: newTranscription,
-        transcriptMetadata: {
-          pipelineMode,
-          sessionFallbackUsed: sessionFallbackDecision.shouldRun,
-          sessionFallbackReasons: sessionFallbackDecision.reasons,
-          canonicalSource: sessionCanonicalSource,
-          postHydrationBleedPass,
-          postHydrationBleedDroppedMe,
-          transcription: {
-            backend: String(resolvedTranscriptionSettings.backend),
-            preset: String(resolvedTranscriptionSettings.preset),
-            model: String(resolvedChunkModel),
-            device: String(resolvedTranscriptionSettings.device),
-            computeType: String(resolvedChunkComputeType),
-            diarization: false,
-            elapsedMs: 0,
-            vocabularyHintPolicyVersion:
-              transcriptionVocabularyRef.current.provenance.policyVersion,
-            vocabularyHintCount:
-              transcriptionVocabularyRef.current.provenance.hintCount,
-          },
-          sessionFallbackTranscription: sessionTranscriptionMeta
-            ? {
-                backend: String(sessionTranscriptionMeta.backend),
-                preset: String(sessionTranscriptionMeta.preset),
-                model: String(sessionTranscriptionMeta.model),
-                device: String(sessionTranscriptionMeta.device),
-                computeType: String(sessionTranscriptionMeta.computeType),
-                canonicalSource: sessionCanonicalSource,
-                diarization: diarizationEnabled,
-                elapsedMs: sessionTranscriptionMeta.elapsedMs || 0,
-                providerLabel: sessionTranscriptionMeta.providerLabel,
-                warnings: sessionTranscriptionMeta.warnings,
-                vocabularyHintPolicyVersion:
-                  sessionTranscriptionMeta.vocabularyHintPolicyVersion,
-                vocabularyHintCount:
-                  sessionTranscriptionMeta.vocabularyHintCount,
-              }
-            : undefined,
-          speakerAttribution,
-          liveTranscriptResponsiveness:
-            frozenLiveTranscriptResponsivenessRef.current ?? undefined,
-          lifecycleStatus: 'validated',
-          integrity: {
-            ...integrityValidation.evidence,
-            reasons: integrityValidation.reasons,
-          },
-        },
-        participants,
-      });
-      const transcriptValidatedAt = String(
-        attributionPersistenceRecord.transcript_validated_at,
-      );
-      attributionPersistenceRecord.downstream_processing_json = JSON.stringify({
-        schemaVersion: 1,
-        state: 'processing',
-        transcriptValidatedAt,
-        runId: downstreamRunId,
-        stage: 'analysis',
-      });
-      const attributionIntegrity = {
-        schemaVersion: 2,
-        state: 'validated',
-        causes: [],
-        evidenceProvenance: {
-          kind: 'sealed_capture_activity_v2',
-          digestSha256: sealedActivityEvidence.digestSha256,
-        },
-        activityEvidence: sealedActivityEvidence,
-        evidence: integrityValidation.evidence,
-        validationProof: {
-          gateVersion: 'canonical_integrity_v1',
-          validatedAt: transcriptValidatedAt,
-        },
-      };
-      const attributionIntegrityJson = JSON.stringify(attributionIntegrity);
-
-      // 3. Generate Analysis V3 (canonical markdown + hidden signals)
-      const fullTranscript = newTranscription
-        .map((s) => `${s.speaker}: ${s.text}`)
-        .join('\n');
-      void fullTranscript;
-      let enhancedNotes = '';
-      let valueSignals = emptyValueSignals();
-      let analysisDocument: AnalysisDocument | AnalysisDocumentV3 =
-        emptyAnalysisDocument();
-
-      let stopToValidatedLatency: StopToValidatedLatencySummary | null = null;
-      let transcriptWithLatency = '';
-      const { patchOutcome: metricPatchOutcome, downstream: rawArtifacts } =
-        await persistTranscriptThenRunLatencyPatchAndDownstream({
-          persistTranscript: async () => {
-            if (
-              checkpointEvidenceVerified &&
-              attributionPersistenceRecord.capture_journal_generation
-            ) {
-              const checkpointValidationStartedAt = Date.now();
-              const validatingIntegrity = beginRetryLease(
-                attributionIntegrity,
-                {
-                  runId: checkpointValidationRunId,
-                  startedAt: new Date(
-                    checkpointValidationStartedAt,
-                  ).toISOString(),
-                  deadlineAt: new Date(
-                    buildRetryDeadline(
-                      checkpointValidationStartedAt,
-                      meetingTiming.durationSeconds,
-                    ),
-                  ).toISOString(),
-                  stage: 'saving',
-                },
-              );
-              const inserted = await sealedActivityHandoff.persistMeeting(
-                {
-                  ...attributionPersistenceRecord,
-                  transcript_status: 'validating',
-                  transcript_validated_at: null,
-                  transcript_json: withTranscriptLifecycleStatus(
-                    attributionPersistenceRecord.transcript_json,
-                    'validating',
-                  ),
-                  downstream_processing_json: null,
-                },
-                validatingIntegrity,
-                async (meeting) =>
-                  await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
-              );
-              if (inserted === false) return false;
-              const outcome = await window.ipcRenderer.invoke(
-                'FINALIZE_CHECKPOINT_TRANSCRIPT',
-                {
-                  meetingId: attributionPersistenceRecord.id,
-                  journalGeneration:
-                    attributionPersistenceRecord.capture_journal_generation,
-                  expectedTranscriptStatus: 'validating',
-                  expectedValidationRunId: checkpointValidationRunId,
-                  canonicalTranscriptJson:
-                    attributionPersistenceRecord.transcript_json,
-                  transcriptIntegrityJson: attributionIntegrityJson,
-                  transcriptValidatedAt:
-                    attributionPersistenceRecord.transcript_validated_at,
-                  downstreamRunId,
-                },
-              );
-              return (
-                outcome === 'committed_and_claimed' ||
-                outcome === 'already_committed'
-              );
-            }
-            return await sealedActivityHandoff.persistMeeting(
-              attributionPersistenceRecord,
-              attributionIntegrity,
-              async (meeting) =>
-                await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
-            );
-          },
-          patchLatency: async () => {
-            stopToValidatedLatency =
-              stopToValidatedLatencyRef.current.completeValidatedSave(
-                performance.now(),
-              ).summary as StopToValidatedLatencySummary;
-            transcriptWithLatency = JSON.stringify({
-              ...(JSON.parse(
-                attributionPersistenceRecord.transcript_json,
-              ) as Record<string, unknown>),
-              stopToValidatedLatency,
-            });
-            return await window.ipcRenderer.invoke(
-              'PATCH_STOP_TO_VALIDATED_LATENCY',
-              {
-                meetingId: attributionPersistenceRecord.id,
-                expectedTranscriptJson:
-                  attributionPersistenceRecord.transcript_json,
-                expectedTranscriptIntegrityJson: attributionIntegrityJson,
-                expectedTranscriptValidatedAt:
-                  attributionPersistenceRecord.transcript_validated_at,
-                replacementTranscriptJson: transcriptWithLatency,
-              },
-            );
-          },
-          runDownstream: (async () =>
-            null) as () => Promise<AnalysisArtifacts | null>,
-        });
-      if (!stopToValidatedLatency) {
-        throw new Error('Validated latency summary was not finalized');
-      }
-
-      // The durable post-meeting coordinator owns every intelligence stage.
-      // Recording finalization ends after canonical transcript persistence so
-      // navigation, restart, and manual retry all use the same worker.
-      onSessionComplete?.(attributionPersistenceRecord.id);
-      return;
-
-      // biome-ignore lint/correctness/noUnreachable: retained temporarily while the single-worker migration removes the legacy inline intelligence block
-      if (rawArtifacts) {
-        analysisDocument = normalizeAnalysisDocument(rawArtifacts?.analysis);
-        valueSignals = normalizeValueSignals(rawArtifacts?.signals);
-        enhancedNotes = analysisDocumentToMarkdown(analysisDocument);
-
-        console.log(
-          '[Pluto] V3 analysis generated:',
-          `formatPass=${analysisDocument.quality.format_pass},`,
-          `retryCount=${analysisDocument.quality.retry_count},`,
-          `fallback=${analysisDocument.quality.fallback_used},`,
-          `continuity=${valueSignals.continuity.length},`,
-          `accountability=${valueSignals.accountability_risks.length},`,
-          `decisionImpact=${valueSignals.decision_impacts.length}`,
-        );
-      } else {
-        analysisDocument = emptyAnalysisDocument();
-        enhancedNotes = analysisDocumentToMarkdown(analysisDocument);
-        valueSignals = emptyValueSignals();
-      }
-
-      // Relabel transcript segments with actual speaker names
-      const labeledTranscription = newTranscription;
-
-      // 4. Save to DB
-
-      // Generate intelligent title
-      let title = userTitle || 'Meeting';
-      if (!userTitle) {
-        try {
-          const fullTranscript = labeledTranscription
-            .map((s) => `${s.speaker}: ${s.text}`)
-            .join('\n');
-          title = await window.ipcRenderer.invoke('GENERATE_TITLE', {
-            transcript: fullTranscript,
-          });
-          console.log(
-            `[Pluto] Generated meeting title [length=${title.length}]`,
-          );
-        } catch (titleErr) {
-          console.error(
-            '[Pluto] Title generation failed, using fallback:',
-            titleErr,
-          );
-          title = extractTitle(labeledTranscription);
-        }
-      }
-
-      const chunkTranscriptMeta = {
-        backend: String(resolvedTranscriptionSettings.backend),
-        preset: String(resolvedTranscriptionSettings.preset),
-        model: String(resolvedChunkModel),
-        device: String(resolvedTranscriptionSettings.device),
-        computeType: String(resolvedChunkComputeType),
-        diarization: false,
-        elapsedMs: 0,
-        vocabularyHintPolicyVersion:
-          transcriptionVocabularyRef.current.provenance.policyVersion,
-        vocabularyHintCount:
-          transcriptionVocabularyRef.current.provenance.hintCount,
-      };
-      const sessionFallbackTranscriptMeta = sessionTranscriptionMeta
-        ? (() => {
-            const metadata =
-              sessionTranscriptionMeta as TranscriptTranscriptionMeta;
-            return {
-              backend: String(metadata.backend),
-              preset: String(metadata.preset),
-              model: String(metadata.model),
-              device: String(metadata.device),
-              computeType: String(metadata.computeType),
-              canonicalSource: sessionCanonicalSource,
-              diarization: diarizationEnabled,
-              elapsedMs: metadata.elapsedMs || 0,
-              providerLabel: metadata.providerLabel,
-              warnings: metadata.warnings,
-              vocabularyHintPolicyVersion: metadata.vocabularyHintPolicyVersion,
-              vocabularyHintCount: metadata.vocabularyHintCount,
-            };
-          })()
-        : undefined;
-      const transcriptMeta = {
-        backend: String(chunkTranscriptMeta.backend),
-        preset: String(chunkTranscriptMeta.preset),
-        model: String(chunkTranscriptMeta.model),
-        device: String(chunkTranscriptMeta.device),
-        computeType: String(chunkTranscriptMeta.computeType),
-        diarization: chunkTranscriptMeta.diarization,
-        elapsedMs: chunkTranscriptMeta.elapsedMs,
-        vocabularyHintPolicyVersion:
-          chunkTranscriptMeta.vocabularyHintPolicyVersion,
-        vocabularyHintCount: chunkTranscriptMeta.vocabularyHintCount,
-      };
-
-      const currentMeetingIdCandidate = currentMeetingIdRef.current;
-      if (!currentMeetingIdCandidate) {
-        throw new Error('No active meeting ID while finalizing recording');
-      }
-      const currentMeetingId = currentMeetingIdCandidate as string;
-      const analysisGenerationMetadata = (
-        analysisDocument as AnalysisDocumentV3
-      ).generation_metadata;
-      const analysisErrorCategories =
-        analysisGenerationMetadata?.error_categories;
-      const meetingData = {
-        id: currentMeetingId,
-        title: title,
-        meeting_type: 'Recording',
-        started_at: meetingTiming.startedAtIso,
-        ended_at: meetingTiming.endedAtIso,
-        duration_seconds: meetingTiming.durationSeconds,
-        audio_path: primaryAudioPath,
-        system_audio_path: systemAudioPath,
-        mixed_audio_path: mixedAudioPath,
-        transcript_status: integrityValidation.status,
-        transcript_validated_at:
-          integrityValidation.status === 'validated'
-            ? new Date().toISOString()
-            : null,
-        transcript_json: JSON.stringify(
-          buildTranscriptJsonPayload(labeledTranscription, {
-            pipelineMode,
-            sessionFallbackUsed: sessionFallbackDecision.shouldRun,
-            sessionFallbackReasons: sessionFallbackDecision.reasons,
-            canonicalSource: sessionCanonicalSource,
-            postHydrationBleedPass,
-            postHydrationBleedDroppedMe,
-            transcription: transcriptMeta,
-            sessionFallbackTranscription: sessionFallbackTranscriptMeta,
-            speakerAttribution,
-            liveTranscriptResponsiveness:
-              frozenLiveTranscriptResponsivenessRef.current ?? undefined,
-            stopToValidatedLatency: stopToValidatedLatency ?? undefined,
-            lifecycleStatus: integrityValidation.status,
-            integrity: {
-              ...integrityValidation.evidence,
-              reasons: integrityValidation.reasons,
-            },
-          }),
-        ),
-        user_notes: userNotes,
-        enhanced_notes: enhancedNotes,
-        analysis_json: JSON.stringify(analysisDocument),
-        analysis_schema_version: analysisDocument.analysis_schema_version,
-        analysis_format_pass: analysisDocument.quality.format_pass,
-        analysis_retry_count: analysisDocument.quality.retry_count,
-        analysis_fallback_used: analysisDocument.quality.fallback_used,
-        analysis_provider: analysisGenerationMetadata?.provider ?? null,
-        analysis_model: analysisGenerationMetadata?.model ?? null,
-        analysis_generation_path:
-          analysisGenerationMetadata?.generation_path ?? null,
-        analysis_prompt_version:
-          analysisGenerationMetadata?.prompt_version ?? null,
-        analysis_generated_at: analysisGenerationMetadata?.generated_at ?? null,
-        analysis_error_categories_json:
-          analysisErrorCategories != null
-            ? JSON.stringify(analysisErrorCategories)
-            : null,
-        value_signals_json: JSON.stringify(valueSignals),
-        participants: participants,
-        folder_id: null,
-        is_favorite: false,
-        end_reason: endReason || 'manual',
-        finalization_status: 'finalized',
-        finalization_error_category: null,
-        downstream_processing_json: JSON.stringify(
-          rawArtifacts
-            ? {
-                schemaVersion: 1,
-                state: 'complete',
-                transcriptValidatedAt,
-              }
-            : {
-                schemaVersion: 1,
-                state: 'failed',
-                transcriptValidatedAt,
-                stage: 'analysis',
-                failure: 'generation_failed',
-              },
-        ),
-      };
-
-      const derivedPersistence = await persistDerivedAfterLatencyPatch<unknown>(
-        {
-          patchOutcome: metricPatchOutcome,
-          persistDerived: async () =>
-            await window.ipcRenderer.invoke(
-              'SAVE_DERIVED_MEETING_FIELDS_IF_TRANSCRIPT_CURRENT',
-              {
-                meetingId: meetingData.id,
-                expectedTranscriptJson: transcriptWithLatency,
-                expectedTranscriptIntegrityJson: attributionIntegrityJson,
-                expectedTranscriptValidatedAt:
-                  attributionPersistenceRecord.transcript_validated_at,
-                expectedTitle: attributionPersistenceRecord.title,
-                title: meetingData.title,
-                enhancedNotes: meetingData.enhanced_notes,
-                analysisJson: meetingData.analysis_json,
-                analysisSchemaVersion: meetingData.analysis_schema_version,
-                analysisFormatPass: meetingData.analysis_format_pass,
-                analysisRetryCount: meetingData.analysis_retry_count,
-                analysisFallbackUsed: meetingData.analysis_fallback_used,
-                analysisProvider: meetingData.analysis_provider,
-                analysisModel: meetingData.analysis_model,
-                analysisGenerationPath: meetingData.analysis_generation_path,
-                analysisPromptVersion: meetingData.analysis_prompt_version,
-                analysisGeneratedAt: meetingData.analysis_generated_at,
-                analysisErrorCategoriesJson:
-                  meetingData.analysis_error_categories_json,
-                valueSignalsJson: meetingData.value_signals_json,
-                downstreamProcessingJson:
-                  meetingData.downstream_processing_json,
-              },
-            ),
-        },
-      );
-      if (derivedPersistence.outcome === 'suppressed') {
-        console.warn(
-          `[Pluto] Latency reconciliation ${String(metricPatchOutcome)}; suppressing derived persistence`,
-        );
-        onSessionComplete?.(meetingData.id);
-        return;
-      }
-      if (derivedPersistence.outcome === 'failed') {
-        console.warn(
-          '[Pluto] Derived persistence failed; preserving current transcript generation',
-        );
-        onSessionComplete?.(meetingData.id);
-        return;
-      }
-      const derivedPersistenceResult = (
-        derivedPersistence as { outcome: 'persisted'; result: unknown }
-      ).result;
-      if (derivedPersistenceResult !== 'updated') {
-        console.warn(
-          `[Pluto] Derived persistence ${String(derivedPersistenceResult)}; preserving current transcript generation`,
-        );
-        onSessionComplete?.(meetingData.id);
-        return;
-      }
-      console.log(
-        '[Pluto] Session saved to DB with transcript segments:',
-        labeledTranscription.length,
-        'summary length:',
-        enhancedNotes.length,
-      );
-
-      const cleanupPaths = resolveFinalizationCleanupPaths({
-        primaryAudioPath,
-        systemAudioPath,
-        rebuiltSystemAudioPath,
-        mixedAudioPath,
-        validationStatus: integrityValidation.status,
-      });
-      if (cleanupPaths.length > 0) {
-        try {
-          await window.ipcRenderer.invoke('AUDIO_DELETE_FILES', cleanupPaths);
-        } catch (cleanupErr) {
-          console.warn(
-            '[Pluto] Failed to clean superseded recording artifacts:',
-            cleanupErr,
-          );
-        }
-      }
-
-      // 5. Extract & Process Entities for Knowledge Graph (Sprint 2)
-      void (async () => {
-        const runExtraction = async () => {
-          try {
-            console.log('[Pluto] Extracting entities for Knowledge Graph...');
-            window.dispatchEvent(
-              new CustomEvent('MEETING_ENTITIES_PROCESSING', {
-                detail: { meetingId: meetingData.id, processing: true },
-              }),
-            );
-            const fullTranscriptText = labeledTranscription
-              .map((s) => `${s.speaker}: ${s.text}`)
-              .join('\n');
-            const entityResult = await window.ipcRenderer.invoke(
-              'EXTRACT_AND_PROCESS_ENTITIES',
-              {
-                transcript: fullTranscriptText,
-                meetingId: String(meetingData.id),
-                summary: enhancedNotes,
-                valueSignals,
-              },
-            );
-            console.log(
-              `[Pluto] Entity extraction complete: ${entityResult.created} created, ${entityResult.linked} linked`,
-            );
-            window.dispatchEvent(
-              new CustomEvent('MEETING_ENTITIES_UPDATED', {
-                detail: { meetingId: meetingData.id },
-              }),
-            );
-          } catch (entityErr) {
-            console.error(
-              '[Pluto] Knowledge Graph processing failed:',
-              entityErr,
-            );
-            // Non-blocking error
-          } finally {
-            window.dispatchEvent(
-              new CustomEvent('MEETING_ENTITIES_PROCESSING', {
-                detail: { meetingId: meetingData.id, processing: false },
-              }),
-            );
-          }
-        };
-
-        if ('requestIdleCallback' in window) {
-          window.requestIdleCallback(
-            () => {
-              void runExtraction();
-            },
-            { timeout: 2000 },
-          );
-        } else {
-          setTimeout(() => {
-            void runExtraction();
-          }, 300);
-        }
-      })();
-
-      if (onSessionComplete) {
-        onSessionComplete(meetingData.id);
-      }
     } catch (e) {
       console.error('[Pluto] Processing failed:', e);
-      if (
+      if (provisionalMeetingPersisted) {
+        await window.ipcRenderer
+          .invoke(
+            'FAIL_FINAL_TRANSCRIPTION',
+            stopSnapshot.meetingId,
+            finalTranscriptionRunId,
+            'runtime_unavailable',
+          )
+          .catch(() => null);
+        onSessionComplete?.(stopSnapshot.meetingId);
+      } else if (
         currentMeetingIdRef.current &&
         (primaryAudioPath || systemAudioPath || mixedAudioPath)
       ) {

@@ -134,7 +134,7 @@ export const isMlxCheckpointConfig = (
     'backend' | 'device' | 'computeType'
   >,
 ): boolean =>
-  config.backend === 'local_alt_apple_silicon' &&
+  config.backend === 'mlx_preview' &&
   config.device === 'mlx' &&
   config.computeType === 'float16';
 

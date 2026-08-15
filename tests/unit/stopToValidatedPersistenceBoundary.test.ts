@@ -52,23 +52,23 @@ describe('stop-to-validated persistence boundary', () => {
     }
   });
 
-  it('suppresses cleanup and entity work on reconciliation failures', () => {
+  it('hands analysis only the generation-bound canonical commit', () => {
     const audioManager = readFileSync(
       'src/components/AudioManager.tsx',
       'utf8',
     );
     const boundary = audioManager.slice(
-      audioManager.indexOf('const derivedPersistence ='),
-      audioManager.indexOf(
-        "console.log(\n        '[Pluto] Session saved to DB with transcript segments:'",
-      ),
+      audioManager.indexOf('commitCanonical: async (commit)'),
+      audioManager.indexOf('markNeedsAttention: async'),
     );
 
-    expect(boundary).toContain('persistDerivedAfterLatencyPatch');
-    expect(boundary).toContain("derivedPersistence.outcome === 'suppressed'");
-    expect(boundary).toContain("derivedPersistence.outcome === 'failed'");
-    expect(
-      boundary.match(/onSessionComplete\?\.\(meetingData\.id\);\s*return;/g),
-    ).toHaveLength(3);
+    expect(boundary).toContain("'COMMIT_FINAL_TRANSCRIPTION'");
+    expect(boundary).toContain('captureGeneration');
+    expect(boundary).toContain('outcome.committed === true');
+    expect(boundary).toContain(
+      'transcript: JSON.parse(outcome.transcriptJson)',
+    );
+    expect(audioManager).not.toContain("'AUDIO_DELETE_FILES'");
+    expect(audioManager).not.toContain("'EXTRACT_AND_PROCESS_ENTITIES'");
   });
 });

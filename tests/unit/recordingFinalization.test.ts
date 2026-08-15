@@ -333,59 +333,51 @@ describe('recording finalization helpers', () => {
     expect(cleanup).toEqual([]);
   });
 
-  it('returns a stronger speaker-attribution policy when current settings are weaker', () => {
+  it('does not vary the fixed preview policy for speaker attribution', () => {
     expect(
       getStrongerSpeakerAttributionPolicy({
-        backend: 'whisperx_current',
+        backend: 'mlx_preview',
         preset: 'balanced',
         model: 'small',
-        device: 'cpu',
-        computeType: 'int8',
-        language: 'en',
-      }),
-    ).toMatchObject({
-      backend: 'local_alt_apple_silicon',
-      preset: 'accuracy_first',
-      model: 'large-v3',
-      computeType: 'float16',
-    });
-  });
-
-  it('does not request a stronger speaker-attribution policy when already strongest', () => {
-    expect(
-      getStrongerSpeakerAttributionPolicy({
-        backend: 'local_alt_apple_silicon',
-        preset: 'accuracy_first',
-        model: 'large-v3',
-        device: 'cpu',
-        computeType: 'float32',
+        device: 'mlx',
+        computeType: 'float16',
         language: 'en',
       }),
     ).toBeNull();
   });
 
-  it('retries low-confidence speaker attribution only when a stronger policy exists', () => {
+  it('does not request a stronger speaker-attribution policy when already strongest', () => {
+    expect(
+      getStrongerSpeakerAttributionPolicy({
+        backend: 'mlx_preview',
+        preset: 'accuracy_first',
+        model: 'large-v3',
+        device: 'mlx',
+        computeType: 'float16',
+        language: 'en',
+      }),
+    ).toBeNull();
+  });
+
+  it('does not retry attribution by changing the fixed preview policy', () => {
     expect(
       buildSpeakerAttributionRetryPlan({
         diarizationEnabled: true,
         mappingConfident: false,
         retryAlreadyUsed: false,
         settings: {
-          backend: 'whisperx_current',
+          backend: 'mlx_preview',
           preset: 'balanced',
           model: 'small',
-          device: 'cpu',
-          computeType: 'int8',
+          device: 'mlx',
+          computeType: 'float16',
           language: 'en',
         },
       }),
-    ).toMatchObject({
-      shouldRetry: true,
-      reason: 'retry-with-stronger-policy',
-      strongerOptions: {
-        backend: 'local_alt_apple_silicon',
-        preset: 'accuracy_first',
-      },
+    ).toEqual({
+      shouldRetry: false,
+      reason: 'no-stronger-policy',
+      strongerOptions: null,
     });
   });
 
@@ -397,11 +389,11 @@ describe('recording finalization helpers', () => {
         retryAlreadyUsed: false,
         providerHasStrongerPolicy: false,
         settings: {
-          backend: 'whisperx_current',
+          backend: 'mlx_preview',
           preset: 'balanced',
           model: 'small',
-          device: 'cpu',
-          computeType: 'int8',
+          device: 'mlx',
+          computeType: 'float16',
           language: 'en',
         },
       }),
@@ -415,11 +407,11 @@ describe('recording finalization helpers', () => {
         mappingConfident: true,
         retryAlreadyUsed: false,
         settings: {
-          backend: 'whisperx_current',
+          backend: 'mlx_preview',
           preset: 'balanced',
           model: 'small',
-          device: 'cpu',
-          computeType: 'int8',
+          device: 'mlx',
+          computeType: 'float16',
           language: 'en',
         },
       }),
@@ -434,11 +426,11 @@ describe('recording finalization helpers', () => {
         mappingConfident: false,
         retryAlreadyUsed: true,
         settings: {
-          backend: 'whisperx_current',
+          backend: 'mlx_preview',
           preset: 'balanced',
           model: 'small',
-          device: 'cpu',
-          computeType: 'int8',
+          device: 'mlx',
+          computeType: 'float16',
           language: 'en',
         },
       }),

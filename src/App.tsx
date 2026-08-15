@@ -64,10 +64,6 @@ import {
   resolveMicrophoneStatus,
   resolveSystemAudioStatus,
 } from './utils/permissions';
-import type {
-  TranscriptionPreset,
-  WhisperModel,
-} from './utils/transcriptionSettings';
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
@@ -111,9 +107,6 @@ function App() {
   const [claudeApiKey, setClaudeApiKey] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [transcriptionPreset, setTranscriptionPreset] =
-    useState<TranscriptionPreset>('balanced');
-  const [whisperModel, setWhisperModel] = useState<WhisperModel>('small');
   const [whisperLanguage, setWhisperLanguage] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
@@ -381,20 +374,14 @@ function App() {
       if (val) setTheme(val as 'light' | 'dark' | 'system');
     });
     window.ipcRenderer
-      .invoke('GET_SETTING', 'transcription_preset')
+      .invoke('GET_SETTING', 'transcription_language')
       .then((val) => {
-        if (val) setTranscriptionPreset(val as TranscriptionPreset);
+        if (val !== null && val !== undefined) setWhisperLanguage(String(val));
       });
-    window.ipcRenderer.invoke('GET_SETTING', 'whisper_model').then((val) => {
-      if (val) setWhisperModel(val as WhisperModel);
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'whisper_language').then((val) => {
-      if (val !== null && val !== undefined) setWhisperLanguage(String(val));
-    });
 
     const checkServer = async () => {
       try {
-        const health = await window.ipcRenderer.invoke('WHISPERX_HEALTH');
+        const health = await window.ipcRenderer.invoke('MLX_PREVIEW_HEALTH');
         if (health.status === 'ok') {
           setIsServerReady(true);
         } else {
@@ -698,9 +685,9 @@ function App() {
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
           transcriptionSettings={{
-            backend: 'local_alt_apple_silicon',
-            preset: transcriptionPreset,
-            model: whisperModel,
+            backend: 'mlx_preview',
+            preset: 'balanced',
+            model: 'base',
             device: 'mlx',
             computeType: 'float16',
             language: whisperLanguage,
@@ -1060,10 +1047,6 @@ function App() {
         setClaudeApiKey={setClaudeApiKey}
         ollamaModel={ollamaModel}
         setOllamaModel={setOllamaModel}
-        transcriptionPreset={transcriptionPreset}
-        setTranscriptionPreset={setTranscriptionPreset}
-        whisperModel={whisperModel}
-        setWhisperModel={setWhisperModel}
         whisperLanguage={whisperLanguage}
         setWhisperLanguage={setWhisperLanguage}
         autoEndEnabled={autoEndEnabled}

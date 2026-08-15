@@ -1,19 +1,22 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { MlxPreviewManager as MlxPreviewManagerConstructor } from '../../electron/transcription/mlxPreviewClient';
 
 vi.mock('electron', () => ({
   app: {
     isPackaged: false,
-    getPath: () => '/tmp/pluto-whisperx-test',
-    getAppPath: () => '/tmp/pluto-whisperx-test-app',
+    getPath: () => '/tmp/pluto-mlx-preview-test',
+    getAppPath: () => '/tmp/pluto-mlx-preview-test-app',
   },
 }));
 
-describe('WhisperX lifecycle', () => {
-  let WhisperXManager: typeof import('../../electron/whisperx').WhisperXManager;
+describe('MLX preview lifecycle', () => {
+  let MlxPreviewManager: typeof MlxPreviewManagerConstructor;
 
   beforeAll(async () => {
-    ({ WhisperXManager } = await import('../../electron/whisperx'));
+    ({ MlxPreviewManager } = await import(
+      '../../electron/transcription/mlxPreviewClient'
+    ));
   });
 
   afterEach(() => {
@@ -21,7 +24,7 @@ describe('WhisperX lifecycle', () => {
   });
 
   it('binds model configuration to each transcribe request', async () => {
-    const manager = new WhisperXManager();
+    const manager = new MlxPreviewManager();
     vi.spyOn(manager, 'start').mockResolvedValue();
     vi.spyOn(
       manager as unknown as { applyConfigFromOptions: () => Promise<void> },
@@ -53,7 +56,7 @@ describe('WhisperX lifecycle', () => {
   });
 
   it('does not release a stopped child until its close event arrives', async () => {
-    const manager = new WhisperXManager();
+    const manager = new MlxPreviewManager();
     const child = new EventEmitter() as EventEmitter & {
       killed: boolean;
       exitCode: number | null;
@@ -83,7 +86,7 @@ describe('WhisperX lifecycle', () => {
 
   it('keeps forced-stop lifecycle locked until SIGKILL produces close', async () => {
     vi.useFakeTimers();
-    const manager = new WhisperXManager();
+    const manager = new MlxPreviewManager();
     const child = new EventEmitter() as EventEmitter & {
       killed: boolean;
       exitCode: number | null;
