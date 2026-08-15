@@ -71,7 +71,7 @@ const dependencies = () => {
 };
 
 describe('runFinalTranscription', () => {
-  it('requires sealed evidence before claiming work', async () => {
+  it('persists unsealed evidence through a generation-bound lease', async () => {
     const deps = dependencies();
 
     const outcome = await runFinalTranscription(
@@ -83,9 +83,14 @@ describe('runFinalTranscription', () => {
     );
 
     expect(outcome.status).toBe('needs_attention');
-    expect(deps.claimLease).not.toHaveBeenCalled();
+    expect(deps.claimLease).toHaveBeenCalledOnce();
     expect(deps.markNeedsAttention).toHaveBeenCalledWith(
-      expect.objectContaining({ failure: 'evidence_unsealed' }),
+      expect.objectContaining({
+        failure: 'evidence_unsealed',
+        lease: expect.objectContaining({
+          captureGeneration: 'generation-1',
+        }),
+      }),
     );
   });
 
@@ -108,9 +113,55 @@ describe('runFinalTranscription', () => {
       expect.objectContaining({ speaker: 'Me' }),
       expect.objectContaining({ speaker: 'Them' }),
     ]);
+    expect(deps.commitCanonical.mock.calls[0][0].metadata).toMatchObject({
+      policy: 'parakeet_final_v1',
+      engine: 'parakeet_coreml',
+      model: 'parakeet-tdt-0.6b-v3',
+      computeType: 'int8',
+      computeUnits: 'cpu_and_neural_engine',
+      language: 'en',
+      elapsedMs: 20,
+      warnings: [],
+      providerVersions: ['FluidAudio-0.15.5'],
+      modelBundleVersions: ['bundle-v1'],
+      sourceDetails: {
+        mic: expect.objectContaining({
+          outcome: 'speech',
+          elapsedMs: 10,
+          segmentCount: 1,
+          wordCount: 2,
+        }),
+        system: expect.objectContaining({
+          outcome: 'speech',
+          elapsedMs: 10,
+          segmentCount: 1,
+          wordCount: 2,
+        }),
+      },
+    });
     const committed = await deps.commitCanonical.mock.results[0].value;
     expect(deps.startAnalysis.mock.calls[0][0].transcript).toBe(
       committed.transcript,
+    );
+  });
+
+  it('pauses before inference when system resources are unsafe', async () => {
+    const deps = dependencies();
+    const outcome = await runFinalTranscription(baseInput, {
+      ...deps,
+      admit: async () => ({ admitted: false, reason: 'memory_pressure' }),
+    });
+
+    expect(outcome).toEqual({
+      status: 'needs_attention',
+      reasons: ['memory_pressure'],
+    });
+    expect(deps.transcribe).not.toHaveBeenCalled();
+    expect(deps.markNeedsAttention).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failure: 'resource_policy_denied',
+        reasons: ['memory_pressure'],
+      }),
     );
   });
 
@@ -182,6 +233,26 @@ describe('runFinalTranscription', () => {
 
     expect(outcome.status).toBe('cancelled');
     expect(deps.transcribe).not.toHaveBeenCalled();
+    expect(deps.commitCanonical).not.toHaveBeenCalled();
+  });
+
+  it('releases an acquired lease when active capture cancels inference', async () => {
+    const deps = dependencies();
+    const controller = new AbortController();
+    deps.transcribe.mockImplementation(async () => {
+      controller.abort();
+      throw new Error('parakeet_cancelled');
+    });
+
+    const outcome = await runFinalTranscription(
+      { ...baseInput, signal: controller.signal },
+      deps,
+    );
+
+    expect(outcome.status).toBe('cancelled');
+    expect(deps.markNeedsAttention).toHaveBeenCalledWith(
+      expect.objectContaining({ failure: 'cancelled' }),
+    );
     expect(deps.commitCanonical).not.toHaveBeenCalled();
   });
 });

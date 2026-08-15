@@ -56,6 +56,8 @@ This document describes the high-level architecture of Pluto's local meeting cap
 - **Source policy:** Complete microphone and system artifacts are recognized sequentially and reconciled without a whole-meeting mixed or MLX fallback.
 - **Trust boundary:** Sealed capture evidence, explicit VAD, valid timings, and source coverage must pass before a generation-guarded canonical commit. Analysis starts only after that commit.
 - **Resource boundary:** Full-meeting inference never runs in Electron or the MLX preview process. The native child can be cancelled or terminated independently and uses CPU plus Neural Engine with disk-backed long-form audio.
+- **Admission and release:** Serious/critical thermal pressure or low free memory leaves final validation retryable without starting inference. Successful provider metadata records the actual int8/Core ML configuration and per-source aggregates; the native child unloads after five idle minutes.
+- **Post-meeting ownership:** `App.tsx` schedules sealed provisional meetings through the persisted final-transcription worker after the recording component releases its critical path. A new capture cancels and unloads active Parakeet work. Once the generation-guarded canonical commit succeeds, a downstream-only worker analyzes those exact committed bytes and never invokes ASR again.
 
 ### 3. Local Speaker Diarization (`python/sherpa_diarization_runtime.py`)
 - **Engine:** `sherpa-onnx` (C++ ONNX Runtime)

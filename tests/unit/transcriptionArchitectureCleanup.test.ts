@@ -7,6 +7,10 @@ const read = (path: string) => readFileSync(path, 'utf8');
 describe('transcription architecture cleanup', () => {
   it('keeps MLX preview and Parakeet final validation as explicit contracts', () => {
     const renderer = read('src/components/AudioManager.tsx');
+    const app = read('src/App.tsx');
+    const finalWorker = read(
+      'src/services/finalTranscription/runPersistedMeetingFinalTranscription.ts',
+    );
     const main = read('electron/main.ts');
     const retry = read('src/services/retryMeetingTranscriptValidation.ts');
 
@@ -14,9 +18,13 @@ describe('transcription architecture cleanup', () => {
       ['WHISPER', 'TRANSCRIBE'].join('_'),
     );
     expect(renderer).toContain('TRANSCRIPTION_TRANSCRIBE_PREVIEW');
-    expect(renderer).toContain('TRANSCRIPTION_TRANSCRIBE_FINAL');
+    expect(renderer).not.toContain('TRANSCRIPTION_TRANSCRIBE_FINAL');
+    expect(app).toContain('runPersistedMeetingFinalTranscription');
+    expect(finalWorker).toContain('TRANSCRIPTION_TRANSCRIBE_FINAL');
+    expect(finalWorker).toContain('processValidatedMeetingDownstream');
     expect(renderer).not.toContain('fullSession');
     expect(renderer).not.toContain('whole-session');
+    expect(main).toMatch(/'models',\s*'transcription',\s*'parakeet'/);
   });
 
   it('does not expose obsolete backend, device, model, or quality choices', () => {

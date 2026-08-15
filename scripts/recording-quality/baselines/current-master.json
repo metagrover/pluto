@@ -1,21 +1,23 @@
 {
   "schemaVersion": 3,
   "tier": "pr",
-  "generatedAt": "2026-07-16T20:21:26.763Z",
+  "generatedAt": "2026-08-15T18:58:55.190Z",
   "manifestPath": "scripts/recording-quality/manifest.json",
   "baselineReportPath": "scripts/recording-quality/baselines/current-master.json",
-  "sourceCommit": "9377346",
+  "sourceCommit": "cccd50f2",
   "environment": {
     "nodeVersion": "v24.11.1",
     "platform": "darwin",
-    "arch": "arm64"
+    "arch": "arm64",
+    "measurementContractVersion": 1,
+    "rssSamplingIntervalMs": 10
   },
   "summary": {
-    "totalCases": 10,
-    "passedCases": 10,
+    "totalCases": 11,
+    "passedCases": 11,
     "failedCases": 0,
     "passRate": 1,
-    "issueCoverage": [25, 75, 428, 434, 458, 476, 493, 549, 551],
+    "issueCoverage": [25, 75, 428, 434, 441, 458, 476, 493, 549, 551],
     "kinds": {
       "candidate_eligibility": {
         "passed": 1,
@@ -30,6 +32,10 @@
         "failed": 0
       },
       "stop_to_validated_latency": {
+        "passed": 1,
+        "failed": 0
+      },
+      "final_transcription_policy": {
         "passed": 1,
         "failed": 0
       },
@@ -48,6 +54,66 @@
     }
   },
   "results": [
+    {
+      "id": "issue-441-parakeet-final-policy",
+      "issue": 441,
+      "title": "Parakeet canonical transcription is isolated and fail-closed",
+      "kind": "final_transcription_policy",
+      "passed": true,
+      "trackedMetrics": [
+        {
+          "name": "passedScenarioCount",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ],
+      "actual": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "passedScenarioCount",
+          "value": 5
+        },
+        "reasons": []
+      },
+      "expected": {
+        "status": "validated",
+        "primaryMetric": {
+          "name": "passedScenarioCount",
+          "value": 5
+        },
+        "policy": {
+          "liveEngine": "mlx_whisper",
+          "finalEngine": "parakeet_coreml"
+        }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 3,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 2620,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 104841216,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
+        }
+      }
+    },
     {
       "id": "issue-476-credential-free-distribution",
       "issue": 476,
@@ -86,6 +152,33 @@
             "non_pluto_distribution_channel"
           ]
         }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 1,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 80,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 104841216,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
+        }
       }
     },
     {
@@ -112,20 +205,38 @@
           "name": "recoveredChunkRatio",
           "value": 0.75
         },
-        "reasons": ["checksum_mismatch:mic:1"]
+        "reasons": ["capture_gap_detected", "capture_activity_missing"]
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requiredRecoveredSources": ["mic", "system"],
+        "requiredCauseCodes": ["capture_gap_detected"],
+        "primaryMetric": {
+          "name": "recoveredChunkRatio",
+          "value": 0.75
+        }
       },
       "measurements": {
         "elapsedTime": {
-          "status": "unavailable",
-          "reason": "unsupported_runtime"
+          "status": "available",
+          "value": 87,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
         },
         "cpuTime": {
-          "status": "unavailable",
-          "reason": "unsupported_runtime"
+          "status": "available",
+          "value": 21727,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
         },
         "peakRss": {
-          "status": "unavailable",
-          "reason": "unsupported_runtime"
+          "status": "available",
+          "value": 106496000,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
         },
         "artifactBytes": {
           "status": "available",
@@ -133,15 +244,6 @@
           "unit": "bytes",
           "stability": "stable",
           "method": "case_artifact_sum"
-        }
-      },
-      "expected": {
-        "status": "needs_attention",
-        "requiredRecoveredSources": ["mic", "system"],
-        "requiredReasons": ["checksum_mismatch:mic:1"],
-        "primaryMetric": {
-          "name": "recoveredChunkRatio",
-          "value": 0.75
         }
       }
     },
@@ -188,6 +290,33 @@
           "cadenceSampleCount": 2,
           "maximumUpdateGapMs": 450
         }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 1,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 299,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 106512384,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
+        }
       }
     },
     {
@@ -222,6 +351,33 @@
           "name": "durationMs",
           "value": 45
         }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 1,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 265,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 106512384,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
+        }
       }
     },
     {
@@ -250,6 +406,33 @@
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 3
+        }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 1,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 248,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 106528768,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
         }
       }
     },
@@ -282,6 +465,33 @@
           "name": "durationSeconds",
           "value": 1062
         }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 1,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 158,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 106528768,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
+        }
       }
     },
     {
@@ -311,6 +521,33 @@
           "name": "localTranscriptCoveredSeconds",
           "value": 110
         }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 1,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 274,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 106545152,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
+        }
       }
     },
     {
@@ -332,7 +569,7 @@
           "name": "localTranscriptCoveredSeconds",
           "value": 6
         },
-        "reasons": ["local_speech_unaccounted"]
+        "reasons": ["required_source_failed", "local_speech_unaccounted"]
       },
       "expected": {
         "status": "needs_attention",
@@ -340,6 +577,33 @@
         "primaryMetric": {
           "name": "localTranscriptCoveredSeconds",
           "value": 6
+        }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 1,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 175,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 106577920,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
         }
       }
     },
@@ -371,6 +635,33 @@
           "name": "activityEvidenceSource",
           "value": "capture_activity_missing"
         }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 2,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 1742,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 106790912,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
+        }
       }
     },
     {
@@ -401,6 +692,33 @@
           "name": "activityEvidenceSource",
           "value": "capture_activity_corrupt"
         }
+      },
+      "measurements": {
+        "elapsedTime": {
+          "status": "available",
+          "value": 1,
+          "unit": "milliseconds",
+          "stability": "hardware_dependent",
+          "method": "monotonic_elapsed"
+        },
+        "cpuTime": {
+          "status": "available",
+          "value": 203,
+          "unit": "microseconds",
+          "stability": "hardware_dependent",
+          "method": "process_cpu_delta"
+        },
+        "peakRss": {
+          "status": "available",
+          "value": 106823680,
+          "unit": "bytes",
+          "stability": "hardware_dependent",
+          "method": "sampled_process_rss"
+        },
+        "artifactBytes": {
+          "status": "unavailable",
+          "reason": "not_applicable"
+        }
       }
     }
   ],
@@ -408,11 +726,21 @@
   "comparisonSummary": {
     "stableRegressions": 0,
     "stableImprovements": 0,
-    "stableWithinTolerance": 7,
+    "stableWithinTolerance": 10,
     "hardwareDependentDrift": 0,
     "missingBaselineMetrics": 1
   },
   "comparisons": [
+    {
+      "id": "issue-441-parakeet-final-policy",
+      "issue": 441,
+      "title": "Parakeet canonical transcription is isolated and fail-closed",
+      "metricName": "passedScenarioCount",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "missing_baseline_metric",
+      "currentValue": 5
+    },
     {
       "id": "issue-493-capture-recovery",
       "issue": 493,
@@ -420,8 +748,22 @@
       "metricName": "recoveredChunkRatio",
       "tolerance": 0,
       "stability": "stable",
-      "outcome": "missing_baseline_metric",
-      "currentValue": 0.75
+      "outcome": "stable_within_tolerance",
+      "baselineValue": 0.75,
+      "currentValue": 0.75,
+      "delta": 0
+    },
+    {
+      "id": "issue-493-capture-recovery",
+      "issue": 493,
+      "title": "Interrupted capture journals recover acknowledged evidence",
+      "metricName": "measurements.artifactBytes",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": 51,
+      "currentValue": 51,
+      "delta": 0
     },
     {
       "id": "issue-549-live-transcript-responsiveness",
@@ -433,6 +775,18 @@
       "outcome": "stable_within_tolerance",
       "baselineValue": 250,
       "currentValue": 250,
+      "delta": 0
+    },
+    {
+      "id": "issue-551-stop-to-validated-latency",
+      "issue": 551,
+      "title": "Stop-to-validated latency follows durable save timing",
+      "metricName": "durationMs",
+      "tolerance": 0,
+      "stability": "stable",
+      "outcome": "stable_within_tolerance",
+      "baselineValue": 45,
+      "currentValue": 45,
       "delta": 0
     },
     {

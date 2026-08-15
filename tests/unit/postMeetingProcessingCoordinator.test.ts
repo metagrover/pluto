@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canRetryMeetingFinalTranscription,
   forgetExpiredMeetingProcessingAttempts,
+  isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
   nextMeetingProcessingWakeDelay,
   rememberMeetingProcessingOutcome,
+  selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
 } from '../../src/services/postMeetingProcessingCoordinator';
 
@@ -23,6 +26,79 @@ const incomplete = (id: string) => ({
 });
 
 describe('post-meeting processing coordinator', () => {
+  it('selects a sealed provisional recording for the app-wide final worker', () => {
+    expect(
+      selectNextMeetingForFinalTranscription([
+        {
+          id: 'meeting-1',
+          transcript_status: 'provisional',
+          finalization_status: 'finalized',
+          capture_journal_generation: 'generation-1',
+          transcript_json: '{"segments":[]}',
+          audio_path: '/approved/mic.wav',
+        },
+      ])?.id,
+    ).toBe('meeting-1');
+  });
+
+  it('does not finalize an unsealed or recovery-required recording', () => {
+    expect(
+      selectNextMeetingForFinalTranscription([
+        {
+          id: 'unsealed',
+          transcript_status: 'provisional',
+          transcript_json: '{"segments":[]}',
+          audio_path: '/approved/mic.wav',
+        },
+        {
+          id: 'recovery',
+          transcript_status: 'provisional',
+          finalization_status: 'recovery_required',
+          capture_journal_generation: 'generation-1',
+          transcript_json: '{"segments":[]}',
+          audio_path: '/approved/mic.wav',
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  it('recognizes an explicit Parakeet failure as manually retryable', () => {
+    const meeting = {
+      id: 'meeting-1',
+      transcript_status: 'needs_attention' as const,
+      capture_journal_generation: 'generation-1',
+      audio_path: '/approved/mic.wav',
+      transcript_json: JSON.stringify({ segments: [{ text: 'preview' }] }),
+      transcript_integrity_json: JSON.stringify({
+        finalTranscription: {
+          policy: 'parakeet_final_v1',
+          state: 'needs_attention',
+          failure: 'resource_policy_denied',
+        },
+      }),
+    };
+    expect(canRetryMeetingFinalTranscription(meeting)).toBe(true);
+    expect(selectNextMeetingForProcessing([meeting], new Set())).toBeNull();
+  });
+
+  it('recognizes a committed Parakeet transcript for downstream-only retry', () => {
+    expect(
+      isParakeetValidatedMeeting({
+        transcript_status: 'validated',
+        transcript_integrity_json: JSON.stringify({
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'complete',
+          },
+          finalTranscriptionResult: {
+            policy: 'parakeet_final_v1',
+            engine: 'parakeet_coreml',
+          },
+        }),
+      }),
+    ).toBe(true);
+  });
+
   it('selects incomplete meetings without relying on UI selection', () => {
     const attempted = new Set<string>();
     expect(

@@ -238,22 +238,22 @@ expect(events).toEqual(['commit-canonical', 'start-analysis']);
 - Modify: `docs/dev.md`
 - Create: `docs/changelog/entries/2026-08-15-441-parakeet-final-transcription.md`
 
-- [ ] **Step 1: Add failing synthetic benchmark cases for policy selection, readiness failure, silence, overlap/deduplication, and analysis handoff plus stable accuracy/integrity metrics**
+- [x] **Step 1: Add failing synthetic benchmark cases for policy selection, readiness failure, silence, overlap/deduplication, and analysis handoff plus stable accuracy/integrity metrics**
 
-- [ ] **Step 2: Verify the benchmark fails before implementation fixtures/baseline update**
+- [x] **Step 2: Verify the benchmark fails before implementation fixtures/baseline update**
 
-- [ ] **Step 3: Implement benchmark adapters and a content-free private-manifest validator; never commit private outputs**
+- [x] **Step 3: Implement benchmark adapters and a content-free private-manifest validator; never commit private outputs**
 
-- [ ] **Step 4: Record the superseding architecture decision, rationale, consequences, model/license ownership, and removal of whole-session MLX**
+- [x] **Step 4: Record the superseding architecture decision, rationale, consequences, model/license ownership, and removal of whole-session MLX**
 
-- [ ] **Step 5: Run `pnpm run benchmark:recording-quality` and `pnpm run changelog:check`; commit**
+- [x] **Step 5: Run `pnpm run benchmark:recording-quality` and `pnpm run changelog:check`; commit**
 
 ### Task 10: Completion verification and delivery
 
 **Files:**
 - Review all changed files and issue/PR evidence
 
-- [ ] **Step 1: Run native verification**
+- [x] **Step 1: Run native verification**
 
 ```bash
 swift test --package-path native/parakeet-runtime
@@ -261,7 +261,7 @@ pnpm run build-native
 pnpm run build:parakeet
 ```
 
-- [ ] **Step 2: Run application verification**
+- [x] **Step 2: Run application verification**
 
 ```bash
 pnpm exec vitest run
@@ -272,10 +272,10 @@ pnpm run changelog:check
 pnpm run audit:high
 ```
 
-- [ ] **Step 3: Run guarded hardware verification with the local-only corpus: sequential per-source v3, word/timing validation, WER/disagreement report, silence precision, peak RSS, and no transcript content in output**
+- [x] **Step 3: Run guarded hardware verification with the local-only corpus: sequential per-source v3, word/timing validation, WER/disagreement report, silence precision, peak RSS, and no transcript content in output**
 
 - [ ] **Step 4: Run the packaged or development application workflow: live text, provisional post-stop transcript, Parakeet final replacement, validated status, and analysis input checksum matching the committed canonical transcript**
 
-- [ ] **Step 5: Review every design requirement against direct evidence, update issue #441 content-free, and fix any uncovered gap**
+- [x] **Step 5: Review every design requirement against direct evidence, update issue #441 content-free, and fix any uncovered gap**
 
-- [ ] **Step 6: Push `codex/441-parakeet-final-transcription`, create the issue-linked PR with verification evidence, and retain the worktree for review**
+- [x] **Step 6: Push `codex/441-parakeet-final-transcription`, create the issue-linked PR with verification evidence, and retain the worktree for review**

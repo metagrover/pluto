@@ -17,7 +17,10 @@ import type {
 export const TRANSCRIPT_PIPELINE_VERSION = '3.0.0';
 
 export type CanonicalTranscriptSource = 'mic' | 'mix' | 'recovered_channels';
-export type TranscriptPipelineMode = 'legacy' | 'canonical_session_v2';
+export type TranscriptPipelineMode =
+  | 'legacy'
+  | 'canonical_session_v2'
+  | 'parakeet_final_v1';
 
 export type TranscriptTranscriptionMeta = {
   backend: string;
@@ -29,6 +32,7 @@ export type TranscriptTranscriptionMeta = {
   diarization: boolean;
   elapsedMs: number;
   providerLabel?: string;
+  language?: string;
   warnings?: string[];
   vocabularyHintPolicyVersion?: string;
   vocabularyHintCount?: number;

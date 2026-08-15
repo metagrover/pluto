@@ -8,6 +8,7 @@ export type FinalTranscriptionStage =
 export type FinalTranscriptionFailure =
   | 'evidence_unsealed'
   | 'runtime_unavailable'
+  | 'resource_policy_denied'
   | 'required_source_failed'
   | 'integrity_rejected'
   | 'conditional_save_conflict'

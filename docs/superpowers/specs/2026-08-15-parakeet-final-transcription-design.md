@@ -93,7 +93,7 @@ The runtime:
 
 ### Managed model lifecycle
 
-Pluto owns `userData/models/transcription/parakeet-v3/`. A checked-in manifest pins:
+Pluto owns `userData/models/transcription/parakeet/`. A checked-in manifest pins:
 
 - FluidAudio package version and revision;
 - model family, model version, encoder precision, provider repository, and license identifiers;

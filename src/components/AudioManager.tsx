@@ -3,8 +3,7 @@ import {
   markStopToValidatedLatencyUnavailable,
   startStopToValidatedLatencyAfterAcceptedStop,
 } from '../services/diarizationFirstFinalization';
-import { runFinalTranscription } from '../services/finalTranscription/runFinalTranscription';
-import { retryMeetingTranscriptValidation } from '../services/retryMeetingTranscriptValidation';
+import { registerFinalTranscriptionVocabulary } from '../services/finalTranscription/finalTranscriptionVocabularyRegistry';
 import {
   computeRms,
   createWavBlob,
@@ -84,7 +83,6 @@ import {
 } from './features/recordingWorkspaceModel';
 
 interface AudioManagerProps {
-  onTranscript: (text: string) => void;
   onSessionComplete: (meetingId?: string | number) => void;
   onRecordingChange?: (isRecording: boolean) => void;
   onProcessingChange?: (isProcessing: boolean) => void;
@@ -190,7 +188,6 @@ type ChunkAcceptanceDraft = {
 };
 
 export const AudioManager = ({
-  onTranscript,
   onSessionComplete,
   onRecordingChange,
   onProcessingChange,
@@ -3741,7 +3738,6 @@ export const AudioManager = ({
     let mixedAudioPath = '';
     let rebuiltSystemAudioPath = '';
     let sealedActivityEvidence: CaptureActivityEvidence | null = null;
-    const finalTranscriptionRunId = crypto.randomUUID();
     let provisionalMeetingPersisted = false;
 
     try {
@@ -4095,167 +4091,15 @@ export const AudioManager = ({
         return;
       }
       provisionalMeetingPersisted = true;
-
-      let committedFinalSegments: TranscriptionSegment[] = [];
-      const finalOutcome = await sealedActivityHandoff.runValidation(
-        async (activityWindows) =>
-          await runFinalTranscription(
-            {
-              meetingId: finalStopSnapshot.meetingId,
-              runId: finalTranscriptionRunId,
-              captureEvidence: {
-                sealed: Boolean(captureGeneration),
-                generation: captureGeneration,
-              },
-              recordingDurationSeconds: meetingTiming.durationSeconds,
-              micAudioPath: primaryAudioPath,
-              systemAudioPath,
-              provisionalSegments: newTranscription,
-              activityWindows,
-              language: resolvedTranscriptionSettings.language || 'en',
-              vocabulary: transcriptionVocabularyRef.current.terms,
-              vocabularyPolicyVersion:
-                transcriptionVocabularyRef.current.provenance.policyVersion,
-            },
-            {
-              claimLease: async (lease) =>
-                (await window.ipcRenderer.invoke(
-                  'CLAIM_FINAL_TRANSCRIPTION',
-                  finalStopSnapshot.meetingId,
-                  lease,
-                )) === true,
-              updateLease: async (lease) =>
-                await window.ipcRenderer.invoke(
-                  'UPDATE_FINAL_TRANSCRIPTION_STAGE',
-                  finalStopSnapshot.meetingId,
-                  lease.runId,
-                  lease.stage,
-                ),
-              transcribe: async (request) =>
-                await window.ipcRenderer.invoke(
-                  'TRANSCRIPTION_TRANSCRIBE_FINAL',
-                  request,
-                ),
-              probeDuration: async (audioPath) =>
-                await window.ipcRenderer.invoke(
-                  'AUDIO_PROBE_DURATION',
-                  audioPath,
-                ),
-              commitCanonical: async (commit) => {
-                committedFinalSegments =
-                  commit.segments as TranscriptionSegment[];
-                const transcriptValidatedAt = new Date().toISOString();
-                const canonicalTranscriptJson = JSON.stringify(
-                  buildTranscriptJsonPayload(committedFinalSegments, {
-                    pipelineMode,
-                    canonicalSource: 'recovered_channels',
-                    postHydrationBleedPass: false,
-                    transcription: {
-                      backend: 'parakeet_coreml',
-                      preset: 'accuracy_first',
-                      model: commit.metadata.model,
-                      device: 'coreml',
-                      computeType: 'float16',
-                      canonicalSource: 'recovered_channels',
-                      diarization: false,
-                      elapsedMs: 0,
-                      providerLabel: 'FluidAudio-0.15.5',
-                      vocabularyHintPolicyVersion:
-                        commit.metadata.vocabularyPolicyVersion,
-                      vocabularyHintCount: commit.metadata.vocabularyCount,
-                    },
-                    speakerAttribution,
-                    liveTranscriptResponsiveness:
-                      frozenLiveTranscriptResponsivenessRef.current ??
-                      undefined,
-                    lifecycleStatus: 'validated',
-                    integrity: {
-                      ...commit.integrity,
-                      reasons: [],
-                    },
-                  }),
-                );
-                const transcriptIntegrityJson = JSON.stringify({
-                  schemaVersion: 2,
-                  state: 'validated',
-                  causes: [],
-                  evidenceProvenance: {
-                    kind: 'sealed_capture_activity_v2',
-                    digestSha256: finalSealedActivityEvidence.digestSha256,
-                  },
-                  activityEvidence: finalSealedActivityEvidence,
-                  evidence: commit.integrity,
-                  validationProof: {
-                    gateVersion: 'canonical_integrity_v1',
-                    validatedAt: transcriptValidatedAt,
-                  },
-                });
-                const outcome = await window.ipcRenderer.invoke(
-                  'COMMIT_FINAL_TRANSCRIPTION',
-                  {
-                    meetingId: finalStopSnapshot.meetingId,
-                    runId: finalTranscriptionRunId,
-                    captureGeneration,
-                    canonicalTranscriptJson,
-                    transcriptIntegrityJson,
-                    transcriptValidatedAt,
-                  },
-                );
-                return outcome && outcome.committed === true
-                  ? {
-                      committed: true,
-                      transcript: JSON.parse(outcome.transcriptJson),
-                    }
-                  : { committed: false };
-              },
-              markNeedsAttention: async ({ failure, lease }) => {
-                if (lease) {
-                  await window.ipcRenderer.invoke(
-                    'FAIL_FINAL_TRANSCRIPTION',
-                    finalStopSnapshot.meetingId,
-                    lease.runId,
-                    failure,
-                  );
-                }
-              },
-              startAnalysis: async ({ transcript }) => {
-                if (
-                  transcript &&
-                  typeof transcript === 'object' &&
-                  Array.isArray(
-                    (transcript as { segments?: unknown[] }).segments,
-                  )
-                ) {
-                  const fullText = committedFinalSegments
-                    .map((segment) => segment.text)
-                    .join(' ');
-                  if (fullText) onTranscript?.(fullText);
-                }
-                await retryMeetingTranscriptValidation(
-                  finalStopSnapshot.meetingId,
-                  (channel, ...args) =>
-                    window.ipcRenderer.invoke(channel, ...args),
-                );
-                onSessionComplete?.(finalStopSnapshot.meetingId);
-              },
-            },
-          ),
+      registerFinalTranscriptionVocabulary(
+        finalStopSnapshot.meetingId,
+        transcriptionVocabularyRef.current.terms,
       );
-      if (finalOutcome.status !== 'validated') {
-        onSessionComplete?.(finalStopSnapshot.meetingId);
-      }
-      if (finalOutcome.status) return;
+      onSessionComplete?.(finalStopSnapshot.meetingId);
+      return;
     } catch (e) {
       console.error('[Pluto] Processing failed:', e);
       if (provisionalMeetingPersisted) {
-        await window.ipcRenderer
-          .invoke(
-            'FAIL_FINAL_TRANSCRIPTION',
-            stopSnapshot.meetingId,
-            finalTranscriptionRunId,
-            'runtime_unavailable',
-          )
-          .catch(() => null);
         onSessionComplete?.(stopSnapshot.meetingId);
       } else if (
         currentMeetingIdRef.current &&

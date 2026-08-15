@@ -53,21 +53,31 @@ describe('stop-to-validated persistence boundary', () => {
   });
 
   it('hands analysis only the generation-bound canonical commit', () => {
+    const finalWorker = readFileSync(
+      'src/services/finalTranscription/runPersistedMeetingFinalTranscription.ts',
+      'utf8',
+    );
     const audioManager = readFileSync(
       'src/components/AudioManager.tsx',
       'utf8',
     );
-    const boundary = audioManager.slice(
-      audioManager.indexOf('commitCanonical: async (commit)'),
-      audioManager.indexOf('markNeedsAttention: async'),
+    const downstream = readFileSync(
+      'src/services/processValidatedMeetingDownstream.ts',
+      'utf8',
+    );
+    const boundary = finalWorker.slice(
+      finalWorker.indexOf('commitCanonical: async (commit)'),
+      finalWorker.indexOf('markNeedsAttention: async'),
     );
 
     expect(boundary).toContain("'COMMIT_FINAL_TRANSCRIPTION'");
     expect(boundary).toContain('captureGeneration');
     expect(boundary).toContain('outcome.committed === true');
     expect(boundary).toContain(
-      'transcript: JSON.parse(outcome.transcriptJson)',
+      'outcome.transcriptJson || canonicalTranscriptJson',
     );
+    expect(finalWorker).toContain('processValidatedMeetingDownstream');
+    expect(downstream).not.toContain('TRANSCRIPTION_TRANSCRIBE');
     expect(audioManager).not.toContain("'AUDIO_DELETE_FILES'");
     expect(audioManager).not.toContain("'EXTRACT_AND_PROCESS_ENTITIES'");
   });

@@ -10,6 +10,7 @@ import type {
   TranscriptionRequest,
   TranscriptionResult,
 } from '../transcription/contracts.ts';
+import type { FinalTranscriptionAdmission } from './finalTranscriptionAdmission.ts';
 import {
   type FinalTranscriptionFailure,
   type FinalTranscriptionLease,
@@ -40,10 +41,33 @@ type CanonicalCommit = {
   metadata: FinalTranscriptionMetadata;
 };
 
-type FinalTranscriptionMetadata = {
+export type FinalTranscriptionMetadata = {
   policy: 'parakeet_final_v1';
+  engine: 'parakeet_coreml';
   model: 'parakeet-tdt-0.6b-v3';
+  computeType: 'int8';
+  computeUnits: 'cpu_and_neural_engine';
+  language: string;
+  elapsedMs: number;
+  warnings: string[];
   sources: RecordingTranscriptValidationResult['sourceOutcomes'];
+  sourceDetails: Partial<
+    Record<
+      'mic' | 'system',
+      {
+        outcome: 'speech' | 'no_speech' | 'failed';
+        providerVersion: string;
+        modelBundleVersion?: string;
+        elapsedMs: number;
+        confidence?: number;
+        vadStatus: 'speech' | 'no_speech' | 'failed';
+        speechSeconds: number;
+        segmentCount: number;
+        wordCount: number;
+      }
+    >
+  >;
+  providerVersions: string[];
   modelBundleVersions: string[];
   vocabularyPolicyVersion?: string;
   vocabularyCount: number;
@@ -51,6 +75,7 @@ type FinalTranscriptionMetadata = {
 
 export type FinalTranscriptionDependencies<TTranscript = unknown> = {
   claimLease: (lease: FinalTranscriptionLease) => Promise<boolean>;
+  admit?: () => Promise<FinalTranscriptionAdmission>;
   updateLease?: (lease: FinalTranscriptionLease) => Promise<unknown>;
   transcribe: (request: TranscriptionRequest) => Promise<TranscriptionResult>;
   probeDuration: (audioPath: string) => Promise<number | null>;
@@ -84,7 +109,7 @@ export const runFinalTranscription = async <TTranscript>(
   input: FinalTranscriptionInput,
   dependencies: FinalTranscriptionDependencies<TTranscript>,
 ): Promise<FinalTranscriptionOutcome> => {
-  if (!input.captureEvidence.sealed || !input.captureEvidence.generation) {
+  if (!input.captureEvidence.generation) {
     await dependencies.markNeedsAttention({
       meetingId: input.meetingId,
       captureGeneration: input.captureEvidence.generation,
@@ -100,6 +125,26 @@ export const runFinalTranscription = async <TTranscript>(
     recordingDurationSeconds: input.recordingDurationSeconds,
   });
   if (!(await dependencies.claimLease(lease))) return { status: 'superseded' };
+  if (!input.captureEvidence.sealed) {
+    await dependencies.markNeedsAttention({
+      meetingId: input.meetingId,
+      captureGeneration: input.captureEvidence.generation,
+      failure: 'evidence_unsealed',
+      lease,
+    });
+    return { status: 'needs_attention', reasons: ['evidence_unsealed'] };
+  }
+  const admission = await dependencies.admit?.();
+  if (admission && !admission.admitted) {
+    await dependencies.markNeedsAttention({
+      meetingId: input.meetingId,
+      captureGeneration: input.captureEvidence.generation,
+      failure: 'resource_policy_denied',
+      lease,
+      reasons: [admission.reason],
+    });
+    return { status: 'needs_attention', reasons: [admission.reason] };
+  }
 
   const observedResults: TranscriptionResult[] = [];
   try {
@@ -151,8 +196,44 @@ export const runFinalTranscription = async <TTranscript>(
 
     const metadata: FinalTranscriptionMetadata = {
       policy: 'parakeet_final_v1',
+      engine: 'parakeet_coreml',
       model: 'parakeet-tdt-0.6b-v3',
+      computeType: 'int8',
+      computeUnits: 'cpu_and_neural_engine',
+      language: input.language,
+      elapsedMs: observedResults.reduce(
+        (total, result) => total + result.meta.elapsedMs,
+        0,
+      ),
+      warnings: [],
       sources: validation.sourceOutcomes,
+      sourceDetails: Object.fromEntries(
+        observedResults.map((result) => [
+          result.meta.source,
+          {
+            outcome: result.vad.status,
+            providerVersion: result.meta.providerVersion,
+            modelBundleVersion: result.meta.modelBundleVersion,
+            elapsedMs: result.meta.elapsedMs,
+            confidence: result.meta.confidence,
+            vadStatus: result.vad.status,
+            speechSeconds: result.vad.speechSeconds,
+            segmentCount: result.segments.length,
+            wordCount: result.segments.reduce(
+              (total, segment) =>
+                total +
+                (segment.words?.length ??
+                  segment.text.split(/\s+/).filter(Boolean).length),
+              0,
+            ),
+          },
+        ]),
+      ) as FinalTranscriptionMetadata['sourceDetails'],
+      providerVersions: [
+        ...new Set(
+          observedResults.map((result) => result.meta.providerVersion),
+        ),
+      ],
       modelBundleVersions: [
         ...new Set(
           observedResults
@@ -204,6 +285,12 @@ export const runFinalTranscription = async <TTranscript>(
     return { status: 'validated' };
   } catch (error) {
     if (isCancellation(error) || input.signal?.aborted) {
+      await dependencies.markNeedsAttention({
+        meetingId: input.meetingId,
+        captureGeneration: input.captureEvidence.generation,
+        failure: 'cancelled',
+        lease,
+      });
       return { status: 'cancelled' };
     }
     await dependencies.markNeedsAttention({

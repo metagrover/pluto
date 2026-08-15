@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -357,6 +358,7 @@ app.whenReady().then(async () => {
   const parakeetModelRoot = path.join(
     app.getPath('userData'),
     'models',
+    'transcription',
     'parakeet',
   );
   fs.mkdirSync(parakeetModelRoot, { recursive: true });
@@ -391,6 +393,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', () => ({
     onBattery: powerMonitor.isOnBatteryPower(),
     thermalState: powerMonitor.getCurrentThermalState(),
+    freeMemoryBytes: os.freemem(),
+    totalMemoryBytes: os.totalmem(),
   }));
 
   ipcMain.handle('TRANSCRIPTION_PREPARE_FINAL', async () => {
@@ -431,6 +435,15 @@ app.whenReady().then(async () => {
     abortMeetingTasks(String(meetingId));
     return { cancelled: true };
   });
+
+  ipcMain.handle(
+    'TRANSCRIPTION_CANCEL_AND_UNLOAD_FINAL',
+    (_event, meetingId) => {
+      abortMeetingTasks(String(meetingId));
+      parakeetFinalClient?.close();
+      return { cancelled: true, unloaded: true };
+    },
+  );
 
   ipcMain.handle(
     'GET_TRANSCRIPTION_VOCABULARY',

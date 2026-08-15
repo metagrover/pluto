@@ -85,6 +85,7 @@ export const shouldAutoProcessMeetingAnalysis = (
   meeting: Partial<Meeting> | null | undefined,
 ) => {
   let downstreamState: unknown = null;
+  let pendingParakeetFinal = false;
   try {
     downstreamState = JSON.parse(
       meeting?.downstream_processing_json || '{}',
@@ -92,12 +93,25 @@ export const shouldAutoProcessMeetingAnalysis = (
   } catch {
     downstreamState = null;
   }
+  try {
+    const integrity = JSON.parse(
+      meeting?.transcript_integrity_json || '{}',
+    ) as {
+      finalTranscription?: { policy?: unknown; state?: unknown };
+    };
+    pendingParakeetFinal =
+      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+      integrity.finalTranscription.state === 'needs_attention';
+  } catch {
+    pendingParakeetFinal = false;
+  }
   const genericTitleRepairNeeded =
     typeof meeting?.title === 'string' &&
     meetingTitleNeedsGeneration(meeting?.title) &&
     hasTranscriptText(meeting?.transcript_json);
   if (
     !meeting ||
+    pendingParakeetFinal ||
     (meeting.transcript_status !== 'needs_attention' &&
       meeting.transcript_status !== 'validated') ||
     meeting.finalization_status === 'recovery_required' ||

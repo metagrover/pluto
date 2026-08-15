@@ -236,4 +236,33 @@ describe('ParakeetFinalClient', () => {
     );
     expect(JSON.stringify(diagnostic.mock.calls)).not.toContain('meeting.wav');
   });
+
+  it('unloads the native model process after the idle deadline', async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({
+      paths,
+      spawn: () => child,
+      idleTimeoutMs: 100,
+    });
+    const ready = client.prepare();
+    child.respond(prepared(String(child.writes[0].id)));
+    await ready;
+    const request = client.transcribe({
+      meetingId: 'one',
+      role: 'final_validation',
+      source: 'mic',
+      audioPath: '/user/recordings/one.wav',
+      language: 'en',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    child.respond(success(String(child.writes[1].id)));
+    await request;
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(child.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    vi.useRealTimers();
+  });
 });

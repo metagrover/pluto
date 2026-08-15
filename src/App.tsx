@@ -32,13 +32,18 @@ import type {
   LiveTranscriptSegment,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
+import { runPersistedMeetingFinalTranscription } from './services/finalTranscription/runPersistedMeetingFinalTranscription';
 import {
+  canRetryMeetingFinalTranscription,
   forgetExpiredMeetingProcessingAttempts,
+  isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
   nextMeetingProcessingWakeDelay,
   rememberMeetingProcessingOutcome,
+  selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
 } from './services/postMeetingProcessingCoordinator';
+import { processValidatedMeetingDownstream } from './services/processValidatedMeetingDownstream';
 import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 
 import {
@@ -71,6 +76,9 @@ function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
     useState(false);
+  const finalTranscriptionAbortRef = useRef<AbortController | null>(null);
+  const [finalTranscriptionMeetingId, setFinalTranscriptionMeetingId] =
+    useState<string | number | null>(null);
   const autoAnalysisAttemptsRef = useRef(new Set<string>());
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingParticipants, setMeetingParticipants] = useState<string[]>([]);
@@ -444,6 +452,21 @@ function App() {
     if (!meetingId || transcriptValidationRetrying) return;
     setTranscriptValidationRetrying(true);
     try {
+      const meeting = safeMeetings.find(
+        (candidate) => String(candidate.id) === String(meetingId),
+      );
+      if (meeting && canRetryMeetingFinalTranscription(meeting)) {
+        await runMeetingFinalTranscription(meeting);
+        return;
+      }
+      if (meeting && isParakeetValidatedMeeting(meeting)) {
+        await processValidatedMeetingDownstream(
+          meeting.id,
+          (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+        );
+        await fetchMeetings();
+        return;
+      }
       const result = await retryMeetingTranscriptValidation(
         meetingId,
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
@@ -500,8 +523,53 @@ function App() {
     setSidebarVisible(true);
   };
 
+  const runMeetingFinalTranscription = async (meeting: Meeting) => {
+    if (finalTranscriptionAbortRef.current) return;
+    const controller = new AbortController();
+    finalTranscriptionAbortRef.current = controller;
+    setFinalTranscriptionMeetingId(meeting.id);
+    try {
+      await runPersistedMeetingFinalTranscription(
+        meeting,
+        (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+        { signal: controller.signal },
+      );
+    } catch (error) {
+      console.error('[Pluto] Final transcription worker failed', error);
+    } finally {
+      if (finalTranscriptionAbortRef.current === controller) {
+        finalTranscriptionAbortRef.current = null;
+        setFinalTranscriptionMeetingId(null);
+      }
+      await fetchMeetings();
+    }
+  };
+
   useEffect(() => {
-    if (transcriptValidationRetrying) return;
+    if (activeRecording || finalTranscriptionAbortRef.current) return;
+    const candidate = selectNextMeetingForFinalTranscription(safeMeetings);
+    if (!candidate?.id) return;
+    void runMeetingFinalTranscription(candidate as Meeting);
+  }, [activeRecording, safeMeetings, finalTranscriptionMeetingId]);
+
+  useEffect(() => {
+    if (!activeRecording) return;
+    finalTranscriptionAbortRef.current?.abort();
+    if (finalTranscriptionMeetingId) {
+      void window.ipcRenderer.invoke(
+        'TRANSCRIPTION_CANCEL_AND_UNLOAD_FINAL',
+        finalTranscriptionMeetingId,
+      );
+    }
+  }, [activeRecording, finalTranscriptionMeetingId]);
+
+  useEffect(() => {
+    if (
+      transcriptValidationRetrying ||
+      finalTranscriptionAbortRef.current ||
+      selectNextMeetingForFinalTranscription(safeMeetings)
+    )
+      return;
     const candidate = selectNextMeetingForProcessing(
       safeMeetings,
       autoAnalysisAttemptsRef.current,
@@ -673,7 +741,6 @@ function App() {
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
       <div className="hidden">
         <AudioManager
-          onTranscript={() => {}}
           onSessionComplete={async (meetingId) => {
             await fetchMeetings();
             if (meetingId) {

@@ -34,18 +34,21 @@ type NativeTranscription = {
 };
 
 const DEFAULT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 export class ParakeetFinalClient {
   private readonly process: NativeJsonLineProcess;
   private preparePromise: Promise<TranscriptionRuntimeHealth> | null = null;
   private queue: Promise<void> = Promise.resolve();
   private nextID = 0;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly options: {
       paths: ParakeetRuntimePaths;
       spawn?: NativeProcessSpawn;
       requestTimeoutMs?: number;
+      idleTimeoutMs?: number;
       diagnostic?: (code: string) => void;
       now?: () => number;
     },
@@ -65,6 +68,7 @@ export class ParakeetFinalClient {
   }
 
   prepare(): Promise<TranscriptionRuntimeHealth> {
+    this.clearIdleTimer();
     if (!this.preparePromise) {
       const id = this.requestID('prepare');
       this.preparePromise = this.process
@@ -114,6 +118,7 @@ export class ParakeetFinalClient {
   }
 
   close(): void {
+    this.clearIdleTimer();
     this.process.terminate();
     this.preparePromise = null;
   }
@@ -188,6 +193,7 @@ export class ParakeetFinalClient {
       };
     } finally {
       request.signal?.removeEventListener('abort', abort);
+      this.scheduleIdleUnload();
     }
   }
 
@@ -235,5 +241,19 @@ export class ParakeetFinalClient {
   private requestID(prefix: string): string {
     this.nextID += 1;
     return `${prefix}-${this.nextID}`;
+  }
+
+  private clearIdleTimer(): void {
+    if (!this.idleTimer) return;
+    clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+  }
+
+  private scheduleIdleUnload(): void {
+    this.clearIdleTimer();
+    this.idleTimer = setTimeout(
+      () => this.close(),
+      this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+    );
   }
 }
