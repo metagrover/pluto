@@ -6,17 +6,20 @@ import ParakeetRuntimeCore
 
 public enum FluidAudioModelLayout {
     public static let asrDirectoryName = "parakeet-tdt-0.6b-v3-coreml"
+    public static let installedAsrDirectoryName = "parakeet-tdt-0.6b-v3"
     public static let ctcDirectoryName = "parakeet-ctc-110m-coreml"
 }
 
 public enum ProductionModelManifest {
     public static let current = ModelManifest(
         identifier: "parakeet-tdt-0.6b-v3",
-        version: "fluidaudio-0.15.5-asr-aed02740-ctc-accdafd8-int8",
+        version: "fluidaudio-0.15.5-asr-aed02740-ctc-accdafd8-int8-verified1",
         repository: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
         repositoryRevision: "aed02740059203c4a87495924f685de3722ae9ce",
         auxiliaryRepository: "FluidInference/parakeet-ctc-110m-coreml",
         auxiliaryRepositoryRevision: "accdafd8cf8a2ff1cabe3c11e54416b405d409aa",
+        recognitionArtifactSHA256: "f03b69d2d516896b78676270164b54f7c1fd2add37de4d06f9671752f88c688f",
+        vocabularyArtifactSHA256: "b955323ed3f2769beb287c97f172a7dd2ccc7493218a2e6e6b930ccbc41d17d7",
         encoderPrecision: "int8"
     )
 }
@@ -49,6 +52,17 @@ public struct FluidAudioModelInstaller: ModelInstalling {
             isDirectory: true
         )
         _ = try await CtcModels.downloadAndLoad(to: ctcDirectory, variant: .ctc110m)
+        try ModelArtifactIntegrity.verify(
+            directory: stagingDirectory.appendingPathComponent(
+                FluidAudioModelLayout.installedAsrDirectoryName,
+                isDirectory: true
+            ),
+            expectedSHA256: manifest.recognitionArtifactSHA256
+        )
+        try ModelArtifactIntegrity.verify(
+            directory: ctcDirectory,
+            expectedSHA256: manifest.vocabularyArtifactSHA256
+        )
     }
 
     private func verifyCurrentRevision(repository: String, expected: String) async throws {

@@ -294,6 +294,35 @@ describe('runRecordingTranscriptValidation', () => {
     expect(result.reasons).toContain('local_speech_unaccounted');
   });
 
+  it('does not let sparse ASR speech replace sealed capture activity', async () => {
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'synthetic-meeting',
+      recordingDurationSeconds: 60,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '',
+      systemAudioPath: '',
+      provisionalSegments: [],
+      activityWindows: [{ speaker: 'Me', startTime: 0, endTime: 60 }],
+      canonicalMode: 'recovered_channels',
+      transcriptionScheduling: 'sequential_channels',
+      transcribe: async (_path, options) => ({
+        segments:
+          options.canonicalSource === 'mic'
+            ? [rawSegment(0, 2, 'Only a short recovered fragment')]
+            : [],
+        vad:
+          options.canonicalSource === 'mic'
+            ? { status: 'speech' as const, speechSeconds: 2 }
+            : { status: 'no_speech' as const, speechSeconds: 0 },
+      }),
+      probeDuration: async () => 60,
+    });
+
+    expect(result.status).toBe('needs_attention');
+    expect(result.reasons).toContain('local_speech_unaccounted');
+    expect(result.evidence.micActivitySeconds).toBe(60);
+  });
+
   it('does not expose source paths or transcript text in integrity evidence', async () => {
     const result = await runRecordingTranscriptValidation({
       meetingId: 'synthetic-meeting',

@@ -389,6 +389,8 @@ export const runRecordingTranscriptValidation = async (input: {
   );
   const micVadVerified = hasExplicitVadProof(mic);
   const systemVadVerified = hasExplicitVadProof(system);
+  const micNoSpeechVerified = mic.result?.vad?.status === 'no_speech';
+  const systemNoSpeechVerified = system.result?.vad?.status === 'no_speech';
   const recoveredChannels = input.canonicalMode === 'recovered_channels';
   const micRequired = micActivitySeconds > 0;
   const systemRequired = systemActivitySeconds > 0;
@@ -424,10 +426,8 @@ export const runRecordingTranscriptValidation = async (input: {
       recoveredChannels && !systemRequired
         ? input.recordingDurationSeconds
         : (systemDuration ?? 0),
-    micActivitySeconds: micVadVerified ? micSpeechSeconds : micActivitySeconds,
-    systemActivitySeconds: systemVadVerified
-      ? systemSpeechSeconds
-      : systemActivitySeconds,
+    micActivitySeconds: micNoSpeechVerified ? 0 : micActivitySeconds,
+    systemActivitySeconds: systemNoSpeechVerified ? 0 : systemActivitySeconds,
     localTranscriptCoveredSeconds: micVadVerified
       ? asrConfirmedLocalCoveredSeconds
       : candidateLocalCoveredSeconds,
@@ -445,17 +445,21 @@ export const runRecordingTranscriptValidation = async (input: {
     systemActivitySeconds,
     localTranscriptCoveredSeconds: candidateLocalCoveredSeconds,
     remoteTranscriptCoveredSeconds: candidateRemoteCoveredSeconds,
-    unexplainedMicSeconds: micVadVerified
-      ? Math.max(
-          0,
-          micSpeechSeconds -
-            asrConfirmedLocalCoveredSeconds -
-            reconciliation.evidence.collapsedPassThroughSeconds,
-        )
-      : Math.max(0, micActivitySeconds - candidateLocalCoveredSeconds),
-    unexplainedSystemSeconds: systemVadVerified
-      ? Math.max(0, systemSpeechSeconds - asrConfirmedRemoteCoveredSeconds)
-      : Math.max(0, systemActivitySeconds - candidateRemoteCoveredSeconds),
+    unexplainedMicSeconds: micNoSpeechVerified
+      ? 0
+      : micVadVerified
+        ? Math.max(
+            0,
+            micActivitySeconds -
+              asrConfirmedLocalCoveredSeconds -
+              reconciliation.evidence.collapsedPassThroughSeconds,
+          )
+        : Math.max(0, micActivitySeconds - candidateLocalCoveredSeconds),
+    unexplainedSystemSeconds: systemNoSpeechVerified
+      ? 0
+      : systemVadVerified
+        ? Math.max(0, systemActivitySeconds - asrConfirmedRemoteCoveredSeconds)
+        : Math.max(0, systemActivitySeconds - candidateRemoteCoveredSeconds),
     rejectedMicCandidateSeconds: micVadVerified
       ? Math.max(0, micActivitySeconds - micSpeechSeconds)
       : 0,

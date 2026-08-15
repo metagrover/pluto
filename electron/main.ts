@@ -19,6 +19,7 @@ import {
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
+import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   appendCaptureJournalChunk,
@@ -87,6 +88,47 @@ const probeAudioDuration = async (inputPath: string) =>
       }
       const duration = Number.parseFloat(stdout.trim());
       resolve(Number.isFinite(duration) && duration >= 0 ? duration : null);
+    });
+  });
+
+const probeAvailableMemory = async () =>
+  await new Promise<{
+    availableMemoryBytes: number;
+    memoryPressureFreePercent?: number;
+  }>((resolve) => {
+    const probe = spawn('/usr/bin/memory_pressure', ['-Q']);
+    let stdout = '';
+    let settled = false;
+    const finish = (value: {
+      availableMemoryBytes: number;
+      memoryPressureFreePercent?: number;
+    }) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const timeout = setTimeout(() => {
+      probe.kill('SIGTERM');
+      finish({ availableMemoryBytes: os.freemem() });
+    }, 2_000);
+    probe.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    probe.on('error', () => finish({ availableMemoryBytes: os.freemem() }));
+    probe.on('close', (code) => {
+      clearTimeout(timeout);
+      const percentage =
+        code === 0 ? parseMacMemoryPressureFreePercent(stdout) : null;
+      finish(
+        percentage === null
+          ? { availableMemoryBytes: os.freemem() }
+          : {
+              availableMemoryBytes: Math.floor(
+                (os.totalmem() * percentage) / 100,
+              ),
+              memoryPressureFreePercent: percentage,
+            },
+      );
     });
   });
 
@@ -390,11 +432,12 @@ app.whenReady().then(async () => {
     return await mlxPreview.health();
   });
 
-  ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', () => ({
+  ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', async () => ({
     onBattery: powerMonitor.isOnBatteryPower(),
     thermalState: powerMonitor.getCurrentThermalState(),
     freeMemoryBytes: os.freemem(),
     totalMemoryBytes: os.totalmem(),
+    ...(await probeAvailableMemory()),
   }));
 
   ipcMain.handle('TRANSCRIPTION_PREPARE_FINAL', async () => {

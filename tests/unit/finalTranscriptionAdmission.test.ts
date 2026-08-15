@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateFinalTranscriptionAdmission } from '../../src/services/finalTranscription/finalTranscriptionAdmission.ts';
+import {
+  evaluateFinalTranscriptionAdmission,
+  parseMacMemoryPressureFreePercent,
+} from '../../src/services/finalTranscription/finalTranscriptionAdmission.ts';
 
 describe('evaluateFinalTranscriptionAdmission', () => {
   it.each(['nominal', 'fair', 'unknown'] as const)(
@@ -44,5 +47,26 @@ describe('evaluateFinalTranscriptionAdmission', () => {
         totalMemoryBytes: 64 * 1024 ** 3,
       }),
     ).toEqual({ admitted: false, reason: 'memory_pressure' });
+  });
+
+  it('uses reclaimable macOS availability instead of raw free pages', () => {
+    expect(
+      evaluateFinalTranscriptionAdmission({
+        thermalState: 'nominal',
+        freeMemoryBytes: 512 * 1024 ** 2,
+        availableMemoryBytes: 12 * 1024 ** 3,
+        memoryPressureFreePercent: 76,
+        totalMemoryBytes: 16 * 1024 ** 3,
+      }),
+    ).toEqual({ admitted: true });
+  });
+
+  it('parses the stable memory_pressure percentage without accepting noise', () => {
+    expect(
+      parseMacMemoryPressureFreePercent(
+        'System-wide memory free percentage: 76%\n',
+      ),
+    ).toBe(76);
+    expect(parseMacMemoryPressureFreePercent('unrecognized output')).toBeNull();
   });
 });

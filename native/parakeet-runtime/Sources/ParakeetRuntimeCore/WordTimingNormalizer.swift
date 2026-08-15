@@ -3,7 +3,7 @@ import Foundation
 public func normalizeWordTimings(
     _ words: [TranscriptionWord],
     durationSeconds: Double,
-    maximumDecoderOverlapSeconds: Double = 0.25
+    maximumDecoderOverlapSeconds: Double = 0.5
 ) throws -> [TranscriptionWord] {
     guard durationSeconds.isFinite, durationSeconds >= 0 else {
         throw RuntimeFailure.transcriptionFailed

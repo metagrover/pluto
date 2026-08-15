@@ -7,6 +7,8 @@ public struct ModelManifest: Codable, Equatable, Sendable {
     public let repositoryRevision: String
     public let auxiliaryRepository: String
     public let auxiliaryRepositoryRevision: String
+    public let recognitionArtifactSHA256: String
+    public let vocabularyArtifactSHA256: String
     public let encoderPrecision: String
 
     public init(
@@ -16,6 +18,8 @@ public struct ModelManifest: Codable, Equatable, Sendable {
         repositoryRevision: String = "",
         auxiliaryRepository: String = "",
         auxiliaryRepositoryRevision: String = "",
+        recognitionArtifactSHA256: String = "",
+        vocabularyArtifactSHA256: String = "",
         encoderPrecision: String
     ) {
         self.identifier = identifier
@@ -24,6 +28,8 @@ public struct ModelManifest: Codable, Equatable, Sendable {
         self.repositoryRevision = repositoryRevision
         self.auxiliaryRepository = auxiliaryRepository
         self.auxiliaryRepositoryRevision = auxiliaryRepositoryRevision
+        self.recognitionArtifactSHA256 = recognitionArtifactSHA256
+        self.vocabularyArtifactSHA256 = vocabularyArtifactSHA256
         self.encoderPrecision = encoderPrecision
     }
 }
