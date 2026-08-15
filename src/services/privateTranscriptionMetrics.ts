@@ -21,6 +21,11 @@ export type PrivateEvaluationSources = {
   systemDurationSeconds: number | null;
 };
 
+export const isIndependentPrivateMicSource = (
+  micPath: string | null,
+  mixedPath: string | null,
+): boolean => Boolean(micPath && (!mixedPath || micPath !== mixedPath));
+
 export const privateEvaluationSourceDuration = (
   audioPath: string,
   sources: PrivateEvaluationSources,

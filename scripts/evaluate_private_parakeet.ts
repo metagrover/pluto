@@ -10,6 +10,7 @@ import { segmentRecognizedWords } from '../src/services/finalTranscription/segme
 import {
   distributeTimedTokens,
   hasPrivateReviewSpeechInWindow,
+  isIndependentPrivateMicSource,
   matchTimeAlignedTokens,
   multisetTokenIntersectionSize,
   normalizePrivateEvaluationFailureCode,
@@ -26,6 +27,7 @@ type MeetingRow = {
   id: string;
   duration_seconds: number;
   audio_path: string | null;
+  mixed_audio_path: string | null;
   system_audio_path: string | null;
   transcript_json: string;
 };
@@ -103,7 +105,7 @@ for (const [label, filePath] of [
 fs.mkdirSync(modelRoot, { recursive: true });
 
 const sql = `
-  SELECT id, duration_seconds, audio_path, system_audio_path, transcript_json
+  SELECT id, duration_seconds, audio_path, system_audio_path, mixed_audio_path, transcript_json
   FROM meetings
   WHERE json_valid(transcript_json)
     AND (
@@ -126,8 +128,11 @@ const candidates = (
 const meetings = candidates
   .filter(
     (entry) =>
-      (entry.audio_path && fs.existsSync(entry.audio_path)) ||
-      (entry.system_audio_path && fs.existsSync(entry.system_audio_path)),
+      isIndependentPrivateMicSource(entry.audio_path, entry.mixed_audio_path) &&
+      entry.audio_path !== null &&
+      entry.system_audio_path !== null &&
+      fs.existsSync(entry.audio_path) &&
+      fs.existsSync(entry.system_audio_path),
   )
   .slice(0, meetingLimit);
 if (meetings.length < meetingLimit) {

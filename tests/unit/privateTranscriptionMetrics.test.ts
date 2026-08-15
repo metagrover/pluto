@@ -4,6 +4,7 @@ import {
   arePrivateReviewSourcesAligned,
   distributeTimedTokens,
   hasPrivateReviewSpeechInWindow,
+  isIndependentPrivateMicSource,
   matchTimeAlignedTokens,
   multisetTokenIntersectionSize,
   normalizePrivateEvaluationFailureCode,
@@ -14,6 +15,16 @@ import {
 } from '../../src/services/privateTranscriptionMetrics.ts';
 
 describe('private transcription metrics', () => {
+  it('rejects a mixed artifact masquerading as the mic source', () => {
+    expect(
+      isIndependentPrivateMicSource('/private/mix.wav', '/private/mix.wav'),
+    ).toBe(false);
+    expect(
+      isIndependentPrivateMicSource('/private/mic.wav', '/private/mix.wav'),
+    ).toBe(true);
+    expect(isIndependentPrivateMicSource(null, '/private/mix.wav')).toBe(false);
+  });
+
   it('uses real per-source durations and rejects unaligned review media', () => {
     const sources = {
       micPath: '/private/mic.wav',

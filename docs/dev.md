@@ -61,7 +61,7 @@ pnpm run benchmark:private-parakeet -- \
   --review-out /absolute/private/evaluations/parakeet-review.html
 ```
 
-The console emits aggregate metrics only. Canonical validation probes each actual source duration. Review cases are generated only from meetings whose mic and system durations align with the meeting timeline, are clamped to the shorter verified source, and contain recognized system speech. The review page contains private audio references and transcript excerpts, is written with owner-only permissions, must remain outside the repository, and exports content-free A/B ratings. Keep the adjacent hidden-assignment manifest private until the review is complete, then score the exported ratings against it:
+The console emits aggregate metrics only. Canonical validation probes each actual source duration. Review cases are generated only from meetings whose persisted mic source is distinct from the persisted mixed artifact, whose mic and system durations align with the meeting timeline, and whose bounded excerpt contains recognized system speech. The review page contains private audio references and transcript excerpts, is written with owner-only permissions, must remain outside the repository, and exports content-free A/B ratings. Keep the adjacent hidden-assignment manifest private until the review is complete, then score the exported ratings against it:
 
 ```bash
 pnpm run benchmark:private-parakeet:review -- \
