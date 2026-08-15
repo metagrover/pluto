@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({
   app: {
@@ -14,6 +14,42 @@ describe('WhisperX lifecycle', () => {
 
   beforeAll(async () => {
     ({ WhisperXManager } = await import('../../electron/whisperx'));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('binds model configuration to each transcribe request', async () => {
+    const manager = new WhisperXManager();
+    vi.spyOn(manager, 'start').mockResolvedValue();
+    vi.spyOn(
+      manager as unknown as { applyConfigFromOptions: () => Promise<void> },
+      'applyConfigFromOptions',
+    ).mockResolvedValue();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ segments: [], language: 'en', duration: 0 }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await manager.transcribe('/tmp/synthetic.wav', {
+      model: 'medium',
+      device: 'mlx',
+      computeType: 'float16',
+      language: 'en',
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      model: 'medium',
+      device: 'mlx',
+      compute_type: 'float16',
+      language: 'en',
+    });
   });
 
   it('does not release a stopped child until its close event arrives', async () => {

@@ -21,6 +21,7 @@ import {
   createCaptureJournal,
   deleteCaptureJournal,
   persistCaptureJournalRawChunk,
+  promoteCaptureTranscriptCheckpoint,
   readCaptureJournalManifest,
   readCaptureJournalSidecar,
   replaceCaptureTranscriptCheckpoint,
@@ -278,25 +279,88 @@ describe('capture journal', () => {
       },
     });
     expect(frame.manifest.acceptanceFrames).toEqual([frame.frame]);
-    const stopping = await stopCaptureJournal(root, {
-      meetingId: created.meetingId,
-      generation: created.generation,
-      expectedRevision: frame.manifest.revision,
-    });
-    const replacement = await replaceCaptureTranscriptCheckpoint(root, {
+    const promotedSidecar = {
+      ...sidecar,
+      transcriptionConfig: {
+        ...sidecar.transcriptionConfig,
+        model: 'medium',
+      },
+      segments: [{ start: 0.1, end: 0.2, text: 'synthetic validation' }],
+    };
+    const promotedConfigKey = createHash('sha256')
+      .update(
+        canonicalizeTranscriptCheckpointConfig(
+          promotedSidecar.transcriptionConfig,
+        ),
+      )
+      .digest('hex');
+    const promotionRequest = {
       receipt: completed.receipt,
-      expectedManifestRevision: stopping.revision,
+      expectedManifestRevision: frame.manifest.revision,
       expectedPriorTranscriptChecksumSha256:
         checkpoint.checkpoint.transcriptChecksumSha256,
-      transcriptionConfigKey: configKey,
-      sidecar: {
-        ...sidecar,
-        segments: [{ start: 0.1, end: 0.2, text: 'synthetic repair' }],
+      transcriptionConfigKey: promotedConfigKey,
+      sidecar: promotedSidecar,
+      expectedPriorAcceptedChecksumSha256: frame.frame.acceptedChecksumSha256,
+      acceptance: {
+        sequence: 0,
+        micCheckpointChecksumSha256:
+          checkpoint.checkpoint.transcriptChecksumSha256,
+        systemCheckpointChecksumSha256: null,
+        activityEvidenceDigestSha256: digest,
+        sidecar: {
+          schemaVersion: 1,
+          meetingId: created.meetingId,
+          sequence: 0,
+          arbitrationVersion: 'chunk_arbitration_v1',
+          activityInputs,
+          segments: [
+            {
+              source: 'mic',
+              start: 0.1,
+              end: 0.2,
+              text: 'synthetic validation',
+            },
+          ],
+        },
       },
-    });
-    expect(replacement.checkpoint).toMatchObject({
+    };
+    await expect(
+      promoteCaptureTranscriptCheckpoint(root, {
+        ...promotionRequest,
+        acceptance: {
+          ...promotionRequest.acceptance,
+          sidecar: {
+            ...promotionRequest.acceptance.sidecar,
+            segments: [
+              {
+                source: 'mic' as const,
+                start: 0.1,
+                end: 0.2,
+                text: 'synthetic mismatched evidence',
+              },
+            ],
+          },
+        },
+      }),
+    ).rejects.toThrow(/promotion evidence mismatch/i);
+    expect(
+      (await readCaptureJournalManifest(root, created.meetingId)).revision,
+    ).toBe(frame.manifest.revision);
+
+    const promotion = await promoteCaptureTranscriptCheckpoint(
+      root,
+      promotionRequest,
+    );
+    expect(promotion.checkpoint).toMatchObject({
       revision: 1,
       repairAttempted: true,
+      transcriptionConfigKey: promotedConfigKey,
+    });
+    expect(promotion.frame).toMatchObject({
+      revision: 1,
+      micCheckpointChecksumSha256:
+        promotion.checkpoint.transcriptChecksumSha256,
     });
   });
 

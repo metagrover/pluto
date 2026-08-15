@@ -149,6 +149,8 @@ export const LiveTranscript = ({
   const [isFollowingLive, setIsFollowingLive] = useState(true);
   const turns = useMemo(() => buildLiveTranscriptTurns(segments), [segments]);
   const newestSegmentId = segments.at(-1)?.id ?? null;
+  const visibleTranscriptValidated =
+    segments.length > 0 && segments.every((segment) => segment.confirmed);
 
   const updateFollowingLive = (following: boolean) => {
     followingLiveRef.current = following;
@@ -203,9 +205,11 @@ export const LiveTranscript = ({
           <span>
             {segments.length === 0
               ? 'Listening'
-              : isFollowingLive
-                ? 'Following live'
-                : 'Reviewing earlier'}
+              : !isFollowingLive
+                ? 'Reviewing earlier'
+                : visibleTranscriptValidated
+                  ? 'Validated live'
+                  : 'Refining live'}
           </span>
         </div>
         <div className="live-transcript-body">
@@ -213,7 +217,7 @@ export const LiveTranscript = ({
             <div className="transcript-waiting">
               <p>Pluto is listening.</p>
               <span>
-                The conversation will appear here as speech is confirmed.
+                The conversation will appear here as speech is recognized.
               </span>
             </div>
           ) : (
