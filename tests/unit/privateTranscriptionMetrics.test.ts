@@ -1,15 +1,59 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  arePrivateReviewSourcesAligned,
   distributeTimedTokens,
+  hasPrivateReviewSpeechInWindow,
   matchTimeAlignedTokens,
   multisetTokenIntersectionSize,
   normalizePrivateEvaluationFailureCode,
   normalizeTranscriptTokens,
+  privateEvaluationSourceDuration,
+  privateReviewTimelineDuration,
   transcriptEditDistance,
 } from '../../src/services/privateTranscriptionMetrics.ts';
 
 describe('private transcription metrics', () => {
+  it('uses real per-source durations and rejects unaligned review media', () => {
+    const sources = {
+      micPath: '/private/mic.wav',
+      micDurationSeconds: 100,
+      systemPath: '/private/system.wav',
+      systemDurationSeconds: 72,
+    };
+    expect(privateEvaluationSourceDuration('/private/mic.wav', sources)).toBe(
+      100,
+    );
+    expect(
+      privateEvaluationSourceDuration('/private/system.wav', sources),
+    ).toBe(72);
+    expect(privateEvaluationSourceDuration('/private/other.wav', sources)).toBe(
+      null,
+    );
+    expect(arePrivateReviewSourcesAligned(100, [100, 72])).toBe(false);
+    expect(arePrivateReviewSourcesAligned(100, [99.5, 100.25])).toBe(true);
+    expect(privateReviewTimelineDuration(100, [99.5, 100.25])).toBe(99.5);
+    expect(privateReviewTimelineDuration(100, [100, 72])).toBe(null);
+    expect(
+      hasPrivateReviewSpeechInWindow(
+        [
+          { startSeconds: 10, endSeconds: 10.5 },
+          { startSeconds: 11, endSeconds: 11.5 },
+          { startSeconds: 12, endSeconds: 12.5 },
+        ],
+        10,
+        20,
+      ),
+    ).toBe(true);
+    expect(
+      hasPrivateReviewSpeechInWindow(
+        [{ startSeconds: 30, endSeconds: 31 }],
+        10,
+        20,
+      ),
+    ).toBe(false);
+  });
+
   it('normalizes and compares transcript tokens deterministically', () => {
     const reference = normalizeTranscriptTokens("Hello, Pluto's world!");
     const candidate = normalizeTranscriptTokens("hello pluto's new world");

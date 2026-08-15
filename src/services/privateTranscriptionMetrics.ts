@@ -9,6 +9,64 @@ export type TimedToken = {
   at: number;
 };
 
+export type PrivateReviewWord = {
+  startSeconds: number;
+  endSeconds: number;
+};
+
+export type PrivateEvaluationSources = {
+  micPath: string | null;
+  micDurationSeconds: number | null;
+  systemPath: string | null;
+  systemDurationSeconds: number | null;
+};
+
+export const privateEvaluationSourceDuration = (
+  audioPath: string,
+  sources: PrivateEvaluationSources,
+): number | null => {
+  if (audioPath === sources.micPath) return sources.micDurationSeconds;
+  if (audioPath === sources.systemPath) return sources.systemDurationSeconds;
+  return null;
+};
+
+export const arePrivateReviewSourcesAligned = (
+  recordingDurationSeconds: number,
+  sourceDurationSeconds: Array<number | null | undefined>,
+  maximumMismatchSeconds = 5,
+): boolean =>
+  Number.isFinite(recordingDurationSeconds) &&
+  recordingDurationSeconds > 0 &&
+  sourceDurationSeconds.length === 2 &&
+  sourceDurationSeconds.every(
+    (duration) =>
+      typeof duration === 'number' &&
+      Number.isFinite(duration) &&
+      duration > 0 &&
+      Math.abs(duration - recordingDurationSeconds) <= maximumMismatchSeconds,
+  );
+
+export const privateReviewTimelineDuration = (
+  recordingDurationSeconds: number,
+  sourceDurationSeconds: Array<number | null | undefined>,
+): number | null =>
+  arePrivateReviewSourcesAligned(
+    recordingDurationSeconds,
+    sourceDurationSeconds,
+  )
+    ? Math.min(recordingDurationSeconds, ...(sourceDurationSeconds as number[]))
+    : null;
+
+export const hasPrivateReviewSpeechInWindow = (
+  words: PrivateReviewWord[],
+  startSeconds: number,
+  endSeconds: number,
+  minimumWordCount = 3,
+): boolean =>
+  words.filter(
+    (word) => word.startSeconds < endSeconds && word.endSeconds > startSeconds,
+  ).length >= minimumWordCount;
+
 const privateEvaluationFailureCodes = new Set([
   'parakeet_request_invalid',
   'parakeet_path_not_allowed',

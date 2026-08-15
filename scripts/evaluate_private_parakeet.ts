@@ -9,10 +9,13 @@ import { pathToFileURL } from 'node:url';
 import { segmentRecognizedWords } from '../src/services/finalTranscription/segmentRecognizedWords.ts';
 import {
   distributeTimedTokens,
+  hasPrivateReviewSpeechInWindow,
   matchTimeAlignedTokens,
   multisetTokenIntersectionSize,
   normalizePrivateEvaluationFailureCode,
   normalizeTranscriptTokens,
+  privateEvaluationSourceDuration,
+  privateReviewTimelineDuration,
   transcriptEditDistance,
 } from '../src/services/privateTranscriptionMetrics.ts';
 import { PRIVATE_TRANSCRIPTION_REVIEW_MINIMUM_CASES } from '../src/services/privateTranscriptionReview.ts';
@@ -398,7 +401,14 @@ try {
           },
         };
       },
-      probeDuration: async () => meeting.duration_seconds,
+      probeDuration: async (audioPath) =>
+        privateEvaluationSourceDuration(audioPath, {
+          micPath: meeting.audio_path,
+          micDurationSeconds: sourceTranscriptions.mic?.durationSeconds ?? null,
+          systemPath: meeting.system_audio_path,
+          systemDurationSeconds:
+            sourceTranscriptions.system?.durationSeconds ?? null,
+        }),
     });
     if (validation.status !== 'validated') canonicalValidationFailureCount += 1;
     const canonicalReferenceTokens = normalizeTranscriptTokens(
@@ -468,9 +478,28 @@ try {
             },
           ]),
     );
-    if (reviewOut) {
-      for (let start = 0; start < meeting.duration_seconds; start += 30) {
-        const end = Math.min(meeting.duration_seconds, start + 30);
+    const reviewTimelineDuration = privateReviewTimelineDuration(
+      meeting.duration_seconds,
+      [
+        sourceTranscriptions.mic?.durationSeconds,
+        sourceTranscriptions.system?.durationSeconds,
+      ],
+    );
+    if (
+      reviewOut &&
+      validation.status === 'validated' &&
+      reviewTimelineDuration !== null
+    ) {
+      for (let start = 0; start < reviewTimelineDuration; start += 30) {
+        const end = Math.min(reviewTimelineDuration, start + 30);
+        if (
+          !hasPrivateReviewSpeechInWindow(
+            sourceTranscriptions.system?.words ?? [],
+            start,
+            end,
+          )
+        )
+          continue;
         const referenceText = reference
           .filter(
             (segment) =>
@@ -668,7 +697,12 @@ try {
         : undefined,
     }),
   );
-  if (failedMeetingCount > 0) process.exitCode = 1;
+  if (
+    failedMeetingCount > 0 ||
+    canonicalValidationFailureCount > 0 ||
+    timestampFailureCount > 0
+  )
+    process.exitCode = 1;
 } finally {
   clearInterval(sampleRss);
   if (child.exitCode === null) {
