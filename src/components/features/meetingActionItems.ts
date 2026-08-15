@@ -10,6 +10,7 @@ export type MeetingActionItemStatus =
   | 'completed'
   | 'stale'
   | 'overdue'
+  | 'merge_pending'
   | 'fallback';
 
 export type MeetingActionAttentionStatus =
@@ -78,9 +79,10 @@ const ACTION_STATUS_ORDER: Record<
   number
 > = {
   overdue: 0,
-  stale: 1,
-  active: 2,
-  completed: 3,
+  merge_pending: 1,
+  stale: 2,
+  active: 3,
+  completed: 4,
 };
 
 const ATTENTION_STATUS_ORDER: Record<
@@ -126,7 +128,7 @@ const isPreferredLinkedAttention = (
 };
 
 const getMeetingActionItemRank = (status: MeetingActionItemStatus): number => {
-  if (status === 'fallback') return 4;
+  if (status === 'fallback') return 5;
   return ACTION_STATUS_ORDER[status];
 };
 

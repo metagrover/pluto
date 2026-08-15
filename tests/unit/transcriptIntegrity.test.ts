@@ -143,4 +143,38 @@ describe('transcriptIntegrity', () => {
       }),
     ).toEqual({ status: 'validated', reasons: [] });
   });
+
+  it('does not let unaligned word volume substitute for remote time coverage', () => {
+    const result = validateTranscriptIntegrity({
+      recordingDurationSeconds: 60,
+      micAudioDurationSeconds: 60,
+      systemAudioDurationSeconds: 60,
+      micActivitySeconds: 0,
+      systemActivitySeconds: 30,
+      localTranscriptCoveredSeconds: 0,
+      remoteTranscriptCoveredSeconds: 2,
+      remoteWordCount: 500,
+      unresolvedAmbiguousSeconds: 0,
+      requiredSourcesSucceeded: true,
+    });
+
+    expect(result.status).toBe('needs_attention');
+    expect(result.reasons).toContain('remote_speech_unaccounted');
+  });
+
+  it('ignores sub-threshold remote activity noise', () => {
+    expect(
+      validateTranscriptIntegrity({
+        recordingDurationSeconds: 60,
+        micAudioDurationSeconds: 60,
+        systemAudioDurationSeconds: 60,
+        micActivitySeconds: 0,
+        systemActivitySeconds: 2,
+        localTranscriptCoveredSeconds: 0,
+        remoteTranscriptCoveredSeconds: 0,
+        unresolvedAmbiguousSeconds: 0,
+        requiredSourcesSucceeded: true,
+      }),
+    ).toEqual({ status: 'validated', reasons: [] });
+  });
 });

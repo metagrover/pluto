@@ -191,7 +191,7 @@ const TopicCard = ({
             <h4 className="text-[9px] font-black uppercase tracking-[0.2em] text-amber-500/80 mb-3">
               Open Questions
             </h4>
-            {topic.open_questions.map((q, qi) => (
+            {topic.open_questions.map((q) => (
               <div
                 key={q}
                 className="text-sm font-medium text-amber-700/80 dark:text-amber-300/80 flex gap-3 items-start"

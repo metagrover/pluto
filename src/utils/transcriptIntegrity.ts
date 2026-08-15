@@ -237,14 +237,10 @@ export const validateTranscriptIntegrity = (input: {
     reasons.push('local_speech_unaccounted');
   }
 
-  if (input.systemActivitySeconds > 0) {
+  if (input.systemActivitySeconds >= 3) {
     const timeCoverage =
       input.remoteTranscriptCoveredSeconds / input.systemActivitySeconds;
-    const tokenCoverage =
-      input.remoteWordCount != null
-        ? input.remoteWordCount / (input.systemActivitySeconds * 2.5)
-        : 0;
-    if (timeCoverage < 0.65 && tokenCoverage < 0.65) {
+    if (timeCoverage < 0.65) {
       reasons.push('remote_speech_unaccounted');
     }
   }

@@ -1,5 +1,7 @@
 # Real-Time Rolling Context Reconciliation Engine
 
+> **Status (2026-08-14): Proposed, not implemented.** Prior helper scaffolding was removed under #622 after verification showed that it was not wired into the product. Track implementation and acceptance under #616.
+
 ## 1. Overview
 In live meeting recordings, real-time speech recognition prioritizes ultra-low latency (~5.0x real-time speed using fast small models). However, live draft transcripts can misinterpret proper nouns, technical acronyms, or mispronounced words when context is limited.
 

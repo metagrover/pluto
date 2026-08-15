@@ -26,9 +26,16 @@ export interface TranscriptionSettings {
   language?: string | null;
 }
 
-export const DEFAULT_TRANSCRIPTION_SETTINGS: Required<
-  Omit<TranscriptionSettings, 'language'>
-> & { language: string } = {
+export interface ResolvedTranscriptionSettings {
+  backend: TranscriptionBackend;
+  preset: TranscriptionPreset;
+  model: WhisperModel;
+  device: WhisperDevice;
+  computeType: WhisperComputeType;
+  language: string;
+}
+
+export const DEFAULT_TRANSCRIPTION_SETTINGS: ResolvedTranscriptionSettings = {
   backend: 'local_alt_apple_silicon',
   preset: 'balanced',
   model: 'small',
@@ -75,7 +82,7 @@ export const resolveTranscriptionPreset = (
 
 export const resolveTranscriptionSettings = (
   settings?: TranscriptionSettings | null,
-): Required<TranscriptionSettings> => {
+): ResolvedTranscriptionSettings => {
   return {
     backend: resolveTranscriptionBackend(settings?.backend),
     preset: resolveTranscriptionPreset(settings?.preset),
