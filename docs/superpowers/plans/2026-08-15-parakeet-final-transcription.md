@@ -157,20 +157,20 @@ expect(() => segmentRecognizedWords(overlappingWords, duration))
 - Test: `tests/unit/runFinalTranscription.test.ts`
 - Test: `tests/unit/finalTranscriptionLease.test.ts`
 
-- [ ] **Step 1: Write failing tests proving sealed-evidence requirement, mic-then-system sequencing, no mix request when both channels exist, source speaker ownership, explicit no-speech acceptance, failed empty rejection, integrity failure, conditional-save conflict, cancellation, and downstream handoff only after canonical commit**
+- [x] **Step 1: Write failing tests proving sealed-evidence requirement, mic-then-system sequencing, no mix request when both channels exist, source speaker ownership, explicit no-speech acceptance, failed empty rejection, integrity failure, conditional-save conflict, cancellation, and downstream handoff only after canonical commit**
 
 ```ts
 expect(transcribe.mock.calls.map(([request]) => request.source)).toEqual(['mic', 'system']);
 expect(events).toEqual(['commit-canonical', 'start-analysis']);
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
-- [ ] **Step 3: Implement a dependency-injected orchestrator that reuses `runRecordingTranscriptValidation`, `reconcileCanonicalTranscript`, and transcript schema/integrity helpers**
+- [x] **Step 3: Implement a dependency-injected orchestrator that reuses `runRecordingTranscriptValidation`, `reconcileCanonicalTranscript`, and transcript schema/integrity helpers**
 
-- [ ] **Step 4: Persist `parakeet_final_v1` policy/model/source metadata and finite failure reasons through the lease boundary; unavailable, failed, or integrity-rejected results retain the provisional transcript with `needs_attention`**
+- [x] **Step 4: Persist `parakeet_final_v1` policy/model/source metadata and finite failure reasons through the lease boundary; unavailable, failed, or integrity-rejected results retain the provisional transcript with `needs_attention`**
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 ### Task 7: Wire final validation into persistence and analysis handoff
 

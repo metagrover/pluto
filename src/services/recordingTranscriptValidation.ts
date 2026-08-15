@@ -50,7 +50,13 @@ const transcribeWithRetry = async (
         attempts: attempt,
         result: await transcribe(audioPath, { meetingId, canonicalSource }),
       };
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === 'AbortError' || error.message === 'parakeet_cancelled')
+      ) {
+        throw error;
+      }
       if (attempt === 2) return { attempts: attempt, result: null };
     }
   }
@@ -211,6 +217,7 @@ export const runRecordingTranscriptValidation = async (input: {
   checkpointSourceSegments?: AttributionSegment[];
   activityWindows: SpeakerActivityWindow[];
   canonicalMode?: 'full_mix' | 'recovered_channels' | 'checkpointed';
+  transcriptionScheduling?: 'parallel' | 'sequential_channels';
   checkpointEvidenceVerified?: boolean;
   transcribe: RecordingTranscribe;
   probeDuration: (audioPath: string) => Promise<number | null>;
@@ -287,8 +294,25 @@ export const runRecordingTranscriptValidation = async (input: {
       },
     };
   }
-  const [mic, mix, system, micDuration, mixDuration, systemDuration] =
-    await Promise.all([
+  let mic: SourceResult;
+  let mix: SourceResult;
+  let system: SourceResult;
+  if (input.transcriptionScheduling === 'sequential_channels') {
+    mic = await transcribeWithRetry(
+      input.transcribe,
+      input.micAudioPath,
+      input.meetingId,
+      'mic',
+    );
+    system = await transcribeWithRetry(
+      input.transcribe,
+      input.systemAudioPath,
+      input.meetingId,
+      'system',
+    );
+    mix = { attempts: 0, result: null };
+  } else {
+    [mic, mix, system] = await Promise.all([
       transcribeWithRetry(
         input.transcribe,
         input.micAudioPath,
@@ -307,10 +331,13 @@ export const runRecordingTranscriptValidation = async (input: {
         input.meetingId,
         'system',
       ),
-      probeDuration(input.probeDuration, input.micAudioPath),
-      probeDuration(input.probeDuration, input.mixAudioPath),
-      probeDuration(input.probeDuration, input.systemAudioPath),
     ]);
+  }
+  const [micDuration, mixDuration, systemDuration] = await Promise.all([
+    probeDuration(input.probeDuration, input.micAudioPath),
+    probeDuration(input.probeDuration, input.mixAudioPath),
+    probeDuration(input.probeDuration, input.systemAudioPath),
+  ]);
 
   const micSegments = toSegments(mic.result, 'Me', 'mic');
   const mixedSegments = toSegments(mix.result, 'Unknown', 'mix');
