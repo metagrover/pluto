@@ -11,6 +11,7 @@ import {
   app,
   ipcMain,
   nativeImage,
+  powerMonitor,
   shell,
   systemPreferences,
 } from 'electron';
@@ -27,6 +28,7 @@ import {
   createCaptureJournal,
   deleteCaptureJournal,
   persistCaptureJournalRawChunk,
+  promoteCaptureTranscriptCheckpoint,
   readCaptureJournalManifest,
   sealCaptureJournal,
   stopCaptureJournal,
@@ -370,6 +372,11 @@ app.whenReady().then(async () => {
     return await whisperX.health();
   });
 
+  ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', () => ({
+    onBattery: powerMonitor.isOnBatteryPower(),
+    thermalState: powerMonitor.getCurrentThermalState(),
+  }));
+
   ipcMain.handle(
     'GET_TRANSCRIPTION_VOCABULARY',
     (_event, { participants } = {}) =>
@@ -674,11 +681,17 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
-    async (_event, { meetingId, expectedConfigKey } = {}) =>
+    async (_event, { meetingId, expectedConfigKey, expectedConfigKeys } = {}) =>
       await verifySealedCaptureJournalTranscriptEvidence(
         getMeetingArtifactsRootDir(),
         String(meetingId || ''),
-        typeof expectedConfigKey === 'string' ? expectedConfigKey : undefined,
+        Array.isArray(expectedConfigKeys)
+          ? expectedConfigKeys.filter(
+              (key): key is string => typeof key === 'string',
+            )
+          : typeof expectedConfigKey === 'string'
+            ? expectedConfigKey
+            : undefined,
       ),
   );
 
@@ -717,6 +730,15 @@ app.whenReady().then(async () => {
     'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND',
     async (_event, request = {}) =>
       await appendCaptureTranscriptCheckpoint(
+        getMeetingArtifactsRootDir(),
+        request,
+      ),
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_PROMOTE',
+    async (_event, request = {}) =>
+      await promoteCaptureTranscriptCheckpoint(
         getMeetingArtifactsRootDir(),
         request,
       ),

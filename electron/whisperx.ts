@@ -585,6 +585,9 @@ export class TranscriptionManager {
       signal: options.signal,
       body: JSON.stringify({
         audio_path: audioPath,
+        model: options.model,
+        device: options.device,
+        compute_type: options.computeType,
         language: options.language,
         diarize: options.diarize,
         word_timestamps: options.wordTimestamps,

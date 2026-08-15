@@ -111,6 +111,23 @@ type RecoveryTranscriptionConfig = NonNullable<
   RecoveryDependencies['transcriptionConfig']
 >;
 
+const getAcceptedRecoveryCheckpointConfigKeys = (
+  config: RecoveryTranscriptionConfig,
+): string[] => {
+  const configs = [
+    config,
+    ...(isMlxCheckpointConfig(config) &&
+    (config.model === 'base' || config.model === 'tiny')
+      ? [{ ...config, model: 'medium' }]
+      : []),
+  ];
+  return configs.map((candidate) =>
+    computeChecksum(
+      Buffer.from(canonicalizeTranscriptCheckpointConfig(candidate)),
+    ),
+  );
+};
+
 export const isMlxCheckpointConfig = (
   config: Pick<
     RecoveryTranscriptionConfig,
@@ -413,6 +430,9 @@ const repairV3TranscriptGaps = async (
   const configKey = computeChecksum(
     Buffer.from(canonicalizeTranscriptCheckpointConfig(targetConfig)),
   );
+  const acceptedConfigKeys = new Set(
+    getAcceptedRecoveryCheckpointConfigKeys(targetConfig),
+  );
   for (const interval of manifest.intervals) {
     const acceptedSpeechSources = await readAcceptedSpeechSources(
       rootDir,
@@ -479,15 +499,16 @@ const repairV3TranscriptGaps = async (
             coveredSeconds / Math.max(activeSeconds, 0.001) < 0.35;
           emptyWithActivity =
             sidecar.segments.length === 0 && sourceActivityWindows.length > 0;
-          structurallyReusable =
-            existing.transcriptionConfigKey === configKey &&
-            computeChecksum(
-              Buffer.from(
-                canonicalizeTranscriptCheckpointConfig(
-                  sidecar.transcriptionConfig,
-                ),
+          const recomputedConfigKey = computeChecksum(
+            Buffer.from(
+              canonicalizeTranscriptCheckpointConfig(
+                sidecar.transcriptionConfig,
               ),
-            ) === configKey &&
+            ),
+          );
+          structurallyReusable =
+            acceptedConfigKeys.has(existing.transcriptionConfigKey) &&
+            recomputedConfigKey === existing.transcriptionConfigKey &&
             !underCovered;
         } catch {
           structurallyReusable = false;
@@ -519,7 +540,7 @@ const repairV3TranscriptGaps = async (
       if (
         reusable ||
         (existing?.repairAttempted &&
-          existing.transcriptionConfigKey === configKey)
+          acceptedConfigKeys.has(existing.transcriptionConfigKey))
       )
         continue;
       const result = await transcribeChunk(
@@ -888,7 +909,7 @@ async function readAcceptedSpeechSources(
 const readV3AcceptedSegments = async (
   rootDir: string,
   manifest: CaptureJournalManifestV3,
-  expectedConfigKey?: string,
+  expectedConfigKeys?: string | string[],
   options: { allowCaptureFailures?: boolean } = {},
 ) => {
   const configKeys = new Set(
@@ -1065,12 +1086,19 @@ const readV3AcceptedSegments = async (
   if (manifest.acceptanceFrames.length !== manifest.intervals.length) {
     throw new Error('Transcript acceptance frame missing');
   }
-  if (!expectedConfigKey && configKeys.size !== 1) {
+  const acceptedConfigKeys = Array.isArray(expectedConfigKeys)
+    ? expectedConfigKeys
+    : expectedConfigKeys
+      ? [expectedConfigKeys]
+      : [];
+  if (acceptedConfigKeys.length === 0 && configKeys.size !== 1) {
     throw new Error('Transcript checkpoint configuration mismatch');
   }
   const finalized = finalizeTranscriptCheckpoints({
     meetingId: manifest.meetingId,
-    expectedConfigKey: expectedConfigKey ?? [...configKeys][0] ?? '',
+    expectedConfigKey: acceptedConfigKeys[0] ?? [...configKeys][0] ?? '',
+    acceptedConfigKeys:
+      acceptedConfigKeys.length > 0 ? acceptedConfigKeys : undefined,
     intervals: manifest.intervals.map((interval) => ({
       sequence: interval.sequence,
       start: interval.chunkStartSec,
@@ -1191,7 +1219,7 @@ const readV3AcceptedSegments = async (
 export const verifySealedCaptureJournalTranscriptEvidence = async (
   rootDir: string,
   meetingId: string,
-  expectedConfigKey?: string,
+  expectedConfigKeys?: string | string[],
 ): Promise<{
   generation: string;
   revision: number;
@@ -1210,7 +1238,7 @@ export const verifySealedCaptureJournalTranscriptEvidence = async (
   const evidence = await readV3AcceptedSegments(
     rootDir,
     manifest,
-    expectedConfigKey,
+    expectedConfigKeys,
   );
   return {
     generation: manifest.generation,
@@ -1391,9 +1419,16 @@ export const recoverInterruptedCaptureJournals = async (
               // Checkpoints are authoritative for an interrupted recording.
               // readV3AcceptedSegments still enforces that every accepted
               // checkpoint uses one internally consistent configuration.
-              readV3AcceptedSegments(rootDir, manifest, undefined, {
-                allowCaptureFailures: true,
-              }),
+              readV3AcceptedSegments(
+                rootDir,
+                manifest,
+                deps.transcriptionConfig
+                  ? getAcceptedRecoveryCheckpointConfigKeys(
+                      deps.transcriptionConfig,
+                    )
+                  : undefined,
+                { allowCaptureFailures: true },
+              ),
             ])
           : await Promise.all([
               buildSourceSegments(rootDir, micEntries),

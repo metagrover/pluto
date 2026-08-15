@@ -102,6 +102,29 @@ describe('LiveTranscript word reveal', () => {
     act(() => root.unmount());
   });
 
+  it('reports preview and fully validated live state quietly in the header', () => {
+    setReducedMotion(true);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <LiveTranscript
+          segments={[{ ...liveSegment, confirmed: false }]}
+          interimText=""
+        />,
+      ),
+    );
+    expect(
+      container.querySelector('.live-transcript-heading span')?.textContent,
+    ).toBe('Refining live');
+    act(() =>
+      root.render(<LiveTranscript segments={[liveSegment]} interimText="" />),
+    );
+    expect(
+      container.querySelector('.live-transcript-heading span')?.textContent,
+    ).toBe('Validated live');
+    act(() => root.unmount());
+  });
+
   it('renders consecutive same-speaker segments as one stable reading turn', () => {
     setReducedMotion(false);
     const root = createRoot(container);

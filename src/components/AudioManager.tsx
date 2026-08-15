@@ -29,6 +29,10 @@ import {
   resolvePcmTimelineSampleRate,
   trimPcmLeadingOverflow,
 } from '../utils/audio';
+import {
+  BackgroundTranscriptValidationQueue,
+  type CaptureComputePolicy,
+} from '../utils/backgroundTranscriptValidation';
 import { startBoundedSampler } from '../utils/boundedSampler';
 import { shouldUseMixForCanonicalTranscript } from '../utils/canonicalTranscriptEnv';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
@@ -42,6 +46,10 @@ import {
   type LiveTranscriptResponsivenessSummary,
   createLiveTranscriptResponsivenessRuntime,
 } from '../utils/liveTranscriptResponsiveness';
+import {
+  createStableLiveSegmentId,
+  mergeValidatedTranscriptChunk,
+} from '../utils/liveTranscriptValidationMerge';
 import { LiveTranscriptionQueue } from '../utils/liveTranscriptionQueue';
 import { isGrantedStatus } from '../utils/permissions';
 import {
@@ -143,6 +151,7 @@ interface TranscriptionSegment {
   text: string;
   speaker: string;
   words?: WordTimestamp[];
+  validationState?: 'preview' | 'validated';
 }
 
 type MicChunkFormat = 'webm' | 'ogg' | 'wav';
@@ -194,6 +203,28 @@ type JournalRawChunkState = {
 
 type JournalCheckpointState = {
   transcriptChecksumSha256: string;
+};
+
+type JournalAcceptanceState = {
+  acceptedChecksumSha256: string;
+};
+
+type ChunkAcceptanceDraft = {
+  activityEvidenceDigestSha256: string;
+  sidecar: {
+    schemaVersion: 1;
+    meetingId: string;
+    sequence: number;
+    arbitrationVersion: 'chunk_arbitration_v1';
+    activityInputs: unknown;
+    segments: Array<{
+      source: 'mic' | 'system';
+      start: number;
+      end: number;
+      text: string;
+      words?: WordTimestamp[];
+    }>;
+  };
 };
 
 interface InternalSignalTag {
@@ -552,6 +583,19 @@ export const AudioManager = ({
       },
     }),
   );
+  const backgroundValidationQueueRef = useRef(
+    new BackgroundTranscriptValidationQueue({
+      waitForLiveIdle: async (timeoutMs) =>
+        await processingQueueRef.current.waitForIdle(timeoutMs),
+      getPolicy: async () =>
+        (await window.ipcRenderer.invoke(
+          'GET_CAPTURE_COMPUTE_POLICY',
+        )) as CaptureComputePolicy,
+      onError: () => {
+        console.warn('[Pluto] Background transcript validation failed');
+      },
+    }),
+  );
   const liveTranscriptionGenerationRef = useRef(0);
   const transcriptionVocabularyRef = useRef<TranscriptionVocabularySelection>({
     initialPrompt: null,
@@ -594,6 +638,12 @@ export const AudioManager = ({
   );
   const captureJournalCheckpointsRef = useRef(
     new Map<string, JournalCheckpointState>(),
+  );
+  const captureJournalAcceptanceFramesRef = useRef(
+    new Map<number, JournalAcceptanceState>(),
+  );
+  const chunkAcceptanceDraftsRef = useRef(
+    new Map<number, ChunkAcceptanceDraft>(),
   );
   const captureJournalMutationCoordinatorRef = useRef(
     createCaptureJournalMutationCoordinator(),
@@ -954,21 +1004,21 @@ export const AudioManager = ({
       JSON.stringify(activityInputs),
     );
     const sidecar = {
-      schemaVersion: 1,
+      schemaVersion: 1 as const,
       meetingId,
       sequence,
-      arbitrationVersion: 'chunk_arbitration_v1',
+      arbitrationVersion: 'chunk_arbitration_v1' as const,
       activityInputs,
       segments: [
         ...micSegments.map((segment) => ({
-          source: 'mic',
+          source: 'mic' as const,
           start: segment.startTime + chunkStartSec,
           end: segment.endTime + chunkStartSec,
           text: segment.text,
           words: segment.words,
         })),
         ...systemSegments.map((segment) => ({
-          source: 'system',
+          source: 'system' as const,
           start: segment.startTime + chunkStartSec,
           end: segment.endTime + chunkStartSec,
           text: segment.text,
@@ -993,10 +1043,256 @@ export const AudioManager = ({
           activityEvidenceDigestSha256,
           sidecar,
         },
-      )) as { manifest: JournalManifestState };
+      )) as {
+        manifest: JournalManifestState;
+        frame: JournalAcceptanceState;
+      };
       captureJournalStateRef.current = saved.manifest;
+      captureJournalAcceptanceFramesRef.current.set(sequence, saved.frame);
+      chunkAcceptanceDraftsRef.current.set(sequence, {
+        activityEvidenceDigestSha256,
+        sidecar,
+      });
       return saved;
     });
+  };
+
+  const validateTranscriptChunkInBackground = async ({
+    meetingId,
+    generation,
+    source,
+    sequence,
+    audioPath,
+    previewSegments,
+    signal,
+  }: {
+    meetingId: string;
+    generation: number;
+    source: 'mic' | 'system';
+    sequence: number;
+    audioPath: string;
+    previewSegments: TranscriptionSegment[];
+    signal: AbortSignal;
+  }) => {
+    if (
+      signal.aborted ||
+      generation !== liveTranscriptionGenerationRef.current ||
+      currentMeetingIdRef.current !== meetingId ||
+      !isRecordingRef.current
+    ) {
+      return;
+    }
+    const tuple = journalTupleKey(source, sequence);
+    const receipt = captureJournalReceiptsRef.current.get(tuple);
+    const priorCheckpoint = captureJournalCheckpointsRef.current.get(tuple);
+    const priorFrame = captureJournalAcceptanceFramesRef.current.get(sequence);
+    const acceptanceDraft = chunkAcceptanceDraftsRef.current.get(sequence);
+    if (!receipt || !priorCheckpoint || !priorFrame || !acceptanceDraft) return;
+
+    const validationModel = 'medium' as const;
+    const result = await window.ipcRenderer.invoke(
+      'WHISPER_TRANSCRIBE',
+      audioPath,
+      buildTranscriptionOptions({
+        diarize: false,
+        meetingId,
+        model: validationModel,
+        wordTimestamps: true,
+      }),
+    );
+    if (
+      signal.aborted ||
+      generation !== liveTranscriptionGenerationRef.current ||
+      currentMeetingIdRef.current !== meetingId ||
+      !isRecordingRef.current
+    ) {
+      return;
+    }
+    const speaker = source === 'mic' ? 'Me' : 'Them';
+    const rawSegments = Array.isArray(result?.segments) ? result.segments : [];
+    const validatedSegments: TranscriptionSegment[] = rawSegments
+      .filter((segment: { text?: unknown }) =>
+        isValidSegment(String(segment.text ?? '')),
+      )
+      .map(
+        (segment: {
+          start: number;
+          end: number;
+          text: string;
+          words?: Array<{ word: string; start: number; end: number }>;
+        }) => ({
+          id: createStableLiveSegmentId(
+            source,
+            sequence,
+            segment.start + receipt.chunkStartSec,
+            segment.end + receipt.chunkStartSec,
+          ),
+          startTime: segment.start + receipt.chunkStartSec,
+          endTime: segment.end + receipt.chunkStartSec,
+          text: segment.text.trim(),
+          speaker,
+          validationState: 'validated' as const,
+          words: segment.words?.map((word) => ({
+            word: word.word,
+            start: word.start + receipt.chunkStartSec,
+            end: word.end + receipt.chunkStartSec,
+          })),
+        }),
+      );
+    const merged = mergeValidatedTranscriptChunk({
+      preview: previewSegments,
+      validated: validatedSegments,
+      source,
+      sequence,
+      chunkStartSec: receipt.chunkStartSec,
+      chunkEndSec: receipt.chunkEndSec,
+    });
+    if (!merged) return;
+
+    const config = {
+      ...buildTranscriptCheckpointConfig(),
+      model: validationModel,
+    };
+    const configKey = await sha256Hex(
+      canonicalizeTranscriptCheckpointConfig(config),
+    );
+    const sidecar = {
+      schemaVersion: 1 as const,
+      meetingId,
+      source,
+      sequence,
+      chunkChecksumSha256: receipt.checksumSha256,
+      chunkStartSec: receipt.chunkStartSec,
+      chunkEndSec: receipt.chunkEndSec,
+      transcriptionConfig: config,
+      backendResult: {
+        detectedLanguage:
+          typeof result?.language === 'string'
+            ? result.language.toLowerCase()
+            : null,
+        providerLabel:
+          typeof result?.meta?.providerLabel === 'string'
+            ? result.meta.providerLabel
+            : 'local',
+      },
+      segments: merged.map((segment) => ({
+        start: segment.startTime - receipt.chunkStartSec,
+        end: segment.endTime - receipt.chunkStartSec,
+        text: segment.text,
+        ...(segment.words
+          ? {
+              words: segment.words.map((word) => ({
+                word: word.word,
+                start: word.start - receipt.chunkStartSec,
+                end: word.end - receipt.chunkStartSec,
+              })),
+            }
+          : {}),
+      })),
+    };
+    const acceptanceSegments = acceptanceDraft.sidecar.segments.filter(
+      (segment) => segment.source !== source,
+    );
+    acceptanceSegments.push(
+      ...sidecar.segments.map((segment) => ({
+        source,
+        start: segment.start + receipt.chunkStartSec,
+        end: segment.end + receipt.chunkStartSec,
+        text: segment.text,
+        ...(segment.words
+          ? {
+              words: segment.words.map((word) => ({
+                word: word.word,
+                start: word.start + receipt.chunkStartSec,
+                end: word.end + receipt.chunkStartSec,
+              })),
+            }
+          : {}),
+      })),
+    );
+
+    const saved = await captureJournalMutationCoordinatorRef.current.run(
+      async () => {
+        const current = await refreshCaptureJournalState(meetingId);
+        if (!current || signal.aborted) return null;
+        return (await window.ipcRenderer.invoke(
+          'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_PROMOTE',
+          {
+            receipt,
+            expectedManifestRevision: current.revision,
+            expectedPriorTranscriptChecksumSha256:
+              priorCheckpoint.transcriptChecksumSha256,
+            transcriptionConfigKey: configKey,
+            sidecar,
+            expectedPriorAcceptedChecksumSha256:
+              priorFrame.acceptedChecksumSha256,
+            acceptance: {
+              sequence,
+              micCheckpointChecksumSha256:
+                source === 'mic'
+                  ? priorCheckpoint.transcriptChecksumSha256
+                  : (captureJournalCheckpointsRef.current.get(
+                      journalTupleKey('mic', sequence),
+                    )?.transcriptChecksumSha256 ?? null),
+              systemCheckpointChecksumSha256:
+                source === 'system'
+                  ? priorCheckpoint.transcriptChecksumSha256
+                  : (captureJournalCheckpointsRef.current.get(
+                      journalTupleKey('system', sequence),
+                    )?.transcriptChecksumSha256 ?? null),
+              activityEvidenceDigestSha256:
+                acceptanceDraft.activityEvidenceDigestSha256,
+              sidecar: {
+                ...acceptanceDraft.sidecar,
+                segments: acceptanceSegments.sort(
+                  (left, right) => left.start - right.start,
+                ),
+              },
+            },
+          },
+        )) as {
+          manifest: JournalManifestState;
+          checkpoint: JournalCheckpointState;
+          frame: JournalAcceptanceState;
+        };
+      },
+    );
+    if (
+      !saved ||
+      signal.aborted ||
+      generation !== liveTranscriptionGenerationRef.current ||
+      currentMeetingIdRef.current !== meetingId ||
+      !isRecordingRef.current
+    ) {
+      return;
+    }
+    captureJournalStateRef.current = saved.manifest;
+    captureJournalCheckpointsRef.current.set(tuple, saved.checkpoint);
+    captureJournalAcceptanceFramesRef.current.set(sequence, saved.frame);
+    const previewIds = new Set(previewSegments.map((segment) => segment.id));
+    processedMicSegmentsRef.current = [
+      ...processedMicSegmentsRef.current.filter(
+        (segment) => !previewIds.has(segment.id),
+      ),
+      ...merged.map((segment) => ({
+        ...segment,
+        validationState: 'validated' as const,
+      })),
+    ];
+    onLiveTranscript?.(
+      [...processedMicSegmentsRef.current]
+        .sort((left, right) => left.startTime - right.startTime)
+        .map((segment) => ({
+          id: segment.id,
+          speaker:
+            segment.speaker === 'Me' || segment.speaker === 'Them'
+              ? segment.speaker
+              : 'Unknown',
+          text: segment.text,
+          timestampMs: segment.startTime * 1_000,
+          confirmed: segment.validationState === 'validated',
+        })),
+    );
   };
 
   const hasCompleteCaptureJournalCheckpoints = async (meetingId: string) => {
@@ -1065,9 +1361,13 @@ export const AudioManager = ({
         'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
         {
           meetingId,
-          expectedConfigKey: await sha256Hex(
-            canonicalizeTranscriptCheckpointConfig(
+          expectedConfigKeys: await Promise.all(
+            [
               buildTranscriptCheckpointConfig(),
+              { ...buildTranscriptCheckpointConfig(), model: 'medium' },
+            ].map(
+              async (config) =>
+                await sha256Hex(canonicalizeTranscriptCheckpointConfig(config)),
             ),
           ),
         },
@@ -1117,6 +1417,19 @@ export const AudioManager = ({
           console.error('[Pluto] Background transcription job failed:', error);
         },
       });
+      backgroundValidationQueueRef.current.close();
+      backgroundValidationQueueRef.current =
+        new BackgroundTranscriptValidationQueue({
+          waitForLiveIdle: async (timeoutMs) =>
+            await processingQueueRef.current.waitForIdle(timeoutMs),
+          getPolicy: async () =>
+            (await window.ipcRenderer.invoke(
+              'GET_CAPTURE_COMPUTE_POLICY',
+            )) as CaptureComputePolicy,
+          onError: () => {
+            console.warn('[Pluto] Background transcript validation failed');
+          },
+        });
       startTimeRef.current = Date.now();
       stopToValidatedLatencyRef.current =
         createStopToValidatedLatencyAccumulator();
@@ -1165,6 +1478,8 @@ export const AudioManager = ({
         captureJournalRawChunksRef.current.clear();
         captureJournalReceiptsRef.current.clear();
         captureJournalCheckpointsRef.current.clear();
+        captureJournalAcceptanceFramesRef.current.clear();
+        chunkAcceptanceDraftsRef.current.clear();
       } catch (journalErr) {
         if (isCaptureSessionAlreadyActiveError(journalErr)) {
           console.warn(
@@ -1723,6 +2038,7 @@ export const AudioManager = ({
     micStream: MediaStream | null,
   ) => {
     stopSpeakingMonitor();
+    backgroundValidationQueueRef.current.close();
 
     let micAnalyser: AnalyserNode | null = null;
     if (micStream && micStream.getAudioTracks().length > 0) {
@@ -3263,6 +3579,7 @@ export const AudioManager = ({
       rms: RmsData | null;
       conversionFailed: boolean;
       audioPath?: string | null;
+      backgroundValidationEligible?: boolean;
     }> => {
       if (label === 'Me' && disableMicChunkTranscriptionRef.current) {
         return {
@@ -3422,11 +3739,17 @@ export const AudioManager = ({
                       s.start < chunkEndSec + chunkWindowPadSec,
                   )
                   .map((s: { start: number; end: number; text: string }) => ({
-                    id: crypto.randomUUID(),
+                    id: createStableLiveSegmentId(
+                      'mic',
+                      opts.chunkIndex,
+                      s.start,
+                      s.end,
+                    ),
                     startTime: s.start,
                     endTime: s.end,
                     text: s.text.trim(),
                     speaker: label,
+                    validationState: 'preview' as const,
                   }))
               : [];
             if (cumulativeSegments.length > 0) {
@@ -3438,6 +3761,7 @@ export const AudioManager = ({
                 rms,
                 conversionFailed: false,
                 audioPath: cumulativeWavPath,
+                backgroundValidationEligible: false,
               };
             }
           }
@@ -3493,11 +3817,17 @@ export const AudioManager = ({
         rawSegments
           .filter((s) => isValidSegment(s.text))
           .map((s) => ({
-            id: crypto.randomUUID(),
+            id: createStableLiveSegmentId(
+              label === 'Me' ? 'mic' : 'system',
+              opts.chunkIndex,
+              s.start + timeOffsetSec,
+              s.end + timeOffsetSec,
+            ),
             startTime: s.start + timeOffsetSec,
             endTime: s.end + timeOffsetSec,
             text: s.text.trim(),
             speaker: label,
+            validationState: 'preview' as const,
             words: s.words?.map((w) => ({
               word: w.word,
               start: w.start + timeOffsetSec,
@@ -3922,7 +4252,7 @@ export const AudioManager = ({
             : 'Unknown',
         text: segment.text,
         timestampMs: segment.startTime * 1_000,
-        confirmed: true,
+        confirmed: segment.validationState === 'validated',
       }));
     liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
       acceptedSegments,
@@ -3931,6 +4261,61 @@ export const AudioManager = ({
         onLiveTranscript?.(liveTranscript);
       },
     );
+    if (checkpointMeetingId) {
+      const candidates =
+        opts.chunkIndex % 2 === 0
+          ? [
+              {
+                source: 'mic' as const,
+                audioPath: micResult.audioPath,
+                segments: filteredMicSegments,
+                eligible: micResult.backgroundValidationEligible !== false,
+              },
+              {
+                source: 'system' as const,
+                audioPath: systemResult.audioPath,
+                segments: filteredSystemSegments,
+                eligible: systemResult.backgroundValidationEligible !== false,
+              },
+            ]
+          : [
+              {
+                source: 'system' as const,
+                audioPath: systemResult.audioPath,
+                segments: filteredSystemSegments,
+                eligible: systemResult.backgroundValidationEligible !== false,
+              },
+              {
+                source: 'mic' as const,
+                audioPath: micResult.audioPath,
+                segments: filteredMicSegments,
+                eligible: micResult.backgroundValidationEligible !== false,
+              },
+            ];
+      const candidate = candidates.find(
+        (item) => item.eligible && item.audioPath && item.segments.length > 0,
+      );
+      if (candidate?.audioPath) {
+        const previewSegments = candidate.segments.map((segment) => ({
+          ...segment,
+          startTime: segment.startTime + chunkStartSec,
+          endTime: segment.endTime + chunkStartSec,
+        }));
+        backgroundValidationQueueRef.current.enqueue(
+          `${candidate.source}:${opts.chunkIndex}`,
+          async (signal) =>
+            await validateTranscriptChunkInBackground({
+              meetingId: checkpointMeetingId,
+              generation: opts.generation,
+              source: candidate.source,
+              sequence: opts.chunkIndex,
+              audioPath: candidate.audioPath as string,
+              previewSegments,
+              signal,
+            }),
+        );
+      }
+    }
   };
 
   // Common Whisper Hallucinations to filter out

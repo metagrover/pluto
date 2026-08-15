@@ -120,6 +120,35 @@ describe('transcript checkpoint finalization', () => {
     ]);
   });
 
+  it('reuses a validated revision alongside an allowed preview config', () => {
+    const input = baseInput();
+    input.acceptedConfigKeys = [configKey, 'medium-config-sha256'];
+    input.checkpoints[0].reference.transcriptionConfigKey =
+      'medium-config-sha256';
+    input.checkpoints[0].sidecar.transcriptionConfigKey =
+      'medium-config-sha256';
+    input.checkpoints[0].reference.revision = 1;
+
+    const result = finalizeTranscriptCheckpoints(input);
+
+    expect(result.repair).toEqual([]);
+    expect(result.transcriptionRequests).toEqual([]);
+    expect(result.reusable).toHaveLength(2);
+  });
+
+  it('rejects a reference and sidecar that name different allowed configs', () => {
+    const input = baseInput();
+    input.acceptedConfigKeys = [configKey, 'medium-config-sha256'];
+    input.checkpoints[0].reference.transcriptionConfigKey =
+      'medium-config-sha256';
+
+    expect(finalizeTranscriptCheckpoints(input).repair).toContainEqual({
+      source: 'mic',
+      sequence: 0,
+      reason: 'transcription_config_changed',
+    });
+  });
+
   it('repairs only the missing tuple and reruns that interval arbitration', () => {
     const input = baseInput();
     input.checkpoints = input.checkpoints.filter(

@@ -76,6 +76,7 @@ export interface TranscriptAcceptanceFrame {
 export interface TranscriptFinalizationInput {
   meetingId: string;
   expectedConfigKey: string;
+  acceptedConfigKeys?: string[];
   intervals: TranscriptInterval[];
   checkpoints: TranscriptCheckpointCandidate[];
   acceptanceFrames: TranscriptAcceptanceFrame[];
@@ -379,12 +380,22 @@ export const finalizeTranscriptCheckpoints = (
       ) {
         reason = 'audio_link_mismatch';
       } else if (
-        input.expectedConfigKey.length === 0 ||
+        ((input.acceptedConfigKeys?.length ?? 0) === 0 &&
+          input.expectedConfigKey.length === 0) ||
         candidate.reference.transcriptionConfigKey.length === 0 ||
         candidate.sidecar.transcriptionConfigKey.length === 0 ||
         candidate.reference.transcriptionConfigKey !==
-          input.expectedConfigKey ||
-        candidate.sidecar.transcriptionConfigKey !== input.expectedConfigKey
+          candidate.sidecar.transcriptionConfigKey ||
+        !(
+          input.acceptedConfigKeys?.length
+            ? input.acceptedConfigKeys
+            : [input.expectedConfigKey]
+        ).includes(candidate.reference.transcriptionConfigKey) ||
+        !(
+          input.acceptedConfigKeys?.length
+            ? input.acceptedConfigKeys
+            : [input.expectedConfigKey]
+        ).includes(candidate.sidecar.transcriptionConfigKey)
       ) {
         reason = 'transcription_config_changed';
       } else if (
