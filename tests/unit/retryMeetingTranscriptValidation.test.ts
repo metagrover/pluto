@@ -30,6 +30,13 @@ const rawSegment = (start: number, end: number, text: string) => ({
   text,
 });
 
+const finalAudioPath = (payload: unknown): string =>
+  typeof payload === 'object' &&
+  payload !== null &&
+  typeof (payload as { audioPath?: unknown }).audioPath === 'string'
+    ? (payload as { audioPath: string }).audioPath
+    : '';
+
 const activityProducer = {
   clock: {
     kind: 'meeting_relative_seconds' as const,
@@ -84,7 +91,7 @@ describe('retryMeetingTranscriptValidation', () => {
     let current = { ...meeting };
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
-      if (channel === 'WHISPER_TRANSCRIBE') return { segments: [] };
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') return { segments: [] };
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
       if (channel === 'SAVE_MEETING') {
         current = { ...current, ...(payload as typeof current) };
@@ -211,8 +218,8 @@ describe('retryMeetingTranscriptValidation', () => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        const path = String(payload);
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        const path = finalAudioPath(payload);
         return {
           segments: [
             {
@@ -458,7 +465,7 @@ describe('retryMeetingTranscriptValidation', () => {
 
     expect(result).toEqual({ status: 'validated' });
     expect(invoke).not.toHaveBeenCalledWith(
-      'WHISPER_TRANSCRIBE',
+      'TRANSCRIPTION_TRANSCRIBE_FINAL',
       expect.anything(),
       expect.anything(),
     );
@@ -511,7 +518,7 @@ describe('retryMeetingTranscriptValidation', () => {
     });
   });
 
-  it('reuses verified recovered checkpoints without invoking Whisper', async () => {
+  it('replaces verified recovered checkpoints with a fresh Parakeet pass', async () => {
     const activityEvidence = await buildCaptureActivityEvidence(
       [
         { speaker: 'Me', startTime: 0, endTime: 4 },
@@ -615,12 +622,14 @@ describe('retryMeetingTranscriptValidation', () => {
         return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
       }
       if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        throw new Error('full-session transcription is forbidden');
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        return finalAudioPath(payload).includes('system')
+          ? { segments: [rawSegment(5, 9, 'Synthetic remote statement.')] }
+          : { segments: [rawSegment(0, 4, 'Synthetic local statement.')] };
       }
-      if (channel === 'AUDIO_PROBE_DURATION') {
-        throw new Error('full-session probing is forbidden');
-      }
+      if (channel === 'AUDIO_PROBE_DURATION') return 60;
+      if (channel === 'REFRESH_KNOWLEDGE_FOR_MEETING_NOW')
+        return { requested: 1, completed: 1 };
       throw new Error(`Unexpected channel: ${channel}`);
     });
 
@@ -630,33 +639,30 @@ describe('retryMeetingTranscriptValidation', () => {
     );
 
     expect(result.status).toBe('validated');
-    expect(invoke).not.toHaveBeenCalledWith(
-      'WHISPER_TRANSCRIBE',
-      expect.anything(),
-      expect.anything(),
+    expect(invoke).toHaveBeenCalledWith(
+      'TRANSCRIPTION_TRANSCRIBE_FINAL',
+      expect.objectContaining({
+        audioPath: '/synthetic/mic.wav',
+        source: 'mic',
+      }),
     );
-    expect(invoke).not.toHaveBeenCalledWith(
+    expect(invoke).toHaveBeenCalledWith(
       'AUDIO_PROBE_DURATION',
-      expect.anything(),
+      '/synthetic/mic.wav',
     );
     expect(invoke).toHaveBeenCalledWith(
       'AUDIO_CAPTURE_JOURNAL_VERIFY_TRANSCRIPT',
       expect.objectContaining({ meetingId: 'synthetic-id' }),
     );
-    expect(invoke).toHaveBeenCalledWith(
+    expect(invoke).not.toHaveBeenCalledWith(
       'FINALIZE_CHECKPOINT_TRANSCRIPT',
-      expect.objectContaining({
-        journalGeneration: 'checkpoint-generation-1',
-      }),
+      expect.anything(),
     );
     expect(validationInputs.at(-1) as { canonicalMode?: string }).toMatchObject(
       {
-        canonicalMode: 'checkpointed',
-        checkpointEvidenceVerified: true,
-        checkpointSourceSegments: expect.arrayContaining([
-          expect.objectContaining({ speaker: 'Me' }),
-          expect.objectContaining({ speaker: 'Them' }),
-        ]),
+        canonicalMode: 'recovered_channels',
+        checkpointEvidenceVerified: false,
+        checkpointSourceSegments: [],
       },
     );
   });
@@ -721,8 +727,8 @@ describe('retryMeetingTranscriptValidation', () => {
         };
       }
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        return String(payload).includes('system')
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        return finalAudioPath(payload).includes('system')
           ? { segments: [rawSegment(10, 18, 'Synthetic remote statement.')] }
           : { segments: [rawSegment(0, 8, 'Synthetic local statement.')] };
       }
@@ -745,14 +751,15 @@ describe('retryMeetingTranscriptValidation', () => {
 
     expect(result.status).toBe('validated');
     expect(invoke).toHaveBeenCalledWith(
-      'WHISPER_TRANSCRIBE',
-      '/synthetic/mic.wav',
-      expect.objectContaining({ canonicalSource: 'mic' }),
+      'TRANSCRIPTION_TRANSCRIBE_FINAL',
+      expect.objectContaining({
+        audioPath: '/synthetic/mic.wav',
+        source: 'mic',
+      }),
     );
-    expect(validationInputs.slice(-2)).toEqual([
-      expect.objectContaining({ canonicalMode: 'checkpointed' }),
+    expect(validationInputs.at(-1)).toEqual(
       expect.objectContaining({ canonicalMode: 'recovered_channels' }),
-    ]);
+    );
   });
 
   it('preserves user edits made while validation is running', async () => {
@@ -773,7 +780,7 @@ describe('retryMeetingTranscriptValidation', () => {
         return current;
       }
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
         return {
           segments: [rawSegment(5, 20, 'Synthetic attributed statement.')],
         };
@@ -812,7 +819,7 @@ describe('retryMeetingTranscriptValidation', () => {
       async (channel: string, payload?: unknown, options?: unknown) => {
         if (channel === 'GET_MEETING') return current;
         if (channel === 'AUDIO_PROBE_DURATION') return 60;
-        if (channel === 'WHISPER_TRANSCRIBE') {
+        if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
           return {
             segments: [rawSegment(5, 20, 'Synthetic attributed statement.')],
           };
@@ -853,8 +860,8 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        return String(payload).includes('mic')
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        return finalAudioPath(payload).includes('mic')
           ? { segments: [] }
           : { segments: [rawSegment(10, 20, 'Synthetic remote statement')] };
       }
@@ -907,8 +914,8 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        const audioPath = String(payload);
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        const audioPath = finalAudioPath(payload);
         if (audioPath.includes('mic')) {
           return {
             segments: [rawSegment(0, 2, 'Short recovered local segment.')],
@@ -975,8 +982,8 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        const audioPath = String(payload);
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        const audioPath = finalAudioPath(payload);
         if (audioPath.includes('system')) {
           return {
             segments: [rawSegment(10, 14, 'Recovered remote statement.')],
@@ -1003,12 +1010,12 @@ describe('retryMeetingTranscriptValidation', () => {
       invoke,
     );
 
-    expect(result.status).toBe('needs_attention');
+    expect(result.status).toBe('validated');
     expect(
       JSON.parse(String(current.transcript_integrity_json))
         .activityEvidenceSource,
     ).toBe('legacy_provisional_segments');
-    expect(invoke).not.toHaveBeenCalledWith(
+    expect(invoke).toHaveBeenCalledWith(
       'GENERATE_ANALYSIS_V2',
       expect.anything(),
     );
@@ -1041,8 +1048,8 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        const audioPath = String(payload);
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        const audioPath = finalAudioPath(payload);
         if (audioPath.includes('system')) {
           return {
             segments: [rawSegment(10, 14, 'Recovered remote statement.')],
@@ -1110,8 +1117,8 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        const audioPath = String(payload);
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        const audioPath = finalAudioPath(payload);
         if (audioPath.includes('system')) {
           return {
             segments: [rawSegment(10, 14, 'Recovered remote statement.')],
@@ -1167,11 +1174,11 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
-        if (String(payload).includes('system')) {
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
+        if (finalAudioPath(payload).includes('system')) {
           return { segments: [rawSegment(18.5, 27.125, 'Remote statement.')] };
         }
-        if (String(payload).includes('mic')) {
+        if (finalAudioPath(payload).includes('mic')) {
           return { segments: [rawSegment(4.25, 12.75, 'Local statement.')] };
         }
         return {
@@ -1273,7 +1280,8 @@ describe('retryMeetingTranscriptValidation', () => {
       const invoke = vi.fn(async (channel: string, payload?: unknown) => {
         if (channel === 'GET_MEETING') return current;
         if (channel === 'AUDIO_PROBE_DURATION') return 60;
-        if (channel === 'WHISPER_TRANSCRIBE') return { segments: [] };
+        if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL')
+          return { segments: [] };
         if (channel === 'SAVE_MEETING') {
           current = { ...current, ...(payload as Record<string, unknown>) };
           return true;
@@ -1325,7 +1333,8 @@ describe('retryMeetingTranscriptValidation', () => {
       const invoke = vi.fn(async (channel: string, payload?: unknown) => {
         if (channel === 'GET_MEETING') return current;
         if (channel === 'AUDIO_PROBE_DURATION') return 60;
-        if (channel === 'WHISPER_TRANSCRIBE') return { segments: [] };
+        if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL')
+          return { segments: [] };
         if (channel === 'SAVE_MEETING') {
           current = { ...current, ...(payload as Record<string, unknown>) };
           return true;
@@ -1382,7 +1391,7 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') return { segments: [] };
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') return { segments: [] };
       if (channel === 'SAVE_MEETING') {
         current = { ...current, ...(payload as Record<string, unknown>) };
         return true;
@@ -1423,11 +1432,10 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'AUDIO_PROBE_DURATION') return 60;
-      if (channel === 'WHISPER_TRANSCRIBE') {
+      if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
         return await new Promise(() => undefined);
       }
-      if (channel === 'CANCEL_MEETING_TRANSCRIPTION')
-        return { cancelled: true };
+      if (channel === 'TRANSCRIPTION_CANCEL_FINAL') return { cancelled: true };
       if (channel === 'FAIL_TRANSCRIPT_VALIDATION_RETRY') {
         const integrity = JSON.parse(
           String(current.transcript_integrity_json),
@@ -1458,7 +1466,7 @@ describe('retryMeetingTranscriptValidation', () => {
 
     expect(result).toEqual({ status: 'needs_attention' });
     expect(invoke).toHaveBeenCalledWith(
-      'CANCEL_MEETING_TRANSCRIPTION',
+      'TRANSCRIPTION_CANCEL_FINAL',
       'synthetic-id',
     );
     expect(current.transcript_status).toBe('needs_attention');

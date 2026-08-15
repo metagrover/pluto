@@ -52,6 +52,8 @@ import {
   transcribeJournalAlignedAudio,
 } from './recoveryTranscriptionAudio';
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
+import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
+import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -276,6 +278,7 @@ const activeTranscriptionMeetings = new Map<string, number>();
 const knowledgeSynthesisPause = createPauseReasonCoordinator(
   setKnowledgeDocSynthesisPaused,
 );
+let parakeetFinalClient: ParakeetFinalClient | null = null;
 
 function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
@@ -345,6 +348,8 @@ app.on('before-quit', async () => {
     controller.abort();
   }
   activeMeetingTasks.clear();
+  parakeetFinalClient?.close();
+  parakeetFinalClient = null;
   await whisperX.stop();
 });
 
@@ -352,6 +357,24 @@ app.whenReady().then(async () => {
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
+
+  const parakeetExecutablePath = app.isPackaged
+    ? path.join(process.resourcesPath, 'bin', 'parakeet-runtime')
+    : path.join(process.env.APP_ROOT, 'resources', 'bin', 'parakeet-runtime');
+  const parakeetModelRoot = path.join(
+    app.getPath('userData'),
+    'models',
+    'parakeet',
+  );
+  fs.mkdirSync(parakeetModelRoot, { recursive: true });
+  parakeetFinalClient = new ParakeetFinalClient({
+    paths: {
+      executablePath: parakeetExecutablePath,
+      modelRoot: parakeetModelRoot,
+      audioRoot: getMeetingArtifactsRootDir(),
+    },
+    diagnostic: (code) => console.warn(`[Pluto] ${code}`),
+  });
 
   // Local transcription handlers. IPC names remain stable for compatibility.
   ipcMain.handle('WHISPERX_CHECK_PYTHON', async () => {
@@ -376,6 +399,45 @@ app.whenReady().then(async () => {
     onBattery: powerMonitor.isOnBatteryPower(),
     thermalState: powerMonitor.getCurrentThermalState(),
   }));
+
+  ipcMain.handle('TRANSCRIPTION_PREPARE_FINAL', async () => {
+    if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
+    return await parakeetFinalClient.prepare();
+  });
+
+  ipcMain.handle('TRANSCRIPTION_FINAL_STATUS', async () => {
+    if (!parakeetFinalClient) {
+      return { ready: false, engine: 'parakeet_coreml' };
+    }
+    try {
+      return await parakeetFinalClient.prepare();
+    } catch {
+      return {
+        ready: false,
+        engine: 'parakeet_coreml',
+        reason: 'parakeet_prepare_failed',
+      };
+    }
+  });
+
+  ipcMain.handle('TRANSCRIPTION_TRANSCRIBE_FINAL', async (_event, request) => {
+    if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
+    const meetingId = String(request?.meetingId || '');
+    const signal = meetingId ? getAbortSignalForMeeting(meetingId) : undefined;
+    beginTranscriptionWork();
+    beginMeetingTranscription(meetingId || null);
+    try {
+      return await parakeetFinalClient.transcribe({ ...request, signal });
+    } finally {
+      endMeetingTranscription(meetingId || null);
+      endTranscriptionWork();
+    }
+  });
+
+  ipcMain.handle('TRANSCRIPTION_CANCEL_FINAL', (_event, meetingId) => {
+    abortMeetingTasks(String(meetingId));
+    return { cancelled: true };
+  });
 
   ipcMain.handle(
     'GET_TRANSCRIPTION_VOCABULARY',
@@ -1605,6 +1667,22 @@ app.whenReady().then(async () => {
     (_event, meetingId, lease) =>
       db.claimMeetingTranscriptValidationRetry(meetingId, lease),
   );
+  ipcMain.handle('CLAIM_FINAL_TRANSCRIPTION', (_event, meetingId, lease) =>
+    db.claimMeetingFinalTranscription(meetingId, lease),
+  );
+  ipcMain.handle(
+    'UPDATE_FINAL_TRANSCRIPTION_STAGE',
+    (_event, meetingId, runId, stage) =>
+      db.updateMeetingFinalTranscriptionStage(meetingId, runId, stage),
+  );
+  ipcMain.handle('COMMIT_FINAL_TRANSCRIPTION', (_event, input) =>
+    db.commitMeetingFinalTranscription(input),
+  );
+  ipcMain.handle(
+    'FAIL_FINAL_TRANSCRIPTION',
+    (_event, meetingId, runId, failure) =>
+      db.failMeetingFinalTranscription(meetingId, runId, failure),
+  );
   ipcMain.handle(
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
     (_event, meetingId, runId, stage) =>
@@ -2684,12 +2762,27 @@ app.whenReady().then(async () => {
       `[Pluto] Released ${interruptedDownstreamRuns} interrupted downstream processing lease(s)`,
     );
   }
+  const interruptedFinalTranscriptions =
+    db.expireInterruptedFinalTranscription();
+  if (interruptedFinalTranscriptions > 0) {
+    console.log(
+      `[Pluto] Released ${interruptedFinalTranscriptions} interrupted final transcription lease(s)`,
+    );
+  }
   initializeKnowledgeDocs().catch((error) => {
     console.error(
       '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
       error,
     );
   });
+  await prepareFinalTranscriptionBeforeRecovery({
+    prepare: async () => {
+      if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
+      await parakeetFinalClient.prepare();
+    },
+    recover: async () => undefined,
+  });
+
   try {
     syncActionTrackerAttentionQueue();
   } catch (error) {

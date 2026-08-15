@@ -51,6 +51,7 @@ type FinalTranscriptionMetadata = {
 
 export type FinalTranscriptionDependencies<TTranscript = unknown> = {
   claimLease: (lease: FinalTranscriptionLease) => Promise<boolean>;
+  updateLease?: (lease: FinalTranscriptionLease) => Promise<unknown>;
   transcribe: (request: TranscriptionRequest) => Promise<TranscriptionResult>;
   probeDuration: (audioPath: string) => Promise<number | null>;
   commitCanonical: (
@@ -124,6 +125,7 @@ export const runFinalTranscription = async <TTranscript>(
             ? 'transcribing_mic'
             : 'transcribing_system',
         );
+        await dependencies.updateLease?.(lease);
         const result = await dependencies.transcribe({
           meetingId: input.meetingId,
           role: 'final_validation',
@@ -165,6 +167,7 @@ export const runFinalTranscription = async <TTranscript>(
       ),
     };
     lease = advanceFinalTranscriptionLease(lease, 'reviewing_integrity');
+    await dependencies.updateLease?.(lease);
     if (validation.status !== 'validated') {
       const failure: FinalTranscriptionFailure = validation.reasons.includes(
         'required_source_failed',
@@ -183,6 +186,7 @@ export const runFinalTranscription = async <TTranscript>(
     }
 
     lease = advanceFinalTranscriptionLease(lease, 'saving');
+    await dependencies.updateLease?.(lease);
     const commit = await dependencies.commitCanonical({
       meetingId: input.meetingId,
       expectedCaptureGeneration: input.captureEvidence.generation,

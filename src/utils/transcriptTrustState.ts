@@ -1,3 +1,7 @@
+import {
+  type FinalTranscriptionLease,
+  readFinalTranscriptionLease,
+} from '../services/finalTranscription/finalTranscriptionLease.ts';
 import type { TranscriptLifecycleStatus } from './transcriptIntegrity.ts';
 
 export const TRANSCRIPT_TRUST_SCHEMA_VERSION = 2;
@@ -52,6 +56,15 @@ export type TranscriptTrustEnvelopeV2 = {
     deadlineAt: string;
     stage: 'transcribing' | 'reviewing_evidence' | 'saving';
   };
+  finalTranscription?:
+    | FinalTranscriptionLease
+    | {
+        schemaVersion: 1;
+        state: 'complete' | 'needs_attention';
+        policy: 'parakeet_final_v1';
+        captureGeneration: string;
+        failure?: string;
+      };
   recovery?: {
     source: 'capture_journal';
     journalSchemaVersion?: 1 | 2 | 3;
@@ -342,6 +355,7 @@ export const parseTranscriptTrustEnvelope = (
         'evidence',
         'validationProof',
         'retry',
+        'finalTranscription',
         'recovery',
         'restorationProof',
       ],
@@ -358,16 +372,47 @@ export const parseTranscriptTrustEnvelope = (
   const state = raw.state as TranscriptLifecycleStatus;
   const causes = raw.causes as TranscriptTrustCause[];
   const retry = raw.retry;
+  const finalTranscription = raw.finalTranscription;
+  const activeFinalTranscription =
+    readFinalTranscriptionLease(finalTranscription);
+  const completedFinalTranscription =
+    finalTranscription &&
+    typeof finalTranscription === 'object' &&
+    !Array.isArray(finalTranscription) &&
+    (finalTranscription as { schemaVersion?: unknown }).schemaVersion === 1 &&
+    ['complete', 'needs_attention'].includes(
+      String((finalTranscription as { state?: unknown }).state),
+    ) &&
+    (finalTranscription as { policy?: unknown }).policy ===
+      'parakeet_final_v1' &&
+    typeof (finalTranscription as { captureGeneration?: unknown })
+      .captureGeneration === 'string';
   const proof = raw.validationProof;
   if (
     (state === 'provisional' &&
-      (causes.length > 0 || retry !== undefined || proof !== undefined)) ||
+      (causes.length > 0 ||
+        retry !== undefined ||
+        finalTranscription !== undefined ||
+        proof !== undefined)) ||
     (state === 'validating' &&
-      (causes.length > 0 || !validRetry(retry) || proof !== undefined)) ||
+      (causes.length > 0 ||
+        proof !== undefined ||
+        validRetry(retry) === Boolean(activeFinalTranscription))) ||
     (state === 'needs_attention' &&
-      (causes.length === 0 || retry !== undefined || proof !== undefined)) ||
+      (causes.length === 0 ||
+        retry !== undefined ||
+        proof !== undefined ||
+        (finalTranscription !== undefined &&
+          (!completedFinalTranscription ||
+            (finalTranscription as { state?: unknown }).state !==
+              'needs_attention')))) ||
     (state === 'validated' &&
-      (causes.length > 0 || retry !== undefined || !validProof(proof)))
+      (causes.length > 0 ||
+        retry !== undefined ||
+        !validProof(proof) ||
+        (finalTranscription !== undefined &&
+          (!completedFinalTranscription ||
+            (finalTranscription as { state?: unknown }).state !== 'complete'))))
   ) {
     return { ok: false, failure: 'invalid_shape' };
   }

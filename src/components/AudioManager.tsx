@@ -6,6 +6,7 @@ import {
   persistTranscriptThenRunLatencyPatchAndDownstream,
   startStopToValidatedLatencyAfterAcceptedStop,
 } from '../services/diarizationFirstFinalization';
+import { runFinalTranscription } from '../services/finalTranscription/runFinalTranscription';
 import { runRecordingTranscriptValidation } from '../services/recordingTranscriptValidation';
 import {
   beginRetryLease,
@@ -599,6 +600,7 @@ export const AudioManager = ({
   const liveTranscriptionGenerationRef = useRef(0);
   const transcriptionVocabularyRef = useRef<TranscriptionVocabularySelection>({
     initialPrompt: null,
+    terms: [],
     provenance: {
       policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
       hintCount: 0,
@@ -1406,6 +1408,7 @@ export const AudioManager = ({
       currentMeetingIdRef.current = meetingId;
       transcriptionVocabularyRef.current = {
         initialPrompt: null,
+        terms: [],
         provenance: {
           policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
           hintCount: 0,
@@ -1529,8 +1532,14 @@ export const AudioManager = ({
         const hintCount = Number.isInteger(vocabulary?.provenance?.hintCount)
           ? Math.max(0, Math.min(12, vocabulary.provenance.hintCount))
           : 0;
+        const terms = Array.isArray(vocabulary?.terms)
+          ? vocabulary.terms
+              .filter((term): term is string => typeof term === 'string')
+              .slice(0, 12)
+          : [];
         transcriptionVocabularyRef.current = {
           initialPrompt,
+          terms,
           provenance: {
             policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
             hintCount: initialPrompt ? hintCount : 0,
@@ -5756,10 +5765,233 @@ export const AudioManager = ({
       const foregroundValidationPlan = planForegroundTranscriptValidation({
         checkpointEvidenceVerified,
       });
+      if (!stopSnapshot || !sealedActivityEvidence) {
+        throw new Error('final_transcription_evidence_unavailable');
+      }
+      const finalStopSnapshot = stopSnapshot;
+      const finalSealedActivityEvidence = sealedActivityEvidence;
+      const finalTranscriptionRunId = crypto.randomUUID();
+      const captureGeneration =
+        captureJournalStateRef.current?.generation ?? '';
+      const provisionalTranscriptJson = JSON.stringify(
+        buildTranscriptJsonPayload(newTranscription, {
+          pipelineMode,
+          canonicalSource: mixedAudioPath ? 'mix' : 'mic',
+          postHydrationBleedPass: false,
+          transcription: {
+            backend: String(resolvedTranscriptionSettings.backend),
+            preset: String(resolvedTranscriptionSettings.preset),
+            model: String(resolvedChunkModel),
+            device: String(resolvedTranscriptionSettings.device),
+            computeType: String(resolvedChunkComputeType),
+            diarization: false,
+            elapsedMs: 0,
+            vocabularyHintPolicyVersion:
+              transcriptionVocabularyRef.current.provenance.policyVersion,
+            vocabularyHintCount:
+              transcriptionVocabularyRef.current.provenance.hintCount,
+          },
+          speakerAttribution,
+          liveTranscriptResponsiveness:
+            frozenLiveTranscriptResponsivenessRef.current ?? undefined,
+          lifecycleStatus: 'provisional',
+        }),
+      );
+      const provisionalMeeting = {
+        id: finalStopSnapshot.meetingId,
+        title: userTitle || 'Meeting',
+        meeting_type: 'Recording',
+        started_at: meetingTiming.startedAtIso,
+        ended_at: meetingTiming.endedAtIso,
+        duration_seconds: meetingTiming.durationSeconds,
+        audio_path: primaryAudioPath || null,
+        system_audio_path: systemAudioPath || null,
+        mixed_audio_path: mixedAudioPath || null,
+        transcript_status: 'provisional',
+        transcript_validated_at: null,
+        transcript_json: provisionalTranscriptJson,
+        user_notes: userNotes,
+        enhanced_notes: null,
+        analysis_json: null,
+        value_signals_json: null,
+        participants,
+        capture_journal_generation: captureGeneration || null,
+        folder_id: null,
+        is_favorite: false,
+        end_reason: endReason || 'manual',
+        finalization_status: 'finalized',
+        finalization_error_category: null,
+      };
+      const provisionalIntegrity = {
+        schemaVersion: 2,
+        state: 'provisional',
+        causes: [],
+        evidenceProvenance: {
+          kind: 'sealed_capture_activity_v2',
+          digestSha256: finalSealedActivityEvidence.digestSha256,
+        },
+        activityEvidence: finalSealedActivityEvidence,
+      };
+      const insertedProvisional = await sealedActivityHandoff.persistMeeting(
+        provisionalMeeting,
+        provisionalIntegrity,
+        async (meeting) =>
+          await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
+      );
+      if (insertedProvisional === false) {
+        onSessionComplete?.(finalStopSnapshot.meetingId);
+        return;
+      }
+
+      let committedFinalSegments: TranscriptionSegment[] = [];
+      const finalOutcome = await sealedActivityHandoff.runValidation(
+        async (activityWindows) =>
+          await runFinalTranscription(
+            {
+              meetingId: finalStopSnapshot.meetingId,
+              runId: finalTranscriptionRunId,
+              captureEvidence: {
+                sealed: Boolean(captureGeneration),
+                generation: captureGeneration,
+              },
+              recordingDurationSeconds: meetingTiming.durationSeconds,
+              micAudioPath: primaryAudioPath,
+              systemAudioPath,
+              provisionalSegments: newTranscription,
+              activityWindows,
+              language: resolvedTranscriptionSettings.language || 'en',
+              vocabulary: transcriptionVocabularyRef.current.terms,
+              vocabularyPolicyVersion:
+                transcriptionVocabularyRef.current.provenance.policyVersion,
+            },
+            {
+              claimLease: async (lease) =>
+                (await window.ipcRenderer.invoke(
+                  'CLAIM_FINAL_TRANSCRIPTION',
+                  finalStopSnapshot.meetingId,
+                  lease,
+                )) === true,
+              updateLease: async (lease) =>
+                await window.ipcRenderer.invoke(
+                  'UPDATE_FINAL_TRANSCRIPTION_STAGE',
+                  finalStopSnapshot.meetingId,
+                  lease.runId,
+                  lease.stage,
+                ),
+              transcribe: async (request) =>
+                await window.ipcRenderer.invoke(
+                  'TRANSCRIPTION_TRANSCRIBE_FINAL',
+                  request,
+                ),
+              probeDuration: async (audioPath) =>
+                await window.ipcRenderer.invoke(
+                  'AUDIO_PROBE_DURATION',
+                  audioPath,
+                ),
+              commitCanonical: async (commit) => {
+                committedFinalSegments =
+                  commit.segments as TranscriptionSegment[];
+                const transcriptValidatedAt = new Date().toISOString();
+                const canonicalTranscriptJson = JSON.stringify(
+                  buildTranscriptJsonPayload(committedFinalSegments, {
+                    pipelineMode,
+                    canonicalSource: 'recovered_channels',
+                    postHydrationBleedPass: false,
+                    transcription: {
+                      backend: 'parakeet_coreml',
+                      preset: 'accuracy_first',
+                      model: commit.metadata.model,
+                      device: 'coreml',
+                      computeType: 'int8',
+                      canonicalSource: 'recovered_channels',
+                      diarization: false,
+                      elapsedMs: 0,
+                      providerLabel: 'FluidAudio-0.15.5',
+                      vocabularyHintPolicyVersion:
+                        commit.metadata.vocabularyPolicyVersion,
+                      vocabularyHintCount: commit.metadata.vocabularyCount,
+                    },
+                    speakerAttribution,
+                    liveTranscriptResponsiveness:
+                      frozenLiveTranscriptResponsivenessRef.current ??
+                      undefined,
+                    lifecycleStatus: 'validated',
+                    integrity: {
+                      ...commit.integrity,
+                      reasons: [],
+                    },
+                  }),
+                );
+                const transcriptIntegrityJson = JSON.stringify({
+                  schemaVersion: 2,
+                  state: 'validated',
+                  causes: [],
+                  evidenceProvenance: {
+                    kind: 'sealed_capture_activity_v2',
+                    digestSha256: finalSealedActivityEvidence.digestSha256,
+                  },
+                  activityEvidence: finalSealedActivityEvidence,
+                  evidence: commit.integrity,
+                  validationProof: {
+                    gateVersion: 'canonical_integrity_v1',
+                    validatedAt: transcriptValidatedAt,
+                  },
+                });
+                const outcome = await window.ipcRenderer.invoke(
+                  'COMMIT_FINAL_TRANSCRIPTION',
+                  {
+                    meetingId: finalStopSnapshot.meetingId,
+                    runId: finalTranscriptionRunId,
+                    captureGeneration,
+                    canonicalTranscriptJson,
+                    transcriptIntegrityJson,
+                    transcriptValidatedAt,
+                  },
+                );
+                return outcome && outcome.committed === true
+                  ? {
+                      committed: true,
+                      transcript: JSON.parse(outcome.transcriptJson),
+                    }
+                  : { committed: false };
+              },
+              markNeedsAttention: async ({ failure, lease }) => {
+                if (lease) {
+                  await window.ipcRenderer.invoke(
+                    'FAIL_FINAL_TRANSCRIPTION',
+                    finalStopSnapshot.meetingId,
+                    lease.runId,
+                    failure,
+                  );
+                }
+              },
+              startAnalysis: async ({ transcript }) => {
+                if (
+                  transcript &&
+                  typeof transcript === 'object' &&
+                  Array.isArray(
+                    (transcript as { segments?: unknown[] }).segments,
+                  )
+                ) {
+                  const fullText = committedFinalSegments
+                    .map((segment) => segment.text)
+                    .join(' ');
+                  if (fullText) onTranscript?.(fullText);
+                }
+                onSessionComplete?.(finalStopSnapshot.meetingId);
+              },
+            },
+          ),
+      );
+      if (finalOutcome.status !== 'validated') {
+        onSessionComplete?.(finalStopSnapshot.meetingId);
+      }
+      if (finalOutcome.status) return;
+
       const integrityValidation = await sealedActivityHandoff.runValidation(
         async (activityWindows) =>
           await runRecordingTranscriptValidation({
-            meetingId: stopSnapshot.meetingId,
+            meetingId: finalStopSnapshot.meetingId,
             recordingDurationSeconds: meetingTiming.durationSeconds,
             micAudioPath: primaryAudioPath,
             mixAudioPath: mixedAudioPath,

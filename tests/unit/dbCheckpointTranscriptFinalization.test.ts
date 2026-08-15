@@ -16,8 +16,11 @@ vi.mock('electron', () => ({
 import {
   addMeetingEntity,
   claimMeetingDownstreamProcessing,
+  claimMeetingFinalTranscription,
   claimMeetingTranscriptValidationRetry,
+  commitMeetingFinalTranscription,
   expireInterruptedDownstreamProcessing,
+  expireInterruptedFinalTranscription,
   finalizeCheckpointTranscript,
   getMeeting,
   getMeetingEntities,
@@ -30,10 +33,97 @@ import {
 } from '../../electron/db';
 import { buildDownstreamProcessingLease } from '../../src/services/downstreamProcessingLease';
 import { buildPartialCaptureGapProcessingLease } from '../../src/services/downstreamProcessingLease';
+import { buildFinalTranscriptionLease } from '../../src/services/finalTranscription/finalTranscriptionLease';
 import { parseMeetingDownstreamProcessing } from '../../src/utils/transcriptTrustState';
 
 afterAll(() => {
   fs.rmSync(testDatabase.directory, { recursive: true, force: true });
+});
+
+it('claims and commits final transcription only for the exact capture generation', () => {
+  const id = 'parakeet-final-generation-bound';
+  saveMeeting({
+    id,
+    title: 'Meeting',
+    transcript_status: 'provisional',
+    transcript_json: JSON.stringify({
+      lifecycleStatus: 'provisional',
+      segments: [],
+    }),
+    transcript_integrity_json: '{}',
+    capture_journal_generation: journalGeneration,
+    analysis_json: JSON.stringify({ stale: true }),
+  });
+  const lease = buildFinalTranscriptionLease({
+    runId: 'parakeet-run-1',
+    captureGeneration: journalGeneration,
+    recordingDurationSeconds: 10,
+    now: Date.parse('2026-08-15T00:00:00.000Z'),
+  });
+
+  expect(claimMeetingFinalTranscription(id, lease)).toBe(true);
+  expect(
+    claimMeetingFinalTranscription(id, { ...lease, runId: 'second' }),
+  ).toBe(false);
+  expect(
+    commitMeetingFinalTranscription({
+      meetingId: id,
+      runId: lease.runId,
+      captureGeneration: 'wrong-generation',
+      canonicalTranscriptJson,
+      transcriptIntegrityJson,
+      transcriptValidatedAt: validatedAt,
+    }),
+  ).toBe(false);
+  const committed = commitMeetingFinalTranscription({
+    meetingId: id,
+    runId: lease.runId,
+    captureGeneration: journalGeneration,
+    canonicalTranscriptJson,
+    transcriptIntegrityJson,
+    transcriptValidatedAt: validatedAt,
+  });
+
+  expect(committed).toEqual({
+    committed: true,
+    transcriptJson: canonicalTranscriptJson,
+  });
+  expect(getMeeting(id)).toMatchObject({
+    transcript_status: 'validated',
+    transcript_json: canonicalTranscriptJson,
+    transcript_validated_at: validatedAt,
+    analysis_json: null,
+  });
+});
+
+it('expires interrupted final transcription without replacing provisional text', () => {
+  const id = 'parakeet-final-interrupted';
+  const provisional = JSON.stringify({
+    segments: [{ speaker: 'Me', text: 'provisional' }],
+  });
+  saveMeeting({
+    id,
+    title: 'Meeting',
+    transcript_status: 'provisional',
+    transcript_json: provisional,
+    transcript_integrity_json: '{}',
+    capture_journal_generation: journalGeneration,
+  });
+  const lease = buildFinalTranscriptionLease({
+    runId: 'interrupted-run',
+    captureGeneration: journalGeneration,
+    recordingDurationSeconds: 10,
+    now: 0,
+  });
+  expect(claimMeetingFinalTranscription(id, lease)).toBe(true);
+
+  expect(expireInterruptedFinalTranscription()).toBeGreaterThanOrEqual(1);
+  expect(getMeeting(id)).toMatchObject({
+    transcript_status: 'needs_attention',
+  });
+  expect(JSON.parse(String(getMeeting(id)?.transcript_json)).segments).toEqual([
+    { speaker: 'Me', text: 'provisional' },
+  ]);
 });
 
 const validatedAt = '2026-07-31T08:00:00.000Z';

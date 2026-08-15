@@ -695,12 +695,7 @@ export const retryMeetingTranscriptValidation = async (
       meeting.capture_journal_generation &&
     verifiedCheckpointEvidence?.segmentCount === provisionalSegments.length &&
     checkpointSourceSegments.length > 0;
-  let canonicalMode: 'checkpointed' | 'recovered_channels' | 'full_mix' =
-    checkpointEvidenceVerified
-      ? ('checkpointed' as const)
-      : recovery?.source === 'capture_journal'
-        ? ('recovered_channels' as const)
-        : ('full_mix' as const);
+  const canonicalMode = 'recovered_channels' as const;
   const claimed = await invoke(
     'SAVE_MEETING',
     {
@@ -743,7 +738,7 @@ export const retryMeetingTranscriptValidation = async (
       runId,
       failure,
     );
-    await invoke('CANCEL_MEETING_TRANSCRIPTION', meetingId).catch(() => null);
+    await invoke('TRANSCRIPTION_CANCEL_FINAL', meetingId).catch(() => null);
     return failed === false
       ? ({ status: 'superseded' } as const)
       : ({ status: 'needs_attention' } as const);
@@ -763,25 +758,30 @@ export const retryMeetingTranscriptValidation = async (
         mode === 'checkpointed' ? checkpointSourceSegments : [],
       activityWindows: activityEvidence.windows,
       canonicalMode: mode,
+      transcriptionScheduling: 'sequential_channels',
       checkpointEvidenceVerified:
         mode === 'checkpointed' && checkpointEvidenceVerified,
       transcribe: async (audioPath, options) =>
-        (await invoke('WHISPER_TRANSCRIBE', audioPath, options)) as {
+        (await invoke('TRANSCRIPTION_TRANSCRIBE_FINAL', {
+          meetingId: String(meeting.id),
+          role: 'final_validation',
+          source: options.canonicalSource,
+          audioPath,
+          language: 'en',
+          vocabulary: [],
+        })) as {
           segments?: Array<{ start: number; end: number; text: string }>;
           meta?: Record<string, unknown>;
+          vad?: {
+            status?: 'speech' | 'no_speech' | 'failed';
+            speechSeconds?: number;
+          };
         },
       probeDuration: async (audioPath) =>
         (await invoke('AUDIO_PROBE_DURATION', audioPath)) as number | null,
     });
   try {
     validation = await runBeforeDeadline(validateTranscript(canonicalMode));
-    if (
-      canonicalMode === 'checkpointed' &&
-      validation.status === 'needs_attention'
-    ) {
-      canonicalMode = 'recovered_channels';
-      validation = await runBeforeDeadline(validateTranscript(canonicalMode));
-    }
   } catch (error) {
     const failure =
       error instanceof Error &&
@@ -864,6 +864,7 @@ export const retryMeetingTranscriptValidation = async (
     validation.sourceSegmentCounts.system === 0 &&
     validation.sourceOutcomes.system !== 'no_speech';
   if (
+    validation.segments.length === 0 ||
     validation.status === 'needs_attention' ||
     activityEvidence.failureReason != null ||
     priorLocalSpeechStillMissing ||
@@ -986,31 +987,11 @@ export const retryMeetingTranscriptValidation = async (
         validateReplacement: async (candidate) =>
           candidate.transcript_status === 'validated' &&
           parseSegments(candidate.transcript_json).length > 0,
-        saveReplacement: async (candidate) => {
-          if (
-            canonicalMode === 'checkpointed' &&
-            current.capture_journal_generation
-          ) {
-            const outcome = await invoke('FINALIZE_CHECKPOINT_TRANSCRIPT', {
-              meetingId,
-              journalGeneration: current.capture_journal_generation,
-              expectedTranscriptStatus: 'validating',
-              expectedValidationRunId: runId,
-              canonicalTranscriptJson: candidate.transcript_json,
-              transcriptIntegrityJson: candidate.transcript_integrity_json,
-              transcriptValidatedAt: validatedAt,
-              downstreamRunId,
-            });
-            return (
-              outcome === 'committed_and_claimed' ||
-              outcome === 'already_committed'
-            );
-          }
-          return invoke('SAVE_MEETING', candidate, {
+        saveReplacement: async (candidate) =>
+          invoke('SAVE_MEETING', candidate, {
             expectedValidationRunId: runId,
             transcriptOwnedFieldsOnly: true,
-          });
-        },
+          }),
       }),
     );
   } catch (error) {

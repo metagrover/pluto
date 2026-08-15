@@ -185,17 +185,17 @@ expect(events).toEqual(['commit-canonical', 'start-analysis']);
 - Test: `tests/unit/transcriptSchema.test.ts`
 - Create: `tests/unit/finalTranscriptionStartupBoundary.test.ts`
 
-- [ ] **Step 1: Add failing persistence/startup tests proving Parakeet preparation precedes retry recovery, final validation claims one lease, canonical commit is generation-bound, and analysis receives the exact committed transcript**
+- [x] **Step 1: Add failing persistence/startup tests proving Parakeet preparation precedes retry recovery, final validation claims one lease, canonical commit is generation-bound, and analysis receives the exact committed transcript**
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
-- [ ] **Step 3: Register `TRANSCRIPTION_TRANSCRIBE`, prepare/status/cancel IPC handlers and route final policy to the native client while retaining MLX live/recovery chunk routing**
+- [x] **Step 3: Register `TRANSCRIPTION_TRANSCRIBE`, prepare/status/cancel IPC handlers and route final policy to the native client while retaining MLX live/recovery chunk routing**
 
-- [ ] **Step 4: Replace the checkpoint-only validation shortcut with the final orchestrator; keep provisional persistence but delay downstream analysis until final commit**
+- [x] **Step 4: Replace the checkpoint-only validation shortcut with the final orchestrator; keep provisional persistence but delay downstream analysis until final commit**
 
-- [ ] **Step 5: Add conditional database operations and restart recovery for interrupted final-validation leases**
+- [x] **Step 5: Add conditional database operations and restart recovery for interrupted final-validation leases**
 
-- [ ] **Step 6: Verify focused persistence, retry, finalization, and analysis tests; commit**
+- [x] **Step 6: Verify focused persistence, retry, finalization, and analysis tests; commit**
 
 ### Task 8: Remove stale transcription code and settings
 

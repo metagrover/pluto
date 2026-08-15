@@ -53,6 +53,32 @@ export const advanceFinalTranscriptionLease = (
   stage: FinalTranscriptionStage,
 ): FinalTranscriptionLease => ({ ...lease, stage });
 
+export const readFinalTranscriptionLease = (
+  value: unknown,
+): FinalTranscriptionLease | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const lease = value as Partial<FinalTranscriptionLease>;
+  if (
+    lease.schemaVersion !== 1 ||
+    lease.state !== 'processing' ||
+    lease.policy !== 'parakeet_final_v1' ||
+    typeof lease.runId !== 'string' ||
+    typeof lease.captureGeneration !== 'string' ||
+    typeof lease.startedAt !== 'string' ||
+    typeof lease.deadlineAt !== 'string' ||
+    ![
+      'preparing',
+      'transcribing_mic',
+      'transcribing_system',
+      'reviewing_integrity',
+      'saving',
+    ].includes(String(lease.stage))
+  ) {
+    return null;
+  }
+  return lease as FinalTranscriptionLease;
+};
+
 export const finishFinalTranscriptionLease = (
   lease: FinalTranscriptionLease,
   failure?: FinalTranscriptionFailure,
