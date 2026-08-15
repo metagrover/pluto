@@ -126,17 +126,26 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             language: languageHint
         )
 
+        var replacements: [VocabularyReplacement] = []
         if !vocabulary.isEmpty {
-            result = try await rescore(result, audioURL: audioURL, vocabulary: vocabulary)
+            (result, replacements) = try await rescore(
+                result,
+                audioURL: audioURL,
+                vocabulary: vocabulary
+            )
         }
 
-        let words = buildWordTimings(from: result.tokenTimings ?? []).map {
+        let recognizedWords = buildWordTimings(from: result.tokenTimings ?? []).map {
             TranscriptionWord(
                 text: $0.word,
                 startSeconds: $0.startTime,
                 endSeconds: $0.endTime
             )
         }
+        let words = reconcileVocabularyTimings(
+            words: recognizedWords,
+            replacements: replacements
+        )
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return TranscriptionOutput(
             text: text,
@@ -151,13 +160,13 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
         _ result: ASRResult,
         audioURL: URL,
         vocabulary: [String]
-    ) async throws -> ASRResult {
+    ) async throws -> (ASRResult, [VocabularyReplacement]) {
         guard
             let ctcModels,
             let ctcModelDirectory,
             let tokenTimings = result.tokenTimings,
             !tokenTimings.isEmpty
-        else { return result }
+        else { return (result, []) }
 
         let tokenizer = try await CtcTokenizer.load(from: ctcModelDirectory)
         let terms = vocabulary.prefix(100).compactMap { rawTerm -> CustomVocabularyTerm? in
@@ -165,7 +174,7 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             guard term.count >= 3, term.count <= 100 else { return nil }
             return CustomVocabularyTerm(text: term, ctcTokenIds: tokenizer.encode(term))
         }
-        guard !terms.isEmpty else { return result }
+        guard !terms.isEmpty else { return (result, []) }
 
         let context = CustomVocabularyContext(terms: terms)
         let spotter = CtcKeywordSpotter(models: ctcModels, blankId: ctcModels.vocabulary.count)
@@ -174,7 +183,7 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             audioSamples: samples,
             customVocabulary: context
         )
-        guard !spotted.logProbs.isEmpty else { return result }
+        guard !spotted.logProbs.isEmpty else { return (result, []) }
         let rescorer = try await VocabularyRescorer.create(
             spotter: spotter,
             vocabulary: context,
@@ -190,11 +199,23 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
             marginSeconds: ContextBiasingConstants.defaultMarginSeconds,
             minSimilarity: policy.minSimilarity
         )
-        guard rescored.wasModified else { return result }
-        return result.withRescoring(
-            text: rescored.text,
-            detected: rescored.replacements.map(\.originalWord),
-            applied: rescored.replacements.compactMap(\.replacementWord)
+        guard rescored.wasModified else { return (result, []) }
+        let appliedReplacements: [VocabularyReplacement] = rescored.replacements.compactMap { replacement in
+            guard replacement.shouldReplace, let replacementWord = replacement.replacementWord else {
+                return nil
+            }
+            return VocabularyReplacement(
+                original: replacement.originalWord,
+                replacement: replacementWord
+            )
+        }
+        return (
+            result.withRescoring(
+                text: rescored.text,
+                detected: rescored.replacements.map(\.originalWord),
+                applied: appliedReplacements.map(\.replacement)
+            ),
+            appliedReplacements
         )
     }
 }

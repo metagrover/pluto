@@ -135,7 +135,7 @@ expect(child.stdin.write).toHaveBeenCalledTimes(2);
 - Create: `src/services/finalTranscription/segmentRecognizedWords.ts`
 - Test: `tests/unit/segmentRecognizedWords.test.ts`
 
-- [ ] **Step 1: Write failing tests for punctuation, 800 ms silence, 15-second, and 40-word boundaries; exact word conservation; invalid/non-finite/out-of-order/beyond-duration rejection; and empty no-speech handling**
+- [x] **Step 1: Write failing tests for punctuation, 800 ms silence, 15-second, and 40-word boundaries; exact word conservation; invalid/non-finite/out-of-order/beyond-duration rejection; and empty no-speech handling**
 
 ```ts
 expect(flattenWords(segmentRecognizedWords(words, duration))).toEqual(words);
@@ -143,11 +143,11 @@ expect(() => segmentRecognizedWords(overlappingWords, duration))
   .toThrow('transcription_word_timing_invalid');
 ```
 
-- [ ] **Step 2: Verify RED with focused Vitest**
+- [x] **Step 2: Verify RED with focused Vitest**
 
-- [ ] **Step 3: Implement the pure segmenter without linguistic rewriting**
+- [x] **Step 3: Implement the pure segmenter without linguistic rewriting**
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 ### Task 6: Quality-first final-validation orchestrator
 

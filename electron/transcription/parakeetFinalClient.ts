@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import path from 'node:path';
 
+import { segmentRecognizedWords } from '../../src/services/finalTranscription/segmentRecognizedWords';
 import type {
   TranscriptionRequest,
   TranscriptionResult,
@@ -154,16 +155,10 @@ export class ParakeetFinalClient {
         end: word.endSeconds,
         confidence: word.confidence,
       }));
-      const segments = transcription.noSpeech
-        ? []
-        : [
-            {
-              start: words[0]?.start ?? 0,
-              end: words.at(-1)?.end ?? transcription.durationSeconds,
-              text: transcription.text,
-              words,
-            },
-          ];
+      const segments = segmentRecognizedWords(
+        transcription.noSpeech ? [] : words,
+        transcription.durationSeconds,
+      );
       return {
         segments,
         language: request.language,
