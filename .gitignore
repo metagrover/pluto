@@ -53,6 +53,7 @@ __pycache__
 
 # Build Artifacts
 resources/bin
+native/**/.build/
 
 # Build Artifacts
 dist-electron/
