@@ -42,6 +42,9 @@ public enum RuntimeFailure: String, Error, Codable, Equatable, Sendable, CustomS
     case invalidRequest = "parakeet_request_invalid"
     case pathNotAllowed = "parakeet_path_not_allowed"
     case pathMissing = "parakeet_path_missing"
+    case modelPreparationFailed = "parakeet_model_preparation_failed"
+    case transcriptionFailed = "parakeet_transcription_failed"
+    case cancelled = "parakeet_cancelled"
 
     public var description: String { rawValue }
 }
@@ -54,6 +57,7 @@ public struct RuntimeResponse: Codable, Equatable, Sendable {
     public let schemaVersion: Int
     public let id: String
     public let ok: Bool
+    public let result: RuntimeResultPayload?
     public let error: RuntimeErrorPayload?
 
     public static func failure(id: String, code: RuntimeFailure) -> RuntimeResponse {
@@ -61,7 +65,51 @@ public struct RuntimeResponse: Codable, Equatable, Sendable {
             schemaVersion: 1,
             id: id,
             ok: false,
+            result: nil,
             error: RuntimeErrorPayload(code: code)
         )
+    }
+
+    public static func prepared(id: String, modelVersion: String) -> RuntimeResponse {
+        RuntimeResponse(
+            schemaVersion: 1,
+            id: id,
+            ok: true,
+            result: RuntimeResultPayload(modelVersion: modelVersion),
+            error: nil
+        )
+    }
+
+    public static func transcribed(
+        id: String,
+        output: TranscriptionOutput,
+        vocabularyCount: Int
+    ) -> RuntimeResponse {
+        RuntimeResponse(
+            schemaVersion: 1,
+            id: id,
+            ok: true,
+            result: RuntimeResultPayload(
+                transcription: output,
+                vocabularyCount: vocabularyCount
+            ),
+            error: nil
+        )
+    }
+}
+
+public struct RuntimeResultPayload: Codable, Equatable, Sendable {
+    public let modelVersion: String?
+    public let transcription: TranscriptionOutput?
+    public let vocabularyCount: Int?
+
+    public init(
+        modelVersion: String? = nil,
+        transcription: TranscriptionOutput? = nil,
+        vocabularyCount: Int? = nil
+    ) {
+        self.modelVersion = modelVersion
+        self.transcription = transcription
+        self.vocabularyCount = vocabularyCount
     }
 }

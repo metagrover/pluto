@@ -47,4 +47,30 @@ final class ProtocolTests: XCTestCase {
         XCTAssertFalse(encoded.contains("message"))
         XCTAssertFalse(encoded.contains("detail"))
     }
+
+    func testEncodesPreparedAndTranscriptionSuccessPayloads() throws {
+        let prepared = RuntimeResponse.prepared(id: "prepare-1", modelVersion: "0.15.5-v3-int8")
+        let transcribed = RuntimeResponse.transcribed(
+            id: "transcribe-1",
+            output: TranscriptionOutput(
+                text: "hello",
+                confidence: 0.9,
+                durationSeconds: 1,
+                words: [TranscriptionWord(text: "hello", startSeconds: 0, endSeconds: 1)],
+                noSpeech: false
+            ),
+            vocabularyCount: 2
+        )
+
+        let preparedData = try JSONEncoder().encode(prepared)
+        let transcribedData = try JSONEncoder().encode(transcribed)
+        let decodedPrepared = try JSONDecoder().decode(RuntimeResponse.self, from: preparedData)
+        let decodedTranscribed = try JSONDecoder().decode(RuntimeResponse.self, from: transcribedData)
+
+        XCTAssertTrue(decodedPrepared.ok)
+        XCTAssertEqual(decodedPrepared.result?.modelVersion, "0.15.5-v3-int8")
+        XCTAssertEqual(decodedTranscribed.result?.transcription?.text, "hello")
+        XCTAssertEqual(decodedTranscribed.result?.vocabularyCount, 2)
+        XCTAssertNil(decodedTranscribed.error)
+    }
 }
