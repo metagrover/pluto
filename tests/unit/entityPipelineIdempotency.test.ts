@@ -19,7 +19,10 @@ import {
   saveMeeting,
   updateActionCommitmentState,
 } from '../../electron/db';
-import { processExtractedEntities } from '../../electron/entityPipeline';
+import {
+  extractAndProcessEntities,
+  processExtractedEntities,
+} from '../../electron/entityPipeline';
 import type { ExtractedEntities } from '../../electron/llm/provider';
 
 afterAll(() => {
@@ -36,6 +39,23 @@ const extractedAction = (description: string): ExtractedEntities => ({
 });
 
 describe('extracted action idempotency', () => {
+  it('does not commit provider results after the owning run is superseded', async () => {
+    const meetingId = 'meeting-superseded-extraction';
+    saveMeeting({ id: meetingId, title: 'Superseded extraction fixture' });
+
+    await expect(
+      extractAndProcessEntities(
+        { extractEntities: async () => extractedAction('Late synthetic task') },
+        'Synthetic transcript evidence',
+        meetingId,
+        undefined,
+        { canCommit: () => false },
+      ),
+    ).rejects.toThrow('entity_extraction_superseded');
+
+    expect(getMeetingEntities(meetingId)).toEqual([]);
+  });
+
   it.each(['confirmed', 'rejected'] as const)(
     'reuses one meeting-scoped action without resetting %s review metadata',
     async (commitmentState) => {

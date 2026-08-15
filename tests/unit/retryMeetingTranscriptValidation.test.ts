@@ -274,6 +274,19 @@ describe('retryMeetingTranscriptValidation', () => {
     expect(
       JSON.parse(String(current.downstream_processing_json)),
     ).toMatchObject({ state: 'complete' });
+    expect(invoke).toHaveBeenCalledWith(
+      'EXTRACT_AND_PROCESS_ENTITIES',
+      expect.objectContaining({
+        expectedDownstreamRunId: expect.any(String),
+      }),
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
+      'synthetic-id',
+      expect.objectContaining({
+        expectedDownstreamRunId: expect.any(String),
+      }),
+    );
   });
 
   it('does not duplicate downstream work when another durable owner is active', async () => {

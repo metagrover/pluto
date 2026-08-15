@@ -141,6 +141,12 @@ const readDownstreamActivity = (value: unknown) => {
   }
 };
 
+const isDownstreamRunCurrent = (meetingId: string, runId: string): boolean => {
+  const meeting = db.getMeeting(meetingId) as db.PersistedMeeting | undefined;
+  const activity = readDownstreamActivity(meeting?.downstream_processing_json);
+  return activity.state === 'processing' && activity.runId === runId;
+};
+
 const getPreloadPath = () => {
   const preloadPathMjs = path.join(__dirname, 'preload.mjs');
   const preloadPathJs = path.join(__dirname, 'preload.js');
@@ -1828,8 +1834,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
-    async (_event, meetingId) =>
-      await refreshKnowledgeDocsForMeetingNow(String(meetingId)),
+    async (
+      _event,
+      meetingId,
+      options?: { expectedDownstreamRunId?: unknown },
+    ) => {
+      const normalizedMeetingId = String(meetingId);
+      const expectedRunId =
+        typeof options?.expectedDownstreamRunId === 'string'
+          ? options.expectedDownstreamRunId
+          : null;
+      return await refreshKnowledgeDocsForMeetingNow(normalizedMeetingId, {
+        canCommit: expectedRunId
+          ? () => isDownstreamRunCurrent(normalizedMeetingId, expectedRunId)
+          : undefined,
+      });
+    },
   );
   ipcMain.handle(
     'GET_WORKING_MEMORY_SNAPSHOT',
@@ -2254,6 +2274,7 @@ app.whenReady().then(async () => {
         valueSignals,
         priorityHints,
         awaitKnowledgeSynthesis,
+        expectedDownstreamRunId,
       },
     ) => {
       try {
@@ -2269,6 +2290,14 @@ app.whenReady().then(async () => {
           priorityHints,
         );
         const signal = getAbortSignalForMeeting(String(meetingId));
+        const canCommit =
+          typeof expectedDownstreamRunId === 'string'
+            ? () =>
+                isDownstreamRunCurrent(
+                  String(meetingId),
+                  expectedDownstreamRunId,
+                )
+            : undefined;
         if (signal.aborted) {
           console.log(
             `[LLM] Skipping entity extraction for meeting ${meetingId} (aborted)`,
@@ -2288,6 +2317,7 @@ app.whenReady().then(async () => {
             valueSignals: normalizedSignals,
             priorityHints: mergedPriorityHints,
           },
+          { canCommit },
         );
 
         if (signal.aborted) {

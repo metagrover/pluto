@@ -509,6 +509,7 @@ export const retryMeetingTranscriptValidation = async (
               ? JSON.parse(current.value_signals_json)
               : null,
             awaitKnowledgeSynthesis: true,
+            expectedDownstreamRunId: downstreamLease.runId,
           });
           throwIfDownstreamStageAborted(signal);
           return result;
@@ -539,6 +540,7 @@ export const retryMeetingTranscriptValidation = async (
           const result = (await invoke(
             'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
             String(meeting.id),
+            { expectedDownstreamRunId: downstreamLease.runId },
           )) as { requested?: number; completed?: number };
           throwIfDownstreamStageAborted(signal);
           return result;
@@ -1086,6 +1088,7 @@ export const retryMeetingTranscriptValidation = async (
         summary: artifacts.markdown || '',
         valueSignals: artifacts.signals ?? null,
         awaitKnowledgeSynthesis: true,
+        expectedDownstreamRunId: downstreamRunId,
       });
       throwIfDownstreamStageAborted(signal);
       return result;
@@ -1115,6 +1118,7 @@ export const retryMeetingTranscriptValidation = async (
         const result = (await invoke(
           'REFRESH_KNOWLEDGE_FOR_MEETING_NOW',
           String(meeting.id),
+          { expectedDownstreamRunId: downstreamRunId },
         )) as { requested?: number; completed?: number };
         throwIfDownstreamStageAborted(signal);
         return result;
