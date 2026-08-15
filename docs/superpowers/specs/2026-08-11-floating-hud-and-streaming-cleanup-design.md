@@ -1,7 +1,9 @@
 # Real-Time Streaming Chunk Cleanup Pipeline & Auto-Learning Jargon Dictionary
 
-**Date:** 2026-08-11  
-**Status:** Approved Draft  
+> **Status (2026-08-14): Proposed, not implemented.** The isolated cleanup and auto-learning scaffolding was removed under #622 because it was not connected to the product. #616 owns future transcript validation integration.
+
+**Date:** 2026-08-11
+**Status:** Proposed
 **Target:** Pluto Desktop (`src/components/AudioManager.tsx` & `python/whisperx_server.py`)
 
 ---

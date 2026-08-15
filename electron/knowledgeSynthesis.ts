@@ -1614,11 +1614,12 @@ const synthesizeKnowledgeDocNowInternal = async (
   const sourceMeetingIds = sourceMeetings.map((meeting) => meeting.id);
 
   if (sourceMeetings.length === 0) {
-    const emptyDoc = applyCorrections(
+    const emptyDoc = applyKnowledgeCorrectionsToDocument(
       buildDeterministicKnowledgeV2Document(
         { type: doc.scope_type, title: doc.title },
         [],
       ),
+      knowledgeCorrections,
     );
     const rendered = renderStructuredDocument(emptyDoc);
     const previous = parseStoredCompiledDoc(doc.structured_json);

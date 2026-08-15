@@ -1,5 +1,7 @@
 # Real-Time Streaming Chunk Cleanup & Auto-Learning Jargon Dictionary Implementation Plan
 
+> **Status (2026-08-14): Not implemented.** The isolated scaffolding described here was removed under #622 because it was not connected to recording, persistence, transcript editing, or MLX prompts. #616 owns any future end-to-end implementation. This document is retained as historical design input, not a statement of product behavior.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement a real-time streaming transcript cleanup engine with deterministic validation gates in Pluto's Python backend, paired with an auto-learning jargon dictionary that extracts custom vocabulary from user note edits and feeds hotwords back into WhisperX.

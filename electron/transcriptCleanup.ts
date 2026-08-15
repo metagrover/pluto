@@ -232,7 +232,7 @@ const mergeConsecutiveSegments = (
 
 export const stripFillers = (text: string): string => {
   return text
-    .replace(/\b(um|uh|you know|sort of|like)\b\s*/gi, '')
+    .replace(/\b(um|uh)\b\s*/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 };
@@ -240,10 +240,23 @@ export const stripFillers = (text: string): string => {
 export const resolveSelfCorrections = (text: string): string => {
   return text
     .replace(
-      /(\S+)\s*(?:\.\.\.|,)?\s*(?:no wait|actually|scratch that|I mean)\s*,?\s*(\S+)/gi,
+      /(\S+)\s*(?:\.\.\.|,)?\s*(?:no wait|scratch that)\s*,?\s*(\S+)/gi,
       '$2',
     )
     .trim();
+};
+
+export const shouldCleanupTranscriptOnSave = (meeting: unknown): boolean => {
+  if (!meeting || typeof meeting !== 'object') return false;
+  const candidate = meeting as {
+    run_transcript_cleanup?: unknown;
+    transcript_json?: unknown;
+  };
+  return (
+    candidate.run_transcript_cleanup === true &&
+    typeof candidate.transcript_json === 'string' &&
+    candidate.transcript_json.trim().length > 0
+  );
 };
 
 export const cleanSegmentText = (text: string): string => {

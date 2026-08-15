@@ -1331,6 +1331,9 @@ export const AudioManager = ({
             `[Pluto] Mic PCM chunk capture active at ${audioContext.sampleRate}Hz`,
           );
         } catch (pcmErr) {
+          const keepalive = window as unknown as Record<string, unknown>;
+          keepalive.__plutoMicProcessor = undefined;
+          keepalive.__plutoMicSource = undefined;
           console.warn(
             '[Pluto] Failed to initialize mic PCM chunk capture, falling back to MediaRecorder chunks:',
             pcmErr,
@@ -1778,6 +1781,9 @@ export const AudioManager = ({
       micPcmSinkRef.current.disconnect();
       micPcmSinkRef.current = null;
     }
+    const keepalive = window as unknown as Record<string, unknown>;
+    keepalive.__plutoMicProcessor = undefined;
+    keepalive.__plutoMicSource = undefined;
     micPcmChunksRef.current = [];
     if (micStreamRef.current) {
       for (const track of micStreamRef.current.getTracks()) {
@@ -3198,6 +3204,7 @@ export const AudioManager = ({
     // But 'system' might be silent/empty? No, blob is blob.
 
     const micPending = pendingMicChunksRef.current.get(chunkIndex);
+    if (!micPending) return;
     const micBlob = micPending?.blob;
     const micFormatForChunk = micPending?.format ?? 'webm';
     const systemBlob = pendingSystemChunksRef.current.get(chunkIndex);
@@ -5747,7 +5754,9 @@ export const AudioManager = ({
           title = await window.ipcRenderer.invoke('GENERATE_TITLE', {
             transcript: fullTranscript,
           });
-          console.log(`[Pluto] Generated title: ${title}`);
+          console.log(
+            `[Pluto] Generated meeting title [length=${title.length}]`,
+          );
         } catch (titleErr) {
           console.error(
             '[Pluto] Title generation failed, using fallback:',
@@ -5771,21 +5780,24 @@ export const AudioManager = ({
           transcriptionVocabularyRef.current.provenance.hintCount,
       };
       const sessionFallbackTranscriptMeta = sessionTranscriptionMeta
-        ? {
-            backend: String(sessionTranscriptionMeta.backend),
-            preset: String(sessionTranscriptionMeta.preset),
-            model: String(sessionTranscriptionMeta.model),
-            device: String(sessionTranscriptionMeta.device),
-            computeType: String(sessionTranscriptionMeta.computeType),
-            canonicalSource: sessionCanonicalSource,
-            diarization: diarizationEnabled,
-            elapsedMs: sessionTranscriptionMeta.elapsedMs || 0,
-            providerLabel: sessionTranscriptionMeta.providerLabel,
-            warnings: sessionTranscriptionMeta.warnings,
-            vocabularyHintPolicyVersion:
-              sessionTranscriptionMeta.vocabularyHintPolicyVersion,
-            vocabularyHintCount: sessionTranscriptionMeta.vocabularyHintCount,
-          }
+        ? (() => {
+            const metadata =
+              sessionTranscriptionMeta as TranscriptTranscriptionMeta;
+            return {
+              backend: String(metadata.backend),
+              preset: String(metadata.preset),
+              model: String(metadata.model),
+              device: String(metadata.device),
+              computeType: String(metadata.computeType),
+              canonicalSource: sessionCanonicalSource,
+              diarization: diarizationEnabled,
+              elapsedMs: metadata.elapsedMs || 0,
+              providerLabel: metadata.providerLabel,
+              warnings: metadata.warnings,
+              vocabularyHintPolicyVersion: metadata.vocabularyHintPolicyVersion,
+              vocabularyHintCount: metadata.vocabularyHintCount,
+            };
+          })()
         : undefined;
       const transcriptMeta = {
         backend: String(chunkTranscriptMeta.backend),
@@ -5800,13 +5812,16 @@ export const AudioManager = ({
         vocabularyHintCount: chunkTranscriptMeta.vocabularyHintCount,
       };
 
-      const currentMeetingId = currentMeetingIdRef.current;
-      if (!currentMeetingId) {
+      const currentMeetingIdCandidate = currentMeetingIdRef.current;
+      if (!currentMeetingIdCandidate) {
         throw new Error('No active meeting ID while finalizing recording');
       }
+      const currentMeetingId = currentMeetingIdCandidate as string;
       const analysisGenerationMetadata = (
         analysisDocument as AnalysisDocumentV3
       ).generation_metadata;
+      const analysisErrorCategories =
+        analysisGenerationMetadata?.error_categories;
       const meetingData = {
         id: currentMeetingId,
         title: title,
@@ -5835,7 +5850,7 @@ export const AudioManager = ({
             speakerAttribution,
             liveTranscriptResponsiveness:
               frozenLiveTranscriptResponsivenessRef.current ?? undefined,
-            stopToValidatedLatency,
+            stopToValidatedLatency: stopToValidatedLatency ?? undefined,
             lifecycleStatus: integrityValidation.status,
             integrity: {
               ...integrityValidation.evidence,
@@ -5857,9 +5872,10 @@ export const AudioManager = ({
         analysis_prompt_version:
           analysisGenerationMetadata?.prompt_version ?? null,
         analysis_generated_at: analysisGenerationMetadata?.generated_at ?? null,
-        analysis_error_categories_json: analysisGenerationMetadata
-          ? JSON.stringify(analysisGenerationMetadata.error_categories)
-          : null,
+        analysis_error_categories_json:
+          analysisErrorCategories != null
+            ? JSON.stringify(analysisErrorCategories)
+            : null,
         value_signals_json: JSON.stringify(valueSignals),
         participants: participants,
         folder_id: null,
@@ -5932,9 +5948,12 @@ export const AudioManager = ({
         onSessionComplete?.(meetingData.id);
         return;
       }
-      if (derivedPersistence.result !== 'updated') {
+      const derivedPersistenceResult = (
+        derivedPersistence as { outcome: 'persisted'; result: unknown }
+      ).result;
+      if (derivedPersistenceResult !== 'updated') {
         console.warn(
-          `[Pluto] Derived persistence ${String(derivedPersistence.result)}; preserving current transcript generation`,
+          `[Pluto] Derived persistence ${String(derivedPersistenceResult)}; preserving current transcript generation`,
         );
         onSessionComplete?.(meetingData.id);
         return;

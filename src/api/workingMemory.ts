@@ -3,6 +3,11 @@ import type {
   WorkingMemorySnapshotScopeType,
 } from '../../electron/db';
 
+export type {
+  WorkingMemorySnapshot,
+  WorkingMemorySnapshotScopeType,
+} from '../../electron/db';
+
 const invoke = <T = unknown>(
   channel: string,
   ...args: unknown[]

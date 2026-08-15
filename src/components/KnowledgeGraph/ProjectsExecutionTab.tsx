@@ -147,15 +147,17 @@ export const getNextTaskStatusForToggle = (
   return status === 'completed' ? 'active' : 'completed';
 };
 
-const EXECUTION_STATUS_PRIORITY: Partial<Record<Entity['status'], number>> = {
+const EXECUTION_STATUS_PRIORITY: Partial<
+  Record<NonNullable<Entity['status']>, number>
+> = {
   overdue: 0,
   active: 1,
 };
 
 export const sortExecutionTasksForDisplay = (tasks: Entity[]): Entity[] => {
   return [...tasks].sort((a, b) => {
-    const priorityA = EXECUTION_STATUS_PRIORITY[a.status] ?? 2;
-    const priorityB = EXECUTION_STATUS_PRIORITY[b.status] ?? 2;
+    const priorityA = a.status ? (EXECUTION_STATUS_PRIORITY[a.status] ?? 2) : 2;
+    const priorityB = b.status ? (EXECUTION_STATUS_PRIORITY[b.status] ?? 2) : 2;
     if (priorityA !== priorityB) {
       return priorityA - priorityB;
     }

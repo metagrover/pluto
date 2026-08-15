@@ -5,18 +5,43 @@ import {
   cleanSegmentText,
   cleanTranscriptSegments,
   resolveSelfCorrections,
+  shouldCleanupTranscriptOnSave,
   stripFillers,
 } from '../../electron/transcriptCleanup';
 
 describe('cleanTranscriptSegments', () => {
-  it('strips filler words from segment text', () => {
-    const text = 'um we are uh sort of launching like today';
+  it('strips only unambiguous hesitation sounds', () => {
+    const text = 'um we are uh launching today';
     expect(stripFillers(text)).toBe('we are launching today');
+  });
+
+  it('preserves words that can carry semantic meaning', () => {
+    expect(stripFillers('I like this approach')).toBe('I like this approach');
+    expect(stripFillers('This is sort of the key constraint')).toBe(
+      'This is sort of the key constraint',
+    );
+    expect(resolveSelfCorrections('I mean this literally')).toBe(
+      'I mean this literally',
+    );
   });
 
   it('resolves spoken self corrections', () => {
     const text = "let's meet at 2... no wait, 3pm";
     expect(resolveSelfCorrections(text)).toBe("let's meet at 3pm");
+  });
+
+  it('requires an explicit cleanup request before rewriting saved evidence', () => {
+    expect(
+      shouldCleanupTranscriptOnSave({
+        transcript_json: '[{"text":"I like this approach"}]',
+      }),
+    ).toBe(false);
+    expect(
+      shouldCleanupTranscriptOnSave({
+        transcript_json: '[{"text":"um start"}]',
+        run_transcript_cleanup: true,
+      }),
+    ).toBe(true);
   });
 
   it('drops near-duplicate Them segments in short windows', () => {

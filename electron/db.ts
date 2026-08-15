@@ -2674,7 +2674,7 @@ const parseAttentionScoreBreakdown = (
           typeof parsed[key] === 'number' && Number.isFinite(parsed[key]),
       )
     ) {
-      return parsed as AttentionScoreBreakdown;
+      return parsed as unknown as AttentionScoreBreakdown;
     }
   } catch {
     return null;

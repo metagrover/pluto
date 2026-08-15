@@ -6,7 +6,7 @@ import {
   type ResolvedBackendOptions,
   resolveBackendOptions,
 } from './transcriptionBackendConfig.ts';
-import type { TranscriptionSettings } from './transcriptionSettings.ts';
+import type { ResolvedTranscriptionSettings } from './transcriptionSettings.ts';
 
 export type RecordingStopSnapshot = {
   meetingId: string;
@@ -34,7 +34,7 @@ const STRONGEST_ATTRIBUTION_POLICY = resolveBackendOptions({
 });
 
 export const getStrongerSpeakerAttributionPolicy = (
-  settings: Required<TranscriptionSettings>,
+  settings: ResolvedTranscriptionSettings,
 ): ResolvedBackendOptions | null => {
   const current = resolveBackendOptions(settings);
 
@@ -62,7 +62,7 @@ export const buildSpeakerAttributionRetryPlan = ({
   mappingConfident: boolean;
   retryAlreadyUsed: boolean;
   providerHasStrongerPolicy?: boolean;
-  settings: Required<TranscriptionSettings>;
+  settings: ResolvedTranscriptionSettings;
 }): SpeakerAttributionRetryPlan => {
   if (!diarizationEnabled) {
     return {

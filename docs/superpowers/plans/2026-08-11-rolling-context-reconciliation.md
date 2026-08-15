@@ -1,5 +1,7 @@
 # Real-Time Rolling Context Reconciliation Implementation Plan
 
+> **Status (2026-08-14): Not implemented.** The isolated scaffolding described here was removed under #622 because it had no recording lifecycle, model invocation, persistence, UI, or finalization integration. #616 owns the complete validated design and delivery. This document is retained as historical design input, not a statement of product behavior.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement a real-time 60-second rolling audio buffer and background reconciliation worker in Pluto's Python transcription backend to silently correct mispronunciations, typos, and low-confidence phonetic words in live transcripts with zero post-meeting delay.
