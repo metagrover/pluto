@@ -62,11 +62,12 @@ export const collapseCrossChannelWordBleed = (input: {
   let collapsedSequenceCount = 0;
 
   for (let micStart = 0; micStart < micWords.length; micStart += 1) {
-    for (const systemStart of
-      systemStartsByToken.get(micWords[micStart].token) || []) {
+    for (const systemStart of systemStartsByToken.get(
+      micWords[micStart].token,
+    ) || []) {
       if (
         Math.abs(micWords[micStart].at - systemWords[systemStart].at) >
-          timingToleranceSeconds
+        timingToleranceSeconds
       ) {
         continue;
       }
