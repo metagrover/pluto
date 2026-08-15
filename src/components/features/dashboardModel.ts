@@ -283,7 +283,7 @@ const sortActions = (
     .sort((a, b) => compare(a.action, b.action) || a.index - b.index)
     .map(({ action }) => action);
 
-const DASHBOARD_SUPPRESSED_ALERT_STATUSES = new Set([
+const DASHBOARD_SUPPRESSED_ALERT_STATUSES = new Set<AttentionItem['status']>([
   'dismissed',
   'snoozed',
 ] as const);
@@ -292,8 +292,12 @@ const DASHBOARD_ATTENTION_STATUS_ORDER: Record<
   number
 > = {
   active: 0,
-  snoozed: 1,
-  dismissed: 2,
+  pinned: 1,
+  stale: 2,
+  snoozed: 3,
+  resolved: 4,
+  dismissed: 5,
+  superseded: 6,
 };
 
 const shouldSuppressDashboardAction = (

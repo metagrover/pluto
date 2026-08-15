@@ -1,4 +1,4 @@
-import { CircleStop, Mic, MonitorSpeaker } from 'lucide-react';
+import { ArrowLeft, CircleStop, Mic, MonitorSpeaker } from 'lucide-react';
 import type {
   CaptureHealth,
   LiveTranscriptIntegrity,
@@ -11,8 +11,7 @@ type Props = {
   microphone: CaptureHealth;
   systemAudio: CaptureHealth;
   liveTranscriptIntegrity: LiveTranscriptIntegrity;
-  title: string;
-  onTitleChange: (title: string) => void;
+  onBackHome?: () => void;
   onFinish: () => void;
 };
 
@@ -35,15 +34,24 @@ export const RecordingCaptureBar = ({
   microphone,
   systemAudio,
   liveTranscriptIntegrity,
-  title,
-  onTitleChange,
+  onBackHome,
   onFinish,
 }: Props) => (
-  <header className="recording-capture-bar drag-region">
+  <header className="recording-capture-bar">
     <div
       className="recording-status no-drag"
       aria-live={liveTranscriptIntegrity === 'lagging' ? 'assertive' : 'polite'}
     >
+      {onBackHome && (
+        <button
+          type="button"
+          className="recording-back-home no-drag"
+          onClick={onBackHome}
+        >
+          <ArrowLeft aria-hidden="true" size={16} />
+          Back home
+        </button>
+      )}
       <span
         className={`recording-dot recording-dot--${status}`}
         aria-hidden="true"
@@ -54,15 +62,7 @@ export const RecordingCaptureBar = ({
       <time>{elapsedLabel}</time>
       <span className="recording-status-message">{statusMessage}</span>
     </div>
-    <label className="recording-title no-drag">
-      <span className="sr-only">Meeting title</span>
-      <input
-        value={title}
-        onChange={(event) => onTitleChange(event.target.value)}
-        placeholder="Untitled meeting"
-        disabled={status === 'processing'}
-      />
-    </label>
+    <div className="recording-capture-drag drag-region" aria-hidden="true" />
     <div className="recording-actions no-drag">
       <Health icon={Mic} label="Microphone" state={microphone} />
       <Health icon={MonitorSpeaker} label="System audio" state={systemAudio} />

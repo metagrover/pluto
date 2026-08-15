@@ -202,6 +202,8 @@ export const validateTranscriptIntegrity = (input: {
   systemActivitySeconds: number;
   localTranscriptCoveredSeconds: number;
   remoteTranscriptCoveredSeconds: number;
+  localWordCount?: number;
+  remoteWordCount?: number;
   collapsedPassThroughSeconds?: number;
   unresolvedAmbiguousSeconds: number;
   requiredSourcesSucceeded: boolean;
@@ -235,14 +237,12 @@ export const validateTranscriptIntegrity = (input: {
     reasons.push('local_speech_unaccounted');
   }
 
-  if (
-    input.systemActivitySeconds >= 3 &&
-    coverageRatio(
-      input.remoteTranscriptCoveredSeconds,
-      input.systemActivitySeconds,
-    ) < 0.65
-  ) {
-    reasons.push('remote_speech_unaccounted');
+  if (input.systemActivitySeconds >= 3) {
+    const timeCoverage =
+      input.remoteTranscriptCoveredSeconds / input.systemActivitySeconds;
+    if (timeCoverage < 0.65) {
+      reasons.push('remote_speech_unaccounted');
+    }
   }
 
   if (input.unresolvedAmbiguousSeconds > 3) {

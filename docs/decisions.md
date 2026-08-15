@@ -15,6 +15,13 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-08-11 - Remove the Meeting View follow-up email draft surface
+- **Status:** Accepted
+- **Source:** [Issue #613](https://github.com/metagrover/pluto/issues/613), owner direction on 2026-08-11
+- **Decision:** Pluto removes the Meeting View follow-up draft/export composer, including the Email/Internal/Slack variants and LLM refinement path, until a clearer business need exists.
+- **Rationale:** The current email-shaped surface was weak enough to reduce trust and overlapped with the broader commitment lifecycle work in [Issue #61](https://github.com/metagrover/pluto/issues/61). Pluto should keep action-item accountability visible without presenting generic send-ready prose as a core meeting outcome.
+- **Consequences:** Meeting View still shows extracted follow-ups and durable lifecycle controls, but no longer offers a follow-up email or draft editor. Legacy saved draft data remains inert for compatibility, and any future recap/export experience should start from an explicit user need with cited evidence and review semantics.
+
 ## 2026-08-11 - Make the Electron main process authoritative for active capture
 - **Status:** Accepted
 - **Source:** [Issue #601](https://github.com/metagrover/pluto/issues/601), [PR #604](https://github.com/metagrover/pluto/pull/604)
@@ -215,3 +222,11 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Rationale:** A real meeting retained durable audio and transcript segments but was rejected twice because long noise intervals were labeled as speech. The separate inline and retry pipelines also disagreed about progress and marked downstream work complete before required intelligence finished.
 - **Consequences:** Empty transcript segments without an explicit VAD outcome remain fail-closed, proven no-speech can reject detector false positives, unavailable diarization models fall back without blocking transcription, and downstream completion is persisted only after entity extraction and knowledge refresh succeed.
 - **2026-08-05 persistence update:** Whole-meeting writes must use in-place conflict updates, never SQLite replacement. Replacing the meeting parent fires foreign-key delete semantics and can erase entity associations while leaving copied MID and completion fields behind. Generic recovered or untitled rows are also incomplete until title generation succeeds; genuine capture-journal gaps remain fail-closed instead of receiving synthesized analysis.
+
+## 2026-08-14 - Keep canonical transcript evidence immutable across generic saves
+
+- **Status:** Accepted
+- **Source:** [Issue #622](https://github.com/metagrover/pluto/issues/622), [Issue #616](https://github.com/metagrover/pluto/issues/616)
+- **Decision:** Generic meeting persistence must preserve canonical transcript bytes. Linguistic cleanup is never an implicit save side effect, and total transcript word volume cannot substitute for time-aligned channel evidence during integrity validation. Background correction work may ship only as an end-to-end, versioned pipeline with stable segment identity, provenance, bounded scheduling, persistence, UI state, cancellation, and final-analysis reuse.
+- **Rationale:** Context-free filler rules changed valid meaning while retaining stale validation metadata, and isolated rolling-validation helpers created false confidence without participating in recording or finalization. Total word density also cannot prove that a missing activity interval was transcribed.
+- **Consequences:** Cleanup requires an explicit controlled boundary and conservative rules; incomplete reconciliation and auto-learning stubs stay out of production; #616 remains open until its full lifecycle and thermal acceptance criteria are verified with synthetic, content-free evidence.

@@ -149,8 +149,36 @@
   .recording-workspace {
     @apply flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-pro-bg text-pro-text-main;
   }
+  .recording-name-popover {
+    @apply flex h-10 min-w-0 max-w-[184px] items-center gap-2 rounded-full border border-pro-border/70 bg-pro-surface/95 px-3 text-pro-text-main shadow-lg backdrop-blur-xl;
+    -webkit-app-region: no-drag;
+  }
+  .recording-name-popover * {
+    -webkit-app-region: no-drag;
+  }
+  .recording-name-status-dot {
+    @apply h-2 w-2 shrink-0 rounded-full bg-pro-accent;
+    box-shadow: 0 0 0 4px hsl(var(--pro-accent) / 0.16);
+  }
+  .recording-name-status-dot--active {
+    @apply bg-pro-accent;
+    box-shadow: 0 0 0 4px hsl(var(--pro-accent) / 0.16);
+  }
+  .recording-name-status-dot--lagging {
+    @apply bg-pro-warning;
+    box-shadow: 0 0 0 4px hsl(var(--pro-warning) / 0.14);
+  }
+  .recording-name-field {
+    @apply block max-w-[120px] truncate text-sm font-medium leading-none text-pro-text-main;
+  }
+  .recording-name-expand {
+    @apply pointer-events-auto relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .recording-back-home {
+    @apply flex h-10 shrink-0 items-center gap-2 rounded-full border border-pro-border/70 bg-pro-bg px-3 text-xs font-semibold text-pro-text-muted shadow-sm transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
   .recording-capture-bar {
-    @apply grid h-[72px] shrink-0 grid-cols-[1fr_minmax(220px,0.75fr)_1fr] items-center gap-5 border-b border-pro-border bg-pro-surface px-6 pl-24;
+    @apply grid min-h-[92px] shrink-0 grid-cols-[1fr_minmax(220px,0.75fr)_1fr] items-center gap-5 border-b border-pro-border bg-pro-surface pb-3 pl-6 pr-6 pt-6;
   }
   .recording-status,
   .recording-actions,
@@ -173,9 +201,6 @@
   }
   .recording-dot--processing {
     @apply animate-pulse bg-pro-warning;
-  }
-  .recording-title input {
-    @apply h-10 w-full rounded-lg bg-transparent px-3 text-center text-sm font-semibold outline-none placeholder:text-pro-text-muted focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .recording-actions {
     @apply justify-end gap-3;
@@ -279,6 +304,9 @@
   .rail-section h3 {
     @apply mb-3 flex items-center gap-2 text-xs font-semibold text-pro-text-muted;
   }
+  .rail-title-input {
+    @apply flex h-10 w-full min-w-0 rounded-lg border border-pro-border bg-pro-bg px-3 text-sm font-medium outline-none placeholder:text-pro-text-muted focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
   .participant-list {
     @apply mb-3 flex flex-wrap gap-2;
   }
@@ -315,9 +343,6 @@
   @media (max-width: 980px) {
     .recording-capture-bar {
       @apply h-auto min-h-[84px] grid-cols-[1fr_auto] gap-2 py-3 pl-20;
-    }
-    .recording-title {
-      @apply order-3 col-span-2;
     }
     .recording-health {
       @apply hidden;

@@ -25,6 +25,7 @@ import {
   type StopToValidatedLatencyUnavailableReason,
   createStopToValidatedLatencyAccumulator,
 } from '../utils/stopToValidatedLatency.ts';
+import type { TranscriptIntegrityReason } from '../utils/transcriptIntegrity.ts';
 import {
   type TranscriptTrustCauseCode,
   parseTranscriptTrustEnvelope,
@@ -375,7 +376,7 @@ export type TranscriptValidationFixture = {
     system: TranscriptValidationFixtureSource;
   };
   expected: RecordingQualityBenchmarkExpectation & {
-    requiredReasons?: string[];
+    requiredReasons?: TranscriptIntegrityReason[];
   };
 };
 

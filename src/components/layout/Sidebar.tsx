@@ -1,3 +1,4 @@
+import { Search } from 'lucide-react';
 import type { Meeting } from '../../types'; // I'll create this type file if it doesn't exist, or just define it here for now
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
 import { Logo } from '../Brand/Logo';
@@ -12,6 +13,7 @@ interface SidebarProps {
   setSelectedMeetingId: (id: string | number | null) => void;
   safeMeetings: Meeting[];
   onStartRecording: () => void;
+  onOpenSearch: () => void;
   handleDeleteMeeting: (id: string | number) => void;
   setSettingsVisible: (visible: boolean) => void;
   theme: 'light' | 'dark' | 'system';
@@ -26,6 +28,7 @@ export const Sidebar = ({
   setSelectedMeetingId,
   safeMeetings,
   onStartRecording,
+  onOpenSearch,
   handleDeleteMeeting,
   setSettingsVisible,
   theme,
@@ -43,7 +46,21 @@ export const Sidebar = ({
         <Logo size={40} showText variant="default" />
       </div>
 
-      <div className="px-6 pb-4 pt-1">
+      <div className="px-6 pb-4 pt-1 space-y-3">
+        <button
+          type="button"
+          data-sidebar-search
+          onClick={onOpenSearch}
+          className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-pro-border/70 bg-pro-surface/35 px-4 text-pro-text-muted shadow-sm transition-all hover:border-pro-border hover:bg-pro-surface/60 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+        >
+          <Search aria-hidden="true" size={18} className="shrink-0" />
+          <span className="flex-1 text-left text-[14px] font-bold tracking-tight">
+            Search
+          </span>
+          <kbd className="font-sans text-[12px] font-bold text-pro-text-muted/60">
+            ⌘P
+          </kbd>
+        </button>
         <button
           type="button"
           onClick={onStartRecording}

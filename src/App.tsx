@@ -12,10 +12,12 @@ import { useAutoEndMonitor } from './hooks/useAutoEndMonitor';
 import { Sidebar } from './components/layout/Sidebar';
 
 import { updateAlertStatus } from './api/intelligence';
+import type { Entity } from './api/knowledgeGraph';
 import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { MeetingView } from './components/features/MeetingView';
+import { RecordingNamePopover } from './components/features/RecordingNamePopover';
 import { ZenMode } from './components/features/ZenMode';
 import {
   DASHBOARD_ACTION_COMPLETION_ERROR,
@@ -40,6 +42,7 @@ import {
 import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 
 import {
+  searchEntities,
   updateActionCommitmentState,
   updateEntityStatus,
 } from './api/knowledgeGraph';
@@ -52,6 +55,7 @@ import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecut
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
 import { SettingsOverlay } from './components/overlays/SettingsOverlay';
+import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel';
 
 // Types
 import type { Meeting } from './types';
@@ -78,6 +82,7 @@ function App() {
 
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [zenVisible, setZenVisible] = useState(false);
   const [selectedMeetingId, setSelectedMeetingId] = useState<
     string | number | null
   >(null);
@@ -88,6 +93,9 @@ function App() {
     !window.__PLUTO_BROWSER_PREVIEW__,
   );
   const [searchVisible, setSearchVisible] = useState(false);
+  const [searchEntitiesResults, setSearchEntitiesResults] = useState<Entity[]>(
+    [],
+  );
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [permissionsVisible, setPermissionsVisible] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState({
@@ -413,6 +421,10 @@ function App() {
         e.preventDefault();
         setAskPlutoVisible(true);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+        e.preventDefault();
+        setSearchVisible(true);
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
         setSettingsVisible(true);
@@ -469,6 +481,7 @@ function App() {
     const wasRecording = isRecording;
     setIsRecording(recording);
     if (recording && !wasRecording) {
+      setZenVisible(true);
       setCurrentNotes('');
       setMeetingTitle('');
       setMeetingParticipants([]);
@@ -485,6 +498,20 @@ function App() {
   const selectedMeeting = safeMeetings.find(
     (m) => String(m.id) === String(selectedMeetingId),
   );
+  const activeRecording = isRecording || isProcessing;
+  const showZenMode = activeRecording && zenVisible;
+  const recordingVoiceActivity =
+    liveTranscriptIntegrity === 'lagging'
+      ? 'lagging'
+      : activeRecording
+        ? 'active'
+        : 'idle';
+  const handleBackHomeFromZen = () => {
+    setZenVisible(false);
+    setSelectedMeetingId(null);
+    setActiveTab('hub');
+    setSidebarVisible(true);
+  };
 
   useEffect(() => {
     if (transcriptValidationRetrying) return;
@@ -517,13 +544,33 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [safeMeetings, transcriptValidationRetrying]);
 
-  const filteredMeetings = safeMeetings.filter(
-    (m) =>
-      (m.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (m.enhanced_notes || '')
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase()),
-  );
+  const searchPlutoResults = buildSearchPlutoResults({
+    query: searchQuery,
+    meetings: safeMeetings,
+    entities: searchEntitiesResults,
+  });
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!searchVisible || !trimmed) {
+      setSearchEntitiesResults([]);
+      return;
+    }
+
+    let cancelled = false;
+    searchEntities(trimmed)
+      .then((entities) => {
+        if (!cancelled) setSearchEntitiesResults(entities);
+      })
+      .catch((error) => {
+        console.error('Failed to search entities', error);
+        if (!cancelled) setSearchEntitiesResults([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchQuery, searchVisible]);
 
   const probeMicrophonePermission = async () => {
     try {
@@ -675,7 +722,7 @@ function App() {
         />
       </div>
 
-      {!isRecording && !isProcessing && (
+      {!showZenMode && (
         <>
           <div
             className={`fixed inset-0 bg-black/20 backdrop-blur-sm z-30 lg:hidden transition-opacity duration-300 ${sidebarVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
@@ -699,6 +746,7 @@ function App() {
                 startSessionRef.current();
               }
             }}
+            onOpenSearch={() => setSearchVisible(true)}
             handleDeleteMeeting={handleDeleteMeeting}
             setSettingsVisible={setSettingsVisible}
             theme={theme}
@@ -713,7 +761,7 @@ function App() {
         </>
       )}
 
-      {isRecording || isProcessing ? (
+      {showZenMode ? (
         <ZenMode
           isProcessing={isProcessing}
           onEndMeeting={() => {
@@ -721,6 +769,7 @@ function App() {
               stopSessionRef.current();
             }
           }}
+          onBackHome={handleBackHomeFromZen}
           meetingTitle={meetingTitle}
           setMeetingTitle={setMeetingTitle}
           meetingParticipants={meetingParticipants}
@@ -738,11 +787,11 @@ function App() {
       ) : (
         <main className="flex-1 flex flex-col bg-pro-bg h-full relative z-10 rounded-l-[2.5rem] overflow-hidden content-shift border-l border-pro-border/10">
           <header
-            className={`app-titlebar flex items-center justify-between px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20 ${
+            className={`app-titlebar grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-6 md:px-12 shrink-0 bg-pro-bg/40 backdrop-blur-3xl sticky top-0 border-b border-pro-border/20 z-20 ${
               !selectedMeetingId && activeTab === 'wiki' ? 'h-20' : 'h-28'
             }`}
           >
-            <div className="flex items-center gap-8">
+            <div className="flex min-w-0 items-center gap-8 justify-self-start">
               <button
                 type="button"
                 onClick={() => setSidebarVisible((prev) => !prev)}
@@ -790,7 +839,17 @@ function App() {
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="no-drag justify-self-center">
+              {activeRecording && !showZenMode && (
+                <RecordingNamePopover
+                  title={meetingTitle}
+                  voiceActivity={recordingVoiceActivity}
+                  onExpand={() => setZenVisible(true)}
+                />
+              )}
+            </div>
+
+            <div className="flex items-center gap-4 justify-self-end">
               <button
                 type="button"
                 onClick={() => setAskPlutoVisible(true)}
@@ -973,8 +1032,19 @@ function App() {
         setSearchVisible={setSearchVisible}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
-        filteredMeetings={filteredMeetings}
-        setSelectedMeetingId={setSelectedMeetingId}
+        results={searchPlutoResults}
+        onOpenMeeting={(meetingId) => {
+          setSelectedMeetingId(meetingId);
+          setActiveTab('hub');
+        }}
+        onOpenProjects={() => {
+          setActiveTab('projects');
+          setSelectedMeetingId(null);
+        }}
+        onOpenPeople={() => {
+          setActiveTab('people');
+          setSelectedMeetingId(null);
+        }}
       />
 
       <SettingsOverlay

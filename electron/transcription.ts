@@ -68,8 +68,8 @@ const toWhisperOptions = (
 ): WhisperTranscribeOptions => {
   return {
     model: resolved.model,
-    device: resolved.device,
-    computeType: resolved.computeType,
+    device: 'mlx',
+    computeType: 'float16',
     language: resolved.language,
     diarize: options.diarize,
     wordTimestamps: options.wordTimestamps,

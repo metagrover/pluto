@@ -74,6 +74,18 @@ const jaccardSimilarity = (left, right) => {
   return union === 0 ? 0 : overlap / union;
 };
 
+const tokenCoverage = (left, right) => {
+  const leftTokens = tokenize(left);
+  const rightTokens = tokenize(right);
+  if (leftTokens.length === 0 || rightTokens.length === 0) return 0;
+  let overlap = 0;
+  const rightSet = new Set(rightTokens);
+  for (const token of leftTokens) {
+    if (rightSet.has(token)) overlap++;
+  }
+  return overlap / leftTokens.length;
+};
+
 const textCoverage = (query, reference) => {
   const qTokens = new Set(tokenize(query));
   const rTokens = new Set(tokenize(reference));
@@ -1089,8 +1101,10 @@ const pruneSourceEchoBleed = (
       const gapMs = Math.abs((other.ts || 0) - (segment.ts || 0));
       if (gapMs > maxGapMs) continue;
 
-      const sim = jaccardSimilarity(segment.text, other.text);
-      if (sim < similarityThreshold) continue;
+      const isSubset = tokenCoverage(segment.text, other.text) >= 0.5;
+      const isSimilar =
+        jaccardSimilarity(segment.text, other.text) >= similarityThreshold;
+      if (!isSubset && !isSimilar) continue;
 
       const themTokens = tokenize(other.text);
       const meIsShorter = meTokens.length <= themTokens.length + 2;

@@ -38,6 +38,7 @@ import {
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
 import { runConditionalMeetingUpdateForIpc } from './conditionalMeetingUpdateIpc';
+import type { AttentionItemStatus } from './intelligence/intelligenceTypes';
 import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioSpawn,
@@ -70,7 +71,7 @@ const probeAudioDuration = async (inputPath: string) =>
     probe.stdout.on('data', (chunk) => {
       stdout += String(chunk);
     });
-    probe.on('error', (error) => {
+    probe.on('error', (error: NodeJS.ErrnoException) => {
       console.warn('[Pluto] Audio duration probe failed to start:', error.code);
       resolve(null);
     });
@@ -250,6 +251,7 @@ import type {
 import {
   type TranscriptCleanupStats,
   cleanTranscriptSegments,
+  shouldCleanupTranscriptOnSave,
 } from './transcriptCleanup';
 import {
   getTranscriptionBackendStatus,
@@ -1466,9 +1468,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('SAVE_MEETING', (_event, meeting, options) => {
     try {
-      const shouldRunTranscriptCleanup =
-        meeting?.run_transcript_cleanup === true;
-      if (shouldRunTranscriptCleanup) {
+      if (shouldCleanupTranscriptOnSave(meeting)) {
         const cleanup = cleanupTranscriptJson(meeting?.transcript_json);
         if (cleanup) {
           meeting.transcript_json = cleanup.cleanedTranscriptJson;
@@ -1490,7 +1490,9 @@ app.whenReady().then(async () => {
         meeting.run_transcript_cleanup = undefined;
       }
 
-      console.log(`[Pluto] Saving meeting: ${meeting.id} - ${meeting.title}`);
+      console.log(
+        `[Pluto] Saving meeting [has_id=${Boolean(meeting?.id)}, title_length=${typeof meeting?.title === 'string' ? meeting.title.length : 0}]`,
+      );
       const expectedValidationRunId =
         options && typeof options.expectedValidationRunId === 'string'
           ? options.expectedValidationRunId
@@ -1680,18 +1682,6 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('GET_MEETINGS', () => db.getMeetings());
   ipcMain.handle('GET_MEETING', (_event, id) => db.getMeeting(id));
-  ipcMain.handle(
-    'UPDATE_MEETING_FOLLOW_UP_DRAFTS',
-    (_event, meetingId, followUpDraftsJson) => {
-      if (
-        (typeof meetingId !== 'string' && typeof meetingId !== 'number') ||
-        (typeof followUpDraftsJson !== 'string' && followUpDraftsJson !== null)
-      ) {
-        throw new Error('Invalid follow-up draft update');
-      }
-      return db.updateMeetingFollowUpDrafts(meetingId, followUpDraftsJson);
-    },
-  );
   ipcMain.handle('SEARCH_MEETINGS', (_event, query) =>
     db.searchMeetings(query),
   );
@@ -2412,49 +2402,6 @@ app.whenReady().then(async () => {
     },
   );
 
-  // Process pre-extracted entities (save to knowledge graph)
-  ipcMain.handle(
-    'GENERATE_FOLLOW_UPS',
-    async (
-      _event,
-      {
-        meetingTitle,
-        overview,
-        participants,
-        entityContext,
-        topicSummaries,
-        actionItems,
-        decisions,
-        openQuestions,
-        discussionPoints,
-        customPrompt,
-      },
-    ) => {
-      try {
-        const settings = await getAllSettings(db);
-        const provider = await getProvider(settings);
-        console.log(
-          `[LLM] Generating follow-up drafts with provider: ${provider.name}`,
-        );
-        return await provider.generateFollowUpDrafts({
-          meetingTitle,
-          overview,
-          participants,
-          entityContext,
-          topicSummaries,
-          actionItems,
-          decisions,
-          openQuestions,
-          discussionPoints,
-          customPrompt,
-        });
-      } catch (error) {
-        console.error('[LLM] Follow-up generation failed:', error);
-        return { drafts: [] };
-      }
-    },
-  );
-
   ipcMain.handle(
     'PROCESS_EXTRACTED_ENTITIES',
     async (_event, { entities, meetingId }) => {
@@ -2494,13 +2441,15 @@ app.whenReady().then(async () => {
     try {
       if (!queryText || !queryText.trim()) return { answer: '', citations: [] };
 
-      console.log(`[Pluto] intelligence:query start: "${queryText}"`);
+      console.log(
+        `[Pluto] intelligence:query start [query_length=${queryText.trim().length}]`,
+      );
 
       const parsed = await parseQuery(queryText);
 
       // Fast-path: return canned response for conversational greetings
       if (parsed.cannedResponse) {
-        console.log(`[Pluto] Returning canned response for "${queryText}"`);
+        console.log('[Pluto] intelligence:query canned response');
         return {
           answer: parsed.cannedResponse,
           citations: [],
@@ -2592,7 +2541,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'intelligence:alerts:update-status',
-    (_event, id: string, status: db.AttentionItemStatus) => {
+    (_event, id: string, status: AttentionItemStatus) => {
       return updateAlertStatus(id, status);
     },
   );

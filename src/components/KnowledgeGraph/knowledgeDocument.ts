@@ -1463,7 +1463,7 @@ export const compileNeedsAttention = (
 
   if (snapshotV2 && doc?.scope_type !== 'global') {
     return [...v2Items, ...riskItems, ...dependencyItems].sort(
-      (a, b) => compareAttentionPriority(b) - compareAttentionPriority(a),
+      (a, b) => attentionSortScore(a) - attentionSortScore(b),
     );
   }
 

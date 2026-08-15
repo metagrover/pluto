@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  MeetingView,
   TranscriptIntegrityPanel,
   canGenerateMeetingIntelligence,
 } from '../../src/components/features/MeetingView';
@@ -9,6 +10,74 @@ import { Sidebar } from '../../src/components/layout/Sidebar';
 import { canDeleteMeeting } from '../../src/utils/recordingFinalization';
 
 describe('MeetingView transcript integrity', () => {
+  it('does not render the send-ready follow-up draft panel for analyzed meetings', () => {
+    const validatedAt = '2026-07-30T20:00:00.000Z';
+    const markup = renderToStaticMarkup(
+      <MeetingView
+        selectedMeeting={{
+          id: 'meeting-follow-up-removal',
+          title: 'Launch review',
+          meeting_type: 'Recording',
+          created_at: '2026-07-30T19:00:00.000Z',
+          started_at: '2026-07-30T19:00:00.000Z',
+          transcript_status: 'validated',
+          transcript_validated_at: validatedAt,
+          transcript_json: JSON.stringify({
+            lifecycleStatus: 'validated',
+            segments: [
+              {
+                speaker: 'Maya',
+                text: 'Launch remains on track.',
+                startTime: 0,
+                endTime: 1,
+              },
+            ],
+          }),
+          transcript_integrity_json: JSON.stringify({
+            schemaVersion: 2,
+            state: 'validated',
+            causes: [],
+            evidenceProvenance: { kind: 'stored_capture_activity_v1' },
+            validationProof: {
+              gateVersion: 'canonical_integrity_v1',
+              validatedAt,
+            },
+          }),
+          finalization_status: 'finalized',
+          analysis_json: JSON.stringify({
+            analysis_schema_version: 3,
+            overview: 'Launch remains on track.',
+            topics: [],
+            all_action_items: [{ text: 'Publish release notes' }],
+            all_decisions: [{ text: 'Use a staged rollout' }],
+            meeting_type: 'general',
+            quality: {
+              format_pass: true,
+              retry_count: 0,
+              fallback_used: false,
+              issues: [],
+            },
+          }),
+        }}
+        editingTitle={false}
+        setEditingTitle={vi.fn()}
+        titleValue="Launch review"
+        setTitleValue={vi.fn()}
+        fetchMeetings={vi.fn()}
+        handleCopySummary={vi.fn()}
+        copySuccess={false}
+        handleDeleteMeeting={vi.fn()}
+        highlightEntities={(text) => text}
+        transcriptVisible={false}
+        setTranscriptVisible={vi.fn()}
+      />,
+    );
+
+    expect(markup).not.toContain('Ready to send');
+    expect(markup).not.toContain('Follow-up format');
+    expect(markup).not.toContain('Email follow-up draft');
+  });
+
   it('keeps the standard analysis page primary when analysis already exists', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel
@@ -190,6 +259,7 @@ describe('MeetingView transcript integrity', () => {
           },
         ]}
         onStartRecording={vi.fn()}
+        onOpenSearch={vi.fn()}
         handleDeleteMeeting={vi.fn()}
         setSettingsVisible={vi.fn()}
         theme="light"
