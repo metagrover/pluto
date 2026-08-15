@@ -384,6 +384,8 @@ export const finalizeTranscriptCheckpoints = (
           input.expectedConfigKey.length === 0) ||
         candidate.reference.transcriptionConfigKey.length === 0 ||
         candidate.sidecar.transcriptionConfigKey.length === 0 ||
+        candidate.reference.transcriptionConfigKey !==
+          candidate.sidecar.transcriptionConfigKey ||
         !(
           input.acceptedConfigKeys?.length
             ? input.acceptedConfigKeys
