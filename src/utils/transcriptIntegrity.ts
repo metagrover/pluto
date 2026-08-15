@@ -2,6 +2,7 @@ import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from './speakerAttribution.ts';
+import { resolveCrossChannelDuplicates } from './speakerAttribution.ts';
 
 export type TranscriptLifecycleStatus =
   | 'provisional'
@@ -131,7 +132,10 @@ export const reconcileCanonicalTranscript = <
   provisionalSegments: T[];
   activityWindows: SpeakerActivityWindow[];
 }) => {
-  const attributed = input.mixedSegments.map((canonical) => {
+  const deduplicatedMixed = resolveCrossChannelDuplicates(
+    input.mixedSegments,
+  ).segments;
+  const attributed = deduplicatedMixed.map((canonical) => {
     const micEvidence = Math.max(
       activityOverlapSeconds(canonical, 'Me', input.activityWindows),
       maxOverlapSeconds(canonical, input.micSegments),

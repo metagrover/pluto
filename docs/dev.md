@@ -23,6 +23,31 @@ This doc captures setup issues we hit on macOS during initial onboarding and the
 pnpm run setup-python
 ```
 
+MLX is the live-preview recognizer only. Canonical final transcription uses the separately managed Parakeet runtime.
+
+## 1a) Parakeet final transcription is unavailable
+
+**Symptoms**
+
+- Final validation remains retryable with a Parakeet preparation or runtime reason.
+- The provisional transcript remains visible and analysis does not start.
+
+**Fix**
+
+Verify Apple Silicon and rebuild the signed native executable:
+
+```bash
+pnpm run build:parakeet
+```
+
+On first use, allow Pluto to download its pinned Parakeet and CTC Core ML bundles. Pluto does not reuse Hex or another application's cache. Do not replace this failure path with whole-session MLX; the process boundary is intentional.
+
+Private quality manifests contain absolute paths only and must stay outside version control. Validate one without printing content or paths:
+
+```bash
+pnpm run benchmark:private-transcription:validate -- --manifest /absolute/private/manifest.json
+```
+
 ## 2) Electron native module ABI mismatch (NODE_MODULE_VERSION)
 
 **Symptoms**

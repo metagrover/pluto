@@ -30,11 +30,14 @@ import {
   type TranscriptTrustCauseCode,
   parseTranscriptTrustEnvelope,
 } from '../utils/transcriptTrustState.ts';
+import { runFinalTranscription } from './finalTranscription/runFinalTranscription.ts';
 import {
   type RecordingTranscriptValidationResult,
   runRecordingTranscriptValidation,
 } from './recordingTranscriptValidation.ts';
 import { retryMeetingTranscriptValidation } from './retryMeetingTranscriptValidation.ts';
+import type { TranscriptionResult } from './transcription/contracts.ts';
+import { resolveTranscriptionPolicy } from './transcription/policy.ts';
 
 export type RecordingQualityBenchmarkCaseKind =
   | 'capture_recovery'
@@ -43,6 +46,7 @@ export type RecordingQualityBenchmarkCaseKind =
   | 'retry_validation'
   | 'live_transcript_responsiveness'
   | 'stop_to_validated_latency'
+  | 'final_transcription_policy'
   | 'candidate_eligibility';
 
 export type RecordingQualityBenchmarkTier = 'pr' | 'manual';
@@ -447,7 +451,35 @@ export type RecordingQualityBenchmarkFixture =
   | RetryValidationFixture
   | LiveTranscriptResponsivenessFixture
   | StopToValidatedLatencyFixture
+  | FinalTranscriptionPolicyFixture
   | CandidateEligibilityFixture;
+
+export type FinalTranscriptionPolicyFixture = {
+  type: 'final_transcription_policy';
+  scenarios: Array<{
+    id: string;
+    sealed: boolean;
+    recordingDurationSeconds: number;
+    activityWindows: SpeakerActivityWindow[];
+    sources: {
+      mic: TranscriptionResult;
+      system: TranscriptionResult;
+    };
+    runtimeFailureSource?: 'mic' | 'system';
+    expected: {
+      status: 'validated' | 'needs_attention';
+      requestOrder: Array<'mic' | 'system'>;
+      analysisStarted: boolean;
+      committedSegmentCount?: number;
+    };
+  }>;
+  expected: RecordingQualityBenchmarkExpectation & {
+    policy: {
+      liveEngine: 'mlx_whisper';
+      finalEngine: 'parakeet_coreml';
+    };
+  };
+};
 
 export type StopToValidatedLatencyFixture = {
   type: 'stop_to_validated_latency';
@@ -533,6 +565,7 @@ const isSupportedBenchmarkCaseKind = (
   kind === 'retry_validation' ||
   kind === 'live_transcript_responsiveness' ||
   kind === 'stop_to_validated_latency' ||
+  kind === 'final_transcription_policy' ||
   kind === 'candidate_eligibility';
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -1035,6 +1068,121 @@ export const runStopToValidatedLatencyBenchmarkCase = (
       status: failures.length === 0 ? 'validated' : 'needs_attention',
       primaryMetric,
       ...(firstAvailable ? { stopToValidatedLatency: firstAvailable } : {}),
+      reasons: failures,
+    },
+    expected: fixture.expected,
+    ...(failures.length > 0 ? { failures } : {}),
+  };
+};
+
+export const runFinalTranscriptionPolicyBenchmarkCase = async (
+  meta: RecordingQualityBenchmarkManifestCase,
+  fixture: FinalTranscriptionPolicyFixture,
+): Promise<RecordingQualityBenchmarkCaseResult> => {
+  const livePolicy = resolveTranscriptionPolicy('live_preview');
+  const finalPolicy = resolveTranscriptionPolicy('final_validation');
+  const policyFailures = [
+    ...(livePolicy.engine === fixture.expected.policy.liveEngine
+      ? []
+      : ['live transcription policy mismatch']),
+    ...(finalPolicy.engine === fixture.expected.policy.finalEngine
+      ? []
+      : ['final transcription policy mismatch']),
+    ...(livePolicy.wholeSession ? ['live preview must remain chunked'] : []),
+    ...(!finalPolicy.wholeSession
+      ? ['final transcription must consume the sealed session']
+      : []),
+    ...(finalPolicy.maxConcurrency === 1
+      ? []
+      : ['final transcription must be sequential']),
+  ];
+
+  const scenarioFailures: string[] = [];
+  for (const scenario of fixture.scenarios) {
+    const requestOrder: Array<'mic' | 'system'> = [];
+    let analysisStarted = false;
+    let committedSegmentCount: number | undefined;
+    const outcome = await runFinalTranscription(
+      {
+        meetingId: `benchmark-${scenario.id}`,
+        runId: `benchmark-run-${scenario.id}`,
+        captureEvidence: {
+          sealed: scenario.sealed,
+          generation: `benchmark-generation-${scenario.id}`,
+        },
+        recordingDurationSeconds: scenario.recordingDurationSeconds,
+        micAudioPath: `/benchmark/${scenario.id}-mic.wav`,
+        systemAudioPath: `/benchmark/${scenario.id}-system.wav`,
+        provisionalSegments: [],
+        activityWindows: scenario.activityWindows,
+        language: 'en',
+        vocabulary: [],
+        vocabularyPolicyVersion: 'benchmark-v1',
+      },
+      {
+        claimLease: async () => true,
+        transcribe: async (request) => {
+          if (request.source === 'mix') {
+            throw new Error('benchmark_mix_source_forbidden');
+          }
+          requestOrder.push(request.source);
+          if (scenario.runtimeFailureSource === request.source) {
+            throw new Error('benchmark_runtime_unavailable');
+          }
+          return scenario.sources[request.source];
+        },
+        probeDuration: async () => scenario.recordingDurationSeconds,
+        commitCanonical: async (commit) => {
+          committedSegmentCount = commit.segments.length;
+          return {
+            committed: true,
+            transcript: {
+              schemaVersion: 2,
+              segments: commit.segments,
+            },
+          };
+        },
+        markNeedsAttention: async () => undefined,
+        startAnalysis: async () => {
+          analysisStarted = true;
+        },
+      },
+    );
+    if (outcome.status !== scenario.expected.status) {
+      scenarioFailures.push(`${scenario.id} status mismatch`);
+    }
+    if (requestOrder.join('|') !== scenario.expected.requestOrder.join('|')) {
+      scenarioFailures.push(`${scenario.id} request order mismatch`);
+    }
+    if (analysisStarted !== scenario.expected.analysisStarted) {
+      scenarioFailures.push(`${scenario.id} analysis handoff mismatch`);
+    }
+    if (
+      scenario.expected.committedSegmentCount !== undefined &&
+      committedSegmentCount !== scenario.expected.committedSegmentCount
+    ) {
+      scenarioFailures.push(`${scenario.id} canonical segment count mismatch`);
+    }
+  }
+
+  const failures = [...policyFailures, ...scenarioFailures];
+  const primaryMetric: RecordingQualityBenchmarkMetric = {
+    name: 'passedScenarioCount',
+    value: fixture.scenarios.length - scenarioFailures.length,
+  };
+  failures.push(
+    ...compareMetric(primaryMetric, fixture.expected.primaryMetric),
+  );
+  return {
+    id: meta.id,
+    issue: meta.issue,
+    title: meta.title,
+    kind: meta.kind,
+    passed: failures.length === 0,
+    trackedMetrics: meta.trackedMetrics,
+    actual: {
+      status: failures.length === 0 ? 'validated' : 'needs_attention',
+      primaryMetric,
       reasons: failures,
     },
     expected: fixture.expected,
@@ -1568,6 +1716,7 @@ export const buildRecordingQualityBenchmarkReport = (input: {
     capture_recovery: { passed: 0, failed: 0 },
     live_transcript_responsiveness: { passed: 0, failed: 0 },
     stop_to_validated_latency: { passed: 0, failed: 0 },
+    final_transcription_policy: { passed: 0, failed: 0 },
     recording_finalization: { passed: 0, failed: 0 },
     transcript_validation: { passed: 0, failed: 0 },
     retry_validation: { passed: 0, failed: 0 },
