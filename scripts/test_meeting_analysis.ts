@@ -69,11 +69,11 @@ async function main() {
   );
 
   const provider = new UnifiedLLMProvider('ollama', {
-    ollama_model: 'phi4-mini:3.8b',
+    ollama_model: 'qwen3.5:9b',
   });
 
   console.log(
-    '\n[Test Analysis] Running UnifiedLLMProvider analysis with phi4-mini:3.8b...',
+    '\n[Test Analysis] Running UnifiedLLMProvider analysis with qwen3.5:9b...',
   );
   const startTime = Date.now();
   const result = await provider.generateStructuredAnalysis(

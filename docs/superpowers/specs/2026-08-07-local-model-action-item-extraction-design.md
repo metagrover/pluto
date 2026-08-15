@@ -8,7 +8,7 @@
 
 ## 1. Overview & Problem
 
-Meeting analysis in Pluto relies on local LLMs (`phi4-mini:3.8b` via Ollama) and cloud providers. However, empirical analysis of `pluto.db` revealed that **98.8% of meetings had 0 action items** and **96.3% of meetings had 0 decisions**.
+Meeting analysis in Pluto relies on task-scoped local LLMs (`qwen3.5:9b` for structured analysis, Phi for other latency-sensitive Ollama tasks) and cloud providers. However, empirical analysis of `pluto.db` revealed that **98.8% of meetings had 0 action items** and **96.3% of meetings had 0 decisions**.
 
 The root cause was identified in `applyTranscriptGrounding()` in `electron/llm/unifiedProvider.ts`:
 - LLM outputs valid, paraphrased action items (e.g. *"Draft Snowflake pipeline RFC"* when spoken: *"I can write up a doc for the pipeline team"*).

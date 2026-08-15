@@ -510,6 +510,7 @@ Return JSON in this exact shape:
 
 export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 - Settled decision: retain only when a participant explicitly agrees to, selects, approves, rejects, declares, or resolves a concrete path. An explicit rejection is itself a decision and must not be omitted; when a participant rejects one option and states what the group will keep or do, extract exactly one decision describing the accepted path using the wording of the resolving clause. Options, preferences, recommendations, predictions, and unresolved or conditional exploration are not decisions.
+- Generic rejection pattern: "We rejected option A. We will keep option B." produces exactly one decision whose text reuses "We will keep option B" and whose evidence quotes the resolving clause. Do not copy this example into output.
 - Committed action: retain only when a participant explicitly commits to concrete follow-through, accepts a request, receives an explicit assignment, or a mandated follow-up is clearly stated. Mentions of work, possible tasks, questions, suggestions, and hypothetical next steps are not actions.
 - Proposal or recommendation: keep in the topic summary or key points, never in decisions or action items unless the transcript later records explicit agreement or commitment.
 - Open question: keep in open_questions, never in decisions or action items while unresolved.

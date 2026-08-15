@@ -45,7 +45,8 @@ import type {
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
-export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v5';
+const OLLAMA_DEFAULT_ANALYSIS_MODEL = 'qwen3.5:9b';
+export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v6';
 
 // The default local Ollama runtime has one generation slot. Queue every
 // generation at the provider boundary so request timeouts measure model work,
@@ -65,6 +66,11 @@ type LLMTask =
   | 'knowledgeDoc'
   | 'askPluto'
   | 'queryClassification';
+
+const isStructuredAnalysisTask = (task: LLMTask): boolean =>
+  task === 'structuredAnalysis' ||
+  task === 'topicSegmentation' ||
+  task === 'topicAnalysis';
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error &&
@@ -97,7 +103,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private claudeBaseUrl = 'https://api.anthropic.com/v1';
   private ollamaBaseUrl = 'http://127.0.0.1:11434';
   private geminiClient: GoogleGenerativeAI | null = null;
-  private cachedOllamaModel: string | null = null;
+  private cachedOllamaModels = new Map<string, string>();
 
   constructor(
     private providerType: ProviderType,
@@ -579,10 +585,11 @@ export class UnifiedLLMProvider implements LLMProvider {
       return this.settings.gemini_model || 'gemini-1.5-flash';
     }
     return (
+      this.settings.ollama_analysis_model ||
       this.settings.ollama_model ||
       this.settings.llm_model ||
-      this.cachedOllamaModel ||
-      OLLAMA_DEFAULT_MODEL
+      this.cachedOllamaModels.get(OLLAMA_DEFAULT_ANALYSIS_MODEL) ||
+      OLLAMA_DEFAULT_ANALYSIS_MODEL
     );
   }
 
@@ -931,7 +938,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     task,
     jsonMode,
   }: TextGenerationOptions): Promise<string> {
-    const model = await this.resolveOllamaModel();
+    const model = await this.resolveOllamaModel(task);
     const { num_ctx, num_predict } = calculateOllamaContextBudget(prompt, task);
 
     const requestBody: Record<string, unknown> = {
@@ -1000,8 +1007,14 @@ export class UnifiedLLMProvider implements LLMProvider {
     return this.geminiClient;
   }
 
-  private async resolveOllamaModel(): Promise<string> {
+  private async resolveOllamaModel(task: LLMTask): Promise<string> {
+    const defaultModel = isStructuredAnalysisTask(task)
+      ? OLLAMA_DEFAULT_ANALYSIS_MODEL
+      : OLLAMA_DEFAULT_MODEL;
     const configuredModel = (
+      (isStructuredAnalysisTask(task)
+        ? this.settings.ollama_analysis_model
+        : undefined) ||
       this.settings.ollama_model ||
       this.settings.llm_model ||
       ''
@@ -1010,14 +1023,15 @@ export class UnifiedLLMProvider implements LLMProvider {
       return configuredModel;
     }
 
-    if (this.cachedOllamaModel) {
-      return this.cachedOllamaModel;
+    const cachedModel = this.cachedOllamaModels.get(defaultModel);
+    if (cachedModel) {
+      return cachedModel;
     }
 
     try {
       const response = await this.ollamaFetch('/api/tags');
       if (!response.ok) {
-        return OLLAMA_DEFAULT_MODEL;
+        return defaultModel;
       }
       const data = await response.json();
       const models: string[] = Array.isArray(data.models)
@@ -1032,11 +1046,10 @@ export class UnifiedLLMProvider implements LLMProvider {
       if (models.length > 0) {
         const defaultCandidate = models.find(
           (name) =>
-            name === OLLAMA_DEFAULT_MODEL ||
-            name.startsWith(`${OLLAMA_DEFAULT_MODEL}:`),
+            name === defaultModel || name.startsWith(`${defaultModel}:`),
         );
         if (defaultCandidate) {
-          this.cachedOllamaModel = defaultCandidate;
+          this.cachedOllamaModels.set(defaultModel, defaultCandidate);
           return defaultCandidate;
         }
 
@@ -1046,18 +1059,18 @@ export class UnifiedLLMProvider implements LLMProvider {
             !/(^|[-_:])(embed|embedding|bge|e5|gte)([-_:]|$)/i.test(name),
         );
         if (nonEmbeddingCandidate) {
-          this.cachedOllamaModel = nonEmbeddingCandidate;
+          this.cachedOllamaModels.set(defaultModel, nonEmbeddingCandidate);
           return nonEmbeddingCandidate;
         }
 
-        this.cachedOllamaModel = models[0];
+        this.cachedOllamaModels.set(defaultModel, models[0]);
         return models[0];
       }
     } catch (e) {
       console.warn('[Ollama] Failed to auto-detect model, using default:', e);
     }
 
-    return OLLAMA_DEFAULT_MODEL;
+    return defaultModel;
   }
 
   private async ollamaFetch(

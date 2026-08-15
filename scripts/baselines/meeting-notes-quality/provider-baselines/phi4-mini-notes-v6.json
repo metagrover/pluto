@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "provider": "ollama",
+  "model": "phi4-mini:3.8b",
+  "prompt_version": "notes-v6",
+  "seed": 42,
+  "fixture_order_sha256": "0c5fe83e7855bda5a721928f19899716bbd2e10d7532f14b1b7f2d643917f4f5",
+  "reviewed_scores": [7, 7, 7, 7]
+}

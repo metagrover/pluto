@@ -37,14 +37,14 @@ This design does not ship the engine. It defines the contracts and delivery gate
 
 ## 4. Model decision
 
-Pluto keeps Phi for latency-sensitive foreground work. `qwen3.5:9b` is the preferred background dreaming candidate to evaluate because idle work can tolerate its higher latency and a local 2026-08-10 benchmark showed stronger exact evidence grounding:
+Pluto keeps Phi for latency-sensitive non-structured Ollama work and uses `qwen3.5:9b` for structured meeting analysis after the evidence-grounded three-seed gate documented in the #594 design. Qwen remains the preferred background dreaming candidate to evaluate because idle work can tolerate its higher latency and both analysis benchmarks showed stronger exact evidence grounding:
 
 | Model | Meeting-analysis score | Precision cases | Exact evidence support | Total benchmark time | Resident model |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `phi4-mini:3.8b` | 30/48 | 1/3 | 7/13 | 88.2 s | 3.1 GB |
 | `qwen3.5:9b`, thinking disabled | 30/48 | 2/3 | 13/13 | 207.4 s | 5.5 GB |
 
-This is a candidate selection, not a quality claim. Qwen still produced false commitments in exploratory material and did not improve the aggregate meeting-analysis score. The dreaming benchmark must compare it with Phi and at least one credible local alternative before the default is locked.
+The earlier table is historical pre-grounding evidence, not the current analysis release result. Qwen later cleared the structured-analysis gate only after deterministic evidence enforcement and a strict rejection-resolution prompt pattern were in place. Dreaming is still a distinct task: its benchmark must compare Qwen with Phi and at least one credible local alternative before the dreaming default is locked.
 
 For strict JSON output, the final Qwen pass uses thinking disabled unless a separately tested two-pass design reserves independent reasoning and final-output budgets. A hidden reasoning stream must never consume the JSON token budget.
 

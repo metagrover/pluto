@@ -46,7 +46,7 @@ async function main() {
   console.log(`[Reanalyze] Found ${meetings.length} meetings to re-analyze.`);
 
   const provider = new UnifiedLLMProvider('ollama', {
-    ollama_model: 'phi4-mini:3.8b',
+    ollama_model: 'qwen3.5:9b',
   });
 
   const isAvailable = await provider.isAvailable();
@@ -67,8 +67,8 @@ async function main() {
         analysis_fallback_used = 0,
         analysis_provider = 'ollama',
         analysis_model = ?,
-        analysis_generation_path = 'adaptive_windowed_reanalysis',
-        analysis_prompt_version = 'notes-v4',
+        analysis_generation_path = ?,
+        analysis_prompt_version = ?,
         analysis_generated_at = ?
     WHERE rowid = ?
   `);
@@ -82,9 +82,9 @@ async function main() {
   for (let i = 0; i < meetings.length; i += 1) {
     const m = meetings[i];
     console.log('\n---------------------------------------------------------');
-    console.log(`[${i + 1}/${meetings.length}] Processing meeting ${m.id}`);
-    console.log(`  Title: "${m.title}"`);
-    console.log(`  Started: ${m.started_at} (${m.duration_seconds}s)`);
+    console.log(
+      `[${i + 1}/${meetings.length}] Processing local meeting (${m.duration_seconds}s)`,
+    );
 
     let rawSegments: Array<{
       speaker?: string;
@@ -100,9 +100,7 @@ async function main() {
         rawSegments = parsed.segments;
       }
     } catch (_e) {
-      console.warn(
-        `  [Warning] Failed to parse transcript_json for meeting ${m.id}`,
-      );
+      console.warn('  [Warning] Failed to parse transcript JSON');
     }
 
     if (rawSegments.length === 0) {
@@ -139,7 +137,10 @@ async function main() {
       updateStmt.run(
         enhancedNotes,
         analysisJsonStr,
-        'phi4-mini:3.8b',
+        analysisDoc.generation_metadata?.model || 'qwen3.5:9b',
+        analysisDoc.generation_metadata?.generation_path ||
+          'adaptive_windowed_reanalysis',
+        analysisDoc.generation_metadata?.prompt_version || 'notes-v6',
         nowIso,
         m.rowid,
       );
@@ -150,15 +151,16 @@ async function main() {
         // FTS update optional
       }
 
-      console.log(`  ✅ Successfully updated meeting ${m.id} in ${elapsed}s!`);
-      console.log(`     Overview: ${analysisDoc.overview?.slice(0, 120)}...`);
+      console.log(`  ✅ Successfully updated local meeting in ${elapsed}s!`);
       console.log(`     Topics: ${analysisDoc.topics?.length || 0}`);
       console.log(`     Decisions: ${analysisDoc.all_decisions?.length || 0}`);
       console.log(
         `     Action Items: ${analysisDoc.all_action_items?.length || 0}`,
       );
     } catch (err) {
-      console.error(`  ❌ Error re-analyzing meeting ${m.id}:`, err);
+      console.error(
+        `  ❌ Re-analysis failed (${err instanceof Error ? err.name : 'unknown_error'})`,
+      );
     }
   }
 
