@@ -4,6 +4,7 @@ import {
   distributeTimedTokens,
   matchTimeAlignedTokens,
   multisetTokenIntersectionSize,
+  normalizePrivateEvaluationFailureCode,
   normalizeTranscriptTokens,
   transcriptEditDistance,
 } from '../../src/services/privateTranscriptionMetrics.ts';
@@ -52,5 +53,20 @@ describe('private transcription metrics', () => {
       0.2,
     );
     expect(result.matched).toBe(1);
+  });
+
+  it('keeps evaluator failures content-free and finite', () => {
+    expect(
+      normalizePrivateEvaluationFailureCode('parakeet_transcription_failed'),
+    ).toBe('parakeet_transcription_failed');
+    expect(
+      normalizePrivateEvaluationFailureCode('parakeet_request_timeout'),
+    ).toBe('parakeet_request_timeout');
+    expect(normalizePrivateEvaluationFailureCode('/private/path leaked')).toBe(
+      'parakeet_failure_unknown',
+    );
+    expect(normalizePrivateEvaluationFailureCode(undefined)).toBe(
+      'parakeet_failure_unknown',
+    );
   });
 });

@@ -276,6 +276,8 @@ pnpm run audit:high
 
 - [ ] **Step 4: Run the packaged or development application workflow: live text, provisional post-stop transcript, Parakeet final replacement, validated status, and analysis input checksum matching the committed canonical transcript**
 
+  The guarded isolated service workflow passes with the real native runtime, a recent read-only source artifact, an isolated database, canonical replacement, validated status, and exact analysis-input checksum. A literal Electron app launch with observed live text remains required before this step is complete.
+
 - [x] **Step 5: Review every design requirement against direct evidence, update issue #441 content-free, and fix any uncovered gap**
 
 - [x] **Step 6: Push `codex/441-parakeet-final-transcription`, create the issue-linked PR with verification evidence, and retain the worktree for review**

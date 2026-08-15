@@ -56,11 +56,31 @@ pnpm run benchmark:private-parakeet -- \
   --database /absolute/private/pluto.db \
   --model-root /absolute/private/models/transcription/parakeet \
   --audio-root /absolute/private/meetings \
-  --limit 2 \
+  --limit 5 \
+  --review-cases 24 \
   --review-out /absolute/private/evaluations/parakeet-review.html
 ```
 
-The console emits aggregate metrics only. The review page contains private audio references and transcript excerpts, is written with owner-only permissions, must remain outside the repository, and exports content-free A/B ratings.
+The console emits aggregate metrics only. The review page contains private audio references and transcript excerpts, is written with owner-only permissions, must remain outside the repository, and exports content-free A/B ratings. Keep the adjacent hidden-assignment manifest private until the review is complete, then score the exported ratings against it:
+
+```bash
+pnpm run benchmark:private-parakeet:review -- \
+  --ratings /absolute/private/parakeet-review-ratings.json \
+  --manifest /absolute/private/evaluations/parakeet-review.html.manifest.json
+```
+
+To exercise the persisted service workflow without mutating the production database, run the guarded manual test with absolute local paths supplied through `PLUTO_E2E_*` environment variables. The test always creates its own process-unique user-data directory and ignores any `PLUTO_E2E_USER_DATA_DIR` value:
+
+```bash
+RUN_PARAKEET_APPLICATION_WORKFLOW=1 \
+PLUTO_E2E_SOURCE_DATABASE=/absolute/private/pluto.db \
+PLUTO_E2E_PARAKEET_RUNTIME=/absolute/path/to/parakeet-runtime \
+PLUTO_E2E_PARAKEET_MODEL_ROOT=/absolute/private/models/transcription/parakeet \
+PLUTO_E2E_AUDIO_ROOT=/absolute/private/meetings \
+pnpm exec vitest run --config vitest.manual.config.ts tests/manual/parakeetApplicationWorkflow.test.ts
+```
+
+The source database and audio are read-only. All provisional, validation, canonical, and downstream writes go to the isolated database. The test compares content-free SHA-256 values internally and never prints transcript text or digest values.
 
 ## 2) Electron native module ABI mismatch (NODE_MODULE_VERSION)
 

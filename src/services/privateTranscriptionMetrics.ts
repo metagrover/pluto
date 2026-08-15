@@ -9,6 +9,25 @@ export type TimedToken = {
   at: number;
 };
 
+const privateEvaluationFailureCodes = new Set([
+  'parakeet_request_invalid',
+  'parakeet_path_not_allowed',
+  'parakeet_path_missing',
+  'parakeet_model_preparation_failed',
+  'parakeet_transcription_failed',
+  'parakeet_cancelled',
+  'parakeet_protocol_invalid',
+  'parakeet_process_exited',
+  'parakeet_request_timeout',
+]);
+
+export const normalizePrivateEvaluationFailureCode = (
+  value: unknown,
+): string =>
+  typeof value === 'string' && privateEvaluationFailureCodes.has(value)
+    ? value
+    : 'parakeet_failure_unknown';
+
 export const normalizeTranscriptTokens = (text: string): string[] =>
   text
     .toLocaleLowerCase('en')
