@@ -24,3 +24,7 @@ The provisional transcript remains durable until sealed evidence passes final va
 The first preparation has a substantial local model download and setup cost. Finalization can take longer, but download size and latency are subordinate to quality and memory safety. Live and final provider identities are observable, private meeting content remains local, and real-meeting evaluation reports only aggregate accuracy, timing, and resource metrics.
 
 Parakeet streaming is not adopted by this decision. It requires separate evidence for first-text latency, cadence, stop behavior, and thermal impact.
+
+## Promotion gate
+
+The first private replay used two recent meetings and four source artifacts. The production reconciliation path validated both meetings with zero timing or no-speech contradictions, a 0.0117 real-time factor, and 184.4 MiB peak child RSS on the final run. Against the existing local transcript as a non-human proxy, however, ordered disagreement was 69.34%, lexical precision was 78.14%, and lexical recall was 82.42%. This proves operational and memory fit, not an accuracy improvement. Default promotion requires human-reviewed reference excerpts showing that Parakeet meets or exceeds the current canonical transcript on the approved stable accuracy metrics.

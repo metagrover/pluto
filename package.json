@@ -26,6 +26,7 @@
     "benchmark:transcription": "node scripts/benchmark_transcription_backends.js",
     "benchmark:recording-quality": "node --experimental-strip-types scripts/run_recording_quality_benchmark.ts",
     "benchmark:private-transcription:validate": "node --experimental-strip-types scripts/validate_private_transcription_manifest.ts",
+    "benchmark:private-parakeet": "node --experimental-strip-types scripts/evaluate_private_parakeet.ts",
     "benchmark:private-speaker-attribution:validate": "node --experimental-strip-types scripts/validate_private_speaker_attribution_manifest.ts",
     "benchmark:speaker-attribution": "node --experimental-strip-types scripts/run_local_speaker_attribution_benchmark.ts",
     "benchmark:production-speaker-attribution": "node --experimental-strip-types scripts/run_production_speaker_attribution_acceptance.ts",

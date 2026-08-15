@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreML
 import FluidAudio
 import Foundation
@@ -142,15 +143,24 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
                 endSeconds: $0.endTime
             )
         }
-        let words = reconcileVocabularyTimings(
+        let reconciledWords = reconcileVocabularyTimings(
             words: recognizedWords,
             replacements: replacements
         )
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let audioFile = try AVAudioFile(forReading: audioURL)
+        let fileDuration = audioFile.processingFormat.sampleRate > 0
+            ? Double(audioFile.length) / audioFile.processingFormat.sampleRate
+            : 0
+        let durationSeconds = max(Double(result.duration), fileDuration)
+        let words = try normalizeWordTimings(
+            reconciledWords,
+            durationSeconds: durationSeconds
+        )
         return TranscriptionOutput(
             text: text,
             confidence: Double(result.confidence),
-            durationSeconds: result.duration,
+            durationSeconds: durationSeconds,
             words: words,
             noSpeech: text.isEmpty
         )
