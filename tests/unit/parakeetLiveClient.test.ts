@@ -1,11 +1,42 @@
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
+  NativeChildProcess,
   NativeEvent,
   NativeJsonLineTransport,
   NativeResponse,
 } from '../../electron/transcription/nativeJsonLineProcess';
+import type { ParakeetRuntimePaths } from '../../electron/transcription/parakeetFinalClient';
 import { ParakeetLiveClient } from '../../electron/transcription/parakeetLiveClient';
+import { makeRuntimeHost } from '../../electron/transcription/parakeetRuntimeHost';
+
+class FakeRuntimeChild extends EventEmitter implements NativeChildProcess {
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly writes: Array<Record<string, unknown>> = [];
+  readonly stdin = {
+    write: vi.fn((value: string) => {
+      this.writes.push(JSON.parse(value.trim()));
+      return true;
+    }),
+    end: vi.fn(),
+  };
+  readonly kill = vi.fn(() => true);
+
+  respond(id: string): void {
+    this.stdout.write(
+      `${JSON.stringify({ schemaVersion: 1, id, ok: true, result: {} })}\n`,
+    );
+  }
+}
+
+const runtimePaths: ParakeetRuntimePaths = {
+  executablePath: '/app/bin/parakeet-runtime',
+  modelRoot: '/user/models/parakeet',
+  audioRoot: '/user/recordings',
+};
 
 class FakeTransport implements NativeJsonLineTransport {
   readonly writes: Array<Record<string, unknown>> = [];
@@ -178,6 +209,60 @@ describe('ParakeetLiveClient', () => {
     await expect(
       client.open({ streamId: 'mic-two', source: 'mic', generation: 1 }),
     ).rejects.toThrow('parakeet_stream_capacity');
+  });
+
+  it('shares a pending same-source open before appending concurrent first chunks', async () => {
+    const child = new FakeRuntimeChild();
+    const runtimeHost = makeRuntimeHost({
+      paths: runtimePaths,
+      spawn: () => child,
+    });
+    const runtimeLease = await runtimeHost.startRecordingLive();
+    const client = new ParakeetLiveClient({
+      runtimeHost,
+      runtimeLease,
+      maxQueuedAppends: 2,
+    });
+
+    const firstOpen = client.open(openSystem);
+    const secondOpen = client.open(openSystem);
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    expect(child.writes[0]).toMatchObject({
+      method: 'stream_open',
+      ...openSystem,
+    });
+    child.respond(String(child.writes[0].id));
+    await expect(Promise.all([firstOpen, secondOpen])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+
+    const firstAppend = client.append(append(1));
+    const secondAppend = client.append(append(2));
+    await vi.waitFor(() =>
+      expect(
+        child.writes.filter((request) => request.method === 'stream_append'),
+      ).toHaveLength(1),
+    );
+    expect(child.writes.at(-1)).toMatchObject({
+      method: 'stream_append',
+      sequence: 1,
+    });
+    child.respond(String(child.writes.at(-1)?.id));
+    await firstAppend;
+    await vi.waitFor(() =>
+      expect(
+        child.writes.filter((request) => request.method === 'stream_append'),
+      ).toHaveLength(2),
+    );
+    expect(child.writes.at(-1)).toMatchObject({
+      method: 'stream_append',
+      sequence: 2,
+    });
+    child.respond(String(child.writes.at(-1)?.id));
+    await secondAppend;
+    await runtimeLease.release();
+    runtimeHost.shutdown();
   });
 
   it('serializes appends per stream while allowing the other source to proceed', async () => {

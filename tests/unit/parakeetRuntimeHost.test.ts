@@ -40,6 +40,20 @@ describe('ParakeetRuntimeHost', () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps child termination exclusive to the runtime host', async () => {
+    const child = new FakeChild();
+    const host = makeRuntimeHost({ paths, spawn: () => child });
+    const lease = await host.acquire('final');
+
+    expect('terminate' in host.transport).toBe(false);
+    expect('process' in lease).toBe(false);
+    expect(child.kill).not.toHaveBeenCalled();
+
+    host.shutdown();
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
   it('queues final work while live owns the shared runtime', async () => {
     const host = makeRuntimeHost({ paths, spawn: () => new FakeChild() });
     const live = await host.acquire('live');

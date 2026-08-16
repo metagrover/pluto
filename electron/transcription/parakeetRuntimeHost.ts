@@ -18,7 +18,6 @@ export type ParakeetRuntimeDiagnostics = {
 
 export type ParakeetRuntimeLease = {
   kind: ParakeetRuntimeWorkload;
-  process: NativeJsonLineTransport;
   release(): Promise<void>;
   cancelAndPersistForRetry(): Promise<void>;
   setPreemptionHandler(handler: () => Promise<void>): void;
@@ -70,7 +69,14 @@ export class ParakeetRuntimeHost {
       requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
       diagnostic: options.diagnostic,
     });
-    this.transport = this.process;
+    this.transport = {
+      request: (payload) => this.process.request(payload),
+      notify: (payload) => this.process.notify(payload),
+      onEvent: (listener) => this.process.onEvent(listener),
+      onFailure: (listener) => this.process.onFailure(listener),
+      cancelPending: (id) => this.process.cancelPending(id),
+      ignoreResponse: (id) => this.process.ignoreResponse(id),
+    };
     this.transport.onFailure((code) => this.invalidateActiveLease(code));
   }
 
@@ -157,7 +163,7 @@ export class ParakeetRuntimeHost {
     const error = new Error('parakeet_runtime_closed');
     for (const record of this.queue.splice(0)) record.reject(error);
     this.active = null;
-    this.transport.terminate();
+    this.process.terminate();
   }
 
   private async cancelAndPersist(record: LeaseRecord): Promise<void> {
@@ -201,7 +207,6 @@ export class ParakeetRuntimeHost {
     const record = {} as LeaseRecord;
     const lease: ParakeetRuntimeLease = {
       kind,
-      process: this.transport,
       release: async () => this.release(record),
       cancelAndPersistForRetry: async () => this.cancelAndPersist(record),
       setPreemptionHandler: (handler) => {
@@ -258,7 +263,7 @@ export class ParakeetRuntimeHost {
         this.queue.length === 0 &&
         this.durableRetryHandoffCount === 0
       ) {
-        this.transport.terminate();
+        this.process.terminate();
       }
     }, this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
   }

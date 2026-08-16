@@ -266,6 +266,58 @@ describe('ParakeetFinalClient', () => {
     await expect(live).resolves.toMatchObject({ kind: 'live' });
   });
 
+  it('preempts a final request held in the client queue before live ownership', async () => {
+    const child = new FakeChild();
+    const persistInterruptedFinalization = vi.fn(async () => undefined);
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => child,
+      persistInterruptedFinalization,
+    });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const first = client.transcribe({
+      meetingId: 'one',
+      role: 'final_validation',
+      source: 'mic',
+      audioPath: '/user/recordings/one.wav',
+      language: 'en',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    child.respond(prepared(String(child.writes[0].id)));
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    const firstID = String(child.writes[1].id);
+
+    const second = client.transcribe({
+      meetingId: 'two',
+      role: 'final_validation',
+      source: 'system',
+      audioPath: '/user/recordings/two.wav',
+      language: 'en',
+    });
+    const live = host.startRecordingLive();
+
+    await expect(second).rejects.toThrow('parakeet_cancelled');
+    await vi.waitFor(() => expect(child.writes).toHaveLength(3));
+    child.respond({
+      schemaVersion: 1,
+      id: child.writes[2].id,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    child.respond({
+      schemaVersion: 1,
+      id: firstID,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+
+    await expect(first).rejects.toThrow('parakeet_cancelled');
+    const liveLease = await live;
+    expect(persistInterruptedFinalization).toHaveBeenCalledTimes(2);
+    expect(child.writes).toHaveLength(3);
+    await liveLease.release();
+  });
+
   it('cancels and settles preparation before handing the runtime to live work', async () => {
     const child = new FakeChild();
     const persistInterruptedFinalization = vi.fn(async () => undefined);

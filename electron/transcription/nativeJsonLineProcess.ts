@@ -95,7 +95,6 @@ export interface NativeJsonLineTransport {
   onFailure(listener: (code: string) => void): () => void;
   cancelPending(id: string): void;
   ignoreResponse(id: string): void;
-  terminate(): void;
 }
 
 const MAX_BUFFER_BYTES = 1024 * 1024;

@@ -72,6 +72,7 @@ export class ParakeetLiveClient {
   private readonly runtimeHost: ParakeetRuntimeHost | undefined;
   private readonly streams = new Map<string, StreamState>();
   private readonly sourceStreams = new Map<NativeLiveSource, string>();
+  private readonly openings = new Map<string, Promise<void>>();
   private readonly eventListeners = new Set<(event: NativeEvent) => void>();
   private readonly protocolErrorListeners = new Set<(code: string) => void>();
   private readonly unsubscribeEvent: () => void;
@@ -123,25 +124,56 @@ export class ParakeetLiveClient {
     return () => this.protocolErrorListeners.delete(listener);
   }
 
-  async open(
-    identity: ParakeetLiveIdentity,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    this.requireOpenClient();
-    this.validateIdentity(identity);
-    if (
-      this.streams.size >= 2 ||
-      this.streams.has(identity.streamId) ||
-      this.sourceStreams.has(identity.source)
-    ) {
-      throw new Error('parakeet_stream_capacity');
+  open(identity: ParakeetLiveIdentity, signal?: AbortSignal): Promise<void> {
+    try {
+      this.requireOpenClient();
+      this.validateIdentity(identity);
+    } catch (error) {
+      return Promise.reject(error);
     }
-    if (this.runtimeHost) await this.ensureRuntimeLease();
+    const existing = this.streams.get(identity.streamId);
+    if (existing) {
+      const opening = this.openings.get(identity.streamId);
+      if (
+        opening &&
+        existing.source === identity.source &&
+        existing.generation === identity.generation
+      ) {
+        return opening;
+      }
+      return Promise.reject(new Error('parakeet_stream_capacity'));
+    }
+    if (this.streams.size >= 2 || this.sourceStreams.has(identity.source)) {
+      return Promise.reject(new Error('parakeet_stream_capacity'));
+    }
     const state = this.makeState(identity);
     this.streams.set(identity.streamId, state);
     this.sourceStreams.set(identity.source, identity.streamId);
+    const opening = this.openStream(state, signal);
+    const pending = opening.finally(() => {
+      if (this.openings.get(identity.streamId) === pending) {
+        this.openings.delete(identity.streamId);
+      }
+    });
+    this.openings.set(identity.streamId, pending);
+    return pending;
+  }
+
+  private async openStream(
+    state: StreamState,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (this.runtimeHost) await this.ensureRuntimeLease();
     try {
-      await this.send('stream_open', identity, signal);
+      await this.send(
+        'stream_open',
+        {
+          streamId: state.streamId,
+          source: state.source,
+          generation: state.generation,
+        },
+        signal,
+      );
       if (!state.active) throw new Error('parakeet_process_exited');
     } catch (error) {
       if (state.active && !this.isNonterminal(error)) {

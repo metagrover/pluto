@@ -14,6 +14,7 @@ import type {
 } from './nativeJsonLineProcess';
 import {
   type ParakeetRuntimeHost,
+  type ParakeetRuntimeLease,
   makeRuntimeHost,
 } from './parakeetRuntimeHost';
 
@@ -35,6 +36,8 @@ type NativeTranscription = {
   }>;
   noSpeech: boolean;
 };
+
+type FinalLeaseReservation = { lease: ParakeetRuntimeLease } | { error: Error };
 
 export class ParakeetFinalClient {
   private readonly runtimeHost: ParakeetRuntimeHost;
@@ -141,10 +144,26 @@ export class ParakeetFinalClient {
     if (request.role !== 'final_validation') {
       return Promise.reject(new Error('parakeet_request_invalid'));
     }
-    const run = this.queue.then(
-      () => this.runTranscription(request),
-      () => this.runTranscription(request),
+    const reservation: Promise<FinalLeaseReservation> = this.runtimeHost
+      .acquire('final')
+      .then(
+        (lease) => ({ lease }),
+        (error: unknown) => ({
+          error:
+            error instanceof Error
+              ? error
+              : new Error('parakeet_runtime_unavailable'),
+        }),
+      );
+    const queuedRun = this.queue.then(
+      () => this.runTranscription(request, reservation),
+      () => this.runTranscription(request, reservation),
     );
+    const preemption = reservation.then((acquired) => {
+      if ('error' in acquired) throw acquired.error;
+      return new Promise<never>(() => undefined);
+    });
+    const run = Promise.race([queuedRun, preemption]);
     this.queue = run.then(
       () => undefined,
       () => undefined,
@@ -158,8 +177,11 @@ export class ParakeetFinalClient {
 
   private async runTranscription(
     request: TranscriptionRequest,
+    reservation: Promise<FinalLeaseReservation>,
   ): Promise<TranscriptionResult> {
-    const lease = await this.runtimeHost.acquire('final');
+    const acquired = await reservation;
+    if ('error' in acquired) throw acquired.error;
+    const lease = acquired.lease;
     try {
       if (request.signal?.aborted) throw new Error('parakeet_cancelled');
       let preempted = false;
