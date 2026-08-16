@@ -250,8 +250,8 @@ describe('ParakeetFinalClient', () => {
     child.respond({
       schemaVersion: 1,
       id: child.writes[2].id,
-      ok: true,
-      result: {},
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(liveResolved).toBe(false);

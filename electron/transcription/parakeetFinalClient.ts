@@ -164,7 +164,14 @@ export class ParakeetFinalClient {
           method: 'cancel',
           targetId: id,
         });
-        this.requireSuccess(await cancellation);
+        const cancellationResponse = await cancellation;
+        if (
+          !cancellationResponse.ok &&
+          cancellationResponse.error?.code !== 'parakeet_cancelled'
+        ) {
+          this.requireSuccess(cancellationResponse);
+        }
+        if (!transcriptionSettled) throw new Error('parakeet_protocol_invalid');
         await transcriptionSettled;
       });
       request.signal?.addEventListener('abort', abort, { once: true });
