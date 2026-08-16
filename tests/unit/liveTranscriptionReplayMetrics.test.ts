@@ -7,6 +7,7 @@ import {
 import {
   LIVE_REPLAY_THRESHOLDS,
   type LiveReplayRepetition,
+  type LiveReplayResourceSoak,
   bootstrapConfidenceInterval,
   buildPrivateLiveReplayReport,
   evaluateLiveReplay,
@@ -83,22 +84,6 @@ const passingRepetition = (
     outsideContextTokenChanges: 0,
     repairedTokenF1: 0.98,
   },
-  peakRssGiB: 1,
-  preparedIdleRssGiB: 1,
-  rssSamples: [
-    { atSeconds: 0, rssGiB: 1 },
-    { atSeconds: 1, rssGiB: 1 },
-  ],
-  thermalSamples: Array.from({ length: 10 }, (_, index) => ({
-    atSeconds: index,
-    state: index === 0 ? ('fair' as const) : ('nominal' as const),
-  })),
-  resourceSoak: {
-    warmupEndSeconds: 0,
-    sampleIntervalSeconds: 1,
-    realTime: true,
-    longestSource: true,
-  },
   captureHandoffMilliseconds: [1, 5, 10],
   rendererInferenceCallbacks: 0,
   wholeSessionAsrCalls: 0,
@@ -106,23 +91,82 @@ const passingRepetition = (
   ...overrides,
 });
 
+const passingResourceSoak = {
+  sourceStartSeconds: 0,
+  sourceEndSeconds: 4,
+  sourceDurationSeconds: 4,
+  soakStartSeconds: 0,
+  soakEndSeconds: 4,
+  warmupEndSeconds: 0,
+  sampleIntervalSeconds: 1 as const,
+  realTime: true as const,
+  longestSource: true as const,
+  peakRssGiB: 1,
+  preparedIdleRssGiB: 1,
+  rssSamples: Array.from({ length: 5 }, (_, atSeconds) => ({
+    atSeconds,
+    rssGiB: 1,
+  })),
+  thermalSamples: Array.from({ length: 5 }, (_, atSeconds) => ({
+    atSeconds,
+    state: 'nominal' as const,
+  })),
+};
+
 const passingEvidence = {
   corpusEligible: true,
   aecEvidenceAvailable: true,
   resourceEvidenceAvailable: true,
   engineOrderAlternated: true,
   mlxProductionQueueVerified: true,
+  resourceSoak: passingResourceSoak,
   mlxBaseline: { firstTextP95Seconds: 1, runtimeFactor: 0.25 },
 } as const;
 
+type ReplayOverrides = Partial<LiveReplayRepetition> & {
+  peakRssGiB?: number;
+  preparedIdleRssGiB?: number;
+  rssSamples?: LiveReplayResourceSoak['rssSamples'];
+  thermalSamples?: LiveReplayResourceSoak['thermalSamples'];
+  resourceSoak?: Partial<LiveReplayResourceSoak>;
+};
+
 const evaluatePassing = (
-  overrides: Partial<LiveReplayRepetition> = {},
+  overrides: ReplayOverrides = {},
   evidence: Parameters<typeof evaluateLiveReplay>[1] = passingEvidence,
-) =>
-  evaluateLiveReplay(
-    Array.from({ length: 3 }, () => passingRepetition(overrides)),
-    evidence,
+) => {
+  const {
+    peakRssGiB,
+    preparedIdleRssGiB,
+    rssSamples,
+    thermalSamples,
+    resourceSoak,
+    ...repetitionOverrides
+  } = overrides;
+  const hasSoakOverrides =
+    peakRssGiB !== undefined ||
+    preparedIdleRssGiB !== undefined ||
+    rssSamples !== undefined ||
+    thermalSamples !== undefined ||
+    resourceSoak !== undefined;
+  const configuredSoak = {
+    ...(evidence.resourceSoak ?? passingResourceSoak),
+    ...resourceSoak,
+    ...(peakRssGiB === undefined ? {} : { peakRssGiB }),
+    ...(preparedIdleRssGiB === undefined ? {} : { preparedIdleRssGiB }),
+    ...(rssSamples === undefined ? {} : { rssSamples }),
+    ...(thermalSamples === undefined ? {} : { thermalSamples }),
+  } as LiveReplayResourceSoak;
+  return evaluateLiveReplay(
+    Array.from({ length: 3 }, () => passingRepetition(repetitionOverrides)),
+    {
+      ...evidence,
+      ...(hasSoakOverrides || evidence.resourceSoak
+        ? { resourceSoak: configuredSoak }
+        : {}),
+    },
   );
+};
 
 describe('causal replay', () => {
   it('releases frames only on their virtual availability clock', async () => {
@@ -529,10 +573,16 @@ describe('live replay gates', () => {
       rssSamples: [
         { atSeconds: 0, rssGiB: 2.48 },
         { atSeconds: 1, rssGiB: 2.501 },
+        { atSeconds: 2, rssGiB: 2.501 },
+        { atSeconds: 3, rssGiB: 2.501 },
+        { atSeconds: 4, rssGiB: 2.501 },
       ],
       thermalSamples: [
         { atSeconds: 0, state: 'serious' },
         { atSeconds: 1, state: 'serious' },
+        { atSeconds: 2, state: 'serious' },
+        { atSeconds: 3, state: 'serious' },
+        { atSeconds: 4, state: 'serious' },
       ],
       captureHandoffMilliseconds: [10.01],
     });
@@ -561,11 +611,15 @@ describe('live replay gates', () => {
         { atSeconds: 0, rssGiB: 1 },
         { atSeconds: 1, rssGiB: 2 },
         { atSeconds: 2, rssGiB: 2 },
+        { atSeconds: 3, rssGiB: 2 },
+        { atSeconds: 4, rssGiB: 2 },
       ],
       thermalSamples: [
         { atSeconds: 0, state: 'nominal' },
         { atSeconds: 1, state: 'nominal' },
         { atSeconds: 2, state: 'nominal' },
+        { atSeconds: 3, state: 'nominal' },
+        { atSeconds: 4, state: 'nominal' },
       ],
     });
 
@@ -663,12 +717,23 @@ describe('live replay gates', () => {
         { atSeconds: 1, rssGiB: 1 },
         { atSeconds: 2, rssGiB: 1 },
         { atSeconds: 3, rssGiB: 1 },
+        { atSeconds: 4, rssGiB: 1 },
+        { atSeconds: 5, rssGiB: 1 },
+        { atSeconds: 6, rssGiB: 1 },
       ],
       thermalSamples: [
         { atSeconds: 2, state: 'nominal' },
         { atSeconds: 3, state: 'nominal' },
+        { atSeconds: 4, state: 'nominal' },
+        { atSeconds: 5, state: 'nominal' },
+        { atSeconds: 6, state: 'nominal' },
       ],
       resourceSoak: {
+        sourceStartSeconds: 2,
+        sourceEndSeconds: 6,
+        sourceDurationSeconds: 4,
+        soakStartSeconds: 0,
+        soakEndSeconds: 6,
         warmupEndSeconds: 2,
         sampleIntervalSeconds: 1,
         realTime: true,
@@ -685,9 +750,9 @@ describe('live replay gates', () => {
       evaluatePassing({
         resourceSoak: {
           warmupEndSeconds: 0,
-          sampleIntervalSeconds: 2,
-          realTime: false,
-          longestSource: false,
+          sampleIntervalSeconds: 2 as 1,
+          realTime: false as true,
+          longestSource: false as true,
         },
       }),
     ).toMatchObject({
@@ -695,6 +760,41 @@ describe('live replay gates', () => {
       failures: expect.arrayContaining(['resource_evidence_unavailable']),
     });
   });
+
+  it.each([
+    {
+      label: 'head',
+      times: [1, 2, 3, 4],
+    },
+    {
+      label: 'tail',
+      times: [0, 1, 2, 3],
+    },
+    {
+      label: 'interior',
+      times: [0, 1, 3, 4],
+    },
+  ])(
+    'rejects truncated $label soak evidence for the full longest source',
+    ({ times }) => {
+      const verdict = evaluatePassing({
+        peakRssGiB: 1,
+        rssSamples: times.map((atSeconds) => ({ atSeconds, rssGiB: 1 })),
+        thermalSamples: times.map((atSeconds) => ({
+          atSeconds,
+          state: 'nominal' as const,
+        })),
+        resourceSoak: {
+          warmupEndSeconds: 0,
+          sampleIntervalSeconds: 1,
+          realTime: true,
+          longestSource: true,
+        },
+      });
+      expect(verdict.status).toBe('unavailable');
+      expect(verdict.failures).toContain('resource_evidence_unavailable');
+    },
+  );
 
   it('counts every volatile operation and forbids committed synthetic seam errors and renderer inference', () => {
     const verdict = evaluatePassing({
@@ -765,7 +865,7 @@ describe('live replay gates', () => {
     const upper = (
       threshold: number,
       code: string,
-      make: (value: number) => Partial<LiveReplayRepetition>,
+      make: (value: number) => ReplayOverrides,
       evidence: Parameters<typeof evaluateLiveReplay>[1] = passingEvidence,
     ) => {
       expect(evaluatePassing(make(threshold), evidence).failures).not.toContain(
@@ -781,7 +881,7 @@ describe('live replay gates', () => {
     const lower = (
       threshold: number,
       code: string,
-      make: (value: number) => Partial<LiveReplayRepetition>,
+      make: (value: number) => ReplayOverrides,
     ) => {
       expect(evaluatePassing(make(threshold)).failures).not.toContain(code);
       expect(evaluatePassing(make(threshold + 0.001)).failures).not.toContain(
@@ -1205,5 +1305,101 @@ describe('live replay report privacy', () => {
         failures: ['first_text_p50'],
       }),
     ).toThrow('private_report_consistency');
+  });
+
+  it.each([
+    { fluidAudioVersion: '0.15.6' },
+    { fluidAudioRevision: '29600a485baa4998812e4654b70d2bab8f2c9949' },
+  ])(
+    'rejects plausible but unapproved FluidAudio pins: $runtime',
+    (runtime) => {
+      const verdict = evaluatePassing();
+      expect(() =>
+        buildPrivateLiveReplayReport({
+          corpus: { meetingCount: 3, sourceCount: 6, audioMinutes: 90 },
+          runtime: {
+            fluidAudioVersion: '0.15.5',
+            fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+            modelId: 'parakeet-tdt-0.6b-v3',
+            configId: 'pinned-default-v1',
+            ...runtime,
+          },
+          mlxProduction: verdict,
+          parakeetSliding: verdict,
+        }),
+      ).toThrow('private_report_value');
+    },
+  );
+
+  it('requires PASS corpus minima and exact dual-source consistency', () => {
+    const verdict = evaluatePassing();
+    for (const corpus of [
+      { meetingCount: 0, sourceCount: 0, audioMinutes: 0 },
+      { meetingCount: 2, sourceCount: 6, audioMinutes: 90 },
+      { meetingCount: 3, sourceCount: 5, audioMinutes: 90 },
+      { meetingCount: 3, sourceCount: 6, audioMinutes: 89 },
+      { meetingCount: 4, sourceCount: 6, audioMinutes: 90 },
+    ]) {
+      expect(() =>
+        buildPrivateLiveReplayReport({
+          corpus,
+          runtime: {
+            fluidAudioVersion: '0.15.5',
+            fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+            modelId: 'parakeet-tdt-0.6b-v3',
+            configId: 'pinned-default-v1',
+          },
+          mlxProduction: verdict,
+          parakeetSliding: verdict,
+        }),
+      ).toThrow('private_report_consistency');
+    }
+  });
+
+  it('requires an unavailable reason exactly when at least one engine is unavailable', () => {
+    const pass = evaluatePassing();
+    const unavailable = {
+      ...pass,
+      status: 'unavailable' as const,
+      failures: ['insufficient_corpus'],
+    };
+    const base = buildPrivateLiveReplayReport({
+      corpus: { meetingCount: 3, sourceCount: 6, audioMinutes: 90 },
+      runtime: {
+        fluidAudioVersion: '0.15.5',
+        fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+        modelId: 'parakeet-tdt-0.6b-v3',
+        configId: 'pinned-default-v1',
+      },
+      mlxProduction: unavailable,
+      parakeetSliding: pass,
+    });
+    expect(() => sanitizeLiveReplayReport(base)).not.toThrow();
+    expect(() => sanitizeLiveReplayReport({ ...base, failures: [] })).toThrow(
+      'private_report_consistency',
+    );
+    expect(() =>
+      sanitizeLiveReplayReport({
+        ...base,
+        engines: {
+          mlxProduction: { ...base.engines.mlxProduction, status: 'pass' },
+          parakeetSliding: { ...base.engines.parakeetSliding, status: 'pass' },
+        },
+      }),
+    ).toThrow('private_report_consistency');
+
+    expect(() =>
+      buildPrivateLiveReplayReport({
+        corpus: { meetingCount: 0, sourceCount: 0, audioMinutes: 0 },
+        runtime: {
+          fluidAudioVersion: '0.15.5',
+          fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+          modelId: 'parakeet-tdt-0.6b-v3',
+          configId: 'pinned-default-v1',
+        },
+        mlxProduction: unavailable,
+        parakeetSliding: unavailable,
+      }),
+    ).not.toThrow();
   });
 });

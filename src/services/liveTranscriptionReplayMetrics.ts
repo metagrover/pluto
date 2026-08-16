@@ -87,23 +87,29 @@ export interface LiveReplayRepetition {
     outsideContextTokenChanges: number;
     repairedTokenF1: number;
   };
-  peakRssGiB: number;
+  captureHandoffMilliseconds: number[];
+  rendererInferenceCallbacks: number;
+  wholeSessionAsrCalls: number;
+  analysisBeforeCanonicalCommit: number;
+}
+
+export interface LiveReplayResourceSoak {
+  sourceStartSeconds: number;
+  sourceEndSeconds: number;
+  sourceDurationSeconds: number;
+  soakStartSeconds: number;
+  soakEndSeconds: number;
+  warmupEndSeconds: number;
+  sampleIntervalSeconds: 1;
+  realTime: true;
+  longestSource: true;
   preparedIdleRssGiB: number;
+  peakRssGiB: number;
   rssSamples: Array<{ atSeconds: number; rssGiB: number }>;
   thermalSamples: Array<{
     atSeconds: number;
     state: 'nominal' | 'fair' | 'serious' | 'critical';
   }>;
-  resourceSoak: {
-    warmupEndSeconds: number;
-    sampleIntervalSeconds: number;
-    realTime: boolean;
-    longestSource: boolean;
-  };
-  captureHandoffMilliseconds: number[];
-  rendererInferenceCallbacks: number;
-  wholeSessionAsrCalls: number;
-  analysisBeforeCanonicalCommit: number;
 }
 
 export interface LiveReplayEvidence {
@@ -112,6 +118,7 @@ export interface LiveReplayEvidence {
   resourceEvidenceAvailable?: boolean;
   engineOrderAlternated?: boolean;
   mlxProductionQueueVerified?: boolean;
+  resourceSoak?: LiveReplayResourceSoak;
   mlxBaseline?: {
     firstTextP95Seconds: number;
     runtimeFactor: number;
@@ -295,7 +302,7 @@ const rssGrowthMiBPerHour = (
 };
 
 const longestFairRunSeconds = (
-  samples: readonly LiveReplayRepetition['thermalSamples'][number][],
+  samples: readonly LiveReplayResourceSoak['thermalSamples'][number][],
 ): number => {
   const sorted = [...samples].sort(
     (left, right) => left.atSeconds - right.atSeconds,
@@ -395,13 +402,9 @@ export const evaluateLiveReplay = (
       repetition.expectedSourceSeconds,
       repetition.processedSourceSeconds,
       repetition.inferenceSeconds,
-      repetition.peakRssGiB,
-      repetition.preparedIdleRssGiB,
       repetition.seamDuplicateTokens,
       repetition.seamOmittedTokens,
       repetition.seamReferenceTokens,
-      repetition.resourceSoak.warmupEndSeconds,
-      repetition.resourceSoak.sampleIntervalSeconds,
       ...repetition.captureHandoffMilliseconds,
       repetition.repair.contextBeforeSeconds,
       repetition.repair.contextAfterSeconds,
@@ -471,15 +474,6 @@ export const evaluateLiveReplay = (
         throw new Error('live_replay_invalid_observation');
       }
     }
-    requireNonNegative(
-      repetition.rssSamples.flatMap((sample) => [
-        sample.atSeconds,
-        sample.rssGiB,
-      ]),
-    );
-    requireNonNegative(
-      repetition.thermalSamples.map((sample) => sample.atSeconds),
-    );
     if (changed.length === 0) {
       failures.add('first_text_missing');
     } else {
@@ -615,13 +609,7 @@ export const evaluateLiveReplay = (
       repetition.committedSyntheticSeamDuplicateTokens +
       repetition.committedSyntheticSeamOmittedTokens;
     rendererInferenceCallbacks += repetition.rendererInferenceCallbacks;
-    if (
-      repetition.captureHandoffMilliseconds.length === 0 ||
-      repetition.thermalSamples.length === 0 ||
-      repetition.resourceSoak.sampleIntervalSeconds !== 1 ||
-      !repetition.resourceSoak.realTime ||
-      !repetition.resourceSoak.longestSource
-    ) {
+    if (repetition.captureHandoffMilliseconds.length === 0) {
       failures.add('resource_evidence_unavailable');
     }
 
@@ -682,39 +670,68 @@ export const evaluateLiveReplay = (
         repair.repairedTokenF1 < LIVE_REPLAY_THRESHOLDS.repairTokenF1,
       'repair_bounds',
     );
-    const postWarmRss = repetition.rssSamples.filter(
-      (sample) => sample.atSeconds >= repetition.resourceSoak.warmupEndSeconds,
+  }
+
+  const soak = evidence.resourceSoak;
+  if (soak) {
+    requireNonNegative([
+      soak.sourceStartSeconds,
+      soak.sourceEndSeconds,
+      soak.sourceDurationSeconds,
+      soak.soakStartSeconds,
+      soak.soakEndSeconds,
+      soak.warmupEndSeconds,
+      soak.sampleIntervalSeconds,
+      soak.preparedIdleRssGiB,
+      soak.peakRssGiB,
+      ...soak.rssSamples.flatMap((sample) => [sample.atSeconds, sample.rssGiB]),
+      ...soak.thermalSamples.map((sample) => sample.atSeconds),
+    ]);
+    const longestSourceSeconds = maximum(
+      repetitions.map(({ expectedSourceSeconds }) => expectedSourceSeconds),
     );
-    const postWarmThermal = repetition.thermalSamples.filter(
-      (sample) => sample.atSeconds >= repetition.resourceSoak.warmupEndSeconds,
+    const postWarmRss = soak.rssSamples.filter(
+      (sample) => sample.atSeconds >= soak.warmupEndSeconds,
     );
-    if (
-      !samplesHaveCadence(
-        postWarmRss,
-        repetition.resourceSoak.sampleIntervalSeconds,
-      ) ||
-      !samplesHaveCadence(
-        postWarmThermal,
-        repetition.resourceSoak.sampleIntervalSeconds,
-      )
-    ) {
-      failures.add('resource_evidence_unavailable');
-    }
-    const derivedPeak = maximum(
-      repetition.rssSamples.map(({ rssGiB }) => rssGiB),
+    const postWarmThermal = soak.thermalSamples.filter(
+      (sample) => sample.atSeconds >= soak.warmupEndSeconds,
     );
-    if (
-      repetition.rssSamples.length > 0 &&
-      derivedPeak !== repetition.peakRssGiB
-    ) {
+    const expectedPostWarmSamples =
+      (soak.sourceEndSeconds - soak.warmupEndSeconds) /
+        soak.sampleIntervalSeconds +
+      1;
+    const fullyBound =
+      soak.realTime === true &&
+      soak.longestSource === true &&
+      soak.sampleIntervalSeconds === 1 &&
+      soak.sourceEndSeconds > soak.sourceStartSeconds &&
+      soak.sourceDurationSeconds ===
+        soak.sourceEndSeconds - soak.sourceStartSeconds &&
+      soak.sourceDurationSeconds === longestSourceSeconds &&
+      soak.soakStartSeconds <= soak.warmupEndSeconds &&
+      soak.soakEndSeconds === soak.sourceEndSeconds &&
+      soak.warmupEndSeconds === soak.sourceStartSeconds &&
+      Number.isSafeInteger(expectedPostWarmSamples) &&
+      postWarmRss.length === expectedPostWarmSamples &&
+      postWarmThermal.length === expectedPostWarmSamples &&
+      postWarmRss[0]?.atSeconds === soak.warmupEndSeconds &&
+      postWarmThermal[0]?.atSeconds === soak.warmupEndSeconds &&
+      postWarmRss.at(-1)?.atSeconds === soak.sourceEndSeconds &&
+      postWarmThermal.at(-1)?.atSeconds === soak.sourceEndSeconds &&
+      samplesHaveCadence(postWarmRss, soak.sampleIntervalSeconds) &&
+      samplesHaveCadence(postWarmThermal, soak.sampleIntervalSeconds);
+    if (!fullyBound) failures.add('resource_evidence_unavailable');
+
+    const derivedPeak = maximum(soak.rssSamples.map(({ rssGiB }) => rssGiB));
+    if (soak.rssSamples.length > 0 && derivedPeak !== soak.peakRssGiB) {
       throw new Error('live_replay_invalid_observation');
     }
     peaks.push(derivedPeak);
-    peakDeltas.push(derivedPeak - repetition.preparedIdleRssGiB);
+    peakDeltas.push(derivedPeak - soak.preparedIdleRssGiB);
     addFailure(
       failures,
       derivedPeak > LIVE_REPLAY_THRESHOLDS.peakRssGiB ||
-        derivedPeak - repetition.preparedIdleRssGiB >
+        derivedPeak - soak.preparedIdleRssGiB >
           LIVE_REPLAY_THRESHOLDS.rssAboveIdleGiB,
       'peak_rss',
     );
@@ -889,7 +906,7 @@ export const evaluateLiveReplay = (
     unavailableFailures.push('insufficient_corpus');
   if (evidence.aecEvidenceAvailable !== true)
     unavailableFailures.push('dependency_unavailable');
-  if (evidence.resourceEvidenceAvailable !== true)
+  if (evidence.resourceEvidenceAvailable !== true || !evidence.resourceSoak)
     unavailableFailures.push('resource_evidence_unavailable');
   if (evidence.engineOrderAlternated !== true)
     unavailableFailures.push('engine_order_unverified');
@@ -1220,10 +1237,8 @@ export const sanitizeLiveReplayReport = (
   exactKeys(engines, ['mlxProduction', 'parakeetSliding']);
 
   if (
-    typeof runtime.fluidAudioVersion !== 'string' ||
-    !/^\d+\.\d+\.\d+$/.test(runtime.fluidAudioVersion) ||
-    typeof runtime.fluidAudioRevision !== 'string' ||
-    !/^[0-9a-f]{40}$/.test(runtime.fluidAudioRevision) ||
+    runtime.fluidAudioVersion !== '0.15.5' ||
+    runtime.fluidAudioRevision !== '19600a485baa4998812e4654b70d2bab8f2c9949' ||
     runtime.modelId !== 'parakeet-tdt-0.6b-v3' ||
     (runtime.configId !== 'pinned-default-v1' &&
       runtime.configId !== 'low-latency-v1')
@@ -1253,12 +1268,18 @@ export const sanitizeLiveReplayReport = (
       'mlx_baseline_unavailable',
     ].includes(failure),
   );
+  const eligiblePassCorpus =
+    meetingCount >= 3 &&
+    sourceCount >= 6 &&
+    audioMinutesRoundedTo5 >= 90 &&
+    sourceCount === meetingCount * 2;
   if (
     (bothPass &&
       (failures.length !== 0 ||
-        Object.values(invariants).some((value) => value !== 0))) ||
+        Object.values(invariants).some((value) => value !== 0) ||
+        !eligiblePassCorpus)) ||
     (!bothPass && failures.length === 0) ||
-    (anyUnavailable && !hasUnavailableReason)
+    anyUnavailable !== hasUnavailableReason
   ) {
     throw new Error('private_report_consistency');
   }
@@ -1298,6 +1319,16 @@ export const buildPrivateLiveReplayReport = (input: {
     input.corpus.sourceCount,
     input.corpus.audioMinutes,
   ]);
+  if (
+    input.mlxProduction.status === 'pass' &&
+    input.parakeetSliding.status === 'pass' &&
+    (input.corpus.meetingCount < 3 ||
+      input.corpus.sourceCount < 6 ||
+      input.corpus.audioMinutes < 90 ||
+      input.corpus.sourceCount !== input.corpus.meetingCount * 2)
+  ) {
+    throw new Error('private_report_consistency');
+  }
   const failures = [
     ...new Set([
       ...input.mlxProduction.failures,
