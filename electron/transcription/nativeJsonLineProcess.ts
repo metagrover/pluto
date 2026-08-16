@@ -19,12 +19,20 @@ type PendingRequest = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+export type NativeFailureCode =
+  | 'parakeet_request_invalid'
+  | 'parakeet_path_not_allowed'
+  | 'parakeet_path_missing'
+  | 'parakeet_model_preparation_failed'
+  | 'parakeet_transcription_failed'
+  | 'parakeet_cancelled';
+
 export type NativeResponse = {
-  schemaVersion: number;
+  schemaVersion: 1;
   id: string;
   ok: boolean;
   result?: Record<string, unknown>;
-  error?: { code?: string };
+  error?: { code: NativeFailureCode };
 };
 
 export type NativeLiveSource = 'mic' | 'system';
@@ -82,6 +90,7 @@ export interface NativeJsonLineTransport {
   request(payload: Record<string, unknown>): Promise<NativeResponse>;
   notify(payload: Record<string, unknown>): void;
   onEvent(listener: (event: NativeEvent) => void): () => void;
+  onFailure(listener: (code: string) => void): () => void;
   cancelPending(id: string): void;
   ignoreResponse(id: string): void;
   terminate(): void;
@@ -95,6 +104,8 @@ export class NativeJsonLineProcess {
   private readonly pending = new Map<string, PendingRequest>();
   private readonly ignoredResponseIDs = new Set<string>();
   private readonly eventListeners = new Set<(event: NativeEvent) => void>();
+  private readonly failureListeners = new Set<(code: string) => void>();
+  private failing = false;
 
   constructor(
     private readonly options: {
@@ -108,6 +119,7 @@ export class NativeJsonLineProcess {
 
   start(): void {
     if (this.child) return;
+    this.failing = false;
     const child = this.options.spawn(
       this.options.executablePath,
       this.options.args,
@@ -138,9 +150,7 @@ export class NativeJsonLineProcess {
       try {
         this.child?.stdin.write(`${JSON.stringify(payload)}\n`);
       } catch {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        reject(new Error('parakeet_process_write_failed'));
+        this.failAll('parakeet_process_write_failed');
       }
     });
   }
@@ -159,6 +169,11 @@ export class NativeJsonLineProcess {
     return () => this.eventListeners.delete(listener);
   }
 
+  onFailure(listener: (code: string) => void): () => void {
+    this.failureListeners.add(listener);
+    return () => this.failureListeners.delete(listener);
+  }
+
   cancelPending(id: string): void {
     const pending = this.pending.get(id);
     if (!pending) return;
@@ -173,6 +188,10 @@ export class NativeJsonLineProcess {
   }
 
   terminate(): void {
+    this.failAll('parakeet_process_terminated');
+  }
+
+  private stopChild(): void {
     const child = this.child;
     this.child = null;
     this.stdoutBuffer = '';
@@ -223,12 +242,8 @@ export class NativeJsonLineProcess {
       }
       return;
     }
-    const response = envelope as NativeResponse;
-    if (
-      response.schemaVersion !== 1 ||
-      typeof response.id !== 'string' ||
-      typeof response.ok !== 'boolean'
-    ) {
+    const response = parseNativeResponse(envelope);
+    if (!response) {
       this.failAll('parakeet_protocol_invalid');
       return;
     }
@@ -244,6 +259,8 @@ export class NativeJsonLineProcess {
   }
 
   private failAll(code: string): void {
+    if (this.failing) return;
+    this.failing = true;
     const requests = [...this.pending.values()];
     this.pending.clear();
     this.ignoredResponseIDs.clear();
@@ -251,7 +268,14 @@ export class NativeJsonLineProcess {
       clearTimeout(request.timer);
       request.reject(new Error(code));
     }
-    this.terminate();
+    for (const listener of this.failureListeners) {
+      try {
+        listener(code);
+      } catch {
+        this.options.diagnostic?.('parakeet_failure_listener_failed');
+      }
+    }
+    this.stopChild();
   }
 }
 
@@ -269,6 +293,44 @@ function isPositiveSafeInteger(value: unknown): value is number {
     value > 0 &&
     value <= MAX_SAFE_INTEGER
   );
+}
+
+const NATIVE_FAILURE_CODES = new Set<NativeFailureCode>([
+  'parakeet_request_invalid',
+  'parakeet_path_not_allowed',
+  'parakeet_path_missing',
+  'parakeet_model_preparation_failed',
+  'parakeet_transcription_failed',
+  'parakeet_cancelled',
+]);
+
+function parseNativeResponse(value: unknown): NativeResponse | null {
+  if (!isRecord(value)) return null;
+  const common = ['schemaVersion', 'id', 'ok'] as const;
+  if (
+    value.schemaVersion !== 1 ||
+    typeof value.id !== 'string' ||
+    value.id.length === 0 ||
+    typeof value.ok !== 'boolean'
+  ) {
+    return null;
+  }
+  if (value.ok) {
+    if (!hasOnlyKeys(value, [...common, 'result']) || !isRecord(value.result)) {
+      return null;
+    }
+  } else {
+    if (
+      !hasOnlyKeys(value, [...common, 'error']) ||
+      !isRecord(value.error) ||
+      !hasOnlyKeys(value.error, ['code']) ||
+      typeof value.error.code !== 'string' ||
+      !NATIVE_FAILURE_CODES.has(value.error.code as NativeFailureCode)
+    ) {
+      return null;
+    }
+  }
+  return value as NativeResponse;
 }
 
 function hasValidIdentity(value: Record<string, unknown>): boolean {

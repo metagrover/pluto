@@ -3,6 +3,7 @@ import type {
   NativeJsonLineTransport,
   NativeLiveSource,
   NativeResponse,
+  NativeStreamDegradedEvent,
 } from './nativeJsonLineProcess';
 
 export type ParakeetLiveIdentity = {
@@ -19,24 +20,56 @@ export type ParakeetLiveAppend = ParakeetLiveIdentity & {
   signal?: AbortSignal;
 };
 
+export type ParakeetLiveDegradation = Omit<
+  NativeStreamDegradedEvent,
+  'schemaVersion' | 'kind' | 'event'
+>;
+
+export type ParakeetLiveFlushResult = {
+  finalPreview: string;
+  degradations: ParakeetLiveDegradation[];
+};
+
+type AppendJob = {
+  request: ParakeetLiveAppend;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  removeAbort?: () => void;
+};
+
+type DrainWaiter = {
+  resolve: () => void;
+  reject: (error: Error) => void;
+};
+
 type StreamState = ParakeetLiveIdentity & {
   nextSequence: number;
   nextRevision: number;
-  pendingAppends: number;
-  tail: Promise<void>;
+  queue: AppendJob[];
+  inFlight: AppendJob | null;
+  inFlightController: AbortController | null;
+  drainWaiters: DrainWaiter[];
   active: boolean;
   closing: boolean;
+  terminalPromise: Promise<void> | null;
 };
 
 const STREAM_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
+const NONTERMINAL_NATIVE_ERRORS = new Set([
+  'parakeet_request_invalid',
+  'parakeet_path_not_allowed',
+  'parakeet_path_missing',
+]);
 
 export class ParakeetLiveClient {
   private readonly streams = new Map<string, StreamState>();
   private readonly sourceStreams = new Map<NativeLiveSource, string>();
   private readonly eventListeners = new Set<(event: NativeEvent) => void>();
   private readonly protocolErrorListeners = new Set<(code: string) => void>();
-  private readonly unsubscribe: () => void;
+  private readonly unsubscribeEvent: () => void;
+  private readonly unsubscribeFailure: () => void;
   private nextID = 0;
+  private closed = false;
 
   constructor(
     private readonly options: {
@@ -50,8 +83,11 @@ export class ParakeetLiveClient {
     ) {
       throw new Error('parakeet_request_invalid');
     }
-    this.unsubscribe = options.process.onEvent((event) =>
+    this.unsubscribeEvent = options.process.onEvent((event) =>
       this.consumeEvent(event),
+    );
+    this.unsubscribeFailure = options.process.onFailure((code) =>
+      this.invalidateAll(code),
     );
   }
 
@@ -69,6 +105,7 @@ export class ParakeetLiveClient {
     identity: ParakeetLiveIdentity,
     signal?: AbortSignal,
   ): Promise<void> {
+    this.requireOpenClient();
     this.validateIdentity(identity);
     if (
       this.streams.size >= 2 ||
@@ -77,21 +114,18 @@ export class ParakeetLiveClient {
     ) {
       throw new Error('parakeet_stream_capacity');
     }
-    const state: StreamState = {
-      ...identity,
-      nextSequence: 1,
-      nextRevision: 1,
-      pendingAppends: 0,
-      tail: Promise.resolve(),
-      active: true,
-      closing: false,
-    };
+    const state = this.makeState(identity);
     this.streams.set(identity.streamId, state);
     this.sourceStreams.set(identity.source, identity.streamId);
     try {
       await this.send('stream_open', identity, signal);
+      if (!state.active) throw new Error('parakeet_process_exited');
     } catch (error) {
-      this.remove(state);
+      if (state.active && !this.isNonterminal(error)) {
+        await this.terminateState(state, this.errorCode(error));
+      } else {
+        this.remove(state);
+      }
       throw error;
     }
   }
@@ -99,6 +133,7 @@ export class ParakeetLiveClient {
   append(request: ParakeetLiveAppend): Promise<void> {
     let state: StreamState;
     try {
+      this.requireOpenClient();
       this.validateAppend(request);
       state = this.requireState(request);
     } catch (error) {
@@ -109,99 +144,204 @@ export class ParakeetLiveClient {
     if (request.sequence !== state.nextSequence) {
       return Promise.reject(new Error('parakeet_sequence_out_of_order'));
     }
-    if (state.pendingAppends > this.options.maxQueuedAppends) {
+    const outstanding = state.queue.length + (state.inFlight ? 1 : 0);
+    if (outstanding > this.options.maxQueuedAppends) {
       return Promise.reject(new Error('parakeet_backpressure'));
     }
 
     state.nextSequence += 1;
-    state.pendingAppends += 1;
-    const previous = state.tail;
-    const queuedOperation = previous
-      .then(async () => {
-        if (!state.active || request.signal?.aborted) {
-          throw new Error('parakeet_cancelled');
-        }
-        await this.send('stream_append', request, request.signal);
-      })
-      .catch((error: unknown) => {
-        state.active = false;
-        this.remove(state);
-        throw error;
-      });
-    const operation = request.signal
-      ? this.rejectQueuedAbort(queuedOperation, request.signal)
-      : queuedOperation;
-    state.tail = operation;
-    void operation
-      .finally(() => {
-        state.pendingAppends -= 1;
-      })
-      .catch(() => undefined);
-    return operation;
-  }
-
-  private rejectQueuedAbort(
-    operation: Promise<void>,
-    signal: AbortSignal,
-  ): Promise<void> {
-    if (signal.aborted) return Promise.reject(new Error('parakeet_cancelled'));
-    return new Promise((resolve, reject) => {
-      const abort = () => reject(new Error('parakeet_cancelled'));
-      signal.addEventListener('abort', abort, { once: true });
-      operation.then(
-        () => {
-          signal.removeEventListener('abort', abort);
-          resolve();
-        },
-        (error: unknown) => {
-          signal.removeEventListener('abort', abort);
-          reject(error);
-        },
-      );
+    const operation = new Promise<void>((resolve, reject) => {
+      const job: AppendJob = { request, resolve, reject };
+      if (request.signal) {
+        const abort = () => {
+          void this.terminateState(state, 'parakeet_cancelled');
+        };
+        request.signal.addEventListener('abort', abort, { once: true });
+        job.removeAbort = () =>
+          request.signal?.removeEventListener('abort', abort);
+      }
+      state.queue.push(job);
     });
+    if (request.signal?.aborted) {
+      void this.terminateState(state, 'parakeet_cancelled');
+    } else {
+      this.pump(state);
+    }
+    return operation;
   }
 
   async flush(
     identity: ParakeetLiveIdentity,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<ParakeetLiveFlushResult> {
+    this.requireOpenClient();
     const state = this.requireState(identity);
     if (state.closing) throw new Error('parakeet_stream_closed');
     state.closing = true;
-    await state.tail;
-    if (!state.active) throw new Error('parakeet_cancelled');
-    await this.send('stream_flush', identity, signal);
-    this.remove(state);
+    try {
+      await this.waitForDrain(state);
+      if (!state.active) throw new Error('parakeet_cancelled');
+      const result = await this.send('stream_flush', identity, signal);
+      const parsed = this.parseFlushResult(result, state);
+      this.remove(state);
+      state.active = false;
+      return parsed;
+    } catch (error) {
+      if (state.active && this.isNonterminal(error)) {
+        state.closing = false;
+      } else if (state.active) {
+        await this.terminateState(state, this.errorCode(error));
+      }
+      throw error;
+    }
   }
 
   async cancel(
     identity: ParakeetLiveIdentity,
-    signal?: AbortSignal,
+    _signal?: AbortSignal,
   ): Promise<void> {
+    this.requireOpenClient();
     const state = this.requireState(identity);
-    state.active = false;
-    state.closing = true;
-    this.remove(state);
-    await this.send('stream_cancel', identity, signal);
+    await this.terminateState(state, 'parakeet_cancelled');
   }
 
   async reset(
     identity: ParakeetLiveIdentity,
+    nextGeneration: number,
     signal?: AbortSignal,
   ): Promise<void> {
+    this.requireOpenClient();
     const state = this.requireState(identity);
-    state.active = false;
+    if (
+      !Number.isSafeInteger(nextGeneration) ||
+      nextGeneration !== state.generation + 1
+    ) {
+      throw new Error('parakeet_generation_mismatch');
+    }
+    if (state.closing) throw new Error('parakeet_stream_closed');
     state.closing = true;
-    this.remove(state);
-    await this.send('stream_reset', identity, signal);
+    try {
+      await this.waitForDrain(state);
+      await this.send(
+        'stream_reset',
+        { ...identity, generation: nextGeneration },
+        signal,
+      );
+      state.generation = nextGeneration;
+      state.nextSequence = 1;
+      state.nextRevision = 1;
+      state.closing = false;
+    } catch (error) {
+      if (state.active && this.isNonterminal(error)) {
+        state.closing = false;
+      } else if (state.active) {
+        await this.terminateState(state, this.errorCode(error));
+      }
+      throw error;
+    }
   }
 
   close(): void {
-    for (const state of this.streams.values()) state.active = false;
-    this.streams.clear();
-    this.sourceStreams.clear();
-    this.unsubscribe();
+    if (this.closed) return;
+    this.closed = true;
+    this.invalidateAll('parakeet_process_terminated');
     this.options.process.terminate();
+    this.unsubscribeEvent();
+    this.unsubscribeFailure();
+  }
+
+  private pump(state: StreamState): void {
+    if (!state.active || state.inFlight || state.terminalPromise) return;
+    const job = state.queue.shift();
+    if (!job) {
+      this.resolveDrain(state);
+      return;
+    }
+    state.inFlight = job;
+    const controller = new AbortController();
+    state.inFlightController = controller;
+    void this.send('stream_append', job.request, controller.signal).then(
+      () => {
+        if (!state.active || state.inFlight !== job) return;
+        this.finishJob(state, job);
+        job.resolve();
+        this.pump(state);
+      },
+      async (error: unknown) => {
+        if (!state.active) return;
+        if (this.isNonterminal(error)) {
+          this.finishJob(state, job);
+          job.reject(this.asError(error));
+          for (const queued of state.queue.splice(0)) {
+            queued.removeAbort?.();
+            queued.reject(new Error('parakeet_predecessor_failed'));
+          }
+          state.nextSequence = job.request.sequence;
+          state.closing = false;
+          this.rejectDrain(state, this.asError(error));
+          return;
+        }
+        await this.terminateState(state, this.errorCode(error));
+      },
+    );
+  }
+
+  private finishJob(state: StreamState, job: AppendJob): void {
+    job.removeAbort?.();
+    if (state.inFlight === job) {
+      state.inFlight = null;
+      state.inFlightController = null;
+    }
+  }
+
+  private terminateState(state: StreamState, code: string): Promise<void> {
+    if (state.terminalPromise) return state.terminalPromise;
+    state.active = false;
+    state.closing = true;
+    state.inFlightController?.abort();
+    state.terminalPromise = (async () => {
+      if (!this.isTransportFailure(code) && !this.closed) {
+        try {
+          await this.send('stream_cancel', {
+            streamId: state.streamId,
+            source: state.source,
+            generation: state.generation,
+          });
+        } catch {
+          // The stream may already be terminal in the native runtime.
+        }
+      }
+      this.remove(state);
+      const error = new Error(code);
+      if (state.inFlight) {
+        state.inFlight.removeAbort?.();
+        state.inFlight.reject(error);
+        state.inFlight = null;
+      }
+      state.inFlightController = null;
+      for (const queued of state.queue.splice(0)) {
+        queued.removeAbort?.();
+        queued.reject(error);
+      }
+      this.rejectDrain(state, error);
+    })();
+    return state.terminalPromise;
+  }
+
+  private waitForDrain(state: StreamState): Promise<void> {
+    if (!state.inFlight && state.queue.length === 0) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      state.drainWaiters.push({ resolve, reject });
+    });
+  }
+
+  private resolveDrain(state: StreamState): void {
+    if (state.inFlight || state.queue.length > 0) return;
+    for (const waiter of state.drainWaiters.splice(0)) waiter.resolve();
+  }
+
+  private rejectDrain(state: StreamState, error: Error): void {
+    for (const waiter of state.drainWaiters.splice(0)) waiter.reject(error);
   }
 
   private async send(
@@ -264,18 +404,81 @@ export class ParakeetLiveClient {
   }
 
   private requireSuccess(response: NativeResponse): Record<string, unknown> {
-    if (!response.ok) {
-      const code = response.error?.code;
-      throw new Error(
-        typeof code === 'string' && code.startsWith('parakeet_')
-          ? code
-          : 'parakeet_native_failed',
-      );
-    }
-    if (!response.result || typeof response.result !== 'object') {
+    if (!response.ok)
+      throw new Error(response.error?.code ?? 'parakeet_native_failed');
+    if (!response.result) throw new Error('parakeet_protocol_invalid');
+    return response.result;
+  }
+
+  private parseFlushResult(
+    result: Record<string, unknown>,
+    state: StreamState,
+  ): ParakeetLiveFlushResult {
+    if (
+      Object.keys(result).some(
+        (key) => key !== 'finalPreview' && key !== 'degradations',
+      ) ||
+      typeof result.finalPreview !== 'string' ||
+      !Array.isArray(result.degradations)
+    ) {
       throw new Error('parakeet_protocol_invalid');
     }
-    return response.result;
+    const degradations = result.degradations.map((value) =>
+      this.parseDegradation(value, state),
+    );
+    return { finalPreview: result.finalPreview, degradations };
+  }
+
+  private parseDegradation(
+    value: unknown,
+    state: StreamState,
+  ): ParakeetLiveDegradation {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('parakeet_protocol_invalid');
+    }
+    const candidate = value as ParakeetLiveDegradation;
+    const allowed = new Set([
+      'streamId',
+      'source',
+      'generation',
+      'revision',
+      'reason',
+      'affectedSequence',
+      'chunkStartSeconds',
+      'chunkEndSeconds',
+    ]);
+    const reasons = new Set([
+      'backpressure',
+      'sequence_gap',
+      'partial_window',
+      'coverage_gap',
+      'thermal_pressure',
+    ]);
+    const hasStart = candidate.chunkStartSeconds !== undefined;
+    const hasEnd = candidate.chunkEndSeconds !== undefined;
+    if (
+      Object.keys(value).some((key) => !allowed.has(key)) ||
+      candidate.streamId !== state.streamId ||
+      candidate.source !== state.source ||
+      candidate.generation !== state.generation ||
+      !Number.isSafeInteger(candidate.revision) ||
+      candidate.revision <= 0 ||
+      typeof candidate.reason !== 'string' ||
+      !reasons.has(candidate.reason) ||
+      (candidate.affectedSequence !== undefined &&
+        (!Number.isSafeInteger(candidate.affectedSequence) ||
+          candidate.affectedSequence <= 0)) ||
+      hasStart !== hasEnd ||
+      (hasStart &&
+        (!Number.isFinite(candidate.chunkStartSeconds) ||
+          !Number.isFinite(candidate.chunkEndSeconds) ||
+          (candidate.chunkStartSeconds ?? -1) < 0 ||
+          (candidate.chunkEndSeconds ?? -1) <=
+            (candidate.chunkStartSeconds ?? 0)))
+    ) {
+      throw new Error('parakeet_protocol_invalid');
+    }
+    return candidate;
   }
 
   private consumeEvent(event: NativeEvent): void {
@@ -295,8 +498,25 @@ export class ParakeetLiveClient {
     state.nextRevision += 1;
     for (const listener of this.eventListeners) listener(event);
     if (event.event === 'stream_failed') {
+      void this.terminateState(state, `parakeet_${event.reason}`);
+    }
+  }
+
+  private invalidateAll(code: string): void {
+    for (const state of [...this.streams.values()]) {
       state.active = false;
       this.remove(state);
+      const error = new Error(code);
+      if (state.inFlight) {
+        state.inFlight.removeAbort?.();
+        state.inFlight.reject(error);
+        state.inFlight = null;
+      }
+      for (const queued of state.queue.splice(0)) {
+        queued.removeAbort?.();
+        queued.reject(error);
+      }
+      this.rejectDrain(state, error);
     }
   }
 
@@ -345,12 +565,52 @@ export class ParakeetLiveClient {
     }
   }
 
+  private makeState(identity: ParakeetLiveIdentity): StreamState {
+    return {
+      ...identity,
+      nextSequence: 1,
+      nextRevision: 1,
+      queue: [],
+      inFlight: null,
+      inFlightController: null,
+      drainWaiters: [],
+      active: true,
+      closing: false,
+      terminalPromise: null,
+    };
+  }
+
   private remove(state: StreamState): void {
     if (this.streams.get(state.streamId) === state)
       this.streams.delete(state.streamId);
     if (this.sourceStreams.get(state.source) === state.streamId) {
       this.sourceStreams.delete(state.source);
     }
+  }
+
+  private requireOpenClient(): void {
+    if (this.closed) throw new Error('parakeet_client_closed');
+  }
+
+  private isNonterminal(error: unknown): boolean {
+    return NONTERMINAL_NATIVE_ERRORS.has(this.errorCode(error));
+  }
+
+  private isTransportFailure(code: string): boolean {
+    return (
+      code.startsWith('parakeet_process_') ||
+      code === 'parakeet_protocol_invalid'
+    );
+  }
+
+  private errorCode(error: unknown): string {
+    return error instanceof Error && error.message.startsWith('parakeet_')
+      ? error.message
+      : 'parakeet_native_failed';
+  }
+
+  private asError(error: unknown): Error {
+    return error instanceof Error ? error : new Error('parakeet_native_failed');
   }
 
   private requestID(method: string): string {

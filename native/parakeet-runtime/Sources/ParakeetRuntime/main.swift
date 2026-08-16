@@ -1,70 +1,7 @@
 import Foundation
 import ParakeetRuntimeCore
 import ParakeetRuntimeEngine
-
-private actor RequestCoordinator {
-    private let router: RuntimeJSONLineRouter
-    private let writer: RuntimeJSONLineWriter
-    private var tasks: [String: Task<Void, Never>] = [:]
-
-    init(router: RuntimeJSONLineRouter, writer: RuntimeJSONLineWriter) {
-        self.router = router
-        self.writer = writer
-    }
-
-    func submit(_ request: RuntimeRequest) {
-        if request.method == .cancel {
-            guard let targetID = request.targetId, let task = tasks[targetID] else {
-                Task {
-                    await writer.write(RuntimeJSONLineOutput(
-                        events: [], response: .failure(id: request.id, code: .invalidRequest)
-                    ))
-                }
-                return
-            }
-            task.cancel()
-            Task {
-                await writer.write(RuntimeJSONLineOutput(
-                    events: [], response: .failure(id: request.id, code: .cancelled)
-                ))
-            }
-            return
-        }
-
-        guard request.method != .shutdown else {
-            for task in tasks.values { task.cancel() }
-            tasks.removeAll()
-            Task { [router, writer] in
-                await writer.write(await router.route(request))
-            }
-            return
-        }
-
-        guard tasks[request.id] == nil else {
-            Task {
-                await writer.write(RuntimeJSONLineOutput(
-                    events: [], response: .failure(id: request.id, code: .invalidRequest)
-                ))
-            }
-            return
-        }
-        tasks[request.id] = Task { [router, writer] in
-            let output = await router.route(request)
-            await writer.write(output)
-            self.finished(request.id)
-        }
-    }
-
-    private func finished(_ id: String) {
-        tasks[id] = nil
-    }
-
-    func finish() async {
-        let running = Array(tasks.values)
-        for task in running { await task.value }
-        await router.shutdown()
-    }
-}
+import Darwin
 
 private struct Arguments {
     let modelRoot: URL
@@ -101,7 +38,15 @@ private struct Arguments {
 
 #if DEBUG
     private actor FixtureRuntimeService: ParakeetRuntimeServing {
+        private struct Stream {
+            let source: LiveSource
+            var generation: Int
+            var nextSequence = 1
+            var revision = 1
+        }
+
         private let liveConfigurationID: ParakeetLiveConfigurationID
+        private var streams: [String: Stream] = [:]
 
         init(liveConfigurationID: ParakeetLiveConfigurationID) {
             self.liveConfigurationID = liveConfigurationID
@@ -119,25 +64,70 @@ private struct Arguments {
             guard let live = request.live else {
                 return .failure(id: request.id, code: .invalidRequest)
             }
-            let events: [RuntimeEvent]
-            if request.method == .streamAppend {
-                events = [.streamUpdate(LiveStreamUpdate(
+            switch request.method {
+            case .streamOpen:
+                guard streams[live.streamId] == nil,
+                    !streams.values.contains(where: { $0.source == live.source }),
+                    streams.count < 2
+                else { return .failure(id: request.id, code: .invalidRequest) }
+                streams[live.streamId] = Stream(
+                    source: live.source, generation: live.generation
+                )
+                return .success(id: request.id)
+            case .streamAppend:
+                guard var stream = streams[live.streamId],
+                    stream.source == live.source,
+                    stream.generation == live.generation,
+                    live.sequence == stream.nextSequence
+                else { return .failure(id: request.id, code: .invalidRequest) }
+                let update = RuntimeEvent.streamUpdate(LiveStreamUpdate(
                     streamId: live.streamId,
                     source: live.source,
                     generation: live.generation,
-                    revision: 1,
+                    revision: stream.revision,
                     qualifiesPriorTentative: false,
                     text: "synthetic",
                     confidence: 0.8,
                     audioEndSeconds: live.chunkEndSeconds ?? 0
-                ))]
-            } else {
-                events = []
+                ))
+                stream.nextSequence += 1
+                stream.revision += 1
+                streams[live.streamId] = stream
+                return .success(id: request.id, events: [update])
+            case .streamFlush:
+                guard let stream = streams[live.streamId],
+                    stream.source == live.source,
+                    stream.generation == live.generation
+                else { return .failure(id: request.id, code: .invalidRequest) }
+                streams[live.streamId] = nil
+                return .success(
+                    id: request.id,
+                    finalPreview: "synthetic final",
+                    degradations: []
+                )
+            case .streamCancel:
+                guard let stream = streams[live.streamId],
+                    stream.source == live.source,
+                    stream.generation == live.generation
+                else { return .failure(id: request.id, code: .invalidRequest) }
+                streams[live.streamId] = nil
+                return .success(id: request.id)
+            case .streamReset:
+                guard var stream = streams[live.streamId],
+                    stream.source == live.source,
+                    live.generation == stream.generation + 1
+                else { return .failure(id: request.id, code: .invalidRequest) }
+                stream.generation = live.generation
+                stream.nextSequence = 1
+                stream.revision = 1
+                streams[live.streamId] = stream
+                return .success(id: request.id)
+            case .prepare, .transcribe, .cancel, .shutdown:
+                return .failure(id: request.id, code: .invalidRequest)
             }
-            return .success(id: request.id, events: events)
         }
 
-        func shutdownLive() async {}
+        func shutdownLive() async { streams.removeAll() }
     }
 #endif
 
@@ -171,21 +161,52 @@ private enum ParakeetRuntimeMain {
         #endif
         let router = RuntimeJSONLineRouter(service: service)
         let writer = RuntimeJSONLineWriter { data in
-            FileHandle.standardOutput.write(data)
-        }
-        let coordinator = RequestCoordinator(router: router, writer: writer)
-
-        do {
-            for try await line in FileHandle.standardInput.bytes.lines {
-                guard let request = await router.decode(line: line) else {
-                    await writer.write(RuntimeJSONLineOutput(
-                        events: [], response: .failure(id: "invalid", code: .invalidRequest)
-                    ))
-                    continue
+            data.withUnsafeBytes { bytes in
+                guard var cursor = bytes.baseAddress else { return }
+                var remaining = bytes.count
+                while remaining > 0 {
+                    let written = Darwin.write(STDOUT_FILENO, cursor, remaining)
+                    guard written > 0 else { return }
+                    cursor = cursor.advanced(by: written)
+                    remaining -= written
                 }
-                await coordinator.submit(request)
             }
-        } catch {}
+        }
+        let coordinator = RuntimeRequestCoordinator(router: router, writer: writer)
+
+        var framer = BoundedJSONLineFramer()
+        while true {
+            let data = FileHandle.standardInput.readData(ofLength: 64 * 1024)
+            if data.isEmpty { break }
+            for frame in framer.ingest(data) {
+                await handle(frame, router: router, writer: writer, coordinator: coordinator)
+            }
+        }
+        for frame in framer.finish() {
+            await handle(frame, router: router, writer: writer, coordinator: coordinator)
+        }
         await coordinator.finish()
+    }
+
+    private static func handle(
+        _ frame: BoundedJSONLineFrame,
+        router: RuntimeJSONLineRouter,
+        writer: RuntimeJSONLineWriter,
+        coordinator: RuntimeRequestCoordinator
+    ) async {
+        switch frame {
+        case .oversized:
+            await writer.write(RuntimeJSONLineOutput(
+                events: [], response: .failure(id: "invalid", code: .invalidRequest)
+            ))
+        case .line(let line):
+            guard let request = await router.decode(line: line) else {
+                await writer.write(RuntimeJSONLineOutput(
+                    events: [], response: .failure(id: "invalid", code: .invalidRequest)
+                ))
+                return
+            }
+            await coordinator.submit(request)
+        }
     }
 }

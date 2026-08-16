@@ -501,6 +501,24 @@ final class ParakeetLiveSessionTests: XCTestCase {
         )
     }
 
+    func testResetRejectsGenerationJumpsWithoutCancellingCurrentManager() async throws {
+        let driver = FakeLiveDriver()
+        let session = makeSession(driver: driver)
+        try await session.open(streamId: "s", source: .system, generation: 1)
+        let managers = await driver.managers
+        let manager = try XCTUnwrap(managers.first)
+
+        await assertThrows(
+            .generationMismatch,
+            try await session.reset(streamId: "s", source: .system, generation: 3)
+        )
+
+        let cancelCount = await manager.cancelCount
+        let state = await session.state(streamId: "s")
+        XCTAssertEqual(cancelCount, 0)
+        XCTAssertEqual(state?.generation, 1)
+    }
+
     func testResetCancelsQueuedWorkBeforeCreatingNewGeneration() async throws {
         let manager = BlockingLiveManager()
         let session = makeSession(driver: BlockingLiveDriver(manager: manager))

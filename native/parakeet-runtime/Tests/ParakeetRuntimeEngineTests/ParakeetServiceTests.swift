@@ -44,7 +44,16 @@ private actor ServiceLiveManager: ParakeetLiveManaging {
     }
 
     func finish() async throws -> LiveDriverFinishOutcome {
-        LiveDriverFinishOutcome(finalText: "final preview")
+        LiveDriverFinishOutcome(
+            finalText: "final preview",
+            degradations: [
+                LiveDriverDegradation(
+                    reason: .coverageGap,
+                    startSeconds: 0,
+                    endSeconds: 1
+                )
+            ]
+        )
     }
     func cancel() async {}
 }
@@ -232,6 +241,8 @@ final class ParakeetServiceTests: XCTestCase {
         XCTAssertTrue(open.response.ok)
         XCTAssertEqual(append.events.count, 1)
         XCTAssertEqual(flush.finalPreview, "final preview")
+        XCTAssertEqual(flush.response.result?.finalPreview, "final preview")
+        XCTAssertEqual(flush.response.result?.degradations?.map(\.reason), [.coverageGap])
     }
 
     func testRoutesInferenceFailureAsFiniteTerminalEvent() async throws {

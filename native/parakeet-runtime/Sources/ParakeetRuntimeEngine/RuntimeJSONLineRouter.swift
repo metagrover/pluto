@@ -101,3 +101,140 @@ public actor RuntimeJSONLineWriter {
         }
     }
 }
+
+public enum BoundedJSONLineFrame: Equatable, Sendable {
+    case line(String)
+    case oversized
+}
+
+public struct BoundedJSONLineFramer: Sendable {
+    private let maximumLineBytes: Int
+    private var buffer = Data()
+    private var drainingOversizedLine = false
+
+    public init(maximumLineBytes: Int = RuntimeJSONLineRouter.maximumLineBytes) {
+        precondition(maximumLineBytes > 0)
+        self.maximumLineBytes = maximumLineBytes
+        buffer.reserveCapacity(min(maximumLineBytes, 64 * 1024))
+    }
+
+    public mutating func ingest(_ data: Data) -> [BoundedJSONLineFrame] {
+        var frames: [BoundedJSONLineFrame] = []
+        for byte in data {
+            if drainingOversizedLine {
+                if byte == 0x0A { drainingOversizedLine = false }
+                continue
+            }
+            if byte == 0x0A {
+                if !buffer.isEmpty {
+                    frames.append(.line(String(decoding: buffer, as: UTF8.self)))
+                    buffer.removeAll(keepingCapacity: true)
+                }
+                continue
+            }
+            buffer.append(byte)
+            if buffer.count > maximumLineBytes {
+                buffer.removeAll(keepingCapacity: true)
+                drainingOversizedLine = true
+                frames.append(.oversized)
+            }
+        }
+        return frames
+    }
+
+    public mutating func finish() -> [BoundedJSONLineFrame] {
+        guard !drainingOversizedLine, !buffer.isEmpty else {
+            buffer.removeAll(keepingCapacity: true)
+            return []
+        }
+        let line = String(decoding: buffer, as: UTF8.self)
+        buffer.removeAll(keepingCapacity: true)
+        return [.line(line)]
+    }
+}
+
+public actor RuntimeRequestCoordinator {
+    private struct PendingRequest {
+        let route: Task<RuntimeJSONLineOutput, Never>
+        let delivery: Task<Void, Never>
+    }
+
+    private let router: RuntimeJSONLineRouter
+    private let writer: RuntimeJSONLineWriter
+    private var tasks: [String: PendingRequest] = [:]
+    private var accepting = true
+    private var suppressOutputs = false
+
+    public init(router: RuntimeJSONLineRouter, writer: RuntimeJSONLineWriter) {
+        self.router = router
+        self.writer = writer
+    }
+
+    public func submit(_ request: RuntimeRequest) async {
+        guard accepting else { return }
+        if request.method == .shutdown {
+            await shutdown(responseID: request.id)
+            return
+        }
+        if request.method == .cancel {
+            guard let targetID = request.targetId, let pending = tasks.removeValue(forKey: targetID)
+            else {
+                await writer.write(RuntimeJSONLineOutput(
+                    events: [], response: .failure(id: request.id, code: .invalidRequest)
+                ))
+                return
+            }
+            pending.route.cancel()
+            await pending.delivery.value
+            await writer.write(RuntimeJSONLineOutput(
+                events: [], response: .failure(id: request.id, code: .cancelled)
+            ))
+            return
+        }
+        guard tasks[request.id] == nil else {
+            await writer.write(RuntimeJSONLineOutput(
+                events: [], response: .failure(id: request.id, code: .invalidRequest)
+            ))
+            return
+        }
+        let route = Task.detached { [router] in
+            await router.route(request)
+        }
+        let delivery = Task.detached {
+            let output = await route.value
+            await self.complete(id: request.id, output: output)
+        }
+        tasks[request.id] = PendingRequest(route: route, delivery: delivery)
+    }
+
+    public func finish() async {
+        guard accepting else { return }
+        accepting = false
+        let running = Array(tasks.values)
+        for pending in running { await pending.delivery.value }
+        await router.shutdown()
+    }
+
+    private func complete(id: String, output: RuntimeJSONLineOutput) async {
+        guard tasks[id] != nil else { return }
+        guard !suppressOutputs else {
+            tasks[id] = nil
+            return
+        }
+        await writer.write(output)
+        tasks[id] = nil
+    }
+
+    private func shutdown(responseID: String) async {
+        accepting = false
+        suppressOutputs = true
+        let running = Array(tasks.values)
+        for pending in running { pending.route.cancel() }
+        for pending in running { await pending.delivery.value }
+        tasks.removeAll()
+        await router.shutdown()
+        await writer.write(RuntimeJSONLineOutput(
+            events: [], response: .prepared(id: responseID, modelVersion: "shutdown")
+        ))
+    }
+}

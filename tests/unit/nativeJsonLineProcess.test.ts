@@ -101,4 +101,68 @@ describe('NativeJsonLineProcess live events', () => {
     await expect(request).resolves.toMatchObject({ ok: true });
     expect(events).toHaveLength(2);
   });
+
+  it.each([
+    null,
+    [],
+    { schemaVersion: 1, id: 'open-1', ok: true, result: [] },
+    {
+      schemaVersion: 1,
+      id: 'open-1',
+      ok: true,
+      result: {},
+      error: { code: 'parakeet_cancelled' },
+    },
+    {
+      schemaVersion: 1,
+      id: 'open-1',
+      ok: false,
+      result: {},
+      error: { code: 'parakeet_cancelled' },
+    },
+    {
+      schemaVersion: 1,
+      id: 'open-1',
+      ok: false,
+      error: { code: 'private_unknown' },
+    },
+    {
+      schemaVersion: 1,
+      id: 'open-1',
+      ok: false,
+      error: { code: 'parakeet_cancelled', detail: 'private' },
+    },
+    { schemaVersion: 1, id: 'open-1', ok: true, result: {}, extra: 'private' },
+  ])(
+    'terminates on a structurally invalid response envelope',
+    async (response) => {
+      const child = new FakeChild();
+      const process = makeProcess(child);
+      const request = process.request({ schemaVersion: 1, id: 'open-1' });
+
+      child.stdout.write(`${JSON.stringify(response)}\n`);
+
+      await expect(request).rejects.toThrow('parakeet_protocol_invalid');
+      expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+    },
+  );
+
+  it('notifies lifecycle listeners and settles pending work on exit and terminate', async () => {
+    const child = new FakeChild();
+    const process = makeProcess(child);
+    const failures: string[] = [];
+    process.onFailure((code) => failures.push(code));
+    const request = process.request({ schemaVersion: 1, id: 'open-1' });
+
+    child.emit('exit', 9, null);
+
+    await expect(request).rejects.toThrow('parakeet_process_exited');
+    expect(failures).toEqual(['parakeet_process_exited']);
+
+    const secondChild = new FakeChild();
+    const second = makeProcess(secondChild);
+    const pending = second.request({ schemaVersion: 1, id: 'open-2' });
+    second.terminate();
+    await expect(pending).rejects.toThrow('parakeet_process_terminated');
+  });
 });

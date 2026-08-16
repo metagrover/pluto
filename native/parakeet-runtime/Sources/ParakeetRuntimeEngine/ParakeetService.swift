@@ -254,7 +254,10 @@ public struct ParakeetLiveServiceResult: Equatable, Sendable {
                 schemaVersion: 1,
                 id: id,
                 ok: true,
-                result: RuntimeResultPayload(),
+                result: RuntimeResultPayload(
+                    finalPreview: finalPreview,
+                    degradations: degradations
+                ),
                 error: nil
             ),
             events: events,

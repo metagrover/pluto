@@ -39,54 +39,87 @@ private actor RoutingService: ParakeetRuntimeServing {
     }
 }
 
+private actor BlockingRoutingService: ParakeetRuntimeServing {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var started = false
+
+    func handle(_ request: RuntimeRequest) async -> RuntimeResponse {
+        started = true
+        await withCheckedContinuation { continuation = $0 }
+        return .prepared(id: request.id, modelVersion: "late")
+    }
+
+    func handleLive(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
+        .failure(id: request.id, code: .invalidRequest)
+    }
+
+    func shutdownLive() async {}
+
+    func waitUntilStarted() async {
+        while !started { await Task.yield() }
+    }
+
+    func release() { continuation?.resume() }
+}
+
 final class RuntimeJSONLineRouterTests: XCTestCase {
     func testDebugExecutableRoutesLiveJSONLinesThroughInjectedFixtureService() throws {
-        let executable = Self.productsDirectory.appendingPathComponent("parakeet-runtime")
-        let process = Process()
-        let input = Pipe()
-        let output = Pipe()
-        let errors = Pipe()
-        process.executableURL = executable
-        process.arguments = [
-            "--model-root", FileManager.default.temporaryDirectory.path,
-            "--audio-root", FileManager.default.temporaryDirectory.path,
-            "--test-fixture-live",
-        ]
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = errors
-
-        try process.run()
-        let request = RuntimeRequest(
-            id: "append-process-1",
-            method: .streamAppend,
+        let open = RuntimeRequest(
+            id: "open-process-1", method: .streamOpen,
+            live: LiveRequestMetadata(
+                streamId: "system-live", source: .system, generation: 1
+            )
+        )
+        let append = RuntimeRequest(
+            id: "append-process-1", method: .streamAppend,
             audioPath: "/fixture/chunk.wav",
             live: LiveRequestMetadata(
                 streamId: "system-live", source: .system, generation: 1, sequence: 1,
                 chunkStartSeconds: 0, chunkEndSeconds: 1
             )
         )
-        var framed = try JSONEncoder().encode(request)
-        framed.append(0x0A)
-        input.fileHandleForWriting.write(framed)
-        try input.fileHandleForWriting.close()
-        process.waitUntilExit()
-
-        let stdout = output.fileHandleForReading.readDataToEndOfFile()
-        let stderr = errors.fileHandleForReading.readDataToEndOfFile()
-        let lines = stdout.split(separator: 0x0A)
-        XCTAssertEqual(process.terminationStatus, 0)
-        XCTAssertEqual(lines.count, 2)
+        let result = try Self.runFixtureProcess(arguments: [], requests: [open, append])
+        let lines = result.stdout.split(separator: 0x0A)
+        XCTAssertEqual(lines.count, 3)
         let event = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(lines[0])) as? [String: Any]
+            JSONSerialization.jsonObject(with: Data(lines[1])) as? [String: Any]
         )
         let response = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: Data(lines[1])) as? [String: Any]
+            JSONSerialization.jsonObject(with: Data(lines[2])) as? [String: Any]
         )
         XCTAssertEqual(event["event"] as? String, "stream_update")
         XCTAssertEqual(response["id"] as? String, "append-process-1")
         XCTAssertEqual(response["ok"] as? Bool, true)
-        XCTAssertTrue(stderr.isEmpty)
+        XCTAssertTrue(result.stderr.isEmpty)
+    }
+
+    func testDebugExecutableRejectsAppendBeforeOpenAndSequenceGap() throws {
+        let append = RuntimeRequest(
+            id: "append-missing", method: .streamAppend,
+            audioPath: "/fixture/chunk.wav",
+            live: LiveRequestMetadata(
+                streamId: "system-live", source: .system, generation: 1, sequence: 2,
+                chunkStartSeconds: 0, chunkEndSeconds: 1
+            )
+        )
+        let result = try Self.runFixtureProcess(arguments: [], requests: [append])
+        let response = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: result.stdout) as? [String: Any]
+        )
+        XCTAssertEqual(response["ok"] as? Bool, false)
+        XCTAssertEqual((response["error"] as? [String: Any])?["code"] as? String,
+                       "parakeet_request_invalid")
+    }
+
+    func testSpawnedRuntimeRejectsUnterminatedOversizedInputWithoutBufferingForEOF() throws {
+        let data = Data(repeating: 0x78, count: RuntimeJSONLineRouter.maximumLineBytes + 1)
+        let result = try Self.runFixtureProcess(arguments: [], rawInput: data)
+        let response = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: result.stdout) as? [String: Any]
+        )
+        XCTAssertEqual(response["id"] as? String, "invalid")
+        XCTAssertEqual(response["ok"] as? Bool, false)
+        XCTAssertTrue(result.stderr.isEmpty)
     }
 
     func testDebugExecutableReportsSelectedLowLatencyConfiguration() throws {
@@ -240,6 +273,52 @@ final class RuntimeJSONLineRouterTests: XCTestCase {
         XCTAssertEqual(counts.shutdown, 1)
     }
 
+    func testCoordinatorFencesBlockedWorkBeforeOneShutdownResponse() async throws {
+        let service = BlockingRoutingService()
+        let sink = LockedLineSink()
+        let writer = RuntimeJSONLineWriter { sink.append($0) }
+        let coordinator = RuntimeRequestCoordinator(
+            router: RuntimeJSONLineRouter(service: service), writer: writer
+        )
+        await coordinator.submit(RuntimeRequest(id: "blocked", method: .prepare))
+        await service.waitUntilStarted()
+        let shutdown = Task {
+            await coordinator.submit(RuntimeRequest(id: "shutdown", method: .shutdown))
+        }
+        await Task.yield()
+        XCTAssertTrue(sink.values().isEmpty)
+
+        await service.release()
+        await shutdown.value
+
+        let lines = sink.values()
+        XCTAssertEqual(lines.count, 1)
+        let response = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: lines[0]) as? [String: Any]
+        )
+        XCTAssertEqual(response["id"] as? String, "shutdown")
+        XCTAssertEqual(response["ok"] as? Bool, true)
+    }
+
+    func testCoordinatorFinishDrainsAcceptedResponse() async throws {
+        let sink = LockedLineSink()
+        let coordinator = RuntimeRequestCoordinator(
+            router: RuntimeJSONLineRouter(service: RoutingService()),
+            writer: RuntimeJSONLineWriter { sink.append($0) }
+        )
+        await coordinator.submit(RuntimeRequest(id: "prepare-drain", method: .prepare))
+
+        await coordinator.finish()
+
+        XCTAssertEqual(sink.values().count, 1)
+    }
+
+    func testBoundedFramerDrainsOversizedLineAndRecoversAtNewline() throws {
+        var framer = BoundedJSONLineFramer(maximumLineBytes: 4)
+        let frames = framer.ingest(Data("private-overflow\n{}\n".utf8))
+        XCTAssertEqual(frames, [.oversized, .line("{}")])
+    }
+
     private static var productsDirectory: URL {
         URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -250,6 +329,23 @@ final class RuntimeJSONLineRouterTests: XCTestCase {
 
     private static func runFixtureProcess(
         arguments: [String], request: RuntimeRequest
+    ) throws -> (stdout: Data, stderr: Data) {
+        try runFixtureProcess(arguments: arguments, requests: [request])
+    }
+
+    private static func runFixtureProcess(
+        arguments: [String], requests: [RuntimeRequest]
+    ) throws -> (stdout: Data, stderr: Data) {
+        var input = Data()
+        for request in requests {
+            input.append(try JSONEncoder().encode(request))
+            input.append(0x0A)
+        }
+        return try runFixtureProcess(arguments: arguments, rawInput: input)
+    }
+
+    private static func runFixtureProcess(
+        arguments: [String], rawInput: Data
     ) throws -> (stdout: Data, stderr: Data) {
         let process = Process()
         let input = Pipe()
@@ -265,9 +361,7 @@ final class RuntimeJSONLineRouterTests: XCTestCase {
         process.standardOutput = output
         process.standardError = errors
         try process.run()
-        var framed = try JSONEncoder().encode(request)
-        framed.append(0x0A)
-        input.fileHandleForWriting.write(framed)
+        input.fileHandleForWriting.write(rawInput)
         try input.fileHandleForWriting.close()
         process.waitUntilExit()
         return (

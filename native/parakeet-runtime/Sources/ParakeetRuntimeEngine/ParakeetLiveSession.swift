@@ -474,7 +474,7 @@ public actor ParakeetLiveSession {
             throw LiveRuntimeFailure.streamNotFound
         }
         guard currentSource == source else { throw LiveRuntimeFailure.sourceMismatch }
-        guard generation > currentGeneration else {
+        guard generation == currentGeneration + 1 else {
             throw LiveRuntimeFailure.generationMismatch
         }
         if let current = streams[streamId] {

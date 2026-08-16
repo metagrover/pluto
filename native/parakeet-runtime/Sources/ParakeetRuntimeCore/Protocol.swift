@@ -375,17 +375,23 @@ public struct RuntimeResponse: Codable, Equatable, Sendable {
 public struct RuntimeResultPayload: Codable, Equatable, Sendable {
     public let modelVersion: String?
     public let liveConfigId: String?
+    public let finalPreview: String?
+    public let degradations: [LiveStreamDegraded]?
     public let transcription: TranscriptionOutput?
     public let vocabularyCount: Int?
 
     public init(
         modelVersion: String? = nil,
         liveConfigId: String? = nil,
+        finalPreview: String? = nil,
+        degradations: [LiveStreamDegraded]? = nil,
         transcription: TranscriptionOutput? = nil,
         vocabularyCount: Int? = nil
     ) {
         self.modelVersion = modelVersion
         self.liveConfigId = liveConfigId
+        self.finalPreview = finalPreview
+        self.degradations = degradations
         self.transcription = transcription
         self.vocabularyCount = vocabularyCount
     }

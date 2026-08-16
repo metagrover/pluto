@@ -101,7 +101,7 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
     public var debugDescription: String { description }
 }
 
-public struct LiveStreamDegraded: Equatable, Sendable, CustomStringConvertible,
+public struct LiveStreamDegraded: Codable, Equatable, Sendable, CustomStringConvertible,
     CustomDebugStringConvertible
 {
     public let streamId: String
