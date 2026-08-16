@@ -118,6 +118,22 @@ pnpm rebuild better-sqlite3
 
 Default contributor verification uses `pnpm run lint` and `pnpm test -- --run`. Local database / provider probe tests now live behind `pnpm run test:manual` so contributors do not need a warmed personal database to get a green baseline.
 
+## Private Parakeet live replay
+
+The #630 feasibility runner uses only sealed, independent mic and System files from a private manifest. The manifest and report must stay outside the repository. Validation probes the real source durations and rejects symlinks, mixed-mic evidence, unresolved capture gaps, inline transcript/audio content, and a corpus smaller than three meetings or 90 aggregate minutes (including one meeting of at least 30 minutes).
+
+Manifest schema version 1 has a `runtime` object containing the absolute `executablePath` and `modelRoot`, plus a `meetings` array. The model root must already contain the pinned, activated, verified FluidAudio 0.15.5 bundle; validation fails instead of downloading a missing model. Every meeting has an opaque `id`, positive `sealedGeneration`, finite `sealedDurationSeconds`, `integrity: "sealed"`, `unresolvedCaptureGap: false`, `micSource: "independent"`, an absolute file-only `proxyTranscriptPath`, and a `sources` object containing only absolute `micPath` and `systemPath` regular files. The two source files must resolve to different file identities and each probed duration must be within five seconds of the sealed duration. The proxy file is read privately for non-regression scoring; it is existing canonical evidence, not independent ground truth.
+
+```bash
+pnpm --silent run benchmark:private-parakeet-live:validate -- --manifest "$PLUTO_PRIVATE_LIVE_REPLAY_MANIFEST"
+pnpm --silent run benchmark:private-parakeet-live -- --manifest "$PLUTO_PRIVATE_LIVE_REPLAY_MANIFEST" --mode causal --repetitions 3 --out "$PLUTO_PRIVATE_LIVE_REPLAY_REPORT"
+pnpm --silent run benchmark:private-parakeet-live -- --manifest "$PLUTO_PRIVATE_LIVE_REPLAY_MANIFEST" --mode realtime-soak --repetitions 1 --out "$PLUTO_PRIVATE_LIVE_REPLAY_SOAK_REPORT"
+```
+
+The causal run decodes locally to 16 kHz mono, releases 250 ms frames, alternates engine order, launches fresh bounded native children for the pinned-default and two-second configurations, and exercises the production five-second MLX cadence. The real-time soak uses only the longest eligible meeting. Console output is restricted to finite status codes or `report written`; it never prints paths, transcript text, child stderr, or per-meeting results.
+
+This is an automated evidence gate and requires no additional human transcript review. Whole-session Parakeet output is a consistency diagnostic, not ground truth, and existing canonical text is only a proxy. Neither may be used to claim lexical accuracy improvement. Missing streaming AEC, resource, batch-diagnostic, or targeted-repair evidence must keep the migration decision from passing.
+
 ## 3) Swift build error: duplicate method redeclaration
 
 **Symptoms**
