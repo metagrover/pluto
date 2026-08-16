@@ -26,5 +26,5 @@ Added files:
 The patch adds serialized acknowledged ingestion reports, exact center-sample coverage,
 detailed deterministic finish reporting, finite failure reasons, ingestion-mode fencing,
 generation-fenced finish/cancel/reset quiescence, and a thread-safe process-wide logging gate
-that defaults to disabled. Transcript text and vocabulary replacement values were removed from
-the sliding-window logger calls.
+with cancelled-recognizer tail suppression. Logging defaults to disabled process-wide. Transcript
+text and vocabulary replacement values were removed from the sliding-window logger calls.

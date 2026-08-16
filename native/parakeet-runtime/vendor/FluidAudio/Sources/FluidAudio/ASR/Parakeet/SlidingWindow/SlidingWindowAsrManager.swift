@@ -262,7 +262,12 @@ public actor SlidingWindowAsrManager {
 
         startTime = Date()
 
-        // Start background recognition task
+        startRecognizerTask()
+
+        logger.info("Sliding-window ASR engine started successfully")
+    }
+
+    private func startRecognizerTask() {
         recognizerTask = Task {
             logger.info("Recognition task started, waiting for audio...")
 
@@ -284,16 +289,25 @@ public actor SlidingWindowAsrManager {
                 }
             }
 
+            guard !Task.isCancelled else {
+                logger.info("Recognition task cancelled before tail flush")
+                return
+            }
+
             // Stream ended: no need to flush converter since each conversion is stateless
 
             // Then flush remaining assembled audio (no right-context requirement)
-            let finishReport = await self.flushRemaining()
+            let tailGeneration = self.lifecycleGeneration
+            let finishReport = await self.flushRemaining(requiredGeneration: tailGeneration)
+            guard !Task.isCancelled, self.lifecycleGeneration == tailGeneration else { return }
             self.storeBackgroundFinishReport(finishReport)
 
             logger.info("Recognition task completed")
         }
+    }
 
-        logger.info("Sliding-window ASR engine started successfully")
+    internal func startRecognizerForTesting() {
+        startRecognizerTask()
     }
 
     /// Stream audio data for transcription
@@ -452,14 +466,22 @@ public actor SlidingWindowAsrManager {
         guard !lifecycleTransitionInProgress else {
             throw SlidingWindowAcknowledgedIngestionError.operationInProgress
         }
+        let finishGeneration = lifecycleGeneration
         lifecycleTransitionInProgress = true
-        defer { lifecycleTransitionInProgress = false }
+        defer {
+            if lifecycleGeneration == finishGeneration {
+                lifecycleTransitionInProgress = false
+            }
+        }
         streamClosed = true
 
         // Fence new input first, then let the exact admitted acknowledged operation finish
         // before either path can inspect or flush its shared sample state.
         if let activeAcknowledgedOperation {
             _ = await activeAcknowledgedOperation.task.result
+        }
+        guard lifecycleGeneration == finishGeneration else {
+            throw SlidingWindowAcknowledgedIngestionError.cancelled
         }
 
         // Closing the continuation drains every already-yielded legacy buffer before its
@@ -476,10 +498,16 @@ public actor SlidingWindowAsrManager {
             }
             finishReport = backgroundFinishReport
         } else {
-            finishReport = await flushRemaining()
+            finishReport = await flushRemaining(requiredGeneration: finishGeneration)
+        }
+        guard lifecycleGeneration == finishGeneration else {
+            throw SlidingWindowAcknowledgedIngestionError.cancelled
         }
 
         let finalText = await makeFinalTranscript()
+        guard lifecycleGeneration == finishGeneration else {
+            throw SlidingWindowAcknowledgedIngestionError.cancelled
+        }
         logger.info("Final transcription: \(finalText.count) characters")
         updateContinuation?.finish()
 
@@ -655,8 +683,9 @@ public actor SlidingWindowAsrManager {
     }
 
     /// Flush any remaining audio at end of stream (no right-context requirement)
-    private func flushRemaining() async -> WindowProcessingReport {
+    private func flushRemaining(requiredGeneration: UInt64) async -> WindowProcessingReport {
         var report = WindowProcessingReport()
+        guard isCurrentAcknowledgedOperation(requiredGeneration) else { return report }
         let chunk = config.chunkSamples
         let left = config.leftContextSamples
 
@@ -682,8 +711,10 @@ public actor SlidingWindowAsrManager {
             let result = await processWindow(
                 window,
                 windowStartSample: leftStartAbs,
-                isLastChunk: isLastWindow
+                isLastChunk: isLastWindow,
+                acknowledgedGeneration: requiredGeneration
             )
+            guard isCurrentAcknowledgedOperation(requiredGeneration) else { return report }
             report.record(centerRange: centerRange, result: result)
 
             nextWindowCenterStart += effectiveChunk

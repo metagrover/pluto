@@ -456,6 +456,7 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
             for await _ in updates { count += 1 }
             return count
         }
+        await manager.startRecognizerForTesting()
         let append = Task {
             try await manager.ingestAudio(
                 makeAcknowledgedIngestionBuffer(sampleCount: 16_000),
@@ -484,6 +485,62 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
         }
         let cancelProcessorCallCount = await processor.callCount
         XCTAssertEqual(cancelProcessorCallCount, 1)
+        XCTAssertEqual(emittedUpdateCount, 0)
+    }
+
+    func testCancelOvertakesWaitingFinishWithoutTailFlushOrReport() async throws {
+        let processor = BlockingWindowProcessor()
+        let manager = SlidingWindowAsrManager(
+            config: SlidingWindowAsrConfig(
+                chunkSeconds: 1,
+                leftContextSeconds: 0,
+                rightContextSeconds: 0
+            ),
+            acknowledgedWindowProcessor: { samples, start, isLast in
+                await processor.process(samples, windowStartSample: start, isLastChunk: isLast)
+            }
+        )
+        let updates = await manager.transcriptionUpdates
+        let updateCollector = Task {
+            var count = 0
+            for await _ in updates { count += 1 }
+            return count
+        }
+        await manager.startRecognizerForTesting()
+
+        let append = Task {
+            try await manager.ingestAudio(
+                makeAcknowledgedIngestionBuffer(sampleCount: 16_000),
+                receipt: "finish-then-cancel"
+            )
+        }
+        await processor.waitUntilStarted()
+
+        let finish = Task { try await manager.finishDetailed() }
+        for _ in 0..<1_000 where await manager.acceptsAcknowledgedIngestionForTesting {
+            await Task.yield()
+        }
+        let cancel = Task { await manager.cancel() }
+        await processor.waitUntilCancellationObserved()
+        await processor.release()
+        await cancel.value
+
+        do {
+            _ = try await finish.value
+            XCTFail("Cancellation must prevent a waiting finish from flushing or reporting")
+        } catch {
+            XCTAssertEqual(error as? SlidingWindowAcknowledgedIngestionError, .cancelled)
+        }
+        do {
+            _ = try await append.value
+            XCTFail("Cancellation must suppress the admitted append report")
+        } catch {
+            XCTAssertEqual(error as? SlidingWindowAcknowledgedIngestionError, .cancelled)
+        }
+
+        let processorCallCount = await processor.callCount
+        let emittedUpdateCount = await updateCollector.value
+        XCTAssertEqual(processorCallCount, 1, "Cancelled recognizer must not perform a tail decode")
         XCTAssertEqual(emittedUpdateCount, 0)
     }
 
