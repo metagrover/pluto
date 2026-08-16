@@ -424,6 +424,20 @@ const appendParakeetLiveReceipt = async (
   });
 };
 
+const stopParakeetLiveRecording = async (meetingId: string) => {
+  const client = parakeetLiveClient;
+  const streams = parakeetLiveStreams.get(meetingId);
+  try {
+    await client?.flushAndClose();
+  } finally {
+    if (parakeetLiveClient === client) parakeetLiveClient = null;
+    for (const identity of streams?.values() ?? []) {
+      parakeetLiveReceiptBridge.clear(identity.streamId);
+    }
+    parakeetLiveStreams.delete(meetingId);
+  }
+};
+
 function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
   knowledgeSynthesisPause.acquire('transcription');
@@ -1039,6 +1053,7 @@ app.whenReady().then(async () => {
       ...request,
       meetingId: normalizedMeetingId,
     });
+    await stopParakeetLiveRecording(normalizedMeetingId);
     captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
     console.log('[CaptureLease] transitioned: capture_stopped');
     return manifest;
@@ -1054,6 +1069,7 @@ app.whenReady().then(async () => {
       );
       let manifest: Awaited<ReturnType<typeof sealCaptureJournal>>;
       try {
+        await stopParakeetLiveRecording(normalizedMeetingId);
         manifest = await sealCaptureJournal(getMeetingArtifactsRootDir(), {
           meetingId: normalizedMeetingId,
           endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),

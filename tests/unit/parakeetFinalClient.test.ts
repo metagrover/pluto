@@ -7,6 +7,7 @@ import {
   ParakeetFinalClient,
   type ParakeetRuntimePaths,
 } from '../../electron/transcription/parakeetFinalClient';
+import { makeRuntimeHost } from '../../electron/transcription/parakeetRuntimeHost';
 
 class FakeChild extends EventEmitter implements NativeChildProcess {
   readonly stdout = new PassThrough();
@@ -197,24 +198,72 @@ describe('ParakeetFinalClient', () => {
 
     controller.abort();
 
-    await expect(request).rejects.toThrow('parakeet_cancelled');
     expect(child.writes[2]).toMatchObject({
       method: 'cancel',
       targetId: targetID,
     });
-    child.respond({
-      schemaVersion: 1,
-      id: child.writes[2].id,
-      ok: false,
-      error: { code: 'parakeet_cancelled' },
-    });
+    let settled = false;
+    void request.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
     child.respond({
       schemaVersion: 1,
       id: targetID,
       ok: false,
       error: { code: 'parakeet_cancelled' },
     });
+    await expect(request).rejects.toThrow('parakeet_cancelled');
     expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it('does not hand the runtime to live work until the cancelled transcription settles', async () => {
+    const child = new FakeChild();
+    const host = makeRuntimeHost({ paths, spawn: () => child });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const ready = client.prepare();
+    child.respond(prepared(String(child.writes[0].id)));
+    await ready;
+
+    const transcription = client.transcribe({
+      meetingId: 'one',
+      role: 'final_validation',
+      source: 'mic',
+      audioPath: '/user/recordings/one.wav',
+      language: 'en',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    const transcribeID = String(child.writes[1].id);
+
+    let liveResolved = false;
+    const live = host.startRecordingLive().then((lease) => {
+      liveResolved = true;
+      return lease;
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(3));
+    child.respond({
+      schemaVersion: 1,
+      id: child.writes[2].id,
+      ok: true,
+      result: {},
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(liveResolved).toBe(false);
+
+    child.respond({
+      schemaVersion: 1,
+      id: transcribeID,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await expect(transcription).rejects.toThrow('parakeet_cancelled');
+    await expect(live).resolves.toMatchObject({ kind: 'live' });
   });
 
   it('drops native stderr content', async () => {

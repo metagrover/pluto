@@ -377,6 +377,67 @@ describe('ParakeetLiveClient', () => {
     });
   });
 
+  it('resets sequence watermark tracking for the next generation', async () => {
+    const { process, client } = await opened();
+    const updates: NativeEvent[] = [];
+    client.onEvent((event) => updates.push(event));
+    const firstAppend = client.append(append(1));
+    process.respondMethod('stream_append');
+    await firstAppend;
+    process.emit(
+      update({
+        revision: 1,
+        tentativeThroughSequence: 1,
+      }),
+    );
+    const resetting = client.reset(openSystem, 2);
+    await vi.waitFor(() =>
+      expect(
+        process.pending.some((item) => item.payload.method === 'stream_reset'),
+      ).toBe(true),
+    );
+    process.respondMethod('stream_reset');
+    await resetting;
+
+    const secondAppend = client.append({ ...append(1), generation: 2 });
+    process.respondMethod('stream_append');
+    await secondAppend;
+
+    process.emit(
+      update({
+        generation: 2,
+        revision: 1,
+        committedThroughSequence: 0,
+        tentativeThroughSequence: 1,
+      }),
+    );
+    expect(updates).toHaveLength(2);
+  });
+
+  it('rejects a committed watermark advance that does not qualify the prior tentative append', async () => {
+    const { process, client } = await opened();
+    const updates: NativeEvent[] = [];
+    client.onEvent((event) => updates.push(event));
+    const firstAppend = client.append(append(1));
+    process.respondMethod('stream_append');
+    await firstAppend;
+    process.emit(
+      update({
+        revision: 1,
+        tentativeThroughSequence: 1,
+      }),
+    );
+    process.emit(
+      update({
+        revision: 2,
+        committedThroughSequence: 1,
+        tentativeThroughSequence: 1,
+        qualifiesPriorTentative: false,
+      }),
+    );
+    expect(updates).toHaveLength(1);
+  });
+
   it('cancels the candidate generation when reset response and abort race', async () => {
     const { process, client } = await opened();
     const controller = new AbortController();
@@ -532,6 +593,26 @@ describe('ParakeetLiveClient', () => {
     process.respondMethod('stream_cancel');
     await closing;
     await expect(pending).rejects.toThrow('parakeet_client_closed');
+    await expect(client.open(openSystem)).rejects.toThrow(
+      'parakeet_client_closed',
+    );
+  });
+
+  it('flushes active streams before closing the live client', async () => {
+    const { process, client } = await opened();
+
+    const stopping = client.flushAndClose();
+    await vi.waitFor(() =>
+      expect(
+        process.pending.some((item) => item.payload.method === 'stream_flush'),
+      ).toBe(true),
+    );
+    process.respondMethod('stream_flush', {
+      finalPreview: 'synthetic',
+      degradations: [],
+    });
+    await stopping;
+
     await expect(client.open(openSystem)).rejects.toThrow(
       'parakeet_client_closed',
     );

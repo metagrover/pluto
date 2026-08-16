@@ -144,6 +144,7 @@ export class ParakeetFinalClient {
       const health = await this.prepareWithLease();
       if (request.signal?.aborted) throw new Error('parakeet_cancelled');
       const id = this.requestID('transcribe');
+      let transcriptionSettled: Promise<void> | null = null;
       const startedAt = (this.options.now ?? Date.now)();
       const abort = () => {
         const cancelID = this.requestID('cancel');
@@ -154,7 +155,6 @@ export class ParakeetFinalClient {
           method: 'cancel',
           targetId: id,
         });
-        this.runtimeHost.transport.cancelPending(id);
       };
       lease.setPreemptionHandler(async () => {
         const cancelID = this.requestID('cancel');
@@ -164,12 +164,12 @@ export class ParakeetFinalClient {
           method: 'cancel',
           targetId: id,
         });
-        this.runtimeHost.transport.cancelPending(id);
         this.requireSuccess(await cancellation);
+        await transcriptionSettled;
       });
       request.signal?.addEventListener('abort', abort, { once: true });
       try {
-        const response = await this.runtimeHost.transport.request({
+        const nativeRequest = this.runtimeHost.transport.request({
           schemaVersion: 1,
           id,
           method: 'transcribe',
@@ -177,6 +177,11 @@ export class ParakeetFinalClient {
           language: request.language,
           vocabulary: request.vocabulary ?? [],
         });
+        transcriptionSettled = nativeRequest.then(
+          () => undefined,
+          () => undefined,
+        );
+        const response = await nativeRequest;
         const result = this.requireSuccess(response);
         const transcription = this.parseTranscription(result.transcription);
         const words: TranscriptionWord[] = transcription.words.map((word) => ({

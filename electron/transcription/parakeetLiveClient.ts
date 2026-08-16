@@ -255,6 +255,8 @@ export class ParakeetLiveClient {
       state.resetGenerationInFlight = null;
       state.nextSequence = 1;
       state.nextRevision = 1;
+      state.committedThroughSequence = 0;
+      state.tentativeThroughSequence = 0;
       state.closing = false;
     } catch (error) {
       if (state.active && this.isNonterminal(error)) {
@@ -278,6 +280,22 @@ export class ParakeetLiveClient {
     await this.releaseRuntimeLeaseIfIdle();
     this.unsubscribeEvent();
     this.unsubscribeFailure();
+  }
+
+  async flushAndClose(): Promise<void> {
+    try {
+      await Promise.all(
+        [...this.streams.values()].map((state) =>
+          this.flush({
+            streamId: state.streamId,
+            source: state.source,
+            generation: state.generation,
+          }),
+        ),
+      );
+    } finally {
+      await this.close();
+    }
   }
 
   private pump(state: StreamState): void {
@@ -660,10 +678,16 @@ export class ParakeetLiveClient {
       return false;
     }
     if (
+      !event.qualifiesPriorTentative &&
+      event.committedThroughSequence !== state.committedThroughSequence
+    ) {
+      return false;
+    }
+    if (
       event.qualifiesPriorTentative &&
-      (event.committedThroughSequence !== state.tentativeThroughSequence ||
-        (event.tentativeThroughSequence <= state.tentativeThroughSequence &&
-          event.tentativeThroughSequence !== 0))
+      (state.tentativeThroughSequence === 0 ||
+        event.committedThroughSequence !== state.tentativeThroughSequence ||
+        event.tentativeThroughSequence <= state.tentativeThroughSequence)
     ) {
       return false;
     }
