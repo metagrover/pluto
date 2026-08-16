@@ -23,6 +23,7 @@ import {
   buildQuarterSecondFrames,
   buildResourceSoakEvidence,
   deriveFirstSealedActivitySeconds,
+  launchResourceProbeAfterPrepared,
   orchestratePrivateReplay,
   parsePrivateLiveReplayOptions,
   replayEvidenceDigest,
@@ -265,6 +266,21 @@ const fakeDependencies = (mlxAvailable: boolean, cleanupFailure = false) => {
 };
 
 describe('single private replay orchestration core', () => {
+  it('does not launch a probe when prepare is invalid', () => {
+    let launches = 0;
+    expect(
+      launchResourceProbeAfterPrepared(
+        { ok: false, liveConfigId: 'pinned-default', pid: 42 },
+        'pinned-default',
+        () => {
+          launches += 1;
+          return undefined;
+        },
+      ),
+    ).toBeUndefined();
+    expect(launches).toBe(0);
+  });
+
   it('drives paired MLX and dual-source Parakeet through the executable path', async () => {
     const { manifest, manifestPath, root } = fixture();
     const fake = fakeDependencies(true);
