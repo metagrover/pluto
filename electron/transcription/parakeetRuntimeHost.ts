@@ -98,6 +98,21 @@ export class ParakeetRuntimeHost {
   }
 
   async startRecordingLive(): Promise<ParakeetRuntimeLease> {
+    const queuedFinals = this.queue.filter((record) => record.kind === 'final');
+    for (const record of queuedFinals) {
+      record.released = true;
+      this.queue.splice(this.queue.indexOf(record), 1);
+      this.durableRetryHandoffCount += 1;
+      try {
+        await this.options.persistInterruptedFinalization?.();
+      } finally {
+        this.durableRetryHandoffCount = Math.max(
+          0,
+          this.durableRetryHandoffCount - 1,
+        );
+      }
+      record.reject(new Error('parakeet_cancelled'));
+    }
     if (this.active?.kind === 'final') {
       await this.active.lease.cancelAndPersistForRetry();
     }
