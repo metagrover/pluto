@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
++## 2026-08-16 - Prefer transcript reconciliation over rolling AEC
+
+- **Status:** Accepted
+- **Source:** [Issue #629](https://github.com/metagrover/pluto/issues/629), owner direction on 2026-08-16
+- **Decision:** Pluto will not build, package, or operate a rolling AEC runtime or dual-source-primary transcription path for ordinary transcript deduplication. It retains separate mic/System capture and transcript-level cross-channel bleed reconciliation.
+- **Rationale:** Duplicate remote speech is a transcript-reconciliation problem already addressed by timestamped cross-channel collapse. The WebRTC AudioProcessing spike proved a maintained external library can build and produce deterministic residuals, but it did not establish the independent delay, drift, and local-speech-preservation evidence needed to use mic audio as local-speaker proof. That higher-risk attribution requirement is not needed for the current product outcome.
+- **Consequences:** No new AEC dependency, DSP implementation, capture sidecar, or primary-transcription wiring will ship. System-only shadow work and the existing canonical finalization remain available. A future request to make local-speaker identity claims during overlap must begin as a separate, evidence-backed product decision.
+
 ## 2026-08-11 - Remove the Meeting View follow-up email draft surface
 - **Status:** Accepted
 - **Source:** [Issue #613](https://github.com/metagrover/pluto/issues/613), owner direction on 2026-08-11

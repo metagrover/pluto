@@ -2,15 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a feature-flagged, AEC-protected Parakeet live transcript with bounded memory, receipt-level evidence, one-way MLX fallback, and unchanged canonical-finalization safety.
+**Goal:** Ship a feature-flagged System-only Parakeet live shadow with bounded memory, one-way MLX fallback, and unchanged canonical-finalization safety. The rolling-AEC and dual-source-primary portions were superseded on 2026-08-16; ordinary mic/System duplication remains a transcript-reconciliation concern.
 
-**Architecture:** Pluto keeps its durable five-second mic/System capture-journal intervals. The Electron main process pairs authoritative receipts and sends approved WAV paths to a packaged native AEC runtime, which writes a derived residual mic artifact and content-free evidence without modifying raw capture. A shared, exclusive-inference Parakeet host consumes clean System plus only trusted residual mic receipts. Rollout proceeds through system shadow, dual shadow, internal primary, and canary; the current full-session final path remains authoritative.
+**Architecture:** Pluto keeps its durable five-second mic/System capture-journal intervals. Existing finalization reconciles timestamp-aligned cross-channel transcript bleed after transcription. A shared, exclusive-inference Parakeet host is limited to System-only shadow work; the current full-session final path remains authoritative. No packaged AEC runtime, derived residual mic artifact, dual shadow, or Parakeet-primary rollout is planned.
 
 **Tech Stack:** Electron, React, TypeScript, Vitest, Swift 6, Core ML, vendored FluidAudio 0.15.5 / Parakeet TDT v3, capture-journal receipts, a packaged native AEC runtime selected by frozen synthetic gates, and MLX fallback.
 
 **Issues:** [#630](https://github.com/metagrover/pluto/issues/630), [#629](https://github.com/metagrover/pluto/issues/629), stacked on [#441](https://github.com/metagrover/pluto/issues/441) / draft PR #628.
 
 ---
+
+> **Supersession — 2026-08-16:** Tasks 5, 7, 8, and all dual-source/Parakeet-primary promotion gates are retired. The WebRTC APM experiment remains an isolated no-go artifact; it does not authorize an AEC runtime or further AEC implementation. Continue only System-only shadow and existing transcript-level bleed reconciliation unless a new, evidence-backed product requirement is approved.
 
 ## 1. Current checkpoint and decisions
 
