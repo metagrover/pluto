@@ -210,6 +210,10 @@ export const TranscriptIntegrityPanel = ({
       retryFailure === 'validation_retry_timeout'
         ? 'Validation stopped after its safety deadline. The recording and prior evidence are safe.'
         : 'Validation stopped safely before completion. The recording and prior evidence are safe.',
+    final_transcription_unavailable:
+      "Pluto's high-accuracy local transcription model was unavailable. The recording and provisional transcript are safe.",
+    final_transcription_resource_paused:
+      'High-accuracy transcription paused to protect system memory or temperature. The recording and provisional transcript are safe.',
     validated: '',
     legacy_complete: '',
     legacy_needs_attention:

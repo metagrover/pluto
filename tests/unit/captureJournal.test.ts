@@ -217,11 +217,11 @@ describe('capture journal', () => {
       chunkStartSec: 0,
       chunkEndSec: 5,
       transcriptionConfig: {
-        backend: 'whisperx',
+        backend: 'mlx_preview',
         preset: 'balanced',
         model: 'small',
-        device: 'cpu',
-        computeType: 'int8',
+        device: 'mlx',
+        computeType: 'float16',
         languageMode: 'detected' as const,
         requestedLanguage: null,
         pipelineVersion: 'live_chunk_v1' as const,
@@ -403,11 +403,11 @@ describe('capture journal', () => {
     });
     const { receipt } = completed;
     const checkpointConfig = {
-      backend: 'whisperx',
+      backend: 'mlx_preview',
       preset: 'balanced',
       model: 'small',
-      device: 'cpu',
-      computeType: 'int8',
+      device: 'mlx',
+      computeType: 'float16',
       languageMode: 'detected' as const,
       requestedLanguage: null,
       pipelineVersion: 'live_chunk_v1' as const,

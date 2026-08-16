@@ -1,3 +1,7 @@
+import {
+  type FinalTranscriptionLease,
+  readFinalTranscriptionLease,
+} from '../services/finalTranscription/finalTranscriptionLease.ts';
 import type { TranscriptLifecycleStatus } from './transcriptIntegrity.ts';
 
 export const TRANSCRIPT_TRUST_SCHEMA_VERSION = 2;
@@ -51,6 +55,51 @@ export type TranscriptTrustEnvelopeV2 = {
     startedAt: string;
     deadlineAt: string;
     stage: 'transcribing' | 'reviewing_evidence' | 'saving';
+  };
+  finalTranscription?:
+    | FinalTranscriptionLease
+    | {
+        schemaVersion: 1;
+        state: 'complete' | 'needs_attention';
+        policy: 'parakeet_final_v1';
+        captureGeneration: string;
+        failure?: string;
+      };
+  finalTranscriptionResult?: {
+    policy: 'parakeet_final_v1';
+    engine: 'parakeet_coreml';
+    model: 'parakeet-tdt-0.6b-v3';
+    computeType: 'int8';
+    computeUnits: 'cpu_and_neural_engine';
+    language: string;
+    elapsedMs: number;
+    warnings: string[];
+    sources: Partial<
+      Record<
+        'mic' | 'system' | 'mix',
+        'speech' | 'no_speech' | 'failed' | 'unknown'
+      >
+    >;
+    sourceDetails: Partial<
+      Record<
+        'mic' | 'system',
+        {
+          outcome: 'speech' | 'no_speech' | 'failed';
+          providerVersion: string;
+          modelBundleVersion?: string;
+          elapsedMs: number;
+          confidence?: number;
+          vadStatus: 'speech' | 'no_speech' | 'failed';
+          speechSeconds: number;
+          segmentCount: number;
+          wordCount: number;
+        }
+      >
+    >;
+    providerVersions: string[];
+    modelBundleVersions: string[];
+    vocabularyPolicyVersion?: string;
+    vocabularyCount: number;
   };
   recovery?: {
     source: 'capture_journal';
@@ -125,6 +174,8 @@ export type TranscriptTrustCopyKey =
   | 'speech_unaccounted'
   | 'integrity_needs_attention'
   | 'validation_retry_failed'
+  | 'final_transcription_unavailable'
+  | 'final_transcription_resource_paused'
   | 'validated'
   | 'legacy_complete'
   | 'legacy_needs_attention';
@@ -145,6 +196,8 @@ export type ResolvedTranscriptTrustState = {
     | 'capture_gap'
     | 'integrity_needs_attention'
     | 'validation_retry_failed'
+    | 'final_transcription_unavailable'
+    | 'final_transcription_resource_paused'
     | 'validated'
     | 'legacy_complete'
     | 'legacy_needs_attention';
@@ -250,6 +303,114 @@ const validCause = (value: unknown): value is TranscriptTrustCause => {
   );
 };
 
+const validFinalTranscriptionResult = (
+  value: unknown,
+): value is NonNullable<
+  TranscriptTrustEnvelopeV2['finalTranscriptionResult']
+> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const result = value as Record<string, unknown>;
+  const validObservedOutcome = (outcome: unknown) =>
+    outcome === 'speech' || outcome === 'no_speech' || outcome === 'failed';
+  const validSourceOutcome = (outcome: unknown) =>
+    validObservedOutcome(outcome) || outcome === 'unknown';
+  const sources = result.sources as Record<string, unknown> | undefined;
+  const sourceDetails = result.sourceDetails as
+    | Record<string, unknown>
+    | undefined;
+  const validSourceDetails = (details: unknown): boolean => {
+    if (!details || typeof details !== 'object' || Array.isArray(details)) {
+      return false;
+    }
+    const source = details as Record<string, unknown>;
+    return (
+      exactKeys(
+        source,
+        [
+          'outcome',
+          'providerVersion',
+          'elapsedMs',
+          'vadStatus',
+          'speechSeconds',
+          'segmentCount',
+          'wordCount',
+        ],
+        ['modelBundleVersion', 'confidence'],
+      ) &&
+      validObservedOutcome(source.outcome) &&
+      typeof source.providerVersion === 'string' &&
+      (source.modelBundleVersion === undefined ||
+        typeof source.modelBundleVersion === 'string') &&
+      typeof source.elapsedMs === 'number' &&
+      Number.isFinite(source.elapsedMs) &&
+      source.elapsedMs >= 0 &&
+      (source.confidence === undefined ||
+        (typeof source.confidence === 'number' &&
+          Number.isFinite(source.confidence))) &&
+      validObservedOutcome(source.vadStatus) &&
+      typeof source.speechSeconds === 'number' &&
+      Number.isFinite(source.speechSeconds) &&
+      source.speechSeconds >= 0 &&
+      typeof source.segmentCount === 'number' &&
+      Number.isInteger(source.segmentCount) &&
+      source.segmentCount >= 0 &&
+      typeof source.wordCount === 'number' &&
+      Number.isInteger(source.wordCount) &&
+      source.wordCount >= 0
+    );
+  };
+  return (
+    exactKeys(
+      result,
+      [
+        'policy',
+        'engine',
+        'model',
+        'computeType',
+        'computeUnits',
+        'language',
+        'elapsedMs',
+        'warnings',
+        'sources',
+        'sourceDetails',
+        'providerVersions',
+        'modelBundleVersions',
+        'vocabularyCount',
+      ],
+      ['vocabularyPolicyVersion'],
+    ) &&
+    result.policy === 'parakeet_final_v1' &&
+    result.engine === 'parakeet_coreml' &&
+    result.model === 'parakeet-tdt-0.6b-v3' &&
+    result.computeType === 'int8' &&
+    result.computeUnits === 'cpu_and_neural_engine' &&
+    typeof result.language === 'string' &&
+    result.language.length > 0 &&
+    typeof result.elapsedMs === 'number' &&
+    Number.isFinite(result.elapsedMs) &&
+    result.elapsedMs >= 0 &&
+    Array.isArray(result.warnings) &&
+    result.warnings.every((warning) => typeof warning === 'string') &&
+    Boolean(sources) &&
+    exactKeys(sources ?? {}, [], ['mic', 'system', 'mix']) &&
+    Object.values(sources ?? {}).every(validSourceOutcome) &&
+    Boolean(sourceDetails) &&
+    exactKeys(sourceDetails ?? {}, [], ['mic', 'system']) &&
+    Object.values(sourceDetails ?? {}).every(validSourceDetails) &&
+    Array.isArray(result.providerVersions) &&
+    result.providerVersions.every((version) => typeof version === 'string') &&
+    Array.isArray(result.modelBundleVersions) &&
+    result.modelBundleVersions.every(
+      (version) => typeof version === 'string',
+    ) &&
+    typeof result.vocabularyCount === 'number' &&
+    Number.isInteger(result.vocabularyCount) &&
+    result.vocabularyCount >= 0 &&
+    (result.vocabularyPolicyVersion === undefined ||
+      typeof result.vocabularyPolicyVersion === 'string')
+  );
+};
+
 const validRetry = (
   value: unknown,
 ): value is NonNullable<TranscriptTrustEnvelopeV2['retry']> => {
@@ -342,6 +503,8 @@ export const parseTranscriptTrustEnvelope = (
         'evidence',
         'validationProof',
         'retry',
+        'finalTranscription',
+        'finalTranscriptionResult',
         'recovery',
         'restorationProof',
       ],
@@ -350,7 +513,9 @@ export const parseTranscriptTrustEnvelope = (
     !Array.isArray(raw.causes) ||
     !raw.causes.every(validCause) ||
     !raw.evidenceProvenance ||
-    typeof raw.evidenceProvenance !== 'object'
+    typeof raw.evidenceProvenance !== 'object' ||
+    (raw.finalTranscriptionResult !== undefined &&
+      !validFinalTranscriptionResult(raw.finalTranscriptionResult))
   ) {
     return { ok: false, failure: 'invalid_shape' };
   }
@@ -358,16 +523,47 @@ export const parseTranscriptTrustEnvelope = (
   const state = raw.state as TranscriptLifecycleStatus;
   const causes = raw.causes as TranscriptTrustCause[];
   const retry = raw.retry;
+  const finalTranscription = raw.finalTranscription;
+  const activeFinalTranscription =
+    readFinalTranscriptionLease(finalTranscription);
+  const completedFinalTranscription =
+    finalTranscription &&
+    typeof finalTranscription === 'object' &&
+    !Array.isArray(finalTranscription) &&
+    (finalTranscription as { schemaVersion?: unknown }).schemaVersion === 1 &&
+    ['complete', 'needs_attention'].includes(
+      String((finalTranscription as { state?: unknown }).state),
+    ) &&
+    (finalTranscription as { policy?: unknown }).policy ===
+      'parakeet_final_v1' &&
+    typeof (finalTranscription as { captureGeneration?: unknown })
+      .captureGeneration === 'string';
   const proof = raw.validationProof;
   if (
     (state === 'provisional' &&
-      (causes.length > 0 || retry !== undefined || proof !== undefined)) ||
+      (causes.length > 0 ||
+        retry !== undefined ||
+        finalTranscription !== undefined ||
+        proof !== undefined)) ||
     (state === 'validating' &&
-      (causes.length > 0 || !validRetry(retry) || proof !== undefined)) ||
+      (causes.length > 0 ||
+        proof !== undefined ||
+        validRetry(retry) === Boolean(activeFinalTranscription))) ||
     (state === 'needs_attention' &&
-      (causes.length === 0 || retry !== undefined || proof !== undefined)) ||
+      (causes.length === 0 ||
+        retry !== undefined ||
+        proof !== undefined ||
+        (finalTranscription !== undefined &&
+          (!completedFinalTranscription ||
+            (finalTranscription as { state?: unknown }).state !==
+              'needs_attention')))) ||
     (state === 'validated' &&
-      (causes.length > 0 || retry !== undefined || !validProof(proof)))
+      (causes.length > 0 ||
+        retry !== undefined ||
+        !validProof(proof) ||
+        (finalTranscription !== undefined &&
+          (!completedFinalTranscription ||
+            (finalTranscription as { state?: unknown }).state !== 'complete'))))
   ) {
     return { ok: false, failure: 'invalid_shape' };
   }
@@ -578,6 +774,32 @@ export const resolveTranscriptTrustState = (
   }
 
   const causeCodes = new Set(envelope.causes.map((cause) => cause.code));
+  const finalTranscriptionFailure =
+    envelope.finalTranscription &&
+    'failure' in envelope.finalTranscription &&
+    typeof envelope.finalTranscription.failure === 'string'
+      ? envelope.finalTranscription.failure
+      : undefined;
+  if (finalTranscriptionFailure === 'runtime_unavailable') {
+    return resolved({
+      kind: 'final_transcription_unavailable',
+      copyKey: 'final_transcription_unavailable',
+      action: capabilities.canRunValidation ? 'retry_validation' : 'none',
+      permitsExistingRead: capabilities.hasExistingTranscript,
+      permitsDerivedGeneration: false,
+      envelope,
+    });
+  }
+  if (finalTranscriptionFailure === 'resource_policy_denied') {
+    return resolved({
+      kind: 'final_transcription_resource_paused',
+      copyKey: 'final_transcription_resource_paused',
+      action: capabilities.canRunValidation ? 'retry_validation' : 'none',
+      permitsExistingRead: capabilities.hasExistingTranscript,
+      permitsDerivedGeneration: false,
+      envelope,
+    });
+  }
   if (causeCodes.has('capture_gap_detected')) {
     const canRestore =
       capabilities.hasCaptureRecoveryHandler &&

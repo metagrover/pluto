@@ -1,0 +1,247 @@
+{
+  "type": "final_transcription_policy",
+  "scenarios": [
+    {
+      "id": "canonical-analysis-handoff",
+      "sealed": true,
+      "recordingDurationSeconds": 12,
+      "activityWindows": [
+        { "speaker": "Me", "startTime": 1, "endTime": 4 },
+        { "speaker": "Them", "startTime": 6, "endTime": 10 }
+      ],
+      "sources": {
+        "mic": {
+          "segments": [
+            { "start": 1, "end": 4, "text": "Synthetic local speech" }
+          ],
+          "language": "en",
+          "duration": 12,
+          "vad": { "status": "speech", "speechSeconds": 3 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "modelBundleVersion": "benchmark-v1",
+            "language": "en",
+            "source": "mic",
+            "elapsedMs": 1
+          }
+        },
+        "system": {
+          "segments": [
+            { "start": 6, "end": 10, "text": "Synthetic remote speech" }
+          ],
+          "language": "en",
+          "duration": 12,
+          "vad": { "status": "speech", "speechSeconds": 4 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "modelBundleVersion": "benchmark-v1",
+            "language": "en",
+            "source": "system",
+            "elapsedMs": 1
+          }
+        }
+      },
+      "expected": {
+        "status": "validated",
+        "requestOrder": ["mic", "system"],
+        "analysisStarted": true,
+        "committedSegmentCount": 2
+      }
+    },
+    {
+      "id": "explicit-silence",
+      "sealed": true,
+      "recordingDurationSeconds": 8,
+      "activityWindows": [],
+      "sources": {
+        "mic": {
+          "segments": [],
+          "language": "en",
+          "duration": 8,
+          "vad": { "status": "no_speech", "speechSeconds": 0 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "modelBundleVersion": "benchmark-v1",
+            "language": "en",
+            "source": "mic",
+            "elapsedMs": 1
+          }
+        },
+        "system": {
+          "segments": [],
+          "language": "en",
+          "duration": 8,
+          "vad": { "status": "no_speech", "speechSeconds": 0 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "modelBundleVersion": "benchmark-v1",
+            "language": "en",
+            "source": "system",
+            "elapsedMs": 1
+          }
+        }
+      },
+      "expected": {
+        "status": "validated",
+        "requestOrder": ["mic", "system"],
+        "analysisStarted": true,
+        "committedSegmentCount": 0
+      }
+    },
+    {
+      "id": "runtime-readiness-failure",
+      "sealed": true,
+      "recordingDurationSeconds": 8,
+      "activityWindows": [{ "speaker": "Me", "startTime": 1, "endTime": 5 }],
+      "runtimeFailureSource": "mic",
+      "sources": {
+        "mic": {
+          "segments": [],
+          "language": "en",
+          "duration": 8,
+          "vad": { "status": "failed", "speechSeconds": 0 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "language": "en",
+            "source": "mic",
+            "elapsedMs": 1
+          }
+        },
+        "system": {
+          "segments": [],
+          "language": "en",
+          "duration": 8,
+          "vad": { "status": "no_speech", "speechSeconds": 0 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "language": "en",
+            "source": "system",
+            "elapsedMs": 1
+          }
+        }
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requestOrder": ["mic", "mic", "system"],
+        "analysisStarted": false
+      }
+    },
+    {
+      "id": "unsealed-evidence",
+      "sealed": false,
+      "recordingDurationSeconds": 8,
+      "activityWindows": [],
+      "sources": {
+        "mic": {
+          "segments": [],
+          "language": "en",
+          "duration": 8,
+          "vad": { "status": "no_speech", "speechSeconds": 0 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "language": "en",
+            "source": "mic",
+            "elapsedMs": 1
+          }
+        },
+        "system": {
+          "segments": [],
+          "language": "en",
+          "duration": 8,
+          "vad": { "status": "no_speech", "speechSeconds": 0 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "language": "en",
+            "source": "system",
+            "elapsedMs": 1
+          }
+        }
+      },
+      "expected": {
+        "status": "needs_attention",
+        "requestOrder": [],
+        "analysisStarted": false
+      }
+    },
+    {
+      "id": "overlap-deduplication",
+      "sealed": true,
+      "recordingDurationSeconds": 8,
+      "activityWindows": [
+        { "speaker": "Me", "startTime": 1, "endTime": 5 },
+        { "speaker": "Them", "startTime": 1, "endTime": 5 }
+      ],
+      "sources": {
+        "mic": {
+          "segments": [
+            { "start": 1, "end": 5, "text": "Synthetic shared channel speech" }
+          ],
+          "language": "en",
+          "duration": 8,
+          "vad": { "status": "speech", "speechSeconds": 4 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "language": "en",
+            "source": "mic",
+            "elapsedMs": 1
+          }
+        },
+        "system": {
+          "segments": [
+            { "start": 1, "end": 5, "text": "Synthetic shared channel speech" }
+          ],
+          "language": "en",
+          "duration": 8,
+          "vad": { "status": "speech", "speechSeconds": 4 },
+          "meta": {
+            "role": "final_validation",
+            "engine": "parakeet_coreml",
+            "model": "parakeet-tdt-0.6b-v3",
+            "providerVersion": "benchmark",
+            "language": "en",
+            "source": "system",
+            "elapsedMs": 1
+          }
+        }
+      },
+      "expected": {
+        "status": "validated",
+        "requestOrder": ["mic", "system"],
+        "analysisStarted": true,
+        "committedSegmentCount": 1
+      }
+    }
+  ],
+  "expected": {
+    "status": "validated",
+    "primaryMetric": { "name": "passedScenarioCount", "value": 5 },
+    "policy": { "liveEngine": "mlx_whisper", "finalEngine": "parakeet_coreml" }
+  }
+}

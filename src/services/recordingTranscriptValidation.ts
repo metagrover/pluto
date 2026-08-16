@@ -8,6 +8,7 @@ import {
   reconcileCanonicalTranscript,
   validateTranscriptIntegrity,
 } from '../utils/transcriptIntegrity.ts';
+import { collapseCrossChannelWordBleed } from './finalTranscription/collapseCrossChannelWordBleed.ts';
 
 type RawWhisperSegment = {
   start: number;
@@ -50,7 +51,13 @@ const transcribeWithRetry = async (
         attempts: attempt,
         result: await transcribe(audioPath, { meetingId, canonicalSource }),
       };
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.name === 'AbortError' || error.message === 'parakeet_cancelled')
+      ) {
+        throw error;
+      }
       if (attempt === 2) return { attempts: attempt, result: null };
     }
   }
@@ -211,6 +218,7 @@ export const runRecordingTranscriptValidation = async (input: {
   checkpointSourceSegments?: AttributionSegment[];
   activityWindows: SpeakerActivityWindow[];
   canonicalMode?: 'full_mix' | 'recovered_channels' | 'checkpointed';
+  transcriptionScheduling?: 'parallel' | 'sequential_channels';
   checkpointEvidenceVerified?: boolean;
   transcribe: RecordingTranscribe;
   probeDuration: (audioPath: string) => Promise<number | null>;
@@ -287,8 +295,25 @@ export const runRecordingTranscriptValidation = async (input: {
       },
     };
   }
-  const [mic, mix, system, micDuration, mixDuration, systemDuration] =
-    await Promise.all([
+  let mic: SourceResult;
+  let mix: SourceResult;
+  let system: SourceResult;
+  if (input.transcriptionScheduling === 'sequential_channels') {
+    mic = await transcribeWithRetry(
+      input.transcribe,
+      input.micAudioPath,
+      input.meetingId,
+      'mic',
+    );
+    system = await transcribeWithRetry(
+      input.transcribe,
+      input.systemAudioPath,
+      input.meetingId,
+      'system',
+    );
+    mix = { attempts: 0, result: null };
+  } else {
+    [mic, mix, system] = await Promise.all([
       transcribeWithRetry(
         input.transcribe,
         input.micAudioPath,
@@ -307,14 +332,29 @@ export const runRecordingTranscriptValidation = async (input: {
         input.meetingId,
         'system',
       ),
-      probeDuration(input.probeDuration, input.micAudioPath),
-      probeDuration(input.probeDuration, input.mixAudioPath),
-      probeDuration(input.probeDuration, input.systemAudioPath),
     ]);
+  }
+  const [micDuration, mixDuration, systemDuration] = await Promise.all([
+    probeDuration(input.probeDuration, input.micAudioPath),
+    probeDuration(input.probeDuration, input.mixAudioPath),
+    probeDuration(input.probeDuration, input.systemAudioPath),
+  ]);
 
-  const micSegments = toSegments(mic.result, 'Me', 'mic');
+  const rawMicSegments = toSegments(mic.result, 'Me', 'mic');
   const mixedSegments = toSegments(mix.result, 'Unknown', 'mix');
-  const systemSegments = toSegments(system.result, 'Them', 'system');
+  const rawSystemSegments = toSegments(system.result, 'Them', 'system');
+  const collapsedChannels =
+    input.canonicalMode === 'recovered_channels'
+      ? collapseCrossChannelWordBleed({
+          micSegments: rawMicSegments,
+          systemSegments: rawSystemSegments,
+        })
+      : {
+          micSegments: rawMicSegments,
+          systemSegments: rawSystemSegments,
+        };
+  const micSegments = collapsedChannels.micSegments;
+  const systemSegments = collapsedChannels.systemSegments;
   const recoveredChannelSegments = [...micSegments, ...systemSegments].sort(
     (left, right) => left.startTime - right.startTime,
   );
@@ -349,6 +389,8 @@ export const runRecordingTranscriptValidation = async (input: {
   );
   const micVadVerified = hasExplicitVadProof(mic);
   const systemVadVerified = hasExplicitVadProof(system);
+  const micNoSpeechVerified = mic.result?.vad?.status === 'no_speech';
+  const systemNoSpeechVerified = system.result?.vad?.status === 'no_speech';
   const recoveredChannels = input.canonicalMode === 'recovered_channels';
   const micRequired = micActivitySeconds > 0;
   const systemRequired = systemActivitySeconds > 0;
@@ -384,10 +426,8 @@ export const runRecordingTranscriptValidation = async (input: {
       recoveredChannels && !systemRequired
         ? input.recordingDurationSeconds
         : (systemDuration ?? 0),
-    micActivitySeconds: micVadVerified ? micSpeechSeconds : micActivitySeconds,
-    systemActivitySeconds: systemVadVerified
-      ? systemSpeechSeconds
-      : systemActivitySeconds,
+    micActivitySeconds: micNoSpeechVerified ? 0 : micActivitySeconds,
+    systemActivitySeconds: systemNoSpeechVerified ? 0 : systemActivitySeconds,
     localTranscriptCoveredSeconds: micVadVerified
       ? asrConfirmedLocalCoveredSeconds
       : candidateLocalCoveredSeconds,
@@ -405,17 +445,21 @@ export const runRecordingTranscriptValidation = async (input: {
     systemActivitySeconds,
     localTranscriptCoveredSeconds: candidateLocalCoveredSeconds,
     remoteTranscriptCoveredSeconds: candidateRemoteCoveredSeconds,
-    unexplainedMicSeconds: micVadVerified
-      ? Math.max(
-          0,
-          micSpeechSeconds -
-            asrConfirmedLocalCoveredSeconds -
-            reconciliation.evidence.collapsedPassThroughSeconds,
-        )
-      : Math.max(0, micActivitySeconds - candidateLocalCoveredSeconds),
-    unexplainedSystemSeconds: systemVadVerified
-      ? Math.max(0, systemSpeechSeconds - asrConfirmedRemoteCoveredSeconds)
-      : Math.max(0, systemActivitySeconds - candidateRemoteCoveredSeconds),
+    unexplainedMicSeconds: micNoSpeechVerified
+      ? 0
+      : micVadVerified
+        ? Math.max(
+            0,
+            micActivitySeconds -
+              asrConfirmedLocalCoveredSeconds -
+              reconciliation.evidence.collapsedPassThroughSeconds,
+          )
+        : Math.max(0, micActivitySeconds - candidateLocalCoveredSeconds),
+    unexplainedSystemSeconds: systemNoSpeechVerified
+      ? 0
+      : systemVadVerified
+        ? Math.max(0, systemActivitySeconds - asrConfirmedRemoteCoveredSeconds)
+        : Math.max(0, systemActivitySeconds - candidateRemoteCoveredSeconds),
     rejectedMicCandidateSeconds: micVadVerified
       ? Math.max(0, micActivitySeconds - micSpeechSeconds)
       : 0,

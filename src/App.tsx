@@ -32,13 +32,18 @@ import type {
   LiveTranscriptSegment,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
+import { runPersistedMeetingFinalTranscription } from './services/finalTranscription/runPersistedMeetingFinalTranscription';
 import {
+  canRetryMeetingFinalTranscription,
   forgetExpiredMeetingProcessingAttempts,
+  isParakeetValidatedMeeting,
   meetingProcessingFingerprint,
   nextMeetingProcessingWakeDelay,
   rememberMeetingProcessingOutcome,
+  selectNextMeetingForFinalTranscription,
   selectNextMeetingForProcessing,
 } from './services/postMeetingProcessingCoordinator';
+import { processValidatedMeetingDownstream } from './services/processValidatedMeetingDownstream';
 import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 
 import {
@@ -64,10 +69,6 @@ import {
   resolveMicrophoneStatus,
   resolveSystemAudioStatus,
 } from './utils/permissions';
-import type {
-  TranscriptionPreset,
-  WhisperModel,
-} from './utils/transcriptionSettings';
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
@@ -75,6 +76,9 @@ function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
     useState(false);
+  const finalTranscriptionAbortRef = useRef<AbortController | null>(null);
+  const [finalTranscriptionMeetingId, setFinalTranscriptionMeetingId] =
+    useState<string | number | null>(null);
   const autoAnalysisAttemptsRef = useRef(new Set<string>());
   const [meetingTitle, setMeetingTitle] = useState('');
   const [meetingParticipants, setMeetingParticipants] = useState<string[]>([]);
@@ -111,9 +115,6 @@ function App() {
   const [claudeApiKey, setClaudeApiKey] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [transcriptionPreset, setTranscriptionPreset] =
-    useState<TranscriptionPreset>('balanced');
-  const [whisperModel, setWhisperModel] = useState<WhisperModel>('small');
   const [whisperLanguage, setWhisperLanguage] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
@@ -381,20 +382,14 @@ function App() {
       if (val) setTheme(val as 'light' | 'dark' | 'system');
     });
     window.ipcRenderer
-      .invoke('GET_SETTING', 'transcription_preset')
+      .invoke('GET_SETTING', 'transcription_language')
       .then((val) => {
-        if (val) setTranscriptionPreset(val as TranscriptionPreset);
+        if (val !== null && val !== undefined) setWhisperLanguage(String(val));
       });
-    window.ipcRenderer.invoke('GET_SETTING', 'whisper_model').then((val) => {
-      if (val) setWhisperModel(val as WhisperModel);
-    });
-    window.ipcRenderer.invoke('GET_SETTING', 'whisper_language').then((val) => {
-      if (val !== null && val !== undefined) setWhisperLanguage(String(val));
-    });
 
     const checkServer = async () => {
       try {
-        const health = await window.ipcRenderer.invoke('WHISPERX_HEALTH');
+        const health = await window.ipcRenderer.invoke('MLX_PREVIEW_HEALTH');
         if (health.status === 'ok') {
           setIsServerReady(true);
         } else {
@@ -457,6 +452,21 @@ function App() {
     if (!meetingId || transcriptValidationRetrying) return;
     setTranscriptValidationRetrying(true);
     try {
+      const meeting = safeMeetings.find(
+        (candidate) => String(candidate.id) === String(meetingId),
+      );
+      if (meeting && canRetryMeetingFinalTranscription(meeting)) {
+        await runMeetingFinalTranscription(meeting);
+        return;
+      }
+      if (meeting && isParakeetValidatedMeeting(meeting)) {
+        await processValidatedMeetingDownstream(
+          meeting.id,
+          (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+        );
+        await fetchMeetings();
+        return;
+      }
       const result = await retryMeetingTranscriptValidation(
         meetingId,
         (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
@@ -513,8 +523,53 @@ function App() {
     setSidebarVisible(true);
   };
 
+  const runMeetingFinalTranscription = async (meeting: Meeting) => {
+    if (finalTranscriptionAbortRef.current) return;
+    const controller = new AbortController();
+    finalTranscriptionAbortRef.current = controller;
+    setFinalTranscriptionMeetingId(meeting.id);
+    try {
+      await runPersistedMeetingFinalTranscription(
+        meeting,
+        (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+        { signal: controller.signal },
+      );
+    } catch (error) {
+      console.error('[Pluto] Final transcription worker failed', error);
+    } finally {
+      if (finalTranscriptionAbortRef.current === controller) {
+        finalTranscriptionAbortRef.current = null;
+        setFinalTranscriptionMeetingId(null);
+      }
+      await fetchMeetings();
+    }
+  };
+
   useEffect(() => {
-    if (transcriptValidationRetrying) return;
+    if (activeRecording || finalTranscriptionAbortRef.current) return;
+    const candidate = selectNextMeetingForFinalTranscription(safeMeetings);
+    if (!candidate?.id) return;
+    void runMeetingFinalTranscription(candidate as Meeting);
+  }, [activeRecording, safeMeetings, finalTranscriptionMeetingId]);
+
+  useEffect(() => {
+    if (!activeRecording) return;
+    finalTranscriptionAbortRef.current?.abort();
+    if (finalTranscriptionMeetingId) {
+      void window.ipcRenderer.invoke(
+        'TRANSCRIPTION_CANCEL_AND_UNLOAD_FINAL',
+        finalTranscriptionMeetingId,
+      );
+    }
+  }, [activeRecording, finalTranscriptionMeetingId]);
+
+  useEffect(() => {
+    if (
+      transcriptValidationRetrying ||
+      finalTranscriptionAbortRef.current ||
+      selectNextMeetingForFinalTranscription(safeMeetings)
+    )
+      return;
     const candidate = selectNextMeetingForProcessing(
       safeMeetings,
       autoAnalysisAttemptsRef.current,
@@ -686,7 +741,6 @@ function App() {
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
       <div className="hidden">
         <AudioManager
-          onTranscript={() => {}}
           onSessionComplete={async (meetingId) => {
             await fetchMeetings();
             if (meetingId) {
@@ -698,9 +752,9 @@ function App() {
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
           transcriptionSettings={{
-            backend: 'local_alt_apple_silicon',
-            preset: transcriptionPreset,
-            model: whisperModel,
+            backend: 'mlx_preview',
+            preset: 'balanced',
+            model: 'base',
             device: 'mlx',
             computeType: 'float16',
             language: whisperLanguage,
@@ -1060,10 +1114,6 @@ function App() {
         setClaudeApiKey={setClaudeApiKey}
         ollamaModel={ollamaModel}
         setOllamaModel={setOllamaModel}
-        transcriptionPreset={transcriptionPreset}
-        setTranscriptionPreset={setTranscriptionPreset}
-        whisperModel={whisperModel}
-        setWhisperModel={setWhisperModel}
         whisperLanguage={whisperLanguage}
         setWhisperLanguage={setWhisperLanguage}
         autoEndEnabled={autoEndEnabled}

@@ -13,7 +13,7 @@ describe('Apple Silicon transcription contract', () => {
       listTranscriptionBackends({ platform: 'darwin', arch: 'arm64' }).map(
         ({ backend, available }) => ({ backend, available }),
       ),
-    ).toEqual([{ backend: 'local_alt_apple_silicon', available: true }]);
+    ).toEqual([{ backend: 'mlx_preview', available: true }]);
   });
 
   it('marks the product unsupported outside Apple Silicon without offering a CPU fallback', () => {
@@ -21,7 +21,7 @@ describe('Apple Silicon transcription contract', () => {
       listTranscriptionBackends({ platform: 'linux', arch: 'x64' }),
     ).toEqual([
       expect.objectContaining({
-        backend: 'local_alt_apple_silicon',
+        backend: 'mlx_preview',
         available: false,
         supportedDevices: ['mlx'],
         supportedComputeTypes: ['float16'],
@@ -29,42 +29,42 @@ describe('Apple Silicon transcription contract', () => {
     ]);
   });
 
-  it('migrates persisted legacy backend choices to MLX', () => {
+  it('normalizes obsolete persisted backend values to MLX preview', () => {
     expect(
       resolvePreferredTranscriptionBackend({
-        configuredBackend: 'whisperx_current',
+        configuredBackend: 'obsolete_backend',
         runtime: { platform: 'darwin', arch: 'arm64' },
         health: { mlxAvailable: true },
       }),
-    ).toEqual({ backend: 'local_alt_apple_silicon', shouldPersist: true });
+    ).toEqual({ backend: 'mlx_preview', shouldPersist: true });
   });
 
-  it('never falls back to WhisperX when MLX health is unavailable', () => {
+  it('never falls back to MLX preview when MLX health is unavailable', () => {
     expect(
       resolvePreferredTranscriptionBackend({
         configuredBackend: null,
         runtime: { platform: 'darwin', arch: 'arm64' },
         health: { mlxAvailable: false },
       }),
-    ).toEqual({ backend: 'local_alt_apple_silicon', shouldPersist: true });
+    ).toEqual({ backend: 'mlx_preview', shouldPersist: false });
   });
 
-  it('coerces legacy device and compute values to the MLX runtime contract', () => {
+  it('uses the fixed MLX live-preview runtime contract', () => {
     expect(
       resolveBackendOptions(
         {
-          backend: 'whisperx_current',
+          backend: 'mlx_preview',
           preset: 'accuracy_first',
           model: 'large-v3',
-          device: 'cpu',
-          computeType: 'int8',
+          device: 'mlx',
+          computeType: 'float16',
         },
         { platform: 'darwin', arch: 'arm64' },
       ),
     ).toMatchObject({
-      backend: 'local_alt_apple_silicon',
-      preset: 'accuracy_first',
-      model: 'large-v3',
+      backend: 'mlx_preview',
+      preset: 'balanced',
+      model: 'base',
       device: 'mlx',
       computeType: 'float16',
     });

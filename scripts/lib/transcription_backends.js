@@ -1,7 +1,7 @@
 const DEFAULTS = {
-  backend: 'local_alt_apple_silicon',
+  backend: 'mlx_preview',
   preset: 'balanced',
-  model: 'medium',
+  model: 'base',
   device: 'mlx',
   computeType: 'float16',
   language: 'en',
@@ -11,28 +11,22 @@ const IS_APPLE_SILICON =
   process.platform === 'darwin' && process.arch === 'arm64';
 
 const BACKEND_LABELS = {
-  local_alt_apple_silicon: 'MLX Whisper',
+  mlx_preview: 'MLX Whisper',
 };
 
-const resolveBackendConfig = ({
-  preset = DEFAULTS.preset,
-  model,
-  language,
-} = {}) => {
-  const resolvedPreset = preset === 'accuracy_first' ? preset : 'balanced';
+const resolveBackendConfig = ({ preset = DEFAULTS.preset, language } = {}) => {
+  const resolvedPreset = preset === 'balanced' ? preset : DEFAULTS.preset;
   return {
     ...DEFAULTS,
     preset: resolvedPreset,
-    model:
-      model || (resolvedPreset === 'accuracy_first' ? 'large-v3' : 'medium'),
+    model: DEFAULTS.model,
     language: language || DEFAULTS.language,
-    providerLabel: BACKEND_LABELS.local_alt_apple_silicon,
+    providerLabel: BACKEND_LABELS.mlx_preview,
   };
 };
 
 const listSupportedBenchmarkBackends = () => [
-  { backend: 'local_alt_apple_silicon', preset: 'balanced' },
-  { backend: 'local_alt_apple_silicon', preset: 'accuracy_first' },
+  { backend: 'mlx_preview', preset: 'balanced' },
 ];
 
 module.exports = {

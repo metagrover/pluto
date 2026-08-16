@@ -1,0 +1,48 @@
+import { existsSync, readFileSync } from 'node:fs';
+
+import { describe, expect, it } from 'vitest';
+
+const read = (path: string) => readFileSync(path, 'utf8');
+
+describe('transcription architecture cleanup', () => {
+  it('keeps MLX preview and Parakeet final validation as explicit contracts', () => {
+    const renderer = read('src/components/AudioManager.tsx');
+    const app = read('src/App.tsx');
+    const finalWorker = read(
+      'src/services/finalTranscription/runPersistedMeetingFinalTranscription.ts',
+    );
+    const main = read('electron/main.ts');
+    const retry = read('src/services/retryMeetingTranscriptValidation.ts');
+
+    expect(`${renderer}\n${main}\n${retry}`).not.toContain(
+      ['WHISPER', 'TRANSCRIBE'].join('_'),
+    );
+    expect(renderer).toContain('TRANSCRIPTION_TRANSCRIBE_PREVIEW');
+    expect(renderer).not.toContain('TRANSCRIPTION_TRANSCRIBE_FINAL');
+    expect(app).toContain('runPersistedMeetingFinalTranscription');
+    expect(finalWorker).toContain('TRANSCRIPTION_TRANSCRIBE_FINAL');
+    expect(finalWorker).toContain('processValidatedMeetingDownstream');
+    expect(renderer).not.toContain('fullSession');
+    expect(renderer).not.toContain('whole-session');
+    expect(main).toMatch(/'models',\s*'transcription',\s*'parakeet'/);
+  });
+
+  it('does not expose obsolete backend, device, model, or quality choices', () => {
+    const settings = read('src/utils/transcriptionSettings.ts');
+    const surface = read('src/components/overlays/SettingsOverlay.tsx');
+
+    expect(settings).not.toContain(['whisperx', 'current'].join('_'));
+    expect(settings).not.toContain(['whisperx', 'tuned'].join('_'));
+    expect(settings).not.toMatch(/'cpu'|'cuda'|'mps'/);
+    expect(surface).not.toMatch(
+      /settings-transcription-preset|settings-whisper-model/,
+    );
+  });
+
+  it('uses descriptive MLX preview sidecar names only', () => {
+    expect(existsSync('electron/whisperx.ts')).toBe(false);
+    expect(existsSync('python/whisperx_server.py')).toBe(false);
+    expect(existsSync('electron/transcription/mlxPreviewClient.ts')).toBe(true);
+    expect(existsSync('python/mlx_transcription_server.py')).toBe(true);
+  });
+});

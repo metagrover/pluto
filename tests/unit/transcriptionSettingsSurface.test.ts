@@ -9,13 +9,13 @@ describe('transcription settings surface', () => {
       'utf8',
     );
     expect(settings).not.toContain('settings-transcription-backend');
-    expect(settings).not.toContain('WhisperX Current');
-    expect(settings).not.toContain('WhisperX Tuned');
+    expect(settings).not.toContain('MLX preview Current');
+    expect(settings).not.toContain('MLX preview Tuned');
     expect(settings).not.toContain('whisperDevice');
     expect(settings).not.toContain('whisperComputeType');
-    expect(settings).toContain('Runs locally with MLX on Apple Silicon.');
-    expect(settings).toContain('settings-transcription-preset');
-    expect(settings).toContain('settings-whisper-model');
-    expect(settings).toContain('settings-whisper-language');
+    expect(settings).toContain('Parakeet produces the');
+    expect(settings).not.toContain('settings-transcription-preset');
+    expect(settings).not.toContain('settings-whisper-model');
+    expect(settings).toContain('settings-transcription-language');
   });
 });

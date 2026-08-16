@@ -3,6 +3,21 @@
   "baselineReport": "baselines/current-master.json",
   "cases": [
     {
+      "id": "issue-441-parakeet-final-policy",
+      "issue": 441,
+      "title": "Parakeet canonical transcription is isolated and fail-closed",
+      "kind": "final_transcription_policy",
+      "fixture": "fixtures/issue-441-parakeet-final-policy.json",
+      "tier": "pr",
+      "trackedMetrics": [
+        {
+          "name": "passedScenarioCount",
+          "tolerance": 0,
+          "stability": "stable"
+        }
+      ]
+    },
+    {
       "id": "issue-476-credential-free-distribution",
       "issue": 476,
       "title": "Credential-free distribution metadata gate",

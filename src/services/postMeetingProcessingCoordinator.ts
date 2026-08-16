@@ -4,6 +4,67 @@ import { shouldAutoProcessMeetingAnalysis } from './retryMeetingTranscriptValida
 
 const PROCESSING_WAKE_GRACE_MS = 50;
 
+export const shouldRunMeetingFinalTranscription = (
+  meeting: Partial<Meeting> | null | undefined,
+): boolean =>
+  Boolean(
+    meeting &&
+      meeting.finalization_status !== 'recovery_required' &&
+      meeting.transcript_status === 'provisional' &&
+      meeting.capture_journal_generation &&
+      meeting.transcript_json &&
+      (meeting.audio_path || meeting.system_audio_path),
+  );
+
+export const canRetryMeetingFinalTranscription = (
+  meeting: Partial<Meeting> | null | undefined,
+): boolean => {
+  if (
+    !meeting ||
+    meeting.transcript_status !== 'needs_attention' ||
+    !meeting.capture_journal_generation ||
+    !(meeting.audio_path || meeting.system_audio_path)
+  ) {
+    return false;
+  }
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      finalTranscription?: { policy?: unknown; state?: unknown };
+    };
+    return (
+      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+      integrity.finalTranscription.state === 'needs_attention'
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const isParakeetValidatedMeeting = (
+  meeting: Partial<Meeting> | null | undefined,
+): boolean => {
+  if (meeting?.transcript_status !== 'validated') return false;
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      finalTranscription?: { policy?: unknown; state?: unknown };
+      finalTranscriptionResult?: { policy?: unknown; engine?: unknown };
+    };
+    return (
+      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+      integrity.finalTranscription.state === 'complete' &&
+      integrity.finalTranscriptionResult?.policy === 'parakeet_final_v1' &&
+      integrity.finalTranscriptionResult.engine === 'parakeet_coreml'
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const selectNextMeetingForFinalTranscription = (
+  meetings: Array<Partial<Meeting>>,
+): Partial<Meeting> | null =>
+  meetings.find(shouldRunMeetingFinalTranscription) ?? null;
+
 export const meetingProcessingFingerprint = (
   meeting: Partial<Meeting>,
 ): string =>

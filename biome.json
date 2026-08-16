@@ -46,6 +46,7 @@
       "**/python/**",
       "**/release/**",
       "**/resources/bin/**",
+      "native/**/.build/**",
       ".agent/**",
       ".agents/**",
       ".claude/**",

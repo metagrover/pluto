@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
-from whisperx_server import _transcribe_locked, TranscribeRequest, MLX_WHISPER_AVAILABLE
+from mlx_transcription_server import _transcribe_locked, TranscribeRequest, MLX_WHISPER_AVAILABLE
 
 def get_wav_duration(audio_path):
     with wave.open(audio_path, 'r') as f:

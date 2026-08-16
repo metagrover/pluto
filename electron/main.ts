@@ -1,6 +1,7 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -18,6 +19,7 @@ import {
 import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
+import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   appendCaptureJournalChunk,
@@ -52,6 +54,18 @@ import {
   transcribeJournalAlignedAudio,
 } from './recoveryTranscriptionAudio';
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
+import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
+import { LiveTranscriptionRolloutStore } from './transcription/liveTranscriptionRolloutStore';
+import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
+import { ParakeetLiveClient } from './transcription/parakeetLiveClient';
+import {
+  ParakeetLiveMeetingCoordinator,
+  descendantPids,
+} from './transcription/parakeetLiveMeetingCoordinator';
+import {
+  type ParakeetRuntimeHost,
+  makeRuntimeHost,
+} from './transcription/parakeetRuntimeHost';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -86,6 +100,87 @@ const probeAudioDuration = async (inputPath: string) =>
       resolve(Number.isFinite(duration) && duration >= 0 ? duration : null);
     });
   });
+
+const probeAvailableMemory = async () =>
+  await new Promise<{
+    availableMemoryBytes: number;
+    memoryPressureFreePercent?: number;
+  }>((resolve) => {
+    const probe = spawn('/usr/bin/memory_pressure', ['-Q']);
+    let stdout = '';
+    let settled = false;
+    const finish = (value: {
+      availableMemoryBytes: number;
+      memoryPressureFreePercent?: number;
+    }) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const timeout = setTimeout(() => {
+      probe.kill('SIGTERM');
+      finish({ availableMemoryBytes: os.freemem() });
+    }, 2_000);
+    probe.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    probe.on('error', () => finish({ availableMemoryBytes: os.freemem() }));
+    probe.on('close', (code) => {
+      clearTimeout(timeout);
+      const percentage =
+        code === 0 ? parseMacMemoryPressureFreePercent(stdout) : null;
+      finish(
+        percentage === null
+          ? { availableMemoryBytes: os.freemem() }
+          : {
+              availableMemoryBytes: Math.floor(
+                (os.totalmem() * percentage) / 100,
+              ),
+              memoryPressureFreePercent: percentage,
+            },
+      );
+    });
+  });
+
+const sampleOwnedRuntimeRss = ():
+  | { mlxRssBytes: number; parakeetRssBytes: number }
+  | undefined => {
+  const result = spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,rss=,command='], {
+    encoding: 'utf8',
+    timeout: 1_000,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  if (result.status !== 0 || result.signal) return undefined;
+  const rows: Array<{
+    pid: number;
+    parentPid: number;
+    rssBytes: number;
+    command: string;
+  }> = [];
+  for (const line of result.stdout.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/u);
+    if (!match) continue;
+    const rssBytes = Number(match[3]) * 1024;
+    if (!Number.isFinite(rssBytes) || rssBytes < 0) return undefined;
+    rows.push({
+      pid: Number(match[1]),
+      parentPid: Number(match[2]),
+      rssBytes,
+      command: match[4],
+    });
+  }
+  const descendants = descendantPids(process.pid, rows);
+  let mlxRssBytes = 0;
+  let parakeetRssBytes = 0;
+  for (const row of rows) {
+    if (!descendants.has(row.pid)) continue;
+    if (row.command.includes('mlx_transcription_server'))
+      mlxRssBytes += row.rssBytes;
+    if (row.command.includes('parakeet-runtime'))
+      parakeetRssBytes += row.rssBytes;
+  }
+  return { mlxRssBytes, parakeetRssBytes };
+};
 
 // Note: We intentionally avoid Chromium loopback/screen-capture APIs to keep
 // permissions limited to microphone + system audio recording only.
@@ -207,15 +302,8 @@ app.on('activate', () => {
   }
 });
 
-import {
-  resolveBackendOptions,
-  resolvePreferredTranscriptionBackend,
-} from '../src/utils/transcriptionBackendConfig';
-import {
-  type TranscriptionSettings,
-  resolveLiveChunkModel,
-  resolveTranscriptionSettings,
-} from '../src/utils/transcriptionSettings';
+import { resolveBackendOptions } from '../src/utils/transcriptionBackendConfig';
+import { resolveLiveChunkModel } from '../src/utils/transcriptionSettings';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
@@ -266,8 +354,8 @@ import {
   listTranscriptionBackends,
   transcribeWithBackend,
 } from './transcription';
+import { mlxPreview } from './transcription/mlxPreviewClient';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
-import { whisperX } from './whisperx';
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
@@ -276,6 +364,39 @@ const activeTranscriptionMeetings = new Map<string, number>();
 const knowledgeSynthesisPause = createPauseReasonCoordinator(
   setKnowledgeDocSynthesisPaused,
 );
+let parakeetFinalClient: ParakeetFinalClient | null = null;
+let parakeetRuntimeHost: ParakeetRuntimeHost | null = null;
+let parakeetShadowCoordinator: ParakeetLiveMeetingCoordinator | null = null;
+
+const startParakeetLiveRecording = async (
+  _sender: WebContents,
+  meetingId: string,
+) => {
+  await parakeetShadowCoordinator?.start(meetingId);
+};
+
+const appendParakeetLiveReceipt = async (
+  _sender: WebContents,
+  receipt: {
+    durable?: true;
+    meetingId: string;
+    generation: string;
+    manifestRevision: number;
+    source: 'mic' | 'system';
+    sequence: number;
+    checksumSha256: string;
+    chunkStartSec: number;
+    chunkEndSec: number;
+    repairAudioRelativePath: string | null;
+  },
+) => {
+  await parakeetShadowCoordinator?.append(receipt);
+};
+
+const stopParakeetLiveRecording = async (meetingId: string) => {
+  void meetingId;
+  await parakeetShadowCoordinator?.stop();
+};
 
 function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
@@ -345,7 +466,13 @@ app.on('before-quit', async () => {
     controller.abort();
   }
   activeMeetingTasks.clear();
-  await whisperX.stop();
+  parakeetFinalClient?.close();
+  parakeetFinalClient = null;
+  await parakeetShadowCoordinator?.stop();
+  parakeetShadowCoordinator = null;
+  parakeetRuntimeHost?.shutdown();
+  parakeetRuntimeHost = null;
+  await mlxPreview.stop();
 });
 
 app.whenReady().then(async () => {
@@ -353,29 +480,169 @@ app.whenReady().then(async () => {
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
 
+  const parakeetExecutablePath = app.isPackaged
+    ? path.join(process.resourcesPath, 'bin', 'parakeet-runtime')
+    : path.join(process.env.APP_ROOT, 'resources', 'bin', 'parakeet-runtime');
+  const parakeetModelRoot = path.join(
+    app.getPath('userData'),
+    'models',
+    'transcription',
+    'parakeet',
+  );
+  fs.mkdirSync(parakeetModelRoot, { recursive: true });
+  const parakeetPaths = {
+    executablePath: parakeetExecutablePath,
+    modelRoot: parakeetModelRoot,
+    audioRoot: getMeetingArtifactsRootDir(),
+  };
+  parakeetRuntimeHost = makeRuntimeHost({
+    paths: parakeetPaths,
+    diagnostic: (code) => console.warn(`[Pluto] ${code}`),
+    persistInterruptedFinalization: async () => {
+      db.expireInterruptedFinalTranscription();
+    },
+  });
+  parakeetFinalClient = new ParakeetFinalClient({
+    paths: parakeetPaths,
+    runtimeHost: parakeetRuntimeHost,
+    diagnostic: (code) => console.warn(`[Pluto] ${code}`),
+  });
+  const rolloutOwnerToken = randomUUID();
+  const rolloutStore = new LiveTranscriptionRolloutStore({
+    filePath: path.join(
+      app.getPath('userData'),
+      'live-transcription-rollout.json',
+    ),
+    ownerToken: rolloutOwnerToken,
+    approvedStageEvidenceDigests: {},
+  });
+  parakeetShadowCoordinator = new ParakeetLiveMeetingCoordinator({
+    enabled: () => {
+      const state = rolloutStore.read();
+      return state.mode === 'parakeet' && state.stage === 'system_shadow';
+    },
+    createClient: async () => {
+      if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
+      const lease = await parakeetRuntimeHost.startRecordingLive();
+      const client = new ParakeetLiveClient({
+        runtimeHost: parakeetRuntimeHost,
+        runtimeLease: lease,
+        maxQueuedAppends: 2,
+      });
+      return {
+        open: (identity) => client.open(identity),
+        append: async ({ checksumSha256: _checksumSha256, ...request }) =>
+          await client.append(request),
+        close: async () => {
+          await client.close();
+          return 'exited' as const;
+        },
+      };
+    },
+    resolveRepairPath: (relativePath) => {
+      const root = path.resolve(getMeetingArtifactsRootDir());
+      const candidate = path.resolve(root, relativePath);
+      if (!candidate.startsWith(`${root}${path.sep}`))
+        throw new Error('parakeet_path_not_allowed');
+      return candidate;
+    },
+    sampleResources: () => {
+      const thermal = powerMonitor.getCurrentThermalState();
+      const owned = sampleOwnedRuntimeRss();
+      if (thermal === 'unknown' || !owned) return undefined;
+      const electronRssBytes = process.memoryUsage().rss;
+      return {
+        mlxRssBytes: owned.mlxRssBytes,
+        parakeetRssBytes: owned.parakeetRssBytes,
+        electronRssBytes,
+        freePercent: (os.freemem() / os.totalmem()) * 100,
+        thermal,
+      };
+    },
+    rollback: async () => {
+      const state = rolloutStore.read();
+      return rolloutStore.rollback({
+        reason: 'watchdog',
+        engineEpoch: state.engineEpoch,
+        ownerToken: rolloutOwnerToken,
+      }).accepted;
+    },
+  });
+
   // Local transcription handlers. IPC names remain stable for compatibility.
-  ipcMain.handle('WHISPERX_CHECK_PYTHON', async () => {
-    return await whisperX.checkPython();
+  ipcMain.handle('MLX_PREVIEW_CHECK_PYTHON', async () => {
+    return await mlxPreview.checkPython();
   });
 
-  ipcMain.handle('WHISPERX_START', async () => {
-    await whisperX.start();
+  ipcMain.handle('MLX_PREVIEW_START', async () => {
+    await mlxPreview.start();
     return { success: true };
   });
 
-  ipcMain.handle('WHISPERX_STOP', async () => {
-    await whisperX.stop();
+  ipcMain.handle('MLX_PREVIEW_STOP', async () => {
+    await mlxPreview.stop();
     return { success: true };
   });
 
-  ipcMain.handle('WHISPERX_HEALTH', async () => {
-    return await whisperX.health();
+  ipcMain.handle('MLX_PREVIEW_HEALTH', async () => {
+    return await mlxPreview.health();
   });
 
-  ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', () => ({
+  ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', async () => ({
     onBattery: powerMonitor.isOnBatteryPower(),
     thermalState: powerMonitor.getCurrentThermalState(),
+    freeMemoryBytes: os.freemem(),
+    totalMemoryBytes: os.totalmem(),
+    ...(await probeAvailableMemory()),
   }));
+
+  ipcMain.handle('TRANSCRIPTION_PREPARE_FINAL', async () => {
+    if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
+    return await parakeetFinalClient.prepare();
+  });
+
+  ipcMain.handle('TRANSCRIPTION_FINAL_STATUS', async () => {
+    if (!parakeetFinalClient) {
+      return { ready: false, engine: 'parakeet_coreml' };
+    }
+    try {
+      return await parakeetFinalClient.prepare();
+    } catch {
+      return {
+        ready: false,
+        engine: 'parakeet_coreml',
+        reason: 'parakeet_prepare_failed',
+      };
+    }
+  });
+
+  ipcMain.handle('TRANSCRIPTION_TRANSCRIBE_FINAL', async (_event, request) => {
+    if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
+    const meetingId = String(request?.meetingId || '');
+    const signal = meetingId ? getAbortSignalForMeeting(meetingId) : undefined;
+    beginTranscriptionWork();
+    beginMeetingTranscription(meetingId || null);
+    try {
+      return await parakeetFinalClient.transcribe({ ...request, signal });
+    } finally {
+      endMeetingTranscription(meetingId || null);
+      endTranscriptionWork();
+    }
+  });
+
+  ipcMain.handle('TRANSCRIPTION_CANCEL_FINAL', (_event, meetingId) => {
+    abortMeetingTasks(String(meetingId));
+    return { cancelled: true };
+  });
+
+  ipcMain.handle(
+    'TRANSCRIPTION_CANCEL_AND_UNLOAD_FINAL',
+    (_event, meetingId) => {
+      abortMeetingTasks(String(meetingId));
+      parakeetFinalClient?.close();
+      return { cancelled: true, unloaded: true };
+    },
+  );
 
   ipcMain.handle(
     'GET_TRANSCRIPTION_VOCABULARY',
@@ -396,7 +663,7 @@ app.whenReady().then(async () => {
     abortMeetingTasks(normalizedMeetingId);
     const meetingWorkCount =
       activeTranscriptionMeetings.get(normalizedMeetingId) || 0;
-    const sidecarTerminated = await whisperX.recycleOwnedProcessIf(
+    const sidecarTerminated = await mlxPreview.recycleOwnedProcessIf(
       () =>
         activeTranscriptionCount > 0 &&
         activeTranscriptionCount === meetingWorkCount,
@@ -405,40 +672,40 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(
-    'WHISPERX_TRANSCRIBE',
+    'MLX_PREVIEW_TRANSCRIBE',
     async (_event, { audioPath, options }) => {
       beginTranscriptionWork();
       try {
         const signal = options?.meetingId
           ? getAbortSignalForMeeting(options.meetingId)
           : undefined;
-        return await whisperX.transcribe(audioPath, { ...options, signal });
+        return await mlxPreview.transcribe(audioPath, { ...options, signal });
       } finally {
         endTranscriptionWork();
       }
     },
   );
 
-  ipcMain.handle('WHISPERX_LIST_MODELS', async () => {
-    return await whisperX.listModels();
+  ipcMain.handle('MLX_PREVIEW_LIST_MODELS', async () => {
+    return await mlxPreview.listModels();
   });
 
   ipcMain.handle('WHISPER_DIARIZATION_MODEL_STATUS', async () => {
-    return await whisperX.getDiarizationModelReadiness();
+    return await mlxPreview.getDiarizationModelReadiness();
   });
 
   ipcMain.handle('WHISPER_PREPARE_DIARIZATION_MODELS', async () => {
-    return await whisperX.prepareDiarizationModels();
+    return await mlxPreview.prepareDiarizationModels();
   });
 
   ipcMain.handle('WHISPER_ROLLBACK_DIARIZATION_MODELS', async () => {
-    return await whisperX.rollbackDiarizationModels();
+    return await mlxPreview.rollbackDiarizationModels();
   });
 
   ipcMain.handle(
     'WHISPER_ALIGNED_ENERGY',
     async (_event, micAudioPath, systemAudioPath) => {
-      return await whisperX.getAlignedEnergy(micAudioPath, systemAudioPath);
+      return await mlxPreview.getAlignedEnergy(micAudioPath, systemAudioPath);
     },
   );
 
@@ -451,7 +718,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle(
-    'WHISPER_TRANSCRIBE',
+    'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
     async (_event, audioPath, options = {}) => {
       const meetingId = options.meetingId ? String(options.meetingId) : null;
       console.log('[Pluto] Transcription request started');
@@ -478,7 +745,7 @@ app.whenReady().then(async () => {
             language: 'en',
             duration: 0,
             meta: {
-              backend: 'local_alt_apple_silicon',
+              backend: 'mlx_preview',
               preset: options.preset || 'balanced',
               model: options.model || 'small',
               device: 'mlx',
@@ -629,6 +896,10 @@ app.whenReady().then(async () => {
             sourceAvailability,
           },
         );
+        await startParakeetLiveRecording(
+          event.sender,
+          normalizedMeetingId,
+        ).catch(() => console.warn('[Pluto] parakeet_shadow_start_failed'));
         console.log(`[CaptureLease] ${acquisition.status}`);
         return manifest;
       } catch (error) {
@@ -716,14 +987,22 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
-    async (_event, request = {}) =>
-      await completeCaptureJournalCapturedChunk(getMeetingArtifactsRootDir(), {
-        ...request,
-        meetingId: String(request.meetingId || ''),
-        ...(request.repairData
-          ? { repairData: Buffer.from(request.repairData) }
-          : {}),
-      }),
+    async (event, request = {}) => {
+      const completed = await completeCaptureJournalCapturedChunk(
+        getMeetingArtifactsRootDir(),
+        {
+          ...request,
+          meetingId: String(request.meetingId || ''),
+          ...(request.repairData
+            ? { repairData: Buffer.from(request.repairData) }
+            : {}),
+        },
+      );
+      await appendParakeetLiveReceipt(event.sender, completed.receipt).catch(
+        () => console.warn('[Pluto] parakeet_shadow_append_failed'),
+      );
+      return completed;
+    },
   );
 
   ipcMain.handle(
@@ -800,6 +1079,7 @@ app.whenReady().then(async () => {
       ...request,
       meetingId: normalizedMeetingId,
     });
+    await stopParakeetLiveRecording(normalizedMeetingId);
     captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
     console.log('[CaptureLease] transitioned: capture_stopped');
     return manifest;
@@ -815,6 +1095,7 @@ app.whenReady().then(async () => {
       );
       let manifest: Awaited<ReturnType<typeof sealCaptureJournal>>;
       try {
+        await stopParakeetLiveRecording(normalizedMeetingId);
         manifest = await sealCaptureJournal(getMeetingArtifactsRootDir(), {
           meetingId: normalizedMeetingId,
           endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),
@@ -1604,6 +1885,22 @@ app.whenReady().then(async () => {
     'CLAIM_TRANSCRIPT_VALIDATION_RETRY',
     (_event, meetingId, lease) =>
       db.claimMeetingTranscriptValidationRetry(meetingId, lease),
+  );
+  ipcMain.handle('CLAIM_FINAL_TRANSCRIPTION', (_event, meetingId, lease) =>
+    db.claimMeetingFinalTranscription(meetingId, lease),
+  );
+  ipcMain.handle(
+    'UPDATE_FINAL_TRANSCRIPTION_STAGE',
+    (_event, meetingId, runId, stage) =>
+      db.updateMeetingFinalTranscriptionStage(meetingId, runId, stage),
+  );
+  ipcMain.handle('COMMIT_FINAL_TRANSCRIPTION', (_event, input) =>
+    db.commitMeetingFinalTranscription(input),
+  );
+  ipcMain.handle(
+    'FAIL_FINAL_TRANSCRIPTION',
+    (_event, meetingId, runId, failure) =>
+      db.failMeetingFinalTranscription(meetingId, runId, failure),
   );
   ipcMain.handle(
     'UPDATE_TRANSCRIPT_VALIDATION_RETRY_STAGE',
@@ -2627,50 +2924,23 @@ app.whenReady().then(async () => {
   });
 
   try {
-    await whisperX.start();
-    const health = await whisperX.health();
-    const startupBackend = resolvePreferredTranscriptionBackend({
-      configuredBackend: db.getSetting('transcription_backend'),
-      runtime: { platform: process.platform, arch: process.arch },
-      health: { mlxAvailable: health.mlx_available === true },
-    });
-    const startupSettings = resolveTranscriptionSettings({
-      backend: startupBackend.backend,
-      preset: db.getSetting('transcription_preset'),
-      model: db.getSetting('whisper_model'),
-      device: db.getSetting('whisper_device'),
-      computeType: db.getSetting('whisper_compute_type'),
-      language: db.getSetting('whisper_language'),
-    } as TranscriptionSettings);
-    const resolvedStartup = resolveBackendOptions(
-      {
-        backend: startupBackend.backend,
-        preset: startupSettings.preset ?? 'balanced',
-        model: startupSettings.model,
-        device: startupSettings.device,
-        computeType: startupSettings.computeType,
-        language: startupSettings.language,
-      },
-      { platform: process.platform, arch: process.arch },
-    );
-    await whisperX.setConfig({
-      model: resolvedStartup.model,
+    await mlxPreview.start();
+    const health = await mlxPreview.health();
+    await mlxPreview.setConfig({
+      model: 'base',
       device: 'mlx',
       computeType: 'float16',
-      language: resolvedStartup.language,
+      language: db.getSetting('transcription_language') || 'en',
     });
-    const activeHealth = await whisperX.health();
+    const activeHealth = await mlxPreview.health();
     if (
-      startupBackend.backend === 'local_alt_apple_silicon' &&
+      health.mlx_available !== true ||
       activeHealth.engine !== 'mlx_whisper'
     ) {
       throw new Error('MLX Whisper did not become the active engine');
     }
-    if (startupBackend.shouldPersist) {
-      db.setSetting('transcription_backend', startupBackend.backend);
-    }
     console.log(
-      `[Pluto] Transcription engine ready: ${activeHealth.engine ?? 'unknown'} (${startupBackend.backend})`,
+      `[Pluto] Live preview engine ready: ${activeHealth.engine ?? 'unknown'}`,
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2684,12 +2954,27 @@ app.whenReady().then(async () => {
       `[Pluto] Released ${interruptedDownstreamRuns} interrupted downstream processing lease(s)`,
     );
   }
+  const interruptedFinalTranscriptions =
+    db.expireInterruptedFinalTranscription();
+  if (interruptedFinalTranscriptions > 0) {
+    console.log(
+      `[Pluto] Released ${interruptedFinalTranscriptions} interrupted final transcription lease(s)`,
+    );
+  }
   initializeKnowledgeDocs().catch((error) => {
     console.error(
       '[KnowledgeDoc] Failed to initialize synthesis pipeline:',
       error,
     );
   });
+  await prepareFinalTranscriptionBeforeRecovery({
+    prepare: async () => {
+      if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
+      await parakeetFinalClient.prepare();
+    },
+    recover: async () => undefined,
+  });
+
   try {
     syncActionTrackerAttentionQueue();
   } catch (error) {
@@ -2700,19 +2985,11 @@ app.whenReady().then(async () => {
   }
 
   try {
-    const recoveryTranscriptionSettings = resolveTranscriptionSettings({
-      backend: db.getSetting('transcription_backend'),
-      preset: db.getSetting('transcription_preset'),
-      model: db.getSetting('whisper_model'),
-      device: db.getSetting('whisper_device'),
-      computeType: db.getSetting('whisper_compute_type'),
-      language: db.getSetting('whisper_language'),
-    } as TranscriptionSettings);
     const resolvedRecoveryTranscription = resolveBackendOptions({
-      backend: 'local_alt_apple_silicon',
-      preset: recoveryTranscriptionSettings.preset ?? 'balanced',
-      model: recoveryTranscriptionSettings.model,
-      language: recoveryTranscriptionSettings.language,
+      backend: 'mlx_preview',
+      preset: 'balanced',
+      model: 'base',
+      language: db.getSetting('transcription_language') || 'en',
     });
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),

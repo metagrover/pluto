@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "identifier": "parakeet-tdt-0.6b-v3",
+  "runtime": {
+    "name": "FluidAudio",
+    "version": "0.15.5",
+    "source": "https://github.com/FluidInference/FluidAudio",
+    "license": "Apache-2.0"
+  },
+  "recognitionModel": {
+    "repository": "FluidInference/parakeet-tdt-0.6b-v3-coreml",
+    "revision": "aed02740059203c4a87495924f685de3722ae9ce",
+    "artifactSHA256": "f03b69d2d516896b78676270164b54f7c1fd2add37de4d06f9671752f88c688f",
+    "license": "CC-BY-4.0",
+    "encoderPrecision": "int8"
+  },
+  "vocabularyModel": {
+    "repository": "FluidInference/parakeet-ctc-110m-coreml",
+    "revision": "accdafd8cf8a2ff1cabe3c11e54416b405d409aa",
+    "artifactSHA256": "b955323ed3f2769beb287c97f172a7dd2ccc7493218a2e6e6b930ccbc41d17d7",
+    "license": "CC-BY-4.0"
+  },
+  "activationVersion": "fluidaudio-0.15.5-asr-aed02740-ctc-accdafd8-int8-verified1"
+}

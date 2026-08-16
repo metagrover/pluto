@@ -174,17 +174,7 @@ const getSetting = (key: unknown) => {
       return 'system';
     case 'auto_end_enabled':
       return 'true';
-    case 'transcription_backend':
-      return 'local_alt_apple_silicon';
-    case 'transcription_preset':
-      return 'balanced';
-    case 'whisper_model':
-      return 'small';
-    case 'whisper_device':
-      return 'mlx';
-    case 'whisper_compute_type':
-      return 'float16';
-    case 'whisper_language':
+    case 'transcription_language':
       return '';
     default:
       return null;
@@ -274,8 +264,8 @@ const createInvokeFallback =
       case 'GET_SETTING':
         result = getSetting(args[0]);
         break;
-      case 'WHISPERX_HEALTH':
-      case 'WHISPERX_CHECK_PYTHON':
+      case 'MLX_PREVIEW_HEALTH':
+      case 'MLX_PREVIEW_CHECK_PYTHON':
         result = { status: 'ok' };
         break;
       case 'GET_MEETINGS':

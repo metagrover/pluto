@@ -6,14 +6,11 @@ export type WhisperModel =
   | 'large-v2'
   | 'large-v3';
 
-export type WhisperDevice = 'cpu' | 'cuda' | 'mps' | 'mlx';
+export type WhisperDevice = 'mlx';
 
-export type WhisperComputeType = 'float16' | 'float32' | 'int8';
+export type WhisperComputeType = 'float16';
 
-export type TranscriptionBackend =
-  | 'whisperx_current'
-  | 'whisperx_tuned'
-  | 'local_alt_apple_silicon';
+export type TranscriptionBackend = 'mlx_preview';
 
 export type TranscriptionPreset = 'balanced' | 'accuracy_first';
 
@@ -36,9 +33,9 @@ export interface ResolvedTranscriptionSettings {
 }
 
 export const DEFAULT_TRANSCRIPTION_SETTINGS: ResolvedTranscriptionSettings = {
-  backend: 'local_alt_apple_silicon',
+  backend: 'mlx_preview',
   preset: 'balanced',
-  model: 'small',
+  model: 'base',
   device: 'mlx',
   computeType: 'float16',
   language: 'en',
@@ -48,9 +45,7 @@ export const TRANSCRIPTION_BACKEND_LABELS: Record<
   TranscriptionBackend,
   string
 > = {
-  whisperx_current: 'WhisperX Current',
-  whisperx_tuned: 'WhisperX Tuned',
-  local_alt_apple_silicon: 'Local Alt (Apple Silicon)',
+  mlx_preview: 'MLX live preview',
 };
 
 export const TRANSCRIPTION_PRESET_LABELS: Record<TranscriptionPreset, string> =
@@ -69,16 +64,12 @@ export const resolveTranscriptionLanguage = (
 export const resolveTranscriptionBackend = (
   _backend?: string | null,
 ): TranscriptionBackend => {
-  return 'local_alt_apple_silicon';
+  return 'mlx_preview';
 };
 
 export const resolveTranscriptionPreset = (
-  preset?: string | null,
-): TranscriptionPreset => {
-  return preset === 'accuracy_first' || preset === 'balanced'
-    ? preset
-    : 'balanced';
-};
+  _preset?: string | null,
+): TranscriptionPreset => 'balanced';
 
 export const resolveTranscriptionSettings = (
   settings?: TranscriptionSettings | null,
@@ -86,10 +77,9 @@ export const resolveTranscriptionSettings = (
   return {
     backend: resolveTranscriptionBackend(settings?.backend),
     preset: resolveTranscriptionPreset(settings?.preset),
-    model: settings?.model ?? DEFAULT_TRANSCRIPTION_SETTINGS.model,
-    device: settings?.device ?? DEFAULT_TRANSCRIPTION_SETTINGS.device,
-    computeType:
-      settings?.computeType ?? DEFAULT_TRANSCRIPTION_SETTINGS.computeType,
+    model: DEFAULT_TRANSCRIPTION_SETTINGS.model,
+    device: DEFAULT_TRANSCRIPTION_SETTINGS.device,
+    computeType: DEFAULT_TRANSCRIPTION_SETTINGS.computeType,
     language: resolveTranscriptionLanguage(settings?.language),
   };
 };
@@ -98,5 +88,5 @@ export const resolveLiveChunkModel = (model: WhisperModel): WhisperModel =>
   model === 'tiny' ? 'tiny' : 'base';
 
 export const resolveLiveChunkComputeType = (
-  computeType: WhisperComputeType,
-): WhisperComputeType => (computeType === 'float32' ? 'int8' : computeType);
+  _computeType: WhisperComputeType,
+): WhisperComputeType => 'float16';

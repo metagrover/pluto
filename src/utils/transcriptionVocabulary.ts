@@ -16,6 +16,7 @@ export type TranscriptionPersonCandidate = {
 
 export type TranscriptionVocabularySelection = {
   initialPrompt: string | null;
+  terms: string[];
   provenance: {
     policyVersion: typeof KNOWN_PERSON_VOCABULARY_POLICY_VERSION;
     hintCount: number;
@@ -119,6 +120,7 @@ export const selectTranscriptionVocabulary = ({
       selectedNames.length > 0
         ? `${PROMPT_PREFIX}${selectedNames.join(', ')}.`
         : null,
+    terms: selectedNames,
     provenance: {
       policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
       hintCount: selectedNames.length,

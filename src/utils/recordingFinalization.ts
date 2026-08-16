@@ -29,7 +29,7 @@ export type SpeakerAttributionRetryPlan = {
 };
 
 const STRONGEST_ATTRIBUTION_POLICY = resolveBackendOptions({
-  backend: 'local_alt_apple_silicon',
+  backend: 'mlx_preview',
   preset: 'accuracy_first',
 });
 

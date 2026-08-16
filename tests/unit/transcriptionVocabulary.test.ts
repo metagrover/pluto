@@ -33,6 +33,12 @@ describe('selectTranscriptionVocabulary', () => {
     expect(selected.initialPrompt).toBe(
       'Person names: Mira Sol, Theo North, Ari Lake, Zara Field.',
     );
+    expect(selected.terms).toEqual([
+      'Mira Sol',
+      'Theo North',
+      'Ari Lake',
+      'Zara Field',
+    ]);
     expect(selected.provenance).toEqual({
       policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
       hintCount: 4,
@@ -135,6 +141,7 @@ describe('selectTranscriptionVocabulary', () => {
 
     expect(selected).toEqual({
       initialPrompt: null,
+      terms: [],
       provenance: {
         policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
         hintCount: 0,

@@ -9,6 +9,11 @@ import {
   readDownstreamProcessingLease,
 } from '../src/services/downstreamProcessingLease';
 import {
+  type FinalTranscriptionLease,
+  finishFinalTranscriptionLease,
+  readFinalTranscriptionLease,
+} from '../src/services/finalTranscription/finalTranscriptionLease';
+import {
   type TranscriptValidationRetryFailure,
   type TranscriptValidationRetryLease,
   type TranscriptValidationRetryStage,
@@ -1541,6 +1546,269 @@ const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
 
 export const saveMeeting = (meeting: PersistedMeeting) =>
   saveMeetingTransaction(meeting);
+
+const readMeetingFinalTranscriptionLease = (
+  integrityJson: string | null | undefined,
+): FinalTranscriptionLease | null => {
+  const integrity = parseIntegrityRecord(integrityJson);
+  return readFinalTranscriptionLease(integrity.finalTranscription);
+};
+
+export const claimMeetingFinalTranscription = (
+  meetingId: string | number,
+  lease: FinalTranscriptionLease,
+): boolean =>
+  db.transaction(() => {
+    const current = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (
+      !current ||
+      current.capture_journal_generation !== lease.captureGeneration ||
+      !['provisional', 'needs_attention'].includes(
+        String(current.transcript_status),
+      )
+    ) {
+      return false;
+    }
+    const active = readMeetingFinalTranscriptionLease(
+      current.transcript_integrity_json,
+    );
+    if (active && Date.parse(active.deadlineAt) > Date.parse(lease.startedAt)) {
+      return false;
+    }
+    const priorIntegrity = current.transcript_integrity_json ?? null;
+    const integrity = parseIntegrityRecord(priorIntegrity);
+    const nextIntegrity = JSON.stringify({
+      ...integrity,
+      state: 'validating',
+      causes: [],
+      validationProof: undefined,
+      retry: undefined,
+      finalTranscription: lease,
+    });
+    return (
+      db
+        .prepare(
+          `UPDATE meetings
+           SET transcript_status = 'validating',
+               transcript_json = ?,
+               transcript_integrity_json = ?
+           WHERE id = ?
+             AND capture_journal_generation = ?
+             AND transcript_integrity_json IS ?`,
+        )
+        .run(
+          withTranscriptLifecycleStatus(current.transcript_json, 'validating'),
+          nextIntegrity,
+          String(meetingId),
+          lease.captureGeneration,
+          priorIntegrity,
+        ).changes === 1
+    );
+  })();
+
+export const updateMeetingFinalTranscriptionStage = (
+  meetingId: string | number,
+  runId: string,
+  stage: FinalTranscriptionLease['stage'],
+): boolean =>
+  db.transaction(() => {
+    const current = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const integrity = parseIntegrityRecord(current.transcript_integrity_json);
+    const lease = readFinalTranscriptionLease(integrity.finalTranscription);
+    if (!lease || lease.runId !== runId) return false;
+    return (
+      db
+        .prepare(
+          `UPDATE meetings SET transcript_integrity_json = ?
+           WHERE id = ? AND transcript_integrity_json IS ?`,
+        )
+        .run(
+          JSON.stringify({
+            ...integrity,
+            finalTranscription: { ...lease, stage },
+          }),
+          String(meetingId),
+          current.transcript_integrity_json,
+        ).changes === 1
+    );
+  })();
+
+export const commitMeetingFinalTranscription = (input: {
+  meetingId: string | number;
+  runId: string;
+  captureGeneration: string;
+  canonicalTranscriptJson: string;
+  transcriptIntegrityJson: string;
+  transcriptValidatedAt: string;
+}): false | { committed: true; transcriptJson: string } =>
+  db.transaction(() => {
+    const current = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const currentIntegrity = parseIntegrityRecord(
+      current.transcript_integrity_json,
+    );
+    const lease = readFinalTranscriptionLease(
+      currentIntegrity.finalTranscription,
+    );
+    if (
+      !lease ||
+      lease.runId !== input.runId ||
+      lease.captureGeneration !== input.captureGeneration ||
+      current.capture_journal_generation !== input.captureGeneration ||
+      current.transcript_status !== 'validating'
+    ) {
+      return false;
+    }
+    let suppliedIntegrity: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(input.transcriptIntegrityJson) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return false;
+      }
+      suppliedIntegrity = parsed as Record<string, unknown>;
+    } catch {
+      return false;
+    }
+    const nextIntegrity = JSON.stringify({
+      ...suppliedIntegrity,
+      finalTranscription: finishFinalTranscriptionLease(lease),
+    });
+    const changed = db
+      .prepare(
+        `UPDATE meetings
+         SET transcript_json = ?,
+             transcript_integrity_json = ?,
+             transcript_validated_at = ?,
+             transcript_status = 'validated',
+             finalization_status = 'finalized',
+             finalization_error_category = NULL,
+             enhanced_notes = NULL,
+             analysis_json = NULL,
+             value_signals_json = NULL,
+             downstream_processing_json = NULL
+         WHERE id = ?
+           AND capture_journal_generation = ?
+           AND transcript_status = 'validating'
+           AND transcript_integrity_json IS ?`,
+      )
+      .run(
+        input.canonicalTranscriptJson,
+        nextIntegrity,
+        input.transcriptValidatedAt,
+        String(input.meetingId),
+        input.captureGeneration,
+        current.transcript_integrity_json,
+      ).changes;
+    if (changed !== 1) return false;
+    const updated = getMeeting(input.meetingId) as PersistedMeeting | undefined;
+    if (updated) refreshMeetingFts(updated);
+    return {
+      committed: true as const,
+      transcriptJson: input.canonicalTranscriptJson,
+    };
+  })();
+
+export const failMeetingFinalTranscription = (
+  meetingId: string | number,
+  runId: string,
+  failure: Parameters<typeof finishFinalTranscriptionLease>[1],
+): boolean =>
+  db.transaction(() => {
+    const current = getMeeting(meetingId) as PersistedMeeting | undefined;
+    if (!current) return false;
+    const integrity = parseIntegrityRecord(current.transcript_integrity_json);
+    const lease = readFinalTranscriptionLease(integrity.finalTranscription);
+    if (!lease || lease.runId !== runId || !failure) return false;
+    return (
+      db
+        .prepare(
+          `UPDATE meetings
+           SET transcript_status = 'needs_attention',
+               transcript_json = ?,
+               transcript_integrity_json = ?
+           WHERE id = ? AND transcript_integrity_json IS ?`,
+        )
+        .run(
+          withTranscriptLifecycleStatus(
+            current.transcript_json,
+            'needs_attention',
+          ),
+          JSON.stringify({
+            ...integrity,
+            state: 'needs_attention',
+            causes: [
+              {
+                code:
+                  failure === 'required_source_failed'
+                    ? 'required_source_failed'
+                    : 'processing_stage_failed',
+                stage: 'source_transcription',
+              },
+            ],
+            validationProof: undefined,
+            retry: undefined,
+            finalTranscription: finishFinalTranscriptionLease(lease, failure),
+          }),
+          String(meetingId),
+          current.transcript_integrity_json,
+        ).changes === 1
+    );
+  })();
+
+export const expireInterruptedFinalTranscription = (): number =>
+  db.transaction(() => {
+    const rows = db
+      .prepare(
+        `SELECT id, transcript_integrity_json
+         FROM meetings
+         WHERE transcript_status = 'validating'`,
+      )
+      .all() as Array<{
+      id: string;
+      transcript_integrity_json: string | null;
+    }>;
+    let expired = 0;
+    for (const row of rows) {
+      const integrity = parseIntegrityRecord(row.transcript_integrity_json);
+      const lease = readFinalTranscriptionLease(integrity.finalTranscription);
+      if (!lease) continue;
+      expired += db
+        .prepare(
+          `UPDATE meetings
+           SET transcript_status = 'needs_attention',
+               transcript_json = ?,
+               transcript_integrity_json = ?
+           WHERE id = ? AND transcript_integrity_json IS ?`,
+        )
+        .run(
+          withTranscriptLifecycleStatus(
+            (getMeeting(row.id) as PersistedMeeting | undefined)
+              ?.transcript_json,
+            'needs_attention',
+          ),
+          JSON.stringify({
+            ...integrity,
+            state: 'needs_attention',
+            causes: [
+              {
+                code: 'processing_stage_failed',
+                stage: 'source_transcription',
+              },
+            ],
+            validationProof: undefined,
+            retry: undefined,
+            finalTranscription: finishFinalTranscriptionLease(
+              lease,
+              'runtime_unavailable',
+            ),
+          }),
+          row.id,
+          row.transcript_integrity_json,
+        ).changes;
+    }
+    return expired;
+  })();
 
 export type ConditionalMeetingUpdateOutcome =
   | 'updated'

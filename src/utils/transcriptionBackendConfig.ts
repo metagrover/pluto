@@ -78,45 +78,24 @@ export const TRANSCRIPTION_BACKEND_LABELS: Record<
   TranscriptionBackend,
   string
 > = {
-  whisperx_current: 'WhisperX Current',
-  whisperx_tuned: 'WhisperX Tuned',
-  local_alt_apple_silicon: 'MLX Whisper',
+  mlx_preview: 'MLX live preview',
 };
 
-const getSupportedDevices = (
-  backend: TranscriptionBackend,
-  runtimePlatform: PlutoRuntimePlatform,
-): WhisperDevice[] => {
-  if (backend === 'local_alt_apple_silicon') {
-    return ['mlx'];
-  }
-  return runtimePlatform.platform === 'linux' ||
-    runtimePlatform.platform === 'win32'
-    ? ['cpu', 'cuda']
-    : ['cpu'];
-};
+const getSupportedDevices = (): WhisperDevice[] => ['mlx'];
 
-const getSupportedComputeTypes = (
-  backend: TranscriptionBackend,
-): WhisperComputeType[] =>
-  backend === 'local_alt_apple_silicon' ? ['float16'] : ['int8', 'float32'];
+const getSupportedComputeTypes = (): WhisperComputeType[] => ['float16'];
 
-const getSupportedPresets = (
-  backend: TranscriptionBackend,
-): TranscriptionPreset[] => {
-  if (backend === 'whisperx_current') return ['balanced'];
-  return ['balanced', 'accuracy_first'];
-};
+const getSupportedPresets = (): TranscriptionPreset[] => ['balanced'];
 
 export const getTranscriptionCapabilities = (
   _backend: TranscriptionBackend,
   runtime?: RuntimePlatformInput,
 ): TranscriptionCapabilities => {
-  const backend: TranscriptionBackend = 'local_alt_apple_silicon';
+  const backend: TranscriptionBackend = 'mlx_preview';
   const runtimePlatform = resolveRuntimePlatform(runtime);
   const isAppleSilicon =
     runtimePlatform.platform === 'darwin' && runtimePlatform.arch === 'arm64';
-  if (backend === 'local_alt_apple_silicon' && !isAppleSilicon) {
+  if (backend === 'mlx_preview' && !isAppleSilicon) {
     return {
       backend,
       available: false,
@@ -124,7 +103,7 @@ export const getTranscriptionCapabilities = (
       supportedDevices: ['mlx'],
       supportedComputeTypes: ['float16'],
       supportedModels: ALL_MODELS,
-      supportedPresets: getSupportedPresets(backend),
+      supportedPresets: getSupportedPresets(),
       reason: 'Pluto transcription requires an Apple Silicon Mac.',
     };
   }
@@ -133,12 +112,12 @@ export const getTranscriptionCapabilities = (
     backend,
     available: true,
     providerLabel: TRANSCRIPTION_BACKEND_LABELS[backend],
-    supportedDevices: getSupportedDevices(backend, runtimePlatform),
-    supportedComputeTypes: getSupportedComputeTypes(backend),
+    supportedDevices: getSupportedDevices(),
+    supportedComputeTypes: getSupportedComputeTypes(),
     supportedModels: ALL_MODELS,
-    supportedPresets: getSupportedPresets(backend),
+    supportedPresets: getSupportedPresets(),
     reason:
-      backend === 'local_alt_apple_silicon'
+      backend === 'mlx_preview'
         ? 'Runs locally with MLX Whisper on Apple Silicon.'
         : undefined,
   };
@@ -148,10 +127,8 @@ const getPresetDefaults = (
   _backend: TranscriptionBackend,
   preset: TranscriptionPreset,
 ): Pick<ResolvedBackendOptions, 'model' | 'device' | 'computeType'> => {
-  if (preset === 'accuracy_first') {
-    return { model: 'large-v3', device: 'mlx', computeType: 'float16' };
-  }
-  return { model: 'medium', device: 'mlx', computeType: 'float16' };
+  void preset;
+  return { model: 'base', device: 'mlx', computeType: 'float16' };
 };
 
 export const resolvePreferredTranscriptionBackend = ({
@@ -166,8 +143,9 @@ export const resolvePreferredTranscriptionBackend = ({
   void runtime;
   void health;
   return {
-    backend: 'local_alt_apple_silicon',
-    shouldPersist: configuredBackend !== 'local_alt_apple_silicon',
+    backend: 'mlx_preview',
+    shouldPersist:
+      configuredBackend != null && configuredBackend !== 'mlx_preview',
   };
 };
 
@@ -182,11 +160,9 @@ export const resolveBackendOptions = (
   },
   runtime?: RuntimePlatformInput,
 ): ResolvedBackendOptions => {
-  const backend: TranscriptionBackend = 'local_alt_apple_silicon';
-  const capabilities = getTranscriptionCapabilities(backend, runtime);
-  const preset = capabilities.supportedPresets.includes(options.preset)
-    ? options.preset
-    : capabilities.supportedPresets[0];
+  void runtime;
+  const backend: TranscriptionBackend = 'mlx_preview';
+  const preset = 'balanced';
   const defaults = getPresetDefaults(backend, preset);
   const warnings: string[] = [];
 
@@ -195,7 +171,7 @@ export const resolveBackendOptions = (
     (options.device !== undefined && options.device !== 'mlx') ||
     (options.computeType !== undefined && options.computeType !== 'float16')
   )
-    warnings.push('Migrated legacy transcription configuration to MLX.');
+    warnings.push('Applied the fixed MLX live-preview configuration.');
   const device: WhisperDevice = 'mlx';
   const computeType: WhisperComputeType = 'float16';
 
@@ -203,7 +179,7 @@ export const resolveBackendOptions = (
     backend,
     preset,
     providerLabel: TRANSCRIPTION_BACKEND_LABELS[backend],
-    model: (options.model ?? defaults.model) as WhisperModel,
+    model: defaults.model,
     device,
     computeType,
     language: resolveTranscriptionLanguage(options.language),
@@ -214,5 +190,5 @@ export const resolveBackendOptions = (
 export const listTranscriptionBackends = (
   runtime?: RuntimePlatformInput,
 ): TranscriptionCapabilities[] => {
-  return [getTranscriptionCapabilities('local_alt_apple_silicon', runtime)];
+  return [getTranscriptionCapabilities('mlx_preview', runtime)];
 };

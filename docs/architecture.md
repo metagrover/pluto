@@ -20,9 +20,9 @@ This document describes the high-level architecture of Pluto's local meeting cap
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│ 2. Native Apple Silicon MLX Whisper (`mlx-whisper` sidecar)            │
-│    • Acceleration: Apple Neural Engine (ANE) + Metal GPU               │
-│    • Responsibility: Converts raw audio to text & word timestamps      │
+│ 2. Local transcription policy                                          │
+│    • MLX Whisper base: bounded live-preview chunks                      │
+│    • Parakeet Core ML: canonical mic/system final validation            │
 └───────────────────────────────────┬────────────────────────────────────┘
                                     │
                                     ▼
@@ -49,13 +49,16 @@ This document describes the high-level architecture of Pluto's local meeting cap
   - **ScreenCaptureKit:** Required on macOS 13+ to capture internal desktop/app audio (Zoom, Google Meet, Slack, Teams) without virtual audio cables.
   - **TCC Entitlements:** Executes with signed macOS code signatures for Microphone and Screen Recording user privacy permissions.
 
-### 2. Native Apple Silicon MLX Whisper (`python/whisperx_server.py`)
-- **Engine:** Apple `mlx-whisper` (`local_alt_apple_silicon`)
-- **Purpose:** Converts raw 16kHz PCM audio into accurate text transcripts with millisecond word-level timestamps.
-- **Why MLX?**
-  - Runs natively with Apple's MLX framework and unified memory.
-  - Produces word timestamps used by Pluto's live and final transcript evidence.
-  - Fails explicitly when MLX is unavailable; Pluto does not switch to a CPU recognizer.
+### 2. Local transcription (`python/mlx_preview_server.py`, `native/parakeet-runtime/`)
+
+- **Live preview:** Apple MLX Whisper base converts sealed, bounded source chunks into responsive provisional text.
+- **Final validation:** FluidAudio 0.15.5 runs Parakeet TDT 0.6B v3 int8 in a dedicated Swift/Core ML child process.
+- **Source policy:** Complete microphone and system artifacts are recognized sequentially and reconciled without a whole-meeting mixed or MLX fallback.
+- **Trust boundary:** Sealed capture evidence remains the source-coverage denominator when ASR reports speech; explicit no-speech proof may reject a false-positive activity window. Real per-source audio duration, valid timings, and required source coverage must pass before a generation-guarded canonical commit; a meeting-level duration may not substitute for a shorter source artifact. Analysis starts only after that commit.
+- **Model integrity:** Pluto verifies the complete staged ASR and vocabulary model trees against shipped SHA-256 values before activating an immutable model version; a moving or altered upstream artifact fails closed.
+- **Resource boundary:** Full-meeting inference never runs in Electron or the MLX preview process. The native child can be cancelled or terminated independently and uses CPU plus Neural Engine with disk-backed long-form audio.
+- **Admission and release:** Serious/critical thermal pressure or low available memory leaves final validation retryable without starting inference. On macOS, availability comes from the system memory-pressure signal so reclaimable cache is not mistaken for exhaustion; raw free pages are only a fallback. Successful provider metadata records the actual int8/Core ML configuration and per-source aggregates; the native child unloads after five idle minutes.
+- **Post-meeting ownership:** `App.tsx` schedules sealed provisional meetings through the persisted final-transcription worker after the recording component releases its critical path. A new capture cancels and unloads active Parakeet work. Once the generation-guarded canonical commit succeeds, a downstream-only worker analyzes those exact committed bytes and never invokes ASR again.
 
 ### 3. Local Speaker Diarization (`python/sherpa_diarization_runtime.py`)
 - **Engine:** `sherpa-onnx` (C++ ONNX Runtime)
@@ -69,8 +72,8 @@ This document describes the high-level architecture of Pluto's local meeting cap
 ## 🔒 IPC & Process Lifecycle
 
 1. **Electron Main Process (`electron/main.ts`):**
-   - Manages the lifecycle of the bundled local transcription executable on `localhost:5123`.
+   - Manages the MLX preview HTTP server and the native Parakeet JSON-lines child separately.
    - Spawns Swift capture binaries when a meeting recording starts.
-2. **Sidecar Communication (`electron/transcription.ts`):**
-   - Communicates via HTTP REST endpoints (`/transcribe`, `/diarize`, `/attribution/aligned-energy`, `/health`).
-   - Ensures warm model state in memory for 0ms request initialization.
+2. **Provider boundary (`electron/transcription/`):**
+   - Routes bounded preview requests to MLX HTTP and canonical final requests to Parakeet standard input/output.
+   - Correlates requests, enforces one final request at a time, sanitizes diagnostics, and preserves provider-neutral result contracts.

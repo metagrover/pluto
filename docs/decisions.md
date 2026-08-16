@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
++## 2026-08-16 - Prefer transcript reconciliation over rolling AEC
+
+- **Status:** Accepted
+- **Source:** [Issue #629](https://github.com/metagrover/pluto/issues/629), owner direction on 2026-08-16
+- **Decision:** Pluto will not build, package, or operate a rolling AEC runtime or dual-source-primary transcription path for ordinary transcript deduplication. It retains separate mic/System capture and transcript-level cross-channel bleed reconciliation.
+- **Rationale:** Duplicate remote speech is a transcript-reconciliation problem already addressed by timestamped cross-channel collapse. The WebRTC AudioProcessing spike proved a maintained external library can build and produce deterministic residuals, but it did not establish the independent delay, drift, and local-speech-preservation evidence needed to use mic audio as local-speaker proof. That higher-risk attribution requirement is not needed for the current product outcome.
+- **Consequences:** No new AEC dependency, DSP implementation, capture sidecar, or primary-transcription wiring will ship. System-only shadow work and the existing canonical finalization remain available. A future request to make local-speaker identity claims during overlap must begin as a separate, evidence-backed product decision.
+
 ## 2026-08-11 - Remove the Meeting View follow-up email draft surface
 - **Status:** Accepted
 - **Source:** [Issue #613](https://github.com/metagrover/pluto/issues/613), owner direction on 2026-08-11
@@ -247,3 +255,12 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Rationale:** Prompt contradictions and whole-transcript token overlap let exploratory language and unsupported owners reach user-facing analysis even when quality metadata admitted the failure. A larger local model improved quoting but did not fix classification by itself.
 - **Consequences:** Proposals and open questions remain visible without becoming commitments; structured Ollama thinking and evaluation seeds are explicit capabilities; default-model changes require a repeated real-provider quality, latency, and memory gate rather than a single anecdotal run.
 - **Model promotion:** After the `notes-v6` rejection-pattern correction, Qwen passed the three-seed production-provider gate with 24/24 precision cases, 30/30 exact-evidence support, zero Phi-baseline fixture regressions, 15.9-second average case latency, and 5.5 GB resident memory. Qwen is the task-scoped structured-analysis default; Phi remains the default for other latency-sensitive Ollama tasks, and explicit user configuration still wins.
+
+## 2026-08-15 - Separate live preview from canonical final transcription
+
+- **Status:** Accepted
+- **Source:** [Issue #441](https://github.com/metagrover/pluto/issues/441), `docs/adr/2026-08-15-parakeet-final-transcription.md`
+- **Decision:** Keep bounded MLX Whisper base chunks for live preview and use a Pluto-owned FluidAudio/Parakeet Core ML child process for whole-meeting final validation. Microphone and system sources run sequentially, whole-session MLX is ineligible as fallback, and analysis starts only from a generation-guarded canonical commit.
+- **Rationale:** Final quality needs a stronger recognizer while two whole-meeting unified-memory incidents froze the system near 12 GB. A native child gives Core ML acceleration, pinned local models, independent cancellation, and an enforceable memory boundary.
+- **Consequences:** First use has a larger download and setup cost; provisional text remains available during validation; failures preserve capture truth and become retryable rather than silently promoting lower-quality text.
+- **Private evaluation:** Two recent meetings and four source artifacts passed the production integrity path with zero timing failures, 0.0117 real-time factor, and 185.4 MiB peak child RSS. The old reference contained 112 out-of-audio segments and one timeline extending 679.63 seconds beyond its source. After excluding impossible evidence and conservatively collapsing exact three-word channel bleed, ten-second time-aligned proxy precision/recall were 67.90%/74.38%, while order-independent lexical precision/recall were 84.71%/79.13%. This is operational-fit and historical-integrity evidence, not human-ground-truth accuracy proof; reviewed excerpts remain a hard promotion gate.

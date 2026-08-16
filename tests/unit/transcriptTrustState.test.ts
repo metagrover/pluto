@@ -45,6 +45,102 @@ const capabilities = buildTranscriptTrustCapabilities({
 });
 
 describe('transcriptTrustState', () => {
+  const finalTranscriptionResult = {
+    policy: 'parakeet_final_v1',
+    engine: 'parakeet_coreml',
+    model: 'parakeet-tdt-0.6b-v3',
+    computeType: 'int8',
+    computeUnits: 'cpu_and_neural_engine',
+    language: 'en',
+    elapsedMs: 1200,
+    warnings: [],
+    sources: { mic: 'speech', system: 'speech', mix: 'unknown' },
+    sourceDetails: {
+      mic: {
+        outcome: 'speech',
+        providerVersion: 'FluidAudio-0.15.5',
+        elapsedMs: 500,
+        vadStatus: 'speech',
+        speechSeconds: 10,
+        segmentCount: 2,
+        wordCount: 20,
+      },
+      system: {
+        outcome: 'speech',
+        providerVersion: 'FluidAudio-0.15.5',
+        elapsedMs: 700,
+        vadStatus: 'speech',
+        speechSeconds: 15,
+        segmentCount: 3,
+        wordCount: 30,
+      },
+    },
+    providerVersions: ['FluidAudio-0.15.5'],
+    modelBundleVersions: ['bundle-v1'],
+    vocabularyCount: 2,
+  };
+
+  it('accepts content-free final provider evidence and rejects extra content', () => {
+    const envelope = {
+      schemaVersion: 2,
+      state: 'validated',
+      causes: [],
+      evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+      validationProof: {
+        gateVersion: 'canonical_integrity_v1',
+        validatedAt: '2026-08-15T00:00:00.000Z',
+      },
+      finalTranscription: {
+        schemaVersion: 1,
+        state: 'complete',
+        policy: 'parakeet_final_v1',
+        captureGeneration: 'generation-1',
+      },
+      finalTranscriptionResult,
+    };
+    const validatedProjections = {
+      transcriptStatus: 'validated' as const,
+      transcriptValidatedAt: '2026-08-15T00:00:00.000Z',
+      payloadLifecycleStatus: 'validated' as const,
+    };
+    expect(
+      parseTranscriptTrustEnvelope(
+        JSON.stringify(envelope),
+        validatedProjections,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(
+      parseTranscriptTrustEnvelope(
+        JSON.stringify({
+          ...envelope,
+          finalTranscriptionResult: {
+            ...finalTranscriptionResult,
+            transcript: 'private content',
+          },
+        }),
+        validatedProjections,
+      ),
+    ).toMatchObject({ ok: false, failure: 'invalid_shape' });
+    expect(
+      parseTranscriptTrustEnvelope(
+        JSON.stringify({
+          ...envelope,
+          finalTranscriptionResult: {
+            ...finalTranscriptionResult,
+            sourceDetails: {
+              ...finalTranscriptionResult.sourceDetails,
+              mic: {
+                ...finalTranscriptionResult.sourceDetails.mic,
+                transcript: 'private content',
+              },
+            },
+          },
+        }),
+        validatedProjections,
+      ),
+    ).toMatchObject({ ok: false, failure: 'invalid_shape' });
+  });
+
   it.each([
     [
       'validated without proof',
@@ -155,6 +251,63 @@ describe('transcriptTrustState', () => {
 
     expect(resolved.copyKey).toBe('speech_unaccounted');
     expect(resolved.action).toBe('retry_validation');
+  });
+
+  it('surfaces the preferred final model being unavailable', () => {
+    const resolved = resolveTranscriptTrustState(
+      meeting({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [
+          { code: 'processing_stage_failed', stage: 'source_transcription' },
+        ],
+        evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+        finalTranscription: {
+          schemaVersion: 1,
+          state: 'needs_attention',
+          policy: 'parakeet_final_v1',
+          captureGeneration: 'generation-1',
+          failure: 'runtime_unavailable',
+        },
+      }),
+      capabilities,
+    );
+
+    expect(resolved).toMatchObject({
+      kind: 'final_transcription_unavailable',
+      copyKey: 'final_transcription_unavailable',
+      action: 'retry_validation',
+      permitsExistingRead: false,
+      permitsDerivedGeneration: false,
+    });
+  });
+
+  it('surfaces resource pressure as a retryable finalization pause', () => {
+    const resolved = resolveTranscriptTrustState(
+      meeting({
+        schemaVersion: 2,
+        state: 'needs_attention',
+        causes: [
+          { code: 'processing_stage_failed', stage: 'resource_admission' },
+        ],
+        evidenceProvenance: { kind: 'sealed_capture_activity_v2' },
+        finalTranscription: {
+          schemaVersion: 1,
+          state: 'needs_attention',
+          policy: 'parakeet_final_v1',
+          captureGeneration: 'generation-1',
+          failure: 'resource_policy_denied',
+        },
+      }),
+      capabilities,
+    );
+
+    expect(resolved).toMatchObject({
+      kind: 'final_transcription_resource_paused',
+      copyKey: 'final_transcription_resource_paused',
+      action: 'retry_validation',
+      permitsDerivedGeneration: false,
+    });
   });
 
   it('requires active-channel artifacts for recovered validation', () => {

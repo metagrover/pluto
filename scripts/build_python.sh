@@ -36,20 +36,20 @@ rm -rf "$PYTHON_DIR/dist"
 # We run from python/ dir so relative paths in spec work
 cd "$PYTHON_DIR"
 export OMP_NUM_THREADS=1
-"$PYINSTALLER_BIN" whisperx_server.spec
+"$PYINSTALLER_BIN" mlx_transcription_server.spec
 
 # Move output to resources/bin
 echo "Moving executable to resources/bin..."
 mkdir -p "$BIN_DIR"
 
 # Check if it was a one-dir or one-file build
-# Spec file says 'COLLECT' so it's a directory build (folder named whisperx_server)
-if [ -d "dist/whisperx_server" ]; then
-    rm -rf "$BIN_DIR/whisperx_server"
-    cp -r "dist/whisperx_server" "$BIN_DIR/"
-    echo "Build successful: $BIN_DIR/whisperx_server"
+# Spec file says 'COLLECT' so it's a directory build (folder named mlx_transcription_server)
+if [ -d "dist/mlx_transcription_server" ]; then
+    rm -rf "$BIN_DIR/mlx_transcription_server"
+    cp -r "dist/mlx_transcription_server" "$BIN_DIR/"
+    echo "Build successful: $BIN_DIR/mlx_transcription_server"
 else
-    echo "Error: Build artifact not found in dist/whisperx_server"
+    echo "Error: Build artifact not found in dist/mlx_transcription_server"
     exit 1
 fi
 
