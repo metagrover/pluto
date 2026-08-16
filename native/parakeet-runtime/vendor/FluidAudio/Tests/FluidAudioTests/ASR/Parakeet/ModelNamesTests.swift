@@ -1,0 +1,318 @@
+import Foundation
+import XCTest
+
+@testable import FluidAudio
+
+final class ModelNamesTests: XCTestCase {
+
+    // MARK: - Repo
+
+    func testRepoRemotePathContainsOwner() {
+        for repo in Repo.allCases {
+            XCTAssertTrue(
+                repo.remotePath.contains("FluidInference/"),
+                "\(repo) remotePath should contain 'FluidInference/'"
+            )
+        }
+    }
+
+    func testRepoNameIsNonEmpty() {
+        for repo in Repo.allCases {
+            XCTAssertFalse(repo.name.isEmpty, "\(repo) should have a non-empty name")
+        }
+    }
+
+    func testRepoFolderNameIsNonEmpty() {
+        for repo in Repo.allCases {
+            XCTAssertFalse(repo.folderName.isEmpty, "\(repo) should have a non-empty folderName")
+        }
+    }
+
+    func testRepoSubPathForVariants() {
+        XCTAssertEqual(Repo.parakeetEou160.subPath, "160ms")
+        XCTAssertEqual(Repo.parakeetEou320.subPath, "320ms")
+        XCTAssertEqual(Repo.parakeetEou1280.subPath, "1280ms")
+        XCTAssertNil(Repo.vad.subPath)
+        XCTAssertNil(Repo.parakeetV3.subPath)
+    }
+
+    // MARK: - Required Models
+
+    func testGetRequiredModelNamesReturnsNonEmpty() {
+        for repo in Repo.allCases {
+            let models = ModelNames.getRequiredModelNames(for: repo, variant: nil)
+            XCTAssertFalse(models.isEmpty, "\(repo) should have required models")
+        }
+    }
+
+    func testModelFileExtensions() {
+        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin"]
+        let validDirectories: Set<String> = ["constants_bin"]
+
+        for repo in Repo.allCases {
+            let models = ModelNames.getRequiredModelNames(for: repo, variant: nil)
+            for model in models {
+                let hasValidExtension = validExtensions.contains(where: { model.hasSuffix($0) })
+                let isKnownDirectory = validDirectories.contains(model)
+                XCTAssertTrue(
+                    hasValidExtension || isKnownDirectory,
+                    "Model '\(model)' for \(repo) should have a valid extension or be a known directory"
+                )
+            }
+        }
+    }
+
+    func testParakeetUnifiedVariants() {
+        let streaming = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: nil)
+        let offline = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "offline")
+        let streamingFp16 = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "fp16")
+        let offlineFp16 = ModelNames.getRequiredModelNames(for: .parakeetUnified, variant: "offline-fp16")
+
+        // int8 encoders are the default; fp16 selected by variant suffix.
+        // The offline encoder is fixed, so it's in the required set...
+        XCTAssertTrue(offline.contains(ModelNames.ParakeetUnified.offlineEncoderInt8File))
+        XCTAssertTrue(offlineFp16.contains(ModelNames.ParakeetUnified.offlineEncoderFp16File))
+        // ...but the streaming encoder is context-specific ([L,C,R] tier), so it
+        // is NOT in the base set — the streaming manager adds its exact encoder
+        // via ModelHub.download(additionalModelNames:), avoiding a default over-fetch.
+        for set in [streaming, streamingFp16] {
+            XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 0)
+        }
+        for set in [offline, offlineFp16] {
+            XCTAssertEqual(set.filter { $0.contains("encoder") }.count, 1)
+        }
+        // Mel is computed in Swift; the CoreML preprocessor is never required.
+        for set in [streaming, offline, streamingFp16, offlineFp16] {
+            XCTAssertFalse(set.contains { $0.contains("preprocessor") })
+        }
+    }
+
+    func testDiarizerOfflineVariant() {
+        let offlineModels = ModelNames.getRequiredModelNames(for: .diarizer, variant: "offline")
+        let onlineModels = ModelNames.getRequiredModelNames(for: .diarizer, variant: nil)
+
+        XCTAssertNotEqual(offlineModels, onlineModels, "Offline and online diarizer should have different model sets")
+        XCTAssertTrue(offlineModels.contains("Segmentation.mlmodelc"))
+        XCTAssertTrue(offlineModels.contains("FBank.mlmodelc"))
+    }
+
+    // MARK: - Sortformer Bundles
+
+    func testSortformerBundleForVariant() {
+        for variant in ModelNames.Sortformer.Variant.allCases {
+            let bundle = ModelNames.Sortformer.bundle(for: variant)
+            XCTAssertTrue(bundle.hasSuffix(".mlmodelc"), "Bundle '\(bundle)' should end in .mlmodelc")
+        }
+    }
+
+    func testSortformerBundleForConfig() {
+        let defaultConfig = SortformerConfig.default
+        let bundle = ModelNames.Sortformer.bundle(for: defaultConfig)
+        XCTAssertNotNil(bundle, "Default config should match a variant")
+    }
+
+    func testSortformerRequiredModelsMatchVariants() {
+        let required = ModelNames.Sortformer.requiredModels
+        XCTAssertEqual(
+            required.count, ModelNames.Sortformer.Variant.allCases.count,
+            "Required models count should match variant count"
+        )
+    }
+
+    func testSortformerPrecisionSubdirectories() {
+        XCTAssertEqual(ModelNames.Sortformer.ModelPrecision.fp16.subdirectory, "v3/fp16")
+        XCTAssertEqual(ModelNames.Sortformer.ModelPrecision.palettized.subdirectory, "v3/palettized")
+        // Default subdirectory must track the fp16 precision.
+        XCTAssertEqual(
+            ModelNames.Sortformer.modelsSubdirectory, ModelNames.Sortformer.ModelPrecision.fp16.subdirectory)
+    }
+
+    func testSortformerBundleHonorsPrecision() {
+        for variant in ModelNames.Sortformer.Variant.allCases {
+            let fp16 = ModelNames.Sortformer.bundle(for: variant, precision: .fp16)
+            let palettized = ModelNames.Sortformer.bundle(for: variant, precision: .palettized)
+            XCTAssertTrue(fp16.hasPrefix("v3/fp16/"), "fp16 bundle '\(fp16)' should live under v3/fp16/")
+            XCTAssertTrue(
+                palettized.hasPrefix("v3/palettized/"),
+                "palettized bundle '\(palettized)' should live under v3/palettized/")
+            // Default (no precision) bundle must equal the fp16 path.
+            XCTAssertEqual(ModelNames.Sortformer.bundle(for: variant), fp16)
+        }
+    }
+
+    func testSortformerConfigPrecisionDrivesBundle() {
+        var config = SortformerConfig.highContextV2_1
+        XCTAssertEqual(config.precision, .fp16, "precision should default to fp16")
+        XCTAssertEqual(ModelNames.Sortformer.bundle(for: config), config.modelVariant?.fileName(precision: .fp16))
+
+        config.precision = .palettized
+        XCTAssertEqual(
+            ModelNames.Sortformer.bundle(for: config), config.modelVariant?.fileName(precision: .palettized),
+            "Flipping config.precision must redirect the bundle to the palettized set")
+    }
+
+    // MARK: - Specific Model Names
+
+    func testASRModelNamesEndInMlmodelc() {
+        for model in ModelNames.ASR.requiredModels {
+            XCTAssertTrue(model.hasSuffix(".mlmodelc"), "ASR model '\(model)' should end in .mlmodelc")
+        }
+    }
+
+    func testVADModelNames() {
+        XCTAssertEqual(ModelNames.VAD.requiredModels.count, 1)
+        XCTAssertTrue(ModelNames.VAD.requiredModels.first!.hasSuffix(".mlmodelc"))
+    }
+
+    // MARK: - TDT-CTC-110M Repo Tests
+
+    func testParakeetTdtCtc110mRepoProperties() {
+        let repo = Repo.parakeetTdtCtc110m
+
+        // Verify remote path (owner/repo)
+        XCTAssertEqual(repo.remotePath, "FluidInference/parakeet-tdt-ctc-110m-coreml")
+
+        // Verify name (repo slug with -coreml suffix)
+        XCTAssertEqual(repo.name, "parakeet-tdt-ctc-110m-coreml")
+
+        // Verify folder name (simplified - strips -coreml suffix by default)
+        XCTAssertEqual(repo.folderName, "parakeet-tdt-ctc-110m")
+
+        // Should have no subpath (not a variant repo)
+        XCTAssertNil(repo.subPath)
+    }
+
+    func testParakeetTdtCtc110mVocabulary() {
+        // tdtCtc110m uses same vocabulary file (array-format JSON, parsed at load time)
+        let vocabFile = ModelNames.ASR.vocabulary(for: .parakeetTdtCtc110m)
+        XCTAssertEqual(vocabFile, "parakeet_vocab.json")
+        XCTAssertEqual(vocabFile, ModelNames.ASR.vocabularyFile)
+    }
+
+    func testParakeetTdtCtc110mUsesRequiredModelsFused() {
+        // tdtCtc110m has fused preprocessor+encoder, so uses requiredModelsFused
+        let models = ModelNames.getRequiredModelNames(for: .parakeetTdtCtc110m, variant: nil)
+
+        // Should match ASR.requiredModelsFused (3 .mlmodelc files, no vocab in this set)
+        XCTAssertEqual(Set(models), Set(ModelNames.ASR.requiredModelsFused))
+
+        // Should NOT match regular ASR.requiredModels (which includes separate Encoder)
+        XCTAssertNotEqual(Set(models), Set(ModelNames.ASR.requiredModels))
+
+        // Verify it includes Preprocessor (fused with encoder)
+        XCTAssertTrue(models.contains("Preprocessor.mlmodelc"))
+
+        // Verify it does NOT include separate Encoder
+        XCTAssertFalse(models.contains("Encoder.mlmodelc"))
+    }
+
+    func testParakeetTdtCtc110mRequiredModelCount() {
+        let models = ModelNames.getRequiredModelNames(for: .parakeetTdtCtc110m, variant: nil)
+
+        // Fused models have 1 less file than regular (no separate Encoder)
+        // Expected: Preprocessor (fused), Decoder, JointDecision = 3 .mlmodelc files
+        // Note: vocabulary is handled separately, not in requiredModelsFused
+        XCTAssertEqual(models.count, 3, "tdtCtc110m should have 3 .mlmodelc files (fused preprocessor+encoder)")
+    }
+
+    func testASRRequiredModelsFusedStructure() {
+        let fusedModels = ModelNames.ASR.requiredModelsFused
+
+        // Should contain core models
+        XCTAssertTrue(fusedModels.contains("Preprocessor.mlmodelc"))
+        XCTAssertTrue(fusedModels.contains("Decoder.mlmodelc"))
+        XCTAssertTrue(fusedModels.contains("JointDecision.mlmodelc"))
+
+        // Should NOT contain vocabulary (handled separately)
+        XCTAssertFalse(fusedModels.contains("parakeet_vocab.json"))
+
+        // Should NOT contain separate Encoder
+        XCTAssertFalse(fusedModels.contains("Encoder.mlmodelc"))
+
+        // Should be 1 less than regular models (which has 4: Preprocessor, Encoder, Decoder, Joint)
+        XCTAssertEqual(fusedModels.count, ModelNames.ASR.requiredModels.count - 1)
+    }
+
+    // MARK: - v3 Encoder Precision Tests
+
+    func testV3DefaultsToInt8Encoder() {
+        // v3 default: 8-bit palettized `Encoder.mlmodelc`. `variant: nil`
+        // is treated the same as `variant: "int8"` for back-compat with
+        // callers that don't know about precision selection.
+        let v3Models = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: nil)
+
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.encoderFile))
+        XCTAssertFalse(v3Models.contains(ModelNames.ASR.encoderInt4File))
+
+        // v3 still uses the v3 joint and the shared preprocessor + decoder.
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.preprocessorFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.decoderFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.jointV3File))
+        XCTAssertEqual(v3Models.count, 4)
+    }
+
+    func testV3Int8VariantMatchesDefault() {
+        let nilVariant = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: nil)
+        let int8Variant = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: "int8")
+        XCTAssertEqual(nilVariant, int8Variant)
+    }
+
+    func testV3Int4VariantSelectsInt4Encoder() {
+        // Opt in to the int4-per-channel encoder via variant string.
+        let v3Models = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: "int4")
+
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.encoderInt4File))
+        XCTAssertEqual(ModelNames.ASR.encoderInt4File, "EncoderInt4.mlmodelc")
+        XCTAssertFalse(v3Models.contains(ModelNames.ASR.encoderFile))
+
+        // Joint, preprocessor, and decoder are unchanged.
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.preprocessorFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.decoderFile))
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.jointV3File))
+        XCTAssertEqual(v3Models.count, 4)
+    }
+
+    func testV3UnknownVariantFallsBackToInt8() {
+        // Defensive: anything other than "int8"/"int4" should resolve to the
+        // shipped default rather than throw or return an empty set.
+        let v3Models = ModelNames.getRequiredModelNames(for: .parakeetV3, variant: "fp32")
+        XCTAssertTrue(v3Models.contains(ModelNames.ASR.encoderFile))
+        XCTAssertFalse(v3Models.contains(ModelNames.ASR.encoderInt4File))
+    }
+
+    func testParakeetEncoderPrecisionEncoderFileNames() {
+        XCTAssertEqual(ParakeetEncoderPrecision.int8.encoderFileName, ModelNames.ASR.encoderFile)
+        XCTAssertEqual(ParakeetEncoderPrecision.int4.encoderFileName, ModelNames.ASR.encoderInt4File)
+    }
+
+    func testRequiredModelsV3ForBothPrecisions() {
+        let int8Set = ModelNames.ASR.requiredModelsV3(precision: .int8)
+        XCTAssertTrue(int8Set.contains(ModelNames.ASR.encoderFile))
+        XCTAssertFalse(int8Set.contains(ModelNames.ASR.encoderInt4File))
+
+        let int4Set = ModelNames.ASR.requiredModelsV3(precision: .int4)
+        XCTAssertTrue(int4Set.contains(ModelNames.ASR.encoderInt4File))
+        XCTAssertFalse(int4Set.contains(ModelNames.ASR.encoderFile))
+
+        // Both sets share preprocessor / decoder / joint v3.
+        for shared in [
+            ModelNames.ASR.preprocessorFile,
+            ModelNames.ASR.decoderFile,
+            ModelNames.ASR.jointV3File,
+        ] {
+            XCTAssertTrue(int8Set.contains(shared))
+            XCTAssertTrue(int4Set.contains(shared))
+        }
+    }
+
+    func testV2KeepsLegacyEncoder() {
+        // v2 must keep the original `Encoder.mlmodelc`; the int4 toggle is
+        // v3-only.
+        let v2Models = ModelNames.getRequiredModelNames(for: .parakeetV2, variant: nil)
+
+        XCTAssertTrue(v2Models.contains(ModelNames.ASR.encoderFile))
+        XCTAssertFalse(v2Models.contains(ModelNames.ASR.encoderInt4File))
+        XCTAssertTrue(v2Models.contains(ModelNames.ASR.jointFile))
+        XCTAssertFalse(v2Models.contains(ModelNames.ASR.jointV3File))
+    }
+}

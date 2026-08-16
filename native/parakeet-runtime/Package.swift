@@ -10,10 +10,7 @@ let package = Package(
         .executable(name: "parakeet-runtime", targets: ["ParakeetRuntime"]),
     ],
     dependencies: [
-        .package(
-            url: "https://github.com/FluidInference/FluidAudio.git",
-            exact: "0.15.5"
-        ),
+        .package(path: "vendor/FluidAudio"),
     ],
     targets: [
         .target(name: "ParakeetRuntimeCore"),

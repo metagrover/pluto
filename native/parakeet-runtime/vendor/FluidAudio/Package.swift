@@ -1,0 +1,59 @@
+// swift-tools-version: 6.0
+import PackageDescription
+import Foundation
+
+let package = Package(
+    name: "FluidAudio",
+    platforms: [
+        .macOS(.v14),
+        .iOS(.v17),
+    ],
+    products: [
+        .library(
+            name: "FluidAudio",
+            targets: ["FluidAudio"]
+        ),
+        .executable(
+            name: "fluidaudiocli",
+            targets: ["FluidAudioCLI"]
+        ),
+    ],
+    dependencies: [],
+    targets: [
+        .target(
+            name: "FluidAudio",
+            dependencies: [
+                "FastClusterWrapper",
+                "MachTaskSelfWrapper",
+            ],
+            path: "Sources/FluidAudio"
+        ),
+        .target(
+            name: "FastClusterWrapper",
+            path: "Sources/FastClusterWrapper",
+            publicHeadersPath: "include"
+        ),
+        .target(
+            name: "MachTaskSelfWrapper",
+            path: "Sources/MachTaskSelfWrapper",
+            publicHeadersPath: "include"
+        ),
+        .executableTarget(
+            name: "FluidAudioCLI",
+            dependencies: ["FluidAudio"],
+            path: "Sources/FluidAudioCLI",
+            exclude: ["README.md"],
+            resources: [
+                .process("Utils/english.json")
+            ]
+        ),
+        .testTarget(
+            name: "FluidAudioTests",
+            dependencies: [
+                "FluidAudio",
+                "FluidAudioCLI",
+            ]
+        ),
+    ],
+    cxxLanguageStandard: .cxx17
+)
