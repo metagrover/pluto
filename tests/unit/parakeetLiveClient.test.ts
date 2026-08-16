@@ -375,6 +375,68 @@ describe('ParakeetLiveClient', () => {
     });
   });
 
+  it('cancels the candidate generation when reset response and abort race', async () => {
+    const { process, client } = await opened();
+    const controller = new AbortController();
+    const resetting = client.reset(openSystem, 2, controller.signal);
+    await vi.waitFor(() =>
+      expect(
+        process.pending.some((item) => item.payload.method === 'stream_reset'),
+      ).toBe(true),
+    );
+
+    process.respondMethod('stream_reset');
+    controller.abort();
+
+    await vi.waitFor(() =>
+      expect(
+        process.pending.find((item) => item.payload.method === 'stream_cancel')
+          ?.payload,
+      ).toMatchObject({ generation: 2 }),
+    );
+    process.respondMethod('stream_cancel');
+    await expect(resetting).rejects.toThrow('parakeet_cancelled');
+
+    const reopening = client.open(openSystem);
+    process.respondNext();
+    await expect(reopening).resolves.toBeUndefined();
+  });
+
+  it('falls back to the current generation without allowing an intervening reopen', async () => {
+    const { process, client } = await opened();
+    const controller = new AbortController();
+    const resetting = client.reset(openSystem, 2, controller.signal);
+    await vi.waitFor(() =>
+      expect(
+        process.pending.some((item) => item.payload.method === 'stream_reset'),
+      ).toBe(true),
+    );
+    controller.abort();
+
+    await vi.waitFor(() =>
+      expect(
+        process.pending.find((item) => item.payload.method === 'stream_cancel')
+          ?.payload,
+      ).toMatchObject({ generation: 2 }),
+    );
+    process.respondErrorNext('parakeet_request_invalid');
+    await vi.waitFor(() =>
+      expect(
+        process.pending.find((item) => item.payload.method === 'stream_cancel')
+          ?.payload,
+      ).toMatchObject({ generation: 1 }),
+    );
+    await expect(client.open(openSystem)).rejects.toThrow(
+      'parakeet_stream_capacity',
+    );
+    process.respondMethod('stream_cancel');
+
+    await expect(resetting).rejects.toThrow('parakeet_cancelled');
+    const reopening = client.open(openSystem);
+    process.respondNext();
+    await expect(reopening).resolves.toBeUndefined();
+  });
+
   it('keeps the stream usable after local backpressure and native path rejection', async () => {
     const { process, client } = await opened(0);
     const badPath = client.append({

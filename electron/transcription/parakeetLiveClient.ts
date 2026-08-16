@@ -51,6 +51,7 @@ type StreamState = ParakeetLiveIdentity & {
   drainWaiters: DrainWaiter[];
   active: boolean;
   closing: boolean;
+  resetGenerationInFlight: number | null;
   terminalPromise: Promise<void> | null;
 };
 
@@ -221,17 +222,20 @@ export class ParakeetLiveClient {
     state.closing = true;
     try {
       await this.waitForDrain(state);
+      state.resetGenerationInFlight = nextGeneration;
       await this.send(
         'stream_reset',
         { ...identity, generation: nextGeneration },
         signal,
       );
       state.generation = nextGeneration;
+      state.resetGenerationInFlight = null;
       state.nextSequence = 1;
       state.nextRevision = 1;
       state.closing = false;
     } catch (error) {
       if (state.active && this.isNonterminal(error)) {
+        state.resetGenerationInFlight = null;
         state.closing = false;
       } else if (state.active) {
         await this.terminateState(state, this.errorCode(error));
@@ -298,16 +302,28 @@ export class ParakeetLiveClient {
     state.active = false;
     state.closing = true;
     state.inFlightController?.abort();
+    const cancellationGenerations =
+      state.resetGenerationInFlight === null ||
+      state.resetGenerationInFlight === state.generation
+        ? [state.generation]
+        : [state.resetGenerationInFlight, state.generation];
     state.terminalPromise = (async () => {
       if (!this.isTransportFailure(code) && !this.closed) {
-        try {
-          await this.send('stream_cancel', {
-            streamId: state.streamId,
-            source: state.source,
-            generation: state.generation,
-          });
-        } catch {
-          // The stream may already be terminal in the native runtime.
+        for (const [index, generation] of cancellationGenerations.entries()) {
+          try {
+            await this.send('stream_cancel', {
+              streamId: state.streamId,
+              source: state.source,
+              generation,
+            });
+            break;
+          } catch (error) {
+            const canTryPreviousGeneration =
+              index === 0 &&
+              cancellationGenerations.length === 2 &&
+              this.errorCode(error) === 'parakeet_request_invalid';
+            if (!canTryPreviousGeneration) break;
+          }
         }
       }
       this.remove(state);
@@ -575,6 +591,7 @@ export class ParakeetLiveClient {
       drainWaiters: [],
       active: true,
       closing: false,
+      resetGenerationInFlight: null,
       terminalPromise: null,
     };
   }
