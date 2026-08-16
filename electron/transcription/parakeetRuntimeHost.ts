@@ -27,6 +27,7 @@ export type ParakeetRuntimeLease = {
 type LeaseRecord = {
   kind: ParakeetRuntimeWorkload;
   released: boolean;
+  preempting: boolean;
   preemptionHandler: (() => Promise<void>) | null;
   resolve: (lease: ParakeetRuntimeLease) => void;
   reject: (error: Error) => void;
@@ -127,11 +128,14 @@ export class ParakeetRuntimeHost {
       await this.release(record);
       return;
     }
+    if (record.preempting) return;
+    record.preempting = true;
     this.durableRetryHandoffCount += 1;
     try {
       await record.preemptionHandler?.();
       await this.options.persistInterruptedFinalization?.();
     } finally {
+      record.preempting = false;
       this.durableRetryHandoffCount = Math.max(
         0,
         this.durableRetryHandoffCount - 1,
@@ -142,6 +146,7 @@ export class ParakeetRuntimeHost {
 
   private async release(record: LeaseRecord): Promise<void> {
     if (record.released) return;
+    if (record.preempting) return;
     record.released = true;
     if (this.active === record) this.active = null;
     else {
@@ -169,6 +174,7 @@ export class ParakeetRuntimeHost {
     Object.assign(record, {
       kind,
       released: false,
+      preempting: false,
       preemptionHandler: null,
       resolve,
       reject,

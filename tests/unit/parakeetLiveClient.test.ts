@@ -523,8 +523,15 @@ describe('ParakeetLiveClient', () => {
     await reopening;
 
     const pending = client.append(append(1));
-    client.close();
-    await expect(pending).rejects.toThrow('parakeet_process_terminated');
+    const closing = client.close();
+    await vi.waitFor(() =>
+      expect(
+        process.pending.some((item) => item.payload.method === 'stream_cancel'),
+      ).toBe(true),
+    );
+    process.respondMethod('stream_cancel');
+    await closing;
+    await expect(pending).rejects.toThrow('parakeet_client_closed');
     await expect(client.open(openSystem)).rejects.toThrow(
       'parakeet_client_closed',
     );

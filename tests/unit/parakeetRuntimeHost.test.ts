@@ -85,4 +85,32 @@ describe('ParakeetRuntimeHost', () => {
       durableRetryHandoffCount: 0,
     });
   });
+
+  it('does not grant live ownership until final cancellation has unwound', async () => {
+    let releaseCancellation: (() => void) | undefined;
+    const host = makeRuntimeHost({ paths, spawn: () => new FakeChild() });
+    const final = await host.acquire('final');
+    final.setPreemptionHandler(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseCancellation = resolve;
+        }),
+    );
+
+    const queuedLive = host.acquire('live');
+    let liveResolved = false;
+    void queuedLive.then(() => {
+      liveResolved = true;
+    });
+
+    const cancellation = final.cancelAndPersistForRetry();
+    await Promise.resolve();
+    await final.release();
+    await Promise.resolve();
+    expect(liveResolved).toBe(false);
+
+    releaseCancellation?.();
+    await cancellation;
+    await expect(queuedLive).resolves.toMatchObject({ kind: 'live' });
+  });
 });

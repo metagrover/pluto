@@ -38,7 +38,6 @@ type NativeTranscription = {
 
 export class ParakeetFinalClient {
   private readonly runtimeHost: ParakeetRuntimeHost;
-  private readonly ownsRuntimeHost: boolean;
   private preparePromise: Promise<TranscriptionRuntimeHealth> | null = null;
   private queue: Promise<void> = Promise.resolve();
   private nextID = 0;
@@ -63,7 +62,6 @@ export class ParakeetFinalClient {
         idleTimeoutMs: options.idleTimeoutMs,
         diagnostic: options.diagnostic,
       });
-    this.ownsRuntimeHost = !options.runtimeHost;
   }
 
   prepare(): Promise<TranscriptionRuntimeHealth> {
@@ -135,7 +133,6 @@ export class ParakeetFinalClient {
 
   close(): void {
     this.preparePromise = null;
-    if (this.ownsRuntimeHost) this.runtimeHost.shutdown();
   }
 
   private async runTranscription(

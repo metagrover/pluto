@@ -85,6 +85,7 @@ export class ParakeetLiveClient {
     private readonly options: {
       process?: NativeJsonLineTransport;
       runtimeHost?: ParakeetRuntimeHost;
+      runtimeLease?: ParakeetRuntimeLease;
       maxQueuedAppends: number;
     },
   ) {
@@ -98,6 +99,11 @@ export class ParakeetLiveClient {
       throw new Error('parakeet_request_invalid');
     }
     this.runtimeHost = options.runtimeHost;
+    if (options.runtimeLease?.kind !== 'live') {
+      if (options.runtimeLease) throw new Error('parakeet_request_invalid');
+    } else {
+      this.runtimeLease = options.runtimeLease;
+    }
     this.process = options.process ?? options.runtimeHost!.transport;
     this.unsubscribeEvent = this.process.onEvent((event) =>
       this.consumeEvent(event),
@@ -261,12 +267,15 @@ export class ParakeetLiveClient {
     }
   }
 
-  close(): void {
+  async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.invalidateAll('parakeet_process_terminated');
-    if (this.runtimeHost) void this.releaseRuntimeLeaseIfIdle();
-    else this.process.terminate();
+    await Promise.all(
+      [...this.streams.values()].map((state) =>
+        this.terminateState(state, 'parakeet_client_closed'),
+      ),
+    );
+    await this.releaseRuntimeLeaseIfIdle();
     this.unsubscribeEvent();
     this.unsubscribeFailure();
   }
@@ -326,7 +335,10 @@ export class ParakeetLiveClient {
         ? [state.generation]
         : [state.resetGenerationInFlight, state.generation];
     state.terminalPromise = (async () => {
-      if (!this.isTransportFailure(code) && !this.closed) {
+      if (
+        !this.isTransportFailure(code) &&
+        (!this.closed || code === 'parakeet_client_closed')
+      ) {
         for (const [index, generation] of cancellationGenerations.entries()) {
           try {
             await this.send('stream_cancel', {
