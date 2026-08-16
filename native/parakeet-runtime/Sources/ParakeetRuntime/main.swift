@@ -2,51 +2,55 @@ import Foundation
 import ParakeetRuntimeCore
 import ParakeetRuntimeEngine
 
-private actor ResponseWriter {
-    private let encoder = JSONEncoder()
-
-    func write(_ response: RuntimeResponse) {
-        guard let data = try? encoder.encode(response) else { return }
-        FileHandle.standardOutput.write(data)
-        FileHandle.standardOutput.write(Data([0x0A]))
-    }
-}
-
 private actor RequestCoordinator {
-    private let service: ParakeetService
-    private let writer: ResponseWriter
+    private let router: RuntimeJSONLineRouter
+    private let writer: RuntimeJSONLineWriter
     private var tasks: [String: Task<Void, Never>] = [:]
 
-    init(service: ParakeetService, writer: ResponseWriter) {
-        self.service = service
+    init(router: RuntimeJSONLineRouter, writer: RuntimeJSONLineWriter) {
+        self.router = router
         self.writer = writer
     }
 
     func submit(_ request: RuntimeRequest) {
         if request.method == .cancel {
             guard let targetID = request.targetId, let task = tasks[targetID] else {
-                Task { await writer.write(.failure(id: request.id, code: .invalidRequest)) }
+                Task {
+                    await writer.write(RuntimeJSONLineOutput(
+                        events: [], response: .failure(id: request.id, code: .invalidRequest)
+                    ))
+                }
                 return
             }
             task.cancel()
-            Task { await writer.write(.failure(id: request.id, code: .cancelled)) }
+            Task {
+                await writer.write(RuntimeJSONLineOutput(
+                    events: [], response: .failure(id: request.id, code: .cancelled)
+                ))
+            }
             return
         }
 
         guard request.method != .shutdown else {
             for task in tasks.values { task.cancel() }
             tasks.removeAll()
-            Task { await writer.write(.prepared(id: request.id, modelVersion: "shutdown")) }
+            Task { [router, writer] in
+                await writer.write(await router.route(request))
+            }
             return
         }
 
         guard tasks[request.id] == nil else {
-            Task { await writer.write(.failure(id: request.id, code: .invalidRequest)) }
+            Task {
+                await writer.write(RuntimeJSONLineOutput(
+                    events: [], response: .failure(id: request.id, code: .invalidRequest)
+                ))
+            }
             return
         }
-        tasks[request.id] = Task { [service, writer] in
-            let response = await service.handle(request)
-            await writer.write(response)
+        tasks[request.id] = Task { [router, writer] in
+            let output = await router.route(request)
+            await writer.write(output)
             self.finished(request.id)
         }
     }
@@ -54,11 +58,19 @@ private actor RequestCoordinator {
     private func finished(_ id: String) {
         tasks[id] = nil
     }
+
+    func finish() async {
+        let running = Array(tasks.values)
+        for task in running { await task.value }
+        await router.shutdown()
+    }
 }
 
 private struct Arguments {
     let modelRoot: URL
     let audioRoot: URL
+    let testFixtureLive: Bool
+    let liveConfigurationID: ParakeetLiveConfigurationID
 
     init?(_ values: [String]) {
         guard
@@ -70,8 +82,64 @@ private struct Arguments {
         modelRoot = URL(fileURLWithPath: values[modelIndex + 1], isDirectory: true)
         audioRoot = URL(fileURLWithPath: values[audioIndex + 1], isDirectory: true)
         guard modelRoot.path.hasPrefix("/"), audioRoot.path.hasPrefix("/") else { return nil }
+        let configIndices = values.indices.filter { values[$0] == "--live-config" }
+        guard configIndices.count <= 1 else { return nil }
+        if let configIndex = configIndices.first {
+            guard values.indices.contains(configIndex + 1),
+                let selected = ParakeetLiveConfigurationID(rawValue: values[configIndex + 1])
+            else { return nil }
+            liveConfigurationID = selected
+        } else {
+            liveConfigurationID = .pinnedDefault
+        }
+        testFixtureLive = values.contains("--test-fixture-live")
+        #if !DEBUG
+            guard !testFixtureLive else { return nil }
+        #endif
     }
 }
+
+#if DEBUG
+    private actor FixtureRuntimeService: ParakeetRuntimeServing {
+        private let liveConfigurationID: ParakeetLiveConfigurationID
+
+        init(liveConfigurationID: ParakeetLiveConfigurationID) {
+            self.liveConfigurationID = liveConfigurationID
+        }
+
+        func handle(_ request: RuntimeRequest) async -> RuntimeResponse {
+            .prepared(
+                id: request.id,
+                modelVersion: "fixture",
+                liveConfigId: liveConfigurationID.rawValue
+            )
+        }
+
+        func handleLive(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
+            guard let live = request.live else {
+                return .failure(id: request.id, code: .invalidRequest)
+            }
+            let events: [RuntimeEvent]
+            if request.method == .streamAppend {
+                events = [.streamUpdate(LiveStreamUpdate(
+                    streamId: live.streamId,
+                    source: live.source,
+                    generation: live.generation,
+                    revision: 1,
+                    qualifiesPriorTentative: false,
+                    text: "synthetic",
+                    confidence: 0.8,
+                    audioEndSeconds: live.chunkEndSeconds ?? 0
+                ))]
+            } else {
+                events = []
+            }
+            return .success(id: request.id, events: events)
+        }
+
+        func shutdownLive() async {}
+    }
+#endif
 
 @main
 private enum ParakeetRuntimeMain {
@@ -79,26 +147,45 @@ private enum ParakeetRuntimeMain {
         guard let arguments = Arguments(Array(CommandLine.arguments.dropFirst())) else {
             return
         }
-        let writer = ResponseWriter()
-        let service = ParakeetService(
-            modelRoot: arguments.modelRoot,
-            audioRoot: arguments.audioRoot,
-            manifest: ProductionModelManifest.current
-        )
-        let coordinator = RequestCoordinator(service: service, writer: writer)
-        let decoder = JSONDecoder()
+        let service: any ParakeetRuntimeServing
+        #if DEBUG
+            if arguments.testFixtureLive {
+                service = FixtureRuntimeService(
+                    liveConfigurationID: arguments.liveConfigurationID
+                )
+            } else {
+                service = ParakeetService(
+                    modelRoot: arguments.modelRoot,
+                    audioRoot: arguments.audioRoot,
+                    manifest: ProductionModelManifest.current,
+                    liveConfigurationID: arguments.liveConfigurationID
+                )
+            }
+        #else
+            service = ParakeetService(
+                modelRoot: arguments.modelRoot,
+                audioRoot: arguments.audioRoot,
+                manifest: ProductionModelManifest.current,
+                liveConfigurationID: arguments.liveConfigurationID
+            )
+        #endif
+        let router = RuntimeJSONLineRouter(service: service)
+        let writer = RuntimeJSONLineWriter { data in
+            FileHandle.standardOutput.write(data)
+        }
+        let coordinator = RequestCoordinator(router: router, writer: writer)
 
         do {
             for try await line in FileHandle.standardInput.bytes.lines {
-                guard let data = line.data(using: .utf8) else { continue }
-                guard let request = try? decoder.decode(RuntimeRequest.self, from: data) else {
-                    await writer.write(.failure(id: "invalid", code: .invalidRequest))
+                guard let request = await router.decode(line: line) else {
+                    await writer.write(RuntimeJSONLineOutput(
+                        events: [], response: .failure(id: "invalid", code: .invalidRequest)
+                    ))
                     continue
                 }
                 await coordinator.submit(request)
             }
-        } catch {
-            return
-        }
+        } catch {}
+        await coordinator.finish()
     }
 }

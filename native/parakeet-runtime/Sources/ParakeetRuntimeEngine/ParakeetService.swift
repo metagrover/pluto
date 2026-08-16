@@ -8,6 +8,7 @@ public actor ParakeetService {
     private let modelStore: ModelStore
     private let transcriber: ParakeetTranscriber
     private let liveDriver: any ParakeetLiveDriving
+    private let liveConfigurationID: ParakeetLiveConfigurationID
     private var activeModelURL: URL?
     private var liveSession: ParakeetLiveSession?
 
@@ -17,7 +18,8 @@ public actor ParakeetService {
         manifest: ModelManifest,
         installer: any ModelInstalling = FluidAudioModelInstaller(),
         inferenceDriver: any ParakeetInferenceDriving = FluidAudioInferenceDriver(),
-        liveDriver: any ParakeetLiveDriving = FluidAudioLiveDriver()
+        liveDriver: any ParakeetLiveDriving = FluidAudioLiveDriver(),
+        liveConfigurationID: ParakeetLiveConfigurationID = .pinnedDefault
     ) {
         self.modelRoot = modelRoot.standardizedFileURL
         self.audioRoot = audioRoot.standardizedFileURL
@@ -25,6 +27,7 @@ public actor ParakeetService {
         self.modelStore = ModelStore(root: self.modelRoot, installer: installer)
         self.transcriber = ParakeetTranscriber(driver: inferenceDriver)
         self.liveDriver = liveDriver
+        self.liveConfigurationID = liveConfigurationID
     }
 
     public func handleLive(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
@@ -42,7 +45,8 @@ public actor ParakeetService {
             let created = ParakeetLiveSession(
                 driver: liveDriver,
                 activeModelURL: activeModelURL,
-                audioRoot: audioRoot
+                audioRoot: audioRoot,
+                configuration: liveConfigurationID.configuration
             )
             liveSession = created
             session = created
@@ -129,6 +133,13 @@ public actor ParakeetService {
         }
     }
 
+    public func shutdownLive() async {
+        if let liveSession {
+            await liveSession.shutdown()
+            self.liveSession = nil
+        }
+    }
+
     public func handle(_ request: RuntimeRequest) async -> RuntimeResponse {
         guard request.schemaVersion == 1, !request.id.isEmpty else {
             return .failure(id: request.id, code: .invalidRequest)
@@ -155,7 +166,11 @@ public actor ParakeetService {
                 self.liveSession = nil
             }
             activeModelURL = try await modelStore.prepare(manifest: manifest)
-            return .prepared(id: request.id, modelVersion: manifest.version)
+            return .prepared(
+                id: request.id,
+                modelVersion: manifest.version,
+                liveConfigId: liveConfigurationID.rawValue
+            )
         } catch is CancellationError {
             return .failure(id: request.id, code: .cancelled)
         } catch {

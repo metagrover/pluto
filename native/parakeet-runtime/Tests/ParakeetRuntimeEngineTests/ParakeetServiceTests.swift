@@ -58,6 +58,19 @@ private struct ServiceLiveDriver: ParakeetLiveDriving {
     func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
 }
 
+private actor CapturingServiceLiveDriver: ParakeetLiveDriving {
+    private(set) var requests: [ParakeetLiveManagerRequest] = []
+
+    func makeManager(request: ParakeetLiveManagerRequest) async throws
+        -> any ParakeetLiveManaging
+    {
+        requests.append(request)
+        return ServiceLiveManager()
+    }
+
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
+}
+
 private actor FailingServiceLiveManager: ParakeetLiveManaging {
     func append(request _: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
         throw RuntimeFailure.transcriptionFailed
@@ -120,6 +133,36 @@ final class ParakeetServiceTests: XCTestCase {
         XCTAssertEqual(transcribed.result?.vocabularyCount, 2)
         let vocabulary = await driver.vocabulary
         XCTAssertEqual(vocabulary, ["Pluto", "FluidAudio"])
+    }
+
+    func testReportsAndUsesOneSelectedLowLatencyConfiguration() async throws {
+        let modelRoot = try makeDirectory("service-config-models")
+        let audioRoot = try makeDirectory("service-config-audio")
+        let driver = CapturingServiceLiveDriver()
+        let service = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: audioRoot,
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            liveDriver: driver,
+            liveConfigurationID: .lowLatency2s
+        )
+
+        let prepared = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
+        _ = await service.handleLive(RuntimeRequest(
+            id: "system-open", method: .streamOpen,
+            live: LiveRequestMetadata(streamId: "system", source: .system, generation: 1)
+        ))
+        _ = await service.handleLive(RuntimeRequest(
+            id: "mic-open", method: .streamOpen,
+            live: LiveRequestMetadata(streamId: "mic", source: .mic, generation: 1)
+        ))
+
+        XCTAssertEqual(prepared.result?.liveConfigId, "low-latency-2s")
+        let requests = await driver.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertTrue(requests.allSatisfy { $0.configuration == .lowLatencyCandidate })
     }
 
     func testRejectsAudioOutsideApprovedRootWithoutLeakingPath() async throws {

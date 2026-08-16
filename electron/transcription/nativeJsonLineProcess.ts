@@ -27,6 +27,66 @@ export type NativeResponse = {
   error?: { code?: string };
 };
 
+export type NativeLiveSource = 'mic' | 'system';
+
+type NativeEventIdentity = {
+  schemaVersion: 1;
+  kind: 'event';
+  streamId: string;
+  source: NativeLiveSource;
+  generation: number;
+  revision: number;
+};
+
+export type NativeStreamUpdateEvent = NativeEventIdentity & {
+  event: 'stream_update';
+  qualifiesPriorTentative: boolean;
+  text: string;
+  confidence: number;
+  audioEndSeconds: number;
+};
+
+export type NativeStreamDegradedEvent = NativeEventIdentity & {
+  event: 'stream_degraded';
+  reason:
+    | 'backpressure'
+    | 'sequence_gap'
+    | 'partial_window'
+    | 'coverage_gap'
+    | 'thermal_pressure';
+  affectedSequence?: number;
+  chunkStartSeconds?: number;
+  chunkEndSeconds?: number;
+};
+
+export type NativeStreamFailedEvent = NativeEventIdentity & {
+  event: 'stream_failed';
+  reason:
+    | 'invalid_request'
+    | 'stream_not_found'
+    | 'generation_mismatch'
+    | 'sequence_out_of_order'
+    | 'path_not_allowed'
+    | 'audio_decode_failed'
+    | 'model_unavailable'
+    | 'inference_failed'
+    | 'cancelled';
+};
+
+export type NativeEvent =
+  | NativeStreamUpdateEvent
+  | NativeStreamDegradedEvent
+  | NativeStreamFailedEvent;
+
+export interface NativeJsonLineTransport {
+  request(payload: Record<string, unknown>): Promise<NativeResponse>;
+  notify(payload: Record<string, unknown>): void;
+  onEvent(listener: (event: NativeEvent) => void): () => void;
+  cancelPending(id: string): void;
+  ignoreResponse(id: string): void;
+  terminate(): void;
+}
+
 const MAX_BUFFER_BYTES = 1024 * 1024;
 
 export class NativeJsonLineProcess {
@@ -34,6 +94,7 @@ export class NativeJsonLineProcess {
   private stdoutBuffer = '';
   private readonly pending = new Map<string, PendingRequest>();
   private readonly ignoredResponseIDs = new Set<string>();
+  private readonly eventListeners = new Set<(event: NativeEvent) => void>();
 
   constructor(
     private readonly options: {
@@ -93,6 +154,11 @@ export class NativeJsonLineProcess {
     }
   }
 
+  onEvent(listener: (event: NativeEvent) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
+
   cancelPending(id: string): void {
     const pending = this.pending.get(id);
     if (!pending) return;
@@ -118,27 +184,46 @@ export class NativeJsonLineProcess {
 
   private consumeStdout(chunk: string): void {
     this.stdoutBuffer += chunk;
-    if (Buffer.byteLength(this.stdoutBuffer, 'utf8') > MAX_BUFFER_BYTES) {
-      this.failAll('parakeet_protocol_invalid');
-      return;
-    }
     let newline = this.stdoutBuffer.indexOf('\n');
     while (newline >= 0) {
       const line = this.stdoutBuffer.slice(0, newline);
       this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
+      if (Buffer.byteLength(line, 'utf8') > MAX_BUFFER_BYTES) {
+        this.failAll('parakeet_protocol_invalid');
+        return;
+      }
       if (line.length > 0) this.consumeLine(line);
       newline = this.stdoutBuffer.indexOf('\n');
+    }
+    if (Buffer.byteLength(this.stdoutBuffer, 'utf8') > MAX_BUFFER_BYTES) {
+      this.failAll('parakeet_protocol_invalid');
     }
   }
 
   private consumeLine(line: string): void {
-    let response: NativeResponse;
+    let envelope: unknown;
     try {
-      response = JSON.parse(line) as NativeResponse;
+      envelope = JSON.parse(line);
     } catch {
       this.failAll('parakeet_protocol_invalid');
       return;
     }
+    if (isRecord(envelope) && envelope.kind === 'event') {
+      const event = parseNativeEvent(envelope);
+      if (!event) {
+        this.failAll('parakeet_protocol_invalid');
+        return;
+      }
+      for (const listener of this.eventListeners) {
+        try {
+          listener(event);
+        } catch {
+          this.options.diagnostic?.('parakeet_event_listener_failed');
+        }
+      }
+      return;
+    }
+    const response = envelope as NativeResponse;
     if (
       response.schemaVersion !== 1 ||
       typeof response.id !== 'string' ||
@@ -168,4 +253,143 @@ export class NativeJsonLineProcess {
     }
     this.terminate();
   }
+}
+
+const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+const STREAM_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= MAX_SAFE_INTEGER
+  );
+}
+
+function hasValidIdentity(value: Record<string, unknown>): boolean {
+  return (
+    value.schemaVersion === 1 &&
+    value.kind === 'event' &&
+    typeof value.streamId === 'string' &&
+    STREAM_ID_PATTERN.test(value.streamId) &&
+    !value.streamId.includes('..') &&
+    (value.source === 'mic' || value.source === 'system') &&
+    isPositiveSafeInteger(value.generation) &&
+    isPositiveSafeInteger(value.revision)
+  );
+}
+
+function hasOnlyKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  return (
+    required.every((key) => key in value) &&
+    Object.keys(value).every((key) => allowed.has(key))
+  );
+}
+
+function parseNativeEvent(value: Record<string, unknown>): NativeEvent | null {
+  if (!hasValidIdentity(value)) return null;
+  const identityKeys = [
+    'schemaVersion',
+    'kind',
+    'event',
+    'streamId',
+    'source',
+    'generation',
+    'revision',
+  ] as const;
+
+  if (value.event === 'stream_update') {
+    if (
+      !hasOnlyKeys(value, [
+        ...identityKeys,
+        'qualifiesPriorTentative',
+        'text',
+        'confidence',
+        'audioEndSeconds',
+      ]) ||
+      typeof value.qualifiesPriorTentative !== 'boolean' ||
+      typeof value.text !== 'string' ||
+      typeof value.confidence !== 'number' ||
+      !Number.isFinite(value.confidence) ||
+      value.confidence < 0 ||
+      value.confidence > 1 ||
+      typeof value.audioEndSeconds !== 'number' ||
+      !Number.isFinite(value.audioEndSeconds) ||
+      value.audioEndSeconds < 0
+    ) {
+      return null;
+    }
+    return value as NativeStreamUpdateEvent;
+  }
+
+  if (value.event === 'stream_degraded') {
+    const reasons = new Set([
+      'backpressure',
+      'sequence_gap',
+      'partial_window',
+      'coverage_gap',
+      'thermal_pressure',
+    ]);
+    if (
+      !hasOnlyKeys(
+        value,
+        [...identityKeys, 'reason'],
+        ['affectedSequence', 'chunkStartSeconds', 'chunkEndSeconds'],
+      ) ||
+      typeof value.reason !== 'string' ||
+      !reasons.has(value.reason) ||
+      (value.affectedSequence !== undefined &&
+        !isPositiveSafeInteger(value.affectedSequence))
+    ) {
+      return null;
+    }
+    const start = value.chunkStartSeconds;
+    const end = value.chunkEndSeconds;
+    if (
+      (start === undefined) !== (end === undefined) ||
+      (start !== undefined &&
+        (typeof start !== 'number' ||
+          !Number.isFinite(start) ||
+          start < 0 ||
+          typeof end !== 'number' ||
+          !Number.isFinite(end) ||
+          end <= start))
+    ) {
+      return null;
+    }
+    return value as NativeStreamDegradedEvent;
+  }
+
+  if (value.event === 'stream_failed') {
+    const reasons = new Set([
+      'invalid_request',
+      'stream_not_found',
+      'generation_mismatch',
+      'sequence_out_of_order',
+      'path_not_allowed',
+      'audio_decode_failed',
+      'model_unavailable',
+      'inference_failed',
+      'cancelled',
+    ]);
+    if (
+      !hasOnlyKeys(value, [...identityKeys, 'reason']) ||
+      typeof value.reason !== 'string' ||
+      !reasons.has(value.reason)
+    ) {
+      return null;
+    }
+    return value as NativeStreamFailedEvent;
+  }
+  return null;
 }

@@ -307,12 +307,19 @@ public struct RuntimeResponse: Codable, Equatable, Sendable {
         )
     }
 
-    public static func prepared(id: String, modelVersion: String) -> RuntimeResponse {
+    public static func prepared(
+        id: String,
+        modelVersion: String,
+        liveConfigId: String? = nil
+    ) -> RuntimeResponse {
         RuntimeResponse(
             schemaVersion: 1,
             id: id,
             ok: true,
-            result: RuntimeResultPayload(modelVersion: modelVersion),
+            result: RuntimeResultPayload(
+                modelVersion: modelVersion,
+                liveConfigId: liveConfigId
+            ),
             error: nil
         )
     }
@@ -367,15 +374,18 @@ public struct RuntimeResponse: Codable, Equatable, Sendable {
 
 public struct RuntimeResultPayload: Codable, Equatable, Sendable {
     public let modelVersion: String?
+    public let liveConfigId: String?
     public let transcription: TranscriptionOutput?
     public let vocabularyCount: Int?
 
     public init(
         modelVersion: String? = nil,
+        liveConfigId: String? = nil,
         transcription: TranscriptionOutput? = nil,
         vocabularyCount: Int? = nil
     ) {
         self.modelVersion = modelVersion
+        self.liveConfigId = liveConfigId
         self.transcription = transcription
         self.vocabularyCount = vocabularyCount
     }

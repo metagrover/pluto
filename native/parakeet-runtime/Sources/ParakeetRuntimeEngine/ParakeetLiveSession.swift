@@ -29,6 +29,18 @@ public struct LiveRuntimeTerminalFailure: Error, Equatable, Sendable {
 
 public enum ParakeetLiveVocabularyMode: Equatable, Sendable { case finalOnly }
 
+public enum ParakeetLiveConfigurationID: String, Equatable, Sendable {
+    case pinnedDefault = "pinned-default"
+    case lowLatency2s = "low-latency-2s"
+
+    public var configuration: ParakeetLiveConfiguration {
+        switch self {
+        case .pinnedDefault: .pinnedDefault
+        case .lowLatency2s: .lowLatencyCandidate
+        }
+    }
+}
+
 public struct ParakeetLiveConfiguration: Equatable, Sendable {
     public let chunkSeconds: Double
     public let hypothesisChunkSeconds: Double
