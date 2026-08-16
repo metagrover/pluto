@@ -70,6 +70,8 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
     public let generation: Int
     public let revision: Int
     public let qualifiesPriorTentative: Bool
+    public let committedThroughSequence: Int
+    public let tentativeThroughSequence: Int
     public let text: String
     public let confidence: Double
     public let audioEndSeconds: Double
@@ -80,6 +82,8 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
         generation: Int,
         revision: Int,
         qualifiesPriorTentative: Bool,
+        committedThroughSequence: Int = 0,
+        tentativeThroughSequence: Int = 0,
         text: String,
         confidence: Double,
         audioEndSeconds: Double
@@ -89,13 +93,15 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
         self.generation = generation
         self.revision = revision
         self.qualifiesPriorTentative = qualifiesPriorTentative
+        self.committedThroughSequence = committedThroughSequence
+        self.tentativeThroughSequence = tentativeThroughSequence
         self.text = text
         self.confidence = confidence
         self.audioEndSeconds = audioEndSeconds
     }
 
     public var description: String {
-        "LiveStreamUpdate(streamId: <redacted>, source: \(source.rawValue), generation: \(generation), revision: \(revision), qualifiesPriorTentative: \(qualifiesPriorTentative), confidence: \(confidence), audioEndSeconds: \(audioEndSeconds), text: <redacted>)"
+        "LiveStreamUpdate(streamId: <redacted>, source: \(source.rawValue), generation: \(generation), revision: \(revision), committedThroughSequence: \(committedThroughSequence), tentativeThroughSequence: \(tentativeThroughSequence), qualifiesPriorTentative: \(qualifiesPriorTentative), confidence: \(confidence), audioEndSeconds: \(audioEndSeconds), text: <redacted>)"
     }
 
     public var debugDescription: String { description }
@@ -203,6 +209,8 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
         case generation
         case revision
         case qualifiesPriorTentative
+        case committedThroughSequence
+        case tentativeThroughSequence
         case text
         case confidence
         case audioEndSeconds
@@ -244,6 +252,14 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
                 qualifiesPriorTentative: try container.decode(
                     Bool.self,
                     forKey: .qualifiesPriorTentative
+                ),
+                committedThroughSequence: try container.decode(
+                    Int.self,
+                    forKey: .committedThroughSequence
+                ),
+                tentativeThroughSequence: try container.decode(
+                    Int.self,
+                    forKey: .tentativeThroughSequence
                 ),
                 text: try container.decode(String.self, forKey: .text),
                 confidence: try container.decode(Double.self, forKey: .confidence),
@@ -293,6 +309,14 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
             try container.encode(
                 update.qualifiesPriorTentative,
                 forKey: .qualifiesPriorTentative
+            )
+            try container.encode(
+                update.committedThroughSequence,
+                forKey: .committedThroughSequence
+            )
+            try container.encode(
+                update.tentativeThroughSequence,
+                forKey: .tentativeThroughSequence
             )
             try container.encode(update.text, forKey: .text)
             try container.encode(update.confidence, forKey: .confidence)
@@ -393,6 +417,16 @@ private func validate(_ update: LiveStreamUpdate) throws {
             "invalid audio boundary"
         )
     }
+    guard
+        isNonnegativeSafeInteger(update.committedThroughSequence),
+        isNonnegativeSafeInteger(update.tentativeThroughSequence),
+        update.committedThroughSequence <= update.tentativeThroughSequence
+    else {
+        throw protocolDecodingError(
+            RuntimeEvent.CodingKeys.tentativeThroughSequence,
+            "invalid sequence watermarks"
+        )
+    }
 }
 
 private func validate(_ degraded: LiveStreamDegraded) throws {
@@ -420,6 +454,10 @@ private func validate(_ degraded: LiveStreamDegraded) throws {
 
 func isPositiveSafeInteger(_ value: Int) -> Bool {
     value > 0 && value <= maximumJSONSafeInteger
+}
+
+func isNonnegativeSafeInteger(_ value: Int) -> Bool {
+    value >= 0 && value <= maximumJSONSafeInteger
 }
 
 func isValidOpaqueStreamId(_ value: String) -> Bool {

@@ -56,6 +56,10 @@ import {
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
+import {
+  type ParakeetRuntimeHost,
+  makeRuntimeHost,
+} from './transcription/parakeetRuntimeHost';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -315,6 +319,7 @@ const knowledgeSynthesisPause = createPauseReasonCoordinator(
   setKnowledgeDocSynthesisPaused,
 );
 let parakeetFinalClient: ParakeetFinalClient | null = null;
+let parakeetRuntimeHost: ParakeetRuntimeHost | null = null;
 
 function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
@@ -386,6 +391,8 @@ app.on('before-quit', async () => {
   activeMeetingTasks.clear();
   parakeetFinalClient?.close();
   parakeetFinalClient = null;
+  parakeetRuntimeHost?.shutdown();
+  parakeetRuntimeHost = null;
   await mlxPreview.stop();
 });
 
@@ -404,12 +411,18 @@ app.whenReady().then(async () => {
     'parakeet',
   );
   fs.mkdirSync(parakeetModelRoot, { recursive: true });
+  const parakeetPaths = {
+    executablePath: parakeetExecutablePath,
+    modelRoot: parakeetModelRoot,
+    audioRoot: getMeetingArtifactsRootDir(),
+  };
+  parakeetRuntimeHost = makeRuntimeHost({
+    paths: parakeetPaths,
+    diagnostic: (code) => console.warn(`[Pluto] ${code}`),
+  });
   parakeetFinalClient = new ParakeetFinalClient({
-    paths: {
-      executablePath: parakeetExecutablePath,
-      modelRoot: parakeetModelRoot,
-      audioRoot: getMeetingArtifactsRootDir(),
-    },
+    paths: parakeetPaths,
+    runtimeHost: parakeetRuntimeHost,
     diagnostic: (code) => console.warn(`[Pluto] ${code}`),
   });
 

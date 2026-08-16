@@ -272,6 +272,8 @@ public actor ParakeetLiveSession {
         var lifecycle: ParakeetLiveLifecycle = .open
         var nextSequence = 1
         var revision = 0
+        var committedThroughSequence = 0
+        var tentativeThroughSequence = 0
         var accepted: [Int: AppendIdentity] = [:]
         var degradations: [LiveStreamDegraded] = []
         var queue: [PendingAppend] = []
@@ -620,13 +622,40 @@ public actor ParakeetLiveSession {
                     ))
                 continue
             }
+            let tentativeSequence = affectedSequence ?? stream.tentativeThroughSequence
+            let committedSequence = update.isConfirmed
+                ? stream.tentativeThroughSequence
+                : stream.committedThroughSequence
+            guard
+                tentativeSequence >= stream.tentativeThroughSequence,
+                tentativeSequence < stream.nextSequence,
+                committedSequence >= stream.committedThroughSequence,
+                committedSequence <= tentativeSequence,
+                !update.isConfirmed ||
+                    committedSequence < tentativeSequence ||
+                    tentativeSequence == 0
+            else {
+                events.append(
+                    makeDegradation(
+                        reason: .coverageGap, affectedSequence: affectedSequence,
+                        chunkStartSeconds: chunkStartSeconds,
+                        chunkEndSeconds: chunkEndSeconds,
+                        streamId: streamId, stream: &stream
+                    ))
+                continue
+            }
+            stream.committedThroughSequence = committedSequence
+            stream.tentativeThroughSequence = tentativeSequence
             stream.revision += 1
             events.append(
                 .streamUpdate(
                     LiveStreamUpdate(
                         streamId: streamId, source: stream.source,
                         generation: stream.generation, revision: stream.revision,
-                        qualifiesPriorTentative: update.isConfirmed, text: update.text,
+                        qualifiesPriorTentative: update.isConfirmed,
+                        committedThroughSequence: committedSequence,
+                        tentativeThroughSequence: tentativeSequence,
+                        text: update.text,
                         confidence: update.confidence, audioEndSeconds: end
                     )))
         }

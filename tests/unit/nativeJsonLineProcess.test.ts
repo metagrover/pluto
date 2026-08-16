@@ -33,6 +33,8 @@ const update = (): NativeEvent => ({
   generation: 1,
   revision: 1,
   qualifiesPriorTentative: false,
+  committedThroughSequence: 0,
+  tentativeThroughSequence: 0,
   text: 'synthetic',
   confidence: 0.75,
   audioEndSeconds: 1,
@@ -98,6 +100,9 @@ describe('NativeJsonLineProcess live events', () => {
     { ...update(), revision: 0 },
     { ...update(), confidence: 2 },
     { ...update(), qualifiesPriorTentative: 'yes' },
+    { ...update(), committedThroughSequence: 0.5 },
+    { ...update(), tentativeThroughSequence: -1 },
+    { ...update(), committedThroughSequence: 2, tentativeThroughSequence: 1 },
   ])(
     'fails pending work for a malformed event without echoing it',
     async (event) => {

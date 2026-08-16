@@ -125,6 +125,8 @@ const update = (overrides: Partial<NativeEvent> = {}): NativeEvent =>
     ...openSystem,
     revision: 1,
     qualifiesPriorTentative: false,
+    committedThroughSequence: 0,
+    tentativeThroughSequence: 0,
     text: 'synthetic',
     confidence: 0.8,
     audioEndSeconds: 1,

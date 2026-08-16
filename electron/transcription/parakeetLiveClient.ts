@@ -5,6 +5,10 @@ import type {
   NativeResponse,
   NativeStreamDegradedEvent,
 } from './nativeJsonLineProcess';
+import type {
+  ParakeetRuntimeHost,
+  ParakeetRuntimeLease,
+} from './parakeetRuntimeHost';
 
 export type ParakeetLiveIdentity = {
   streamId: string;
@@ -45,6 +49,8 @@ type DrainWaiter = {
 type StreamState = ParakeetLiveIdentity & {
   nextSequence: number;
   nextRevision: number;
+  committedThroughSequence: number;
+  tentativeThroughSequence: number;
   queue: AppendJob[];
   inFlight: AppendJob | null;
   inFlightController: AbortController | null;
@@ -62,6 +68,8 @@ const NONTERMINAL_NATIVE_ERRORS = new Set([
 ]);
 
 export class ParakeetLiveClient {
+  private readonly process: NativeJsonLineTransport;
+  private readonly runtimeHost: ParakeetRuntimeHost | undefined;
   private readonly streams = new Map<string, StreamState>();
   private readonly sourceStreams = new Map<NativeLiveSource, string>();
   private readonly eventListeners = new Set<(event: NativeEvent) => void>();
@@ -70,10 +78,13 @@ export class ParakeetLiveClient {
   private readonly unsubscribeFailure: () => void;
   private nextID = 0;
   private closed = false;
+  private runtimeLease: ParakeetRuntimeLease | null = null;
+  private runtimeLeasePromise: Promise<ParakeetRuntimeLease> | null = null;
 
   constructor(
     private readonly options: {
-      process: NativeJsonLineTransport;
+      process?: NativeJsonLineTransport;
+      runtimeHost?: ParakeetRuntimeHost;
       maxQueuedAppends: number;
     },
   ) {
@@ -83,10 +94,15 @@ export class ParakeetLiveClient {
     ) {
       throw new Error('parakeet_request_invalid');
     }
-    this.unsubscribeEvent = options.process.onEvent((event) =>
+    if (!options.process && !options.runtimeHost) {
+      throw new Error('parakeet_request_invalid');
+    }
+    this.runtimeHost = options.runtimeHost;
+    this.process = options.process ?? options.runtimeHost!.transport;
+    this.unsubscribeEvent = this.process.onEvent((event) =>
       this.consumeEvent(event),
     );
-    this.unsubscribeFailure = options.process.onFailure((code) =>
+    this.unsubscribeFailure = this.process.onFailure((code) =>
       this.invalidateAll(code),
     );
   }
@@ -114,6 +130,7 @@ export class ParakeetLiveClient {
     ) {
       throw new Error('parakeet_stream_capacity');
     }
+    if (this.runtimeHost) await this.ensureRuntimeLease();
     const state = this.makeState(identity);
     this.streams.set(identity.streamId, state);
     this.sourceStreams.set(identity.source, identity.streamId);
@@ -248,7 +265,8 @@ export class ParakeetLiveClient {
     if (this.closed) return;
     this.closed = true;
     this.invalidateAll('parakeet_process_terminated');
-    this.options.process.terminate();
+    if (this.runtimeHost) void this.releaseRuntimeLeaseIfIdle();
+    else this.process.terminate();
     this.unsubscribeEvent();
     this.unsubscribeFailure();
   }
@@ -366,7 +384,7 @@ export class ParakeetLiveClient {
   ): Promise<Record<string, unknown>> {
     if (signal?.aborted) throw new Error('parakeet_cancelled');
     const id = this.requestID(method);
-    const request = this.options.process.request({
+    const request = this.process.request({
       schemaVersion: 1,
       id,
       method,
@@ -390,14 +408,14 @@ export class ParakeetLiveClient {
         if (settled) return;
         settled = true;
         const cancelID = this.requestID('cancel');
-        this.options.process.ignoreResponse(cancelID);
-        this.options.process.notify({
+        this.process.ignoreResponse(cancelID);
+        this.process.notify({
           schemaVersion: 1,
           id: cancelID,
           method: 'cancel',
           targetId: id,
         });
-        this.options.process.cancelPending(id);
+        this.process.cancelPending(id);
         reject(new Error('parakeet_cancelled'));
       };
       signal.addEventListener('abort', abort, { once: true });
@@ -510,6 +528,13 @@ export class ParakeetLiveClient {
       this.reportProtocolError('parakeet_event_out_of_order');
       return;
     }
+    if (
+      event.event === 'stream_update' &&
+      !this.acceptSequenceWatermarks(state, event)
+    ) {
+      this.reportProtocolError('parakeet_event_sequence_invalid');
+      return;
+    }
     state.nextRevision += 1;
     for (const listener of this.eventListeners) listener(event);
     if (event.event === 'stream_failed') {
@@ -585,6 +610,8 @@ export class ParakeetLiveClient {
       ...identity,
       nextSequence: 1,
       nextRevision: 1,
+      committedThroughSequence: 0,
+      tentativeThroughSequence: 0,
       queue: [],
       inFlight: null,
       inFlightController: null,
@@ -602,6 +629,57 @@ export class ParakeetLiveClient {
     if (this.sourceStreams.get(state.source) === state.streamId) {
       this.sourceStreams.delete(state.source);
     }
+    void this.releaseRuntimeLeaseIfIdle();
+  }
+
+  private acceptSequenceWatermarks(
+    state: StreamState,
+    event: Extract<NativeEvent, { event: 'stream_update' }>,
+  ): boolean {
+    const highestAcceptedSequence = state.nextSequence - 1;
+    if (
+      !Number.isSafeInteger(event.committedThroughSequence) ||
+      !Number.isSafeInteger(event.tentativeThroughSequence) ||
+      event.committedThroughSequence < state.committedThroughSequence ||
+      event.tentativeThroughSequence < state.tentativeThroughSequence ||
+      event.committedThroughSequence > event.tentativeThroughSequence ||
+      event.tentativeThroughSequence > highestAcceptedSequence
+    ) {
+      return false;
+    }
+    if (
+      event.qualifiesPriorTentative &&
+      (event.committedThroughSequence !== state.tentativeThroughSequence ||
+        (event.tentativeThroughSequence <= state.tentativeThroughSequence &&
+          event.tentativeThroughSequence !== 0))
+    ) {
+      return false;
+    }
+    state.committedThroughSequence = event.committedThroughSequence;
+    state.tentativeThroughSequence = event.tentativeThroughSequence;
+    return true;
+  }
+
+  private async ensureRuntimeLease(): Promise<void> {
+    if (!this.runtimeHost || this.runtimeLease) return;
+    if (!this.runtimeLeasePromise) {
+      const immediate = this.runtimeHost.tryAcquire('live');
+      this.runtimeLeasePromise = immediate
+        ? Promise.resolve(immediate)
+        : this.runtimeHost.acquire('live');
+    }
+    try {
+      this.runtimeLease = await this.runtimeLeasePromise;
+    } finally {
+      this.runtimeLeasePromise = null;
+    }
+  }
+
+  private async releaseRuntimeLeaseIfIdle(): Promise<void> {
+    if (this.streams.size > 0 || !this.runtimeLease) return;
+    const lease = this.runtimeLease;
+    this.runtimeLease = null;
+    await lease.release();
   }
 
   private requireOpenClient(): void {

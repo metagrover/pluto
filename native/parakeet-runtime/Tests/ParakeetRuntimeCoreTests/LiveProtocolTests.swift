@@ -318,6 +318,8 @@ final class LiveProtocolTests: XCTestCase {
         XCTAssertEqual(object["kind"] as? String, "event")
         XCTAssertEqual(object["event"] as? String, "stream_update")
         XCTAssertEqual(object["text"] as? String, "synthetic")
+        XCTAssertEqual(object["committedThroughSequence"] as? Int, 0)
+        XCTAssertEqual(object["tentativeThroughSequence"] as? Int, 0)
         XCTAssertNil(object["payload"])
     }
 
@@ -338,6 +340,14 @@ final class LiveProtocolTests: XCTestCase {
             JSONSerialization.jsonObject(with: encoder.encode(event)) as? [String: Any])
         XCTAssertEqual(object["qualifiesPriorTentative"] as? Bool, true)
         XCTAssertNil(object["priorTentativeQualified"])
+    }
+
+    func testRejectsUpdateWithInvalidSequenceWatermarks() {
+        assertAllEventsReject([
+            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"revision":1,"qualifiesPriorTentative":false,"committedThroughSequence":1,"tentativeThroughSequence":0,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#,
+            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"revision":1,"qualifiesPriorTentative":false,"committedThroughSequence":0.5,"tentativeThroughSequence":1,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#,
+            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"revision":1,"qualifiesPriorTentative":false,"committedThroughSequence":0,"tentativeThroughSequence":9007199254740992,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#,
+        ])
     }
 
     func testUpdateRejectsLegacyPriorTentativeQualifiedKey() {
