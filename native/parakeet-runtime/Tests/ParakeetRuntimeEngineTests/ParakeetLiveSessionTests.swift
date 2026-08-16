@@ -1,4 +1,5 @@
 import Foundation
+import FluidAudio
 import XCTest
 
 @testable import ParakeetRuntimeCore
@@ -19,8 +20,8 @@ private actor FakeLiveManager: ParakeetLiveManaging {
         self.outcomes = outcomes
     }
 
-    func append(audioURL: URL) async throws -> LiveDriverAppendOutcome {
-        appendedURLs.append(audioURL)
+    func append(request: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
+        appendedURLs.append(request.audioURL)
         return outcomes.isEmpty ? LiveDriverAppendOutcome() : outcomes.removeFirst()
     }
 
@@ -67,8 +68,8 @@ private actor BlockingLiveManager: ParakeetLiveManaging {
         self.lateUpdateOnCancel = lateUpdateOnCancel
     }
 
-    func append(audioURL: URL) async throws -> LiveDriverAppendOutcome {
-        appendedNames.append(audioURL.lastPathComponent)
+    func append(request: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
+        appendedNames.append(request.audioURL.lastPathComponent)
         await withCheckedContinuation { continuations.append($0) }
         return LiveDriverAppendOutcome(
             updates: lateUpdateOnCancel
@@ -101,7 +102,7 @@ private actor FailingFirstLiveManager: ParakeetLiveManaging {
     private var continuation: CheckedContinuation<Void, Never>?
     private(set) var appendCount = 0
 
-    func append(audioURL _: URL) async throws -> LiveDriverAppendOutcome {
+    func append(request _: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
         appendCount += 1
         if appendCount == 1 {
             await withCheckedContinuation { continuation = $0 }
@@ -213,7 +214,7 @@ private actor RecoveringOpenDriver: ParakeetLiveDriving {
 }
 
 private actor FinalUpdateManager: ParakeetLiveManaging {
-    func append(audioURL _: URL) async throws -> LiveDriverAppendOutcome {
+    func append(request _: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
         LiveDriverAppendOutcome()
     }
     func finish() async throws -> LiveDriverFinishOutcome {
@@ -269,7 +270,7 @@ private actor OrderedUpdateManager: ParakeetLiveManaging {
     private var firstContinuation: CheckedContinuation<Void, Never>?
     private var appendCount = 0
 
-    func append(audioURL _: URL) async throws -> LiveDriverAppendOutcome {
+    func append(request _: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
         appendCount += 1
         let ordinal = appendCount
         if ordinal == 1 {
@@ -582,7 +583,13 @@ final class ParakeetLiveSessionTests: XCTestCase {
                     processedAudioEndSeconds: 1
                 )
             ],
-            partialWindowFailed: true
+            degradations: [
+                LiveDriverDegradation(
+                    reason: .partialWindow,
+                    startSeconds: 0.25,
+                    endSeconds: 0.375
+                )
+            ]
         )
         let session = makeSession(driver: FakeLiveDriver(outcomes: [outcome]))
         try await session.open(streamId: "s", source: .system, generation: 1)
@@ -605,6 +612,8 @@ final class ParakeetLiveSessionTests: XCTestCase {
         }
         XCTAssertEqual(degraded.reason, .partialWindow)
         XCTAssertEqual(degraded.affectedSequence, 1)
+        XCTAssertEqual(degraded.chunkStartSeconds, 0.25)
+        XCTAssertEqual(degraded.chunkEndSeconds, 0.375)
     }
 
     func testCancelRemovesManagerAndPreventsLateAppendResults() async throws {
@@ -897,14 +906,14 @@ final class ParakeetLiveSessionTests: XCTestCase {
         XCTAssertEqual(event.reason, .coverageGap)
     }
 
-    func testProductionDriverFailsClosedOnMissingCapabilities() async throws {
-        let session = makeSession(driver: FluidAudioLiveDriver())
-        await assertThrows(
-            .unsupportedCapability,
-            try await session.open(streamId: "s", source: .mic, generation: 1)
-        )
-        let state = await session.state(streamId: "s")
-        XCTAssertNil(state)
+    func testProductionDriverAdvertisesOnlyTheVendoredAcknowledgedContract() async {
+        AppLogger.setProcessLogging(.enabled)
+
+        let driver = FluidAudioLiveDriver()
+        let capabilities = await driver.capabilities()
+
+        XCTAssertEqual(capabilities, .required)
+        XCTAssertEqual(AppLogger.processLoggingMode, .disabled)
     }
 
     func testVerifiedModelLoaderIsSingleFlightForConcurrentManagerCreation() async throws {

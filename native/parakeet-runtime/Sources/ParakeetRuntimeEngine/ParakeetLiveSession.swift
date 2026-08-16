@@ -100,18 +100,45 @@ public struct ParakeetLiveDriverCapabilities: Equatable, Sendable {
 
 public struct ParakeetLiveManagerRequest: Equatable, Sendable {
     public let activeModelURL: URL
+    public let streamId: String
     public let source: LiveSource
+    public let generation: Int
     public let configuration: ParakeetLiveConfiguration
     public let vocabularyMode: ParakeetLiveVocabularyMode
     public init(
-        activeModelURL: URL, source: LiveSource,
+        activeModelURL: URL, streamId: String, source: LiveSource, generation: Int,
         configuration: ParakeetLiveConfiguration,
         vocabularyMode: ParakeetLiveVocabularyMode
     ) {
         self.activeModelURL = activeModelURL
+        self.streamId = streamId
         self.source = source
+        self.generation = generation
         self.configuration = configuration
         self.vocabularyMode = vocabularyMode
+    }
+}
+
+public struct ParakeetLiveAppendRequest: Equatable, Sendable {
+    public let audioURL: URL
+    public let streamId: String
+    public let source: LiveSource
+    public let generation: Int
+    public let sequence: Int
+    public let chunkStartSeconds: Double
+    public let chunkEndSeconds: Double
+
+    public init(
+        audioURL: URL, streamId: String, source: LiveSource, generation: Int,
+        sequence: Int, chunkStartSeconds: Double, chunkEndSeconds: Double
+    ) {
+        self.audioURL = audioURL
+        self.streamId = streamId
+        self.source = source
+        self.generation = generation
+        self.sequence = sequence
+        self.chunkStartSeconds = chunkStartSeconds
+        self.chunkEndSeconds = chunkEndSeconds
     }
 }
 
@@ -133,29 +160,44 @@ public struct LiveDriverUpdate: Equatable, Sendable {
 
 public struct LiveDriverAppendOutcome: Equatable, Sendable {
     public let updates: [LiveDriverUpdate]
-    public let partialWindowFailed: Bool
-    public init(updates: [LiveDriverUpdate] = [], partialWindowFailed: Bool = false) {
+    public let degradations: [LiveDriverDegradation]
+    public init(
+        updates: [LiveDriverUpdate] = [],
+        degradations: [LiveDriverDegradation] = []
+    ) {
         self.updates = updates
-        self.partialWindowFailed = partialWindowFailed
+        self.degradations = degradations
+    }
+}
+
+public struct LiveDriverDegradation: Equatable, Sendable {
+    public let reason: LiveDegradationReason
+    public let startSeconds: Double
+    public let endSeconds: Double
+
+    public init(reason: LiveDegradationReason, startSeconds: Double, endSeconds: Double) {
+        self.reason = reason
+        self.startSeconds = startSeconds
+        self.endSeconds = endSeconds
     }
 }
 
 public struct LiveDriverFinishOutcome: Equatable, Sendable {
     public let finalText: String
     public let updates: [LiveDriverUpdate]
-    public let partialWindowFailed: Bool
+    public let degradations: [LiveDriverDegradation]
     public init(
         finalText: String, updates: [LiveDriverUpdate] = [],
-        partialWindowFailed: Bool = false
+        degradations: [LiveDriverDegradation] = []
     ) {
         self.finalText = finalText
         self.updates = updates
-        self.partialWindowFailed = partialWindowFailed
+        self.degradations = degradations
     }
 }
 
 public protocol ParakeetLiveManaging: Sendable {
-    func append(audioURL: URL) async throws -> LiveDriverAppendOutcome
+    func append(request: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome
     func finish() async throws -> LiveDriverFinishOutcome
     func cancel() async
 }
@@ -281,7 +323,8 @@ public actor ParakeetLiveSession {
         do {
             manager = try await driver.makeManager(
                 request: ParakeetLiveManagerRequest(
-                    activeModelURL: activeModelURL, source: source,
+                    activeModelURL: activeModelURL, streamId: streamId, source: source,
+                    generation: generation,
                     configuration: configuration, vocabularyMode: .finalOnly
                 ))
         } catch {
@@ -372,7 +415,7 @@ public actor ParakeetLiveSession {
             throw LiveRuntimeFailure.cancelled
         }
         let events = applyUpdates(
-            outcome.updates, partialWindowFailed: outcome.partialWindowFailed,
+            outcome.updates, degradations: outcome.degradations,
             affectedSequence: nil, chunkStartSeconds: nil, chunkEndSeconds: nil,
             streamId: streamId, stream: &current
         )
@@ -507,7 +550,17 @@ public actor ParakeetLiveSession {
         stream.active = pending
         streams[streamId] = stream
         let outcome: LiveDriverAppendOutcome
-        do { outcome = try await stream.manager.append(audioURL: pending.audioURL) } catch {
+        do {
+            outcome = try await stream.manager.append(
+                request: ParakeetLiveAppendRequest(
+                    audioURL: pending.audioURL, streamId: streamId,
+                    source: stream.source, generation: generation,
+                    sequence: pending.sequence,
+                    chunkStartSeconds: pending.chunkStartSeconds,
+                    chunkEndSeconds: pending.chunkEndSeconds
+                )
+            )
+        } catch {
             await failActiveAppend(
                 streamId: streamId, generation: generation, pending: pending
             )
@@ -518,7 +571,7 @@ public actor ParakeetLiveSession {
         else { return }
         current.active = nil
         let events = applyUpdates(
-            outcome.updates, partialWindowFailed: outcome.partialWindowFailed,
+            outcome.updates, degradations: outcome.degradations,
             affectedSequence: pending.sequence,
             chunkStartSeconds: pending.chunkStartSeconds,
             chunkEndSeconds: pending.chunkEndSeconds,
@@ -537,7 +590,7 @@ public actor ParakeetLiveSession {
     }
 
     private func applyUpdates(
-        _ updates: [LiveDriverUpdate], partialWindowFailed: Bool,
+        _ updates: [LiveDriverUpdate], degradations: [LiveDriverDegradation],
         affectedSequence: Int?, chunkStartSeconds: Double?,
         chunkEndSeconds: Double?, streamId: String, stream: inout StreamState
     ) -> [RuntimeEvent] {
@@ -565,13 +618,15 @@ public actor ParakeetLiveSession {
                         confidence: update.confidence, audioEndSeconds: end
                     )))
         }
-        if partialWindowFailed {
+        for degradation in degradations {
             events.append(
                 makeDegradation(
-                    reason: .partialWindow, affectedSequence: affectedSequence,
-                    chunkStartSeconds: chunkStartSeconds, chunkEndSeconds: chunkEndSeconds,
+                    reason: degradation.reason, affectedSequence: affectedSequence,
+                    chunkStartSeconds: degradation.startSeconds,
+                    chunkEndSeconds: degradation.endSeconds,
                     streamId: streamId, stream: &stream
-                ))
+                )
+            )
         }
         return events
     }

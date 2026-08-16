@@ -34,7 +34,7 @@ private actor ServiceInferenceDriver: ParakeetInferenceDriving {
 }
 
 private actor ServiceLiveManager: ParakeetLiveManaging {
-    func append(audioURL _: URL) async throws -> LiveDriverAppendOutcome {
+    func append(request _: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
         LiveDriverAppendOutcome(updates: [
             LiveDriverUpdate(
                 text: "preview", isConfirmed: false, confidence: 0.8,
@@ -59,7 +59,7 @@ private struct ServiceLiveDriver: ParakeetLiveDriving {
 }
 
 private actor FailingServiceLiveManager: ParakeetLiveManaging {
-    func append(audioURL _: URL) async throws -> LiveDriverAppendOutcome {
+    func append(request _: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
         throw RuntimeFailure.transcriptionFailed
     }
 
@@ -231,7 +231,7 @@ final class ParakeetServiceTests: XCTestCase {
         XCTAssertEqual(event.revision, 1)
     }
 
-    func testServiceEnforcesSourceAndFailsClosedForProductionCapabilities() async throws {
+    func testServiceEnforcesSourceForLiveOperations() async throws {
         let modelRoot = try makeDirectory("service-capability-models")
         let audioRoot = try makeDirectory("service-capability-audio")
         let audio = audioRoot.appendingPathComponent("chunk.wav")
@@ -260,26 +260,6 @@ final class ParakeetServiceTests: XCTestCase {
             )
         ))
         XCTAssertEqual(wrongSource.response.error?.code, .invalidRequest)
-
-        let production = ParakeetService(
-            modelRoot: modelRoot,
-            audioRoot: audioRoot,
-            manifest: .fixture,
-            installer: ServiceModelInstaller(),
-            inferenceDriver: ServiceInferenceDriver(),
-            liveDriver: FluidAudioLiveDriver()
-        )
-        _ = await production.handle(RuntimeRequest(id: "prepare-2", method: .prepare))
-        let unsupported = await production.handleLive(RuntimeRequest(
-            id: "unsupported",
-            method: .streamOpen,
-            live: LiveRequestMetadata(streamId: "p", source: .system, generation: 1)
-        ))
-        XCTAssertEqual(unsupported.response.error?.code, .modelPreparationFailed)
-        guard case .streamFailed(let event) = unsupported.events.first else {
-            return XCTFail("expected finite unsupported capability event")
-        }
-        XCTAssertEqual(event.reason, .modelUnavailable)
     }
 }
 

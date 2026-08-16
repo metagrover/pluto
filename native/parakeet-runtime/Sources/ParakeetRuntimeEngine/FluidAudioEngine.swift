@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreML
+import CryptoKit
 import FluidAudio
 import Foundation
 import ParakeetRuntimeCore
@@ -245,20 +246,21 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
 }
 
 public actor FluidAudioLiveDriver: ParakeetLiveDriving {
-    private let modelLoader = SingleFlightModelLoader<AsrModels>()
+    private let modelLoader: SingleFlightModelLoader<AsrModels>
 
-    public init() {}
+    public init() {
+        AppLogger.setProcessLogging(.disabled)
+        modelLoader = SingleFlightModelLoader<AsrModels>()
+    }
 
     public func capabilities() async -> ParakeetLiveDriverCapabilities {
-        // FluidAudio 0.15.5 does not expose bounded processing acknowledgements,
-        // exact update watermarks, or partial-window failures, and DEBUG logs can
-        // contain recognized text. The session therefore refuses production open.
-        .unsupported
+        .required
     }
 
     public func makeManager(request: ParakeetLiveManagerRequest) async throws
         -> any ParakeetLiveManaging
     {
+        AppLogger.setProcessLogging(.disabled)
         let modelURL = request.activeModelURL.standardizedFileURL
         let models = try await modelLoader.load(at: modelURL) {
             let asrDirectory = modelURL.appendingPathComponent(
@@ -287,40 +289,119 @@ public actor FluidAudioLiveDriver: ParakeetLiveDriving {
             tdtConfig: TdtConfig(blankId: AsrModelVersion.v3.blankId)
         )
         let manager = SlidingWindowAsrManager(config: slidingConfiguration)
-        let adapter = FluidAudioLiveManager(manager: manager)
-        try await adapter.start(
-            models: models,
+        try await manager.loadModels(models)
+        try await manager.startStreaming(
             source: request.source == .mic ? .microphone : .system
         )
-        return adapter
+        return FluidAudioLiveManager(
+            backend: manager, streamId: request.streamId,
+            source: request.source, generation: request.generation
+        )
     }
 }
 
-private actor FluidAudioLiveManager: ParakeetLiveManaging {
-    private let manager: SlidingWindowAsrManager
-    private var updateTask: Task<Void, Never>?
-    private var bufferedUpdates: [LiveDriverUpdate] = []
+protocol FluidAudioAcknowledgedLiveBackend: Sendable {
+    func ingestAudio(
+        _ buffer: sending AVAudioPCMBuffer,
+        receipt: String
+    ) async throws -> SlidingWindowIngestionReport
+    func finishDetailed() async throws -> SlidingWindowFinishReport
+    func cancel() async
+}
 
-    init(manager: SlidingWindowAsrManager) {
-        self.manager = manager
+extension SlidingWindowAsrManager: FluidAudioAcknowledgedLiveBackend {}
+
+actor FluidAudioLiveManager: ParakeetLiveManaging {
+    private enum Lifecycle { case open, finishing, finished, cancelled }
+
+    private let backend: any FluidAudioAcknowledgedLiveBackend
+    private let streamId: String
+    private let source: LiveSource
+    private let generation: Int
+    private var lifecycle = Lifecycle.open
+    private var nextAcceptedSample = 0
+    private var activeReceipt: String?
+
+    init(
+        backend: any FluidAudioAcknowledgedLiveBackend,
+        streamId: String, source: LiveSource, generation: Int
+    ) {
+        self.backend = backend
+        self.streamId = streamId
+        self.source = source
+        self.generation = generation
     }
 
-    func start(models: AsrModels, source: AudioSource) async throws {
-        try await manager.loadModels(models)
-
-        // Subscribe before accepting any audio. FluidAudio's update stream only supports
-        // one continuation, so attaching it after streamAudio can lose the first update.
-        let updates = await manager.transcriptionUpdates
-        updateTask = Task { [weak self] in
-            for await update in updates {
-                guard !Task.isCancelled else { return }
-                await self?.record(update)
-            }
+    func append(request: ParakeetLiveAppendRequest) async throws -> LiveDriverAppendOutcome {
+        guard lifecycle == .open, activeReceipt == nil else {
+            throw LiveRuntimeFailure.cancelled
         }
-        try await manager.startStreaming(source: source)
+        guard request.streamId == streamId, request.source == source,
+            request.generation == generation
+        else { throw LiveRuntimeFailure.inferenceFailed }
+        let buffer = try Self.makeCanonicalBuffer(audioURL: request.audioURL)
+        let startSample = nextAcceptedSample
+        let endSample = startSample + Int(buffer.frameLength)
+        let receipt = makeReceipt(
+            request: request, startSample: startSample, endSample: endSample
+        )
+        activeReceipt = receipt
+        let report: SlidingWindowIngestionReport
+        do {
+            report = try await backend.ingestAudio(buffer, receipt: receipt)
+        } catch {
+            if activeReceipt == receipt { activeReceipt = nil }
+            guard lifecycle == .open else { throw LiveRuntimeFailure.cancelled }
+            throw LiveRuntimeFailure.inferenceFailed
+        }
+        guard lifecycle == .open, activeReceipt == receipt else {
+            throw LiveRuntimeFailure.cancelled
+        }
+        activeReceipt = nil
+        guard report.receipt == receipt,
+            report.acceptedSamples
+                == SlidingWindowSampleRange(startSample: startSample, endSample: endSample)
+        else { throw LiveRuntimeFailure.inferenceFailed }
+        nextAcceptedSample = endSample
+        return try mapAppendReport(report)
     }
 
-    func append(audioURL: URL) async throws -> LiveDriverAppendOutcome {
+    func finish() async throws -> LiveDriverFinishOutcome {
+        guard lifecycle == .open, activeReceipt == nil else {
+            throw LiveRuntimeFailure.cancelled
+        }
+        lifecycle = .finishing
+        let report: SlidingWindowFinishReport
+        do { report = try await backend.finishDetailed() } catch {
+            guard lifecycle == .finishing else { throw LiveRuntimeFailure.cancelled }
+            lifecycle = .cancelled
+            throw LiveRuntimeFailure.inferenceFailed
+        }
+        guard lifecycle == .finishing else { throw LiveRuntimeFailure.cancelled }
+        lifecycle = .finished
+        let mapped = try mapReport(
+            attempted: report.attemptedCenterRanges,
+            processed: report.processedCenterRanges,
+            failed: report.failedCenterRanges,
+            updates: report.finalUpdates
+        )
+        return LiveDriverFinishOutcome(
+            finalText: report.finalTranscript,
+            updates: mapped.updates,
+            degradations: mapped.degradations
+        )
+    }
+
+    func cancel() async {
+        guard lifecycle != .cancelled, lifecycle != .finished else { return }
+        lifecycle = .cancelled
+        activeReceipt = nil
+        await backend.cancel()
+    }
+
+    nonisolated private static func makeCanonicalBuffer(
+        audioURL: URL
+    ) throws -> AVAudioPCMBuffer {
         let audioFile = try AVAudioFile(forReading: audioURL)
         let frameCount = AVAudioFrameCount(audioFile.length)
         guard
@@ -331,45 +412,103 @@ private actor FluidAudioLiveManager: ParakeetLiveManaging {
             )
         else { throw RuntimeFailure.transcriptionFailed }
         try audioFile.read(into: buffer)
-        await manager.streamAudio(buffer)
-
-        // The upstream API has no per-window completion acknowledgement. Drain only
-        // updates already delivered; later updates are retained for the next append/flush.
-        await Task.yield()
-        let delivered = bufferedUpdates
-        bufferedUpdates.removeAll(keepingCapacity: true)
-        return LiveDriverAppendOutcome(updates: delivered)
+        let samples = try AudioConverter().resampleBuffer(buffer)
+        guard !samples.isEmpty,
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: 16_000,
+                channels: 1, interleaved: false
+            ),
+            let canonical = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+            ),
+            let channel = canonical.floatChannelData?[0]
+        else { throw RuntimeFailure.transcriptionFailed }
+        canonical.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { source in
+            channel.update(from: source.baseAddress!, count: samples.count)
+        }
+        return canonical
     }
 
-    func finish() async throws -> LiveDriverFinishOutcome {
-        defer {
-            updateTask?.cancel()
-            updateTask = nil
-            bufferedUpdates.removeAll()
-        }
-        let finalText = try await manager.finish()
-        await Task.yield()
-        return LiveDriverFinishOutcome(
-            finalText: finalText,
-            updates: bufferedUpdates
+    private func makeReceipt(
+        request: ParakeetLiveAppendRequest, startSample: Int, endSample: Int
+    ) -> String {
+        let sourceValue = request.source == .mic ? "mic" : "system"
+        let identity = [
+            "pluto-live-v1", request.streamId, sourceValue,
+            String(request.generation), String(request.sequence),
+            String(request.chunkStartSeconds.bitPattern),
+            String(request.chunkEndSeconds.bitPattern),
+            String(startSample), String(endSample),
+        ].joined(separator: "|")
+        return SHA256.hash(data: Data(identity.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func mapAppendReport(
+        _ report: SlidingWindowIngestionReport
+    ) throws -> LiveDriverAppendOutcome {
+        let mapped = try mapReport(
+            attempted: report.attemptedCenterRanges,
+            processed: report.processedCenterRanges,
+            failed: report.failedCenterRanges,
+            updates: report.updates
+        )
+        return LiveDriverAppendOutcome(
+            updates: mapped.updates, degradations: mapped.degradations
         )
     }
 
-    func cancel() async {
-        updateTask?.cancel()
-        updateTask = nil
-        bufferedUpdates.removeAll()
-        await manager.cancel()
-    }
+    private func mapReport(
+        attempted: [SlidingWindowSampleRange],
+        processed: [SlidingWindowSampleRange],
+        failed: [SlidingWindowFailedRange],
+        updates: [SlidingWindowTranscriptionUpdate]
+    ) throws -> (updates: [LiveDriverUpdate], degradations: [LiveDriverDegradation]) {
+        guard updates.count == processed.count else {
+            throw LiveRuntimeFailure.inferenceFailed
+        }
+        guard processed.allSatisfy({ attempted.contains($0) }),
+            failed.allSatisfy({ attempted.contains($0.centerRange) })
+        else { throw LiveRuntimeFailure.inferenceFailed }
 
-    private func record(_ update: SlidingWindowTranscriptionUpdate) {
-        bufferedUpdates.append(
-            LiveDriverUpdate(
+        var mappedUpdates: [LiveDriverUpdate] = []
+        for (range, update) in zip(processed, updates) {
+            mappedUpdates.append(LiveDriverUpdate(
                 text: update.text,
                 isConfirmed: update.isConfirmed,
                 confidence: Double(update.confidence),
-                processedAudioEndSeconds: nil
+                processedAudioEndSeconds: seconds(range.endSample)
             ))
+        }
+        var degradations: [LiveDriverDegradation] = []
+        for range in attempted {
+            let processedMatches = processed.filter { $0 == range }.count
+            let failedMatches = failed.filter { $0.centerRange == range }.count
+            guard processedMatches + failedMatches <= 1 else {
+                throw LiveRuntimeFailure.inferenceFailed
+            }
+            if failedMatches == 1 {
+                degradations.append(degradation(reason: .partialWindow, range: range))
+            } else if processedMatches == 0 {
+                degradations.append(degradation(reason: .coverageGap, range: range))
+            }
+        }
+        return (mappedUpdates, degradations)
+    }
+
+    private func degradation(
+        reason: LiveDegradationReason, range: SlidingWindowSampleRange
+    ) -> LiveDriverDegradation {
+        LiveDriverDegradation(
+            reason: reason, startSeconds: seconds(range.startSample),
+            endSeconds: seconds(range.endSample)
+        )
+    }
+
+    private func seconds(_ sample: Int) -> Double {
+        Double(sample) / 16_000
     }
 }
 
