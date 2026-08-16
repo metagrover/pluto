@@ -39,6 +39,7 @@ type NativeTranscription = {
 export class ParakeetFinalClient {
   private readonly runtimeHost: ParakeetRuntimeHost;
   private preparePromise: Promise<TranscriptionRuntimeHealth> | null = null;
+  private activePrepare: { id: string; settled: Promise<void> } | null = null;
   private queue: Promise<void> = Promise.resolve();
   private nextID = 0;
 
@@ -85,13 +86,21 @@ export class ParakeetFinalClient {
   private prepareWithLease(): Promise<TranscriptionRuntimeHealth> {
     if (!this.preparePromise) {
       const id = this.requestID('prepare');
-      this.preparePromise = this.runtimeHost.transport
-        .request({
-          schemaVersion: 1,
-          id,
-          method: 'prepare',
-          modelRoot: this.options.paths.modelRoot,
-        })
+      const nativeRequest = this.runtimeHost.transport.request({
+        schemaVersion: 1,
+        id,
+        method: 'prepare',
+        modelRoot: this.options.paths.modelRoot,
+      });
+      const activePrepare = {
+        id,
+        settled: nativeRequest.then(
+          () => undefined,
+          () => undefined,
+        ),
+      };
+      this.activePrepare = activePrepare;
+      this.preparePromise = nativeRequest
         .then((response) => {
           const result = this.requireSuccess(response);
           const modelVersion = result.modelVersion;
@@ -108,6 +117,11 @@ export class ParakeetFinalClient {
         .catch((error) => {
           this.preparePromise = null;
           throw error;
+        })
+        .finally(() => {
+          if (this.activePrepare === activePrepare) {
+            this.activePrepare = null;
+          }
         });
     }
     return this.preparePromise;
@@ -141,8 +155,30 @@ export class ParakeetFinalClient {
     const lease = await this.runtimeHost.acquire('final');
     try {
       if (request.signal?.aborted) throw new Error('parakeet_cancelled');
+      let preempted = false;
+      lease.setPreemptionHandler(async () => {
+        preempted = true;
+        const activePrepare = this.activePrepare;
+        if (!activePrepare) return;
+        const cancelID = this.requestID('cancel');
+        const cancellation = await this.runtimeHost.transport.request({
+          schemaVersion: 1,
+          id: cancelID,
+          method: 'cancel',
+          targetId: activePrepare.id,
+        });
+        if (
+          !cancellation.ok &&
+          cancellation.error?.code !== 'parakeet_cancelled'
+        ) {
+          this.requireSuccess(cancellation);
+        }
+        await activePrepare.settled;
+      });
       const health = await this.prepareWithLease();
-      if (request.signal?.aborted) throw new Error('parakeet_cancelled');
+      if (preempted || request.signal?.aborted) {
+        throw new Error('parakeet_cancelled');
+      }
       const id = this.requestID('transcribe');
       let transcriptionSettled: Promise<void> | null = null;
       const startedAt = (this.options.now ?? Date.now)();
