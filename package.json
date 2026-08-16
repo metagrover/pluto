@@ -28,6 +28,7 @@
     "benchmark:private-transcription:validate": "node --experimental-strip-types scripts/validate_private_transcription_manifest.ts",
     "benchmark:private-parakeet-live:validate": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/validate_private_parakeet_live_manifest.ts",
     "benchmark:private-parakeet-live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-transform-types scripts/run_private_parakeet_live_replay.ts",
+    "replay:parakeet-live": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --experimental-transform-types scripts/run_private_parakeet_live_replay.ts",
     "benchmark:private-parakeet": "node --experimental-strip-types scripts/evaluate_private_parakeet.ts",
     "benchmark:private-parakeet:review": "node --experimental-strip-types scripts/evaluate_private_parakeet_review.ts",
     "benchmark:private-speaker-attribution:validate": "node --experimental-strip-types scripts/validate_private_speaker_attribution_manifest.ts",
