@@ -1495,4 +1495,79 @@ describe('live replay report privacy', () => {
       }),
     ).toThrow('private_report_consistency');
   });
+
+  it.each([
+    ['unavailable/fail', true],
+    ['fail/unavailable', false],
+  ] as const)(
+    'rejects ineligible corpus with $label instead of globally unavailable engines',
+    (_label, mlxUnavailable) => {
+      const pass = evaluatePassing();
+      const unavailable = {
+        ...pass,
+        status: 'unavailable' as const,
+        failures: ['insufficient_corpus'],
+      };
+      const fail = {
+        ...evaluatePassing({ seamDuplicateTokens: 1 }),
+        failures: ['insufficient_corpus'],
+      };
+      const input = {
+        corpus: { meetingCount: 0, sourceCount: 0, audioMinutes: 0 },
+        runtime: {
+          fluidAudioVersion: '0.15.5',
+          fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+          modelId: 'parakeet-tdt-0.6b-v3',
+          configId: 'pinned-default-v1',
+        },
+        mlxProduction: mlxUnavailable ? unavailable : fail,
+        parakeetSliding: mlxUnavailable ? fail : unavailable,
+      } as const;
+      expect(() => buildPrivateLiveReplayReport(input)).toThrow(
+        'private_report_consistency',
+      );
+
+      const valid = buildPrivateLiveReplayReport({
+        ...input,
+        mlxProduction: unavailable,
+        parakeetSliding: unavailable,
+      });
+      expect(() =>
+        sanitizeLiveReplayReport({
+          ...valid,
+          engines: {
+            mlxProduction: {
+              ...valid.engines.mlxProduction,
+              status: mlxUnavailable ? 'unavailable' : 'fail',
+            },
+            parakeetSliding: {
+              ...valid.engines.parakeetSliding,
+              status: mlxUnavailable ? 'fail' : 'unavailable',
+            },
+          },
+        }),
+      ).toThrow('private_report_consistency');
+    },
+  );
+
+  it('rejects extra unavailable reasons when corpus is ineligible', () => {
+    const unavailable = {
+      ...evaluatePassing(),
+      status: 'unavailable' as const,
+      failures: ['insufficient_corpus', 'dependency_unavailable'],
+    };
+    expect(() =>
+      buildPrivateLiveReplayReport({
+        corpus: { meetingCount: 0, sourceCount: 0, audioMinutes: 0 },
+        runtime: {
+          fluidAudioVersion: '0.15.5',
+          fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+          modelId: 'parakeet-tdt-0.6b-v3',
+          configId: 'pinned-default-v1',
+        },
+        mlxProduction: unavailable,
+        parakeetSliding: unavailable,
+      }),
+    ).toThrow('private_report_consistency');
+  });
 });

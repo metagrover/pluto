@@ -1257,6 +1257,9 @@ export const sanitizeLiveReplayReport = (
   const anyUnavailable = Object.values(sanitizedEngines).some(
     ({ status }) => status === 'unavailable',
   );
+  const allUnavailable = Object.values(sanitizedEngines).every(
+    ({ status }) => status === 'unavailable',
+  );
   const anyPass = Object.values(sanitizedEngines).some(
     ({ status }) => status === 'pass',
   );
@@ -1272,6 +1275,8 @@ export const sanitizeLiveReplayReport = (
     ].includes(failure),
   );
   const hasInsufficientCorpusReason = failures.includes('insufficient_corpus');
+  const hasExactInsufficientCorpusReason =
+    failures.length === 1 && failures[0] === 'insufficient_corpus';
   const eligibleCorpus =
     meetingCount >= 3 &&
     sourceCount >= 6 &&
@@ -1285,7 +1290,8 @@ export const sanitizeLiveReplayReport = (
     (!bothPass && failures.length === 0) ||
     anyUnavailable !== hasUnavailableReason ||
     (anyPass && !eligibleCorpus) ||
-    (!eligibleCorpus && (!anyUnavailable || !hasInsufficientCorpusReason)) ||
+    (!eligibleCorpus &&
+      (!allUnavailable || !hasExactInsufficientCorpusReason)) ||
     (eligibleCorpus && hasInsufficientCorpusReason)
   ) {
     throw new Error('private_report_consistency');
@@ -1333,24 +1339,27 @@ export const buildPrivateLiveReplayReport = (input: {
     input.corpus.sourceCount === input.corpus.meetingCount * 2;
   const statuses = [input.mlxProduction.status, input.parakeetSliding.status];
   const anyPass = statuses.includes('pass');
-  const anyUnavailable = statuses.includes('unavailable');
-  const hasInsufficientCorpusReason = [
-    ...input.mlxProduction.failures,
-    ...input.parakeetSliding.failures,
-  ].includes('insufficient_corpus');
-  if (
-    (anyPass && !rawCorpusEligible) ||
-    (!rawCorpusEligible && (!anyUnavailable || !hasInsufficientCorpusReason)) ||
-    (rawCorpusEligible && hasInsufficientCorpusReason)
-  ) {
-    throw new Error('private_report_consistency');
-  }
-  const failures = [
+  const allUnavailable = statuses.every((status) => status === 'unavailable');
+  const inputFailures = [
     ...new Set([
       ...input.mlxProduction.failures,
       ...input.parakeetSliding.failures,
     ]),
   ];
+  const hasInsufficientCorpusReason = inputFailures.includes(
+    'insufficient_corpus',
+  );
+  const hasExactInsufficientCorpusReason =
+    inputFailures.length === 1 && inputFailures[0] === 'insufficient_corpus';
+  if (
+    (anyPass && !rawCorpusEligible) ||
+    (!rawCorpusEligible &&
+      (!allUnavailable || !hasExactInsufficientCorpusReason)) ||
+    (rawCorpusEligible && hasInsufficientCorpusReason)
+  ) {
+    throw new Error('private_report_consistency');
+  }
+  const failures = inputFailures;
   const invariantNames = new Set([
     ...Object.keys(input.mlxProduction.invariants),
     ...Object.keys(input.parakeetSliding.invariants),
