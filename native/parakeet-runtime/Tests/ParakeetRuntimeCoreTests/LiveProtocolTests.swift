@@ -104,6 +104,95 @@ final class LiveProtocolTests: XCTestCase {
         assertAllReject(invalid)
     }
 
+    func testEncodingRejectsMethodIncompatibleProgrammaticFields() {
+        let identity = LiveRequestMetadata(
+            streamId: "stream-01",
+            source: .mic,
+            generation: 1
+        )
+        let append = LiveRequestMetadata(
+            streamId: "stream-01",
+            source: .mic,
+            generation: 1,
+            sequence: 1,
+            chunkStartSeconds: 0,
+            chunkEndSeconds: 1
+        )
+        let invalid = [
+            RuntimeRequest(id: "p", method: .prepare, audioPath: "/approved/a.wav"),
+            RuntimeRequest(id: "t", method: .transcribe, modelRoot: "/approved/models"),
+            RuntimeRequest(id: "c", method: .cancel, vocabulary: ["Pluto"]),
+            RuntimeRequest(id: "s", method: .shutdown, targetId: "t"),
+            RuntimeRequest(id: "p-live", method: .prepare, live: identity),
+            RuntimeRequest(
+                id: "o",
+                method: .streamOpen,
+                modelRoot: "/approved/models",
+                live: identity
+            ),
+            RuntimeRequest(
+                id: "a",
+                method: .streamAppend,
+                audioPath: "/approved/a.wav",
+                targetId: "other",
+                live: append
+            ),
+        ]
+
+        for request in invalid {
+            XCTAssertThrowsError(
+                try encoder.encode(request),
+                "Expected encoding rejection for \(request.method.rawValue)"
+            )
+        }
+    }
+
+    func testProgrammaticRequestsRoundTripOnlyTheirAllowedFields() throws {
+        let identity = LiveRequestMetadata(
+            streamId: "stream-01",
+            source: .system,
+            generation: 1
+        )
+        let append = LiveRequestMetadata(
+            streamId: "stream-01",
+            source: .system,
+            generation: 1,
+            sequence: 1,
+            chunkStartSeconds: 0,
+            chunkEndSeconds: 1
+        )
+        let requests = [
+            RuntimeRequest(id: "p", method: .prepare, modelRoot: "/approved/models"),
+            RuntimeRequest(
+                id: "t",
+                method: .transcribe,
+                audioPath: "/approved/a.wav",
+                language: "en",
+                vocabulary: ["Pluto"]
+            ),
+            RuntimeRequest(id: "c", method: .cancel, targetId: "t"),
+            RuntimeRequest(id: "s", method: .shutdown),
+            RuntimeRequest(id: "o", method: .streamOpen, live: identity),
+            RuntimeRequest(id: "f", method: .streamFlush, live: identity),
+            RuntimeRequest(id: "lc", method: .streamCancel, live: identity),
+            RuntimeRequest(id: "r", method: .streamReset, live: identity),
+            RuntimeRequest(
+                id: "a",
+                method: .streamAppend,
+                audioPath: "/approved/a.wav",
+                live: append
+            ),
+        ]
+
+        for request in requests {
+            let decoded = try decoder.decode(
+                RuntimeRequest.self,
+                from: encoder.encode(request)
+            )
+            XCTAssertEqual(decoded, request)
+        }
+    }
+
     func testRejectsMalformedLiveRequestIdentityAndSource() {
         let invalid = [
             #"{"schemaVersion":2,"id":"a","method":"stream_open","streamId":"s","source":"mic","generation":1}"#,

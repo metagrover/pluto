@@ -67,7 +67,10 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         id = try container.decode(String.self, forKey: .id)
         method = try container.decode(RuntimeMethod.self, forKey: .method)
-        try Self.rejectMethodIncompatibleKeys(in: container, method: method)
+        let presentKeys = Set(CodingKeys.allCases.filter { container.contains($0) })
+        if let incompatible = Self.incompatibleKnownKey(in: presentKeys, method: method) {
+            throw protocolDecodingError(incompatible, "method-incompatible request field")
+        }
         modelRoot = try container.decodeIfPresent(String.self, forKey: .modelRoot)
         audioPath = try container.decodeIfPresent(String.self, forKey: .audioPath)
         language = try container.decodeIfPresent(String.self, forKey: .language)
@@ -139,16 +142,19 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
     }
 
     public func encode(to encoder: Encoder) throws {
+        let presentKeys = encodedKnownKeys
+        if let incompatible = Self.incompatibleKnownKey(in: presentKeys, method: method) {
+            throw EncodingError.invalidValue(
+                method,
+                .init(
+                    codingPath: [incompatible],
+                    debugDescription: "method-incompatible request field")
+            )
+        }
+
         switch method {
         case .prepare, .transcribe, .cancel, .shutdown:
-            guard live == nil else {
-                throw EncodingError.invalidValue(
-                    live as Any,
-                    .init(
-                        codingPath: [],
-                        debugDescription: "batch method cannot contain live metadata")
-                )
-            }
+            break
         case .streamOpen, .streamAppend, .streamFlush, .streamCancel, .streamReset:
             guard schemaVersion == 1, let live else {
                 throw EncodingError.invalidValue(
@@ -180,13 +186,6 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                         .init(codingPath: [], debugDescription: "invalid live append")
                     )
                 }
-            } else if live.sequence != nil || live.chunkStartSeconds != nil
-                || live.chunkEndSeconds != nil || audioPath != nil
-            {
-                throw EncodingError.invalidValue(
-                    live,
-                    .init(codingPath: [], debugDescription: "unexpected append metadata")
-                )
             }
         }
 
@@ -209,25 +208,47 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         }
     }
 
-    private static func rejectMethodIncompatibleKeys(
-        in container: KeyedDecodingContainer<CodingKeys>,
+    private var encodedKnownKeys: Set<CodingKeys> {
+        var keys: Set<CodingKeys> = [.schemaVersion, .id, .method]
+        if modelRoot != nil { keys.insert(.modelRoot) }
+        if audioPath != nil { keys.insert(.audioPath) }
+        if language != nil { keys.insert(.language) }
+        if vocabulary != nil { keys.insert(.vocabulary) }
+        if targetId != nil { keys.insert(.targetId) }
+        if let live {
+            keys.formUnion([.streamId, .source, .generation])
+            if live.sequence != nil { keys.insert(.sequence) }
+            if live.chunkStartSeconds != nil { keys.insert(.chunkStartSeconds) }
+            if live.chunkEndSeconds != nil { keys.insert(.chunkEndSeconds) }
+        }
+        return keys
+    }
+
+    private static func incompatibleKnownKey(
+        in presentKeys: Set<CodingKeys>,
         method: RuntimeMethod
-    ) throws {
+    ) -> CodingKeys? {
+        let allowed = allowedKeys(for: method)
+        return CodingKeys.allCases.first {
+            presentKeys.contains($0) && !allowed.contains($0)
+        }
+    }
+
+    private static func allowedKeys(for method: RuntimeMethod) -> Set<CodingKeys> {
         let common: Set<CodingKeys> = [.schemaVersion, .id, .method]
-        let allowed: Set<CodingKeys>
         switch method {
         case .prepare:
-            allowed = common.union([.modelRoot])
+            return common.union([.modelRoot])
         case .transcribe:
-            allowed = common.union([.audioPath, .language, .vocabulary])
+            return common.union([.audioPath, .language, .vocabulary])
         case .cancel:
-            allowed = common.union([.targetId])
+            return common.union([.targetId])
         case .shutdown:
-            allowed = common
+            return common
         case .streamOpen, .streamFlush, .streamCancel, .streamReset:
-            allowed = common.union([.streamId, .source, .generation])
+            return common.union([.streamId, .source, .generation])
         case .streamAppend:
-            allowed = common.union([
+            return common.union([
                 .streamId,
                 .source,
                 .generation,
@@ -236,12 +257,6 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                 .chunkStartSeconds,
                 .chunkEndSeconds,
             ])
-        }
-
-        if let incompatible = CodingKeys.allCases.first(where: {
-            container.contains($0) && !allowed.contains($0)
-        }) {
-            throw protocolDecodingError(incompatible, "method-incompatible request field")
         }
     }
 }
