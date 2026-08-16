@@ -136,4 +136,27 @@ describe('ParakeetRuntimeHost', () => {
     await expect(live).resolves.toMatchObject({ kind: 'live' });
     expect(persisted).toHaveBeenCalledTimes(2);
   });
+
+  it('keeps live priority while an active final lease unwinds', async () => {
+    const persisted = vi.fn(async () => undefined);
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => new FakeChild(),
+      persistInterruptedFinalization: persisted,
+    });
+    const active = await host.acquire('final');
+    let releaseActive: (() => void) | undefined;
+    active.setPreemptionHandler(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseActive = resolve;
+        }),
+    );
+    const live = host.startRecordingLive();
+    const lateFinal = host.acquire('final');
+    await expect(lateFinal).rejects.toThrow('parakeet_cancelled');
+    releaseActive?.();
+    await expect(live).resolves.toMatchObject({ kind: 'live' });
+    expect(persisted).toHaveBeenCalledTimes(2);
+  });
 });

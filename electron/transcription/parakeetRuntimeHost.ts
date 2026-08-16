@@ -45,6 +45,7 @@ export class ParakeetRuntimeHost {
   private readonly queue: LeaseRecord[] = [];
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private durableRetryHandoffCount = 0;
+  private livePriority = false;
   private closed = false;
 
   constructor(
@@ -76,6 +77,9 @@ export class ParakeetRuntimeHost {
   acquire(kind: ParakeetRuntimeWorkload): Promise<ParakeetRuntimeLease> {
     if (this.closed)
       return Promise.reject(new Error('parakeet_runtime_closed'));
+    if (kind === 'final' && this.livePriority) {
+      return this.persistRejectedFinal();
+    }
     this.clearIdleTimer();
     return new Promise((resolve, reject) => {
       const record = this.makeRecord(kind, resolve, reject);
@@ -98,6 +102,7 @@ export class ParakeetRuntimeHost {
   }
 
   async startRecordingLive(): Promise<ParakeetRuntimeLease> {
+    this.livePriority = true;
     const queuedFinals = this.queue.filter((record) => record.kind === 'final');
     for (const record of queuedFinals) {
       record.released = true;
@@ -113,10 +118,27 @@ export class ParakeetRuntimeHost {
       }
       record.reject(new Error('parakeet_cancelled'));
     }
-    if (this.active?.kind === 'final') {
-      await this.active.lease.cancelAndPersistForRetry();
+    try {
+      if (this.active?.kind === 'final') {
+        await this.active.lease.cancelAndPersistForRetry();
+      }
+      return await this.acquire('live');
+    } finally {
+      this.livePriority = false;
     }
-    return this.acquire('live');
+  }
+
+  private async persistRejectedFinal(): Promise<never> {
+    this.durableRetryHandoffCount += 1;
+    try {
+      await this.options.persistInterruptedFinalization?.();
+    } finally {
+      this.durableRetryHandoffCount = Math.max(
+        0,
+        this.durableRetryHandoffCount - 1,
+      );
+    }
+    throw new Error('parakeet_cancelled');
   }
 
   diagnostics(): ParakeetRuntimeDiagnostics {
