@@ -189,7 +189,7 @@ git push -u origin codex/630-parakeet-live
 
 Create/update a stacked draft PR only after the push. State that user-visible behavior is unchanged and #628 must land first or be preserved during rebase.
 
-- [ ] **Step 5: Record the immutable integration base and create Wave 1 worktrees**
+- [x] **Step 5: Record the immutable integration base and create Wave 1 worktrees**
 
 Use the just-pushed Task 0 commit as `BASE_SHA`, validate every absolute target is absent, and create the four isolated worktrees described above. Record `BASE_SHA` in #630 before dispatching agents.
 
