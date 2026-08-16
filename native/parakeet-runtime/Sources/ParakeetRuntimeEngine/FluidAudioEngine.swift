@@ -243,3 +243,125 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
         )
     }
 }
+
+public actor FluidAudioLiveDriver: ParakeetLiveDriving {
+    private var loadedModelURL: URL?
+    private var loadedModels: AsrModels?
+
+    public init() {}
+
+    public func makeManager(request: ParakeetLiveManagerRequest) async throws
+        -> any ParakeetLiveManaging
+    {
+        let modelURL = request.activeModelURL.standardizedFileURL
+        let models: AsrModels
+        if loadedModelURL == modelURL, let cached = loadedModels {
+            models = cached
+        } else {
+            let asrDirectory = modelURL.appendingPathComponent(
+                FluidAudioModelLayout.asrDirectoryName,
+                isDirectory: true
+            )
+            let configuration = MLModelConfiguration()
+            configuration.computeUnits = .cpuAndNeuralEngine
+            models = try await AsrModels.load(
+                from: asrDirectory,
+                configuration: configuration,
+                version: .v3,
+                encoderPrecision: .int8,
+                encoderComputeUnits: .cpuAndNeuralEngine
+            )
+            loadedModelURL = modelURL
+            loadedModels = models
+        }
+
+        let liveConfiguration = request.configuration
+        let slidingConfiguration = SlidingWindowAsrConfig(
+            chunkSeconds: liveConfiguration.chunkSeconds,
+            hypothesisChunkSeconds: liveConfiguration.hypothesisChunkSeconds,
+            leftContextSeconds: liveConfiguration.leftContextSeconds,
+            rightContextSeconds: liveConfiguration.rightContextSeconds,
+            minContextForConfirmation: liveConfiguration.minContextForConfirmation,
+            confirmationThreshold: liveConfiguration.confirmationThreshold,
+            tdtConfig: TdtConfig(blankId: AsrModelVersion.v3.blankId)
+        )
+        let manager = SlidingWindowAsrManager(config: slidingConfiguration)
+        let adapter = FluidAudioLiveManager(manager: manager)
+        try await adapter.start(
+            models: models,
+            source: request.source == .mic ? .microphone : .system
+        )
+        return adapter
+    }
+}
+
+private actor FluidAudioLiveManager: ParakeetLiveManaging {
+    private let manager: SlidingWindowAsrManager
+    private var updateTask: Task<Void, Never>?
+    private var bufferedUpdates: [LiveDriverUpdate] = []
+
+    init(manager: SlidingWindowAsrManager) {
+        self.manager = manager
+    }
+
+    func start(models: AsrModels, source: AudioSource) async throws {
+        try await manager.loadModels(models)
+
+        // Subscribe before accepting any audio. FluidAudio's update stream only supports
+        // one continuation, so attaching it after streamAudio can lose the first update.
+        let updates = await manager.transcriptionUpdates
+        updateTask = Task { [weak self] in
+            for await update in updates {
+                guard !Task.isCancelled else { return }
+                await self?.record(update)
+            }
+        }
+        try await manager.startStreaming(source: source)
+    }
+
+    func append(audioURL: URL) async throws -> LiveDriverAppendOutcome {
+        let audioFile = try AVAudioFile(forReading: audioURL)
+        let frameCount = AVAudioFrameCount(audioFile.length)
+        guard
+            frameCount > 0,
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: audioFile.processingFormat,
+                frameCapacity: frameCount
+            )
+        else { throw RuntimeFailure.transcriptionFailed }
+        try audioFile.read(into: buffer)
+        await manager.streamAudio(buffer)
+
+        // The upstream API has no per-window completion acknowledgement. Drain only
+        // updates already delivered; later updates are retained for the next append/flush.
+        await Task.yield()
+        let delivered = bufferedUpdates
+        bufferedUpdates.removeAll(keepingCapacity: true)
+        return LiveDriverAppendOutcome(updates: delivered)
+    }
+
+    func finish() async throws -> String {
+        defer {
+            updateTask?.cancel()
+            updateTask = nil
+            bufferedUpdates.removeAll()
+        }
+        return try await manager.finish()
+    }
+
+    func cancel() async {
+        updateTask?.cancel()
+        updateTask = nil
+        bufferedUpdates.removeAll()
+        await manager.cancel()
+    }
+
+    private func record(_ update: SlidingWindowTranscriptionUpdate) {
+        bufferedUpdates.append(
+            LiveDriverUpdate(
+                text: update.text,
+                isConfirmed: update.isConfirmed,
+                confidence: Double(update.confidence)
+            ))
+    }
+}

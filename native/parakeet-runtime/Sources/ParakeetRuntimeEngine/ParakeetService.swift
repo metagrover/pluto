@@ -7,20 +7,109 @@ public actor ParakeetService {
     private let manifest: ModelManifest
     private let modelStore: ModelStore
     private let transcriber: ParakeetTranscriber
+    private let liveDriver: any ParakeetLiveDriving
     private var activeModelURL: URL?
+    private var liveSession: ParakeetLiveSession?
 
     public init(
         modelRoot: URL,
         audioRoot: URL,
         manifest: ModelManifest,
         installer: any ModelInstalling = FluidAudioModelInstaller(),
-        inferenceDriver: any ParakeetInferenceDriving = FluidAudioInferenceDriver()
+        inferenceDriver: any ParakeetInferenceDriving = FluidAudioInferenceDriver(),
+        liveDriver: any ParakeetLiveDriving = FluidAudioLiveDriver()
     ) {
         self.modelRoot = modelRoot.standardizedFileURL
         self.audioRoot = audioRoot.standardizedFileURL
         self.manifest = manifest
         self.modelStore = ModelStore(root: self.modelRoot, installer: installer)
         self.transcriber = ParakeetTranscriber(driver: inferenceDriver)
+        self.liveDriver = liveDriver
+    }
+
+    public func handleLive(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
+        guard
+            request.schemaVersion == 1,
+            !request.id.isEmpty,
+            let metadata = request.live,
+            let activeModelURL
+        else { return .failure(id: request.id, code: .invalidRequest) }
+
+        let session: ParakeetLiveSession
+        if let existing = liveSession {
+            session = existing
+        } else {
+            let created = ParakeetLiveSession(
+                driver: liveDriver,
+                activeModelURL: activeModelURL,
+                audioRoot: audioRoot
+            )
+            liveSession = created
+            session = created
+        }
+
+        do {
+            switch request.method {
+            case .streamOpen:
+                try await session.open(
+                    streamId: metadata.streamId,
+                    source: metadata.source,
+                    generation: metadata.generation
+                )
+                return .success(id: request.id)
+            case .streamAppend:
+                guard
+                    let sequence = metadata.sequence,
+                    let audioPath = request.audioPath,
+                    let chunkStartSeconds = metadata.chunkStartSeconds,
+                    let chunkEndSeconds = metadata.chunkEndSeconds
+                else { return .failure(id: request.id, code: .invalidRequest) }
+                let result = try await session.append(
+                    streamId: metadata.streamId,
+                    generation: metadata.generation,
+                    sequence: sequence,
+                    audioURL: URL(fileURLWithPath: audioPath),
+                    chunkStartSeconds: chunkStartSeconds,
+                    chunkEndSeconds: chunkEndSeconds
+                )
+                return .success(id: request.id, events: result.events)
+            case .streamFlush:
+                let result = try await session.flush(
+                    streamId: metadata.streamId,
+                    generation: metadata.generation
+                )
+                return .success(
+                    id: request.id,
+                    finalPreview: result.finalPreview,
+                    degradations: result.degradations
+                )
+            case .streamCancel:
+                try await session.cancel(
+                    streamId: metadata.streamId,
+                    generation: metadata.generation
+                )
+                return .success(id: request.id)
+            case .streamReset:
+                try await session.reset(
+                    streamId: metadata.streamId,
+                    source: metadata.source,
+                    generation: metadata.generation
+                )
+                return .success(id: request.id)
+            case .prepare, .transcribe, .cancel, .shutdown:
+                return .failure(id: request.id, code: .invalidRequest)
+            }
+        } catch let terminal as LiveRuntimeTerminalFailure {
+            return .failure(
+                id: request.id,
+                code: runtimeFailure(for: terminal.failure),
+                events: [terminal.event]
+            )
+        } catch let failure as LiveRuntimeFailure {
+            return .failure(id: request.id, code: runtimeFailure(for: failure))
+        } catch {
+            return .failure(id: request.id, code: .transcriptionFailed)
+        }
     }
 
     public func handle(_ request: RuntimeRequest) async -> RuntimeResponse {
@@ -44,6 +133,10 @@ public actor ParakeetService {
             return .failure(id: request.id, code: .pathNotAllowed)
         }
         do {
+            if let liveSession {
+                await liveSession.shutdown()
+                self.liveSession = nil
+            }
             activeModelURL = try await modelStore.prepare(manifest: manifest)
             return .prepared(id: request.id, modelVersion: manifest.version)
         } catch is CancellationError {
@@ -93,5 +186,61 @@ public actor ParakeetService {
             guard seen.insert(key).inserted else { return nil }
             return term
         }
+    }
+
+    private func runtimeFailure(for failure: LiveRuntimeFailure) -> RuntimeFailure {
+        switch failure {
+        case .pathNotAllowed:
+            return .pathNotAllowed
+        case .modelUnavailable:
+            return .modelPreparationFailed
+        case .cancelled:
+            return .cancelled
+        case .inferenceFailed:
+            return .transcriptionFailed
+        case .streamCapacity, .streamNotFound, .generationMismatch, .sequenceGap,
+            .duplicateMismatch, .backpressure:
+            return .invalidRequest
+        }
+    }
+}
+
+public struct ParakeetLiveServiceResult: Equatable, Sendable {
+    public let response: RuntimeResponse
+    public let events: [RuntimeEvent]
+    public let finalPreview: String?
+    public let degradations: [LiveStreamDegraded]
+
+    public static func success(
+        id: String,
+        events: [RuntimeEvent] = [],
+        finalPreview: String? = nil,
+        degradations: [LiveStreamDegraded] = []
+    ) -> ParakeetLiveServiceResult {
+        ParakeetLiveServiceResult(
+            response: RuntimeResponse(
+                schemaVersion: 1,
+                id: id,
+                ok: true,
+                result: RuntimeResultPayload(),
+                error: nil
+            ),
+            events: events,
+            finalPreview: finalPreview,
+            degradations: degradations
+        )
+    }
+
+    public static func failure(
+        id: String,
+        code: RuntimeFailure,
+        events: [RuntimeEvent] = []
+    ) -> ParakeetLiveServiceResult {
+        ParakeetLiveServiceResult(
+            response: .failure(id: id, code: code),
+            events: events,
+            finalPreview: nil,
+            degradations: []
+        )
     }
 }
