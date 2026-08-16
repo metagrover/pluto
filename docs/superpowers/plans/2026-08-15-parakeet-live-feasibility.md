@@ -8,6 +8,27 @@
 
 **Tech Stack:** Swift 6, FluidAudio 0.15.5 / Parakeet TDT v3 Core ML, TypeScript, Electron IPC, JSON-lines, Vitest 4, XCTest, SQLite, FFmpeg, macOS process/thermal sampling.
 
+## Execution status (superseded by #630 primary-flow plan)
+
+Tasks 1–5 and Task 7's guarded native-runtime test are complete and committed on
+`codex/630-parakeet-live`. The private replay runner is implemented, but it is
+not promotion-approved and does not change user-visible live transcription.
+
+The remaining replay-semantic work is tracked as Task 4A in
+`2026-08-15-parakeet-primary-execution.md`:
+
+- bucket native events by stream, source, and generation;
+- derive stability from cumulative committed-preview state rather than tentative
+  event text;
+- make first activity causal, join MLX evidence correctly, and score real
+  recognizer seams;
+- fail closed on spawn, exit, or cleanup uncertainty; bound repair words to
+  their requested window; reconcile with the canonical transcript; and prove
+  bounded retention for a 90-minute synthetic stream.
+
+The primary-flow plan retains MLX fallback and the canonical full final pass
+until its separate AEC, rollout, and evidence gates are complete.
+
 ---
 
 ## File map
@@ -489,4 +510,3 @@ Expected: 154 or more Vitest files pass, Swift tests pass, changelog validates, 
 Passing this plan authorizes a second issue-backed plan to integrate the proven live client with `AudioManager`, capture-journal stream coverage, presentation state, one-way MLX fallback, streaming AEC evidence, flush/gap repair, and canonical commit. It does not itself switch the user-visible engine.
 
 Failing this plan leaves MLX live plus whole-session Parakeet finalization unchanged and records which claim failed. The implementation seams remain useful only if they are safe, content-free, and do not complicate the current path.
-

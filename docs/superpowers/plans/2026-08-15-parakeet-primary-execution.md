@@ -156,7 +156,7 @@ Timed-word / conditional-final work is a separate follow-up issue and does not b
 - Modify: `docs/superpowers/plans/2026-08-15-parakeet-live-feasibility.md`
 - Modify: `docs/superpowers/plans/2026-08-15-parakeet-primary-execution.md`
 
-- [ ] **Step 1: Verify clean foundation without loading models**
+- [x] **Step 1: Verify clean foundation without loading models**
 
 ```bash
 git status --short
@@ -169,15 +169,15 @@ pnpm exec tsc --noEmit
 git diff --check
 ```
 
-- [ ] **Step 2: Update #629 scope**
+- [x] **Step 2: Update #629 scope**
 
 Comment on #629 that execution now includes rolling shadow AEC after every durable paired interval, Electron-owned processing, receipt-bound evidence, fail-closed Parakeet handoff, and no additional human review. Preserve post-seal AEC processing as the final-path fallback.
 
-- [ ] **Step 3: Record status in the old feasibility plan**
+- [x] **Step 3: Record status in the old feasibility plan**
 
 Mark Tasks 1-5 and the guarded runtime test complete; mark the private runner implemented but not promotion-approved; list Task 4A's remaining semantic issues.
 
-- [ ] **Step 4: Commit, verify clean HEAD, then push**
+- [x] **Step 4: Commit, verify clean HEAD, then push**
 
 ```bash
 git add docs/superpowers/plans/2026-08-15-parakeet-live-feasibility.md \
