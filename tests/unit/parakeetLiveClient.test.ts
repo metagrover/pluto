@@ -1,11 +1,42 @@
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
+  NativeChildProcess,
   NativeEvent,
   NativeJsonLineTransport,
   NativeResponse,
 } from '../../electron/transcription/nativeJsonLineProcess';
+import type { ParakeetRuntimePaths } from '../../electron/transcription/parakeetFinalClient';
 import { ParakeetLiveClient } from '../../electron/transcription/parakeetLiveClient';
+import { makeRuntimeHost } from '../../electron/transcription/parakeetRuntimeHost';
+
+class FakeRuntimeChild extends EventEmitter implements NativeChildProcess {
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly writes: Array<Record<string, unknown>> = [];
+  readonly stdin = {
+    write: vi.fn((value: string) => {
+      this.writes.push(JSON.parse(value.trim()));
+      return true;
+    }),
+    end: vi.fn(),
+  };
+  readonly kill = vi.fn(() => true);
+
+  respond(id: string): void {
+    this.stdout.write(
+      `${JSON.stringify({ schemaVersion: 1, id, ok: true, result: {} })}\n`,
+    );
+  }
+}
+
+const runtimePaths: ParakeetRuntimePaths = {
+  executablePath: '/app/bin/parakeet-runtime',
+  modelRoot: '/user/models/parakeet',
+  audioRoot: '/user/recordings',
+};
 
 class FakeTransport implements NativeJsonLineTransport {
   readonly writes: Array<Record<string, unknown>> = [];
@@ -125,6 +156,8 @@ const update = (overrides: Partial<NativeEvent> = {}): NativeEvent =>
     ...openSystem,
     revision: 1,
     qualifiesPriorTentative: false,
+    committedThroughSequence: 0,
+    tentativeThroughSequence: 0,
     text: 'synthetic',
     confidence: 0.8,
     audioEndSeconds: 1,
@@ -176,6 +209,60 @@ describe('ParakeetLiveClient', () => {
     await expect(
       client.open({ streamId: 'mic-two', source: 'mic', generation: 1 }),
     ).rejects.toThrow('parakeet_stream_capacity');
+  });
+
+  it('shares a pending same-source open before appending concurrent first chunks', async () => {
+    const child = new FakeRuntimeChild();
+    const runtimeHost = makeRuntimeHost({
+      paths: runtimePaths,
+      spawn: () => child,
+    });
+    const runtimeLease = await runtimeHost.startRecordingLive();
+    const client = new ParakeetLiveClient({
+      runtimeHost,
+      runtimeLease,
+      maxQueuedAppends: 2,
+    });
+
+    const firstOpen = client.open(openSystem);
+    const secondOpen = client.open(openSystem);
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    expect(child.writes[0]).toMatchObject({
+      method: 'stream_open',
+      ...openSystem,
+    });
+    child.respond(String(child.writes[0].id));
+    await expect(Promise.all([firstOpen, secondOpen])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+
+    const firstAppend = client.append(append(1));
+    const secondAppend = client.append(append(2));
+    await vi.waitFor(() =>
+      expect(
+        child.writes.filter((request) => request.method === 'stream_append'),
+      ).toHaveLength(1),
+    );
+    expect(child.writes.at(-1)).toMatchObject({
+      method: 'stream_append',
+      sequence: 1,
+    });
+    child.respond(String(child.writes.at(-1)?.id));
+    await firstAppend;
+    await vi.waitFor(() =>
+      expect(
+        child.writes.filter((request) => request.method === 'stream_append'),
+      ).toHaveLength(2),
+    );
+    expect(child.writes.at(-1)).toMatchObject({
+      method: 'stream_append',
+      sequence: 2,
+    });
+    child.respond(String(child.writes.at(-1)?.id));
+    await secondAppend;
+    await runtimeLease.release();
+    runtimeHost.shutdown();
   });
 
   it('serializes appends per stream while allowing the other source to proceed', async () => {
@@ -375,6 +462,67 @@ describe('ParakeetLiveClient', () => {
     });
   });
 
+  it('resets sequence watermark tracking for the next generation', async () => {
+    const { process, client } = await opened();
+    const updates: NativeEvent[] = [];
+    client.onEvent((event) => updates.push(event));
+    const firstAppend = client.append(append(1));
+    process.respondMethod('stream_append');
+    await firstAppend;
+    process.emit(
+      update({
+        revision: 1,
+        tentativeThroughSequence: 1,
+      }),
+    );
+    const resetting = client.reset(openSystem, 2);
+    await vi.waitFor(() =>
+      expect(
+        process.pending.some((item) => item.payload.method === 'stream_reset'),
+      ).toBe(true),
+    );
+    process.respondMethod('stream_reset');
+    await resetting;
+
+    const secondAppend = client.append({ ...append(1), generation: 2 });
+    process.respondMethod('stream_append');
+    await secondAppend;
+
+    process.emit(
+      update({
+        generation: 2,
+        revision: 1,
+        committedThroughSequence: 0,
+        tentativeThroughSequence: 1,
+      }),
+    );
+    expect(updates).toHaveLength(2);
+  });
+
+  it('rejects a committed watermark advance that does not qualify the prior tentative append', async () => {
+    const { process, client } = await opened();
+    const updates: NativeEvent[] = [];
+    client.onEvent((event) => updates.push(event));
+    const firstAppend = client.append(append(1));
+    process.respondMethod('stream_append');
+    await firstAppend;
+    process.emit(
+      update({
+        revision: 1,
+        tentativeThroughSequence: 1,
+      }),
+    );
+    process.emit(
+      update({
+        revision: 2,
+        committedThroughSequence: 1,
+        tentativeThroughSequence: 1,
+        qualifiesPriorTentative: false,
+      }),
+    );
+    expect(updates).toHaveLength(1);
+  });
+
   it('cancels the candidate generation when reset response and abort race', async () => {
     const { process, client } = await opened();
     const controller = new AbortController();
@@ -521,8 +669,35 @@ describe('ParakeetLiveClient', () => {
     await reopening;
 
     const pending = client.append(append(1));
-    client.close();
-    await expect(pending).rejects.toThrow('parakeet_process_terminated');
+    const closing = client.close();
+    await vi.waitFor(() =>
+      expect(
+        process.pending.some((item) => item.payload.method === 'stream_cancel'),
+      ).toBe(true),
+    );
+    process.respondMethod('stream_cancel');
+    await closing;
+    await expect(pending).rejects.toThrow('parakeet_client_closed');
+    await expect(client.open(openSystem)).rejects.toThrow(
+      'parakeet_client_closed',
+    );
+  });
+
+  it('flushes active streams before closing the live client', async () => {
+    const { process, client } = await opened();
+
+    const stopping = client.flushAndClose();
+    await vi.waitFor(() =>
+      expect(
+        process.pending.some((item) => item.payload.method === 'stream_flush'),
+      ).toBe(true),
+    );
+    process.respondMethod('stream_flush', {
+      finalPreview: 'synthetic',
+      degradations: [],
+    });
+    await stopping;
+
     await expect(client.open(openSystem)).rejects.toThrow(
       'parakeet_client_closed',
     );

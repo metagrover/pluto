@@ -56,6 +56,12 @@ import {
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
+import { ParakeetLiveClient } from './transcription/parakeetLiveClient';
+import { ParakeetLiveReceiptBridge } from './transcription/parakeetLiveReceiptBridge';
+import {
+  type ParakeetRuntimeHost,
+  makeRuntimeHost,
+} from './transcription/parakeetRuntimeHost';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -315,6 +321,123 @@ const knowledgeSynthesisPause = createPauseReasonCoordinator(
   setKnowledgeDocSynthesisPaused,
 );
 let parakeetFinalClient: ParakeetFinalClient | null = null;
+let parakeetRuntimeHost: ParakeetRuntimeHost | null = null;
+let parakeetLiveClient: ParakeetLiveClient | null = null;
+const parakeetLiveReceiptBridge = new ParakeetLiveReceiptBridge<{
+  meetingId: string;
+  generation: string;
+  manifestRevision: number;
+  source: 'mic' | 'system';
+  sequence: number;
+  checksumSha256: string;
+  chunkStartSec: number;
+  chunkEndSec: number;
+  repairAudioRelativePath: string | null;
+}>();
+const parakeetLiveStreams = new Map<
+  string,
+  Map<
+    'mic' | 'system',
+    { streamId: string; source: 'mic' | 'system'; generation: number }
+  >
+>();
+
+const startParakeetLiveRecording = async (
+  sender: WebContents,
+  meetingId: string,
+) => {
+  if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
+  await parakeetLiveClient?.close();
+  parakeetLiveClient = null;
+  const lease = await parakeetRuntimeHost.startRecordingLive();
+  const client = new ParakeetLiveClient({
+    runtimeHost: parakeetRuntimeHost,
+    runtimeLease: lease,
+    maxQueuedAppends: 2,
+  });
+  client.onEvent((event) => {
+    if (event.event !== 'stream_update') return;
+    try {
+      sender.send('PARAKEET_LIVE_UPDATE', {
+        event,
+        receipts: parakeetLiveReceiptBridge.resolve(event),
+      });
+    } catch {
+      sender.send('PARAKEET_LIVE_PROTOCOL_ERROR', 'parakeet_receipt_not_found');
+    }
+  });
+  client.onProtocolError((code) =>
+    sender.send('PARAKEET_LIVE_PROTOCOL_ERROR', code),
+  );
+  parakeetLiveClient = client;
+  parakeetLiveStreams.set(meetingId, new Map());
+};
+
+const appendParakeetLiveReceipt = async (
+  sender: WebContents,
+  receipt: {
+    meetingId: string;
+    generation: string;
+    manifestRevision: number;
+    source: 'mic' | 'system';
+    sequence: number;
+    checksumSha256: string;
+    chunkStartSec: number;
+    chunkEndSec: number;
+    repairAudioRelativePath: string | null;
+  },
+) => {
+  const client = parakeetLiveClient;
+  if (!client || !receipt.repairAudioRelativePath) return;
+  const streams = parakeetLiveStreams.get(receipt.meetingId);
+  if (!streams) return;
+  let identity = streams.get(receipt.source);
+  if (!identity) {
+    identity = {
+      streamId: `live-${receipt.meetingId}-${receipt.source}`,
+      source: receipt.source,
+      generation: 1,
+    };
+    await client.open(identity);
+    streams.set(receipt.source, identity);
+  }
+  const audioRoot = getMeetingArtifactsRootDir();
+  const audioPath = path.resolve(audioRoot, receipt.repairAudioRelativePath);
+  if (path.relative(audioRoot, audioPath).startsWith('..')) {
+    throw new Error('parakeet_path_not_allowed');
+  }
+  const parakeetSequence = receipt.sequence + 1;
+  parakeetLiveReceiptBridge.record({
+    ...identity,
+    sequence: parakeetSequence,
+    receipt,
+  });
+  await client.append({
+    ...identity,
+    sequence: parakeetSequence,
+    audioPath,
+    chunkStartSeconds: receipt.chunkStartSec,
+    chunkEndSeconds: receipt.chunkEndSec,
+  });
+  sender.send('PARAKEET_LIVE_RECEIPT_ACCEPTED', {
+    source: receipt.source,
+    sequence: receipt.sequence,
+  });
+};
+
+const stopParakeetLiveRecording = async (meetingId: string) => {
+  const client = parakeetLiveClient;
+  const streams = parakeetLiveStreams.get(meetingId);
+  try {
+    await client?.flushAndClose();
+  } finally {
+    if (parakeetLiveClient === client) parakeetLiveClient = null;
+    for (const identity of streams?.values() ?? []) {
+      parakeetLiveReceiptBridge.clear(identity.streamId);
+    }
+    parakeetLiveStreams.delete(meetingId);
+  }
+};
 
 function beginTranscriptionWork() {
   activeTranscriptionCount += 1;
@@ -386,6 +509,10 @@ app.on('before-quit', async () => {
   activeMeetingTasks.clear();
   parakeetFinalClient?.close();
   parakeetFinalClient = null;
+  await parakeetLiveClient?.close();
+  parakeetLiveClient = null;
+  parakeetRuntimeHost?.shutdown();
+  parakeetRuntimeHost = null;
   await mlxPreview.stop();
 });
 
@@ -404,12 +531,21 @@ app.whenReady().then(async () => {
     'parakeet',
   );
   fs.mkdirSync(parakeetModelRoot, { recursive: true });
-  parakeetFinalClient = new ParakeetFinalClient({
-    paths: {
-      executablePath: parakeetExecutablePath,
-      modelRoot: parakeetModelRoot,
-      audioRoot: getMeetingArtifactsRootDir(),
+  const parakeetPaths = {
+    executablePath: parakeetExecutablePath,
+    modelRoot: parakeetModelRoot,
+    audioRoot: getMeetingArtifactsRootDir(),
+  };
+  parakeetRuntimeHost = makeRuntimeHost({
+    paths: parakeetPaths,
+    diagnostic: (code) => console.warn(`[Pluto] ${code}`),
+    persistInterruptedFinalization: async () => {
+      db.expireInterruptedFinalTranscription();
     },
+  });
+  parakeetFinalClient = new ParakeetFinalClient({
+    paths: parakeetPaths,
+    runtimeHost: parakeetRuntimeHost,
     diagnostic: (code) => console.warn(`[Pluto] ${code}`),
   });
 
@@ -740,6 +876,7 @@ app.whenReady().then(async () => {
             sourceAvailability,
           },
         );
+        await startParakeetLiveRecording(event.sender, normalizedMeetingId);
         console.log(`[CaptureLease] ${acquisition.status}`);
         return manifest;
       } catch (error) {
@@ -827,14 +964,20 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
-    async (_event, request = {}) =>
-      await completeCaptureJournalCapturedChunk(getMeetingArtifactsRootDir(), {
-        ...request,
-        meetingId: String(request.meetingId || ''),
-        ...(request.repairData
-          ? { repairData: Buffer.from(request.repairData) }
-          : {}),
-      }),
+    async (event, request = {}) => {
+      const completed = await completeCaptureJournalCapturedChunk(
+        getMeetingArtifactsRootDir(),
+        {
+          ...request,
+          meetingId: String(request.meetingId || ''),
+          ...(request.repairData
+            ? { repairData: Buffer.from(request.repairData) }
+            : {}),
+        },
+      );
+      await appendParakeetLiveReceipt(event.sender, completed.receipt);
+      return completed;
+    },
   );
 
   ipcMain.handle(
@@ -911,6 +1054,7 @@ app.whenReady().then(async () => {
       ...request,
       meetingId: normalizedMeetingId,
     });
+    await stopParakeetLiveRecording(normalizedMeetingId);
     captureSessionLease.markStopped(normalizedMeetingId, event.sender.id);
     console.log('[CaptureLease] transitioned: capture_stopped');
     return manifest;
@@ -926,6 +1070,7 @@ app.whenReady().then(async () => {
       );
       let manifest: Awaited<ReturnType<typeof sealCaptureJournal>>;
       try {
+        await stopParakeetLiveRecording(normalizedMeetingId);
         manifest = await sealCaptureJournal(getMeetingArtifactsRootDir(), {
           meetingId: normalizedMeetingId,
           endedAtMs: typeof endedAtMs === 'number' ? endedAtMs : Date.now(),

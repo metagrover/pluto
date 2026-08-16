@@ -634,6 +634,43 @@ final class ParakeetLiveSessionTests: XCTestCase {
         XCTAssertEqual(degraded.chunkEndSeconds, 0.375)
     }
 
+    func testCarriesExactCommittedAndTentativeAppendSequences() async throws {
+        let first = LiveDriverAppendOutcome(updates: [
+            LiveDriverUpdate(
+                text: "first", isConfirmed: false, confidence: 0.8,
+                processedAudioEndSeconds: 1
+            )
+        ])
+        let second = LiveDriverAppendOutcome(updates: [
+            LiveDriverUpdate(
+                text: "second", isConfirmed: true, confidence: 0.8,
+                processedAudioEndSeconds: 2
+            )
+        ])
+        let session = makeSession(driver: FakeLiveDriver(outcomes: [first, second]))
+        try await session.open(streamId: "s", source: .system, generation: 1)
+        let one = try makeAudio("one.wav", contents: "one")
+        let two = try makeAudio("two.wav", contents: "two")
+
+        let firstResult = try await session.append(
+            streamId: "s", source: .system, generation: 1, sequence: 1, audioURL: one,
+            chunkStartSeconds: 0, chunkEndSeconds: 1
+        )
+        let secondResult = try await session.append(
+            streamId: "s", source: .system, generation: 1, sequence: 2, audioURL: two,
+            chunkStartSeconds: 1, chunkEndSeconds: 2
+        )
+
+        guard
+            case .streamUpdate(let firstUpdate) = firstResult.events.first,
+            case .streamUpdate(let secondUpdate) = secondResult.events.first
+        else { return XCTFail("expected sequence-bound updates") }
+        XCTAssertEqual(firstUpdate.committedThroughSequence, 0)
+        XCTAssertEqual(firstUpdate.tentativeThroughSequence, 1)
+        XCTAssertEqual(secondUpdate.committedThroughSequence, 1)
+        XCTAssertEqual(secondUpdate.tentativeThroughSequence, 2)
+    }
+
     func testCancelRemovesManagerAndPreventsLateAppendResults() async throws {
         let driver = FakeLiveDriver()
         let session = makeSession(driver: driver)

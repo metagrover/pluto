@@ -7,6 +7,7 @@ import {
   ParakeetFinalClient,
   type ParakeetRuntimePaths,
 } from '../../electron/transcription/parakeetFinalClient';
+import { makeRuntimeHost } from '../../electron/transcription/parakeetRuntimeHost';
 
 class FakeChild extends EventEmitter implements NativeChildProcess {
   readonly stdout = new PassThrough();
@@ -197,11 +198,106 @@ describe('ParakeetFinalClient', () => {
 
     controller.abort();
 
-    await expect(request).rejects.toThrow('parakeet_cancelled');
     expect(child.writes[2]).toMatchObject({
       method: 'cancel',
       targetId: targetID,
     });
+    let settled = false;
+    void request.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    child.respond({
+      schemaVersion: 1,
+      id: targetID,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await expect(request).rejects.toThrow('parakeet_cancelled');
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it('does not hand the runtime to live work until the cancelled transcription settles', async () => {
+    const child = new FakeChild();
+    const host = makeRuntimeHost({ paths, spawn: () => child });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const ready = client.prepare();
+    child.respond(prepared(String(child.writes[0].id)));
+    await ready;
+
+    const transcription = client.transcribe({
+      meetingId: 'one',
+      role: 'final_validation',
+      source: 'mic',
+      audioPath: '/user/recordings/one.wav',
+      language: 'en',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    const transcribeID = String(child.writes[1].id);
+
+    let liveResolved = false;
+    const live = host.startRecordingLive().then((lease) => {
+      liveResolved = true;
+      return lease;
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(3));
+    child.respond({
+      schemaVersion: 1,
+      id: child.writes[2].id,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(liveResolved).toBe(false);
+
+    child.respond({
+      schemaVersion: 1,
+      id: transcribeID,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await expect(transcription).rejects.toThrow('parakeet_cancelled');
+    await expect(live).resolves.toMatchObject({ kind: 'live' });
+  });
+
+  it('preempts a final request held in the client queue before live ownership', async () => {
+    const child = new FakeChild();
+    const persistInterruptedFinalization = vi.fn(async () => undefined);
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => child,
+      persistInterruptedFinalization,
+    });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const first = client.transcribe({
+      meetingId: 'one',
+      role: 'final_validation',
+      source: 'mic',
+      audioPath: '/user/recordings/one.wav',
+      language: 'en',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    child.respond(prepared(String(child.writes[0].id)));
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    const firstID = String(child.writes[1].id);
+
+    const second = client.transcribe({
+      meetingId: 'two',
+      role: 'final_validation',
+      source: 'system',
+      audioPath: '/user/recordings/two.wav',
+      language: 'en',
+    });
+    const live = host.startRecordingLive();
+
+    await expect(second).rejects.toThrow('parakeet_cancelled');
+    await vi.waitFor(() => expect(child.writes).toHaveLength(3));
     child.respond({
       schemaVersion: 1,
       id: child.writes[2].id,
@@ -210,11 +306,99 @@ describe('ParakeetFinalClient', () => {
     });
     child.respond({
       schemaVersion: 1,
-      id: targetID,
+      id: firstID,
       ok: false,
       error: { code: 'parakeet_cancelled' },
     });
-    expect(child.kill).not.toHaveBeenCalled();
+
+    await expect(first).rejects.toThrow('parakeet_cancelled');
+    const liveLease = await live;
+    expect(persistInterruptedFinalization).toHaveBeenCalledTimes(2);
+    expect(child.writes).toHaveLength(3);
+    await liveLease.release();
+  });
+
+  it('cancels and settles preparation before handing the runtime to live work', async () => {
+    const child = new FakeChild();
+    const persistInterruptedFinalization = vi.fn(async () => undefined);
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => child,
+      persistInterruptedFinalization,
+    });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const transcription = client.transcribe({
+      meetingId: 'one',
+      role: 'final_validation',
+      source: 'mic',
+      audioPath: '/user/recordings/one.wav',
+      language: 'en',
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const prepareID = String(child.writes[0].id);
+
+    let liveResolved = false;
+    const live = host.startRecordingLive().then((lease) => {
+      liveResolved = true;
+      return lease;
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    child.respond({
+      schemaVersion: 1,
+      id: child.writes[1].id,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(liveResolved).toBe(false);
+
+    child.respond({
+      schemaVersion: 1,
+      id: prepareID,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await expect(transcription).rejects.toThrow('parakeet_cancelled');
+    await expect(live).resolves.toMatchObject({ kind: 'live' });
+    expect(persistInterruptedFinalization).toHaveBeenCalledTimes(1);
+    expect(child.writes).toHaveLength(2);
+  });
+
+  it('preempts a direct prepare before granting live ownership', async () => {
+    const child = new FakeChild();
+    const persisted = vi.fn(async () => undefined);
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => child,
+      persistInterruptedFinalization: persisted,
+    });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const preparing = client.prepare();
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const prepareID = String(child.writes[0].id);
+    let liveResolved = false;
+    const live = host.startRecordingLive().then((lease) => {
+      liveResolved = true;
+      return lease;
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    child.respond({
+      schemaVersion: 1,
+      id: child.writes[1].id,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(liveResolved).toBe(false);
+    child.respond({
+      schemaVersion: 1,
+      id: prepareID,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await expect(preparing).rejects.toThrow('parakeet_cancelled');
+    await expect(live).resolves.toMatchObject({ kind: 'live' });
+    expect(persisted).toHaveBeenCalledTimes(1);
   });
 
   it('drops native stderr content', async () => {

@@ -49,6 +49,8 @@ type NativeEventIdentity = {
 export type NativeStreamUpdateEvent = NativeEventIdentity & {
   event: 'stream_update';
   qualifiesPriorTentative: boolean;
+  committedThroughSequence: number;
+  tentativeThroughSequence: number;
   text: string;
   confidence: number;
   audioEndSeconds: number;
@@ -93,7 +95,6 @@ export interface NativeJsonLineTransport {
   onFailure(listener: (code: string) => void): () => void;
   cancelPending(id: string): void;
   ignoreResponse(id: string): void;
-  terminate(): void;
 }
 
 const MAX_BUFFER_BYTES = 1024 * 1024;
@@ -381,11 +382,16 @@ function parseNativeEvent(value: Record<string, unknown>): NativeEvent | null {
       !hasOnlyKeys(value, [
         ...identityKeys,
         'qualifiesPriorTentative',
+        'committedThroughSequence',
+        'tentativeThroughSequence',
         'text',
         'confidence',
         'audioEndSeconds',
       ]) ||
       typeof value.qualifiesPriorTentative !== 'boolean' ||
+      !isNonnegativeSafeInteger(value.committedThroughSequence) ||
+      !isNonnegativeSafeInteger(value.tentativeThroughSequence) ||
+      value.committedThroughSequence > value.tentativeThroughSequence ||
       typeof value.text !== 'string' ||
       typeof value.confidence !== 'number' ||
       !Number.isFinite(value.confidence) ||
@@ -460,4 +466,13 @@ function parseNativeEvent(value: Record<string, unknown>): NativeEvent | null {
     return value as NativeStreamFailedEvent;
   }
   return null;
+}
+
+function isNonnegativeSafeInteger(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= MAX_SAFE_INTEGER
+  );
 }

@@ -85,7 +85,9 @@ private struct Arguments {
                     source: live.source,
                     generation: live.generation,
                     revision: stream.revision,
-                    qualifiesPriorTentative: false,
+                    qualifiesPriorTentative: stream.nextSequence > 1,
+                    committedThroughSequence: max(0, stream.nextSequence - 1),
+                    tentativeThroughSequence: stream.nextSequence,
                     text: "synthetic",
                     confidence: 0.8,
                     audioEndSeconds: live.chunkEndSeconds ?? 0
