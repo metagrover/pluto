@@ -56,7 +56,6 @@ type StreamState = ParakeetLiveIdentity & {
 
 const STREAM_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$/;
 const NONTERMINAL_NATIVE_ERRORS = new Set([
-  'parakeet_request_invalid',
   'parakeet_path_not_allowed',
   'parakeet_path_missing',
 ]);

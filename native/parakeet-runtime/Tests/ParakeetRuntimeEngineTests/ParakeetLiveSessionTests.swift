@@ -851,7 +851,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
                 audioURL: secondAudio, chunkStartSeconds: 1, chunkEndSeconds: 2
             )
         }
-        await Task.yield()
+        await waitForNextSequence(3, streamId: "s", session: session)
 
         try await session.cancel(streamId: "s", source: .mic, generation: 1)
         await assertTaskThrows(.cancelled, first)
@@ -1035,6 +1035,16 @@ final class ParakeetLiveSessionTests: XCTestCase {
             await Task.yield()
         }
         XCTFail("append did not start")
+    }
+
+    private func waitForNextSequence(
+        _ expected: Int, streamId: String, session: ParakeetLiveSession
+    ) async {
+        for _ in 0..<1_000 {
+            if await session.state(streamId: streamId)?.nextSequence == expected { return }
+            await Task.yield()
+        }
+        XCTFail("append was not admitted")
     }
 
     private func waitForCapabilityCount(

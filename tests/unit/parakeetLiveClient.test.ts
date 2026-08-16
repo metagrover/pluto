@@ -397,6 +397,36 @@ describe('ParakeetLiveClient', () => {
     ).toBe(false);
   });
 
+  it.each(['stream_append', 'stream_flush'])(
+    'treats invalid %s as terminal divergence and permits source reopen',
+    async (method) => {
+      const { process, client } = await opened();
+      const operation =
+        method === 'stream_append'
+          ? client.append(append(1))
+          : client.flush(openSystem);
+      await vi.waitFor(() =>
+        expect(
+          process.pending.some((item) => item.payload.method === method),
+        ).toBe(true),
+      );
+      process.respondErrorNext('parakeet_request_invalid');
+      await vi.waitFor(() =>
+        expect(
+          process.pending.some(
+            (item) => item.payload.method === 'stream_cancel',
+          ),
+        ).toBe(true),
+      );
+      process.respondMethod('stream_cancel');
+
+      await expect(operation).rejects.toThrow('parakeet_request_invalid');
+      const reopening = client.open(openSystem);
+      process.respondNext();
+      await expect(reopening).resolves.toBeUndefined();
+    },
+  );
+
   it('terminally cancels a queued abort before allowing the same source to reopen', async () => {
     const { process, client } = await opened();
     const first = client.append(append(1));

@@ -176,7 +176,7 @@ private enum ParakeetRuntimeMain {
 
         var framer = BoundedJSONLineFramer()
         while true {
-            let data = FileHandle.standardInput.readData(ofLength: 64 * 1024)
+            let data = FileHandle.standardInput.availableData
             if data.isEmpty { break }
             for frame in framer.ingest(data) {
                 await handle(frame, router: router, writer: writer, coordinator: coordinator)

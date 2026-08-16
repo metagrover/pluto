@@ -162,6 +162,7 @@ public actor RuntimeRequestCoordinator {
     private let router: RuntimeJSONLineRouter
     private let writer: RuntimeJSONLineWriter
     private var tasks: [String: PendingRequest] = [:]
+    private var suppressedRequestIDs: Set<String> = []
     private var accepting = true
     private var suppressOutputs = false
 
@@ -177,15 +178,16 @@ public actor RuntimeRequestCoordinator {
             return
         }
         if request.method == .cancel {
-            guard let targetID = request.targetId, let pending = tasks.removeValue(forKey: targetID)
+            guard let targetID = request.targetId, let pending = tasks[targetID],
+                !suppressedRequestIDs.contains(targetID)
             else {
                 await writer.write(RuntimeJSONLineOutput(
                     events: [], response: .failure(id: request.id, code: .invalidRequest)
                 ))
                 return
             }
+            suppressedRequestIDs.insert(targetID)
             pending.route.cancel()
-            await pending.delivery.value
             await writer.write(RuntimeJSONLineOutput(
                 events: [], response: .failure(id: request.id, code: .cancelled)
             ))
@@ -210,14 +212,14 @@ public actor RuntimeRequestCoordinator {
     public func finish() async {
         guard accepting else { return }
         accepting = false
+        await router.shutdown()
         let running = Array(tasks.values)
         for pending in running { await pending.delivery.value }
-        await router.shutdown()
     }
 
     private func complete(id: String, output: RuntimeJSONLineOutput) async {
         guard tasks[id] != nil else { return }
-        guard !suppressOutputs else {
+        if suppressOutputs || suppressedRequestIDs.remove(id) != nil {
             tasks[id] = nil
             return
         }
@@ -228,11 +230,12 @@ public actor RuntimeRequestCoordinator {
     private func shutdown(responseID: String) async {
         accepting = false
         suppressOutputs = true
+        await router.shutdown()
         let running = Array(tasks.values)
         for pending in running { pending.route.cancel() }
         for pending in running { await pending.delivery.value }
         tasks.removeAll()
-        await router.shutdown()
+        suppressedRequestIDs.removeAll()
         await writer.write(RuntimeJSONLineOutput(
             events: [], response: .prepared(id: responseID, modelVersion: "shutdown")
         ))

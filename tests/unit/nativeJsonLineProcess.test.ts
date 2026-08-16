@@ -39,6 +39,44 @@ const update = (): NativeEvent => ({
 });
 
 describe('NativeJsonLineProcess live events', () => {
+  it('ignores a stale exit after timeout restart', async () => {
+    vi.useFakeTimers();
+    try {
+      const firstChild = new FakeChild();
+      const replacement = new FakeChild();
+      const children = [firstChild, replacement];
+      const process = new NativeJsonLineProcess({
+        executablePath: '/app/parakeet-runtime',
+        args: [],
+        spawn: () => {
+          const child = children.shift();
+          if (!child) throw new Error('unexpected spawn');
+          return child;
+        },
+        requestTimeoutMs: 10,
+      });
+
+      const timedOut = process.request({ schemaVersion: 1, id: 'first' });
+      const timeoutExpectation = expect(timedOut).rejects.toThrow(
+        'parakeet_request_timeout',
+      );
+      await vi.advanceTimersByTimeAsync(10);
+      await timeoutExpectation;
+
+      const active = process.request({ schemaVersion: 1, id: 'second' });
+      firstChild.emit('exit', 9, null);
+      firstChild.emit('error', new Error('late old child error'));
+      replacement.stdout.write(
+        `${JSON.stringify({ schemaVersion: 1, id: 'second', ok: true, result: {} })}\n`,
+      );
+
+      await expect(active).resolves.toMatchObject({ id: 'second', ok: true });
+      expect(replacement.kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('delivers an event before resolving its correlated response', async () => {
     const child = new FakeChild();
     const process = makeProcess(child);

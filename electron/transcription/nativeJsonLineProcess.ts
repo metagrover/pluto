@@ -105,7 +105,6 @@ export class NativeJsonLineProcess {
   private readonly ignoredResponseIDs = new Set<string>();
   private readonly eventListeners = new Set<(event: NativeEvent) => void>();
   private readonly failureListeners = new Set<(code: string) => void>();
-  private failing = false;
 
   constructor(
     private readonly options: {
@@ -119,7 +118,6 @@ export class NativeJsonLineProcess {
 
   start(): void {
     if (this.child) return;
-    this.failing = false;
     const child = this.options.spawn(
       this.options.executablePath,
       this.options.args,
@@ -127,13 +125,14 @@ export class NativeJsonLineProcess {
     );
     this.child = child;
     child.stdout.on('data', (chunk: Buffer | string) => {
-      this.consumeStdout(chunk.toString());
+      if (this.child === child) this.consumeStdout(chunk.toString());
     });
     child.stderr.on('data', () => {
-      this.options.diagnostic?.('parakeet_stderr_activity');
+      if (this.child === child)
+        this.options.diagnostic?.('parakeet_stderr_activity');
     });
-    child.once('error', () => this.failAll('parakeet_process_error'));
-    child.once('exit', () => this.failAll('parakeet_process_exited'));
+    child.once('error', () => this.failChild(child, 'parakeet_process_error'));
+    child.once('exit', () => this.failChild(child, 'parakeet_process_exited'));
   }
 
   request(payload: Record<string, unknown>): Promise<NativeResponse> {
@@ -142,25 +141,29 @@ export class NativeJsonLineProcess {
     if (!id || this.pending.has(id)) {
       return Promise.reject(new Error('parakeet_request_invalid'));
     }
+    const child = this.child;
+    if (!child) return Promise.reject(new Error('parakeet_process_error'));
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.failAll('parakeet_request_timeout');
+        this.failChild(child, 'parakeet_request_timeout');
       }, this.options.requestTimeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       try {
-        this.child?.stdin.write(`${JSON.stringify(payload)}\n`);
+        child.stdin.write(`${JSON.stringify(payload)}\n`);
       } catch {
-        this.failAll('parakeet_process_write_failed');
+        this.failChild(child, 'parakeet_process_write_failed');
       }
     });
   }
 
   notify(payload: Record<string, unknown>): void {
     this.start();
+    const child = this.child;
+    if (!child) return;
     try {
-      this.child?.stdin.write(`${JSON.stringify(payload)}\n`);
+      child.stdin.write(`${JSON.stringify(payload)}\n`);
     } catch {
-      this.failAll('parakeet_process_write_failed');
+      this.failChild(child, 'parakeet_process_write_failed');
     }
   }
 
@@ -188,17 +191,16 @@ export class NativeJsonLineProcess {
   }
 
   terminate(): void {
-    this.failAll('parakeet_process_terminated');
+    const child = this.child;
+    if (child) this.failChild(child, 'parakeet_process_terminated');
   }
 
-  private stopChild(): void {
-    const child = this.child;
+  private stopChild(child: NativeChildProcess): void {
+    if (this.child !== child) return;
     this.child = null;
     this.stdoutBuffer = '';
-    if (child) {
-      child.stdin.end();
-      child.kill('SIGTERM');
-    }
+    child.stdin.end();
+    child.kill('SIGTERM');
   }
 
   private consumeStdout(chunk: string): void {
@@ -208,14 +210,14 @@ export class NativeJsonLineProcess {
       const line = this.stdoutBuffer.slice(0, newline);
       this.stdoutBuffer = this.stdoutBuffer.slice(newline + 1);
       if (Buffer.byteLength(line, 'utf8') > MAX_BUFFER_BYTES) {
-        this.failAll('parakeet_protocol_invalid');
+        this.failCurrent('parakeet_protocol_invalid');
         return;
       }
       if (line.length > 0) this.consumeLine(line);
       newline = this.stdoutBuffer.indexOf('\n');
     }
     if (Buffer.byteLength(this.stdoutBuffer, 'utf8') > MAX_BUFFER_BYTES) {
-      this.failAll('parakeet_protocol_invalid');
+      this.failCurrent('parakeet_protocol_invalid');
     }
   }
 
@@ -224,13 +226,13 @@ export class NativeJsonLineProcess {
     try {
       envelope = JSON.parse(line);
     } catch {
-      this.failAll('parakeet_protocol_invalid');
+      this.failCurrent('parakeet_protocol_invalid');
       return;
     }
     if (isRecord(envelope) && envelope.kind === 'event') {
       const event = parseNativeEvent(envelope);
       if (!event) {
-        this.failAll('parakeet_protocol_invalid');
+        this.failCurrent('parakeet_protocol_invalid');
         return;
       }
       for (const listener of this.eventListeners) {
@@ -244,13 +246,13 @@ export class NativeJsonLineProcess {
     }
     const response = parseNativeResponse(envelope);
     if (!response) {
-      this.failAll('parakeet_protocol_invalid');
+      this.failCurrent('parakeet_protocol_invalid');
       return;
     }
     const pending = this.pending.get(response.id);
     if (!pending) {
       if (this.ignoredResponseIDs.delete(response.id)) return;
-      this.failAll('parakeet_protocol_invalid');
+      this.failCurrent('parakeet_protocol_invalid');
       return;
     }
     clearTimeout(pending.timer);
@@ -258,12 +260,17 @@ export class NativeJsonLineProcess {
     pending.resolve(response);
   }
 
-  private failAll(code: string): void {
-    if (this.failing) return;
-    this.failing = true;
+  private failCurrent(code: string): void {
+    const child = this.child;
+    if (child) this.failChild(child, code);
+  }
+
+  private failChild(child: NativeChildProcess, code: string): void {
+    if (this.child !== child) return;
     const requests = [...this.pending.values()];
     this.pending.clear();
     this.ignoredResponseIDs.clear();
+    this.stopChild(child);
     for (const request of requests) {
       clearTimeout(request.timer);
       request.reject(new Error(code));
@@ -275,7 +282,6 @@ export class NativeJsonLineProcess {
         this.options.diagnostic?.('parakeet_failure_listener_failed');
       }
     }
-    this.stopChild();
   }
 }
 
