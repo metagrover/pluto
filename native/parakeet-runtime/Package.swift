@@ -8,6 +8,7 @@ let package = Package(
     products: [
         .library(name: "ParakeetRuntimeCore", targets: ["ParakeetRuntimeCore"]),
         .executable(name: "parakeet-runtime", targets: ["ParakeetRuntime"]),
+        .executable(name: "parakeet-resource-probe", targets: ["ParakeetResourceProbe"]),
     ],
     dependencies: [
         .package(path: "vendor/FluidAudio"),
@@ -24,6 +25,10 @@ let package = Package(
         .executableTarget(
             name: "ParakeetRuntime",
             dependencies: ["ParakeetRuntimeCore", "ParakeetRuntimeEngine"]
+        ),
+        .executableTarget(
+            name: "ParakeetResourceProbe",
+            dependencies: ["ParakeetRuntimeCore"]
         ),
         .testTarget(
             name: "ParakeetRuntimeCoreTests",

@@ -1884,6 +1884,43 @@ const terminateChild = async (
   });
 };
 
+type ResourceProbeSample = {
+  wallTimeMs: number;
+  rssBytes: number;
+  thermal: NonNullable<ResourceSample['thermal']>;
+};
+
+export const launchResourceProbeAfterPrepared = <T>(
+  prepared: { ok: boolean; liveConfigId?: string; pid?: number },
+  config: ParakeetConfig,
+  launch: () => T,
+): T | undefined =>
+  prepared.ok && prepared.liveConfigId === config && !!prepared.pid
+    ? launch()
+    : undefined;
+
+const parseResourceProbeSample = (
+  line: string,
+): ResourceProbeSample | undefined => {
+  if (Buffer.byteLength(line, 'utf8') > 512) return undefined;
+  try {
+    const value = JSON.parse(line) as Record<string, unknown>;
+    return typeof value.wallTimeMs === 'number' &&
+      Number.isFinite(value.wallTimeMs) &&
+      typeof value.rssBytes === 'number' &&
+      Number.isFinite(value.rssBytes) &&
+      value.rssBytes >= 0 &&
+      (value.thermal === 'nominal' ||
+        value.thermal === 'fair' ||
+        value.thermal === 'serious' ||
+        value.thermal === 'critical')
+      ? (value as ResourceProbeSample)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 const sampleRss = (pid: number) => {
   const result = spawnSync('ps', ['-o', 'rss=', '-p', String(pid)], {
     encoding: 'utf8',
@@ -1896,8 +1933,6 @@ const sampleRss = (pid: number) => {
     : undefined;
 };
 
-// macOS does not expose a reliable finite thermal state through the production
-// adapter. Absence-of-warning notes are not converted into invented evidence.
 const sampleThermal = (): ResourceSample['thermal'] => undefined;
 
 export const hasPreparedMlxMediumCache = (
@@ -2177,16 +2212,58 @@ export const createProductionDependencies = (
         if (child) await terminateChild(child);
         throw new Error('runtime_unavailable');
       }
+      const preparedRuntime = {
+        ok: prepare.ok,
+        liveConfigId: prepare.result?.liveConfigId,
+        pid: child?.pid,
+      };
       if (
-        !prepare.ok ||
-        prepare.result?.liveConfigId !== config ||
-        !child?.pid
+        !preparedRuntime.ok ||
+        preparedRuntime.liveConfigId !== config ||
+        !preparedRuntime.pid
       ) {
         unsubscribe();
         client.close();
         if (child) await terminateChild(child);
         throw new Error('runtime_unavailable');
       }
+      const probePath = path.join(
+        path.dirname(manifest.runtime.executablePath),
+        'parakeet-resource-probe',
+      );
+      if (!fs.existsSync(probePath)) {
+        unsubscribe();
+        await client.close().catch(() => undefined);
+        await terminateChild(child);
+        throw new Error('runtime_unavailable');
+      }
+      const probe = launchResourceProbeAfterPrepared(
+        preparedRuntime,
+        config,
+        () =>
+          spawn(
+            probePath,
+            [
+              '--pid',
+              String(child.pid),
+              '--parent-pid',
+              String(process.pid),
+              '--interval-ms',
+              '1000',
+            ],
+            { stdio: ['ignore', 'pipe', 'ignore'] },
+          ),
+      );
+      if (!probe) throw new Error('runtime_unavailable');
+      let latestProbe: ResourceProbeSample | undefined;
+      let probeBuffer = '';
+      probe.stdout?.on('data', (chunk: Buffer) => {
+        probeBuffer = `${probeBuffer}${chunk.toString('utf8')}`.slice(-1024);
+        const lines = probeBuffer.split('\n');
+        probeBuffer = lines.pop() ?? '';
+        for (const line of lines)
+          latestProbe = parseResourceProbeSample(line) ?? latestProbe;
+      });
       let active: PreparedMeeting | undefined;
       const identities = {} as Record<
         ReplaySource,
@@ -2341,23 +2418,29 @@ export const createProductionDependencies = (
           };
         },
         sample: (sourceSeconds, expectedWallTimeMs) => {
-          if (!child?.pid) return undefined;
-          const rssGiB = sampleRss(child.pid);
-          const wallTimeMs = Date.now();
-          return rssGiB === undefined
+          const sample = latestProbe;
+          return sample === undefined
             ? undefined
             : {
                 sourceSeconds,
-                wallTimeMs,
-                schedulingJitterMs: wallTimeMs - expectedWallTimeMs,
-                rssGiB,
-                thermal: sampleThermal(),
+                wallTimeMs: sample.wallTimeMs,
+                schedulingJitterMs: sample.wallTimeMs - expectedWallTimeMs,
+                rssGiB: sample.rssBytes / 1024 / 1024 / 1024,
+                thermal: sample.thermal,
               };
         },
         close: async () => {
           unsubscribe();
           await client.close().catch(() => undefined);
-          return child ? await terminateChild(child) : 'cleanup_failed';
+          const probeCleanup = await terminateChild(probe).catch(
+            () => 'cleanup_failed' as const,
+          );
+          const runtimeCleanup = child
+            ? await terminateChild(child)
+            : 'cleanup_failed';
+          return probeCleanup === 'exited' && runtimeCleanup === 'exited'
+            ? 'exited'
+            : 'cleanup_failed';
         },
       };
     },
