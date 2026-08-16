@@ -33,7 +33,8 @@ public actor ParakeetService {
             return await prepare(request)
         case .transcribe:
             return await transcribe(request)
-        case .cancel, .shutdown:
+        case .cancel, .shutdown, .streamOpen, .streamAppend, .streamFlush, .streamCancel,
+            .streamReset:
             return .failure(id: request.id, code: .invalidRequest)
         }
     }
