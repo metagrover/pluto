@@ -344,9 +344,24 @@ describe('private Parakeet live replay orchestration', () => {
 
   it('releases only 250 ms causal frames without future audio', () => {
     expect(buildQuarterSecondFrames(0.6)).toEqual([
-      { sequence: 0, availableAtSeconds: 0.25, audioEndSeconds: 0.25 },
-      { sequence: 1, availableAtSeconds: 0.5, audioEndSeconds: 0.5 },
-      { sequence: 2, availableAtSeconds: 0.6, audioEndSeconds: 0.6 },
+      {
+        sequence: 0,
+        startSeconds: 0,
+        endSeconds: 0.25,
+        availableAtSeconds: 0.25,
+      },
+      {
+        sequence: 1,
+        startSeconds: 0.25,
+        endSeconds: 0.5,
+        availableAtSeconds: 0.5,
+      },
+      {
+        sequence: 2,
+        startSeconds: 0.5,
+        endSeconds: 0.6,
+        availableAtSeconds: 0.6,
+      },
     ]);
   });
 
@@ -394,9 +409,24 @@ describe('private Parakeet live replay orchestration', () => {
 
   it('places exact two-second gap injections in early, middle, and late regions', () => {
     expect(buildGapInjections(1_800)).toEqual([
-      { label: 'early', startSeconds: 180, endSeconds: 182 },
-      { label: 'middle', startSeconds: 899, endSeconds: 901 },
-      { label: 'late', startSeconds: 1_618, endSeconds: 1_620 },
+      {
+        label: 'early',
+        startSeconds: 180,
+        endSeconds: 182,
+        omittedSequences: [720, 721, 722, 723, 724, 725, 726, 727],
+      },
+      {
+        label: 'middle',
+        startSeconds: 900,
+        endSeconds: 902,
+        omittedSequences: [3600, 3601, 3602, 3603, 3604, 3605, 3606, 3607],
+      },
+      {
+        label: 'late',
+        startSeconds: 1620,
+        endSeconds: 1622,
+        omittedSequences: [6480, 6481, 6482, 6483, 6484, 6485, 6486, 6487],
+      },
     ]);
   });
 

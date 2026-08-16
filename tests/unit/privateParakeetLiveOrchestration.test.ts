@@ -1,498 +1,538 @@
-import {
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  statSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import type { NativeEvent } from '../../electron/transcription/nativeJsonLineProcess.ts';
 import {
-  type InjectedParakeetProcess,
-  type ReplaySource,
+  type MlxReplayRun,
+  OnlineCommittedPrefixTracker,
+  type ParakeetReplayRun,
+  type PreparedMeeting,
+  type PrivateReplayDependencies,
+  buildGapInjections,
   buildPrivateLiveReplayComparison,
-  orchestrateInjectedPrivateReplay,
-  writePrivateReplayReportAtomic,
+  buildQuarterSecondFrames,
+  buildResourceSoakEvidence,
+  orchestratePrivateReplay,
+  runPrivateLiveReplay,
+  runReplayCli,
+  validateCoverageGapProbe,
+  validateResourceTimeline,
 } from '../../scripts/run_private_parakeet_live_replay.ts';
-import type { PrivateLiveReplayReport } from '../../src/services/liveTranscriptionReplayMetrics.ts';
+import type {
+  PrivateLiveReplayManifest,
+  PrivateLiveReplayMeeting,
+} from '../../scripts/validate_private_parakeet_live_manifest.ts';
 import {
   buildPrivateLiveReplayReport,
   evaluateLiveReplay,
 } from '../../src/services/liveTranscriptionReplayMetrics.ts';
 
-const report = (configId: string): PrivateLiveReplayReport => {
-  const repetition = {
-    firstSealedActivitySeconds: 1,
-    publications: [
-      {
-        availableAtSeconds: 2,
-        lookaheadReadyAtSeconds: 2,
-        completedAtSeconds: 3,
-        audioEndSeconds: 2,
-        changed: true,
-        activeSpeech: true,
-        newTokenCount: 2,
-        rollbackTokens: 0,
-        volatileOperationCount: 0,
-        revisionAgeSeconds: 0,
-      },
-    ],
-    committedSnapshots: ['stable'],
-    acceptedSequences: [1],
-    processedSequences: [1],
-    acceptedCoverage: [{ receipt: 1, startSeconds: 0, endSeconds: 2 }],
-    processedCoverage: [{ receipt: 1, startSeconds: 0, endSeconds: 2 }],
-    expectedSourceSeconds: 2,
-    processedSourceSeconds: 2,
-    inferenceSeconds: 0.5,
-    seamDuplicateTokens: 0,
-    seamOmittedTokens: 0,
-    seamReferenceTokens: 1,
-    committedSyntheticSeamDuplicateTokens: 0,
-    committedSyntheticSeamOmittedTokens: 0,
-    batchDiagnostic: {
-      editRate: 0,
-      precisionAt2Seconds: 1,
-      recallAt2Seconds: 1,
-      precisionAt5Seconds: 1,
-      recallAt5Seconds: 1,
-    },
-    proxy: {
-      disagreementRate: 0,
-      alignedRecall: 1,
-      mlxDisagreementRate: 0,
-      mlxAlignedRecall: 1,
-    },
-    repair: {
-      exactGapDetected: true,
-      contextBeforeSeconds: 2,
-      contextAfterSeconds: 2,
-      outsideContextTokenChanges: 0,
-      repairedTokenF1: 1,
-    },
-    captureHandoffMilliseconds: [1],
-    rendererInferenceCallbacks: 0,
-    wholeSessionAsrCalls: 0,
-    analysisBeforeCanonicalCommit: 0,
-  };
-  const resourceSoak = {
-    sourceStartSeconds: 0,
-    sourceEndSeconds: 2,
-    sourceDurationSeconds: 2,
-    soakStartSeconds: 0,
-    soakEndSeconds: 2,
-    warmupEndSeconds: 0,
-    sampleIntervalSeconds: 1 as const,
-    realTime: true as const,
-    longestSource: true as const,
-    preparedIdleRssGiB: 1,
-    peakRssGiB: 1,
-    rssSamples: [
-      { atSeconds: 0, rssGiB: 1 },
-      { atSeconds: 1, rssGiB: 1 },
-      { atSeconds: 2, rssGiB: 1 },
-    ],
-    thermalSamples: [
-      { atSeconds: 0, state: 'nominal' as const },
-      { atSeconds: 1, state: 'nominal' as const },
-      { atSeconds: 2, state: 'nominal' as const },
-    ],
-  };
-  const verdict = evaluateLiveReplay([repetition, repetition, repetition], {
-    corpusEligible: true,
-    aecEvidenceAvailable: true,
-    resourceEvidenceAvailable: true,
-    engineOrderAlternated: true,
-    mlxProductionQueueVerified: true,
-    resourceSoak,
-    mlxBaseline: { firstTextP95Seconds: 1, runtimeFactor: 0.25 },
+const fixture = () => {
+  const root = realpathSync(
+    mkdtempSync(path.join(tmpdir(), 'private-replay-core-')),
+  );
+  const runtimePath = path.join(root, 'runtime');
+  const modelRoot = path.join(root, 'models');
+  mkdirSync(modelRoot);
+  writeFileSync(runtimePath, 'runtime');
+  const manifestPath = path.join(root, 'manifest.json');
+  writeFileSync(manifestPath, '{}');
+  const meetings: PrivateLiveReplayMeeting[] = [0, 1, 2].map((index) => {
+    const micPath = path.join(root, `mic-${index}.wav`);
+    const systemPath = path.join(root, `system-${index}.wav`);
+    const proxyTranscriptPath = path.join(root, `proxy-${index}.json`);
+    writeFileSync(micPath, 'mic');
+    writeFileSync(systemPath, 'system');
+    writeFileSync(
+      proxyTranscriptPath,
+      JSON.stringify([{ text: 'stable', end: 1 }]),
+    );
+    return {
+      id: `m${index}`,
+      recordedAt: '2026-08-14T00:00:00.000Z',
+      sealedDurationSeconds: 1_800,
+      sealedGeneration: index + 1,
+      integrity: 'sealed',
+      unresolvedCaptureGap: false,
+      micSource: 'independent',
+      proxyTranscriptPath,
+      sources: { micPath, systemPath },
+    };
   });
-  return buildPrivateLiveReplayReport({
-    corpus: { meetingCount: 3, sourceCount: 6, audioMinutes: 90 },
-    runtime: {
-      fluidAudioVersion: '0.15.5',
-      fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
-      modelId: 'parakeet-tdt-0.6b-v3',
-      configId,
-    },
-    mlxProduction: verdict,
-    parakeetSliding: verdict,
-  });
+  return {
+    root,
+    manifestPath,
+    manifest: {
+      schemaVersion: 1,
+      runtime: { executablePath: runtimePath, modelRoot },
+      meetings,
+    } satisfies PrivateLiveReplayManifest,
+  };
 };
 
-describe('private live replay injected orchestration', () => {
-  it('uses one dual-source child per config/run, causal interleaving, bounded backpressure, diagnostics, and cleanup', async () => {
-    let virtualNow = 0;
-    const children: Array<{
-      config: string;
-      opens: ReplaySource[];
-      appends: Array<{
-        source: ReplaySource;
-        availableAtSeconds: number;
-        observedAtSeconds: number;
-      }>;
-      maximumPending: number;
-      batches: ReplaySource[];
-      gaps: Array<{
-        source: ReplaySource;
-        skippedStartSeconds: number;
-        skippedEndSeconds: number;
-        prefixCount: number;
-        suffixCount: number;
-      }>;
-      terminated: boolean;
-    }> = [];
-    const createParakeet = async (
-      config: string,
-    ): Promise<InjectedParakeetProcess> => {
-      const state = {
-        config,
-        opens: [] as ReplaySource[],
-        appends: [] as Array<{
-          source: ReplaySource;
-          availableAtSeconds: number;
-          observedAtSeconds: number;
-        }>,
-        maximumPending: 0,
-        batches: [] as ReplaySource[],
-        gaps: [] as Array<{
-          source: ReplaySource;
-          skippedStartSeconds: number;
-          skippedEndSeconds: number;
-          prefixCount: number;
-          suffixCount: number;
-        }>,
-        terminated: false,
-      };
-      children.push(state);
-      let pending = 0;
-      return {
-        open: async (source) => {
-          state.opens.push(source);
+const prepare = (meeting: PrivateLiveReplayMeeting): PreparedMeeting => {
+  const frames = buildQuarterSecondFrames(meeting.sealedDurationSeconds);
+  return {
+    meeting,
+    frames: { mic: frames, system: frames },
+    mlxJobs: Array.from(
+      { length: Math.ceil(meeting.sealedDurationSeconds / 5) },
+      (_, index) => ({
+        sequence: index + 1,
+        availableAtSeconds: Math.min(
+          meeting.sealedDurationSeconds,
+          (index + 1) * 5,
+        ),
+        micPath: meeting.sources.micPath,
+        systemPath: meeting.sources.systemPath,
+      }),
+    ),
+    wholePaths: meeting.sources,
+  };
+};
+
+const update = (source: 'mic' | 'system', end: number): NativeEvent => ({
+  schemaVersion: 1,
+  kind: 'event',
+  streamId: `${source}-fake`,
+  source,
+  generation: 1,
+  revision: 1,
+  event: 'stream_update',
+  qualifiesPriorTentative: false,
+  text: 'stable',
+  confidence: 1,
+  audioEndSeconds: end,
+});
+
+const fakeDependencies = (mlxAvailable: boolean, cleanupFailure = false) => {
+  let wall = 1_000;
+  let pending = 0;
+  let maximumPending = 0;
+  let releasedSourceSeconds = 0;
+  const topology: string[] = [];
+  const appendOrder: string[] = [];
+  const mlxJobs: Array<{
+    sequence: number;
+    micPath: string;
+    systemPath: string;
+  }> = [];
+  const dependencies: PrivateReplayDependencies = {
+    nowWallTimeMs: () => wall,
+    wait: async (milliseconds) => {
+      wall += milliseconds;
+    },
+    observeSourceRelease: (sourceSeconds) => {
+      releasedSourceSeconds = sourceSeconds;
+    },
+    prepareMeeting: async (meeting) => prepare(meeting),
+    startParakeet: async (config, repetition) => {
+      topology.push(`parakeet:${repetition}:${config}`);
+      const run: ParakeetReplayRun = {
+        openPair: async (meeting) => {
+          topology.push(`open:${meeting.meeting.id}:mic+system`);
         },
         append: async (source, frame) => {
+          if (frame.availableAtSeconds > releasedSourceSeconds)
+            throw new Error('future_frame_exposed');
           pending += 1;
-          state.maximumPending = Math.max(state.maximumPending, pending);
-          state.appends.push({
-            source,
-            availableAtSeconds: frame.availableAtSeconds,
-            observedAtSeconds: virtualNow,
-          });
+          maximumPending = Math.max(maximumPending, pending);
+          appendOrder.push(`${source}:${frame.sequence}`);
           await Promise.resolve();
           pending -= 1;
+          return frame.sequence === 0 ? [update(source, frame.endSeconds)] : [];
         },
-        flush: async () => ({ finalPreview: '', degradations: [] }),
-        runBatchDiagnostic: async (source) => {
-          state.batches.push(source);
-          return { status: 'available', boundaries: [5, 10] };
-        },
-        probeGap: async (source, gap, prefix, suffix) => {
-          state.gaps.push({
-            source,
-            skippedStartSeconds: gap.startSeconds,
-            skippedEndSeconds: gap.endSeconds,
-            prefixCount: prefix.length,
-            suffixCount: suffix.length,
-          });
+        flush: async () => ({
+          finalPreview: 'stable',
+          timedTokens: [{ token: 'stable', atSeconds: 1 }],
+          degradations: [],
+          events: [],
+        }),
+        batch: async () => ({
+          status: 'available',
+          text: 'stable',
+          timedTokens: [{ token: 'stable', atSeconds: 1 }],
+        }),
+        probeGap: async (source, gap) => ({
+          events: [
+            {
+              schemaVersion: 1,
+              kind: 'event',
+              streamId: `${source}-gap`,
+              source,
+              generation: 1,
+              revision: 1,
+              event: 'stream_degraded',
+              reason: 'coverage_gap',
+              chunkStartSeconds: gap.startSeconds,
+              chunkEndSeconds: gap.endSeconds,
+            },
+          ],
+        }),
+        repair: async (_source, start, end) => ({
+          status: 'available',
+          text: 'stable',
+          timedTokens: [{ token: 'stable', atSeconds: (start + end) / 2 }],
+        }),
+        sample: (sourceSeconds, expectedWallTimeMs) => ({
+          sourceSeconds,
+          wallTimeMs: expectedWallTimeMs,
+          schedulingJitterMs: 0,
+          rssGiB: 1,
+          thermal: 'nominal',
+        }),
+        close: async () => (cleanupFailure ? 'cleanup_failed' : 'exited'),
+      };
+      return run;
+    },
+    startMlx: async (repetition) => {
+      topology.push(`mlx:${repetition}`);
+      if (!mlxAvailable)
+        return { status: 'unavailable', reason: 'cache_missing' } as const;
+      const run: MlxReplayRun = {
+        transcribePair: async (job) => {
+          if (job.availableAtSeconds > releasedSourceSeconds)
+            throw new Error('future_mlx_job_exposed');
+          mlxJobs.push(job);
+          const result = {
+            status: 'available' as const,
+            text: 'stable',
+            timedTokens: [
+              { token: 'stable', atSeconds: job.availableAtSeconds },
+            ],
+          };
           return {
-            status: 'detected',
-            startSeconds: gap.startSeconds,
-            endSeconds: gap.endSeconds,
+            completedAtSeconds:
+              job.sequence === 1
+                ? job.availableAtSeconds + 11
+                : Math.max(16, job.availableAtSeconds),
+            mic: result,
+            system: result,
           };
         },
-        repairGap: async (_source, gap) => ({
+        batch: async () => ({
           status: 'available',
-          before: [
-            { token: 'before', atSeconds: Math.max(0, gap.startSeconds - 3) },
-          ],
-          repair: [{ token: 'fixed', atSeconds: gap.startSeconds + 1 }],
-          after: [{ token: 'after', atSeconds: gap.endSeconds + 3 }],
-          spliced: [
-            { token: 'before', atSeconds: Math.max(0, gap.startSeconds - 3) },
-            { token: 'fixed', atSeconds: gap.startSeconds + 1 },
-            { token: 'after', atSeconds: gap.endSeconds + 3 },
-          ],
+          text: 'stable',
+          timedTokens: [{ token: 'stable', atSeconds: 5 }],
         }),
-        resourceEvidence: () => ({
-          status: 'available',
-          processTopology: 'combined-dual-source',
-          samples: [{ wallTimeMs: 100, rssGiB: 1 }],
-          thermal: { status: 'unavailable' },
+        sample: (sourceSeconds, expectedWallTimeMs) => ({
+          sourceSeconds,
+          wallTimeMs: expectedWallTimeMs,
+          schedulingJitterMs: 0,
+          rssGiB: 1,
+          thermal: 'nominal',
         }),
-        terminate: async () => {
-          state.terminated = true;
-          return 'exited';
-        },
+        close: async () => 'exited',
       };
-    };
+      return { status: 'available', run } as const;
+    },
+  };
+  return {
+    dependencies,
+    topology,
+    appendOrder,
+    mlxJobs,
+    maximumPending: () => maximumPending,
+  };
+};
 
-    const result = await orchestrateInjectedPrivateReplay({
-      meetings: [
-        {
-          id: 'm1',
-          durationSeconds: 30,
-          micPath: '/mic',
-          systemPath: '/system',
-        },
-      ],
-      repetitions: 1,
-      maximumPendingAppends: 2,
-      clock: {
-        nowSeconds: () => virtualNow,
-        waitUntil: async (seconds) => {
-          virtualNow = seconds;
-        },
+describe('single private replay orchestration core', () => {
+  it('drives paired MLX and dual-source Parakeet through the executable path', async () => {
+    const { manifest, manifestPath, root } = fixture();
+    const fake = fakeDependencies(true);
+    const report = await runPrivateLiveReplay(
+      {
+        manifestPath,
+        outputPath: path.join(root, 'report.json'),
+        mode: 'causal',
+        repetitions: 3,
       },
-      createParakeet,
-      createMlx: async ({ offline }) => ({
-        status: 'unavailable',
-        reason: offline ? 'cache_missing' : 'runtime_unavailable',
-      }),
-    });
-
-    expect(children).toHaveLength(2);
-    expect(children.map((child) => child.config)).toEqual([
-      'pinned-default',
-      'low-latency-2s',
-    ]);
-    for (const child of children) {
-      expect(child.opens).toEqual(['mic', 'system']);
-      expect(
-        child.appends.every(
-          (entry) => entry.observedAtSeconds >= entry.availableAtSeconds,
-        ),
-      ).toBe(true);
-      expect(child.appends.slice(0, 4).map((entry) => entry.source)).toEqual([
-        'mic',
-        'system',
-        'mic',
-        'system',
-      ]);
-      expect(child.maximumPending).toBeLessThanOrEqual(2);
-      expect(child.batches).toEqual(['mic', 'system']);
-      expect(child.gaps).toHaveLength(6);
-      expect(
-        child.gaps.every(
-          (gap) =>
-            gap.skippedEndSeconds - gap.skippedStartSeconds === 2 &&
-            gap.prefixCount > 0 &&
-            gap.suffixCount > 0,
-        ),
-      ).toBe(true);
-      expect(child.terminated).toBe(true);
-    }
-    expect(result.configs.map((entry) => entry.config)).toEqual([
-      'pinned-default',
-      'low-latency-2s',
-    ]);
-    expect(result.mlx).toEqual([
-      { status: 'unavailable', reason: 'cache_missing' },
+      { manifest, dependencies: fake.dependencies },
+    );
+    expect(fake.topology.filter((entry) => entry.startsWith('mlx:'))).toEqual([
+      'mlx:0',
+      'mlx:1',
+      'mlx:2',
     ]);
     expect(
-      result.resources.every(
-        (entry) => entry.processTopology === 'combined-dual-source',
+      fake.topology.filter((entry) => entry.startsWith('parakeet:')),
+    ).toEqual([
+      'parakeet:0:pinned-default',
+      'parakeet:0:low-latency-2s',
+      'parakeet:1:low-latency-2s',
+      'parakeet:1:pinned-default',
+      'parakeet:2:pinned-default',
+      'parakeet:2:low-latency-2s',
+    ]);
+    expect(fake.appendOrder.slice(0, 4)).toEqual([
+      'mic:0',
+      'system:0',
+      'mic:1',
+      'system:1',
+    ]);
+    expect(fake.maximumPending()).toBeLessThanOrEqual(2);
+    expect(
+      fake.mlxJobs.every(
+        (job) =>
+          job.micPath.includes('mic-') && job.systemPath.includes('system-'),
       ),
     ).toBe(true);
-  });
+    expect(fake.mlxJobs.slice(0, 4).map(({ sequence }) => sequence)).toEqual([
+      1, 3, 4, 5,
+    ]);
+    expect(report.configs.pinnedDefault.runtime.configId).toBe(
+      'pinned-default-v1',
+    );
+    expect(report.configs.lowLatency.runtime.configId).toBe('low-latency-v1');
+  }, 30_000);
 
-  it('returns a finite cleanup failure when a forced child cannot prove exit', async () => {
-    await expect(
-      orchestrateInjectedPrivateReplay({
-        meetings: [
-          {
-            id: 'm1',
-            durationSeconds: 30,
-            micPath: '/mic',
-            systemPath: '/system',
-          },
+  it('makes MLX cache unavailability dominate the overall comparison', async () => {
+    const { manifest } = fixture();
+    const fake = fakeDependencies(false);
+    const report = await orchestratePrivateReplay(
+      manifest,
+      { mode: 'causal', repetitions: 3 },
+      fake.dependencies,
+    );
+    expect(report.configs.pinnedDefault.engines.mlxProduction.status).toBe(
+      'unavailable',
+    );
+    expect(report.configs.lowLatency.engines.mlxProduction.status).toBe(
+      'unavailable',
+    );
+    expect(report.decision).toBe('unavailable');
+  }, 30_000);
+
+  it('uses the same core from the CLI and writes only a finite unavailable envelope', async () => {
+    const { manifest, manifestPath, root } = fixture();
+    const fake = fakeDependencies(false);
+    const writes: unknown[] = [];
+    const stdout = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    try {
+      await runReplayCli(
+        [
+          '--manifest',
+          manifestPath,
+          '--mode',
+          'causal',
+          '--repetitions',
+          '3',
+          '--out',
+          path.join(root, 'cli-report.json'),
         ],
-        repetitions: 1,
-        maximumPendingAppends: 2,
-        clock: { nowSeconds: () => 0, waitUntil: async () => undefined },
-        createParakeet: async () => ({
-          open: async () => undefined,
-          append: async () => {
-            throw new Error('arbitrary private failure');
+        {
+          manifest,
+          dependencies: fake.dependencies,
+          write: (_outputPath, report) => {
+            writes.push(report);
           },
-          flush: async () => ({ finalPreview: '', degradations: [] }),
-          runBatchDiagnostic: async () => ({ status: 'unavailable' }),
-          probeGap: async (_source, gap) => ({
-            status: 'detected',
-            startSeconds: gap.startSeconds,
-            endSeconds: gap.endSeconds,
-          }),
-          repairGap: async () => ({ status: 'unavailable' }),
-          resourceEvidence: () => ({ status: 'unavailable' }),
-          terminate: async () => 'cleanup_failed',
-        }),
-        createMlx: async () => ({
-          status: 'unavailable',
-          reason: 'cache_missing',
-        }),
-      }),
-    ).rejects.toThrowError('cleanup_failed');
+        },
+      );
+    } finally {
+      stdout.mockRestore();
+    }
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ decision: 'unavailable' });
+  }, 30_000);
+
+  it('returns a finite cleanup failure when process exit cannot be proved', async () => {
+    const { manifest } = fixture();
+    const fake = fakeDependencies(false, true);
+    await expect(
+      orchestratePrivateReplay(
+        manifest,
+        { mode: 'causal', repetitions: 3 },
+        fake.dependencies,
+      ),
+    ).rejects.toThrow('cleanup_failed');
+  }, 30_000);
+});
+
+describe('resource, gap, and retention evidence', () => {
+  it('requires the exact source grid, final sample, wall order, and jitter', () => {
+    const valid = [0, 1, 2, 3].map((sourceSeconds) => ({
+      sourceSeconds,
+      wallTimeMs: sourceSeconds * 1_000,
+      schedulingJitterMs: 0,
+      rssGiB: 1,
+      thermal: 'nominal' as const,
+    }));
+    expect(validateResourceTimeline(valid, 3, 1, true)).toBe(true);
+    expect(validateResourceTimeline(valid.slice(1), 3, 1, true)).toBe(false);
+    expect(validateResourceTimeline(valid.slice(0, -1), 3, 1, true)).toBe(
+      false,
+    );
+    expect(
+      validateResourceTimeline(
+        valid.map((sample, index) =>
+          index === 2 ? { ...sample, sourceSeconds: 2.5 } : sample,
+        ),
+        3,
+        1,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      validateResourceTimeline(
+        valid.map((sample, index) =>
+          index === 2 ? { ...sample, schedulingJitterMs: 251 } : sample,
+        ),
+        3,
+        1,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      validateResourceTimeline(
+        valid.map((sample, index) =>
+          index === 2 ? { ...sample, wallTimeMs: 500 } : sample,
+        ),
+        3,
+        1,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      buildResourceSoakEvidence(
+        valid.map(({ thermal: _thermal, ...sample }) => sample),
+        3,
+        1,
+        true,
+      ),
+    ).toBeUndefined();
   });
 
-  it('uses one offline MLX server for paired five-second latest-wins jobs', async () => {
-    let createCount = 0;
-    let mlxTerminated = false;
-    const jobs: Array<{
-      micPath: string;
-      systemPath: string;
-      sequence: number;
-    }> = [];
-    const inertParakeet = (): InjectedParakeetProcess => ({
-      open: async () => undefined,
-      append: async () => undefined,
-      flush: async () => ({ finalPreview: '', degradations: [] }),
-      runBatchDiagnostic: async () => ({ status: 'unavailable' }),
-      probeGap: async (_source, gap) => ({
-        status: 'detected',
-        startSeconds: gap.startSeconds,
-        endSeconds: gap.endSeconds,
-      }),
-      repairGap: async () => ({ status: 'unavailable' }),
-      resourceEvidence: () => ({ status: 'unavailable' }),
-      terminate: async () => 'exited',
-    });
-
-    const result = await orchestrateInjectedPrivateReplay({
-      meetings: [
-        {
-          id: 'm1',
-          durationSeconds: 30,
-          micPath: '/mic',
-          systemPath: '/system',
-        },
-      ],
-      repetitions: 1,
-      maximumPendingAppends: 2,
-      clock: { nowSeconds: () => 30, waitUntil: async () => undefined },
-      createParakeet: async () => inertParakeet(),
-      createMlx: async ({ offline, chunkSeconds, queuePolicy }) => {
-        createCount += 1;
-        expect({ offline, chunkSeconds, queuePolicy }).toEqual({
-          offline: true,
-          chunkSeconds: 5,
-          queuePolicy: 'one-active-one-latest',
-        });
-        return {
-          status: 'available',
-          process: {
-            transcribePair: async (job) => {
-              jobs.push(job);
-              return {
-                completedAtSeconds:
-                  job.sequence === 1 ? 16 : job.availableAtSeconds,
-              };
-            },
-            resourceEvidence: () => ({
-              status: 'available',
-              samples: [{ wallTimeMs: 1, rssGiB: 1 }],
-            }),
-            terminate: async () => {
-              mlxTerminated = true;
-              return 'exited';
-            },
-          },
-        };
-      },
-    });
-
-    expect(createCount).toBe(1);
+  it('accepts only a correlated exact eight-frame coverage gap', () => {
+    const frames = buildQuarterSecondFrames(30);
+    const gap = buildGapInjections(30)[1];
+    const prefix = frames.filter(
+      ({ sequence }) => sequence < gap.omittedSequences[0],
+    );
+    const suffix = frames[gap.omittedSequences[7] + 1];
+    const event = {
+      schemaVersion: 1,
+      kind: 'event',
+      streamId: 'gap',
+      source: 'mic',
+      generation: 1,
+      revision: 1,
+      event: 'stream_degraded',
+      reason: 'coverage_gap',
+      chunkStartSeconds: gap.startSeconds,
+      chunkEndSeconds: gap.endSeconds,
+    } as const;
+    expect(validateCoverageGapProbe(gap, prefix, suffix, [event])).toBe(true);
     expect(
-      jobs.every(
-        (job) => job.micPath === '/mic' && job.systemPath === '/system',
+      validateCoverageGapProbe(gap, prefix, suffix, [
+        { ...event, reason: 'partial_window' },
+      ]),
+    ).toBe(false);
+    expect(
+      validateCoverageGapProbe(gap, prefix, suffix, [
+        { ...event, chunkEndSeconds: gap.endSeconds + 0.25 },
+      ]),
+    ).toBe(false);
+    expect(
+      validateCoverageGapProbe(
+        { ...gap, omittedSequences: gap.omittedSequences.slice(1) },
+        prefix,
+        suffix,
+        [event],
       ),
-    ).toBe(true);
-    expect(jobs.map(({ sequence }) => sequence)).toEqual([1, 3, 4, 5, 6]);
-    expect(mlxTerminated).toBe(true);
-    expect(result.mlx).toEqual([
-      expect.objectContaining({ status: 'available', processedJobs: 5 }),
-    ]);
+    ).toBe(false);
+    expect(
+      validateCoverageGapProbe(
+        gap,
+        prefix,
+        { ...suffix, startSeconds: gap.endSeconds + 0.25 },
+        [event],
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps transcript retention bounded for a 90-minute-equivalent stream', () => {
+    const tracker = new OnlineCommittedPrefixTracker();
+    let cumulative = '';
+    for (let sourceSeconds = 0; sourceSeconds < 90 * 60; sourceSeconds += 3) {
+      cumulative += ' word';
+      tracker.observe(cumulative);
+    }
+    expect(tracker.finish().retainedCommittedSnapshotCount).toBe(1);
+    expect(tracker.finish().retainedCommittedSnapshotBytes).toBe(
+      Buffer.byteLength(cumulative),
+    );
+    expect(tracker.finish().retainedCommittedSnapshotBytes).toBeLessThan(
+      16_384,
+    );
   });
 });
 
-describe('private live replay comparison envelope', () => {
-  it('retains both exact config reports and emits only a finite decision', () => {
-    const pinned = report('pinned-default-v1');
-    const low = report('low-latency-v1');
-    const comparison = buildPrivateLiveReplayComparison(pinned, low);
-    expect(comparison.configs).toEqual({
-      pinnedDefault: pinned,
-      lowLatency: low,
-    });
-    expect(comparison.decision).toBe(pinned.engines.parakeetSliding.status);
-  });
-
-  it('sanitizes a deliberately unavailable MLX engine without invented scores', () => {
-    const pinned = report('pinned-default-v1');
-    const low = report('low-latency-v1');
-    const unavailablePinned = {
-      ...pinned,
-      engines: {
-        ...pinned.engines,
-        mlxProduction: { status: 'unavailable' as const, metrics: {} },
-      },
+describe('comparison envelope', () => {
+  it('cannot allow Parakeet-only success when MLX is unavailable', () => {
+    const unavailable = {
+      status: 'unavailable' as const,
+      metrics: {},
+      invariants: {},
       failures: ['dependency_unavailable'],
     };
-
-    expect(() =>
-      buildPrivateLiveReplayComparison(unavailablePinned, low),
-    ).not.toThrow();
-  });
-
-  it('rejects unavailable metric smuggling and incomplete pass claims', () => {
-    const pinned = report('pinned-default-v1');
-    const low = report('low-latency-v1');
-    const mutateMlx = (
-      status: 'pass' | 'unavailable',
-      metrics: Record<string, unknown>,
-    ) => ({
-      ...pinned,
-      engines: {
-        ...pinned.engines,
-        mlxProduction: { status, metrics },
-      },
-      failures: status === 'unavailable' ? ['dependency_unavailable'] : [],
-    });
-
-    expect(() =>
-      buildPrivateLiveReplayComparison(
-        mutateMlx('unavailable', { arbitraryScore: 1 }) as never,
-        low,
-      ),
-    ).toThrow('private_report_field');
-    expect(() =>
-      buildPrivateLiveReplayComparison(
-        mutateMlx('unavailable', { transcript: 'private' }) as never,
-        low,
-      ),
-    ).toThrow('private_report_field');
-    expect(() =>
-      buildPrivateLiveReplayComparison(
-        mutateMlx('pass', { firstTextP95Seconds: 1 }) as never,
-        low,
-      ),
-    ).toThrow('private_report_field');
-  });
-
-  it('writes the protected comparison atomically with owner-only permissions', () => {
-    const directory = realpathSync(
-      mkdtempSync(path.join(tmpdir(), 'pluto-private-report-')),
+    const make = (configId: string) =>
+      buildPrivateLiveReplayReport({
+        corpus: { meetingCount: 3, sourceCount: 6, audioMinutes: 90 },
+        runtime: {
+          ...{
+            fluidAudioVersion: '0.15.5',
+            fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+            modelId: 'parakeet-tdt-0.6b-v3',
+          },
+          configId,
+        },
+        mlxProduction: unavailable,
+        parakeetSliding: unavailable,
+      });
+    const pinned = make('pinned-default-v1');
+    const low = make('low-latency-v1');
+    expect(buildPrivateLiveReplayComparison(pinned, low).decision).toBe(
+      'unavailable',
     );
-    const outputPath = path.join(directory, 'report.json');
-    const comparison = buildPrivateLiveReplayComparison(
-      report('pinned-default-v1'),
-      report('low-latency-v1'),
-    );
-
-    writePrivateReplayReportAtomic(outputPath, comparison);
-
-    expect(statSync(outputPath).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(outputPath, 'utf8'))).toEqual(comparison);
-    expect(readdirSync(directory)).toEqual(['report.json']);
+    expect(() =>
+      buildPrivateLiveReplayComparison(
+        {
+          ...pinned,
+          engines: {
+            ...pinned.engines,
+            mlxProduction: {
+              status: 'unavailable',
+              metrics: { arbitraryScore: 1 },
+            },
+          },
+        },
+        low,
+      ),
+    ).toThrow('private_report_field');
+    expect(() =>
+      buildPrivateLiveReplayComparison(
+        {
+          ...pinned,
+          engines: {
+            ...pinned.engines,
+            mlxProduction: {
+              status: 'unavailable',
+              metrics: { transcript: 'private' },
+            },
+          },
+        },
+        low,
+      ),
+    ).toThrow('private_report_field');
+    expect(() =>
+      buildPrivateLiveReplayComparison(
+        { ...pinned, invariants: { unknownInvariant: 1 } },
+        low,
+      ),
+    ).toThrow('private_report_field');
   });
 });

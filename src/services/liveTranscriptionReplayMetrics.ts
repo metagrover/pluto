@@ -53,7 +53,10 @@ export interface LiveReplayCoverageReceipt {
 export interface LiveReplayRepetition {
   firstSealedActivitySeconds: number;
   publications: LiveReplayPublication[];
-  committedSnapshots: string[];
+  committedSnapshots?: string[];
+  committedPrefixViolationCount?: number;
+  retainedCommittedSnapshotCount?: number;
+  retainedCommittedSnapshotBytes?: number;
   acceptedSequences: number[];
   processedSequences: number[];
   acceptedCoverage: LiveReplayCoverageReceipt[];
@@ -105,7 +108,12 @@ export interface LiveReplayResourceSoak {
   longestSource: true;
   preparedIdleRssGiB: number;
   peakRssGiB: number;
-  rssSamples: Array<{ atSeconds: number; rssGiB: number }>;
+  rssSamples: Array<{
+    atSeconds: number;
+    rssGiB: number;
+    wallTimeMs?: number;
+    schedulingJitterMs?: number;
+  }>;
   thermalSamples: Array<{
     atSeconds: number;
     state: 'nominal' | 'fair' | 'serious' | 'critical';
@@ -508,9 +516,23 @@ export const evaluateLiveReplay = (
         'volatile_revision_age',
       );
     }
-    committedPrefixViolations += countCommittedPrefixViolations(
-      repetition.committedSnapshots,
+    const onlinePrefixViolations = repetition.committedPrefixViolationCount;
+    if (
+      onlinePrefixViolations !== undefined &&
+      (!Number.isSafeInteger(onlinePrefixViolations) ||
+        onlinePrefixViolations < 0)
+    ) {
+      throw new Error('live_replay_invalid_observation');
+    }
+    requireCounts(
+      [
+        repetition.retainedCommittedSnapshotCount,
+        repetition.retainedCommittedSnapshotBytes,
+      ].filter((value): value is number => value !== undefined),
     );
+    committedPrefixViolations +=
+      onlinePrefixViolations ??
+      countCommittedPrefixViolations(repetition.committedSnapshots ?? []);
     const processed = new Set(repetition.processedSequences);
     const accepted = new Set(repetition.acceptedSequences);
     missingAcceptedSequences += repetition.acceptedSequences.filter(
@@ -1140,9 +1162,15 @@ const sanitizeMetrics = (
   return safe;
 };
 
-const sanitizeInvariants = (value: unknown): Record<string, number> => {
+const sanitizeInvariants = (
+  value: unknown,
+  allowSubset = false,
+): Record<string, number> => {
   const raw = expectObject(value);
-  exactKeys(raw, [...invariantKeys]);
+  if (allowSubset) {
+    if (Object.keys(raw).some((key) => !invariantKeys.has(key)))
+      throw new Error('private_report_field');
+  } else exactKeys(raw, [...invariantKeys]);
   const safe: Record<string, number> = {};
   for (const [key, invariant] of Object.entries(raw)) {
     if (!invariantKeys.has(key)) throw new Error('private_report_field');
@@ -1259,7 +1287,12 @@ export const sanitizeLiveReplayReport = (
     mlxProduction: sanitizeEngine(engines.mlxProduction),
     parakeetSliding: sanitizeEngine(engines.parakeetSliding),
   };
-  const invariants = sanitizeInvariants(raw.invariants);
+  const invariants = sanitizeInvariants(
+    raw.invariants,
+    Object.values(sanitizedEngines).some(
+      ({ status }) => status === 'unavailable',
+    ),
+  );
   const failures = sanitizeFailures(raw.failures);
   const bothPass = Object.values(sanitizedEngines).every(
     ({ status }) => status === 'pass',
