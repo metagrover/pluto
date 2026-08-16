@@ -245,34 +245,35 @@ public actor FluidAudioInferenceDriver: ParakeetInferenceDriving {
 }
 
 public actor FluidAudioLiveDriver: ParakeetLiveDriving {
-    private var loadedModelURL: URL?
-    private var loadedModels: AsrModels?
+    private let modelLoader = SingleFlightModelLoader<AsrModels>()
 
     public init() {}
+
+    public func capabilities() async -> ParakeetLiveDriverCapabilities {
+        // FluidAudio 0.15.5 does not expose bounded processing acknowledgements,
+        // exact update watermarks, or partial-window failures, and DEBUG logs can
+        // contain recognized text. The session therefore refuses production open.
+        .unsupported
+    }
 
     public func makeManager(request: ParakeetLiveManagerRequest) async throws
         -> any ParakeetLiveManaging
     {
         let modelURL = request.activeModelURL.standardizedFileURL
-        let models: AsrModels
-        if loadedModelURL == modelURL, let cached = loadedModels {
-            models = cached
-        } else {
+        let models = try await modelLoader.load(at: modelURL) {
             let asrDirectory = modelURL.appendingPathComponent(
                 FluidAudioModelLayout.asrDirectoryName,
                 isDirectory: true
             )
             let configuration = MLModelConfiguration()
             configuration.computeUnits = .cpuAndNeuralEngine
-            models = try await AsrModels.load(
+            return try await AsrModels.load(
                 from: asrDirectory,
                 configuration: configuration,
                 version: .v3,
                 encoderPrecision: .int8,
                 encoderComputeUnits: .cpuAndNeuralEngine
             )
-            loadedModelURL = modelURL
-            loadedModels = models
         }
 
         let liveConfiguration = request.configuration
@@ -340,13 +341,18 @@ private actor FluidAudioLiveManager: ParakeetLiveManaging {
         return LiveDriverAppendOutcome(updates: delivered)
     }
 
-    func finish() async throws -> String {
+    func finish() async throws -> LiveDriverFinishOutcome {
         defer {
             updateTask?.cancel()
             updateTask = nil
             bufferedUpdates.removeAll()
         }
-        return try await manager.finish()
+        let finalText = try await manager.finish()
+        await Task.yield()
+        return LiveDriverFinishOutcome(
+            finalText: finalText,
+            updates: bufferedUpdates
+        )
     }
 
     func cancel() async {
@@ -361,7 +367,49 @@ private actor FluidAudioLiveManager: ParakeetLiveManaging {
             LiveDriverUpdate(
                 text: update.text,
                 isConfirmed: update.isConfirmed,
-                confidence: Double(update.confidence)
+                confidence: Double(update.confidence),
+                processedAudioEndSeconds: nil
             ))
+    }
+}
+
+public actor SingleFlightModelLoader<Model: Sendable> {
+    private struct InFlight: Sendable {
+        let token: UUID
+        let modelURL: URL
+        let task: Task<Model, Error>
+    }
+
+    private var loadedModelURL: URL?
+    private var loadedModel: Model?
+    private var inFlight: InFlight?
+
+    public init() {}
+
+    public func load(
+        at modelURL: URL,
+        operation: @escaping @Sendable () async throws -> Model
+    ) async throws -> Model {
+        let standardizedURL = modelURL.standardizedFileURL
+        if loadedModelURL == standardizedURL, let loadedModel { return loadedModel }
+        if let inFlight, inFlight.modelURL == standardizedURL {
+            return try await inFlight.task.value
+        }
+
+        let token = UUID()
+        let task = Task { try await operation() }
+        inFlight = InFlight(token: token, modelURL: standardizedURL, task: task)
+        do {
+            let model = try await task.value
+            if inFlight?.token == token {
+                loadedModelURL = standardizedURL
+                loadedModel = model
+                inFlight = nil
+            }
+            return model
+        } catch {
+            if inFlight?.token == token { inFlight = nil }
+            throw error
+        }
     }
 }

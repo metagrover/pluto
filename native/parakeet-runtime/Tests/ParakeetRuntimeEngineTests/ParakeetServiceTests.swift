@@ -36,11 +36,16 @@ private actor ServiceInferenceDriver: ParakeetInferenceDriving {
 private actor ServiceLiveManager: ParakeetLiveManaging {
     func append(audioURL _: URL) async throws -> LiveDriverAppendOutcome {
         LiveDriverAppendOutcome(updates: [
-            LiveDriverUpdate(text: "preview", isConfirmed: false, confidence: 0.8)
+            LiveDriverUpdate(
+                text: "preview", isConfirmed: false, confidence: 0.8,
+                processedAudioEndSeconds: 1
+            )
         ])
     }
 
-    func finish() async throws -> String { "final preview" }
+    func finish() async throws -> LiveDriverFinishOutcome {
+        LiveDriverFinishOutcome(finalText: "final preview")
+    }
     func cancel() async {}
 }
 
@@ -50,6 +55,7 @@ private struct ServiceLiveDriver: ParakeetLiveDriving {
     {
         ServiceLiveManager()
     }
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
 }
 
 private actor FailingServiceLiveManager: ParakeetLiveManaging {
@@ -57,7 +63,9 @@ private actor FailingServiceLiveManager: ParakeetLiveManaging {
         throw RuntimeFailure.transcriptionFailed
     }
 
-    func finish() async throws -> String { "" }
+    func finish() async throws -> LiveDriverFinishOutcome {
+        LiveDriverFinishOutcome(finalText: "")
+    }
     func cancel() async {}
 }
 
@@ -67,6 +75,7 @@ private struct FailingServiceLiveDriver: ParakeetLiveDriving {
     {
         FailingServiceLiveManager()
     }
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
 }
 
 final class ParakeetServiceTests: XCTestCase {
@@ -220,6 +229,57 @@ final class ParakeetServiceTests: XCTestCase {
         }
         XCTAssertEqual(event.reason, .inferenceFailed)
         XCTAssertEqual(event.revision, 1)
+    }
+
+    func testServiceEnforcesSourceAndFailsClosedForProductionCapabilities() async throws {
+        let modelRoot = try makeDirectory("service-capability-models")
+        let audioRoot = try makeDirectory("service-capability-audio")
+        let audio = audioRoot.appendingPathComponent("chunk.wav")
+        try Data("chunk".utf8).write(to: audio)
+        let service = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: audioRoot,
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            liveDriver: ServiceLiveDriver()
+        )
+        _ = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
+        _ = await service.handleLive(RuntimeRequest(
+            id: "open",
+            method: .streamOpen,
+            live: LiveRequestMetadata(streamId: "s", source: .mic, generation: 1)
+        ))
+        let wrongSource = await service.handleLive(RuntimeRequest(
+            id: "append",
+            method: .streamAppend,
+            audioPath: audio.path,
+            live: LiveRequestMetadata(
+                streamId: "s", source: .system, generation: 1, sequence: 1,
+                chunkStartSeconds: 0, chunkEndSeconds: 1
+            )
+        ))
+        XCTAssertEqual(wrongSource.response.error?.code, .invalidRequest)
+
+        let production = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: audioRoot,
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            liveDriver: FluidAudioLiveDriver()
+        )
+        _ = await production.handle(RuntimeRequest(id: "prepare-2", method: .prepare))
+        let unsupported = await production.handleLive(RuntimeRequest(
+            id: "unsupported",
+            method: .streamOpen,
+            live: LiveRequestMetadata(streamId: "p", source: .system, generation: 1)
+        ))
+        XCTAssertEqual(unsupported.response.error?.code, .modelPreparationFailed)
+        guard case .streamFailed(let event) = unsupported.events.first else {
+            return XCTFail("expected finite unsupported capability event")
+        }
+        XCTAssertEqual(event.reason, .modelUnavailable)
     }
 }
 

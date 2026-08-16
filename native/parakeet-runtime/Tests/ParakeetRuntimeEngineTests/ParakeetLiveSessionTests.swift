@@ -24,7 +24,9 @@ private actor FakeLiveManager: ParakeetLiveManaging {
         return outcomes.isEmpty ? LiveDriverAppendOutcome() : outcomes.removeFirst()
     }
 
-    func finish() async throws -> String { finishText }
+    func finish() async throws -> LiveDriverFinishOutcome {
+        LiveDriverFinishOutcome(finalText: finishText)
+    }
 
     func cancel() async { cancelCount += 1 }
 }
@@ -50,20 +52,40 @@ private actor FakeLiveDriver: ParakeetLiveDriving {
         managers.append(manager)
         return manager
     }
+
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
 }
 
 private actor BlockingLiveManager: ParakeetLiveManaging {
     private var continuations: [CheckedContinuation<Void, Never>] = []
     private(set) var appendedNames: [String] = []
+    private(set) var finishCount = 0
+    private(set) var cancelCount = 0
+    private let lateUpdateOnCancel: Bool
+
+    init(lateUpdateOnCancel: Bool = false) {
+        self.lateUpdateOnCancel = lateUpdateOnCancel
+    }
 
     func append(audioURL: URL) async throws -> LiveDriverAppendOutcome {
         appendedNames.append(audioURL.lastPathComponent)
         await withCheckedContinuation { continuations.append($0) }
-        return LiveDriverAppendOutcome()
+        return LiveDriverAppendOutcome(
+            updates: lateUpdateOnCancel
+                ? [
+                    LiveDriverUpdate(
+                        text: "late", isConfirmed: false, confidence: 0.8,
+                        processedAudioEndSeconds: 1
+                    )
+                ] : [])
     }
 
-    func finish() async throws -> String { "" }
+    func finish() async throws -> LiveDriverFinishOutcome {
+        finishCount += 1
+        return LiveDriverFinishOutcome(finalText: "")
+    }
     func cancel() async {
+        cancelCount += 1
         let pending = continuations
         continuations.removeAll()
         for continuation in pending { continuation.resume() }
@@ -75,6 +97,112 @@ private actor BlockingLiveManager: ParakeetLiveManaging {
     }
 }
 
+private actor FailingFirstLiveManager: ParakeetLiveManaging {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var appendCount = 0
+
+    func append(audioURL _: URL) async throws -> LiveDriverAppendOutcome {
+        appendCount += 1
+        if appendCount == 1 {
+            await withCheckedContinuation { continuation = $0 }
+            throw RuntimeFailure.transcriptionFailed
+        }
+        return LiveDriverAppendOutcome()
+    }
+
+    func finish() async throws -> LiveDriverFinishOutcome {
+        LiveDriverFinishOutcome(finalText: "")
+    }
+    func cancel() async {
+        continuation?.resume()
+        continuation = nil
+    }
+    func releaseFailure() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private struct FailingFirstLiveDriver: ParakeetLiveDriving {
+    let manager: FailingFirstLiveManager
+    func makeManager(request _: ParakeetLiveManagerRequest) async throws
+        -> any ParakeetLiveManaging
+    { manager }
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
+}
+
+private actor BlockingOpenDriver: ParakeetLiveDriving {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var makeCount = 0
+
+    func makeManager(request _: ParakeetLiveManagerRequest) async throws
+        -> any ParakeetLiveManaging
+    {
+        makeCount += 1
+        await withCheckedContinuation { continuation = $0 }
+        return FakeLiveManager()
+    }
+
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor RecoveringOpenDriver: ParakeetLiveDriving {
+    private var count = 0
+    func makeManager(request _: ParakeetLiveManagerRequest) async throws
+        -> any ParakeetLiveManaging
+    {
+        count += 1
+        if count == 1 { throw RuntimeFailure.modelPreparationFailed }
+        return FakeLiveManager()
+    }
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
+}
+
+private actor FinalUpdateManager: ParakeetLiveManaging {
+    func append(audioURL _: URL) async throws -> LiveDriverAppendOutcome {
+        LiveDriverAppendOutcome()
+    }
+    func finish() async throws -> LiveDriverFinishOutcome {
+        LiveDriverFinishOutcome(
+            finalText: "tail",
+            updates: [
+                LiveDriverUpdate(
+                    text: "final update", isConfirmed: true, confidence: 0.9,
+                    processedAudioEndSeconds: 2
+                )
+            ]
+        )
+    }
+    func cancel() async {}
+}
+
+private struct FinalUpdateDriver: ParakeetLiveDriving {
+    func makeManager(request _: ParakeetLiveManagerRequest) async throws
+        -> any ParakeetLiveManaging
+    { FinalUpdateManager() }
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
+}
+
+private actor ModelLoadProbe {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var count = 0
+
+    func load() async -> String {
+        count += 1
+        await withCheckedContinuation { continuation = $0 }
+        return "models"
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
 private struct BlockingLiveDriver: ParakeetLiveDriving {
     let manager: BlockingLiveManager
 
@@ -83,6 +211,8 @@ private struct BlockingLiveDriver: ParakeetLiveDriving {
     {
         manager
     }
+
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
 }
 
 private actor OrderedUpdateManager: ParakeetLiveManaging {
@@ -96,11 +226,16 @@ private actor OrderedUpdateManager: ParakeetLiveManaging {
             await withCheckedContinuation { firstContinuation = $0 }
         }
         return LiveDriverAppendOutcome(updates: [
-            LiveDriverUpdate(text: "update-\(ordinal)", isConfirmed: false, confidence: 0.8)
+            LiveDriverUpdate(
+                text: "update-\(ordinal)", isConfirmed: false, confidence: 0.8,
+                processedAudioEndSeconds: Double(ordinal)
+            )
         ])
     }
 
-    func finish() async throws -> String { "" }
+    func finish() async throws -> LiveDriverFinishOutcome {
+        LiveDriverFinishOutcome(finalText: "")
+    }
     func cancel() async { firstContinuation?.resume() }
     func releaseFirst() {
         firstContinuation?.resume()
@@ -117,6 +252,8 @@ private struct OrderedUpdateDriver: ParakeetLiveDriving {
     {
         manager
     }
+
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
 }
 
 final class ParakeetLiveSessionTests: XCTestCase {
@@ -142,14 +279,14 @@ final class ParakeetLiveSessionTests: XCTestCase {
         let third = try makeAudio("three.wav", contents: "three")
 
         _ = try await session.append(
-            streamId: "s", generation: 1, sequence: 1, audioURL: first,
+            streamId: "s", source: .system, generation: 1, sequence: 1, audioURL: first,
             chunkStartSeconds: 0, chunkEndSeconds: 1
         )
 
         await assertThrows(
             .sequenceGap,
             try await session.append(
-                streamId: "s", generation: 1, sequence: 3, audioURL: third,
+                streamId: "s", source: .system, generation: 1, sequence: 3, audioURL: third,
                 chunkStartSeconds: 2, chunkEndSeconds: 3
             )
         )
@@ -162,11 +299,11 @@ final class ParakeetLiveSessionTests: XCTestCase {
         let audio = try makeAudio("one.wav", contents: "same")
 
         let original = try await session.append(
-            streamId: "s", generation: 1, sequence: 1, audioURL: audio,
+            streamId: "s", source: .mic, generation: 1, sequence: 1, audioURL: audio,
             chunkStartSeconds: 0, chunkEndSeconds: 1
         )
         let duplicate = try await session.append(
-            streamId: "s", generation: 1, sequence: 1, audioURL: audio,
+            streamId: "s", source: .mic, generation: 1, sequence: 1, audioURL: audio,
             chunkStartSeconds: 0, chunkEndSeconds: 1
         )
 
@@ -181,7 +318,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
         await assertThrows(
             .duplicateMismatch,
             try await session.append(
-                streamId: "s", generation: 1, sequence: 1, audioURL: audio,
+                streamId: "s", source: .mic, generation: 1, sequence: 1, audioURL: audio,
                 chunkStartSeconds: 0, chunkEndSeconds: 1
             )
         )
@@ -197,7 +334,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
 
         let firstTask = Task {
             try await session.append(
-                streamId: "s", generation: 1, sequence: 1, audioURL: first,
+                streamId: "s", source: .system, generation: 1, sequence: 1, audioURL: first,
                 chunkStartSeconds: 0, chunkEndSeconds: 1
             )
         }
@@ -205,7 +342,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
         await waitForAppendCount(1, manager: manager)
         let secondTask = Task {
             try await session.append(
-                streamId: "s", generation: 1, sequence: 2, audioURL: second,
+                streamId: "s", source: .system, generation: 1, sequence: 2, audioURL: second,
                 chunkStartSeconds: 1, chunkEndSeconds: 2
             )
         }
@@ -214,7 +351,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
         await assertThrows(
             .backpressure,
             try await session.append(
-                streamId: "s", generation: 1, sequence: 3, audioURL: third,
+                streamId: "s", source: .system, generation: 1, sequence: 3, audioURL: third,
                 chunkStartSeconds: 2, chunkEndSeconds: 3
             )
         )
@@ -237,7 +374,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
 
         let firstTask = Task {
             try await session.append(
-                streamId: "s", generation: 1, sequence: 1, audioURL: first,
+                streamId: "s", source: .system, generation: 1, sequence: 1, audioURL: first,
                 chunkStartSeconds: 0, chunkEndSeconds: 1
             )
         }
@@ -247,7 +384,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
         }
         let secondTask = Task {
             try await session.append(
-                streamId: "s", generation: 1, sequence: 2, audioURL: second,
+                streamId: "s", source: .system, generation: 1, sequence: 2, audioURL: second,
                 chunkStartSeconds: 1, chunkEndSeconds: 2
             )
         }
@@ -274,7 +411,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
         await assertThrows(
             .pathNotAllowed,
             try await session.append(
-                streamId: "s", generation: 1, sequence: 1, audioURL: outside,
+                streamId: "s", source: .mic, generation: 1, sequence: 1, audioURL: outside,
                 chunkStartSeconds: 0, chunkEndSeconds: 1
             )
         )
@@ -285,7 +422,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
         let session = makeSession(driver: driver)
         try await session.open(streamId: "s", source: .mic, generation: 1)
 
-        let result = try await session.flush(streamId: "s", generation: 1)
+        let result = try await session.flush(streamId: "s", source: .mic, generation: 1)
 
         XCTAssertEqual(result.finalPreview, "tail")
         let state = await session.state(streamId: "s")
@@ -309,8 +446,28 @@ final class ParakeetLiveSessionTests: XCTestCase {
         XCTAssertEqual(resetState?.generation, 2)
         await assertThrows(
             .generationMismatch,
-            try await session.cancel(streamId: "s", generation: 1)
+            try await session.cancel(streamId: "s", source: .system, generation: 1)
         )
+    }
+
+    func testResetCancelsQueuedWorkBeforeCreatingNewGeneration() async throws {
+        let manager = BlockingLiveManager()
+        let session = makeSession(driver: BlockingLiveDriver(manager: manager))
+        try await session.open(streamId: "s", source: .system, generation: 1)
+        let audio = try makeAudio("one.wav", contents: "one")
+        let append = Task {
+            try await session.append(
+                streamId: "s", source: .system, generation: 1, sequence: 1,
+                audioURL: audio, chunkStartSeconds: 0, chunkEndSeconds: 1
+            )
+        }
+        await waitForAppendCount(1, manager: manager)
+
+        try await session.reset(streamId: "s", source: .system, generation: 2)
+
+        await assertTaskThrows(.cancelled, append)
+        let state = await session.state(streamId: "s")
+        XCTAssertEqual(state?.generation, 2)
     }
 
     func testLimitsRegistryToDistinctMicAndSystemManagersSharingVerifiedBundle() async throws {
@@ -371,7 +528,8 @@ final class ParakeetLiveSessionTests: XCTestCase {
         let outcome = LiveDriverAppendOutcome(
             updates: [
                 LiveDriverUpdate(
-                    text: "synthetic", isConfirmed: true, confidence: 0.9
+                    text: "synthetic", isConfirmed: true, confidence: 0.9,
+                    processedAudioEndSeconds: 1
                 )
             ],
             partialWindowFailed: true
@@ -381,7 +539,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
         let audio = try makeAudio("one.wav", contents: "one")
 
         let result = try await session.append(
-            streamId: "s", generation: 1, sequence: 1, audioURL: audio,
+            streamId: "s", source: .system, generation: 1, sequence: 1, audioURL: audio,
             chunkStartSeconds: 0, chunkEndSeconds: 1
         )
 
@@ -404,7 +562,7 @@ final class ParakeetLiveSessionTests: XCTestCase {
         let session = makeSession(driver: driver)
         try await session.open(streamId: "s", source: .mic, generation: 1)
 
-        try await session.cancel(streamId: "s", generation: 1)
+        try await session.cancel(streamId: "s", source: .mic, generation: 1)
 
         let state = await session.state(streamId: "s")
         XCTAssertNil(state)
@@ -412,10 +570,247 @@ final class ParakeetLiveSessionTests: XCTestCase {
         await assertThrows(
             .streamNotFound,
             try await session.append(
-                streamId: "s", generation: 1, sequence: 1, audioURL: audio,
+                streamId: "s", source: .mic, generation: 1, sequence: 1, audioURL: audio,
                 chunkStartSeconds: 0, chunkEndSeconds: 1
             )
         )
+    }
+
+    func testRejectsMismatchedSourceForEveryExistingStreamOperation() async throws {
+        let session = makeSession(driver: FakeLiveDriver())
+        try await session.open(streamId: "s", source: .mic, generation: 1)
+        let audio = try makeAudio("one.wav", contents: "one")
+
+        await assertThrows(
+            .sourceMismatch,
+            try await session.append(
+                streamId: "s", source: .system, generation: 1, sequence: 1,
+                audioURL: audio, chunkStartSeconds: 0, chunkEndSeconds: 1
+            )
+        )
+        await assertThrows(
+            .sourceMismatch,
+            try await session.flush(streamId: "s", source: .system, generation: 1)
+        )
+        await assertThrows(
+            .sourceMismatch,
+            try await session.cancel(streamId: "s", source: .system, generation: 1)
+        )
+        await assertThrows(
+            .sourceMismatch,
+            try await session.reset(streamId: "s", source: .system, generation: 2)
+        )
+    }
+
+    func testConcurrentOpenReservesSourceAndCapacityAcrossDriverAwait() async throws {
+        let driver = BlockingOpenDriver()
+        let session = makeSession(driver: driver)
+        let first = Task {
+            try await session.open(streamId: "one", source: .mic, generation: 1)
+        }
+        for _ in 0..<1_000 {
+            if await driver.makeCount == 1 { break }
+            await Task.yield()
+        }
+
+        await assertThrows(
+            .streamCapacity,
+            try await session.open(streamId: "two", source: .mic, generation: 1)
+        )
+        await driver.release()
+        try await first.value
+        let makeCount = await driver.makeCount
+        XCTAssertEqual(makeCount, 1)
+    }
+
+    func testFailedOpenRollsBackSourceAndCapacityReservation() async throws {
+        let session = makeSession(driver: RecoveringOpenDriver())
+        await assertThrows(
+            .modelUnavailable,
+            try await session.open(streamId: "failed", source: .mic, generation: 1)
+        )
+        try await session.open(streamId: "recovered", source: .mic, generation: 1)
+        let state = await session.state(streamId: "recovered")
+        XCTAssertEqual(state?.source, .mic)
+    }
+
+    func testFlushWaitsForAcceptedAppendBeforeFinishingAndKeepsTailUpdates() async throws {
+        let manager = BlockingLiveManager()
+        let session = makeSession(driver: BlockingLiveDriver(manager: manager))
+        try await session.open(streamId: "s", source: .system, generation: 1)
+        let audio = try makeAudio("one.wav", contents: "one")
+        let append = Task {
+            try await session.append(
+                streamId: "s", source: .system, generation: 1, sequence: 1,
+                audioURL: audio, chunkStartSeconds: 0, chunkEndSeconds: 1
+            )
+        }
+        await waitForAppendCount(1, manager: manager)
+        let flush = Task {
+            try await session.flush(streamId: "s", source: .system, generation: 1)
+        }
+        await Task.yield()
+        let finishCountBeforeRelease = await manager.finishCount
+        XCTAssertEqual(finishCountBeforeRelease, 0)
+        await manager.releaseNext()
+        _ = try await append.value
+        _ = try await flush.value
+        let finishCountAfterFlush = await manager.finishCount
+        XCTAssertEqual(finishCountAfterFlush, 1)
+
+        let finalSession = makeSession(driver: FinalUpdateDriver())
+        try await finalSession.open(streamId: "final", source: .mic, generation: 1)
+        let result = try await finalSession.flush(
+            streamId: "final", source: .mic, generation: 1
+        )
+        XCTAssertEqual(result.finalPreview, "tail")
+        guard case .streamUpdate(let finalUpdate) = result.events.first else {
+            return XCTFail("expected drained final update")
+        }
+        XCTAssertEqual(finalUpdate.audioEndSeconds, 2)
+    }
+
+    func testCancelCancelsActiveAndQueuedAppendsWithoutLateEvents() async throws {
+        let manager = BlockingLiveManager(lateUpdateOnCancel: true)
+        let session = makeSession(driver: BlockingLiveDriver(manager: manager))
+        try await session.open(streamId: "s", source: .mic, generation: 1)
+        let firstAudio = try makeAudio("one.wav", contents: "one")
+        let secondAudio = try makeAudio("two.wav", contents: "two")
+        let first = Task {
+            try await session.append(
+                streamId: "s", source: .mic, generation: 1, sequence: 1,
+                audioURL: firstAudio, chunkStartSeconds: 0, chunkEndSeconds: 1
+            )
+        }
+        await waitForAppendCount(1, manager: manager)
+        let second = Task {
+            try await session.append(
+                streamId: "s", source: .mic, generation: 1, sequence: 2,
+                audioURL: secondAudio, chunkStartSeconds: 1, chunkEndSeconds: 2
+            )
+        }
+        await Task.yield()
+
+        try await session.cancel(streamId: "s", source: .mic, generation: 1)
+        await assertTaskThrows(.cancelled, first)
+        await assertTaskThrows(.cancelled, second)
+        let appendedNames = await manager.appendedNames
+        let cancelCount = await manager.cancelCount
+        let state = await session.state(streamId: "s")
+        XCTAssertEqual(appendedNames, ["one.wav"])
+        XCTAssertEqual(cancelCount, 1)
+        XCTAssertNil(state)
+    }
+
+    func testPredecessorFailureCancelsQueuedAppendAndEmitsOneTerminalEvent() async throws {
+        let manager = FailingFirstLiveManager()
+        let session = makeSession(driver: FailingFirstLiveDriver(manager: manager))
+        try await session.open(streamId: "s", source: .system, generation: 1)
+        let firstAudio = try makeAudio("one.wav", contents: "one")
+        let secondAudio = try makeAudio("two.wav", contents: "two")
+        let first = Task {
+            try await session.append(
+                streamId: "s", source: .system, generation: 1, sequence: 1,
+                audioURL: firstAudio, chunkStartSeconds: 0, chunkEndSeconds: 1
+            )
+        }
+        for _ in 0..<1_000 {
+            if await manager.appendCount == 1 { break }
+            await Task.yield()
+        }
+        let second = Task {
+            try await session.append(
+                streamId: "s", source: .system, generation: 1, sequence: 2,
+                audioURL: secondAudio, chunkStartSeconds: 1, chunkEndSeconds: 2
+            )
+        }
+        await manager.releaseFailure()
+
+        do {
+            _ = try await first.value
+            XCTFail("expected terminal failure")
+        } catch let terminal as LiveRuntimeTerminalFailure {
+            guard case .streamFailed = terminal.event else {
+                return XCTFail("expected one terminal event")
+            }
+        }
+        await assertTaskThrows(.inferenceFailed, second)
+        let appendCount = await manager.appendCount
+        XCTAssertEqual(appendCount, 1)
+    }
+
+    func testUnknownProcessedWatermarkEmitsCoverageDegradationInsteadOfFalseUpdate() async throws {
+        let outcome = LiveDriverAppendOutcome(updates: [
+            LiveDriverUpdate(
+                text: "unknown boundary", isConfirmed: false, confidence: 0.8,
+                processedAudioEndSeconds: nil
+            )
+        ])
+        let session = makeSession(driver: FakeLiveDriver(outcomes: [outcome]))
+        try await session.open(streamId: "s", source: .system, generation: 1)
+        let audio = try makeAudio("one.wav", contents: "one")
+
+        let result = try await session.append(
+            streamId: "s", source: .system, generation: 1, sequence: 1,
+            audioURL: audio, chunkStartSeconds: 0, chunkEndSeconds: 1
+        )
+
+        XCTAssertEqual(result.events.count, 1)
+        guard case .streamDegraded(let event) = result.events[0] else {
+            return XCTFail("expected coverage degradation")
+        }
+        XCTAssertEqual(event.reason, .coverageGap)
+    }
+
+    func testProductionDriverFailsClosedOnMissingCapabilities() async throws {
+        let session = makeSession(driver: FluidAudioLiveDriver())
+        await assertThrows(
+            .unsupportedCapability,
+            try await session.open(streamId: "s", source: .mic, generation: 1)
+        )
+        let state = await session.state(streamId: "s")
+        XCTAssertNil(state)
+    }
+
+    func testVerifiedModelLoaderIsSingleFlightForConcurrentManagerCreation() async throws {
+        let loader = SingleFlightModelLoader<String>()
+        let probe = ModelLoadProbe()
+        let modelURL = model!
+        async let first = loader.load(at: modelURL) { await probe.load() }
+        async let second = loader.load(at: modelURL) { await probe.load() }
+        for _ in 0..<1_000 {
+            if await probe.count == 1 { break }
+            await Task.yield()
+        }
+        let countWhileLoading = await probe.count
+        XCTAssertEqual(countWhileLoading, 1)
+        await probe.release()
+        let values = try await [first, second]
+        XCTAssertEqual(values, ["models", "models"])
+        let finalCount = await probe.count
+        XCTAssertEqual(finalCount, 1)
+    }
+
+    func testShutdownCancelsInFlightAppendAndLeavesNoLateEvent() async throws {
+        let manager = BlockingLiveManager(lateUpdateOnCancel: true)
+        let session = makeSession(driver: BlockingLiveDriver(manager: manager))
+        try await session.open(streamId: "s", source: .mic, generation: 1)
+        let audio = try makeAudio("one.wav", contents: "one")
+        let append = Task {
+            try await session.append(
+                streamId: "s", source: .mic, generation: 1, sequence: 1,
+                audioURL: audio, chunkStartSeconds: 0, chunkEndSeconds: 1
+            )
+        }
+        await waitForAppendCount(1, manager: manager)
+
+        await session.shutdown()
+
+        await assertTaskThrows(.cancelled, append)
+        let state = await session.state(streamId: "s")
+        let cancelCount = await manager.cancelCount
+        XCTAssertNil(state)
+        XCTAssertEqual(cancelCount, 1)
     }
 
     private func makeSession(
@@ -442,6 +837,18 @@ final class ParakeetLiveSessionTests: XCTestCase {
     ) async {
         do {
             _ = try await expression()
+            XCTFail("expected \(expected)")
+        } catch {
+            XCTAssertEqual(error as? LiveRuntimeFailure, expected)
+        }
+    }
+
+    private func assertTaskThrows(
+        _ expected: LiveRuntimeFailure,
+        _ task: Task<LiveAppendResult, Error>
+    ) async {
+        do {
+            _ = try await task.value
             XCTFail("expected \(expected)")
         } catch {
             XCTAssertEqual(error as? LiveRuntimeFailure, expected)

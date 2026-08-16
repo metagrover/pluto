@@ -66,6 +66,7 @@ public actor ParakeetService {
                 else { return .failure(id: request.id, code: .invalidRequest) }
                 let result = try await session.append(
                     streamId: metadata.streamId,
+                    source: metadata.source,
                     generation: metadata.generation,
                     sequence: sequence,
                     audioURL: URL(fileURLWithPath: audioPath),
@@ -76,16 +77,19 @@ public actor ParakeetService {
             case .streamFlush:
                 let result = try await session.flush(
                     streamId: metadata.streamId,
+                    source: metadata.source,
                     generation: metadata.generation
                 )
                 return .success(
                     id: request.id,
+                    events: result.events,
                     finalPreview: result.finalPreview,
                     degradations: result.degradations
                 )
             case .streamCancel:
                 try await session.cancel(
                     streamId: metadata.streamId,
+                    source: metadata.source,
                     generation: metadata.generation
                 )
                 return .success(id: request.id)
@@ -106,6 +110,19 @@ public actor ParakeetService {
                 events: [terminal.event]
             )
         } catch let failure as LiveRuntimeFailure {
+            if failure == .unsupportedCapability {
+                return .failure(
+                    id: request.id,
+                    code: runtimeFailure(for: failure),
+                    events: [.streamFailed(LiveStreamFailed(
+                        streamId: metadata.streamId,
+                        source: metadata.source,
+                        generation: metadata.generation,
+                        revision: 1,
+                        reason: .modelUnavailable
+                    ))]
+                )
+            }
             return .failure(id: request.id, code: runtimeFailure(for: failure))
         } catch {
             return .failure(id: request.id, code: .transcriptionFailed)
@@ -192,13 +209,13 @@ public actor ParakeetService {
         switch failure {
         case .pathNotAllowed:
             return .pathNotAllowed
-        case .modelUnavailable:
+        case .modelUnavailable, .unsupportedCapability:
             return .modelPreparationFailed
         case .cancelled:
             return .cancelled
         case .inferenceFailed:
             return .transcriptionFailed
-        case .streamCapacity, .streamNotFound, .generationMismatch, .sequenceGap,
+        case .streamCapacity, .streamNotFound, .generationMismatch, .sourceMismatch, .sequenceGap,
             .duplicateMismatch, .backpressure:
             return .invalidRequest
         }
