@@ -1,6 +1,9 @@
 export const isGrantedStatus = (status: string) =>
   status === 'authorized' || status === 'granted';
 
+export const shouldRunBootPermissionProbe = (setupNeeded: boolean | null) =>
+  setupNeeded === false;
+
 export const resolveMicrophoneStatus = (
   nativeStatus: string,
   probeSucceeded: boolean,

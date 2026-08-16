@@ -16,7 +16,7 @@
     {
       "from": "resources/bin",
       "to": "bin",
-      "filter": ["parakeet-runtime", "parakeet-resource-probe"]
+      "filter": ["**/*"]
     },
     {
       "from": "resources/model-manifests",

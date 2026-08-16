@@ -9,6 +9,7 @@ describe('final transcription startup boundary', () => {
     const recover = vi.fn(async () => events.push('recover'));
 
     const outcome = await prepareFinalTranscriptionBeforeRecovery({
+      shouldPrepare: true,
       prepare,
       recover,
     });
@@ -20,6 +21,7 @@ describe('final transcription startup boundary', () => {
   it('still runs recovery after a content-free preparation failure', async () => {
     const events: string[] = [];
     const outcome = await prepareFinalTranscriptionBeforeRecovery({
+      shouldPrepare: true,
       prepare: async () => {
         events.push('prepare');
         throw new Error('/private/model path');
@@ -33,5 +35,20 @@ describe('final transcription startup boundary', () => {
       reason: 'parakeet_prepare_failed',
     });
     expect(JSON.stringify(outcome)).not.toContain('/private');
+  });
+
+  it('does not start the model download before first-run onboarding', async () => {
+    const prepare = vi.fn(async () => undefined);
+    const recover = vi.fn(async () => undefined);
+
+    const outcome = await prepareFinalTranscriptionBeforeRecovery({
+      shouldPrepare: false,
+      prepare,
+      recover,
+    });
+
+    expect(prepare).not.toHaveBeenCalled();
+    expect(recover).toHaveBeenCalledOnce();
+    expect(outcome).toEqual({ prepared: false, reason: 'setup_incomplete' });
   });
 });

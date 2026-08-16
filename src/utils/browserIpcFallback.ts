@@ -268,6 +268,12 @@ const createInvokeFallback =
       case 'MLX_PREVIEW_CHECK_PYTHON':
         result = { status: 'ok' };
         break;
+      case 'TRANSCRIPTION_PREPARE_FINAL':
+        result = { ready: true, engine: 'browser_preview' };
+        break;
+      case 'WHISPER_PREPARE_DIARIZATION_MODELS':
+        result = { ready: true };
+        break;
       case 'GET_MEETINGS':
       case 'GET_KNOWLEDGE_DOC_SOURCES':
       case 'GET_KNOWLEDGE_CORRECTIONS':
@@ -277,7 +283,11 @@ const createInvokeFallback =
         result = true;
         break;
       case 'CHECK_MICROPHONE_PERMISSION':
+      case 'CHECK_SYSTEM_AUDIO_PERMISSION':
         result = 'granted';
+        break;
+      case 'REQUEST_MICROPHONE_PERMISSION':
+        result = true;
         break;
       case 'SYSTEM_AUDIO_PROBE':
         result = true;

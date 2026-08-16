@@ -3,9 +3,16 @@ import {
   isGrantedStatus,
   resolveMicrophoneStatus,
   resolveSystemAudioStatus,
+  shouldRunBootPermissionProbe,
 } from '../../src/utils/permissions';
 
 describe('permission status helpers', () => {
+  test('defers the legacy boot probe until onboarding is complete', () => {
+    expect(shouldRunBootPermissionProbe(null)).toBe(false);
+    expect(shouldRunBootPermissionProbe(true)).toBe(false);
+    expect(shouldRunBootPermissionProbe(false)).toBe(true);
+  });
+
   test('treats authorized and granted as granted statuses', () => {
     expect(isGrantedStatus('authorized')).toBe(true);
     expect(isGrantedStatus('granted')).toBe(true);

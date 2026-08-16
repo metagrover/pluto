@@ -68,6 +68,7 @@ import {
   isGrantedStatus,
   resolveMicrophoneStatus,
   resolveSystemAudioStatus,
+  shouldRunBootPermissionProbe,
 } from './utils/permissions';
 
 function App() {
@@ -671,6 +672,7 @@ function App() {
   };
 
   useEffect(() => {
+    if (!shouldRunBootPermissionProbe(setupNeeded)) return;
     const probeOnBoot = async () => {
       const alreadyDone = await window.ipcRenderer.invoke('BOOT_PROBE_STATUS');
       if (alreadyDone) return;
@@ -713,7 +715,7 @@ function App() {
         'SHOW_PERMISSION_OVERLAY',
         handlePermissionsOverlay,
       );
-  }, []);
+  }, [setupNeeded]);
 
   useEffect(() => {
     const micGranted = isGrantedStatus(permissionStatus.mic);

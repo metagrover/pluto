@@ -9,6 +9,7 @@
     "build": "tsc && vite build && pnpm run build-python && pnpm run build:parakeet && electron-builder",
     "build:parakeet": "./scripts/build_parakeet.sh",
     "build:audio-cap": "mkdir -p resources/bin && swiftc resources/swift/audiocap/*.swift -o resources/bin/audiocap -framework CoreAudio -framework AudioToolbox -framework AVFoundation",
+    "package:verify-runtime": "node scripts/verify_packaged_runtime.mjs",
     "lint": "biome lint .",
     "format": "biome format . --write",
     "check": "biome check .",

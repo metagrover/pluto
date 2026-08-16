@@ -2903,6 +2903,16 @@ app.whenReady().then(async () => {
     return 'granted'; // Assume granted on other platforms if app is running
   });
 
+  ipcMain.handle('REQUEST_MICROPHONE_PERMISSION', async () => {
+    if (process.platform !== 'darwin') return true;
+    return await systemPreferences.askForMediaAccess('microphone');
+  });
+
+  ipcMain.handle('CHECK_SYSTEM_AUDIO_PERMISSION', () => {
+    if (process.platform !== 'darwin') return 'granted';
+    return systemPreferences.getMediaAccessStatus('screen');
+  });
+
   ipcMain.handle('OPEN_SYSTEM_SETTINGS_PRIVACY', async (_event, pane) => {
     if (process.platform !== 'darwin') return false;
     try {
@@ -2968,6 +2978,7 @@ app.whenReady().then(async () => {
     );
   });
   await prepareFinalTranscriptionBeforeRecovery({
+    shouldPrepare: db.getSetting('setup_complete') === 'true',
     prepare: async () => {
       if (!parakeetFinalClient) throw new Error('parakeet_runtime_unavailable');
       await parakeetFinalClient.prepare();
@@ -3116,19 +3127,6 @@ app.whenReady().then(async () => {
       '[Pluto] Failed to recover interrupted capture journals:',
       error,
     );
-  }
-
-  // macOS: Proactively request microphone access
-  if (process.platform === 'darwin') {
-    console.log('[Pluto] Requesting microphone access from OS...');
-    systemPreferences
-      .askForMediaAccess('microphone')
-      .then((granted) => {
-        console.log(`[Pluto] Microphone access granted: ${granted}`);
-      })
-      .catch((err) => {
-        console.error('[Pluto] Failed to request microphone access:', err);
-      });
   }
 
   // Create Tray Icon

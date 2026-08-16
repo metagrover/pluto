@@ -4,6 +4,21 @@ import { createBrowserIpcFallback } from '../../src/utils/browserIpcFallback';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('browser IPC capture journal fallback', () => {
+  it('reports browser-preview recording setup as ready', async () => {
+    const ipc = createBrowserIpcFallback();
+
+    await expect(ipc.invoke('TRANSCRIPTION_PREPARE_FINAL')).resolves.toEqual({
+      ready: true,
+      engine: 'browser_preview',
+    });
+    await expect(
+      ipc.invoke('WHISPER_PREPARE_DIARIZATION_MODELS'),
+    ).resolves.toEqual({ ready: true });
+    await expect(ipc.invoke('CHECK_SYSTEM_AUDIO_PERMISSION')).resolves.toBe(
+      'granted',
+    );
+  });
+
   it('returns the exact latest activity evidence when sealing a started journal', async () => {
     const ipc = createBrowserIpcFallback();
     const activityEvidence = await buildCaptureActivityEvidence(

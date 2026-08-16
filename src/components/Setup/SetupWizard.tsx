@@ -1,90 +1,126 @@
-import { Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Check, Download, Loader2, Mic, MonitorSpeaker } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import {
+  type SetupReadinessInput,
+  deriveSetupReadiness,
+} from '../../services/setupReadiness';
 import { Logo } from '../Brand/Logo';
 
 interface SetupWizardProps {
   onComplete: () => void;
 }
 
+const isGranted = (status: unknown) =>
+  status === 'authorized' || status === 'granted';
+
+const requirementTone = (ready: boolean, blocked = false) =>
+  ready
+    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700'
+    : blocked
+      ? 'border-rose-200 bg-rose-50/70 text-rose-700'
+      : 'border-pro-border bg-pro-surface text-pro-text-muted';
+
 export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
-  const [step, setStep] = useState(1);
-  const [pythonStatus, setPythonStatus] = useState<{
-    available: boolean;
-    version?: string;
-    error?: string;
-  } | null>(null);
-  const [llmProvider, setLlmProvider] = useState('ollama');
+  const [step, setStep] = useState<1 | 2>(1);
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
-  const [finishError, setFinishError] = useState('');
+  const [requirements, setRequirements] = useState<SetupReadinessInput>({
+    transcription: 'checking',
+    microphone: 'checking',
+    systemAudio: 'checking',
+  });
 
-  // Restore saved progress so user doesn't redo first screens
+  const readiness = useMemo(
+    () => deriveSetupReadiness(requirements),
+    [requirements],
+  );
+
+  const checkPermissions = useCallback(async () => {
+    const [microphone, systemAudio] = await Promise.all([
+      window.ipcRenderer.invoke('CHECK_MICROPHONE_PERMISSION'),
+      window.ipcRenderer.invoke('CHECK_SYSTEM_AUDIO_PERMISSION'),
+    ]);
+    setRequirements((current) => ({
+      ...current,
+      microphone: isGranted(microphone) ? 'granted' : 'blocked',
+      systemAudio: isGranted(systemAudio) ? 'granted' : 'blocked',
+    }));
+  }, []);
+
+  const prepareLocalModels = useCallback(async () => {
+    setRequirements((current) => ({
+      ...current,
+      transcription: 'preparing',
+    }));
+    try {
+      const [transcription, speakers] = await Promise.all([
+        window.ipcRenderer.invoke('TRANSCRIPTION_PREPARE_FINAL'),
+        window.ipcRenderer.invoke('WHISPER_PREPARE_DIARIZATION_MODELS'),
+      ]);
+      if (transcription?.ready !== true || speakers?.ready !== true) {
+        throw new Error('local_models_not_ready');
+      }
+      setRequirements((current) => ({
+        ...current,
+        transcription: 'ready',
+      }));
+    } catch {
+      setRequirements((current) => ({
+        ...current,
+        transcription: 'error',
+      }));
+    }
+  }, []);
 
   useEffect(() => {
     const load = async () => {
-      const [setupComplete, savedStep, savedLlm] = await Promise.all([
+      const [setupComplete, savedStep] = await Promise.all([
         window.ipcRenderer.invoke('GET_SETTING', 'setup_complete'),
         window.ipcRenderer.invoke('GET_SETTING', 'setup_step'),
-        window.ipcRenderer.invoke('GET_SETTING', 'llm_provider'),
       ]);
       if (setupComplete === 'true') {
         onComplete();
         return;
       }
-      const stepNum = savedStep
-        ? Math.min(4, Math.max(1, Number(savedStep)))
-        : 1;
-      setStep(stepNum);
-      setLlmProvider(savedLlm ?? 'ollama');
+      setStep(savedStep === '2' ? 2 : 1);
       setHydrated(true);
     };
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
-  }, []);
+    void load();
+  }, [onComplete]);
 
   useEffect(() => {
-    if (step === 2) {
-      checkPython();
-    }
-  }, [step]);
+    if (!hydrated || step !== 2) return;
+    void Promise.all([prepareLocalModels(), checkPermissions()]);
+  }, [checkPermissions, hydrated, prepareLocalModels, step]);
 
-  const checkPython = async () => {
-    const status = await window.ipcRenderer.invoke('MLX_PREVIEW_CHECK_PYTHON');
-    setPythonStatus(status);
-  };
-
-  const persistStep = async (s: number) => {
+  const startSetup = async () => {
     await window.ipcRenderer.invoke('SET_SETTING', {
       key: 'setup_step',
-      value: String(s),
+      value: '2',
     });
+    setStep(2);
   };
 
-  const handleFinish = async () => {
+  const requestMicrophone = async () => {
+    await window.ipcRenderer.invoke('REQUEST_MICROPHONE_PERMISSION');
+    await checkPermissions();
+  };
+
+  const openSystemAudioSettings = async () => {
+    await window.ipcRenderer.invoke(
+      'OPEN_SYSTEM_SETTINGS_PRIVACY',
+      'system-audio',
+    );
+  };
+
+  const finish = async () => {
+    if (!readiness.canComplete) return;
     setFinishing(true);
-    setFinishError('');
     try {
-      try {
-        const readiness = await window.ipcRenderer.invoke(
-          'WHISPER_PREPARE_DIARIZATION_MODELS',
-        );
-        if (!readiness?.ready) {
-          setFinishError(
-            'Local speaker models are not ready yet. You can retry from Settings.',
-          );
-        }
-      } catch {
-        setFinishError(
-          'Local speaker models are not ready yet. You can retry from Settings.',
-        );
-      }
       await window.ipcRenderer.invoke('SET_SETTING', {
         key: 'setup_complete',
         value: 'true',
-      });
-      await window.ipcRenderer.invoke('SET_SETTING', {
-        key: 'llm_provider',
-        value: llmProvider,
       });
       onComplete();
     } finally {
@@ -94,269 +130,177 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
   if (!hydrated) {
     return (
-      <div className="fixed inset-0 bg-pro-bg z-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-pro-accent border-t-transparent rounded-full animate-spin" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-pro-bg">
+        <Loader2 className="h-7 w-7 animate-spin text-pro-accent" />
       </div>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-pro-bg z-50 overflow-y-auto selection:bg-pro-accent/20">
-      <div className="min-h-full flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto w-full space-y-12">
-        {step === 1 && (
-          <div className="animate-in fade-in slide-in-from-bottom-8 duration-1000">
-            <div className="relative inline-block mb-10">
-              <div className="w-48 h-48 rounded-[2.5rem] bg-pro-surface shadow-2xl flex items-center justify-center p-8 border border-pro-border relative group">
-                <Logo size={120} />
-                <div className="absolute inset-0 bg-pro-accent/5 rounded-[2.5rem] blur-2xl -z-10 group-hover:bg-pro-accent/10 transition-all" />
-              </div>
-              <div className="absolute -bottom-2 -right-2 w-12 h-12 bg-pro-accent rounded-2xl flex items-center justify-center text-xl shadow-2xl shadow-pro-accent/40 animate-bounce cursor-default text-white">
-                ✨
-              </div>
+    <main className="fixed inset-0 z-50 overflow-y-auto bg-pro-bg text-pro-text-main selection:bg-pro-accent/20">
+      <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center px-8 py-14">
+        {step === 1 ? (
+          <section className="mx-auto w-full max-w-lg text-center">
+            <div className="mx-auto mb-10 flex h-24 w-24 items-center justify-center rounded-3xl border border-pro-border bg-pro-surface shadow-premium">
+              <Logo size={62} />
             </div>
-            <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-pro-text-main leading-tight">
-              Focus on the <span className="gradient-text">human.</span>
+            <p className="mb-4 text-xs font-bold uppercase tracking-[0.18em] text-pro-accent">
+              Welcome to Pluto
+            </p>
+            <h1 className="text-4xl font-black tracking-tight md:text-5xl">
+              Meetings remembered, privately
             </h1>
-            <p className="mt-6 text-pro-text-muted/80 leading-relaxed font-bold text-lg max-w-sm mx-auto">
-              Pluto is your personal second brain for deep focus and effortless
-              recall.
+            <p className="mx-auto mt-6 max-w-md text-base leading-7 text-pro-text-muted">
+              Pluto records your meetings and turns them into useful memory.
+              Transcription stays on this Mac.
             </p>
             <button
               type="button"
-              onClick={async () => {
-                await persistStep(2);
-                setStep(2);
-              }}
-              className="mt-14 w-full h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-xs uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all active:scale-[0.98]"
+              onClick={() => void startSetup()}
+              className="mt-10 h-14 w-full rounded-2xl bg-pro-text-main px-6 text-sm font-bold text-white shadow-premium transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] dark:bg-pro-accent dark:text-[#1A2340]"
             >
-              Get Started
+              Set up Pluto
             </button>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="animate-in fade-in slide-in-from-right-8 duration-700 space-y-10">
-            <div className="space-y-4">
-              <h2 className="text-2xl md:text-4xl font-black tracking-tighter text-pro-text-main">
-                Local Engine
-              </h2>
-              <p className="text-base text-pro-text-muted/60 font-bold uppercase tracking-widest leading-relaxed">
-                Preparing your local high-performance compute.
+            <p className="mt-4 text-xs text-pro-text-muted/70">
+              Pluto will download local transcription models and request the two
+              permissions needed to record.
+            </p>
+          </section>
+        ) : (
+          <section className="w-full">
+            <div className="mb-9">
+              <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-pro-accent">
+                Recording setup
+              </p>
+              <h1 className="text-3xl font-black tracking-tight md:text-4xl">
+                {readiness.status === 'ready'
+                  ? 'Ready to record'
+                  : 'Getting Pluto ready'}
+              </h1>
+              <p className="mt-3 max-w-xl text-sm leading-6 text-pro-text-muted">
+                The local transcription download may take a few minutes. It is
+                saved once and reused for future meetings.
               </p>
             </div>
 
-            <div className="p-10 bg-pro-surface border border-pro-border rounded-[2rem] shadow-premium text-left space-y-8">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div
-                    className={`w-3 h-3 rounded-full ${pythonStatus?.available ? 'bg-green-500 shadow-status-ok' : 'bg-pro-border pulse-glow'}`}
-                  />
-                  <span className="text-[10px] font-bold text-pro-text-muted/60 uppercase tracking-[0.15em]">
-                    Python Engine Check
-                  </span>
-                </div>
-                {pythonStatus === null ? (
-                  <Loader2 size={16} className="animate-spin text-pro-accent" />
-                ) : pythonStatus.available ? (
-                  <div className="px-3 py-1 bg-green-500/10 rounded-lg">
-                    <span className="text-green-600 text-[9px] font-bold uppercase tracking-widest">
-                      Online
-                    </span>
-                  </div>
-                ) : (
-                  <div className="px-3 py-1 bg-red-500/10 rounded-lg">
-                    <span className="text-red-500 text-[9px] font-bold uppercase tracking-widest">
-                      Missing
-                    </span>
-                  </div>
-                )}
-              </div>
-              {pythonStatus?.version && (
-                <div className="p-4 bg-pro-bg/50 rounded-2xl border border-pro-border group">
-                  <p className="text-[10px] text-pro-text-muted/40 font-mono font-bold group-hover:text-pro-accent transition-colors">
-                    {pythonStatus.version}
-                  </p>
-                </div>
-              )}
-              {pythonStatus?.error && (
-                <div className="p-6 bg-red-50 border border-red-100 rounded-2xl space-y-3">
-                  <p className="text-xs text-red-600 font-bold leading-relaxed">
-                    {pythonStatus.error}
-                  </p>
-                  <p className="text-[9px] font-black text-red-400 uppercase tracking-widest leading-loose">
-                    Check installation guide in README
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-6 mt-12">
-              <button
-                type="button"
-                onClick={() => setStep(1)}
-                className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
-              >
-                Go back
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await persistStep(3);
-                  setStep(3);
-                }}
-                disabled={!pythonStatus?.available}
-                className="flex-[2] h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl transition-all disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed hover:scale-[1.02]"
-              >
-                Continue Setup
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 3 && (
-          <div className="animate-in fade-in slide-in-from-right-8 duration-700 space-y-12">
-            <div className="space-y-4">
-              <h2 className="text-2xl md:text-4xl font-black tracking-tighter text-pro-text-main">
-                Speaker ID
-              </h2>
-              <p className="text-base text-pro-text-muted/60 font-bold uppercase tracking-widest leading-relaxed">
-                Local speaker attribution is included and credential-free.
-              </p>
-            </div>
-
-            <div className="text-left space-y-4">
-              <div className="p-6 bg-pro-bg/50 rounded-2xl border border-pro-border">
-                <p className="text-[10px] text-pro-text-muted/50 font-medium leading-loose italic">
-                  Pluto uses verified local models for speaker attribution. No
-                  account or external service is required.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-6 mt-14">
-              <button
-                type="button"
-                onClick={() => setStep(2)}
-                className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await persistStep(4);
-                  setStep(4);
-                }}
-                className="flex-[2] h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && (
-          <div className="animate-in fade-in slide-in-from-right-8 duration-700 space-y-12">
-            <div className="space-y-4">
-              <h2 className="text-2xl md:text-4xl font-black tracking-tighter text-pro-text-main">
-                AI Model
-              </h2>
-              <p className="text-base text-pro-text-muted/60 font-bold uppercase tracking-widest leadign-relaxed">
-                Choose your reasoning provider.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              {[
-                {
-                  id: 'ollama',
-                  name: 'Ollama (Local Model)',
-                  desc: 'Private Local Reasoning',
-                  icon: '🏠',
-                },
-                {
-                  id: 'gemini',
-                  name: 'Gemini 1.5 Pro',
-                  desc: 'Powerful Cloud Model',
-                  icon: '✨',
-                },
-                {
-                  id: 'openai',
-                  name: 'GPT-4o',
-                  desc: 'Standard Cloud Model',
-                  icon: '☁️',
-                },
-              ].map((provider) => (
-                <button
-                  type="button"
-                  key={provider.id}
-                  onClick={() => {
-                    setLlmProvider(provider.id);
-                    window.ipcRenderer.invoke('SET_SETTING', {
-                      key: 'llm_provider',
-                      value: provider.id,
-                    });
-                  }}
-                  className={`w-full p-6 text-left border rounded-3xl transition-all duration-500 group relative overflow-hidden ${
-                    llmProvider === provider.id
-                      ? 'border-pro-accent bg-pro-surface shadow-xl ring-2 ring-pro-accent/10'
-                      : 'border-pro-border bg-pro-surface/60 hover:bg-pro-surface hover:border-pro-accent/20'
-                  }`}
-                >
-                  <div className="flex items-center justify-between relative z-10">
-                    <div className="flex items-center gap-5">
-                      <span
-                        className={`text-2xl grayscale group-hover:grayscale-0 transition-all ${llmProvider === provider.id ? 'grayscale-0' : ''}`}
+            <div className="divide-y divide-pro-border overflow-hidden rounded-3xl border border-pro-border bg-pro-surface shadow-premium">
+              <RequirementRow
+                icon={<Download size={20} />}
+                title="Local transcription"
+                detail={
+                  requirements.transcription === 'preparing'
+                    ? 'Downloading and verifying Parakeet and speaker models'
+                    : requirements.transcription === 'ready'
+                      ? 'Downloaded and verified'
+                      : requirements.transcription === 'error'
+                        ? 'Could not prepare transcription'
+                        : 'Checking local models'
+                }
+                state={requirements.transcription}
+                action={
+                  requirements.transcription === 'error' ? (
+                    <button
+                      type="button"
+                      onClick={() => void prepareLocalModels()}
+                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700"
+                    >
+                      Try again
+                    </button>
+                  ) : undefined
+                }
+              />
+              <RequirementRow
+                icon={<Mic size={20} />}
+                title="Microphone"
+                detail="Captures your side of the conversation"
+                state={requirements.microphone}
+                action={
+                  requirements.microphone === 'blocked' ? (
+                    <button
+                      type="button"
+                      onClick={() => void requestMicrophone()}
+                      className="rounded-xl border border-pro-border px-4 py-2 text-xs font-bold"
+                    >
+                      Allow microphone
+                    </button>
+                  ) : undefined
+                }
+              />
+              <RequirementRow
+                icon={<MonitorSpeaker size={20} />}
+                title="System audio"
+                detail="Captures the other people in your meeting"
+                state={requirements.systemAudio}
+                action={
+                  requirements.systemAudio === 'blocked' ? (
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void openSystemAudioSettings()}
+                        className="rounded-xl border border-pro-border px-4 py-2 text-xs font-bold"
                       >
-                        {provider.icon}
-                      </span>
-                      <div>
-                        <span
-                          className={`text-base font-bold tracking-tight ${llmProvider === provider.id ? 'text-pro-text-main' : 'text-pro-text-main/60'}`}
-                        >
-                          {provider.name}
-                        </span>
-                        <p className="text-[10px] text-pro-text-muted/50 font-bold uppercase tracking-tighter mt-1 leading-none">
-                          {provider.desc}
-                        </p>
-                      </div>
+                        Open Settings
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void checkPermissions()}
+                        className="rounded-xl bg-pro-bg px-4 py-2 text-xs font-bold"
+                      >
+                        Check again
+                      </button>
                     </div>
-                    {llmProvider === provider.id && (
-                      <div className="w-6 h-6 rounded-full bg-pro-accent flex items-center justify-center text-[10px] text-white shadow-lg shadow-pro-accent/30 animate-in zoom-in-50 duration-300">
-                        ✓
-                      </div>
-                    )}
-                  </div>
-                  {llmProvider === provider.id && (
-                    <div className="absolute inset-0 bg-pro-accent/5 animate-pulse" />
-                  )}
-                </button>
-              ))}
+                  ) : undefined
+                }
+              />
             </div>
 
-            <div className="flex gap-6 mt-12">
-              <button
-                type="button"
-                onClick={() => setStep(3)}
-                className="flex-1 h-14 text-pro-text-muted/40 font-bold text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-colors"
-              >
-                Go back
-              </button>
-              <button
-                type="button"
-                onClick={handleFinish}
-                disabled={finishing}
-                className="flex-[2] h-16 bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] rounded-2xl font-bold text-[11px] uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] transition-all"
-              >
-                {finishing ? 'Preparing local models…' : 'Finish Setup'}
-              </button>
-            </div>
-            {finishError && (
-              <p className="text-xs font-bold text-red-500">{finishError}</p>
-            )}
+            <button
+              type="button"
+              onClick={() => void finish()}
+              disabled={!readiness.canComplete || finishing}
+              className="mt-8 h-14 w-full rounded-2xl bg-pro-text-main px-6 text-sm font-bold text-white shadow-premium transition-all disabled:cursor-not-allowed disabled:opacity-35 dark:bg-pro-accent dark:text-[#1A2340]"
+            >
+              {finishing ? 'Opening Pluto…' : 'Start using Pluto'}
+            </button>
+          </section>
+        )}
+      </div>
+    </main>
+  );
+};
+
+const RequirementRow = ({
+  icon,
+  title,
+  detail,
+  state,
+  action,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+  state: 'checking' | 'preparing' | 'ready' | 'error' | 'granted' | 'blocked';
+  action?: React.ReactNode;
+}) => {
+  const ready = state === 'ready' || state === 'granted';
+  const blocked = state === 'error' || state === 'blocked';
+  return (
+    <div className="flex min-h-24 items-center gap-4 px-6 py-5">
+      <div
+        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${requirementTone(ready, blocked)}`}
+      >
+        {ready ? <Check size={20} /> : icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <h2 className="text-sm font-bold">{title}</h2>
+        <p className="mt-1 text-xs leading-5 text-pro-text-muted">{detail}</p>
+        {(state === 'checking' || state === 'preparing') && (
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-pro-bg">
+            <div className="h-full w-2/3 animate-pulse rounded-full bg-pro-accent" />
           </div>
         )}
       </div>
+      {action}
     </div>
   );
 };
