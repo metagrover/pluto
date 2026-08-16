@@ -21,32 +21,48 @@ const passingRepetition = (
   publications: [
     {
       availableAtSeconds: 2,
+      lookaheadReadyAtSeconds: 2,
       completedAtSeconds: 3,
       audioEndSeconds: 2,
       changed: true,
+      activeSpeech: true,
       newTokenCount: 2,
       rollbackTokens: 0,
+      volatileOperationCount: 0,
       revisionAgeSeconds: 0,
     },
     {
       availableAtSeconds: 4,
+      lookaheadReadyAtSeconds: 4,
       completedAtSeconds: 5,
       audioEndSeconds: 4,
       changed: true,
+      activeSpeech: true,
       newTokenCount: 2,
       rollbackTokens: 0,
+      volatileOperationCount: 0,
       revisionAgeSeconds: 0,
     },
   ],
   committedSnapshots: ['one two', 'one two three'],
   acceptedSequences: [0, 1],
   processedSequences: [0, 1],
+  acceptedCoverage: [
+    { receipt: 0, startSeconds: 0, endSeconds: 2 },
+    { receipt: 1, startSeconds: 2, endSeconds: 4 },
+  ],
+  processedCoverage: [
+    { receipt: 0, startSeconds: 0, endSeconds: 2 },
+    { receipt: 1, startSeconds: 2, endSeconds: 4 },
+  ],
   expectedSourceSeconds: 4,
   processedSourceSeconds: 4,
   inferenceSeconds: 1,
   seamDuplicateTokens: 0,
   seamOmittedTokens: 0,
   seamReferenceTokens: 10,
+  committedSyntheticSeamDuplicateTokens: 0,
+  committedSyntheticSeamOmittedTokens: 0,
   batchDiagnostic: {
     editRate: 0.1,
     precisionAt2Seconds: 0.9,
@@ -67,21 +83,46 @@ const passingRepetition = (
     outsideContextTokenChanges: 0,
     repairedTokenF1: 0.98,
   },
-  peakRssGiB: 2.5,
+  peakRssGiB: 1,
   preparedIdleRssGiB: 1,
   rssSamples: [
     { atSeconds: 0, rssGiB: 1 },
-    { atSeconds: 3600, rssGiB: 1.0625 },
+    { atSeconds: 1, rssGiB: 1 },
   ],
   thermalSamples: Array.from({ length: 10 }, (_, index) => ({
-    atSeconds: index * 60,
+    atSeconds: index,
     state: index === 0 ? ('fair' as const) : ('nominal' as const),
   })),
+  resourceSoak: {
+    warmupEndSeconds: 0,
+    sampleIntervalSeconds: 1,
+    realTime: true,
+    longestSource: true,
+  },
   captureHandoffMilliseconds: [1, 5, 10],
+  rendererInferenceCallbacks: 0,
   wholeSessionAsrCalls: 0,
   analysisBeforeCanonicalCommit: 0,
   ...overrides,
 });
+
+const passingEvidence = {
+  corpusEligible: true,
+  aecEvidenceAvailable: true,
+  resourceEvidenceAvailable: true,
+  engineOrderAlternated: true,
+  mlxProductionQueueVerified: true,
+  mlxBaseline: { firstTextP95Seconds: 1, runtimeFactor: 0.25 },
+} as const;
+
+const evaluatePassing = (
+  overrides: Partial<LiveReplayRepetition> = {},
+  evidence: Parameters<typeof evaluateLiveReplay>[1] = passingEvidence,
+) =>
+  evaluateLiveReplay(
+    Array.from({ length: 3 }, () => passingRepetition(overrides)),
+    evidence,
+  );
 
 describe('causal replay', () => {
   it('releases frames only on their virtual availability clock', async () => {
@@ -121,10 +162,10 @@ describe('causal replay', () => {
 
     await expect(
       runCausalReplay(
-        [{ sequence: 0, availableAtSeconds: 1, audioEndSeconds: 1 }],
+        [{ sequence: 0, availableAtSeconds: 1, audioEndSeconds: 0.25 }],
         async () => ({
           completedAtSeconds: 1.1,
-          observedAudioEndSeconds: 1.01,
+          observedAudioEndSeconds: 0.26,
         }),
       ),
     ).rejects.toThrow('causal_replay_future_audio');
@@ -132,8 +173,8 @@ describe('causal replay', () => {
     await expect(
       runCausalReplay(
         [
-          { sequence: 0, availableAtSeconds: 1, audioEndSeconds: 1 },
-          { sequence: 0, availableAtSeconds: 2, audioEndSeconds: 2 },
+          { sequence: 0, availableAtSeconds: 1, audioEndSeconds: 0.25 },
+          { sequence: 0, availableAtSeconds: 2, audioEndSeconds: 0.5 },
         ],
         async (frame, clock) => ({
           completedAtSeconds: clock,
@@ -145,8 +186,8 @@ describe('causal replay', () => {
     await expect(
       runCausalReplay(
         [
-          { sequence: 0, availableAtSeconds: 2, audioEndSeconds: 1 },
-          { sequence: 1, availableAtSeconds: 1, audioEndSeconds: 1 },
+          { sequence: 0, availableAtSeconds: 2, audioEndSeconds: 0.25 },
+          { sequence: 1, availableAtSeconds: 1, audioEndSeconds: 0.25 },
         ],
         async (frame, clock) => ({
           completedAtSeconds: clock,
@@ -175,13 +216,59 @@ describe('causal replay', () => {
 
     await expect(
       runCausalReplay(
-        [{ sequence: 0, availableAtSeconds: 1, audioEndSeconds: 1 }],
+        [{ sequence: 0, availableAtSeconds: 1, audioEndSeconds: 0.25 }],
         async () => ({
           completedAtSeconds: 0.9,
-          observedAudioEndSeconds: 1,
+          observedAudioEndSeconds: 0.25,
         }),
       ),
     ).rejects.toThrow('causal_replay_completion_clock');
+  });
+
+  it('advances a monotonic causal watermark under backlog and rejects regressing observations', async () => {
+    const clocks: number[] = [];
+    await runCausalReplay(
+      [
+        { sequence: 0, availableAtSeconds: 0.25, audioEndSeconds: 0.25 },
+        { sequence: 1, availableAtSeconds: 0.5, audioEndSeconds: 0.5 },
+      ],
+      async (frame, clock) => {
+        clocks.push(clock);
+        return {
+          completedAtSeconds: frame.sequence === 0 ? 10 : clock + 0.1,
+          observedAudioEndSeconds: frame.audioEndSeconds,
+        };
+      },
+    );
+    expect(clocks).toEqual([0.25, 10]);
+
+    await expect(
+      runCausalReplay(
+        [
+          { sequence: 0, availableAtSeconds: 0.25, audioEndSeconds: 0.25 },
+          { sequence: 1, availableAtSeconds: 0.5, audioEndSeconds: 0.5 },
+        ],
+        async (frame, clock) => ({
+          completedAtSeconds: clock,
+          observedAudioEndSeconds: frame.sequence === 0 ? 0.25 : 0.2,
+        }),
+      ),
+    ).rejects.toThrow('causal_replay_clock');
+  });
+
+  it('rejects replay frames larger than the 250ms causal admission slice', async () => {
+    await expect(
+      runCausalReplay(
+        [
+          { sequence: 0, availableAtSeconds: 0.25, audioEndSeconds: 0.25 },
+          { sequence: 1, availableAtSeconds: 0.501, audioEndSeconds: 0.501 },
+        ],
+        async (frame, clock) => ({
+          completedAtSeconds: clock,
+          observedAudioEndSeconds: frame.audioEndSeconds,
+        }),
+      ),
+    ).rejects.toThrow('causal_replay_frame_duration');
   });
 });
 
@@ -234,16 +321,16 @@ describe('live replay statistics', () => {
 
 describe('live replay gates', () => {
   it('fails any committed-prefix mutation in any repetition', () => {
-    const verdict = evaluateLiveReplay([
-      passingRepetition({ committedSnapshots: ['one two', 'one x'] }),
-    ]);
+    const verdict = evaluatePassing({
+      committedSnapshots: ['one two', 'one x'],
+    });
 
-    expect(verdict.invariants.committedPrefixViolations).toBe(1);
+    expect(verdict.invariants.committedPrefixViolations).toBe(3);
     expect(verdict.status).toBe('fail');
   });
 
   it('derives first text from first sealed activity and cadence from changed publications', () => {
-    const verdict = evaluateLiveReplay([passingRepetition()]);
+    const verdict = evaluatePassing();
 
     expect(verdict.metrics.firstTextP50Seconds).toBe(2);
     expect(verdict.metrics.publicationCadenceP50Seconds).toBe(2);
@@ -252,57 +339,76 @@ describe('live replay gates', () => {
   });
 
   it('counts missing accepted sequences and requires exact source coverage', () => {
-    const verdict = evaluateLiveReplay([
-      passingRepetition({
-        acceptedSequences: [0, 1, 2],
-        processedSequences: [0, 2],
-        processedSourceSeconds: 3.999,
-      }),
-    ]);
+    const verdict = evaluatePassing({
+      acceptedSequences: [0, 1, 2],
+      processedSequences: [0, 2],
+      acceptedCoverage: [
+        { receipt: 0, startSeconds: 0, endSeconds: 1 },
+        { receipt: 1, startSeconds: 1, endSeconds: 2 },
+        { receipt: 2, startSeconds: 2, endSeconds: 4 },
+      ],
+      processedCoverage: [
+        { receipt: 0, startSeconds: 0, endSeconds: 1 },
+        { receipt: 2, startSeconds: 2, endSeconds: 4 },
+      ],
+      processedSourceSeconds: 3,
+    });
 
-    expect(verdict.invariants.missingAcceptedSequences).toBe(1);
-    expect(verdict.metrics.sourceCoverage).toBeCloseTo(0.99975);
+    expect(verdict.invariants.missingAcceptedSequences).toBe(3);
+    expect(verdict.metrics.sourceCoverage).toBe(0.75);
     expect(verdict.status).toBe('fail');
   });
 
   it('tests exact, inside, and outside first-text boundaries', () => {
-    const exact = evaluateLiveReplay([
-      passingRepetition({
+    const relaxedRegressionEvidence = {
+      ...passingEvidence,
+      mlxBaseline: { firstTextP95Seconds: 100, runtimeFactor: 1 },
+    };
+    const exact = evaluatePassing(
+      {
         publications: [
           {
             ...passingRepetition().publications[0],
             availableAtSeconds: 5,
+            lookaheadReadyAtSeconds: 5,
             completedAtSeconds: 6,
           },
         ],
-      }),
-    ]);
-    const inside = evaluateLiveReplay([
-      passingRepetition({
+      },
+      relaxedRegressionEvidence,
+    );
+    const inside = evaluatePassing(
+      {
         publications: [
           {
             ...passingRepetition().publications[0],
             availableAtSeconds:
               LIVE_REPLAY_THRESHOLDS.firstTextP50Seconds - 0.001,
+            lookaheadReadyAtSeconds:
+              LIVE_REPLAY_THRESHOLDS.firstTextP50Seconds - 0.001,
             completedAtSeconds:
               1 + LIVE_REPLAY_THRESHOLDS.firstTextP50Seconds - 0.001,
           },
         ],
-      }),
-    ]);
-    const outside = evaluateLiveReplay([
-      passingRepetition({
+      },
+      relaxedRegressionEvidence,
+    );
+    const outside = evaluatePassing(
+      {
         publications: [
           {
             ...passingRepetition().publications[0],
             availableAtSeconds:
               LIVE_REPLAY_THRESHOLDS.firstTextP50Seconds + 0.001,
+            lookaheadReadyAtSeconds:
+              LIVE_REPLAY_THRESHOLDS.firstTextP50Seconds + 0.001,
             completedAtSeconds:
               1 + LIVE_REPLAY_THRESHOLDS.firstTextP50Seconds + 0.001,
           },
         ],
-      }),
-    ]);
+      },
+      relaxedRegressionEvidence,
+    );
 
     expect(exact.status).toBe('pass');
     expect(inside.status).toBe('pass');
@@ -315,6 +421,7 @@ describe('live replay gates', () => {
         {
           ...passingRepetition().publications[0],
           availableAtSeconds: 4,
+          lookaheadReadyAtSeconds: 4,
           completedAtSeconds: 5,
         },
       ],
@@ -324,25 +431,28 @@ describe('live replay gates', () => {
         {
           ...passingRepetition().publications[0],
           availableAtSeconds: 6,
+          lookaheadReadyAtSeconds: 6,
           completedAtSeconds: 7,
         },
       ],
     });
 
-    const verdict = evaluateLiveReplay([fast, slow]);
+    const verdict = evaluateLiveReplay([fast, slow, fast], passingEvidence);
 
-    expect(verdict.metrics.firstTextP50Seconds).toBe(5);
-    expect(verdict.metrics.firstTextP50Upper95Seconds).toBeGreaterThan(5);
+    expect(verdict.metrics.firstTextP50Seconds).toBe(4);
+    expect(verdict.metrics.firstTextP50Upper95Seconds).toBeGreaterThan(4);
     expect(verdict.failures).toContain('first_text_p50');
   });
 
   it('enforces Parakeet latency and RTF non-regression against MLX', () => {
-    const exact = evaluateLiveReplay([passingRepetition()], {
-      mlxBaseline: { firstTextP95Seconds: 1, runtimeFactor: 0.25 },
-    });
-    const outside = evaluateLiveReplay([passingRepetition()], {
-      mlxBaseline: { firstTextP95Seconds: 0.999, runtimeFactor: 0.2 },
-    });
+    const exact = evaluatePassing();
+    const outside = evaluatePassing(
+      {},
+      {
+        ...passingEvidence,
+        mlxBaseline: { firstTextP95Seconds: 0.999, runtimeFactor: 0.2 },
+      },
+    );
 
     expect(exact.status).toBe('pass');
     expect(outside.failures).toEqual(
@@ -383,48 +493,49 @@ describe('live replay gates', () => {
   });
 
   it('enforces resource, revision, seam, batch, proxy, repair, and thermal gates', () => {
-    const verdict = evaluateLiveReplay([
-      passingRepetition({
-        publications: [
-          {
-            ...passingRepetition().publications[0],
-            rollbackTokens: 4,
-            revisionAgeSeconds: 6.01,
-          },
-        ],
-        seamDuplicateTokens: 1,
-        seamOmittedTokens: 1,
-        seamReferenceTokens: 100,
-        batchDiagnostic: {
-          editRate: 0.101,
-          precisionAt2Seconds: 0.899,
-          recallAt2Seconds: 0.899,
-          precisionAt5Seconds: 0.949,
-          recallAt5Seconds: 0.949,
+    const verdict = evaluatePassing({
+      publications: [
+        {
+          ...passingRepetition().publications[0],
+          rollbackTokens: 4,
+          revisionAgeSeconds: 6.01,
         },
-        proxy: {
-          disagreementRate: 0.101,
-          alignedRecall: 0.909,
-          mlxDisagreementRate: 0.08,
-          mlxAlignedRecall: 0.93,
-        },
-        repair: {
-          exactGapDetected: false,
-          contextBeforeSeconds: 2.01,
-          contextAfterSeconds: 2,
-          outsideContextTokenChanges: 1,
-          repairedTokenF1: 0.979,
-        },
-        peakRssGiB: 2.501,
-        preparedIdleRssGiB: 0.9,
-        rssSamples: [
-          { atSeconds: 0, rssGiB: 1 },
-          { atSeconds: 3600, rssGiB: 1.063 },
-        ],
-        thermalSamples: [{ atSeconds: 0, state: 'serious' }],
-        captureHandoffMilliseconds: [10.01],
-      }),
-    ]);
+      ],
+      seamDuplicateTokens: 1,
+      seamOmittedTokens: 1,
+      seamReferenceTokens: 100,
+      batchDiagnostic: {
+        editRate: 0.101,
+        precisionAt2Seconds: 0.899,
+        recallAt2Seconds: 0.899,
+        precisionAt5Seconds: 0.949,
+        recallAt5Seconds: 0.949,
+      },
+      proxy: {
+        disagreementRate: 0.101,
+        alignedRecall: 0.909,
+        mlxDisagreementRate: 0.08,
+        mlxAlignedRecall: 0.93,
+      },
+      repair: {
+        exactGapDetected: false,
+        contextBeforeSeconds: 2.01,
+        contextAfterSeconds: 2,
+        outsideContextTokenChanges: 1,
+        repairedTokenF1: 0.979,
+      },
+      peakRssGiB: 2.501,
+      preparedIdleRssGiB: 0.9,
+      rssSamples: [
+        { atSeconds: 0, rssGiB: 2.48 },
+        { atSeconds: 1, rssGiB: 2.501 },
+      ],
+      thermalSamples: [
+        { atSeconds: 0, state: 'serious' },
+        { atSeconds: 1, state: 'serious' },
+      ],
+      captureHandoffMilliseconds: [10.01],
+    });
 
     expect(verdict.status).toBe('fail');
     expect(verdict.failures).toEqual(
@@ -444,26 +555,36 @@ describe('live replay gates', () => {
   });
 
   it('uses RSS regression slope rather than only the first and last sample', () => {
-    const verdict = evaluateLiveReplay([
-      passingRepetition({
-        rssSamples: [
-          { atSeconds: 0, rssGiB: 1 },
-          { atSeconds: 2_700, rssGiB: 2 },
-          { atSeconds: 3_600, rssGiB: 1 },
-        ],
-      }),
-    ]);
+    const verdict = evaluatePassing({
+      peakRssGiB: 2,
+      rssSamples: [
+        { atSeconds: 0, rssGiB: 1 },
+        { atSeconds: 1, rssGiB: 2 },
+        { atSeconds: 2, rssGiB: 2 },
+      ],
+      thermalSamples: [
+        { atSeconds: 0, state: 'nominal' },
+        { atSeconds: 1, state: 'nominal' },
+        { atSeconds: 2, state: 'nominal' },
+      ],
+    });
 
     expect(verdict.metrics.rssGrowthMiBPerHourMaximum).toBeGreaterThan(64);
     expect(verdict.failures).toContain('rss_growth');
   });
 
   it('cannot pass without sufficient corpus, AEC, or resource evidence', () => {
-    const verdict = evaluateLiveReplay([passingRepetition()], {
-      corpusEligible: false,
-      aecEvidenceAvailable: false,
-      resourceEvidenceAvailable: false,
-    });
+    const verdict = evaluateLiveReplay(
+      Array.from({ length: 3 }, () => passingRepetition()),
+      {
+        corpusEligible: false,
+        aecEvidenceAvailable: false,
+        resourceEvidenceAvailable: false,
+        engineOrderAlternated: true,
+        mlxProductionQueueVerified: true,
+        mlxBaseline: passingEvidence.mlxBaseline,
+      },
+    );
 
     expect(verdict.status).toBe('unavailable');
     expect(verdict.failures).toEqual([
@@ -473,15 +594,483 @@ describe('live replay gates', () => {
     ]);
   });
 
-  it('returns a finite unavailable verdict when publication or sampling evidence is empty', () => {
-    const verdict = evaluateLiveReplay([
-      passingRepetition({
-        publications: [],
-        captureHandoffMilliseconds: [],
-        rssSamples: [],
-        thermalSamples: [],
+  it('requires three repetitions, an alternating engine order, MLX queue proof, and a baseline', () => {
+    expect(
+      evaluateLiveReplay([passingRepetition()], passingEvidence),
+    ).toMatchObject({
+      status: 'unavailable',
+      failures: expect.arrayContaining(['insufficient_repetitions']),
+    });
+    expect(
+      evaluateLiveReplay(Array.from({ length: 3 }, () => passingRepetition())),
+    ).toMatchObject({
+      status: 'unavailable',
+      failures: expect.arrayContaining([
+        'insufficient_corpus',
+        'dependency_unavailable',
+        'resource_evidence_unavailable',
+        'engine_order_unverified',
+        'mlx_queue_unverified',
+        'mlx_baseline_unavailable',
+      ]),
+    });
+  });
+
+  it('measures cadence only during active speech and processing from lookahead readiness', () => {
+    const verdict = evaluatePassing({
+      publications: [
+        passingRepetition().publications[0],
+        {
+          ...passingRepetition().publications[1],
+          activeSpeech: false,
+          completedAtSeconds: 100,
+        },
+        {
+          ...passingRepetition().publications[1],
+          availableAtSeconds: 6,
+          lookaheadReadyAtSeconds: 8,
+          completedAtSeconds: 9,
+          audioEndSeconds: 6,
+        },
+      ],
+    });
+    expect(verdict.metrics.publicationCadenceP50Seconds).toBe(6);
+    expect(verdict.metrics.processingLatencyP95Seconds).toBe(1);
+  });
+
+  it('rejects scalar coverage that masks receipt gaps, overlap, or substitution', () => {
+    const verdict = evaluatePassing({
+      acceptedCoverage: [
+        { receipt: 0, startSeconds: 0, endSeconds: 2 },
+        { receipt: 1, startSeconds: 2, endSeconds: 4 },
+      ],
+      processedCoverage: [
+        { receipt: 0, startSeconds: 0, endSeconds: 2.5 },
+        { receipt: 2, startSeconds: 2.5, endSeconds: 4 },
+      ],
+      processedSourceSeconds: 4,
+    });
+    expect(verdict.invariants.incompleteSourceCoverage).toBeGreaterThan(0);
+    expect(verdict.invariants.unexpectedProcessedSequences).toBeGreaterThan(0);
+    expect(verdict.failures).toContain('source_coverage');
+  });
+
+  it('uses only post-warmup one-second real-time samples and derives peak RSS', () => {
+    const preWarmupGrowth = evaluatePassing({
+      peakRssGiB: 1,
+      rssSamples: [
+        { atSeconds: 0, rssGiB: 0.5 },
+        { atSeconds: 1, rssGiB: 1 },
+        { atSeconds: 2, rssGiB: 1 },
+        { atSeconds: 3, rssGiB: 1 },
+      ],
+      thermalSamples: [
+        { atSeconds: 2, state: 'nominal' },
+        { atSeconds: 3, state: 'nominal' },
+      ],
+      resourceSoak: {
+        warmupEndSeconds: 2,
+        sampleIntervalSeconds: 1,
+        realTime: true,
+        longestSource: true,
+      },
+    });
+    expect(preWarmupGrowth.failures).not.toContain('rss_growth');
+    expect(preWarmupGrowth.status).toBe('pass');
+
+    expect(() => evaluatePassing({ peakRssGiB: 2 })).toThrow(
+      'live_replay_invalid_observation',
+    );
+    expect(
+      evaluatePassing({
+        resourceSoak: {
+          warmupEndSeconds: 0,
+          sampleIntervalSeconds: 2,
+          realTime: false,
+          longestSource: false,
+        },
       }),
-    ]);
+    ).toMatchObject({
+      status: 'unavailable',
+      failures: expect.arrayContaining(['resource_evidence_unavailable']),
+    });
+  });
+
+  it('counts every volatile operation and forbids committed synthetic seam errors and renderer inference', () => {
+    const verdict = evaluatePassing({
+      publications: [
+        {
+          ...passingRepetition().publications[0],
+          newTokenCount: 10,
+          volatileOperationCount: 2,
+        },
+      ],
+      committedSyntheticSeamDuplicateTokens: 1,
+      rendererInferenceCallbacks: 1,
+    });
+    expect(verdict.metrics.volatileOperationsPerNewToken).toBe(0.2);
+    expect(verdict.invariants.committedSyntheticSeamErrors).toBe(3);
+    expect(verdict.invariants.rendererInferenceCallbacks).toBe(3);
+    expect(verdict.failures).toEqual(
+      expect.arrayContaining([
+        'volatile_revision_rate',
+        'committed_synthetic_seam',
+        'renderer_inference',
+      ]),
+    );
+  });
+
+  it('serializes every aggregate used by an enforced gate', () => {
+    expect(Object.keys(evaluatePassing().metrics).sort()).toEqual(
+      [
+        'batchEditRateMaximum',
+        'batchPrecisionAt2SecondsMinimum',
+        'batchPrecisionAt5SecondsMinimum',
+        'batchRecallAt2SecondsMinimum',
+        'batchRecallAt5SecondsMinimum',
+        'captureHandoffP99Milliseconds',
+        'fairThermalContinuousSecondsMaximum',
+        'fairThermalFractionMaximum',
+        'firstTextMaximumSeconds',
+        'firstTextP50Seconds',
+        'firstTextP50Upper95Seconds',
+        'firstTextP95Seconds',
+        'firstTextP95Upper95Seconds',
+        'peakRssAboveIdleGiBMaximum',
+        'peakRssGiBMaximum',
+        'processingLatencyMaximumSeconds',
+        'processingLatencyP95Seconds',
+        'processingLatencyP95Upper95Seconds',
+        'proxyDisagreementRegressionMaximum',
+        'proxyRecallRegressionMaximum',
+        'publicationCadenceMaximumSeconds',
+        'publicationCadenceP50Seconds',
+        'publicationCadenceP50Upper95Seconds',
+        'publicationCadenceP95Seconds',
+        'publicationCadenceP95Upper95Seconds',
+        'repairContextSecondsMaximum',
+        'repairTokenF1Minimum',
+        'revisionMaximumAgeSeconds',
+        'rollbackP95Tokens',
+        'rssGrowthMiBPerHourMaximum',
+        'runtimeFactorMaximum',
+        'seamErrorRateMaximum',
+        'sourceCoverage',
+        'volatileOperationsPerNewToken',
+      ].sort(),
+    );
+  });
+
+  it('keeps every scalar gate inclusive at exact and inside boundaries and rejects outside', () => {
+    const upper = (
+      threshold: number,
+      code: string,
+      make: (value: number) => Partial<LiveReplayRepetition>,
+      evidence: Parameters<typeof evaluateLiveReplay>[1] = passingEvidence,
+    ) => {
+      expect(evaluatePassing(make(threshold), evidence).failures).not.toContain(
+        code,
+      );
+      expect(
+        evaluatePassing(make(threshold - 0.001), evidence).failures,
+      ).not.toContain(code);
+      expect(
+        evaluatePassing(make(threshold + 0.001), evidence).failures,
+      ).toContain(code);
+    };
+    const lower = (
+      threshold: number,
+      code: string,
+      make: (value: number) => Partial<LiveReplayRepetition>,
+    ) => {
+      expect(evaluatePassing(make(threshold)).failures).not.toContain(code);
+      expect(evaluatePassing(make(threshold + 0.001)).failures).not.toContain(
+        code,
+      );
+      expect(evaluatePassing(make(threshold - 0.001)).failures).toContain(code);
+    };
+    const firstText = (value: number): Partial<LiveReplayRepetition> => ({
+      publications: [
+        {
+          ...passingRepetition().publications[0],
+          availableAtSeconds: value,
+          lookaheadReadyAtSeconds: value,
+          completedAtSeconds: value + 1,
+        },
+      ],
+    });
+    const relaxed = {
+      ...passingEvidence,
+      mlxBaseline: { firstTextP95Seconds: 100, runtimeFactor: 1 },
+    };
+    upper(
+      LIVE_REPLAY_THRESHOLDS.firstTextP50Seconds,
+      'first_text_p50',
+      firstText,
+      relaxed,
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.firstTextP95Seconds,
+      'first_text_p95',
+      firstText,
+      relaxed,
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.firstTextMaximumSeconds,
+      'first_text_max',
+      firstText,
+      relaxed,
+    );
+
+    const cadence = (value: number): Partial<LiveReplayRepetition> => ({
+      publications: [
+        passingRepetition().publications[0],
+        {
+          ...passingRepetition().publications[1],
+          availableAtSeconds: 2,
+          lookaheadReadyAtSeconds: 2,
+          completedAtSeconds: 3 + value,
+        },
+      ],
+    });
+    upper(
+      LIVE_REPLAY_THRESHOLDS.publicationCadenceP50Seconds,
+      'publication_cadence_p50',
+      cadence,
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.publicationCadenceP95Seconds,
+      'publication_cadence_p95',
+      cadence,
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.publicationCadenceMaximumSeconds,
+      'publication_cadence_max',
+      cadence,
+    );
+
+    const processing = (value: number): Partial<LiveReplayRepetition> => ({
+      publications: [
+        {
+          ...passingRepetition().publications[0],
+          completedAtSeconds: 2 + value,
+        },
+      ],
+    });
+    upper(
+      LIVE_REPLAY_THRESHOLDS.processingLatencyP95Seconds,
+      'processing_latency_p95',
+      processing,
+      relaxed,
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.processingLatencyMaximumSeconds,
+      'processing_latency_max',
+      processing,
+      relaxed,
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.runtimeFactor,
+      'runtime_factor',
+      (value) => ({ inferenceSeconds: value * 4 }),
+      {
+        ...passingEvidence,
+        mlxBaseline: { firstTextP95Seconds: 1, runtimeFactor: 1 },
+      },
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.captureHandoffP99Milliseconds,
+      'capture_handoff',
+      (value) => ({ captureHandoffMilliseconds: [value] }),
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.revisionMaximumAgeSeconds,
+      'volatile_revision_age',
+      (value) => ({
+        publications: passingRepetition().publications.map((publication) => ({
+          ...publication,
+          revisionAgeSeconds: value,
+        })),
+      }),
+    );
+    upper(LIVE_REPLAY_THRESHOLDS.peakRssGiB, 'peak_rss', (value) => ({
+      peakRssGiB: value,
+      preparedIdleRssGiB: value,
+      rssSamples: [
+        { atSeconds: 0, rssGiB: value },
+        { atSeconds: 1, rssGiB: value },
+      ],
+    }));
+    upper(LIVE_REPLAY_THRESHOLDS.rssAboveIdleGiB, 'peak_rss', (value) => ({
+      peakRssGiB: 1 + value,
+      preparedIdleRssGiB: 1,
+      rssSamples: [
+        { atSeconds: 0, rssGiB: 1 + value },
+        { atSeconds: 1, rssGiB: 1 + value },
+      ],
+    }));
+    upper(LIVE_REPLAY_THRESHOLDS.seamErrorRate, 'seam_error_rate', (value) => ({
+      seamDuplicateTokens: Math.round(value * 1_000_000),
+      seamReferenceTokens: 1_000_000,
+    }));
+    upper(LIVE_REPLAY_THRESHOLDS.batchEditRate, 'batch_agreement', (value) => ({
+      batchDiagnostic: {
+        ...passingRepetition().batchDiagnostic,
+        editRate: value,
+      },
+    }));
+    lower(
+      LIVE_REPLAY_THRESHOLDS.batchPrecisionAt2Seconds,
+      'batch_agreement',
+      (value) => ({
+        batchDiagnostic: {
+          ...passingRepetition().batchDiagnostic,
+          precisionAt2Seconds: value,
+        },
+      }),
+    );
+    lower(
+      LIVE_REPLAY_THRESHOLDS.batchRecallAt2Seconds,
+      'batch_agreement',
+      (value) => ({
+        batchDiagnostic: {
+          ...passingRepetition().batchDiagnostic,
+          recallAt2Seconds: value,
+        },
+      }),
+    );
+    lower(
+      LIVE_REPLAY_THRESHOLDS.batchPrecisionAt5Seconds,
+      'batch_agreement',
+      (value) => ({
+        batchDiagnostic: {
+          ...passingRepetition().batchDiagnostic,
+          precisionAt5Seconds: value,
+        },
+      }),
+    );
+    lower(
+      LIVE_REPLAY_THRESHOLDS.batchRecallAt5Seconds,
+      'batch_agreement',
+      (value) => ({
+        batchDiagnostic: {
+          ...passingRepetition().batchDiagnostic,
+          recallAt5Seconds: value,
+        },
+      }),
+    );
+    upper(
+      LIVE_REPLAY_THRESHOLDS.repairContextSeconds,
+      'repair_bounds',
+      (value) => ({
+        repair: { ...passingRepetition().repair, contextBeforeSeconds: value },
+      }),
+    );
+    lower(LIVE_REPLAY_THRESHOLDS.repairTokenF1, 'repair_bounds', (value) => ({
+      repair: { ...passingRepetition().repair, repairedTokenF1: value },
+    }));
+  });
+
+  it('covers exact, inside, and outside boundaries for stability, soak, proxy, and MLX gates', () => {
+    const rates = [15, 14, 16].map((volatileOperationCount) =>
+      evaluatePassing({
+        publications: [
+          {
+            ...passingRepetition().publications[0],
+            newTokenCount: 100,
+            volatileOperationCount,
+          },
+        ],
+      }),
+    );
+    expect(rates[0].failures).not.toContain('volatile_revision_rate');
+    expect(rates[1].failures).not.toContain('volatile_revision_rate');
+    expect(rates[2].failures).toContain('volatile_revision_rate');
+
+    const rollbacks = [3, 2, 4].map((rollbackTokens) =>
+      evaluatePassing({
+        publications: passingRepetition().publications.map((publication) => ({
+          ...publication,
+          rollbackTokens,
+        })),
+      }),
+    );
+    expect(rollbacks[0].failures).not.toContain('volatile_rollback');
+    expect(rollbacks[1].failures).not.toContain('volatile_rollback');
+    expect(rollbacks[2].failures).toContain('volatile_rollback');
+
+    const rss = [64, 63.999, 64.001].map((growth) => {
+      const end = 1 + growth / (1024 * 3600);
+      return evaluatePassing({
+        peakRssGiB: end,
+        preparedIdleRssGiB: 1,
+        rssSamples: [
+          { atSeconds: 0, rssGiB: 1 },
+          { atSeconds: 1, rssGiB: end },
+        ],
+      });
+    });
+    expect(rss[0].failures).not.toContain('rss_growth');
+    expect(rss[1].failures).not.toContain('rss_growth');
+    expect(rss[2].failures).toContain('rss_growth');
+
+    const thermal = (fairCount: number, nominalCount: number) =>
+      Array.from({ length: nominalCount + fairCount }, (_, atSeconds) => ({
+        atSeconds,
+        state:
+          atSeconds < nominalCount ? ('nominal' as const) : ('fair' as const),
+      }));
+    const thermalRuns = [
+      evaluatePassing({ thermalSamples: thermal(301, 2709) }),
+      evaluatePassing({ thermalSamples: thermal(300, 2700) }),
+      evaluatePassing({ thermalSamples: thermal(302, 2718) }),
+    ];
+    expect(thermalRuns[0].failures).not.toContain('thermal_state');
+    expect(thermalRuns[1].failures).not.toContain('thermal_state');
+    expect(thermalRuns[2].failures).toContain('thermal_state');
+
+    const proxy = (disagreement: number, recallRegression: number) =>
+      evaluatePassing({
+        proxy: {
+          disagreementRate: 0.08 + disagreement,
+          alignedRecall: 0.93 - recallRegression,
+          mlxDisagreementRate: 0.08,
+          mlxAlignedRecall: 0.93,
+        },
+      });
+    expect(proxy(0.02, 0.02).failures).not.toContain('proxy_non_regression');
+    expect(proxy(0.019, 0.019).failures).not.toContain('proxy_non_regression');
+    expect(proxy(0.021, 0.021).failures).toContain('proxy_non_regression');
+
+    const mlxLatency = (latency: number) =>
+      evaluatePassing({
+        publications: [
+          {
+            ...passingRepetition().publications[0],
+            completedAtSeconds: 1 + latency,
+          },
+        ],
+      });
+    expect(mlxLatency(2).failures).not.toContain('first_text_regression');
+    expect(mlxLatency(1.999).failures).not.toContain('first_text_regression');
+    expect(mlxLatency(2.001).failures).toContain('first_text_regression');
+
+    const mlxRuntime = (runtimeFactor: number) =>
+      evaluatePassing({ inferenceSeconds: runtimeFactor * 4 });
+    expect(mlxRuntime(0.3).failures).not.toContain('runtime_factor_regression');
+    expect(mlxRuntime(0.299).failures).not.toContain(
+      'runtime_factor_regression',
+    );
+    expect(mlxRuntime(0.301).failures).toContain('runtime_factor_regression');
+  });
+
+  it('returns a finite unavailable verdict when publication or sampling evidence is empty', () => {
+    const verdict = evaluatePassing({
+      publications: [],
+      captureHandoffMilliseconds: [],
+      rssSamples: [],
+      thermalSamples: [],
+    });
 
     expect(verdict.status).toBe('unavailable');
     expect(verdict.failures).toEqual(
@@ -500,7 +1089,7 @@ describe('live replay gates', () => {
 
 describe('live replay report privacy', () => {
   it('builds the exact allowlisted content-free report shape', () => {
-    const verdict = evaluateLiveReplay([passingRepetition()]);
+    const verdict = evaluatePassing();
     const report = buildPrivateLiveReplayReport({
       corpus: { meetingCount: 3, sourceCount: 6, audioMinutes: 92 },
       runtime: {
@@ -542,12 +1131,12 @@ describe('live replay report privacy', () => {
       corpus: { meetingCount: 3, sourceCount: 6, audioMinutes: 90 },
       runtime: {
         fluidAudioVersion: '0.15.5',
-        fluidAudioRevision: 'revision',
-        modelId: 'model',
-        configId: 'config',
+        fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+        modelId: 'parakeet-tdt-0.6b-v3',
+        configId: 'low-latency-v1',
       },
-      mlxProduction: evaluateLiveReplay([passingRepetition()]),
-      parakeetSliding: evaluateLiveReplay([passingRepetition()]),
+      mlxProduction: evaluatePassing(),
+      parakeetSliding: evaluatePassing(),
     });
     expect(() =>
       sanitizeLiveReplayReport({ ...report, arbitrary: true }),
@@ -570,6 +1159,51 @@ describe('live replay report privacy', () => {
 
     const sanitized = sanitizeLiveReplayReport(report);
     report.runtime.configId = 'changed';
-    expect(sanitized.runtime.configId).toBe('config');
+    expect(sanitized.runtime.configId).toBe('low-latency-v1');
+  });
+
+  it('rejects incomplete schemas, invalid pins, negative corpus values, and inconsistent pass reports', () => {
+    const verdict = evaluatePassing();
+    const report = buildPrivateLiveReplayReport({
+      corpus: { meetingCount: 3, sourceCount: 6, audioMinutes: 90 },
+      runtime: {
+        fluidAudioVersion: '0.15.5',
+        fluidAudioRevision: '19600a485baa4998812e4654b70d2bab8f2c9949',
+        modelId: 'parakeet-tdt-0.6b-v3',
+        configId: 'pinned-default-v1',
+      },
+      mlxProduction: verdict,
+      parakeetSliding: verdict,
+    });
+    expect(() =>
+      sanitizeLiveReplayReport({
+        ...report,
+        engines: {
+          ...report.engines,
+          mlxProduction: { status: 'pass', metrics: {} },
+        },
+      }),
+    ).toThrow('private_report_field');
+    expect(() =>
+      sanitizeLiveReplayReport({ ...report, invariants: {} }),
+    ).toThrow('private_report_field');
+    expect(() =>
+      sanitizeLiveReplayReport({
+        ...report,
+        corpus: { ...report.corpus, meetingCount: -1 },
+      }),
+    ).toThrow('private_report_value');
+    expect(() =>
+      sanitizeLiveReplayReport({
+        ...report,
+        runtime: { ...report.runtime, fluidAudioRevision: 'SecretWords' },
+      }),
+    ).toThrow('private_report_value');
+    expect(() =>
+      sanitizeLiveReplayReport({
+        ...report,
+        failures: ['first_text_p50'],
+      }),
+    ).toThrow('private_report_consistency');
   });
 });

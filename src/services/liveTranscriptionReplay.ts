@@ -31,6 +31,8 @@ export const runCausalReplay = async (
 ): Promise<CausalReplayCompletion[]> => {
   let previousAvailableAt = -1;
   let previousAudioEnd = -1;
+  let causalWatermark = 0;
+  let previousObservedAudioEnd = -1;
   const completions: CausalReplayCompletion[] = [];
 
   for (let index = 0; index < frames.length; index += 1) {
@@ -45,24 +47,33 @@ export const runCausalReplay = async (
     }
     if (
       frame.availableAtSeconds < previousAvailableAt ||
-      frame.audioEndSeconds < previousAudioEnd
+      frame.audioEndSeconds <= previousAudioEnd
     ) {
       throw new Error('causal_replay_clock');
     }
+    if (frame.audioEndSeconds - Math.max(0, previousAudioEnd) > 0.25) {
+      throw new Error('causal_replay_frame_duration');
+    }
 
     const immutableFrame = Object.freeze({ ...frame });
-    const completion = await consume(immutableFrame, frame.availableAtSeconds);
+    const virtualClock = Math.max(frame.availableAtSeconds, causalWatermark);
+    const completion = await consume(immutableFrame, virtualClock);
     requireFiniteNonNegative(completion.completedAtSeconds);
     requireFiniteNonNegative(completion.observedAudioEndSeconds);
-    if (completion.completedAtSeconds < frame.availableAtSeconds) {
+    if (completion.completedAtSeconds < virtualClock) {
       throw new Error('causal_replay_completion_clock');
     }
     if (completion.observedAudioEndSeconds > frame.audioEndSeconds) {
       throw new Error('causal_replay_future_audio');
     }
+    if (completion.observedAudioEndSeconds < previousObservedAudioEnd) {
+      throw new Error('causal_replay_clock');
+    }
     completions.push({ ...completion });
     previousAvailableAt = frame.availableAtSeconds;
     previousAudioEnd = frame.audioEndSeconds;
+    previousObservedAudioEnd = completion.observedAudioEndSeconds;
+    causalWatermark = completion.completedAtSeconds;
   }
 
   return completions;

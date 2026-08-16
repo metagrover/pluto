@@ -33,12 +33,21 @@ export const LIVE_REPLAY_THRESHOLDS = Object.freeze({
 
 export interface LiveReplayPublication {
   availableAtSeconds: number;
+  lookaheadReadyAtSeconds: number;
   completedAtSeconds: number;
   audioEndSeconds: number;
   changed: boolean;
+  activeSpeech: boolean;
   newTokenCount: number;
   rollbackTokens: number;
+  volatileOperationCount: number;
   revisionAgeSeconds: number;
+}
+
+export interface LiveReplayCoverageReceipt {
+  receipt: number;
+  startSeconds: number;
+  endSeconds: number;
 }
 
 export interface LiveReplayRepetition {
@@ -47,12 +56,16 @@ export interface LiveReplayRepetition {
   committedSnapshots: string[];
   acceptedSequences: number[];
   processedSequences: number[];
+  acceptedCoverage: LiveReplayCoverageReceipt[];
+  processedCoverage: LiveReplayCoverageReceipt[];
   expectedSourceSeconds: number;
   processedSourceSeconds: number;
   inferenceSeconds: number;
   seamDuplicateTokens: number;
   seamOmittedTokens: number;
   seamReferenceTokens: number;
+  committedSyntheticSeamDuplicateTokens: number;
+  committedSyntheticSeamOmittedTokens: number;
   overlappingCommittedTokenProvenance?: number;
   batchDiagnostic: {
     editRate: number;
@@ -81,9 +94,28 @@ export interface LiveReplayRepetition {
     atSeconds: number;
     state: 'nominal' | 'fair' | 'serious' | 'critical';
   }>;
+  resourceSoak: {
+    warmupEndSeconds: number;
+    sampleIntervalSeconds: number;
+    realTime: boolean;
+    longestSource: boolean;
+  };
   captureHandoffMilliseconds: number[];
+  rendererInferenceCallbacks: number;
   wholeSessionAsrCalls: number;
   analysisBeforeCanonicalCommit: number;
+}
+
+export interface LiveReplayEvidence {
+  corpusEligible?: boolean;
+  aecEvidenceAvailable?: boolean;
+  resourceEvidenceAvailable?: boolean;
+  engineOrderAlternated?: boolean;
+  mlxProductionQueueVerified?: boolean;
+  mlxBaseline?: {
+    firstTextP95Seconds: number;
+    runtimeFactor: number;
+  };
 }
 
 export type LiveReplayStatus = 'pass' | 'fail' | 'unavailable';
@@ -289,17 +321,27 @@ const addFailure = (
   if (condition) failures.add(code);
 };
 
+const maximum = (values: readonly number[]): number =>
+  values.length === 0 ? 0 : Math.max(...values);
+
+const minimum = (values: readonly number[]): number =>
+  values.length === 0 ? 0 : Math.min(...values);
+
+const samplesHaveCadence = (
+  samples: readonly { atSeconds: number }[],
+  interval: number,
+): boolean =>
+  samples.length >= 2 &&
+  samples.every(
+    (sample, index) =>
+      index === 0 ||
+      Math.abs(sample.atSeconds - samples[index - 1].atSeconds - interval) <
+        1e-9,
+  );
+
 export const evaluateLiveReplay = (
   repetitions: readonly LiveReplayRepetition[],
-  evidence: {
-    corpusEligible?: boolean;
-    aecEvidenceAvailable?: boolean;
-    resourceEvidenceAvailable?: boolean;
-    mlxBaseline?: {
-      firstTextP95Seconds: number;
-      runtimeFactor: number;
-    };
-  } = {},
+  evidence: LiveReplayEvidence = {},
 ): LiveReplayVerdict => {
   if (repetitions.length === 0) {
     return {
@@ -318,10 +360,28 @@ export const evaluateLiveReplay = (
   const rollbacks: number[] = [];
   const handoffs: number[] = [];
   const rssGrowth: number[] = [];
+  const peaks: number[] = [];
+  const peakDeltas: number[] = [];
+  const fairFractions: number[] = [];
+  const fairRuns: number[] = [];
+  const revisionAges: number[] = [];
+  const seamRates: number[] = [];
+  const batchEditRates: number[] = [];
+  const batchPrecision2: number[] = [];
+  const batchRecall2: number[] = [];
+  const batchPrecision5: number[] = [];
+  const batchRecall5: number[] = [];
+  const proxyDisagreementRegression: number[] = [];
+  const proxyRecallRegression: number[] = [];
+  const repairContexts: number[] = [];
+  const repairF1: number[] = [];
   let committedPrefixViolations = 0;
   let missingAcceptedSequences = 0;
   let overlappingDuplicateTokenProvenance = 0;
   let incompleteSourceCoverage = 0;
+  let unexpectedProcessedSequences = 0;
+  let committedSyntheticSeamErrors = 0;
+  let rendererInferenceCallbacks = 0;
   let wholeSessionAsrCallsWhenComplete = 0;
   let analysisBeforeCanonicalCommit = 0;
   let processedSeconds = 0;
@@ -340,6 +400,8 @@ export const evaluateLiveReplay = (
       repetition.seamDuplicateTokens,
       repetition.seamOmittedTokens,
       repetition.seamReferenceTokens,
+      repetition.resourceSoak.warmupEndSeconds,
+      repetition.resourceSoak.sampleIntervalSeconds,
       ...repetition.captureHandoffMilliseconds,
       repetition.repair.contextBeforeSeconds,
       repetition.repair.contextAfterSeconds,
@@ -358,6 +420,9 @@ export const evaluateLiveReplay = (
       repetition.wholeSessionAsrCalls,
       repetition.analysisBeforeCanonicalCommit,
       repetition.overlappingCommittedTokenProvenance ?? 0,
+      repetition.committedSyntheticSeamDuplicateTokens,
+      repetition.committedSyntheticSeamOmittedTokens,
+      repetition.rendererInferenceCallbacks,
       ...repetition.acceptedSequences,
       ...repetition.processedSequences,
     ]);
@@ -375,21 +440,31 @@ export const evaluateLiveReplay = (
     const changed = repetition.publications.filter(
       (publication) => publication.changed,
     );
+    const activeChanged = changed.filter(
+      (publication) => publication.activeSpeech,
+    );
     requireFinite(
       repetition.publications.flatMap((publication) => [
         publication.availableAtSeconds,
+        publication.lookaheadReadyAtSeconds,
         publication.completedAtSeconds,
         publication.audioEndSeconds,
         publication.newTokenCount,
         publication.rollbackTokens,
+        publication.volatileOperationCount,
         publication.revisionAgeSeconds,
       ]),
     );
     for (const publication of repetition.publications) {
-      requireCounts([publication.newTokenCount, publication.rollbackTokens]);
+      requireCounts([
+        publication.newTokenCount,
+        publication.rollbackTokens,
+        publication.volatileOperationCount,
+      ]);
       if (
         publication.availableAtSeconds < 0 ||
-        publication.completedAtSeconds < publication.availableAtSeconds ||
+        publication.lookaheadReadyAtSeconds < publication.availableAtSeconds ||
+        publication.completedAtSeconds < publication.lookaheadReadyAtSeconds ||
         publication.audioEndSeconds < 0 ||
         publication.revisionAgeSeconds < 0
       ) {
@@ -414,21 +489,24 @@ export const evaluateLiveReplay = (
         throw new Error('live_replay_invalid_observation');
       }
       firstText.push(firstTextLatency);
-      for (let index = 1; index < changed.length; index += 1) {
+      for (let index = 1; index < activeChanged.length; index += 1) {
         const interval =
-          changed[index].completedAtSeconds -
-          changed[index - 1].completedAtSeconds;
+          activeChanged[index].completedAtSeconds -
+          activeChanged[index - 1].completedAtSeconds;
         if (interval < 0) throw new Error('live_replay_invalid_observation');
         cadence.push(interval);
       }
     }
     for (const publication of repetition.publications) {
-      processingLatency.push(
-        publication.completedAtSeconds - publication.availableAtSeconds,
-      );
+      if (publication.activeSpeech) {
+        processingLatency.push(
+          publication.completedAtSeconds - publication.lookaheadReadyAtSeconds,
+        );
+      }
       newTokens += publication.newTokenCount;
-      volatileOperations += Number(publication.rollbackTokens > 0);
+      volatileOperations += publication.volatileOperationCount;
       rollbacks.push(publication.rollbackTokens);
+      revisionAges.push(publication.revisionAgeSeconds);
       addFailure(
         failures,
         publication.revisionAgeSeconds >
@@ -440,14 +518,89 @@ export const evaluateLiveReplay = (
       repetition.committedSnapshots,
     );
     const processed = new Set(repetition.processedSequences);
+    const accepted = new Set(repetition.acceptedSequences);
     missingAcceptedSequences += repetition.acceptedSequences.filter(
       (sequence) => !processed.has(sequence),
     ).length;
+    unexpectedProcessedSequences += repetition.processedSequences.filter(
+      (sequence) => !accepted.has(sequence),
+    ).length;
+    requireCounts([
+      ...repetition.acceptedCoverage.map(({ receipt }) => receipt),
+      ...repetition.processedCoverage.map(({ receipt }) => receipt),
+    ]);
+    requireNonNegative(
+      [...repetition.acceptedCoverage, ...repetition.processedCoverage].flatMap(
+        ({ startSeconds, endSeconds }) => [startSeconds, endSeconds],
+      ),
+    );
+    const acceptedRanges = new Map(
+      repetition.acceptedCoverage.map((range) => [range.receipt, range]),
+    );
+    const processedRanges = new Map(
+      repetition.processedCoverage.map((range) => [range.receipt, range]),
+    );
+    if (
+      acceptedRanges.size !== repetition.acceptedCoverage.length ||
+      processedRanges.size !== repetition.processedCoverage.length ||
+      [...acceptedRanges.values(), ...processedRanges.values()].some(
+        ({ startSeconds, endSeconds }) =>
+          endSeconds <= startSeconds ||
+          endSeconds > repetition.expectedSourceSeconds,
+      )
+    ) {
+      throw new Error('live_replay_invalid_observation');
+    }
+    let coverageErrors = 0;
+    if (
+      repetition.acceptedCoverage.some(
+        ({ receipt }) => !accepted.has(receipt),
+      ) ||
+      repetition.processedCoverage.some(
+        ({ receipt }) => !processed.has(receipt),
+      ) ||
+      repetition.acceptedSequences.some(
+        (receipt) => !acceptedRanges.has(receipt),
+      ) ||
+      repetition.processedSequences.some(
+        (receipt) => !processedRanges.has(receipt),
+      )
+    ) {
+      coverageErrors += 1;
+    }
+    for (const [receipt, range] of acceptedRanges) {
+      const observed = processedRanges.get(receipt);
+      if (
+        (observed && observed.startSeconds !== range.startSeconds) ||
+        (observed && observed.endSeconds !== range.endSeconds)
+      )
+        coverageErrors += 1;
+    }
+    unexpectedProcessedSequences += [...processedRanges.keys()].filter(
+      (receipt) => !acceptedRanges.has(receipt),
+    ).length;
+    const sortedCoverage = [...processedRanges.values()].sort(
+      (left, right) => left.startSeconds - right.startSeconds,
+    );
+    let coverageCursor = 0;
+    let coveredSeconds = 0;
+    for (const range of sortedCoverage) {
+      if (range.startSeconds !== coverageCursor) coverageErrors += 1;
+      coveredSeconds += range.endSeconds - range.startSeconds;
+      coverageCursor = range.endSeconds;
+    }
+    if (
+      coverageCursor !== repetition.expectedSourceSeconds ||
+      coveredSeconds !== repetition.processedSourceSeconds
+    )
+      coverageErrors += 1;
     overlappingDuplicateTokenProvenance +=
       repetition.overlappingCommittedTokenProvenance ?? 0;
     const complete =
+      coverageErrors === 0 &&
+      acceptedRanges.size === processedRanges.size &&
       repetition.processedSourceSeconds === repetition.expectedSourceSeconds;
-    incompleteSourceCoverage += Number(!complete);
+    incompleteSourceCoverage += Number(!complete) + coverageErrors;
     wholeSessionAsrCallsWhenComplete += complete
       ? repetition.wholeSessionAsrCalls
       : 0;
@@ -458,9 +611,16 @@ export const evaluateLiveReplay = (
       repetition.inferenceSeconds / repetition.expectedSourceSeconds,
     );
     handoffs.push(...repetition.captureHandoffMilliseconds);
+    committedSyntheticSeamErrors +=
+      repetition.committedSyntheticSeamDuplicateTokens +
+      repetition.committedSyntheticSeamOmittedTokens;
+    rendererInferenceCallbacks += repetition.rendererInferenceCallbacks;
     if (
       repetition.captureHandoffMilliseconds.length === 0 ||
-      repetition.thermalSamples.length === 0
+      repetition.thermalSamples.length === 0 ||
+      repetition.resourceSoak.sampleIntervalSeconds !== 1 ||
+      !repetition.resourceSoak.realTime ||
+      !repetition.resourceSoak.longestSource
     ) {
       failures.add('resource_evidence_unavailable');
     }
@@ -468,12 +628,18 @@ export const evaluateLiveReplay = (
     const seamErrorRate =
       (repetition.seamDuplicateTokens + repetition.seamOmittedTokens) /
       Math.max(1, repetition.seamReferenceTokens);
+    seamRates.push(seamErrorRate);
     addFailure(
       failures,
       seamErrorRate > LIVE_REPLAY_THRESHOLDS.seamErrorRate,
       'seam_error_rate',
     );
     const batch = repetition.batchDiagnostic;
+    batchEditRates.push(batch.editRate);
+    batchPrecision2.push(batch.precisionAt2Seconds);
+    batchRecall2.push(batch.recallAt2Seconds);
+    batchPrecision5.push(batch.precisionAt5Seconds);
+    batchRecall5.push(batch.recallAt5Seconds);
     addFailure(
       failures,
       batch.editRate > LIVE_REPLAY_THRESHOLDS.batchEditRate ||
@@ -486,6 +652,10 @@ export const evaluateLiveReplay = (
       'batch_agreement',
     );
     const proxy = repetition.proxy;
+    proxyDisagreementRegression.push(
+      proxy.disagreementRate - proxy.mlxDisagreementRate,
+    );
+    proxyRecallRegression.push(proxy.mlxAlignedRecall - proxy.alignedRecall);
     addFailure(
       failures,
       proxy.disagreementRate >
@@ -496,6 +666,11 @@ export const evaluateLiveReplay = (
       'proxy_non_regression',
     );
     const repair = repetition.repair;
+    repairContexts.push(
+      repair.contextBeforeSeconds,
+      repair.contextAfterSeconds,
+    );
+    repairF1.push(repair.repairedTokenF1);
     addFailure(
       failures,
       !repair.exactGapDetected ||
@@ -507,34 +682,65 @@ export const evaluateLiveReplay = (
         repair.repairedTokenF1 < LIVE_REPLAY_THRESHOLDS.repairTokenF1,
       'repair_bounds',
     );
+    const postWarmRss = repetition.rssSamples.filter(
+      (sample) => sample.atSeconds >= repetition.resourceSoak.warmupEndSeconds,
+    );
+    const postWarmThermal = repetition.thermalSamples.filter(
+      (sample) => sample.atSeconds >= repetition.resourceSoak.warmupEndSeconds,
+    );
+    if (
+      !samplesHaveCadence(
+        postWarmRss,
+        repetition.resourceSoak.sampleIntervalSeconds,
+      ) ||
+      !samplesHaveCadence(
+        postWarmThermal,
+        repetition.resourceSoak.sampleIntervalSeconds,
+      )
+    ) {
+      failures.add('resource_evidence_unavailable');
+    }
+    const derivedPeak = maximum(
+      repetition.rssSamples.map(({ rssGiB }) => rssGiB),
+    );
+    if (
+      repetition.rssSamples.length > 0 &&
+      derivedPeak !== repetition.peakRssGiB
+    ) {
+      throw new Error('live_replay_invalid_observation');
+    }
+    peaks.push(derivedPeak);
+    peakDeltas.push(derivedPeak - repetition.preparedIdleRssGiB);
     addFailure(
       failures,
-      repetition.peakRssGiB > LIVE_REPLAY_THRESHOLDS.peakRssGiB ||
-        repetition.peakRssGiB - repetition.preparedIdleRssGiB >
+      derivedPeak > LIVE_REPLAY_THRESHOLDS.peakRssGiB ||
+        derivedPeak - repetition.preparedIdleRssGiB >
           LIVE_REPLAY_THRESHOLDS.rssAboveIdleGiB,
       'peak_rss',
     );
-    const growth = rssGrowthMiBPerHour(repetition.rssSamples);
+    const growth = rssGrowthMiBPerHour(postWarmRss);
     if (Number.isFinite(growth)) rssGrowth.push(growth);
     else failures.add('resource_evidence_unavailable');
     addFailure(
       failures,
       Number.isFinite(growth) &&
-        growth > LIVE_REPLAY_THRESHOLDS.rssGrowthMiBPerHour,
+        growth > LIVE_REPLAY_THRESHOLDS.rssGrowthMiBPerHour + 1e-9,
       'rss_growth',
     );
-    const serious = repetition.thermalSamples.some(
+    const serious = postWarmThermal.some(
       (sample) => sample.state === 'serious' || sample.state === 'critical',
     );
     const fairFraction =
-      repetition.thermalSamples.filter((sample) => sample.state === 'fair')
-        .length / Math.max(1, repetition.thermalSamples.length);
+      postWarmThermal.filter((sample) => sample.state === 'fair').length /
+      Math.max(1, postWarmThermal.length);
+    const fairRun = longestFairRunSeconds(postWarmThermal);
+    fairFractions.push(fairFraction);
+    fairRuns.push(fairRun);
     addFailure(
       failures,
       serious ||
         fairFraction > LIVE_REPLAY_THRESHOLDS.fairThermalFraction ||
-        longestFairRunSeconds(repetition.thermalSamples) >
-          LIVE_REPLAY_THRESHOLDS.fairThermalContinuousSeconds,
+        fairRun > LIVE_REPLAY_THRESHOLDS.fairThermalContinuousSeconds,
       'thermal_state',
     );
   }
@@ -543,10 +749,21 @@ export const evaluateLiveReplay = (
   addFailure(failures, missingAcceptedSequences !== 0, 'missing_sequence');
   addFailure(
     failures,
+    unexpectedProcessedSequences !== 0,
+    'unexpected_processed_sequence',
+  );
+  addFailure(
+    failures,
     overlappingDuplicateTokenProvenance !== 0,
     'duplicate_token_provenance',
   );
   addFailure(failures, incompleteSourceCoverage !== 0, 'source_coverage');
+  addFailure(
+    failures,
+    committedSyntheticSeamErrors !== 0,
+    'committed_synthetic_seam',
+  );
+  addFailure(failures, rendererInferenceCallbacks !== 0, 'renderer_inference');
   addFailure(
     failures,
     wholeSessionAsrCallsWhenComplete !== 0,
@@ -666,12 +883,20 @@ export const evaluateLiveReplay = (
   );
 
   const unavailableFailures: string[] = [];
-  if (evidence.corpusEligible === false)
+  if (repetitions.length < 3)
+    unavailableFailures.push('insufficient_repetitions');
+  if (evidence.corpusEligible !== true)
     unavailableFailures.push('insufficient_corpus');
-  if (evidence.aecEvidenceAvailable === false)
+  if (evidence.aecEvidenceAvailable !== true)
     unavailableFailures.push('dependency_unavailable');
-  if (evidence.resourceEvidenceAvailable === false)
+  if (evidence.resourceEvidenceAvailable !== true)
     unavailableFailures.push('resource_evidence_unavailable');
+  if (evidence.engineOrderAlternated !== true)
+    unavailableFailures.push('engine_order_unverified');
+  if (evidence.mlxProductionQueueVerified !== true)
+    unavailableFailures.push('mlx_queue_unverified');
+  if (!evidence.mlxBaseline)
+    unavailableFailures.push('mlx_baseline_unavailable');
   if (
     failures.has('resource_evidence_unavailable') &&
     !unavailableFailures.includes('resource_evidence_unavailable')
@@ -703,14 +928,35 @@ export const evaluateLiveReplay = (
     rssGrowthMiBPerHourMaximum: finiteMetric(
       rssGrowth.length > 0 ? Math.max(...rssGrowth) : 0,
     ),
+    peakRssGiBMaximum: finiteMetric(maximum(peaks)),
+    peakRssAboveIdleGiBMaximum: finiteMetric(maximum(peakDeltas)),
+    fairThermalFractionMaximum: finiteMetric(maximum(fairFractions)),
+    fairThermalContinuousSecondsMaximum: finiteMetric(maximum(fairRuns)),
+    revisionMaximumAgeSeconds: finiteMetric(maximum(revisionAges)),
+    seamErrorRateMaximum: finiteMetric(maximum(seamRates)),
+    batchEditRateMaximum: finiteMetric(maximum(batchEditRates)),
+    batchPrecisionAt2SecondsMinimum: finiteMetric(minimum(batchPrecision2)),
+    batchRecallAt2SecondsMinimum: finiteMetric(minimum(batchRecall2)),
+    batchPrecisionAt5SecondsMinimum: finiteMetric(minimum(batchPrecision5)),
+    batchRecallAt5SecondsMinimum: finiteMetric(minimum(batchRecall5)),
+    proxyDisagreementRegressionMaximum: finiteMetric(
+      maximum(proxyDisagreementRegression),
+    ),
+    proxyRecallRegressionMaximum: finiteMetric(maximum(proxyRecallRegression)),
+    repairContextSecondsMaximum: finiteMetric(maximum(repairContexts)),
+    repairTokenF1Minimum: finiteMetric(minimum(repairF1)),
   };
   const invariants = {
     committedPrefixViolations,
     missingAcceptedSequences,
+    unexpectedProcessedSequences,
     overlappingDuplicateTokenProvenance,
     incompleteSourceCoverage,
     wholeSessionAsrCallsWhenComplete,
     analysisBeforeCanonicalCommit,
+    committedSyntheticSeamErrors,
+    rendererInferenceCallbacks,
+    unexpectedPrivateReportFields: 0,
   };
   return {
     status:
@@ -726,9 +972,13 @@ export const evaluateLiveReplay = (
 };
 
 const failureCodes = new Set([
+  'insufficient_repetitions',
   'insufficient_corpus',
   'dependency_unavailable',
   'resource_evidence_unavailable',
+  'engine_order_unverified',
+  'mlx_queue_unverified',
+  'mlx_baseline_unavailable',
   'first_text_missing',
   'first_text_p50',
   'first_text_p95',
@@ -754,10 +1004,13 @@ const failureCodes = new Set([
   'thermal_state',
   'committed_prefix',
   'missing_sequence',
+  'unexpected_processed_sequence',
   'duplicate_token_provenance',
   'source_coverage',
   'unexpected_whole_session_asr',
   'analysis_before_canonical_commit',
+  'committed_synthetic_seam',
+  'renderer_inference',
 ]);
 
 const metricKeys = new Set([
@@ -780,15 +1033,34 @@ const metricKeys = new Set([
   'rollbackP95Tokens',
   'captureHandoffP99Milliseconds',
   'rssGrowthMiBPerHourMaximum',
+  'peakRssGiBMaximum',
+  'peakRssAboveIdleGiBMaximum',
+  'fairThermalFractionMaximum',
+  'fairThermalContinuousSecondsMaximum',
+  'revisionMaximumAgeSeconds',
+  'seamErrorRateMaximum',
+  'batchEditRateMaximum',
+  'batchPrecisionAt2SecondsMinimum',
+  'batchRecallAt2SecondsMinimum',
+  'batchPrecisionAt5SecondsMinimum',
+  'batchRecallAt5SecondsMinimum',
+  'proxyDisagreementRegressionMaximum',
+  'proxyRecallRegressionMaximum',
+  'repairContextSecondsMaximum',
+  'repairTokenF1Minimum',
 ]);
 
 const invariantKeys = new Set([
   'committedPrefixViolations',
   'missingAcceptedSequences',
+  'unexpectedProcessedSequences',
   'overlappingDuplicateTokenProvenance',
   'incompleteSourceCoverage',
   'wholeSessionAsrCallsWhenComplete',
   'analysisBeforeCanonicalCommit',
+  'committedSyntheticSeamErrors',
+  'rendererInferenceCallbacks',
+  'unexpectedPrivateReportFields',
 ]);
 
 const isForbiddenKey = (key: string): boolean =>
@@ -837,22 +1109,11 @@ const safeNumber = (value: unknown): number => {
   return value;
 };
 
-const safePublicPin = (value: unknown): string => {
-  if (
-    typeof value !== 'string' ||
-    value.length === 0 ||
-    value.length > 128 ||
-    !/^[a-zA-Z0-9._:+@-]+$/.test(value)
-  ) {
-    throw new Error('private_report_value');
-  }
-  return value;
-};
-
 const sanitizeMetrics = (
   value: unknown,
 ): Record<string, number | boolean | string> => {
   const raw = expectObject(value);
+  exactKeys(raw, [...metricKeys]);
   const safe: Record<string, number | boolean | string> = {};
   for (const [key, metric] of Object.entries(raw)) {
     if (!metricKeys.has(key)) throw new Error('private_report_field');
@@ -864,10 +1125,15 @@ const sanitizeMetrics = (
 
 const sanitizeInvariants = (value: unknown): Record<string, number> => {
   const raw = expectObject(value);
+  exactKeys(raw, [...invariantKeys]);
   const safe: Record<string, number> = {};
   for (const [key, invariant] of Object.entries(raw)) {
     if (!invariantKeys.has(key)) throw new Error('private_report_field');
-    safe[key] = safeNumber(invariant);
+    const number = safeNumber(invariant);
+    if (!Number.isSafeInteger(number) || number < 0) {
+      throw new Error('private_report_value');
+    }
+    safe[key] = number;
   }
   return safe;
 };
@@ -936,6 +1202,9 @@ export const sanitizeLiveReplayReport = (
     !Number.isSafeInteger(meetingCount) ||
     !Number.isSafeInteger(sourceCount) ||
     !Number.isSafeInteger(audioMinutesRoundedTo5) ||
+    meetingCount < 0 ||
+    sourceCount < 0 ||
+    audioMinutesRoundedTo5 < 0 ||
     audioMinutesRoundedTo5 % 5 !== 0
   ) {
     throw new Error('private_report_value');
@@ -950,6 +1219,50 @@ export const sanitizeLiveReplayReport = (
   const engines = expectObject(raw.engines);
   exactKeys(engines, ['mlxProduction', 'parakeetSliding']);
 
+  if (
+    typeof runtime.fluidAudioVersion !== 'string' ||
+    !/^\d+\.\d+\.\d+$/.test(runtime.fluidAudioVersion) ||
+    typeof runtime.fluidAudioRevision !== 'string' ||
+    !/^[0-9a-f]{40}$/.test(runtime.fluidAudioRevision) ||
+    runtime.modelId !== 'parakeet-tdt-0.6b-v3' ||
+    (runtime.configId !== 'pinned-default-v1' &&
+      runtime.configId !== 'low-latency-v1')
+  ) {
+    throw new Error('private_report_value');
+  }
+  const sanitizedEngines = {
+    mlxProduction: sanitizeEngine(engines.mlxProduction),
+    parakeetSliding: sanitizeEngine(engines.parakeetSliding),
+  };
+  const invariants = sanitizeInvariants(raw.invariants);
+  const failures = sanitizeFailures(raw.failures);
+  const bothPass = Object.values(sanitizedEngines).every(
+    ({ status }) => status === 'pass',
+  );
+  const anyUnavailable = Object.values(sanitizedEngines).some(
+    ({ status }) => status === 'unavailable',
+  );
+  const hasUnavailableReason = failures.some((failure) =>
+    [
+      'insufficient_repetitions',
+      'insufficient_corpus',
+      'dependency_unavailable',
+      'resource_evidence_unavailable',
+      'engine_order_unverified',
+      'mlx_queue_unverified',
+      'mlx_baseline_unavailable',
+    ].includes(failure),
+  );
+  if (
+    (bothPass &&
+      (failures.length !== 0 ||
+        Object.values(invariants).some((value) => value !== 0))) ||
+    (!bothPass && failures.length === 0) ||
+    (anyUnavailable && !hasUnavailableReason)
+  ) {
+    throw new Error('private_report_consistency');
+  }
+
   return {
     schemaVersion: 1,
     benchmark: 'parakeet_live_causal_replay',
@@ -960,17 +1273,17 @@ export const sanitizeLiveReplayReport = (
     },
     corpus: { meetingCount, sourceCount, audioMinutesRoundedTo5 },
     runtime: {
-      fluidAudioVersion: safePublicPin(runtime.fluidAudioVersion),
-      fluidAudioRevision: safePublicPin(runtime.fluidAudioRevision),
-      modelId: safePublicPin(runtime.modelId),
-      configId: safePublicPin(runtime.configId),
+      fluidAudioVersion: runtime.fluidAudioVersion,
+      fluidAudioRevision: runtime.fluidAudioRevision,
+      modelId: runtime.modelId,
+      configId: runtime.configId,
     },
     engines: {
-      mlxProduction: sanitizeEngine(engines.mlxProduction),
-      parakeetSliding: sanitizeEngine(engines.parakeetSliding),
+      mlxProduction: sanitizedEngines.mlxProduction,
+      parakeetSliding: sanitizedEngines.parakeetSliding,
     },
-    invariants: sanitizeInvariants(raw.invariants),
-    failures: sanitizeFailures(raw.failures),
+    invariants,
+    failures,
   };
 };
 
