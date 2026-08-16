@@ -1,22 +1,34 @@
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { NativeEvent } from '../../electron/transcription/nativeJsonLineProcess.ts';
 import {
+  CommittedPreviewState,
   type MlxReplayRun,
   OnlineCommittedPrefixTracker,
   type ParakeetReplayRun,
   type PreparedMeeting,
   type PrivateReplayDependencies,
+  bucketStreamEvents,
   buildGapInjections,
   buildPrivateLiveReplayComparison,
   buildQuarterSecondFrames,
   buildResourceSoakEvidence,
+  deriveFirstSealedActivitySeconds,
   orchestratePrivateReplay,
+  parsePrivateLiveReplayOptions,
+  replayEvidenceDigest,
   runPrivateLiveReplay,
   runReplayCli,
+  scoreRecognizerSeams,
   validateCoverageGapProbe,
   validateResourceTimeline,
 } from '../../scripts/run_private_parakeet_live_replay.ts';
@@ -101,7 +113,7 @@ const update = (source: 'mic' | 'system', end: number): NativeEvent => ({
   generation: 1,
   revision: 1,
   event: 'stream_update',
-  qualifiesPriorTentative: false,
+  qualifiesPriorTentative: true,
   text: 'stable',
   confidence: 1,
   audioEndSeconds: end,
@@ -133,6 +145,18 @@ const fakeDependencies = (mlxAvailable: boolean, cleanupFailure = false) => {
       const run: ParakeetReplayRun = {
         openPair: async (meeting) => {
           topology.push(`open:${meeting.meeting.id}:mic+system`);
+          return {
+            mic: {
+              streamId: 'mic-fake',
+              source: 'mic',
+              generation: meeting.meeting.sealedGeneration,
+            },
+            system: {
+              streamId: 'system-fake',
+              source: 'system',
+              generation: meeting.meeting.sealedGeneration,
+            },
+          };
         },
         append: async (source, frame) => {
           if (frame.availableAtSeconds > releasedSourceSeconds)
@@ -142,18 +166,20 @@ const fakeDependencies = (mlxAvailable: boolean, cleanupFailure = false) => {
           appendOrder.push(`${source}:${frame.sequence}`);
           await Promise.resolve();
           pending -= 1;
-          return frame.sequence === 0 ? [update(source, frame.endSeconds)] : [];
+          return frame.sequence % 44 === 0
+            ? [update(source, frame.endSeconds)]
+            : [];
         },
         flush: async () => ({
           finalPreview: 'stable',
-          timedTokens: [{ token: 'stable', atSeconds: 1 }],
+          timedTokens: [{ token: 'stable', atSeconds: 11 }],
           degradations: [],
           events: [],
         }),
         batch: async () => ({
           status: 'available',
           text: 'stable',
-          timedTokens: [{ token: 'stable', atSeconds: 1 }],
+          timedTokens: [{ token: 'stable', atSeconds: 11 }],
         }),
         probeGap: async (source, gap) => ({
           events: [
@@ -215,7 +241,7 @@ const fakeDependencies = (mlxAvailable: boolean, cleanupFailure = false) => {
         batch: async () => ({
           status: 'available',
           text: 'stable',
-          timedTokens: [{ token: 'stable', atSeconds: 5 }],
+          timedTokens: [{ token: 'stable', atSeconds: 11 }],
         }),
         sample: (sourceSeconds, expectedWallTimeMs) => ({
           sourceSeconds,
@@ -350,9 +376,156 @@ describe('single private replay orchestration core', () => {
       ),
     ).rejects.toThrow('cleanup_failed');
   }, 30_000);
+
+  it('fails closed when openPair does not reserve both stream identities', async () => {
+    const { manifest } = fixture();
+    const fake = fakeDependencies(true);
+    const startParakeet = fake.dependencies.startParakeet;
+    fake.dependencies.startParakeet = async (config, repetition) => {
+      const run = await startParakeet(config, repetition);
+      return { ...run, openPair: async () => undefined };
+    };
+    await expect(
+      orchestratePrivateReplay(
+        manifest,
+        { mode: 'causal', repetitions: 3 },
+        fake.dependencies,
+      ),
+    ).rejects.toThrow('benchmark_failed');
+  }, 30_000);
 });
 
 describe('resource, gap, and retention evidence', () => {
+  it('exposes the documented replay command', () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+    ) as { scripts?: Record<string, unknown> };
+    expect(packageJson.scripts?.['replay:parakeet-live']).toContain(
+      'run_private_parakeet_live_replay.ts',
+    );
+  });
+
+  it('buckets native events by stream identity and retains only committed preview state', () => {
+    const stream = {
+      streamId: 'mic-r1-g1',
+      source: 'mic' as const,
+      generation: 1,
+    };
+    const foreign = {
+      ...stream,
+      streamId: 'system-r1-g1',
+      source: 'system' as const,
+    };
+    const events = [
+      { ...update('mic', 1), ...stream, text: 'tentative words' },
+      {
+        ...update('mic', 2),
+        ...stream,
+        revision: 2,
+        qualifiesPriorTentative: true,
+        text: 'different tentative tail',
+      },
+      { ...update('system', 2), ...foreign, text: 'foreign words' },
+    ];
+    expect(bucketStreamEvents(events, stream)).toHaveLength(2);
+
+    const committed = new CommittedPreviewState();
+    committed.observe(events[0]);
+    committed.observe(events[1]);
+    expect(committed.snapshot()).toBe('tentative words');
+  });
+
+  it('derives causal activity and seam scoring from recognizer boundaries', () => {
+    expect(
+      deriveFirstSealedActivitySeconds([
+        {
+          sequence: 0,
+          startSeconds: 0,
+          endSeconds: 0.25,
+          availableAtSeconds: 0.25,
+        },
+        {
+          sequence: 1,
+          startSeconds: 0.25,
+          endSeconds: 0.5,
+          availableAtSeconds: 0.5,
+        },
+      ]),
+    ).toBe(0.25);
+    const seams = scoreRecognizerSeams(
+      [{ token: 'one', atSeconds: 11 }],
+      [{ token: 'one', atSeconds: 11 }],
+      13,
+    );
+    expect(seams.referenceTokens).toBeGreaterThan(0);
+  });
+
+  it('parses preflight, promotion, and realtime soak stages without allowing arbitrary runs', () => {
+    const paths = {
+      manifestPath: '/tmp/manifest.json',
+      outputPath: '/tmp/report.json',
+      selectionPath: '/tmp/selection.json',
+    };
+    expect(
+      parsePrivateLiveReplayOptions([
+        '--manifest',
+        paths.manifestPath,
+        '--stage',
+        'preflight',
+        '--repetitions',
+        '1',
+        '--selection',
+        paths.selectionPath,
+      ]),
+    ).toMatchObject({
+      stage: 'preflight',
+      repetitions: 1,
+      outputPath: paths.selectionPath,
+    });
+    expect(() =>
+      parsePrivateLiveReplayOptions([
+        '--manifest',
+        paths.manifestPath,
+        '--out',
+        paths.outputPath,
+        '--stage',
+        'promotion',
+        '--config',
+        'pinned-default',
+        '--repetitions',
+        '2',
+      ]),
+    ).toThrow('options_invalid');
+  });
+
+  it('binds selection evidence to the activated model and runtime bytes', () => {
+    const { manifest } = fixture();
+    const version = 'fluidaudio-0.15.5-asr-real-ctc-real-int8-verified1';
+    mkdirSync(path.join(manifest.runtime.modelRoot, 'versions', version), {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(manifest.runtime.modelRoot, 'active.json'),
+      JSON.stringify({ version }),
+    );
+    const modelFile = path.join(
+      manifest.runtime.modelRoot,
+      'versions',
+      version,
+      'model.bin',
+    );
+    writeFileSync(modelFile, 'model-revision-a');
+    const first = replayEvidenceDigest(manifest);
+    writeFileSync(modelFile, 'model-revision-a');
+    expect(replayEvidenceDigest(manifest)).toBe(first);
+    writeFileSync(modelFile, 'model-revision-b');
+    expect(replayEvidenceDigest(manifest)).not.toBe(first);
+    writeFileSync(manifest.runtime.executablePath, 'runtime-revision-b');
+    expect(replayEvidenceDigest(manifest)).not.toBe(first);
+    writeFileSync(manifest.meetings[0].sources.micPath, 'different-mic');
+    expect(replayEvidenceDigest(manifest)).not.toBe(first);
+  });
+
   it('requires the exact source grid, final sample, wall order, and jitter', () => {
     const valid = [0, 1, 2, 3].map((sourceSeconds) => ({
       sourceSeconds,

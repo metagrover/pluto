@@ -1,21 +1,26 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import type { NativeEvent } from '../electron/transcription/nativeJsonLineProcess.ts';
 import {
+  type LiveConfigSelection,
   type LiveReplayPublication,
   type LiveReplayRepetition,
   type LiveReplayResourceSoak,
   type LiveReplayVerdict,
   type PrivateLiveReplayReport,
+  buildLiveConfigSelection,
   buildPrivateLiveReplayReport,
   evaluateLiveReplay,
+  sanitizeLiveConfigSelection,
   sanitizeLiveReplayReport,
 } from '../src/services/liveTranscriptionReplayMetrics.ts';
+import { reconcileCanonicalTranscript } from '../src/utils/transcriptIntegrity.ts';
 import {
   type PrivateLiveReplayManifest,
   type PrivateLiveReplayMeeting,
@@ -24,16 +29,140 @@ import {
 } from './validate_private_parakeet_live_manifest.ts';
 
 export type ReplayMode = 'causal' | 'realtime-soak';
+export type ReplayStage = 'preflight' | 'promotion' | 'realtime-soak';
 export type ReplaySource = 'mic' | 'system';
 export type ParakeetConfig = 'pinned-default' | 'low-latency-2s';
 type Engine = 'mlxProduction' | 'parakeetPinnedDefault' | 'parakeetLowLatency';
 type TimedToken = { token: string; atSeconds: number };
+
+const replayJoinKey = (
+  repetition: number,
+  meetingId: string,
+  source: ReplaySource,
+) => `${repetition}:${meetingId}:${source}`;
+
+const sha256File = (filePath: string) => {
+  const digest = createHash('sha256');
+  const handle = fs.openSync(
+    filePath,
+    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+  );
+  const buffer = Buffer.allocUnsafe(64 * 1024);
+  try {
+    for (;;) {
+      const bytesRead = fs.readSync(handle, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      digest.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    fs.closeSync(handle);
+  }
+  return digest.digest('hex');
+};
+
+const directoryFingerprint = (root: string) => {
+  const digest = createHash('sha256');
+  const visit = (directory: string) => {
+    for (const entry of fs
+      .readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const filePath = path.join(directory, entry.name);
+      const relative = path.relative(root, filePath);
+      if (entry.isDirectory()) visit(filePath);
+      else if (entry.isFile()) {
+        const stat = fs.statSync(filePath);
+        digest.update(`${relative}:${stat.size}:${sha256File(filePath)}`);
+      }
+    }
+  };
+  visit(root);
+  return digest.digest('hex');
+};
+
+export const replayEvidenceDigest = (manifest: PrivateLiveReplayManifest) => {
+  const repositoryRoot = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '..',
+  );
+  const activationPath = path.join(manifest.runtime.modelRoot, 'active.json');
+  const activation = JSON.parse(fs.readFileSync(activationPath, 'utf8')) as {
+    version?: unknown;
+  };
+  if (typeof activation.version !== 'string')
+    throw new Error('options_invalid');
+  const pinnedVersion = activation.version;
+  const fluidAudioVersion = /^fluidaudio-([0-9]+\.[0-9]+\.[0-9]+)-/u.exec(
+    pinnedVersion,
+  )?.[1];
+  if (!fluidAudioVersion) throw new Error('options_invalid');
+  const modelVersionRoot = path.join(
+    manifest.runtime.modelRoot,
+    'versions',
+    pinnedVersion,
+  );
+  const fluidAudioRoot = path.join(
+    repositoryRoot,
+    'native',
+    'parakeet-runtime',
+    'vendor',
+    'FluidAudio',
+  );
+  const corpusDigest = createHash('sha256')
+    .update(
+      JSON.stringify(
+        manifest.meetings
+          .map((meeting) => {
+            const artifact = (filePath: string) => ({
+              bytes: fs.statSync(filePath).size,
+              checksum: sha256File(filePath),
+            });
+            return {
+              canonicalMeetingIdentity: meeting.id,
+              sealedGeneration: meeting.sealedGeneration,
+              sealedDurationSeconds: meeting.sealedDurationSeconds,
+              mic: artifact(meeting.sources.micPath),
+              system: artifact(meeting.sources.systemPath),
+              proxy: artifact(meeting.proxyTranscriptPath),
+            };
+          })
+          .sort((left, right) =>
+            left.canonicalMeetingIdentity.localeCompare(
+              right.canonicalMeetingIdentity,
+            ),
+          ),
+      ),
+    )
+    .digest('hex');
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        runnerRevision: sha256File(fileURLToPath(import.meta.url)),
+        thresholdRevision: sha256File(
+          path.join(
+            repositoryRoot,
+            'src/services/liveTranscriptionReplayMetrics.ts',
+          ),
+        ),
+        pinnedModelIdAndRevision: pinnedVersion,
+        pinnedModelContents: directoryFingerprint(modelVersionRoot),
+        runtimeExecutableRevision: sha256File(manifest.runtime.executablePath),
+        fluidAudioVersion,
+        fluidAudioRevision: directoryFingerprint(fluidAudioRoot),
+        aecConfigRevision: 'aec-cleaned-input-v1',
+        corpusDigest,
+      }),
+    )
+    .digest('hex');
+};
 
 export type PrivateLiveReplayOptions = {
   manifestPath: string;
   mode: ReplayMode;
   repetitions: number;
   outputPath: string;
+  stage?: ReplayStage;
+  config?: ParakeetConfig;
+  selectionPath?: string;
 };
 
 export type ReplayFrame = {
@@ -88,7 +217,9 @@ type DiagnosticResult =
   | { status: 'unavailable' };
 
 export type ParakeetReplayRun = {
-  openPair(prepared: PreparedMeeting): Promise<void>;
+  openPair(
+    prepared: PreparedMeeting,
+  ): Promise<Partial<Record<ReplaySource, StreamIdentity>> | undefined>;
   append(
     source: ReplaySource,
     frame: ReplayFrame,
@@ -341,28 +472,32 @@ export const timedAgreement = (
   };
 };
 
-const scoreChunkSeams = (
+const RECOGNIZER_WINDOW_SECONDS = 11;
+const RECOGNIZER_CONTEXT_SECONDS = 2;
+
+export const scoreRecognizerSeams = (
   candidate: readonly TimedToken[],
   reference: readonly TimedToken[],
   durationSeconds: number,
-  intervalSeconds = FRAME_SECONDS,
 ) => {
   let duplicateTokens = 0;
   let omittedTokens = 0;
   let referenceTokens = 0;
   for (
-    let boundary = intervalSeconds;
+    let boundary = RECOGNIZER_WINDOW_SECONDS;
     boundary < durationSeconds;
-    boundary += intervalSeconds
+    boundary += RECOGNIZER_WINDOW_SECONDS
   ) {
     const candidateWindow = candidate
       .filter(
-        ({ atSeconds }) => Math.abs(atSeconds - boundary) <= FRAME_SECONDS,
+        ({ atSeconds }) =>
+          Math.abs(atSeconds - boundary) <= RECOGNIZER_CONTEXT_SECONDS,
       )
       .map(({ token }) => token);
     const referenceWindow = reference
       .filter(
-        ({ atSeconds }) => Math.abs(atSeconds - boundary) <= FRAME_SECONDS,
+        ({ atSeconds }) =>
+          Math.abs(atSeconds - boundary) <= RECOGNIZER_CONTEXT_SECONDS,
       )
       .map(({ token }) => token);
     const comparison = compareTokens(candidateWindow, referenceWindow);
@@ -372,6 +507,56 @@ const scoreChunkSeams = (
   }
   return { duplicateTokens, omittedTokens, referenceTokens };
 };
+
+export const deriveFirstSealedActivitySeconds = (
+  frames: readonly ReplayFrame[],
+): number => {
+  const first = frames.find(
+    (frame) =>
+      Number.isFinite(frame.availableAtSeconds) &&
+      frame.availableAtSeconds >= frame.endSeconds &&
+      frame.endSeconds > frame.startSeconds,
+  );
+  if (!first) throw new Error('benchmark_failed');
+  return first.availableAtSeconds;
+};
+
+type StreamIdentity = Pick<NativeEvent, 'streamId' | 'source' | 'generation'>;
+
+export const bucketStreamEvents = (
+  events: readonly NativeEvent[],
+  identity: StreamIdentity,
+): NativeEvent[] =>
+  events.filter(
+    (event) =>
+      event.streamId === identity.streamId &&
+      event.source === identity.source &&
+      event.generation === identity.generation,
+  );
+
+export class CommittedPreviewState {
+  private committed = '';
+  private tentative: string | undefined;
+
+  observe(event: NativeEvent): string {
+    if (event.event !== 'stream_update') return this.committed;
+    if (event.qualifiesPriorTentative && this.tentative) {
+      this.committed = [this.committed, this.tentative]
+        .filter(Boolean)
+        .join(' ');
+    }
+    this.tentative = event.text;
+    return this.committed;
+  }
+
+  finish(finalPreview: string): string {
+    return [this.committed, finalPreview].filter(Boolean).join(' ');
+  }
+
+  snapshot(): string {
+    return this.committed;
+  }
+}
 
 export const proveTargetedRepair = (
   candidateBeforeRepair: readonly TimedToken[],
@@ -567,28 +752,95 @@ export const parsePrivateLiveReplayOptions = (
   argv: readonly string[],
 ): PrivateLiveReplayOptions => {
   const normalized = argv[0] === '--' ? argv.slice(1) : argv;
-  const known = new Set(['--manifest', '--mode', '--repetitions', '--out']);
+  const known = new Set([
+    '--manifest',
+    '--mode',
+    '--repetitions',
+    '--out',
+    '--stage',
+    '--config',
+    '--selection',
+  ]);
   for (let index = 0; index < normalized.length; index += 2)
     if (!known.has(normalized[index]) || !normalized[index + 1])
       throw new Error('options_invalid');
   const manifestPath = parseOption(normalized, '--manifest') as string;
-  const outputPath = parseOption(normalized, '--out') as string;
-  const mode = parseOption(normalized, '--mode') as ReplayMode;
+  const stage = parseOption(normalized, '--stage', false) as
+    | ReplayStage
+    | undefined;
+  const requestedOutputPath = parseOption(normalized, '--out', !stage);
+  const mode = parseOption(normalized, '--mode', !stage) as ReplayMode;
+  const config = parseOption(normalized, '--config', false) as
+    | ParakeetConfig
+    | undefined;
+  const selectionPath = parseOption(normalized, '--selection', false);
   const repetitionText = parseOption(normalized, '--repetitions', false);
   const repetitions = repetitionText
     ? Number(repetitionText)
-    : mode === 'realtime-soak'
+    : stage === 'preflight' ||
+        stage === 'realtime-soak' ||
+        mode === 'realtime-soak'
       ? 1
       : 3;
+  if (stage) {
+    const validStage =
+      (stage === 'preflight' &&
+        !config &&
+        !!selectionPath &&
+        repetitions === 1) ||
+      (stage === 'promotion' &&
+        !!config &&
+        !!selectionPath &&
+        repetitions === 3) ||
+      (stage === 'realtime-soak' &&
+        !!config &&
+        !!selectionPath &&
+        repetitions === 1);
+    if (
+      !path.isAbsolute(manifestPath) ||
+      (requestedOutputPath !== undefined &&
+        !path.isAbsolute(requestedOutputPath)) ||
+      !validStage ||
+      (config !== undefined &&
+        config !== 'pinned-default' &&
+        config !== 'low-latency-2s') ||
+      (selectionPath !== undefined && !path.isAbsolute(selectionPath))
+    )
+      throw new Error('options_invalid');
+    if (
+      stage === 'preflight' &&
+      requestedOutputPath !== undefined &&
+      requestedOutputPath !== selectionPath
+    )
+      throw new Error('options_invalid');
+    const outputPath =
+      stage === 'preflight' ? selectionPath : requestedOutputPath;
+    if (!outputPath) throw new Error('options_invalid');
+    return {
+      manifestPath,
+      outputPath,
+      mode: stage === 'realtime-soak' ? 'realtime-soak' : 'causal',
+      repetitions,
+      stage,
+      config,
+      selectionPath,
+    };
+  }
   if (
     !path.isAbsolute(manifestPath) ||
-    !path.isAbsolute(outputPath) ||
+    !requestedOutputPath ||
+    !path.isAbsolute(requestedOutputPath) ||
     (mode !== 'causal' && mode !== 'realtime-soak') ||
     !Number.isSafeInteger(repetitions) ||
     (mode === 'causal' ? repetitions !== 3 : repetitions !== 1)
   )
     throw new Error('options_invalid');
-  return { manifestPath, outputPath, mode, repetitions };
+  return {
+    manifestPath,
+    outputPath: requestedOutputPath,
+    mode,
+    repetitions,
+  };
 };
 
 const emptyDiagnostic = {
@@ -612,6 +864,7 @@ const makeRepetition = (input: {
   coverageSeconds?: number;
   repair: LiveReplayRepetition['repair'];
   proxy: LiveReplayRepetition['proxy'];
+  firstSealedActivitySeconds: number;
 }): LiveReplayRepetition => {
   const coverageSeconds = input.coverageSeconds ?? FRAME_SECONDS;
   const batchAvailable = input.batch.status === 'available';
@@ -629,15 +882,14 @@ const makeRepetition = (input: {
     ? timedAgreement(input.candidate, batchTokens, 5)
     : undefined;
   const seams = batchAvailable
-    ? scoreChunkSeams(
+    ? scoreRecognizerSeams(
         input.candidate,
         batchTokens,
         input.meeting.sealedDurationSeconds,
-        coverageSeconds,
       )
     : undefined;
   return {
-    firstSealedActivitySeconds: 0,
+    firstSealedActivitySeconds: input.firstSealedActivitySeconds,
     publications: input.publications,
     ...input.tracker.finish(),
     acceptedSequences: input.accepted,
@@ -722,6 +974,35 @@ const loadProxy = (proxyPath: string): TimedToken[] => {
   }
 };
 
+/** Canonicalize both capture sources before any accuracy diagnostic. */
+const canonicalTimedTokens = (
+  bySource: Record<ReplaySource, readonly TimedToken[]>,
+) => {
+  const segment = (source: ReplaySource, timed: TimedToken, index: number) => ({
+    startTime: timed.atSeconds,
+    endTime: timed.atSeconds + 0.01,
+    text: timed.token,
+    speaker: source === 'mic' ? 'Me' : 'Them',
+    index,
+  });
+  const micSegments = bySource.mic.map((timed, index) =>
+    segment('mic', timed, index),
+  );
+  const systemSegments = bySource.system.map((timed, index) =>
+    segment('system', timed, index),
+  );
+  return reconcileCanonicalTranscript({
+    mixedSegments: [...micSegments, ...systemSegments],
+    micSegments,
+    systemSegments,
+    provisionalSegments: [],
+    activityWindows: [],
+  }).segments.map(({ text, startTime }) => ({
+    token: text,
+    atSeconds: startTime,
+  }));
+};
+
 const proxyMetrics = (
   candidate: readonly TimedToken[],
   proxy: readonly TimedToken[],
@@ -801,18 +1082,22 @@ const collectEvents = (
   events: readonly NativeEvent[],
   publications: LiveReplayPublication[],
   tracker: OnlineCommittedPrefixTracker,
+  committed: CommittedPreviewState,
   completedAtSeconds: number,
 ) => {
   for (const event of events) {
     if (event.event !== 'stream_update') continue;
-    const change = tracker.observe(event.text);
+    const before = committed.snapshot();
+    const preview = committed.observe(event);
+    if (preview === before) continue;
+    const change = tracker.observe(preview);
     publications.push({
       availableAtSeconds: event.audioEndSeconds,
       lookaheadReadyAtSeconds: event.audioEndSeconds,
       completedAtSeconds,
       audioEndSeconds: event.audioEndSeconds,
       changed: true,
-      activeSpeech: tokens(event.text).length > 0,
+      activeSpeech: tokens(preview).length > 0,
       newTokenCount: change.newTokenCount,
       rollbackTokens: change.rollbackTokens,
       volatileOperationCount: Number(change.prefixViolation),
@@ -855,7 +1140,20 @@ const runParakeetConfig = async (input: {
   let failure: unknown;
   try {
     for (const prepared of input.meetings) {
-      await run.openPair(prepared);
+      const streamIdentities = await run.openPair(prepared);
+      if (
+        !streamIdentities ||
+        SOURCES.some((source) => {
+          const identity = streamIdentities[source];
+          return (
+            !identity ||
+            !identity.streamId ||
+            identity.source !== source ||
+            identity.generation !== prepared.meeting.sealedGeneration
+          );
+        })
+      )
+        throw new Error('benchmark_failed');
       const startedWallMs = input.dependencies.nowWallTimeMs();
       const publications = Object.fromEntries(
         SOURCES.map((source) => [source, [] as LiveReplayPublication[]]),
@@ -863,6 +1161,9 @@ const runParakeetConfig = async (input: {
       const trackers = Object.fromEntries(
         SOURCES.map((source) => [source, new OnlineCommittedPrefixTracker()]),
       ) as Record<ReplaySource, OnlineCommittedPrefixTracker>;
+      const committedPreviews = Object.fromEntries(
+        SOURCES.map((source) => [source, new CommittedPreviewState()]),
+      ) as Record<ReplaySource, CommittedPreviewState>;
       const priorUpdates = {
         mic: undefined as { text: string; endSeconds: number } | undefined,
         system: undefined as { text: string; endSeconds: number } | undefined,
@@ -876,7 +1177,8 @@ const runParakeetConfig = async (input: {
         events: readonly NativeEvent[],
         completedAtSeconds: number,
       ) => {
-        for (const event of events) {
+        const scoped = bucketStreamEvents(events, streamIdentities[source]);
+        for (const event of scoped) {
           if (event.event !== 'stream_update') continue;
           const prior = priorUpdates[source];
           if (event.qualifiesPriorTentative && prior) {
@@ -893,9 +1195,10 @@ const runParakeetConfig = async (input: {
           };
         }
         collectEvents(
-          events,
+          scoped,
           publications[source],
           trackers[source],
+          committedPreviews[source],
           completedAtSeconds,
         );
       };
@@ -983,14 +1286,14 @@ const runParakeetConfig = async (input: {
         ),
       ) as Record<ReplaySource, StreamFlush>;
       const proxy = loadProxy(prepared.meeting.proxyTranscriptPath);
-      for (const source of SOURCES) {
+      for (const source of SOURCES)
         collectStreamEvents(
           source,
           flushes[source].events,
           prepared.meeting.sealedDurationSeconds +
             (input.dependencies.nowWallTimeMs() - startedWallMs) / 1_000,
         );
-        trackers[source].observe(flushes[source].finalPreview);
+      for (const source of SOURCES) {
         const prior = priorUpdates[source];
         if (prior)
           eventTimedTokens[source].push(
@@ -999,14 +1302,41 @@ const runParakeetConfig = async (input: {
               atSeconds: prior.endSeconds,
             })),
           );
-        const candidate =
-          eventTimedTokens[source].length > 0
-            ? eventTimedTokens[source]
-            : [...flushes[source].timedTokens];
+      }
+      const candidates = Object.fromEntries(
+        SOURCES.map(
+          (source) =>
+            [
+              source,
+              eventTimedTokens[source].length > 0
+                ? eventTimedTokens[source]
+                : [...flushes[source].timedTokens],
+            ] as const,
+        ),
+      ) as Record<ReplaySource, TimedToken[]>;
+      const canonicalCandidate = canonicalTimedTokens(candidates);
+      const canonicalMlx = canonicalTimedTokens(
+        Object.fromEntries(
+          SOURCES.map(
+            (source) =>
+              [
+                source,
+                input.mlxByMeeting.get(
+                  replayJoinKey(input.repetition, prepared.meeting.id, source),
+                ) ?? [],
+              ] as const,
+          ),
+        ) as Record<ReplaySource, TimedToken[]>,
+      );
+      for (const source of SOURCES) {
+        trackers[source].observe(
+          committedPreviews[source].finish(flushes[source].finalPreview),
+        );
+        const candidate = candidates[source];
         const batch = await run.batch(source);
         if (
           batch.status === 'unavailable' ||
-          scoreChunkSeams(
+          scoreRecognizerSeams(
             candidate,
             batch.timedTokens,
             prepared.meeting.sealedDurationSeconds,
@@ -1043,6 +1373,13 @@ const runParakeetConfig = async (input: {
             repairedTokenF1 = 0;
             continue;
           }
+          if (
+            repair.timedTokens.some(
+              ({ atSeconds }) =>
+                atSeconds < repairStart || atSeconds > repairEnd,
+            )
+          )
+            throw new Error('benchmark_failed');
           const before = candidate.filter(
             ({ atSeconds }) => atSeconds < repairStart,
           );
@@ -1061,10 +1398,15 @@ const runParakeetConfig = async (input: {
           repairedTokenF1 = Math.min(repairedTokenF1, proof.repairedTokenF1);
           outsideContextTokenChanges += proof.outsideContextTokenChanges;
         }
-        const mlx = input.mlxByMeeting.get(`${prepared.meeting.id}:${source}`);
+        const mlx = input.mlxByMeeting.get(
+          replayJoinKey(input.repetition, prepared.meeting.id, source),
+        );
         collected.repetitions.push(
           makeRepetition({
             meeting: prepared.meeting,
+            firstSealedActivitySeconds: deriveFirstSealedActivitySeconds(
+              prepared.frames[source],
+            ),
             publications: publications[source],
             tracker: trackers[source],
             candidate,
@@ -1080,11 +1422,11 @@ const runParakeetConfig = async (input: {
               outsideContextTokenChanges,
               repairedTokenF1,
             },
-            proxy: proxyMetrics(candidate, proxy, mlx),
+            proxy: proxyMetrics(canonicalCandidate, proxy, canonicalMlx),
           }),
         );
         collected.timedByMeeting.set(
-          `${prepared.meeting.id}:${source}`,
+          replayJoinKey(input.repetition, prepared.meeting.id, source),
           candidate,
         );
       }
@@ -1224,15 +1566,15 @@ const runMlxRepetition = async (
           true,
         );
       const proxy = loadProxy(prepared.meeting.proxyTranscriptPath);
+      const canonicalMlx = canonicalTimedTokens(bySource);
       for (const source of SOURCES) {
         const batch = await created.run.batch(prepared, source);
         if (
           batch.status === 'unavailable' ||
-          scoreChunkSeams(
+          scoreRecognizerSeams(
             bySource[source],
             batch.timedTokens,
             prepared.meeting.sealedDurationSeconds,
-            5,
           ).referenceTokens === 0
         )
           collected.batchAvailable = false;
@@ -1241,6 +1583,9 @@ const runMlxRepetition = async (
         collected.repetitions.push(
           makeRepetition({
             meeting: prepared.meeting,
+            firstSealedActivitySeconds: deriveFirstSealedActivitySeconds(
+              prepared.frames[source],
+            ),
             publications: publications[source],
             tracker,
             candidate: bySource[source],
@@ -1257,11 +1602,11 @@ const runMlxRepetition = async (
               outsideContextTokenChanges: 0,
               repairedTokenF1: 0,
             },
-            proxy: proxyMetrics(bySource[source], proxy, bySource[source]),
+            proxy: proxyMetrics(canonicalMlx, proxy, canonicalMlx),
           }),
         );
         collected.timedByMeeting.set(
-          `${prepared.meeting.id}:${source}`,
+          replayJoinKey(repetition, prepared.meeting.id, source),
           bySource[source],
         );
       }
@@ -1294,7 +1639,10 @@ const unavailableVerdict = (): LiveReplayVerdict => ({
 
 export const orchestratePrivateReplay = async (
   manifest: PrivateLiveReplayManifest,
-  options: Pick<PrivateLiveReplayOptions, 'mode' | 'repetitions'>,
+  options: Pick<
+    PrivateLiveReplayOptions,
+    'mode' | 'repetitions' | 'stage' | 'config'
+  >,
   dependencies: PrivateReplayDependencies,
 ): Promise<PrivateLiveReplayComparison> => {
   const longest = [...manifest.meetings].sort(
@@ -1304,15 +1652,23 @@ export const orchestratePrivateReplay = async (
     options.mode === 'realtime-soak' ? [longest] : manifest.meetings;
   const prepared = await Promise.all(selected.map(dependencies.prepareMeeting));
   const orders =
-    options.mode === 'causal'
+    options.mode === 'causal' && options.repetitions === 3
       ? buildEngineRunOrder(options.repetitions)
-      : [
-          [
-            'mlxProduction',
-            'parakeetPinnedDefault',
-            'parakeetLowLatency',
-          ] as Engine[],
-        ];
+      : options.mode === 'causal'
+        ? [
+            [
+              'mlxProduction',
+              'parakeetPinnedDefault',
+              'parakeetLowLatency',
+            ] as Engine,
+          ]
+        : [
+            [
+              'mlxProduction',
+              'parakeetPinnedDefault',
+              'parakeetLowLatency',
+            ] as Engine[],
+          ];
   const mlxAll: CollectedEngine = {
     repetitions: [],
     timedByMeeting: new Map(),
@@ -1330,29 +1686,29 @@ export const orchestratePrivateReplay = async (
   };
   let mlxAvailable = true;
   for (let repetition = 0; repetition < orders.length; repetition += 1) {
-    for (const engine of orders[repetition]) {
-      if (engine === 'mlxProduction') {
-        const mlx = await runMlxRepetition(
-          repetition,
-          prepared,
-          dependencies,
-          options.mode,
-        );
-        if (!mlx) mlxAvailable = false;
-        else mergeCollected(mlxAll, mlx);
-        continue;
-      }
+    const mlx = await runMlxRepetition(
+      repetition,
+      prepared,
+      dependencies,
+      options.mode,
+    );
+    if (!mlx) mlxAvailable = false;
+    else mergeCollected(mlxAll, mlx);
+    for (const engine of orders[repetition].filter(
+      (candidate) => candidate !== 'mlxProduction',
+    )) {
       const config =
         engine === 'parakeetPinnedDefault'
           ? 'pinned-default'
           : 'low-latency-2s';
+      if (options.config && options.config !== config) continue;
       const result = await runParakeetConfig({
         config,
         repetition,
         meetings: prepared,
         dependencies,
         mode: options.mode,
-        mlxByMeeting: mlxAll.timedByMeeting,
+        mlxByMeeting: mlx?.timedByMeeting ?? new Map(),
       });
       mergeCollected(config === 'pinned-default' ? pinnedAll : lowAll, result);
     }
@@ -1850,6 +2206,7 @@ export const createProductionDependencies = (
             SOURCES.map((source) => client.open(identities[source])),
           );
           drain();
+          return identities;
         },
         append: async (source, frame) => {
           if (!frame.audioPath) throw new Error('benchmark_failed');
@@ -1999,8 +2356,8 @@ export const createProductionDependencies = (
         },
         close: async () => {
           unsubscribe();
-          client.close();
-          return child ? terminateChild(child) : 'cleanup_failed';
+          await client.close().catch(() => undefined);
+          return child ? await terminateChild(child) : 'cleanup_failed';
         },
       };
     },
@@ -2040,7 +2397,7 @@ export const assertReportTargetSafe = (
 
 export const writePrivateReplayReportAtomic = (
   outputPath: string,
-  report: PrivateLiveReplayComparison,
+  report: PrivateLiveReplayComparison | LiveConfigSelection,
 ) => {
   const parent = path.dirname(outputPath);
   const temporary = path.join(
@@ -2077,6 +2434,27 @@ export const writePrivateReplayReportAtomic = (
   }
 };
 
+const readRequiredSelection = (
+  selectionPath: string,
+  expectedDigest: string,
+  config: ParakeetConfig,
+) => {
+  let selection: LiveConfigSelection;
+  try {
+    selection = sanitizeLiveConfigSelection(
+      JSON.parse(fs.readFileSync(selectionPath, 'utf8')),
+    );
+  } catch {
+    throw new Error('options_invalid');
+  }
+  if (
+    selection.evidenceDigest !== expectedDigest ||
+    selection.selectedConfig !== config
+  )
+    throw new Error('options_invalid');
+  return selection;
+};
+
 export const runPrivateLiveReplay = async (
   options: PrivateLiveReplayOptions,
   injected?: {
@@ -2095,12 +2473,26 @@ export const runPrivateLiveReplay = async (
   );
   fs.chmodSync(temporaryRoot, 0o700);
   try {
-    return await orchestratePrivateReplay(
+    const digest = options.stage ? replayEvidenceDigest(manifest) : undefined;
+    if (options.stage === 'promotion' || options.stage === 'realtime-soak')
+      readRequiredSelection(
+        options.selectionPath as string,
+        digest as string,
+        options.config as ParakeetConfig,
+      );
+    const comparison = await orchestratePrivateReplay(
       manifest,
       options,
       injected?.dependencies ??
         createProductionDependencies(manifest, temporaryRoot),
     );
+    if (options.stage === 'preflight')
+      return buildLiveConfigSelection({
+        pinnedDefault: comparison.configs.pinnedDefault,
+        lowLatency: comparison.configs.lowLatency,
+        evidenceDigest: digest as string,
+      });
+    return comparison;
   } finally {
     fs.rmSync(temporaryRoot, { recursive: true, force: false });
   }

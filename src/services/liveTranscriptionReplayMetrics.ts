@@ -171,6 +171,115 @@ export type PrivateLiveReplayReport = {
   failures: string[];
 };
 
+export type LiveConfigSelectionReason =
+  | 'pinned_default_only_pass'
+  | 'low_latency_only_pass'
+  | 'both_pass_low_latency_wins'
+  | 'both_pass_pinned_default_wins'
+  | 'no_config_passed';
+
+export type LiveConfigSelection = {
+  schemaVersion: 1;
+  benchmark: 'parakeet_live_config_selection';
+  selectedConfig: 'pinned-default' | 'low-latency-2s' | null;
+  reason: LiveConfigSelectionReason;
+  evidenceDigest: string;
+};
+
+const isEvidenceDigest = (value: unknown): value is string =>
+  typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value);
+
+export const buildLiveConfigSelection = (input: {
+  pinnedDefault: LiveReplayVerdict;
+  lowLatency: LiveReplayVerdict;
+  evidenceDigest: string;
+  preferredConfig?: 'pinned-default' | 'low-latency-2s';
+}): LiveConfigSelection => {
+  if (!isEvidenceDigest(input.evidenceDigest))
+    throw new Error('private_report_value');
+  const pinnedPass = input.pinnedDefault.status === 'pass';
+  const lowPass = input.lowLatency.status === 'pass';
+  if (pinnedPass && lowPass) {
+    const pinnedWins = input.preferredConfig === 'pinned-default';
+    return {
+      schemaVersion: 1,
+      benchmark: 'parakeet_live_config_selection',
+      selectedConfig: pinnedWins ? 'pinned-default' : 'low-latency-2s',
+      reason: pinnedWins
+        ? 'both_pass_pinned_default_wins'
+        : 'both_pass_low_latency_wins',
+      evidenceDigest: input.evidenceDigest,
+    };
+  }
+  if (pinnedPass) {
+    return {
+      schemaVersion: 1,
+      benchmark: 'parakeet_live_config_selection',
+      selectedConfig: 'pinned-default',
+      reason: 'pinned_default_only_pass',
+      evidenceDigest: input.evidenceDigest,
+    };
+  }
+  if (lowPass) {
+    return {
+      schemaVersion: 1,
+      benchmark: 'parakeet_live_config_selection',
+      selectedConfig: 'low-latency-2s',
+      reason: 'low_latency_only_pass',
+      evidenceDigest: input.evidenceDigest,
+    };
+  }
+  return {
+    schemaVersion: 1,
+    benchmark: 'parakeet_live_config_selection',
+    selectedConfig: null,
+    reason: 'no_config_passed',
+    evidenceDigest: input.evidenceDigest,
+  };
+};
+
+export const sanitizeLiveConfigSelection = (
+  input: unknown,
+): LiveConfigSelection => {
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    throw new Error('private_report_value');
+  const value = input as Record<string, unknown>;
+  const keys = [
+    'schemaVersion',
+    'benchmark',
+    'selectedConfig',
+    'reason',
+    'evidenceDigest',
+  ];
+  if (
+    Object.keys(value).length !== keys.length ||
+    Object.keys(value).some((key) => !keys.includes(key)) ||
+    value.schemaVersion !== 1 ||
+    value.benchmark !== 'parakeet_live_config_selection' ||
+    !isEvidenceDigest(value.evidenceDigest)
+  ) {
+    throw new Error('private_report_value');
+  }
+  const selectedConfig = value.selectedConfig;
+  const reason = value.reason;
+  const valid =
+    (selectedConfig === 'pinned-default' &&
+      (reason === 'pinned_default_only_pass' ||
+        reason === 'both_pass_pinned_default_wins')) ||
+    (selectedConfig === 'low-latency-2s' &&
+      (reason === 'low_latency_only_pass' ||
+        reason === 'both_pass_low_latency_wins')) ||
+    (selectedConfig === null && reason === 'no_config_passed');
+  if (!valid) throw new Error('private_report_value');
+  return {
+    schemaVersion: 1,
+    benchmark: 'parakeet_live_config_selection',
+    selectedConfig,
+    reason,
+    evidenceDigest: value.evidenceDigest,
+  };
+};
+
 const requireFinite = (values: readonly number[]): void => {
   if (values.some((value) => !Number.isFinite(value))) {
     throw new Error('live_replay_invalid_number');

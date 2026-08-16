@@ -9,6 +9,7 @@ import {
   type LiveReplayRepetition,
   type LiveReplayResourceSoak,
   bootstrapConfidenceInterval,
+  buildLiveConfigSelection,
   buildPrivateLiveReplayReport,
   evaluateLiveReplay,
   percentile,
@@ -1188,6 +1189,23 @@ describe('live replay gates', () => {
 });
 
 describe('live replay report privacy', () => {
+  it('creates a content-free winner selection bound to immutable evidence', () => {
+    const pass = evaluatePassing();
+    expect(
+      buildLiveConfigSelection({
+        pinnedDefault: pass,
+        lowLatency: pass,
+        evidenceDigest: 'a'.repeat(64),
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      benchmark: 'parakeet_live_config_selection',
+      selectedConfig: 'low-latency-2s',
+      reason: 'both_pass_low_latency_wins',
+      evidenceDigest: 'a'.repeat(64),
+    });
+  });
+
   it('builds the exact allowlisted content-free report shape', () => {
     const verdict = evaluatePassing();
     const report = buildPrivateLiveReplayReport({
