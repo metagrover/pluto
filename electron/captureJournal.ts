@@ -83,6 +83,8 @@ export type CaptureIntervalLedgerEntry = {
 };
 
 export type CaptureAudioReceipt = {
+  /** Issued only after repair WAV and manifest mutation have both been synced. */
+  durable?: true;
   meetingId: string;
   generation: string;
   manifestRevision: number;
@@ -950,6 +952,7 @@ export const completeCaptureJournalCapturedChunk = async (
     return {
       manifest: next,
       receipt: {
+        durable: true,
         meetingId: manifest.meetingId,
         generation: manifest.generation,
         manifestRevision: next.revision,
