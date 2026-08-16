@@ -87,4 +87,5 @@ public enum SlidingWindowAcknowledgedIngestionError: Error, Equatable, Sendable 
     case operationInProgress
     case streamClosed
     case audioConversionFailed
+    case cancelled
 }

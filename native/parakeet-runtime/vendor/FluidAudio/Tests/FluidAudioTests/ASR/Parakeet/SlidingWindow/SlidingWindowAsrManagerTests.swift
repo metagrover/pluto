@@ -13,6 +13,74 @@ private func makeAcknowledgedIngestionBuffer(sampleCount: Int) -> AVAudioPCMBuff
     return buffer
 }
 
+private actor BlockingWindowProcessor {
+    private var started = false
+    private var released = false
+    private var cancellationObserved = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
+    private var cancellationWaiters: [CheckedContinuation<Void, Never>] = []
+    private(set) var callCount = 0
+
+    func process(
+        _ samples: [Float],
+        windowStartSample: Int,
+        isLastChunk: Bool
+    ) async -> Result<SlidingWindowTranscriptionUpdate, SlidingWindowFailureReason> {
+        callCount += 1
+        started = true
+        startWaiters.forEach { $0.resume() }
+        startWaiters.removeAll()
+
+        await withTaskCancellationHandler {
+            if !released {
+                await withCheckedContinuation { releaseWaiters.append($0) }
+            }
+        } onCancel: {
+            Task { await self.recordCancellation() }
+        }
+
+        return .success(
+            SlidingWindowTranscriptionUpdate(
+                text: "test-only update",
+                isConfirmed: false,
+                confidence: 0.9,
+                timestamp: Date()
+            )
+        )
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func waitUntilCancellationObserved() async {
+        if cancellationObserved { return }
+        await withCheckedContinuation { cancellationWaiters.append($0) }
+    }
+
+    func release() {
+        released = true
+        releaseWaiters.forEach { $0.resume() }
+        releaseWaiters.removeAll()
+    }
+
+    private func recordCancellation() {
+        cancellationObserved = true
+        cancellationWaiters.forEach { $0.resume() }
+        cancellationWaiters.removeAll()
+    }
+}
+
+private actor CompletionProbe {
+    private(set) var completed = false
+
+    func markCompleted() {
+        completed = true
+    }
+}
+
 final class SlidingWindowAsrManagerTests: XCTestCase {
     override func setUp() {
         super.setUp()
@@ -301,6 +369,178 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
         } catch {
             XCTAssertEqual(error as? SlidingWindowAcknowledgedIngestionError, .streamClosed)
         }
+    }
+
+    func testDetailedFinishWaitsForActiveAcknowledgedIngestionAndFlushesOnce() async throws {
+        let processor = BlockingWindowProcessor()
+        let manager = SlidingWindowAsrManager(
+            config: SlidingWindowAsrConfig(
+                chunkSeconds: 1,
+                leftContextSeconds: 0,
+                rightContextSeconds: 0
+            ),
+            acknowledgedWindowProcessor: { samples, start, isLast in
+                await processor.process(samples, windowStartSample: start, isLastChunk: isLast)
+            }
+        )
+        let updates = await manager.transcriptionUpdates
+        let updateCollector = Task {
+            var collected: [SlidingWindowTranscriptionUpdate] = []
+            for await update in updates { collected.append(update) }
+            return collected
+        }
+
+        let append = Task {
+            try await manager.ingestAudio(
+                makeAcknowledgedIngestionBuffer(sampleCount: 16_000),
+                receipt: "blocked-finish"
+            )
+        }
+        await processor.waitUntilStarted()
+
+        let finishProbe = CompletionProbe()
+        let finish = Task {
+            let report = try await manager.finishDetailed()
+            await finishProbe.markCompleted()
+            return report
+        }
+        for _ in 0..<1_000 where await manager.acceptsAcknowledgedIngestionForTesting {
+            await Task.yield()
+        }
+
+        let finishCompletedWhileBlocked = await finishProbe.completed
+        XCTAssertFalse(finishCompletedWhileBlocked)
+        do {
+            _ = try await manager.ingestAudio(
+                makeAcknowledgedIngestionBuffer(sampleCount: 1),
+                receipt: "after-finish-started"
+            )
+            XCTFail("Finish must fence new ingestion before waiting")
+        } catch {
+            XCTAssertEqual(error as? SlidingWindowAcknowledgedIngestionError, .streamClosed)
+        }
+
+        await processor.release()
+        let appendReport = try await append.value
+        let finishReport = try await finish.value
+        let emittedUpdates = await updateCollector.value
+        let center = SlidingWindowSampleRange(startSample: 0, endSample: 16_000)
+
+        let finishProcessorCallCount = await processor.callCount
+        XCTAssertEqual(finishProcessorCallCount, 1)
+        XCTAssertEqual(appendReport.attemptedCenterRanges, [center])
+        XCTAssertEqual(appendReport.processedCenterRanges, [center])
+        XCTAssertEqual(appendReport.updates.count, 1)
+        XCTAssertEqual(emittedUpdates.count, 1)
+        XCTAssertTrue(finishReport.attemptedCenterRanges.isEmpty)
+        XCTAssertTrue(finishReport.processedCenterRanges.isEmpty)
+        XCTAssertTrue(finishReport.failedCenterRanges.isEmpty)
+        XCTAssertTrue(finishReport.finalUpdates.isEmpty)
+    }
+
+    func testCancelInvalidatesAndAwaitsBlockedAcknowledgedIngestion() async throws {
+        let processor = BlockingWindowProcessor()
+        let manager = SlidingWindowAsrManager(
+            config: SlidingWindowAsrConfig(
+                chunkSeconds: 1,
+                leftContextSeconds: 0,
+                rightContextSeconds: 0
+            ),
+            acknowledgedWindowProcessor: { samples, start, isLast in
+                await processor.process(samples, windowStartSample: start, isLastChunk: isLast)
+            }
+        )
+        let updates = await manager.transcriptionUpdates
+        let updateCollector = Task {
+            var count = 0
+            for await _ in updates { count += 1 }
+            return count
+        }
+        let append = Task {
+            try await manager.ingestAudio(
+                makeAcknowledgedIngestionBuffer(sampleCount: 16_000),
+                receipt: "blocked-cancel"
+            )
+        }
+        await processor.waitUntilStarted()
+
+        let cancelProbe = CompletionProbe()
+        let cancel = Task {
+            await manager.cancel()
+            await cancelProbe.markCompleted()
+        }
+        await processor.waitUntilCancellationObserved()
+        let cancelCompletedWhileBlocked = await cancelProbe.completed
+        XCTAssertFalse(cancelCompletedWhileBlocked, "Cancel must await operation quiescence")
+
+        await processor.release()
+        await cancel.value
+        let emittedUpdateCount = await updateCollector.value
+        do {
+            _ = try await append.value
+            XCTFail("Cancelled ingestion must not return a late report")
+        } catch {
+            XCTAssertEqual(error as? SlidingWindowAcknowledgedIngestionError, .cancelled)
+        }
+        let cancelProcessorCallCount = await processor.callCount
+        XCTAssertEqual(cancelProcessorCallCount, 1)
+        XCTAssertEqual(emittedUpdateCount, 0)
+    }
+
+    func testResetInvalidatesBlockedIngestionBeforeStartingFreshGeneration() async throws {
+        let processor = BlockingWindowProcessor()
+        let manager = SlidingWindowAsrManager(
+            config: SlidingWindowAsrConfig(
+                chunkSeconds: 1,
+                leftContextSeconds: 0,
+                rightContextSeconds: 0
+            ),
+            acknowledgedWindowProcessor: { samples, start, isLast in
+                await processor.process(samples, windowStartSample: start, isLastChunk: isLast)
+            }
+        )
+        let updates = await manager.transcriptionUpdates
+        let updateCollector = Task {
+            var count = 0
+            for await _ in updates { count += 1 }
+            return count
+        }
+        let staleAppend = Task {
+            try await manager.ingestAudio(
+                makeAcknowledgedIngestionBuffer(sampleCount: 16_000),
+                receipt: "stale-generation"
+            )
+        }
+        await processor.waitUntilStarted()
+
+        let resetProbe = CompletionProbe()
+        let reset = Task {
+            try await manager.reset()
+            await resetProbe.markCompleted()
+        }
+        await processor.waitUntilCancellationObserved()
+        let resetCompletedWhileBlocked = await resetProbe.completed
+        XCTAssertFalse(resetCompletedWhileBlocked, "Reset must await stale operation quiescence")
+
+        await processor.release()
+        try await reset.value
+        do {
+            _ = try await staleAppend.value
+            XCTFail("Reset ingestion must not return a late report")
+        } catch {
+            XCTAssertEqual(error as? SlidingWindowAcknowledgedIngestionError, .cancelled)
+        }
+
+        let fresh = try await manager.ingestAudio(
+            makeAcknowledgedIngestionBuffer(sampleCount: 1),
+            receipt: "fresh-generation"
+        )
+        await manager.cancel()
+        let emittedUpdateCount = await updateCollector.value
+        XCTAssertEqual(fresh.acceptedSamples, SlidingWindowSampleRange(startSample: 0, endSample: 1))
+        let resetProcessorCallCount = await processor.callCount
+        XCTAssertEqual(resetProcessorCallCount, 1)
+        XCTAssertEqual(emittedUpdateCount, 0)
     }
 
     // MARK: - Update Structure Tests

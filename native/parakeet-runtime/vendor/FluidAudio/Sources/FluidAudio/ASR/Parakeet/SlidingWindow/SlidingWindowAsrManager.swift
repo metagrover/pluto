@@ -8,6 +8,11 @@ import OSLog
 /// Uses an offline TDT encoder with overlapping windows for pseudo-streaming.
 /// Similar to Apple's SpeechAnalyzer, it handles audio conversion and buffering automatically.
 public actor SlidingWindowAsrManager {
+    internal typealias AcknowledgedWindowProcessor =
+        @Sendable ([Float], Int, Bool) async -> Result<
+            SlidingWindowTranscriptionUpdate, SlidingWindowFailureReason
+        >
+
     private enum IngestionMode {
         case undecided
         case legacy
@@ -35,15 +40,23 @@ public actor SlidingWindowAsrManager {
         }
     }
 
+    private struct AcknowledgedOperation {
+        let generation: UInt64
+        let task: Task<SlidingWindowIngestionReport, Error>
+    }
+
     private let logger = AppLogger(category: "SlidingWindowASR")
     private let audioConverter: AudioConverter = AudioConverter()
     private let config: SlidingWindowAsrConfig
+    private let acknowledgedWindowProcessor: AcknowledgedWindowProcessor?
 
     // Audio input stream
     private let inputSequence: AsyncStream<AVAudioPCMBuffer>
     private let inputBuilder: AsyncStream<AVAudioPCMBuffer>.Continuation
     private var ingestionMode: IngestionMode = .undecided
-    private var acknowledgedOperationInFlight = false
+    private var activeAcknowledgedOperation: AcknowledgedOperation?
+    private var lifecycleGeneration: UInt64 = 0
+    private var lifecycleTransitionInProgress = false
     private var streamClosed = false
     private var ingestedSampleCount = 0
     private var backgroundFinishReport = WindowProcessingReport()
@@ -79,6 +92,10 @@ public actor SlidingWindowAsrManager {
         return audioSource
     }
 
+    internal var acceptsAcknowledgedIngestionForTesting: Bool {
+        !streamClosed
+    }
+
     // Metrics
     private var startTime: Date?
     private var processedChunks: Int = 0
@@ -100,6 +117,24 @@ public actor SlidingWindowAsrManager {
     /// - Parameter config: Configuration for streaming behavior
     public init(config: SlidingWindowAsrConfig = .default) {
         self.config = config
+        self.acknowledgedWindowProcessor = nil
+
+        // Create input stream
+        let (stream, continuation) = AsyncStream<AVAudioPCMBuffer>.makeStream()
+        self.inputSequence = stream
+        self.inputBuilder = continuation
+
+        logger.info(
+            "Initialized SlidingWindowAsrManager with config: chunk=\(config.chunkSeconds)s left=\(config.leftContextSeconds)s right=\(config.rightContextSeconds)s"
+        )
+    }
+
+    internal init(
+        config: SlidingWindowAsrConfig,
+        acknowledgedWindowProcessor: @escaping AcknowledgedWindowProcessor
+    ) {
+        self.config = config
+        self.acknowledgedWindowProcessor = acknowledgedWindowProcessor
 
         // Create input stream
         let (stream, continuation) = AsyncStream<AVAudioPCMBuffer>.makeStream()
@@ -216,7 +251,10 @@ public actor SlidingWindowAsrManager {
         failedWindowCount = 0
         lastWindowError = nil
         ingestionMode = .undecided
-        acknowledgedOperationInFlight = false
+        activeAcknowledgedOperation?.task.cancel()
+        activeAcknowledgedOperation = nil
+        lifecycleGeneration &+= 1
+        lifecycleTransitionInProgress = false
         streamClosed = false
         ingestedSampleCount = 0
         backgroundFinishReport = WindowProcessingReport()
@@ -288,14 +326,14 @@ public actor SlidingWindowAsrManager {
         guard ingestionMode != .legacy else {
             throw SlidingWindowAcknowledgedIngestionError.mixedIngestionModes
         }
-        guard !acknowledgedOperationInFlight else {
+        guard !lifecycleTransitionInProgress else {
+            throw SlidingWindowAcknowledgedIngestionError.operationInProgress
+        }
+        guard activeAcknowledgedOperation == nil else {
             throw SlidingWindowAcknowledgedIngestionError.operationInProgress
         }
 
         ingestionMode = .acknowledged
-        acknowledgedOperationInFlight = true
-        defer { acknowledgedOperationInFlight = false }
-
         let samples: [Float]
         do {
             samples = try audioConverter.resampleBuffer(buffer)
@@ -303,12 +341,51 @@ public actor SlidingWindowAsrManager {
             throw SlidingWindowAcknowledgedIngestionError.audioConversionFailed
         }
 
+        let operationGeneration = lifecycleGeneration
+        let operationTask = Task { [weak self] in
+            guard let self else {
+                throw SlidingWindowAcknowledgedIngestionError.cancelled
+            }
+            do {
+                let report = try await self.performAcknowledgedIngestion(
+                    samples,
+                    receipt: receipt,
+                    generation: operationGeneration
+                )
+                await self.completeAcknowledgedOperation(generation: operationGeneration)
+                return report
+            } catch {
+                await self.completeAcknowledgedOperation(generation: operationGeneration)
+                throw error
+            }
+        }
+        activeAcknowledgedOperation = AcknowledgedOperation(
+            generation: operationGeneration,
+            task: operationTask
+        )
+        return try await operationTask.value
+    }
+
+    private func performAcknowledgedIngestion(
+        _ samples: [Float],
+        receipt: String,
+        generation: UInt64
+    ) async throws -> SlidingWindowIngestionReport {
+        guard isCurrentAcknowledgedOperation(generation) else {
+            throw SlidingWindowAcknowledgedIngestionError.cancelled
+        }
         let acceptedSamples = SlidingWindowSampleRange(
             startSample: ingestedSampleCount,
             endSample: ingestedSampleCount + samples.count
         )
         ingestedSampleCount += samples.count
-        let windowReport = await appendSamplesAndProcess(samples)
+        let windowReport = await appendSamplesAndProcess(
+            samples,
+            acknowledgedGeneration: generation
+        )
+        guard isCurrentAcknowledgedOperation(generation) else {
+            throw SlidingWindowAcknowledgedIngestionError.cancelled
+        }
 
         return SlidingWindowIngestionReport(
             receipt: receipt,
@@ -318,6 +395,16 @@ public actor SlidingWindowAsrManager {
             failedCenterRanges: windowReport.failedCenterRanges,
             updates: windowReport.updates
         )
+    }
+
+    private func completeAcknowledgedOperation(generation: UInt64) {
+        guard activeAcknowledgedOperation?.generation == generation else { return }
+        activeAcknowledgedOperation = nil
+    }
+
+    private func isCurrentAcknowledgedOperation(_ generation: UInt64?) -> Bool {
+        guard let generation else { return true }
+        return lifecycleGeneration == generation && !Task.isCancelled
     }
 
     /// Get an async stream of transcription updates
@@ -362,10 +449,21 @@ public actor SlidingWindowAsrManager {
     /// finite center ranges rather than converted into an opaque thrown model error.
     public func finishDetailed() async throws -> SlidingWindowFinishReport {
         logger.info("Finishing sliding-window ASR...")
+        guard !lifecycleTransitionInProgress else {
+            throw SlidingWindowAcknowledgedIngestionError.operationInProgress
+        }
+        lifecycleTransitionInProgress = true
+        defer { lifecycleTransitionInProgress = false }
         streamClosed = true
 
-        // Closing the continuation drains every already-yielded legacy buffer before the
-        // recognizer task flushes. Acknowledged ingestion has no queued buffers to drain.
+        // Fence new input first, then let the exact admitted acknowledged operation finish
+        // before either path can inspect or flush its shared sample state.
+        if let activeAcknowledgedOperation {
+            _ = await activeAcknowledgedOperation.task.result
+        }
+
+        // Closing the continuation drains every already-yielded legacy buffer before its
+        // recognizer task performs the one tail flush. Acknowledged input has no queued buffers.
         inputBuilder.finish()
 
         let finishReport: WindowProcessingReport
@@ -425,6 +523,17 @@ public actor SlidingWindowAsrManager {
 
     /// Reset the transcriber for a new session
     public func reset() async throws {
+        guard !lifecycleTransitionInProgress else {
+            throw SlidingWindowAcknowledgedIngestionError.operationInProgress
+        }
+        lifecycleTransitionInProgress = true
+        lifecycleGeneration &+= 1
+        let staleOperation = activeAcknowledgedOperation
+        staleOperation?.task.cancel()
+        if let staleOperation {
+            _ = await staleOperation.task.result
+        }
+
         volatileTranscript = ""
         confirmedTranscript = ""
         processedChunks = 0
@@ -434,6 +543,8 @@ public actor SlidingWindowAsrManager {
         sampleBuffer.removeAll(keepingCapacity: false)
         bufferStartIndex = 0
         nextWindowCenterStart = 0
+        ingestedSampleCount = 0
+        backgroundFinishReport = WindowProcessingReport()
 
         // Reset decoder state
         if let mgr = asrManager {
@@ -444,6 +555,7 @@ public actor SlidingWindowAsrManager {
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
+        lifecycleTransitionInProgress = false
 
         logger.info("SlidingWindowAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -460,9 +572,20 @@ public actor SlidingWindowAsrManager {
     /// Cancel streaming without getting results
     public func cancel() async {
         streamClosed = true
+        lifecycleTransitionInProgress = true
+        lifecycleGeneration &+= 1
+        let staleOperation = activeAcknowledgedOperation
+        staleOperation?.task.cancel()
         inputBuilder.finish()
         recognizerTask?.cancel()
+        if let staleOperation {
+            _ = await staleOperation.task.result
+        }
+        if let recognizerTask {
+            _ = await recognizerTask.result
+        }
         updateContinuation?.finish()
+        lifecycleTransitionInProgress = false
 
         logger.info("SlidingWindowAsrManager cancelled")
     }
@@ -475,8 +598,13 @@ public actor SlidingWindowAsrManager {
     // MARK: - Private Methods
 
     /// Append new samples and process as many windows as available
-    private func appendSamplesAndProcess(_ samples: [Float]) async -> WindowProcessingReport {
+    private func appendSamplesAndProcess(
+        _ samples: [Float],
+        acknowledgedGeneration: UInt64? = nil
+    ) async -> WindowProcessingReport {
         var report = WindowProcessingReport()
+
+        guard isCurrentAcknowledgedOperation(acknowledgedGeneration) else { return report }
 
         // Append samples to buffer
         sampleBuffer.append(contentsOf: samples)
@@ -503,8 +631,10 @@ public actor SlidingWindowAsrManager {
             )
             let result = await processWindow(
                 window,
-                windowStartSample: leftStartAbs
+                windowStartSample: leftStartAbs,
+                acknowledgedGeneration: acknowledgedGeneration
             )
+            guard isCurrentAcknowledgedOperation(acknowledgedGeneration) else { return report }
             report.record(centerRange: centerRange, result: result)
 
             // Advance by chunk size
@@ -576,9 +706,25 @@ public actor SlidingWindowAsrManager {
     private func processWindow(
         _ windowSamples: [Float],
         windowStartSample: Int,
-        isLastChunk: Bool = false
+        isLastChunk: Bool = false,
+        acknowledgedGeneration: UInt64? = nil
     ) async -> Result<SlidingWindowTranscriptionUpdate, SlidingWindowFailureReason> {
         do {
+            if let acknowledgedWindowProcessor {
+                let result = await acknowledgedWindowProcessor(
+                    windowSamples,
+                    windowStartSample,
+                    isLastChunk
+                )
+                guard isCurrentAcknowledgedOperation(acknowledgedGeneration) else {
+                    return .failure(.cancelled)
+                }
+                if case .success(let update) = result {
+                    updateContinuation?.yield(update)
+                }
+                return result
+            }
+
             let chunkStartTime = Date()
 
             // Start frame offset is now handled by decoder's timeJump mechanism
@@ -598,8 +744,9 @@ public actor SlidingWindowAsrManager {
                 )
             else { return .failure(.transcriptionUnavailable) }
 
-            // Update stored decoder state
-            self.decoderState = state
+            guard isCurrentAcknowledgedOperation(acknowledgedGeneration) else {
+                return .failure(.cancelled)
+            }
 
             let (tokens, timestamps, confidences, _) = result
 
@@ -622,16 +769,9 @@ public actor SlidingWindowAsrManager {
                     processingTime: processingTime
                 )
             else { return .failure(.transcriptionUnavailable) }
-
-            // Update state only after all required async calls complete successfully
-            accumulatedTokens.append(contentsOf: tokens)
-            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
-            segmentIndex += 1
-            processedChunks += 1
-
-            logger.debug(
-                "Processed chunk \(self.processedChunks) in \(String(format: "%.3f", processingTime))s"
-            )
+            guard isCurrentAcknowledgedOperation(acknowledgedGeneration) else {
+                return .failure(.cancelled)
+            }
 
             let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
             let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
@@ -669,7 +809,22 @@ public actor SlidingWindowAsrManager {
                 }
             }
 
-            await updateTranscriptionState(with: displayResult, shouldConfirm: shouldConfirm)
+            guard isCurrentAcknowledgedOperation(acknowledgedGeneration) else {
+                return .failure(.cancelled)
+            }
+
+            // Commit the complete window transaction only after every suspension point succeeds
+            // and the acknowledged generation is still current.
+            self.decoderState = state
+            accumulatedTokens.append(contentsOf: tokens)
+            lastProcessedFrame = max(lastProcessedFrame, adjustedTimestamps.max() ?? 0)
+            segmentIndex += 1
+            processedChunks += 1
+            updateTranscriptionState(with: displayResult, shouldConfirm: shouldConfirm)
+
+            logger.debug(
+                "Processed chunk \(self.processedChunks) in \(String(format: "%.3f", processingTime))s"
+            )
 
             let update = SlidingWindowTranscriptionUpdate(
                 text: displayResult.text,
@@ -684,7 +839,7 @@ public actor SlidingWindowAsrManager {
             return .success(update)
 
         } catch {
-            if error is CancellationError || Task.isCancelled {
+            if error is CancellationError || !isCurrentAcknowledgedOperation(acknowledgedGeneration) {
                 return .failure(.cancelled)
             }
             let streamingError = SlidingWindowAsrError.modelProcessingFailed(error)
@@ -700,7 +855,7 @@ public actor SlidingWindowAsrManager {
         }
     }
 
-    private func updateTranscriptionState(with result: ASRResult, shouldConfirm: Bool) async {
+    private func updateTranscriptionState(with result: ASRResult, shouldConfirm: Bool) {
         let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
 
         if shouldConfirm {
