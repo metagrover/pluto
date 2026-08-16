@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 
 export type PrivateLiveReplayMeeting = {
   id: string;
+  recordedAt: string;
   sealedDurationSeconds: number;
   sealedGeneration: number;
   integrity: 'sealed';
@@ -32,10 +33,12 @@ export type PrivateLiveReplayValidationAdapters = {
   lstat(filePath: string): Stats;
   realpath(filePath: string): string;
   durationSeconds(filePath: string): number;
+  nowMs(): number;
 };
 
 export const PRIVATE_LIVE_REPLAY_MODEL_VERSION =
   'fluidaudio-0.15.5-asr-aed02740-ctc-accdafd8-int8-verified1';
+export const PRIVATE_LIVE_REPLAY_RECENCY_DAYS = 30;
 
 const PRIVATE_FIELD =
   /^(?:transcript|text|words?|segments?|content|base64|audio|audioData|pcm|pcmData|samples?|speaker|identity)$/i;
@@ -44,6 +47,7 @@ const ALLOWED_TOP_LEVEL = new Set(['schemaVersion', 'runtime', 'meetings']);
 const ALLOWED_RUNTIME = new Set(['executablePath', 'modelRoot']);
 const ALLOWED_MEETING = new Set([
   'id',
+  'recordedAt',
   'sealedDurationSeconds',
   'sealedGeneration',
   'integrity',
@@ -122,6 +126,18 @@ const requirePath = (
   }
   let stat: Stats;
   try {
+    const parsed = path.parse(path.normalize(value));
+    const relativeParts = path
+      .relative(parsed.root, path.normalize(value))
+      .split(path.sep)
+      .filter(Boolean);
+    let ancestor = parsed.root;
+    for (const part of relativeParts) {
+      ancestor = path.join(ancestor, part);
+      if (adapters.lstat(ancestor).isSymbolicLink()) {
+        throw new Error(unavailableCode);
+      }
+    }
     stat = adapters.lstat(value);
   } catch {
     throw new Error(unavailableCode);
@@ -131,7 +147,9 @@ const requirePath = (
     throw new Error(unavailableCode);
   }
   try {
-    return adapters.realpath(value);
+    const canonical = adapters.realpath(value);
+    if (canonical !== path.normalize(value)) throw new Error(unavailableCode);
+    return canonical;
   } catch {
     throw new Error(unavailableCode);
   }
@@ -171,18 +189,47 @@ const DEFAULT_ADAPTERS: PrivateLiveReplayValidationAdapters = {
   lstat: fs.lstatSync,
   realpath: fs.realpathSync,
   durationSeconds: probeDurationSeconds,
+  nowMs: Date.now,
+};
+
+const isCanonicalPathWithoutSymlinkAncestors = (filePath: string): boolean => {
+  try {
+    const normalized = path.normalize(filePath);
+    const parsed = path.parse(normalized);
+    let ancestor = parsed.root;
+    for (const part of path
+      .relative(parsed.root, normalized)
+      .split(path.sep)
+      .filter(Boolean)) {
+      ancestor = path.join(ancestor, part);
+      if (fs.lstatSync(ancestor).isSymbolicLink()) return false;
+    }
+    return fs.realpathSync(normalized) === normalized;
+  } catch {
+    return false;
+  }
 };
 
 export const requirePreparedPrivateLiveReplayModel = (
   modelRoot: string,
 ): void => {
   try {
+    const canonicalRoot = fs.realpathSync(modelRoot);
+    if (canonicalRoot !== path.normalize(modelRoot)) {
+      throw new Error('model_unavailable');
+    }
     const activationPath = path.join(modelRoot, 'active.json');
     const activationStat = fs.lstatSync(activationPath);
     if (
       activationStat.isSymbolicLink() ||
       !activationStat.isFile() ||
       activationStat.size > 1024
+    ) {
+      throw new Error('model_unavailable');
+    }
+    if (
+      fs.realpathSync(activationPath) !== activationPath ||
+      !activationPath.startsWith(`${canonicalRoot}${path.sep}`)
     ) {
       throw new Error('model_unavailable');
     }
@@ -205,7 +252,9 @@ export const requirePreparedPrivateLiveReplayModel = (
     if (
       versionStat.isSymbolicLink() ||
       !versionStat.isDirectory() ||
-      fs.readdirSync(versionRoot).length === 0
+      fs.readdirSync(versionRoot).length === 0 ||
+      fs.realpathSync(versionRoot) !== versionRoot ||
+      !versionRoot.startsWith(`${canonicalRoot}${path.sep}`)
     ) {
       throw new Error('model_unavailable');
     }
@@ -219,6 +268,9 @@ export const readPrivateLiveReplayManifest = (
 ): unknown => {
   if (!path.isAbsolute(manifestPath)) throw new Error('manifest_unavailable');
   try {
+    if (!isCanonicalPathWithoutSymlinkAncestors(manifestPath)) {
+      throw new Error('manifest_unavailable');
+    }
     const stat = fs.lstatSync(manifestPath);
     if (
       stat.isSymbolicLink() ||
@@ -272,6 +324,21 @@ export const validatePrivateLiveReplayManifest = (
     const id = requireOpaqueId(entry.id);
     if (ids.has(id)) throw new Error('manifest_invalid');
     ids.add(id);
+    if (typeof entry.recordedAt !== 'string') {
+      throw new Error('meeting_not_recent');
+    }
+    const recordedAtMs = Date.parse(entry.recordedAt);
+    const nowMs = adapters.nowMs();
+    const maximumAgeMs =
+      PRIVATE_LIVE_REPLAY_RECENCY_DAYS * 24 * 60 * 60 * 1_000;
+    if (
+      !Number.isFinite(recordedAtMs) ||
+      !Number.isFinite(nowMs) ||
+      recordedAtMs > nowMs + 5 * 60_000 ||
+      nowMs - recordedAtMs > maximumAgeMs
+    ) {
+      throw new Error('meeting_not_recent');
+    }
     const sealedDurationSeconds = requireFinitePositive(
       entry.sealedDurationSeconds,
     );
@@ -326,6 +393,7 @@ export const validatePrivateLiveReplayManifest = (
     }
     return {
       id,
+      recordedAt: new Date(recordedAtMs).toISOString(),
       sealedDurationSeconds,
       sealedGeneration,
       integrity: 'sealed',
@@ -393,6 +461,7 @@ const allowedCliCode = (error: unknown): string => {
     'unresolved_capture_gap',
     'runtime_unavailable',
     'model_unavailable',
+    'meeting_not_recent',
   ]).has(code)
     ? code
     : 'manifest_unavailable';

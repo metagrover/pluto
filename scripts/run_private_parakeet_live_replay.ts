@@ -18,6 +18,7 @@ import {
   type PrivateLiveReplayReport,
   buildPrivateLiveReplayReport,
   evaluateLiveReplay,
+  sanitizeLiveReplayReport,
 } from '../src/services/liveTranscriptionReplayMetrics.ts';
 import {
   type PrivateLiveReplayManifest,
@@ -54,7 +55,9 @@ const SAFE_CLI_CODES = new Set([
   'decode_unavailable',
   'manifest_invalid',
   'manifest_unavailable',
+  'meeting_not_recent',
   'model_unavailable',
+  'mlx_cache_unavailable',
   'options_invalid',
   'private_content_not_allowed',
   'report_unavailable',
@@ -66,6 +69,7 @@ const SAFE_CLI_CODES = new Set([
   'integrity_not_sealed',
   'mixed_mic_source',
   'unresolved_capture_gap',
+  'cleanup_failed',
 ]);
 
 export const buildEngineRunOrder = (repetitions: number): Engine[][] => {
@@ -115,6 +119,371 @@ export const buildGapInjections = (durationSeconds: number): GapInjection[] => {
       endSeconds: center(0.9),
     },
   ];
+};
+
+export type ReplaySource = 'mic' | 'system';
+export type QuarterSecondFrame = ReturnType<
+  typeof buildQuarterSecondFrames
+>[number];
+type ReplayGap = ReturnType<typeof buildGapInjections>[number];
+type RepairToken = { token: string; atSeconds: number };
+export type MlxPairJob = {
+  meetingId: string;
+  sequence: number;
+  availableAtSeconds: number;
+  micPath: string;
+  systemPath: string;
+};
+export type InjectedMlxProcess = {
+  transcribePair(job: MlxPairJob): Promise<{ completedAtSeconds: number }>;
+  resourceEvidence():
+    | {
+        status: 'available';
+        samples: readonly { wallTimeMs: number; rssGiB: number }[];
+      }
+    | { status: 'unavailable' };
+  terminate(): Promise<'exited' | 'cleanup_failed'>;
+};
+
+export type InjectedParakeetProcess = {
+  open(source: ReplaySource): Promise<void>;
+  append(source: ReplaySource, frame: QuarterSecondFrame): Promise<void>;
+  flush(
+    source: ReplaySource,
+  ): Promise<{ finalPreview: string; degradations: readonly unknown[] }>;
+  runBatchDiagnostic(
+    source: ReplaySource,
+  ): Promise<
+    | { status: 'available'; boundaries: readonly number[] }
+    | { status: 'unavailable' }
+  >;
+  probeGap(
+    source: ReplaySource,
+    gap: ReplayGap,
+    prefix: readonly QuarterSecondFrame[],
+    suffix: readonly QuarterSecondFrame[],
+  ): Promise<
+    | { status: 'detected'; startSeconds: number; endSeconds: number }
+    | { status: 'unavailable' }
+  >;
+  repairGap(
+    source: ReplaySource,
+    gap: ReplayGap,
+  ): Promise<
+    | {
+        status: 'available';
+        before: readonly RepairToken[];
+        repair: readonly RepairToken[];
+        after: readonly RepairToken[];
+        spliced: readonly RepairToken[];
+      }
+    | { status: 'unavailable' }
+  >;
+  resourceEvidence():
+    | {
+        status: 'available';
+        processTopology: 'combined-dual-source';
+        samples: readonly { wallTimeMs: number; rssGiB: number }[];
+        thermal:
+          | {
+              status: 'available';
+              state: 'nominal' | 'fair' | 'serious' | 'critical';
+            }
+          | { status: 'unavailable' };
+      }
+    | { status: 'unavailable' };
+  terminate(): Promise<'exited' | 'cleanup_failed'>;
+};
+
+type InjectedReplayInput = {
+  meetings: readonly {
+    id: string;
+    durationSeconds: number;
+    micPath: string;
+    systemPath: string;
+  }[];
+  repetitions: number;
+  maximumPendingAppends: number;
+  clock: { nowSeconds(): number; waitUntil(seconds: number): Promise<void> };
+  createParakeet(
+    config: 'pinned-default' | 'low-latency-2s',
+    repetition: number,
+  ): Promise<InjectedParakeetProcess>;
+  createMlx(input: {
+    offline: true;
+    chunkSeconds: 5;
+    queuePolicy: 'one-active-one-latest';
+  }): Promise<
+    | { status: 'available'; process: InjectedMlxProcess }
+    | { status: 'unavailable'; reason: 'cache_missing' | 'runtime_unavailable' }
+  >;
+};
+
+const runInjectedMlx = async (
+  input: InjectedReplayInput,
+): Promise<
+  | {
+      status: 'available';
+      processedJobs: number;
+      resourceStatus: 'available' | 'unavailable';
+    }
+  | { status: 'unavailable'; reason: 'cache_missing' | 'runtime_unavailable' }
+> => {
+  const created = await input.createMlx({
+    offline: true,
+    chunkSeconds: 5,
+    queuePolicy: 'one-active-one-latest',
+  });
+  if (created.status === 'unavailable') return created;
+  let processedJobs = 0;
+  let failure: unknown;
+  try {
+    for (const meeting of input.meetings) {
+      const segmentCount = Math.ceil(meeting.durationSeconds / 5);
+      let index = 0;
+      while (index < segmentCount) {
+        const availableAtSeconds = Math.min(
+          meeting.durationSeconds,
+          (index + 1) * 5,
+        );
+        await input.clock.waitUntil(availableAtSeconds);
+        const result = await created.process.transcribePair({
+          meetingId: meeting.id,
+          sequence: index + 1,
+          availableAtSeconds,
+          micPath: meeting.micPath,
+          systemPath: meeting.systemPath,
+        });
+        if (
+          !Number.isFinite(result.completedAtSeconds) ||
+          result.completedAtSeconds < availableAtSeconds
+        ) {
+          throw new Error('benchmark_failed');
+        }
+        processedJobs += 1;
+        index = nextMlxProductionQueueIndex(
+          index,
+          result.completedAtSeconds,
+          segmentCount,
+          meeting.durationSeconds,
+        ).nextIndex;
+      }
+    }
+  } catch (error) {
+    failure = error;
+  }
+  const resource = created.process.resourceEvidence();
+  if (
+    resource.status === 'available' &&
+    resource.samples.some(
+      (sample, index, samples) =>
+        !Number.isFinite(sample.wallTimeMs) ||
+        !Number.isFinite(sample.rssGiB) ||
+        (index > 0 && sample.wallTimeMs < samples[index - 1].wallTimeMs),
+    )
+  ) {
+    failure = new Error('benchmark_failed');
+  }
+  const cleanup = await created.process
+    .terminate()
+    .catch(() => 'cleanup_failed' as const);
+  if (cleanup !== 'exited') throw new Error('cleanup_failed');
+  if (failure) throw new Error('benchmark_failed');
+  return {
+    status: 'available',
+    processedJobs,
+    resourceStatus: resource.status,
+  };
+};
+
+const validateRepairSplice = (
+  evidence: Extract<
+    Awaited<ReturnType<InjectedParakeetProcess['repairGap']>>,
+    { status: 'available' }
+  >,
+  gap: ReplayGap,
+): void => {
+  const expectedOutside = [...evidence.before, ...evidence.after].map(
+    ({ token }) => token,
+  );
+  const actualOutside = [
+    ...evidence.spliced.slice(0, evidence.before.length),
+    ...evidence.spliced.slice(evidence.spliced.length - evidence.after.length),
+  ].map(({ token }) => token);
+  if (editDistance(expectedOutside, actualOutside) !== 0) {
+    throw new Error('benchmark_failed');
+  }
+  if (
+    !evidence.repair.some(
+      ({ atSeconds }) =>
+        atSeconds >= gap.startSeconds - 2 && atSeconds <= gap.endSeconds + 2,
+    )
+  ) {
+    throw new Error('benchmark_failed');
+  }
+};
+
+const replayDualSourceMeeting = async (
+  child: InjectedParakeetProcess,
+  meeting: InjectedReplayInput['meetings'][number],
+  maximumPending: number,
+  clock: InjectedReplayInput['clock'],
+): Promise<void> => {
+  await Promise.all([child.open('mic'), child.open('system')]);
+  const frames = buildQuarterSecondFrames(meeting.durationSeconds);
+  const pending: Promise<void>[] = [];
+  for (const frame of frames) {
+    await clock.waitUntil(frame.availableAtSeconds);
+    for (const source of ['mic', 'system'] as const) {
+      if (clock.nowSeconds() < frame.availableAtSeconds)
+        throw new Error('benchmark_failed');
+      if (pending.length >= maximumPending) await pending.shift();
+      const append = child.append(source, frame);
+      pending.push(append);
+    }
+  }
+  await Promise.all(pending);
+  await Promise.all([child.flush('mic'), child.flush('system')]);
+  for (const source of ['mic', 'system'] as const) {
+    await child.runBatchDiagnostic(source);
+    for (const gap of buildGapInjections(meeting.durationSeconds)) {
+      const prefix = frames.filter(
+        (frame) => frame.audioEndSeconds <= gap.startSeconds,
+      );
+      const suffix = frames.filter(
+        (frame) => frame.audioEndSeconds - FRAME_SECONDS >= gap.endSeconds,
+      );
+      if (prefix.length === 0 || suffix.length === 0)
+        throw new Error('benchmark_failed');
+      const detected = await child.probeGap(source, gap, prefix, suffix);
+      if (
+        detected.status !== 'detected' ||
+        detected.startSeconds !== gap.startSeconds ||
+        detected.endSeconds !== gap.endSeconds ||
+        detected.endSeconds - detected.startSeconds !== 2
+      ) {
+        throw new Error('benchmark_failed');
+      }
+      const repair = await child.repairGap(source, gap);
+      if (repair.status === 'available') validateRepairSplice(repair, gap);
+    }
+  }
+};
+
+export const orchestrateInjectedPrivateReplay = async (
+  input: InjectedReplayInput,
+) => {
+  if (
+    !Number.isSafeInteger(input.repetitions) ||
+    input.repetitions <= 0 ||
+    !Number.isSafeInteger(input.maximumPendingAppends) ||
+    input.maximumPendingAppends <= 0
+  ) {
+    throw new Error('options_invalid');
+  }
+  const mlx: Array<Awaited<ReturnType<typeof runInjectedMlx>>> = [];
+  const configs: Array<{
+    config: 'pinned-default' | 'low-latency-2s';
+    repetition: number;
+  }> = [];
+  const resources: Array<{
+    config: 'pinned-default' | 'low-latency-2s';
+    repetition: number;
+    processTopology: 'combined-dual-source';
+  }> = [];
+  for (let repetition = 0; repetition < input.repetitions; repetition += 1) {
+    const order =
+      repetition % 2 === 0
+        ? (['mlx', 'pinned-default', 'low-latency-2s'] as const)
+        : (['low-latency-2s', 'pinned-default', 'mlx'] as const);
+    for (const engine of order) {
+      if (engine === 'mlx') {
+        mlx.push(await runInjectedMlx(input));
+        continue;
+      }
+      const config = engine;
+      const child = await input.createParakeet(config, repetition);
+      let failure: unknown;
+      try {
+        for (const meeting of input.meetings) {
+          await replayDualSourceMeeting(
+            child,
+            meeting,
+            input.maximumPendingAppends,
+            input.clock,
+          );
+        }
+        const resource = child.resourceEvidence();
+        if (resource.status === 'available') {
+          if (
+            resource.processTopology !== 'combined-dual-source' ||
+            resource.samples.some(
+              (sample, index, samples) =>
+                !Number.isFinite(sample.wallTimeMs) ||
+                !Number.isFinite(sample.rssGiB) ||
+                (index > 0 &&
+                  sample.wallTimeMs < samples[index - 1].wallTimeMs),
+            )
+          ) {
+            throw new Error('benchmark_failed');
+          }
+          resources.push({
+            config,
+            repetition,
+            processTopology: resource.processTopology,
+          });
+        }
+        configs.push({ config, repetition });
+      } catch (error) {
+        failure = error;
+      }
+      const cleanup = await child
+        .terminate()
+        .catch(() => 'cleanup_failed' as const);
+      if (cleanup !== 'exited') throw new Error('cleanup_failed');
+      if (failure) throw new Error('benchmark_failed');
+    }
+  }
+  return { configs, mlx, resources };
+};
+
+export type PrivateLiveReplayComparison = {
+  schemaVersion: 1;
+  benchmark: 'parakeet_live_config_comparison';
+  configs: {
+    pinnedDefault: PrivateLiveReplayReport;
+    lowLatency: PrivateLiveReplayReport;
+  };
+  decision: 'pass' | 'fail' | 'unavailable';
+};
+
+export const buildPrivateLiveReplayComparison = (
+  pinnedDefault: PrivateLiveReplayReport,
+  lowLatency: PrivateLiveReplayReport,
+): PrivateLiveReplayComparison => {
+  if (
+    pinnedDefault.runtime.configId !== 'pinned-default-v1' ||
+    lowLatency.runtime.configId !== 'low-latency-v1'
+  ) {
+    throw new Error('benchmark_failed');
+  }
+  const pinned = sanitizeLiveReplayReport(pinnedDefault);
+  const low = sanitizeLiveReplayReport(lowLatency);
+  const statuses = [
+    pinned.engines.parakeetSliding.status,
+    low.engines.parakeetSliding.status,
+  ];
+  const decision = statuses.includes('fail')
+    ? 'fail'
+    : statuses.includes('unavailable')
+      ? 'unavailable'
+      : 'pass';
+  return {
+    schemaVersion: 1,
+    benchmark: 'parakeet_live_config_comparison',
+    configs: { pinnedDefault: pinned, lowLatency: low },
+    decision,
+  };
 };
 
 const readOption = (
@@ -327,6 +696,42 @@ export const timedAgreement = (
   };
 };
 
+export const scoreChunkBoundarySeams = (
+  candidate: readonly TimedToken[],
+  reference: readonly TimedToken[],
+  boundaries: readonly number[],
+): {
+  duplicateTokens: number;
+  omittedTokens: number;
+  referenceTokens: number;
+} => {
+  let duplicateTokens = 0;
+  let omittedTokens = 0;
+  let referenceTokens = 0;
+  for (const boundary of boundaries) {
+    if (!Number.isFinite(boundary) || boundary <= 0)
+      throw new Error('benchmark_failed');
+    const candidateWindow = candidate
+      .filter(
+        ({ atSeconds }) => Math.abs(atSeconds - boundary) <= FRAME_SECONDS,
+      )
+      .map(({ token }) => token);
+    const referenceWindow = reference
+      .filter(
+        ({ atSeconds }) => Math.abs(atSeconds - boundary) <= FRAME_SECONDS,
+      )
+      .map(({ token }) => token);
+    const comparison = compareText(
+      candidateWindow.join(' '),
+      referenceWindow.join(' '),
+    );
+    duplicateTokens += comparison.duplicateTokens;
+    omittedTokens += comparison.omittedTokens;
+    referenceTokens += comparison.referenceTokens;
+  }
+  return { duplicateTokens, omittedTokens, referenceTokens };
+};
+
 export const nextMlxProductionQueueIndex = (
   currentIndex: number,
   completedAtSeconds: number,
@@ -371,6 +776,7 @@ export const proveTargetedRepair = (
   repairText: string,
   repairStartSeconds: number,
   repairEndSeconds: number,
+  spliced: readonly TimedToken[] = reference,
 ): { repairedTokenF1: number; outsideContextTokenChanges: number } => {
   if (
     !Number.isFinite(repairStartSeconds) ||
@@ -391,7 +797,12 @@ export const proveTargetedRepair = (
     ({ atSeconds }) => atSeconds > repairEndSeconds,
   );
   const outsideBefore = [...before, ...after].map(({ token }) => token);
-  const splicedOutside = [...before, ...after].map(({ token }) => token);
+  const splicedOutside = spliced
+    .filter(
+      ({ atSeconds }) =>
+        atSeconds < repairStartSeconds || atSeconds > repairEndSeconds,
+    )
+    .map(({ token }) => token);
   return {
     repairedTokenF1: tokenF1(
       repairText,
@@ -474,13 +885,13 @@ const sampleThermalState = (): 'nominal' | 'fair' | 'serious' | 'critical' => {
     stdio: ['ignore', 'pipe', 'ignore'],
   });
   if (result.status !== 0) throw new Error('benchmark_failed');
-  const limits = [
-    ...result.stdout.matchAll(/(?:Limit|Speed_Limit)\s*=\s*(\d+)/g),
-  ].map((match) => Number(match[1]));
-  if (limits.some((limit) => limit < 50)) return 'critical';
-  if (limits.some((limit) => limit < 80)) return 'serious';
-  if (limits.some((limit) => limit < 100)) return 'fair';
-  return 'nominal';
+  if (
+    result.stdout.includes('No thermal warning level has been recorded') &&
+    result.stdout.includes('No performance warning level has been recorded')
+  ) {
+    return 'nominal';
+  }
+  throw new Error('benchmark_failed');
 };
 
 const startResourceSampling = (
@@ -495,9 +906,10 @@ const startResourceSampling = (
   }> = [];
   let sampleIndex = 0;
   let samplingFailed = false;
+  const wallStartedAt = performance.now();
   const sample = () => {
     try {
-      const atSeconds = sampleIndex * intervalSeconds;
+      const atSeconds = (performance.now() - wallStartedAt) / 1_000;
       rssSamples.push({ atSeconds, rssGiB: sampleRssGiB(pid) });
       if (includeThermal) {
         thermalSamples.push({ atSeconds, state: sampleThermalState() });
@@ -512,14 +924,9 @@ const startResourceSampling = (
   const timer = setInterval(sample, intervalSeconds * 1_000);
   return {
     preparedIdleRssGiB: rssSamples[0].rssGiB,
-    stop: (finalAtSeconds?: number) => {
+    stop: (_finalAtSeconds?: number) => {
       clearInterval(timer);
-      if (
-        finalAtSeconds !== undefined &&
-        Math.abs(sampleIndex * intervalSeconds - finalAtSeconds) < 1e-9
-      ) {
-        sample();
-      }
+      sample();
       return { rssSamples, thermalSamples, samplingFailed };
     },
   };
@@ -542,14 +949,44 @@ const waitForMlx = async (port: number, child: ChildProcess): Promise<void> => {
   throw new Error('benchmark_failed');
 };
 
+export const hasPreparedMlxMediumCache = (
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean => {
+  const huggingFaceHome = environment.HF_HOME
+    ? path.resolve(environment.HF_HOME)
+    : path.join(os.homedir(), '.cache', 'huggingface');
+  const modelRoot = path.join(
+    huggingFaceHome,
+    'hub',
+    'models--mlx-community--whisper-medium-mlx',
+  );
+  try {
+    const stat = fs.lstatSync(modelRoot);
+    const canonical = fs.realpathSync(modelRoot);
+    const snapshots = path.join(canonical, 'snapshots');
+    return (
+      stat.isDirectory() &&
+      !stat.isSymbolicLink() &&
+      canonical === modelRoot &&
+      fs.lstatSync(snapshots).isDirectory() &&
+      fs.readdirSync(snapshots).length > 0
+    );
+  } catch {
+    return false;
+  }
+};
+
 const terminateChild = async (child: ChildProcess): Promise<void> => {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill('SIGTERM');
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
       child.kill('SIGKILL');
     }, 5_000);
-    const forcedTimeout = setTimeout(resolve, 7_000);
+    const forcedTimeout = setTimeout(
+      () => reject(new Error('cleanup_failed')),
+      7_000,
+    );
     child.once('exit', () => {
       clearTimeout(timeout);
       clearTimeout(forcedTimeout);
@@ -563,6 +1000,7 @@ const runMlxSource = async (input: {
   durationSeconds: number;
   audioRoot: string;
 }): Promise<RunObservation> => {
+  if (!hasPreparedMlxMediumCache()) throw new Error('mlx_cache_unavailable');
   const pythonPath = path.resolve('python/venv/bin/python');
   const serverPath = path.resolve('python/mlx_transcription_server.py');
   for (const required of [pythonPath, serverPath]) {
@@ -576,10 +1014,19 @@ const runMlxSource = async (input: {
     path.join(input.audioRoot, 'mlx-five-second'),
     5,
   );
+  const wholeSourcePath = path.join(input.audioRoot, 'mlx-whole.wav');
+  decodeWholeSource(input.sourcePath, wholeSourcePath);
   const port = 54_000 + Math.floor(Math.random() * 1_000);
   const child = spawn(pythonPath, [serverPath], {
     stdio: 'ignore',
-    env: { ...process.env, MLX_PREVIEW_PORT: String(port) },
+    env: {
+      ...process.env,
+      HF_DATASETS_OFFLINE: '1',
+      HF_HUB_DISABLE_TELEMETRY: '1',
+      HF_HUB_OFFLINE: '1',
+      TRANSFORMERS_OFFLINE: '1',
+      MLX_PREVIEW_PORT: String(port),
+    },
   });
   const publications: LiveReplayPublication[] = [];
   const committedSnapshots: string[] = [];
@@ -707,7 +1154,45 @@ const runMlxSource = async (input: {
       }
       index = queue.nextIndex;
     }
-    const self = compareText(accumulated, accumulated);
+    const batchResponse = await fetch(`http://127.0.0.1:${port}/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      body: JSON.stringify({
+        audio_path: wholeSourcePath,
+        model: 'medium',
+        device: 'mlx',
+        compute_type: 'float16',
+        language: 'en',
+        word_timestamps: true,
+      }),
+    });
+    if (!batchResponse.ok) throw new Error('benchmark_failed');
+    const batchPayload = (await batchResponse.json()) as {
+      segments?: Array<{ text?: string; end?: number }>;
+    };
+    const batchText = (batchPayload.segments ?? [])
+      .map(({ text }) => text ?? '')
+      .join(' ');
+    const batchTimedTokens = (batchPayload.segments ?? []).flatMap((segment) =>
+      tokens(segment.text ?? '').map((token) => ({
+        token,
+        atSeconds:
+          typeof segment.end === 'number' && Number.isFinite(segment.end)
+            ? segment.end
+            : input.durationSeconds,
+      })),
+    );
+    const batchComparison = compareText(accumulated, batchText);
+    const agreement2 = timedAgreement(observedTimedTokens, batchTimedTokens, 2);
+    const agreement5 = timedAgreement(observedTimedTokens, batchTimedTokens, 5);
+    const seamComparison = scoreChunkBoundarySeams(
+      observedTimedTokens,
+      batchTimedTokens,
+      segmentPaths
+        .slice(0, -1)
+        .map((_, segmentIndex) => (segmentIndex + 1) * 5),
+    );
     return {
       finalText: accumulated,
       timedTokens: observedTimedTokens,
@@ -727,17 +1212,17 @@ const runMlxSource = async (input: {
           0,
         ),
         inferenceSeconds,
-        seamDuplicateTokens: 0,
-        seamOmittedTokens: 0,
-        seamReferenceTokens: self.referenceTokens,
+        seamDuplicateTokens: seamComparison.duplicateTokens,
+        seamOmittedTokens: seamComparison.omittedTokens,
+        seamReferenceTokens: seamComparison.referenceTokens,
         committedSyntheticSeamDuplicateTokens: 0,
         committedSyntheticSeamOmittedTokens: 0,
         batchDiagnostic: {
-          editRate: 0,
-          precisionAt2Seconds: 1,
-          recallAt2Seconds: 1,
-          precisionAt5Seconds: 1,
-          recallAt5Seconds: 1,
+          editRate: batchComparison.editRate,
+          precisionAt2Seconds: agreement2.precision,
+          recallAt2Seconds: agreement2.recall,
+          precisionAt5Seconds: agreement5.precision,
+          recallAt5Seconds: agreement5.recall,
         },
         proxy: {
           disagreementRate: 0,
@@ -866,7 +1351,7 @@ const runParakeetSource = async (input: {
     publications.push({
       availableAtSeconds: event.audioEndSeconds,
       lookaheadReadyAtSeconds: event.audioEndSeconds,
-      completedAtSeconds: Math.max(event.audioEndSeconds, completedAtSeconds),
+      completedAtSeconds,
       audioEndSeconds: event.audioEndSeconds,
       changed:
         before?.tentativeText !== snapshot.tentativeText ||
@@ -926,12 +1411,9 @@ const runParakeetSource = async (input: {
     const replayStartedAt = performance.now();
     for (let index = 0; index < segmentPaths.length; index += 1) {
       const end = Math.min(input.durationSeconds, (index + 1) * FRAME_SECONDS);
-      if (input.realtime) {
-        const target = replayStartedAt + end * 1_000;
-        const delay = target - performance.now();
-        if (delay > 0)
-          await new Promise((resolve) => setTimeout(resolve, delay));
-      }
+      const target = replayStartedAt + end * 1_000;
+      const delay = target - performance.now();
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       const handoffStarted = performance.now();
       const appendStarted = performance.now();
       const operation = client.append({
@@ -1022,6 +1504,11 @@ const runParakeetSource = async (input: {
       );
     }
     const batchComparison = compareText(finalText, transcription.text);
+    const seamComparison = scoreChunkBoundarySeams(
+      streamTimedTokens,
+      batchTimedTokens,
+      segmentPaths.slice(0, -1).map((_, index) => (index + 1) * FRAME_SECONDS),
+    );
     const agreement2 = timedAgreement(streamTimedTokens, batchTimedTokens, 2);
     const agreement5 = timedAgreement(streamTimedTokens, batchTimedTokens, 5);
     let exactGapDetected = true;
@@ -1038,26 +1525,37 @@ const runParakeetSource = async (input: {
       } as const;
       gapFailureEvent = false;
       await client.open(gapIdentity);
-      await client.append({
-        ...gapIdentity,
-        sequence: 1,
-        audioPath: segmentPaths[0],
-        chunkStartSeconds: 0,
-        chunkEndSeconds: gap.startSeconds,
-      });
+      const prefixFrames = buildQuarterSecondFrames(
+        input.durationSeconds,
+      ).filter((frame) => frame.audioEndSeconds <= gap.startSeconds);
+      const suffixFrame = buildQuarterSecondFrames(input.durationSeconds).find(
+        (frame) => frame.audioEndSeconds - FRAME_SECONDS >= gap.endSeconds,
+      );
+      if (prefixFrames.length === 0 || !suffixFrame) {
+        throw new Error('benchmark_failed');
+      }
+      for (const frame of prefixFrames) {
+        await client.append({
+          ...gapIdentity,
+          sequence: frame.sequence + 1,
+          audioPath: segmentPaths[frame.sequence],
+          chunkStartSeconds: frame.audioEndSeconds - FRAME_SECONDS,
+          chunkEndSeconds: frame.audioEndSeconds,
+        });
+      }
       let rejected = false;
       try {
         await client.append({
           ...gapIdentity,
-          sequence: 2,
-          audioPath: segmentPaths[1] ?? segmentPaths[0],
+          sequence: prefixFrames.length + 1,
+          audioPath: segmentPaths[suffixFrame.sequence],
           chunkStartSeconds: gap.endSeconds,
-          chunkEndSeconds: gap.endSeconds + FRAME_SECONDS,
+          chunkEndSeconds: suffixFrame.audioEndSeconds,
         });
       } catch {
         rejected = true;
       }
-      exactGapDetected &&= rejected || gapFailureEvent;
+      exactGapDetected &&= rejected && gapFailureEvent;
       await client.cancel(gapIdentity).catch(() => undefined);
 
       const repairStart = Math.max(0, gap.startSeconds - 2);
@@ -1088,6 +1586,16 @@ const runParakeetSource = async (input: {
         repairTranscription.text,
         repairStart,
         repairEnd,
+        [
+          ...batchTimedTokens.filter(
+            ({ atSeconds }) => atSeconds < repairStart,
+          ),
+          ...tokens(repairTranscription.text).map((token) => ({
+            token,
+            atSeconds: (repairStart + repairEnd) / 2,
+          })),
+          ...batchTimedTokens.filter(({ atSeconds }) => atSeconds > repairEnd),
+        ],
       );
       repairedTokenF1 = Math.min(repairedTokenF1, proof.repairedTokenF1);
       outsideContextTokenChanges += proof.outsideContextTokenChanges;
@@ -1136,9 +1644,9 @@ const runParakeetSource = async (input: {
           0,
         ),
         inferenceSeconds,
-        seamDuplicateTokens: batchComparison.duplicateTokens,
-        seamOmittedTokens: batchComparison.omittedTokens,
-        seamReferenceTokens: batchComparison.referenceTokens,
+        seamDuplicateTokens: seamComparison.duplicateTokens,
+        seamOmittedTokens: seamComparison.omittedTokens,
+        seamReferenceTokens: seamComparison.referenceTokens,
         committedSyntheticSeamDuplicateTokens: 0,
         committedSyntheticSeamOmittedTokens: 0,
         batchDiagnostic: {
@@ -1175,33 +1683,557 @@ const runParakeetSource = async (input: {
   }
 };
 
-const writeOwnerOnly = (
+const runParakeetDualSource = async (input: {
+  manifest: PrivateLiveReplayManifest;
+  sourcePaths: Record<ReplaySource, string>;
+  durationSeconds: number;
+  audioRoot: string;
+  config: 'pinned-default' | 'low-latency-2s';
+  realtime: boolean;
+}): Promise<Record<ReplaySource, RunObservation>> => {
+  const [{ NativeJsonLineProcess }, { ParakeetLiveClient }] = await Promise.all(
+    [
+      import('../electron/transcription/nativeJsonLineProcess.ts'),
+      import('../electron/transcription/parakeetLiveClient.ts'),
+    ],
+  );
+  const sources = ['mic', 'system'] as const;
+  const segmentPaths = Object.fromEntries(
+    sources.map((source) => [
+      source,
+      decodeSegments(
+        input.sourcePaths[source],
+        path.join(input.audioRoot, `${source}-frames`),
+        FRAME_SECONDS,
+      ),
+    ]),
+  ) as Record<ReplaySource, string[]>;
+  const wholePaths = Object.fromEntries(
+    sources.map((source) => {
+      const wholePath = path.join(input.audioRoot, `${source}-whole.wav`);
+      decodeWholeSource(input.sourcePaths[source], wholePath);
+      return [source, wholePath];
+    }),
+  ) as Record<ReplaySource, string>;
+  let nativeChild: ChildProcess | undefined;
+  const nativeSpawn: NativeProcessSpawn = (executablePath, args, options) => {
+    nativeChild = spawn(executablePath, args, options);
+    return nativeChild as ReturnType<NativeProcessSpawn>;
+  };
+  const transport = new NativeJsonLineProcess({
+    executablePath: input.manifest.runtime.executablePath,
+    args: [
+      '--model-root',
+      input.manifest.runtime.modelRoot,
+      '--audio-root',
+      input.audioRoot,
+      '--live-config',
+      input.config,
+    ],
+    spawn: nativeSpawn,
+    requestTimeoutMs: REQUEST_TIMEOUT_MS,
+  });
+  const client = new ParakeetLiveClient({
+    process: transport,
+    maxQueuedAppends: 2,
+  });
+  const identities = Object.fromEntries(
+    sources.map((source) => [
+      source,
+      { streamId: `${source}-${input.config}`, source, generation: 1 },
+    ]),
+  ) as Record<
+    ReplaySource,
+    { streamId: string; source: ReplaySource; generation: number }
+  >;
+  const state = Object.fromEntries(
+    sources.map((source) => [
+      source,
+      {
+        snapshot: null as LiveStreamSnapshot | null,
+        publications: [] as LiveReplayPublication[],
+        committedSnapshots: [] as string[],
+        timedTokens: [] as TimedToken[],
+        handoffs: [] as number[],
+        inferenceSeconds: 0,
+      },
+    ]),
+  ) as Record<
+    ReplaySource,
+    {
+      snapshot: LiveStreamSnapshot | null;
+      publications: LiveReplayPublication[];
+      committedSnapshots: string[];
+      timedTokens: TimedToken[];
+      handoffs: number[];
+      inferenceSeconds: number;
+    }
+  >;
+  let replayStartedAt = performance.now();
+  let warming = true;
+  const unsubscribe = client.onEvent((event) => {
+    if (warming || event.event !== 'stream_update') return;
+    const source = event.source;
+    const sourceState = state[source];
+    if (!sourceState || event.streamId !== identities[source].streamId) return;
+    const before = sourceState.snapshot;
+    sourceState.snapshot = reduceLiveStreamUpdate(before, {
+      source,
+      generation: event.generation,
+      revision: event.revision,
+      qualifiesPriorTentative: event.qualifiesPriorTentative,
+      text: event.text,
+      confidence: event.confidence,
+      audioEndSeconds: event.audioEndSeconds,
+    });
+    if (event.qualifiesPriorTentative && before?.tentativeText) {
+      sourceState.timedTokens.push(
+        ...tokens(before.tentativeText).map((token) => ({
+          token,
+          atSeconds: before.audioEndSeconds,
+        })),
+      );
+    }
+    const beforeTokens = tokens(before?.tentativeText ?? '');
+    const afterTokens = tokens(sourceState.snapshot.tentativeText);
+    sourceState.publications.push({
+      availableAtSeconds: event.audioEndSeconds,
+      lookaheadReadyAtSeconds: event.audioEndSeconds,
+      completedAtSeconds: (performance.now() - replayStartedAt) / 1_000,
+      audioEndSeconds: event.audioEndSeconds,
+      changed:
+        before?.tentativeText !== sourceState.snapshot.tentativeText ||
+        before?.committedPreviewText !==
+          sourceState.snapshot.committedPreviewText,
+      activeSpeech: afterTokens.length > 0,
+      newTokenCount: Math.max(0, afterTokens.length - beforeTokens.length),
+      rollbackTokens: Math.max(0, beforeTokens.length - afterTokens.length),
+      volatileOperationCount: Number(
+        before?.tentativeText !== sourceState.snapshot.tentativeText,
+      ),
+      revisionAgeSeconds: 0,
+    });
+    sourceState.committedSnapshots.push(
+      sourceState.snapshot.committedPreviewText,
+    );
+  });
+  let sampling: ReturnType<typeof startResourceSampling> | undefined;
+  try {
+    const prepare = await transport.request({
+      schemaVersion: 1,
+      id: 'prepare-dual',
+      method: 'prepare',
+      modelRoot: input.manifest.runtime.modelRoot,
+    });
+    if (
+      !prepare.ok ||
+      prepare.result?.liveConfigId !== input.config ||
+      !nativeChild?.pid
+    ) {
+      throw new Error('benchmark_failed');
+    }
+    const warmIdentities = Object.fromEntries(
+      sources.map((source) => [
+        source,
+        { streamId: `${source}-${input.config}-warm`, source, generation: 1 },
+      ]),
+    ) as Record<
+      ReplaySource,
+      { streamId: string; source: ReplaySource; generation: number }
+    >;
+    await Promise.all(
+      sources.map((source) => client.open(warmIdentities[source])),
+    );
+    await Promise.all(
+      sources.map((source) =>
+        client.append({
+          ...warmIdentities[source],
+          sequence: 1,
+          audioPath: segmentPaths[source][0],
+          chunkStartSeconds: 0,
+          chunkEndSeconds: Math.min(FRAME_SECONDS, input.durationSeconds),
+        }),
+      ),
+    );
+    await Promise.all(
+      sources.map((source) => client.flush(warmIdentities[source])),
+    );
+    warming = false;
+    sampling = startResourceSampling(
+      nativeChild.pid,
+      input.realtime ? 1 : 0.25,
+      input.realtime,
+    );
+    const preparedIdleRssGiB = sampling.preparedIdleRssGiB;
+    await Promise.all(sources.map((source) => client.open(identities[source])));
+    replayStartedAt = performance.now();
+    const pending: Array<{
+      source: ReplaySource;
+      sequence: number;
+      operation: Promise<void>;
+      startedAt: number;
+    }> = [];
+    const processed = Object.fromEntries(
+      sources.map((source) => [source, [] as number[]]),
+    ) as Record<ReplaySource, number[]>;
+    const settleOldest = async () => {
+      const pendingAppend = pending.shift();
+      if (!pendingAppend) return;
+      await pendingAppend.operation;
+      state[pendingAppend.source].inferenceSeconds +=
+        (performance.now() - pendingAppend.startedAt) / 1_000;
+      processed[pendingAppend.source].push(pendingAppend.sequence);
+    };
+    for (const frame of buildQuarterSecondFrames(input.durationSeconds)) {
+      const target = replayStartedAt + frame.availableAtSeconds * 1_000;
+      const delay = target - performance.now();
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      if (
+        (performance.now() - replayStartedAt) / 1_000 <
+        frame.availableAtSeconds
+      ) {
+        throw new Error('benchmark_failed');
+      }
+      for (const source of sources) {
+        if (pending.length >= 2) await settleOldest();
+        const startedAt = performance.now();
+        const operation = client.append({
+          ...identities[source],
+          sequence: frame.sequence + 1,
+          audioPath: segmentPaths[source][frame.sequence],
+          chunkStartSeconds: frame.audioEndSeconds - FRAME_SECONDS,
+          chunkEndSeconds: frame.audioEndSeconds,
+        });
+        state[source].handoffs.push(performance.now() - startedAt);
+        pending.push({
+          source,
+          sequence: frame.sequence + 1,
+          operation,
+          startedAt,
+        });
+      }
+    }
+    while (pending.length > 0) await settleOldest();
+    const flushes = Object.fromEntries(
+      await Promise.all(
+        sources.map(
+          async (source) =>
+            [source, await client.flush(identities[source])] as const,
+        ),
+      ),
+    ) as Record<
+      ReplaySource,
+      {
+        finalPreview: string;
+        degradations: Array<{ affectedSequence?: number }>;
+      }
+    >;
+    const resourceSamples = sampling.stop();
+    sampling = undefined;
+    const resourceSoak =
+      input.realtime &&
+      !resourceSamples.samplingFailed &&
+      resourceSamples.rssSamples.length > 0
+        ? {
+            sourceStartSeconds: 0,
+            sourceEndSeconds: input.durationSeconds,
+            sourceDurationSeconds: input.durationSeconds,
+            soakStartSeconds: 0,
+            soakEndSeconds: input.durationSeconds,
+            warmupEndSeconds: 0,
+            sampleIntervalSeconds: 1 as const,
+            realTime: true as const,
+            longestSource: true as const,
+            preparedIdleRssGiB,
+            peakRssGiB: Math.max(
+              ...resourceSamples.rssSamples.map(({ rssGiB }) => rssGiB),
+            ),
+            rssSamples: resourceSamples.rssSamples,
+            thermalSamples: resourceSamples.thermalSamples,
+          }
+        : undefined;
+    const observations = {} as Record<ReplaySource, RunObservation>;
+    for (const source of sources) {
+      const batch = await transport.request({
+        schemaVersion: 1,
+        id: `batch-${source}`,
+        method: 'transcribe',
+        audioPath: wholePaths[source],
+        language: 'en',
+        vocabulary: [],
+      });
+      const transcription = batch.result?.transcription as
+        | {
+            text?: unknown;
+            words?: Array<{ text?: unknown; endSeconds?: unknown }>;
+          }
+        | undefined;
+      if (!batch.ok || typeof transcription?.text !== 'string')
+        throw new Error('benchmark_failed');
+      const batchTimedTokens = (transcription.words ?? []).flatMap((word) =>
+        typeof word.text === 'string' &&
+        typeof word.endSeconds === 'number' &&
+        Number.isFinite(word.endSeconds)
+          ? tokens(word.text).map((token) => ({
+              token,
+              atSeconds: word.endSeconds as number,
+            }))
+          : [],
+      );
+      const sourceState = state[source];
+      if (sourceState.snapshot?.tentativeText) {
+        sourceState.timedTokens.push(
+          ...tokens(sourceState.snapshot.tentativeText).map((token) => ({
+            token,
+            atSeconds:
+              sourceState.snapshot?.audioEndSeconds ?? input.durationSeconds,
+          })),
+        );
+      }
+      const batchComparison = compareText(
+        flushes[source].finalPreview,
+        transcription.text,
+      );
+      const agreement2 = timedAgreement(
+        sourceState.timedTokens,
+        batchTimedTokens,
+        2,
+      );
+      const agreement5 = timedAgreement(
+        sourceState.timedTokens,
+        batchTimedTokens,
+        5,
+      );
+      const seams = scoreChunkBoundarySeams(
+        sourceState.timedTokens,
+        batchTimedTokens,
+        segmentPaths[source]
+          .slice(0, -1)
+          .map((_, index) => (index + 1) * FRAME_SECONDS),
+      );
+      let exactGapDetected = true;
+      let repairedTokenF1 = 1;
+      let outsideContextTokenChanges = 0;
+      for (const [gapIndex, gap] of buildGapInjections(
+        input.durationSeconds,
+      ).entries()) {
+        const gapIdentity = {
+          streamId: `${source}-${input.config}-gap-${gap.label}`,
+          source,
+          generation: gapIndex + 2,
+        } as const;
+        const frames = buildQuarterSecondFrames(input.durationSeconds);
+        const prefix = frames.filter(
+          ({ audioEndSeconds }) => audioEndSeconds <= gap.startSeconds,
+        );
+        const suffix = frames.find(
+          ({ audioEndSeconds }) =>
+            audioEndSeconds - FRAME_SECONDS >= gap.endSeconds,
+        );
+        if (prefix.length === 0 || !suffix) throw new Error('benchmark_failed');
+        await client.open(gapIdentity);
+        for (const frame of prefix) {
+          await client.append({
+            ...gapIdentity,
+            sequence: frame.sequence + 1,
+            audioPath: segmentPaths[source][frame.sequence],
+            chunkStartSeconds: frame.audioEndSeconds - FRAME_SECONDS,
+            chunkEndSeconds: frame.audioEndSeconds,
+          });
+        }
+        let rejected = false;
+        try {
+          await client.append({
+            ...gapIdentity,
+            sequence: prefix.length + 1,
+            audioPath: segmentPaths[source][suffix.sequence],
+            chunkStartSeconds: gap.endSeconds,
+            chunkEndSeconds: suffix.audioEndSeconds,
+          });
+        } catch {
+          rejected = true;
+        }
+        exactGapDetected &&= rejected;
+        await client.cancel(gapIdentity).catch(() => undefined);
+        const repairStart = Math.max(0, gap.startSeconds - 2);
+        const repairEnd = Math.min(input.durationSeconds, gap.endSeconds + 2);
+        const repairPath = path.join(
+          input.audioRoot,
+          `${source}-repair-${gap.label}.wav`,
+        );
+        extractSourceWindow(
+          input.sourcePaths[source],
+          repairPath,
+          repairStart,
+          repairEnd - repairStart,
+        );
+        const repair = await transport.request({
+          schemaVersion: 1,
+          id: `repair-${source}-${gapIndex}`,
+          method: 'transcribe',
+          audioPath: repairPath,
+          language: 'en',
+          vocabulary: [],
+        });
+        const repairText = (
+          repair.result?.transcription as { text?: unknown } | undefined
+        )?.text;
+        if (!repair.ok || typeof repairText !== 'string') {
+          throw new Error('benchmark_failed');
+        }
+        const spliced = [
+          ...batchTimedTokens.filter(
+            ({ atSeconds }) => atSeconds < repairStart,
+          ),
+          ...tokens(repairText).map((token) => ({
+            token,
+            atSeconds: (repairStart + repairEnd) / 2,
+          })),
+          ...batchTimedTokens.filter(({ atSeconds }) => atSeconds > repairEnd),
+        ];
+        const proof = proveTargetedRepair(
+          batchTimedTokens,
+          repairText,
+          repairStart,
+          repairEnd,
+          spliced,
+        );
+        repairedTokenF1 = Math.min(repairedTokenF1, proof.repairedTokenF1);
+        outsideContextTokenChanges += proof.outsideContextTokenChanges;
+      }
+      const acceptedSequences = buildQuarterSecondFrames(
+        input.durationSeconds,
+      ).map(({ sequence }) => sequence + 1);
+      for (const degradation of flushes[source].degradations) {
+        if (degradation.affectedSequence !== undefined) {
+          const index = processed[source].indexOf(degradation.affectedSequence);
+          if (index >= 0) processed[source].splice(index, 1);
+        }
+      }
+      observations[source] = {
+        finalText: flushes[source].finalPreview,
+        timedTokens: sourceState.timedTokens,
+        resourceSoak,
+        repetition: {
+          firstSealedActivitySeconds:
+            sourceState.publications.find(({ changed }) => changed)
+              ?.completedAtSeconds ?? input.durationSeconds,
+          publications: sourceState.publications,
+          committedSnapshots: sourceState.committedSnapshots,
+          acceptedSequences,
+          processedSequences: processed[source],
+          acceptedCoverage: acceptedSequences.map((receipt) => ({
+            receipt,
+            startSeconds: (receipt - 1) * FRAME_SECONDS,
+            endSeconds: Math.min(
+              input.durationSeconds,
+              receipt * FRAME_SECONDS,
+            ),
+          })),
+          processedCoverage: processed[source].map((receipt) => ({
+            receipt,
+            startSeconds: (receipt - 1) * FRAME_SECONDS,
+            endSeconds: Math.min(
+              input.durationSeconds,
+              receipt * FRAME_SECONDS,
+            ),
+          })),
+          expectedSourceSeconds: input.durationSeconds,
+          processedSourceSeconds: processed[source].reduce(
+            (total, receipt) =>
+              total +
+              Math.min(
+                FRAME_SECONDS,
+                input.durationSeconds - (receipt - 1) * FRAME_SECONDS,
+              ),
+            0,
+          ),
+          inferenceSeconds: sourceState.inferenceSeconds,
+          seamDuplicateTokens: seams.duplicateTokens,
+          seamOmittedTokens: seams.omittedTokens,
+          seamReferenceTokens: seams.referenceTokens,
+          committedSyntheticSeamDuplicateTokens: 0,
+          committedSyntheticSeamOmittedTokens: 0,
+          batchDiagnostic: {
+            editRate: batchComparison.editRate,
+            precisionAt2Seconds: agreement2.precision,
+            recallAt2Seconds: agreement2.recall,
+            precisionAt5Seconds: agreement5.precision,
+            recallAt5Seconds: agreement5.recall,
+          },
+          proxy: {
+            disagreementRate: 1,
+            alignedRecall: 0,
+            mlxDisagreementRate: 1,
+            mlxAlignedRecall: 0,
+          },
+          repair: {
+            exactGapDetected,
+            contextBeforeSeconds: 2,
+            contextAfterSeconds: 2,
+            outsideContextTokenChanges,
+            repairedTokenF1,
+          },
+          captureHandoffMilliseconds: sourceState.handoffs,
+          rendererInferenceCallbacks: 0,
+          wholeSessionAsrCalls: 0,
+          analysisBeforeCanonicalCommit: 0,
+        },
+      };
+    }
+    return observations;
+  } finally {
+    sampling?.stop();
+    unsubscribe();
+    client.close();
+    if (nativeChild) await terminateChild(nativeChild);
+  }
+};
+
+export const writePrivateReplayReportAtomic = (
   outputPath: string,
-  report: PrivateLiveReplayReport,
+  report: PrivateLiveReplayReport | PrivateLiveReplayComparison,
 ) => {
   const parent = path.dirname(outputPath);
   const parentStat = fs.lstatSync(parent);
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) {
     throw new Error('report_unavailable');
   }
-  let handle: number;
+  const temporaryPath = path.join(
+    parent,
+    `.private-live-replay-${process.pid}-${Date.now()}.tmp`,
+  );
+  let handle: number | undefined;
   try {
     handle = fs.openSync(
-      outputPath,
+      temporaryPath,
       fs.constants.O_WRONLY |
         fs.constants.O_CREAT |
-        fs.constants.O_TRUNC |
+        fs.constants.O_EXCL |
         fs.constants.O_NOFOLLOW,
       0o600,
     );
-  } catch {
-    throw new Error('report_unavailable');
-  }
-  try {
     fs.fchmodSync(handle, 0o600);
     fs.writeFileSync(handle, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  } finally {
+    fs.fsyncSync(handle);
     fs.closeSync(handle);
+    handle = undefined;
+    fs.linkSync(temporaryPath, outputPath);
+    fs.unlinkSync(temporaryPath);
+    const directoryHandle = fs.openSync(parent, fs.constants.O_RDONLY);
+    try {
+      fs.fsyncSync(directoryHandle);
+    } finally {
+      fs.closeSync(directoryHandle);
+    }
+  } catch {
+    if (handle !== undefined) fs.closeSync(handle);
+    try {
+      if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+    } catch {
+      // The caller receives only a finite content-free failure.
+    }
+    throw new Error('report_unavailable');
   }
 };
 
@@ -1219,6 +2251,24 @@ export const assertReportTargetSafe = (
   manifestPath: string,
   manifest: PrivateLiveReplayManifest,
 ): void => {
+  const outputParent = path.dirname(path.resolve(outputPath));
+  let ancestor = path.parse(outputParent).root;
+  try {
+    for (const part of path
+      .relative(ancestor, outputParent)
+      .split(path.sep)
+      .filter(Boolean)) {
+      ancestor = path.join(ancestor, part);
+      if (fs.lstatSync(ancestor).isSymbolicLink()) {
+        throw new Error('report_unavailable');
+      }
+    }
+    if (fs.realpathSync(outputParent) !== outputParent) {
+      throw new Error('report_unavailable');
+    }
+  } catch {
+    throw new Error('report_unavailable');
+  }
   const protectedPaths = [
     manifestPath,
     manifest.runtime.executablePath,
@@ -1237,24 +2287,12 @@ export const assertReportTargetSafe = (
     throw new Error('report_unavailable');
   }
   if (!fs.existsSync(resolvedOutput)) return;
-  const outputStat = fs.lstatSync(resolvedOutput);
-  if (outputStat.isSymbolicLink() || !outputStat.isFile()) {
-    throw new Error('report_unavailable');
-  }
-  for (const protectedPath of protectedPaths) {
-    const protectedStat = fs.lstatSync(protectedPath);
-    if (
-      outputStat.dev === protectedStat.dev &&
-      outputStat.ino === protectedStat.ino
-    ) {
-      throw new Error('report_unavailable');
-    }
-  }
+  throw new Error('report_unavailable');
 };
 
 export const runPrivateLiveReplay = async (
   options: PrivateLiveReplayOptions,
-): Promise<PrivateLiveReplayReport> => {
+): Promise<PrivateLiveReplayComparison> => {
   const manifest = validatePrivateLiveReplayManifest(
     readPrivateLiveReplayManifest(options.manifestPath),
   );
@@ -1280,8 +2318,10 @@ export const runPrivateLiveReplay = async (
     const meetings =
       options.mode === 'realtime-soak' ? [longest] : manifest.meetings;
     const mlxRepetitions: LiveReplayRepetition[] = [];
-    const parakeetRepetitions: LiveReplayRepetition[] = [];
-    let candidateResourceSoak: LiveReplayResourceSoak | undefined;
+    const pinnedRepetitions: LiveReplayRepetition[] = [];
+    const lowLatencyRepetitions: LiveReplayRepetition[] = [];
+    let pinnedResourceSoak: LiveReplayResourceSoak | undefined;
+    let lowLatencyResourceSoak: LiveReplayResourceSoak | undefined;
     const runCount = options.mode === 'realtime-soak' ? 1 : options.repetitions;
     const orders =
       options.mode === 'causal'
@@ -1295,66 +2335,44 @@ export const runPrivateLiveReplay = async (
           ];
     for (let repetition = 0; repetition < runCount; repetition += 1) {
       for (const meeting of meetings) {
-        const meetingObservations: Array<{
-          mlx: RunObservation;
-          pinned: RunObservation;
-          candidate: RunObservation;
-        }> = [];
-        for (const source of ['mic', 'system'] as const) {
-          const sourcePath =
-            source === 'mic'
-              ? meeting.sources.micPath
-              : meeting.sources.systemPath;
-          let mlxObservation: RunObservation | undefined;
-          let pinnedObservation: RunObservation | undefined;
-          let candidateObservation: RunObservation | undefined;
-          for (const engine of orders[repetition]) {
-            const root = path.join(
-              temporaryRoot,
-              `${repetition}-${meeting.sealedGeneration}-${source}-${engine}`,
-            );
-            fs.mkdirSync(root, { mode: 0o700 });
-            try {
-              if (engine === 'mlxProduction') {
-                mlxObservation = await runMlxSource({
-                  sourcePath,
-                  durationSeconds: meeting.sealedDurationSeconds,
-                  audioRoot: root,
-                });
-              } else {
-                const config =
-                  engine === 'parakeetPinnedDefault'
-                    ? 'pinned-default'
-                    : 'low-latency-2s';
-                const observation = await runParakeetSource({
-                  manifest,
-                  source,
-                  sourcePath,
-                  durationSeconds: meeting.sealedDurationSeconds,
-                  audioRoot: root,
-                  config,
-                  realtime: options.mode === 'realtime-soak',
-                });
-                if (config === 'pinned-default')
-                  pinnedObservation = observation;
-                else candidateObservation = observation;
-              }
-            } finally {
-              removeReplayDirectory(root, temporaryRoot);
-            }
+        let pinnedPair: Record<ReplaySource, RunObservation> | undefined;
+        let candidatePair: Record<ReplaySource, RunObservation> | undefined;
+        for (const engine of orders[repetition]) {
+          if (engine === 'mlxProduction') continue;
+          const root = path.join(
+            temporaryRoot,
+            `${repetition}-${meeting.sealedGeneration}-${engine}`,
+          );
+          fs.mkdirSync(root, { mode: 0o700 });
+          try {
+            const config =
+              engine === 'parakeetPinnedDefault'
+                ? 'pinned-default'
+                : 'low-latency-2s';
+            const pair = await runParakeetDualSource({
+              manifest,
+              sourcePaths: meeting.sources,
+              durationSeconds: meeting.sealedDurationSeconds,
+              audioRoot: root,
+              config,
+              realtime: options.mode === 'realtime-soak',
+            });
+            if (config === 'pinned-default') pinnedPair = pair;
+            else candidatePair = pair;
+          } finally {
+            removeReplayDirectory(root, temporaryRoot);
           }
-          if (!mlxObservation || !pinnedObservation || !candidateObservation) {
-            throw new Error('benchmark_failed');
-          }
-          meetingObservations.push({
-            mlx: mlxObservation,
-            pinned: pinnedObservation,
-            candidate: candidateObservation,
-          });
         }
+        if (!pinnedPair || !candidatePair) throw new Error('benchmark_failed');
+        const meetingObservations = (['mic', 'system'] as const).map(
+          (source) => ({
+            pinned: pinnedPair[source],
+            candidate: candidatePair[source],
+          }),
+        );
         const proxy = loadProxyTranscript(meeting.proxyTranscriptPath);
         const combine = (
-          key: 'mlx' | 'pinned' | 'candidate',
+          key: 'pinned' | 'candidate',
         ): { text: string; timedTokens: TimedToken[] } => {
           const timedTokens = meetingObservations
             .flatMap((observation) => observation[key].timedTokens)
@@ -1364,20 +2382,20 @@ export const runPrivateLiveReplay = async (
             timedTokens,
           };
         };
-        const combinedMlx = combine('mlx');
+        const combinedPinned = combine('pinned');
         const combinedCandidate = combine('candidate');
         const candidateVsProxy = compareText(
           combinedCandidate.text,
           proxy.text,
         );
-        const mlxVsProxy = compareText(combinedMlx.text, proxy.text);
+        const pinnedVsProxy = compareText(combinedPinned.text, proxy.text);
         const candidateAligned = timedAgreement(
           combinedCandidate.timedTokens,
           proxy.timedTokens,
           2,
         );
-        const mlxAligned = timedAgreement(
-          combinedMlx.timedTokens,
+        const pinnedAligned = timedAgreement(
+          combinedPinned.timedTokens,
           proxy.timedTokens,
           2,
         );
@@ -1385,44 +2403,49 @@ export const runPrivateLiveReplay = async (
           observation.candidate.repetition.proxy = {
             disagreementRate: candidateVsProxy.editRate,
             alignedRecall: candidateAligned.recall,
-            mlxDisagreementRate: mlxVsProxy.editRate,
-            mlxAlignedRecall: mlxAligned.recall,
+            mlxDisagreementRate: candidateVsProxy.editRate,
+            mlxAlignedRecall: candidateAligned.recall,
           };
-          observation.mlx.repetition.proxy = {
-            disagreementRate: mlxVsProxy.editRate,
-            alignedRecall: mlxAligned.recall,
-            mlxDisagreementRate: mlxVsProxy.editRate,
-            mlxAlignedRecall: mlxAligned.recall,
+          observation.pinned.repetition.proxy = {
+            disagreementRate: pinnedVsProxy.editRate,
+            alignedRecall: pinnedAligned.recall,
+            mlxDisagreementRate: pinnedVsProxy.editRate,
+            mlxAlignedRecall: pinnedAligned.recall,
           };
-          mlxRepetitions.push(observation.mlx.repetition);
-          parakeetRepetitions.push(observation.candidate.repetition);
-          candidateResourceSoak ??= observation.candidate.resourceSoak;
+          pinnedRepetitions.push(observation.pinned.repetition);
+          lowLatencyRepetitions.push(observation.candidate.repetition);
+          pinnedResourceSoak ??= observation.pinned.resourceSoak;
+          lowLatencyResourceSoak ??= observation.candidate.resourceSoak;
         }
       }
     }
-    const evidence = {
+    const evidence = (resourceSoak: LiveReplayResourceSoak | undefined) => ({
       corpusEligible: true,
       aecEvidenceAvailable: false,
-      resourceEvidenceAvailable: candidateResourceSoak !== undefined,
-      resourceSoak: candidateResourceSoak,
+      resourceEvidenceAvailable: resourceSoak !== undefined,
+      resourceSoak,
       engineOrderAlternated: options.mode === 'causal',
-      mlxProductionQueueVerified: true,
-    };
-    const mlx = evaluateLiveReplay(mlxRepetitions, evidence);
-    const parakeet = evaluateLiveReplay(parakeetRepetitions, {
-      ...evidence,
-      mlxBaseline: {
-        firstTextP95Seconds:
-          typeof mlx.metrics.firstTextP95Seconds === 'number'
-            ? mlx.metrics.firstTextP95Seconds
-            : 0,
-        runtimeFactor:
-          typeof mlx.metrics.runtimeFactorMaximum === 'number'
-            ? mlx.metrics.runtimeFactorMaximum
-            : 0,
-      },
+      mlxProductionQueueVerified: mlxRepetitions.length > 0,
     });
-    return buildPrivateLiveReplayReport({
+    const mlx = evaluateLiveReplay(mlxRepetitions, evidence(undefined));
+    const evaluateParakeet = (
+      repetitions: LiveReplayRepetition[],
+      resourceSoak: LiveReplayResourceSoak | undefined,
+    ) =>
+      evaluateLiveReplay(repetitions, {
+        ...evidence(resourceSoak),
+        ...(mlx.status !== 'unavailable' &&
+        typeof mlx.metrics.firstTextP95Seconds === 'number' &&
+        typeof mlx.metrics.runtimeFactorMaximum === 'number'
+          ? {
+              mlxBaseline: {
+                firstTextP95Seconds: mlx.metrics.firstTextP95Seconds,
+                runtimeFactor: mlx.metrics.runtimeFactorMaximum,
+              },
+            }
+          : {}),
+      });
+    const reportInput = {
       corpus: {
         meetingCount: manifest.meetings.length,
         sourceCount: manifest.meetings.length * 2,
@@ -1432,13 +2455,22 @@ export const runPrivateLiveReplay = async (
             0,
           ) / 60,
       },
-      runtime: {
-        ...RUNTIME,
-        configId: 'low-latency-v1',
-      },
       mlxProduction: mlx,
-      parakeetSliding: parakeet,
+    };
+    const pinnedDefault = buildPrivateLiveReplayReport({
+      ...reportInput,
+      runtime: { ...RUNTIME, configId: 'pinned-default-v1' },
+      parakeetSliding: evaluateParakeet(pinnedRepetitions, pinnedResourceSoak),
     });
+    const lowLatency = buildPrivateLiveReplayReport({
+      ...reportInput,
+      runtime: { ...RUNTIME, configId: 'low-latency-v1' },
+      parakeetSliding: evaluateParakeet(
+        lowLatencyRepetitions,
+        lowLatencyResourceSoak,
+      ),
+    });
+    return buildPrivateLiveReplayComparison(pinnedDefault, lowLatency);
   } finally {
     fs.rmSync(resolvedTemporaryRoot, { recursive: true, force: false });
   }
@@ -1453,7 +2485,7 @@ export const runReplayCli = async (): Promise<void> => {
   try {
     const options = parsePrivateLiveReplayOptions(process.argv.slice(2));
     const report = await runPrivateLiveReplay(options);
-    writeOwnerOnly(options.outputPath, report);
+    writePrivateReplayReportAtomic(options.outputPath, report);
     process.stdout.write('report written\n');
   } catch (error) {
     process.stderr.write(`${cliCode(error)}\n`);

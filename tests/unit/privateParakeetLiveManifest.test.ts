@@ -33,7 +33,9 @@ import {
 } from '../../scripts/validate_private_parakeet_live_manifest.ts';
 
 const createFixture = () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'pluto-live-replay-'));
+  const root = realpathSync(
+    mkdtempSync(path.join(tmpdir(), 'pluto-live-replay-')),
+  );
   const runtimePath = path.join(root, 'parakeet-runtime');
   const modelRoot = path.join(root, 'models');
   writeFileSync(runtimePath, 'runtime');
@@ -62,6 +64,7 @@ const createFixture = () => {
     durationByPath.set(realpathSync(systemPath), durationSeconds);
     return {
       id: `meeting-${index}`,
+      recordedAt: new Date(Date.UTC(2026, 7, 14 - index)).toISOString(),
       sealedDurationSeconds: durationSeconds,
       sealedGeneration: index + 1,
       integrity: 'sealed' as const,
@@ -82,6 +85,7 @@ const createFixture = () => {
       lstat: lstatSync,
       realpath: realpathSync,
       durationSeconds: (filePath: string) => durationByPath.get(filePath) ?? 0,
+      nowMs: () => Date.UTC(2026, 7, 15),
     },
   };
 };
@@ -201,6 +205,43 @@ describe('private Parakeet live replay manifest', () => {
     expect(() =>
       validatePrivateLiveReplayManifest(fixture.manifest, fixture.adapters),
     ).toThrowError('source_duration_mismatch');
+  });
+
+  it('requires every meeting to fall inside the explicit recent window', () => {
+    const fixture = createFixture();
+    fixture.manifest.meetings[0].recordedAt = '2026-06-01T00:00:00.000Z';
+    expect(() =>
+      validatePrivateLiveReplayManifest(fixture.manifest, fixture.adapters),
+    ).toThrowError('meeting_not_recent');
+
+    fixture.manifest.meetings[0].recordedAt = '2026-08-16T00:00:00.000Z';
+    expect(() =>
+      validatePrivateLiveReplayManifest(fixture.manifest, fixture.adapters),
+    ).toThrowError('meeting_not_recent');
+  });
+
+  it('rejects a regular source beneath a symlinked ancestor', () => {
+    const fixture = createFixture();
+    const realDirectory = path.join(
+      path.dirname(fixture.manifest.runtime.modelRoot),
+      'real-audio',
+    );
+    mkdirSync(realDirectory);
+    const realSource = path.join(realDirectory, 'mic.wav');
+    writeFileSync(realSource, 'mic');
+    const linkedDirectory = path.join(
+      path.dirname(realDirectory),
+      'linked-audio',
+    );
+    symlinkSync(realDirectory, linkedDirectory);
+    fixture.manifest.meetings[0].sources.micPath = path.join(
+      linkedDirectory,
+      'mic.wav',
+    );
+    fixture.adapters.durationSeconds = () => 1_800;
+    expect(() =>
+      validatePrivateLiveReplayManifest(fixture.manifest, fixture.adapters),
+    ).toThrowError('source_unavailable');
   });
 
   it.each([

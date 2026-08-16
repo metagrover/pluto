@@ -1177,6 +1177,16 @@ const sanitizeEngine = (
   ) {
     throw new Error('private_report_value');
   }
+  if (raw.status === 'unavailable') {
+    const metrics = expectObject(raw.metrics);
+    const sanitized: Record<string, number | boolean | string> = {};
+    for (const [key, metric] of Object.entries(metrics)) {
+      if (!metricKeys.has(key)) throw new Error('private_report_field');
+      sanitized[key] =
+        typeof metric === 'boolean' ? metric : safeNumber(metric);
+    }
+    return { status: raw.status, metrics: sanitized };
+  }
   return { status: raw.status, metrics: sanitizeMetrics(raw.metrics) };
 };
 
