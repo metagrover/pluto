@@ -140,7 +140,7 @@ final class LiveProtocolTests: XCTestCase {
                     streamId: "s",
                     source: .system,
                     generation: 2,
-                    eventSequence: 3,
+                    revision: 3,
                     priorTentativeQualified: true,
                     text: "synthetic",
                     confidence: 0.9,
@@ -151,7 +151,7 @@ final class LiveProtocolTests: XCTestCase {
                     streamId: "s",
                     source: .system,
                     generation: 2,
-                    eventSequence: 4,
+                    revision: 4,
                     reason: .partialWindow,
                     affectedSequence: 4,
                     chunkStartSeconds: 20,
@@ -162,7 +162,7 @@ final class LiveProtocolTests: XCTestCase {
                     streamId: "s",
                     source: .system,
                     generation: 2,
-                    eventSequence: 5,
+                    revision: 5,
                     reason: .inferenceFailed
                 )),
         ]
@@ -188,7 +188,7 @@ final class LiveProtocolTests: XCTestCase {
                 streamId: "s",
                 source: .system,
                 generation: 2,
-                eventSequence: 3,
+                revision: 3,
                 priorTentativeQualified: true,
                 text: "synthetic",
                 confidence: 0.9,
@@ -204,14 +204,41 @@ final class LiveProtocolTests: XCTestCase {
         XCTAssertNil(object["payload"])
     }
 
+    func testUpdateEncodesRevisionKeyExactly() throws {
+        let event = RuntimeEvent.streamUpdate(
+            LiveStreamUpdate(
+                streamId: "s",
+                source: .mic,
+                generation: 1,
+                revision: 7,
+                priorTentativeQualified: false,
+                text: "synthetic",
+                confidence: 0.5,
+                audioEndSeconds: 1
+            ))
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(event)) as? [String: Any])
+        XCTAssertEqual(object["revision"] as? Int, 7)
+        XCTAssertNil(object["eventSequence"])
+    }
+
+    func testUpdateRejectsLegacyEventSequenceKey() {
+        let legacy = Data(
+            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"eventSequence":1,"priorTentativeQualified":false,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#
+                .utf8)
+
+        XCTAssertThrowsError(try decoder.decode(RuntimeEvent.self, from: legacy))
+    }
+
     func testRejectsMalformedUpdateNumbersAndIdentity() {
         let base =
-            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"eventSequence":1,"priorTentativeQualified":false,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#
+            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"revision":1,"priorTentativeQualified":false,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#
         let invalid = [
             base.replacingOccurrences(of: #""streamId":"s""#, with: #""streamId":"""#),
             base.replacingOccurrences(of: #""source":"mic""#, with: #""source":"mixed""#),
             base.replacingOccurrences(of: #""generation":1"#, with: #""generation":0"#),
-            base.replacingOccurrences(of: #""eventSequence":1"#, with: #""eventSequence":0"#),
+            base.replacingOccurrences(of: #""revision":1"#, with: #""revision":0"#),
             base.replacingOccurrences(of: #""confidence":0.5"#, with: #""confidence":-0.1"#),
             base.replacingOccurrences(of: #""confidence":0.5"#, with: #""confidence":1.1"#),
             base.replacingOccurrences(of: #""confidence":0.5"#, with: #""confidence":1e400"#),
@@ -225,10 +252,10 @@ final class LiveProtocolTests: XCTestCase {
 
     func testRejectsUnknownKindsEventsAndArbitraryReasons() {
         let invalid = [
-            #"{"schemaVersion":1,"kind":"response","event":"stream_failed","streamId":"s","source":"mic","generation":1,"eventSequence":1,"reason":"inference_failed"}"#,
-            #"{"schemaVersion":1,"kind":"event","event":"stream_unknown","streamId":"s","source":"mic","generation":1,"eventSequence":1}"#,
-            #"{"schemaVersion":1,"kind":"event","event":"stream_degraded","streamId":"s","source":"mic","generation":1,"eventSequence":1,"reason":"private path /tmp/a.wav"}"#,
-            #"{"schemaVersion":1,"kind":"event","event":"stream_failed","streamId":"s","source":"mic","generation":1,"eventSequence":1,"reason":"model said private transcript"}"#,
+            #"{"schemaVersion":1,"kind":"response","event":"stream_failed","streamId":"s","source":"mic","generation":1,"revision":1,"reason":"inference_failed"}"#,
+            #"{"schemaVersion":1,"kind":"event","event":"stream_unknown","streamId":"s","source":"mic","generation":1,"revision":1}"#,
+            #"{"schemaVersion":1,"kind":"event","event":"stream_degraded","streamId":"s","source":"mic","generation":1,"revision":1,"reason":"private path /tmp/a.wav"}"#,
+            #"{"schemaVersion":1,"kind":"event","event":"stream_failed","streamId":"s","source":"mic","generation":1,"revision":1,"reason":"model said private transcript"}"#,
         ]
 
         assertAllEventsReject(invalid)
@@ -236,8 +263,8 @@ final class LiveProtocolTests: XCTestCase {
 
     func testRejectsInvalidDegradedAffectedRange() {
         let invalid = [
-            #"{"schemaVersion":1,"kind":"event","event":"stream_degraded","streamId":"s","source":"mic","generation":1,"eventSequence":1,"reason":"partial_window","affectedSequence":0,"chunkStartSeconds":0,"chunkEndSeconds":1}"#,
-            #"{"schemaVersion":1,"kind":"event","event":"stream_degraded","streamId":"s","source":"mic","generation":1,"eventSequence":1,"reason":"partial_window","affectedSequence":1,"chunkStartSeconds":2,"chunkEndSeconds":1}"#,
+            #"{"schemaVersion":1,"kind":"event","event":"stream_degraded","streamId":"s","source":"mic","generation":1,"revision":1,"reason":"partial_window","affectedSequence":0,"chunkStartSeconds":0,"chunkEndSeconds":1}"#,
+            #"{"schemaVersion":1,"kind":"event","event":"stream_degraded","streamId":"s","source":"mic","generation":1,"revision":1,"reason":"partial_window","affectedSequence":1,"chunkStartSeconds":2,"chunkEndSeconds":1}"#,
         ]
 
         assertAllEventsReject(invalid)
@@ -245,7 +272,7 @@ final class LiveProtocolTests: XCTestCase {
 
     func testEventAndResponseEnvelopesAreDiscriminated() throws {
         let event = Data(
-            #"{"schemaVersion":1,"kind":"event","event":"stream_failed","streamId":"s","source":"mic","generation":1,"eventSequence":1,"reason":"inference_failed","id":"misleading","ok":false}"#
+            #"{"schemaVersion":1,"kind":"event","event":"stream_failed","streamId":"s","source":"mic","generation":1,"revision":1,"reason":"inference_failed","id":"misleading","ok":false}"#
                 .utf8)
         XCTAssertThrowsError(try decoder.decode(RuntimeResponse.self, from: event))
 
@@ -258,7 +285,7 @@ final class LiveProtocolTests: XCTestCase {
             streamId: "s",
             source: .mic,
             generation: 1,
-            eventSequence: 1,
+            revision: 1,
             priorTentativeQualified: false,
             text: "private synthetic transcript",
             confidence: 0.5,
@@ -278,7 +305,7 @@ final class LiveProtocolTests: XCTestCase {
                 streamId: "",
                 source: .mic,
                 generation: 1,
-                eventSequence: 1,
+                revision: 1,
                 reason: .partialWindow
             ))
 

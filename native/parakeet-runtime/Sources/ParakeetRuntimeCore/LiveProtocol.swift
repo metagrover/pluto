@@ -68,7 +68,7 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
     public let streamId: String
     public let source: LiveSource
     public let generation: Int
-    public let eventSequence: Int
+    public let revision: Int
     public let priorTentativeQualified: Bool
     public let text: String
     public let confidence: Double
@@ -78,7 +78,7 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
         streamId: String,
         source: LiveSource,
         generation: Int,
-        eventSequence: Int,
+        revision: Int,
         priorTentativeQualified: Bool,
         text: String,
         confidence: Double,
@@ -87,7 +87,7 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
         self.streamId = streamId
         self.source = source
         self.generation = generation
-        self.eventSequence = eventSequence
+        self.revision = revision
         self.priorTentativeQualified = priorTentativeQualified
         self.text = text
         self.confidence = confidence
@@ -95,7 +95,7 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
     }
 
     public var description: String {
-        "LiveStreamUpdate(streamId: \(streamId), source: \(source.rawValue), generation: \(generation), eventSequence: \(eventSequence), priorTentativeQualified: \(priorTentativeQualified), confidence: \(confidence), audioEndSeconds: \(audioEndSeconds), text: <redacted>)"
+        "LiveStreamUpdate(streamId: \(streamId), source: \(source.rawValue), generation: \(generation), revision: \(revision), priorTentativeQualified: \(priorTentativeQualified), confidence: \(confidence), audioEndSeconds: \(audioEndSeconds), text: <redacted>)"
     }
 
     public var debugDescription: String { description }
@@ -105,7 +105,7 @@ public struct LiveStreamDegraded: Equatable, Sendable {
     public let streamId: String
     public let source: LiveSource
     public let generation: Int
-    public let eventSequence: Int
+    public let revision: Int
     public let reason: LiveDegradationReason
     public let affectedSequence: Int?
     public let chunkStartSeconds: Double?
@@ -115,7 +115,7 @@ public struct LiveStreamDegraded: Equatable, Sendable {
         streamId: String,
         source: LiveSource,
         generation: Int,
-        eventSequence: Int,
+        revision: Int,
         reason: LiveDegradationReason,
         affectedSequence: Int? = nil,
         chunkStartSeconds: Double? = nil,
@@ -124,7 +124,7 @@ public struct LiveStreamDegraded: Equatable, Sendable {
         self.streamId = streamId
         self.source = source
         self.generation = generation
-        self.eventSequence = eventSequence
+        self.revision = revision
         self.reason = reason
         self.affectedSequence = affectedSequence
         self.chunkStartSeconds = chunkStartSeconds
@@ -136,20 +136,20 @@ public struct LiveStreamFailed: Equatable, Sendable {
     public let streamId: String
     public let source: LiveSource
     public let generation: Int
-    public let eventSequence: Int
+    public let revision: Int
     public let reason: LiveFailureReason
 
     public init(
         streamId: String,
         source: LiveSource,
         generation: Int,
-        eventSequence: Int,
+        revision: Int,
         reason: LiveFailureReason
     ) {
         self.streamId = streamId
         self.source = source
         self.generation = generation
-        self.eventSequence = eventSequence
+        self.revision = revision
         self.reason = reason
     }
 }
@@ -169,10 +169,10 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
             return "RuntimeEvent.streamUpdate(\(update))"
         case .streamDegraded(let degraded):
             return
-                "RuntimeEvent.streamDegraded(streamId: \(degraded.streamId), source: \(degraded.source.rawValue), generation: \(degraded.generation), eventSequence: \(degraded.eventSequence), reason: \(degraded.reason.rawValue))"
+                "RuntimeEvent.streamDegraded(streamId: \(degraded.streamId), source: \(degraded.source.rawValue), generation: \(degraded.generation), revision: \(degraded.revision), reason: \(degraded.reason.rawValue))"
         case .streamFailed(let failed):
             return
-                "RuntimeEvent.streamFailed(streamId: \(failed.streamId), source: \(failed.source.rawValue), generation: \(failed.generation), eventSequence: \(failed.eventSequence), reason: \(failed.reason.rawValue))"
+                "RuntimeEvent.streamFailed(streamId: \(failed.streamId), source: \(failed.source.rawValue), generation: \(failed.generation), revision: \(failed.revision), reason: \(failed.reason.rawValue))"
         }
     }
 
@@ -185,7 +185,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
         case streamId
         case source
         case generation
-        case eventSequence
+        case revision
         case priorTentativeQualified
         case text
         case confidence
@@ -210,12 +210,12 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
         let streamId = try container.decode(String.self, forKey: .streamId)
         let source = try container.decode(LiveSource.self, forKey: .source)
         let generation = try container.decode(Int.self, forKey: .generation)
-        let eventSequence = try container.decode(Int.self, forKey: .eventSequence)
+        let revision = try container.decode(Int.self, forKey: .revision)
         try validateLiveIdentity(
             streamId: streamId,
             generation: generation,
-            sequence: eventSequence,
-            sequenceKey: CodingKeys.eventSequence
+            sequence: revision,
+            sequenceKey: CodingKeys.revision
         )
 
         switch name {
@@ -224,7 +224,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
                 streamId: streamId,
                 source: source,
                 generation: generation,
-                eventSequence: eventSequence,
+                revision: revision,
                 priorTentativeQualified: try container.decode(
                     Bool.self,
                     forKey: .priorTentativeQualified
@@ -240,7 +240,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
                 streamId: streamId,
                 source: source,
                 generation: generation,
-                eventSequence: eventSequence,
+                revision: revision,
                 reason: try container.decode(LiveDegradationReason.self, forKey: .reason),
                 affectedSequence: try container.decodeIfPresent(
                     Int.self, forKey: .affectedSequence),
@@ -259,7 +259,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
                     streamId: streamId,
                     source: source,
                     generation: generation,
-                    eventSequence: eventSequence,
+                    revision: revision,
                     reason: try container.decode(LiveFailureReason.self, forKey: .reason)
                 ))
         }
@@ -292,8 +292,8 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
             try validateLiveIdentity(
                 streamId: failed.streamId,
                 generation: failed.generation,
-                sequence: failed.eventSequence,
-                sequenceKey: CodingKeys.eventSequence
+                sequence: failed.revision,
+                sequenceKey: CodingKeys.revision
             )
             try encodeIdentity(failed, name: .streamFailed, into: &container)
             try container.encode(failed.reason, forKey: .reason)
@@ -309,7 +309,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
             streamId: update.streamId,
             source: update.source,
             generation: update.generation,
-            eventSequence: update.eventSequence,
+            revision: update.revision,
             name: name,
             into: &container
         )
@@ -324,7 +324,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
             streamId: degraded.streamId,
             source: degraded.source,
             generation: degraded.generation,
-            eventSequence: degraded.eventSequence,
+            revision: degraded.revision,
             name: name,
             into: &container
         )
@@ -339,7 +339,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
             streamId: failed.streamId,
             source: failed.source,
             generation: failed.generation,
-            eventSequence: failed.eventSequence,
+            revision: failed.revision,
             name: name,
             into: &container
         )
@@ -349,7 +349,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
         streamId: String,
         source: LiveSource,
         generation: Int,
-        eventSequence: Int,
+        revision: Int,
         name: RuntimeEventName,
         into container: inout KeyedEncodingContainer<CodingKeys>
     ) throws {
@@ -357,7 +357,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
         try container.encode(streamId, forKey: .streamId)
         try container.encode(source, forKey: .source)
         try container.encode(generation, forKey: .generation)
-        try container.encode(eventSequence, forKey: .eventSequence)
+        try container.encode(revision, forKey: .revision)
     }
 }
 
@@ -365,8 +365,8 @@ private func validate(_ update: LiveStreamUpdate) throws {
     try validateLiveIdentity(
         streamId: update.streamId,
         generation: update.generation,
-        sequence: update.eventSequence,
-        sequenceKey: RuntimeEvent.CodingKeys.eventSequence
+        sequence: update.revision,
+        sequenceKey: RuntimeEvent.CodingKeys.revision
     )
     guard update.confidence.isFinite, (0...1).contains(update.confidence) else {
         throw protocolDecodingError(RuntimeEvent.CodingKeys.confidence, "invalid confidence")
@@ -383,8 +383,8 @@ private func validate(_ degraded: LiveStreamDegraded) throws {
     try validateLiveIdentity(
         streamId: degraded.streamId,
         generation: degraded.generation,
-        sequence: degraded.eventSequence,
-        sequenceKey: RuntimeEvent.CodingKeys.eventSequence
+        sequence: degraded.revision,
+        sequenceKey: RuntimeEvent.CodingKeys.revision
     )
     if let affectedSequence = degraded.affectedSequence {
         guard isPositiveSafeInteger(affectedSequence) else {
