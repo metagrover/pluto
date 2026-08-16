@@ -142,6 +142,60 @@ describe('live transcription stable prefix', () => {
     expect(third.committedPreviewText).toBe('Héllo, 世界! Ça va?');
   });
 
+  it('does not insert a space before closing punctuation promoted later', () => {
+    const word = reduceLiveStreamUpdate(
+      undefined,
+      update({ text: 'Hello', audioEndSeconds: 1 }),
+    );
+    const punctuation = reduceLiveStreamUpdate(
+      word,
+      update({
+        revision: 2,
+        text: '!',
+        qualifiesPriorTentative: true,
+        audioEndSeconds: 2,
+      }),
+    );
+    const next = reduceLiveStreamUpdate(
+      punctuation,
+      update({
+        revision: 3,
+        text: 'Next',
+        qualifiesPriorTentative: true,
+        audioEndSeconds: 3,
+      }),
+    );
+
+    expect(next.committedPreviewText).toBe('Hello!');
+  });
+
+  it('preserves no-space CJK adjacency across promotions', () => {
+    const first = reduceLiveStreamUpdate(
+      undefined,
+      update({ text: '你好', audioEndSeconds: 1 }),
+    );
+    const second = reduceLiveStreamUpdate(
+      first,
+      update({
+        revision: 2,
+        text: '世界',
+        qualifiesPriorTentative: true,
+        audioEndSeconds: 2,
+      }),
+    );
+    const third = reduceLiveStreamUpdate(
+      second,
+      update({
+        revision: 3,
+        text: '。',
+        qualifiesPriorTentative: true,
+        audioEndSeconds: 3,
+      }),
+    );
+
+    expect(third.committedPreviewText).toBe('你好世界');
+  });
+
   it('rejects a source mismatch with a stable finite error', () => {
     const current = reduceLiveStreamUpdate(undefined, update());
 
@@ -174,6 +228,46 @@ describe('live transcription stable prefix', () => {
       ).toThrowError('live_stream_update_invalid');
     },
   );
+
+  it.each([
+    ['generation', 1.5],
+    ['generation', Number.MAX_SAFE_INTEGER + 1],
+    ['revision', 1.5],
+    ['revision', Number.MAX_SAFE_INTEGER + 1],
+    ['confidence', 1.01],
+  ] as const)('rejects out-of-domain %s values', (field, value) => {
+    expect(() =>
+      reduceLiveStreamUpdate(undefined, update({ [field]: value })),
+    ).toThrowError('live_stream_update_invalid');
+  });
+
+  it('rejects a same-generation audio watermark regression', () => {
+    const current = reduceLiveStreamUpdate(
+      undefined,
+      update({ revision: 4, audioEndSeconds: 8 }),
+    );
+
+    expect(() =>
+      reduceLiveStreamUpdate(
+        current,
+        update({ revision: 5, audioEndSeconds: 7.99 }),
+      ),
+    ).toThrowError('live_stream_audio_watermark_regression');
+  });
+
+  it('allows an equal audio watermark for a higher revision', () => {
+    const current = reduceLiveStreamUpdate(
+      undefined,
+      update({ revision: 4, audioEndSeconds: 8 }),
+    );
+    const next = reduceLiveStreamUpdate(
+      current,
+      update({ revision: 5, audioEndSeconds: 8 }),
+    );
+
+    expect(next.revision).toBe(5);
+    expect(next.audioEndSeconds).toBe(8);
+  });
 
   it('keeps committed preview text monotonic and append-only', () => {
     const snapshots = [
