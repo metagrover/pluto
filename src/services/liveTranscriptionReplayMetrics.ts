@@ -1257,6 +1257,9 @@ export const sanitizeLiveReplayReport = (
   const anyUnavailable = Object.values(sanitizedEngines).some(
     ({ status }) => status === 'unavailable',
   );
+  const anyPass = Object.values(sanitizedEngines).some(
+    ({ status }) => status === 'pass',
+  );
   const hasUnavailableReason = failures.some((failure) =>
     [
       'insufficient_repetitions',
@@ -1268,7 +1271,8 @@ export const sanitizeLiveReplayReport = (
       'mlx_baseline_unavailable',
     ].includes(failure),
   );
-  const eligiblePassCorpus =
+  const hasInsufficientCorpusReason = failures.includes('insufficient_corpus');
+  const eligibleCorpus =
     meetingCount >= 3 &&
     sourceCount >= 6 &&
     audioMinutesRoundedTo5 >= 90 &&
@@ -1277,9 +1281,12 @@ export const sanitizeLiveReplayReport = (
     (bothPass &&
       (failures.length !== 0 ||
         Object.values(invariants).some((value) => value !== 0) ||
-        !eligiblePassCorpus)) ||
+        !eligibleCorpus)) ||
     (!bothPass && failures.length === 0) ||
-    anyUnavailable !== hasUnavailableReason
+    anyUnavailable !== hasUnavailableReason ||
+    (anyPass && !eligibleCorpus) ||
+    (!eligibleCorpus && (!anyUnavailable || !hasInsufficientCorpusReason)) ||
+    (eligibleCorpus && hasInsufficientCorpusReason)
   ) {
     throw new Error('private_report_consistency');
   }
@@ -1319,13 +1326,22 @@ export const buildPrivateLiveReplayReport = (input: {
     input.corpus.sourceCount,
     input.corpus.audioMinutes,
   ]);
+  const rawCorpusEligible =
+    input.corpus.meetingCount >= 3 &&
+    input.corpus.sourceCount >= 6 &&
+    input.corpus.audioMinutes >= 90 &&
+    input.corpus.sourceCount === input.corpus.meetingCount * 2;
+  const statuses = [input.mlxProduction.status, input.parakeetSliding.status];
+  const anyPass = statuses.includes('pass');
+  const anyUnavailable = statuses.includes('unavailable');
+  const hasInsufficientCorpusReason = [
+    ...input.mlxProduction.failures,
+    ...input.parakeetSliding.failures,
+  ].includes('insufficient_corpus');
   if (
-    input.mlxProduction.status === 'pass' &&
-    input.parakeetSliding.status === 'pass' &&
-    (input.corpus.meetingCount < 3 ||
-      input.corpus.sourceCount < 6 ||
-      input.corpus.audioMinutes < 90 ||
-      input.corpus.sourceCount !== input.corpus.meetingCount * 2)
+    (anyPass && !rawCorpusEligible) ||
+    (!rawCorpusEligible && (!anyUnavailable || !hasInsufficientCorpusReason)) ||
+    (rawCorpusEligible && hasInsufficientCorpusReason)
   ) {
     throw new Error('private_report_consistency');
   }
