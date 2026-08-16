@@ -150,6 +150,56 @@ private actor BlockingOpenDriver: ParakeetLiveDriving {
     }
 }
 
+private actor BlockingCapabilityDriver: ParakeetLiveDriving {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var capabilityCount = 0
+    private(set) var makeCount = 0
+
+    func capabilities() async -> ParakeetLiveDriverCapabilities {
+        capabilityCount += 1
+        await withCheckedContinuation { continuation = $0 }
+        return .required
+    }
+
+    func makeManager(request _: ParakeetLiveManagerRequest) async throws
+        -> any ParakeetLiveManaging
+    {
+        makeCount += 1
+        return FakeLiveManager()
+    }
+
+    func releaseCapabilities() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private actor FirstBlockingOpenDriver: ParakeetLiveDriving {
+    private var firstContinuation: CheckedContinuation<Void, Never>?
+    private(set) var managers: [FakeLiveManager] = []
+    private(set) var makeCount = 0
+
+    func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
+
+    func makeManager(request _: ParakeetLiveManagerRequest) async throws
+        -> any ParakeetLiveManaging
+    {
+        makeCount += 1
+        let ordinal = makeCount
+        let manager = FakeLiveManager()
+        managers.append(manager)
+        if ordinal == 1 {
+            await withCheckedContinuation { firstContinuation = $0 }
+        }
+        return manager
+    }
+
+    func releaseFirst() {
+        firstContinuation?.resume()
+        firstContinuation = nil
+    }
+}
+
 private actor RecoveringOpenDriver: ParakeetLiveDriving {
     private var count = 0
     func makeManager(request _: ParakeetLiveManagerRequest) async throws
@@ -623,6 +673,91 @@ final class ParakeetLiveSessionTests: XCTestCase {
         XCTAssertEqual(makeCount, 1)
     }
 
+    func testShutdownFencesOpeningBeforeBlockedCapabilitiesReturn() async throws {
+        let driver = BlockingCapabilityDriver()
+        let session = makeSession(driver: driver)
+        let opening = Task {
+            try await session.open(streamId: "s", source: .mic, generation: 1)
+        }
+        await waitForCapabilityCount(1, driver: driver)
+
+        let openingState = await session.state(streamId: "s")
+        XCTAssertEqual(openingState?.lifecycle, .opening)
+        await session.shutdown()
+        await driver.releaseCapabilities()
+
+        await assertVoidTaskThrows(.cancelled, opening)
+        let state = await session.state(streamId: "s")
+        let makeCount = await driver.makeCount
+        XCTAssertNil(state)
+        XCTAssertEqual(makeCount, 0)
+    }
+
+    func testCancelFencesOpeningAndCancelsManagerConstructedAfterward() async throws {
+        let driver = FirstBlockingOpenDriver()
+        let session = makeSession(driver: driver)
+        let opening = Task {
+            try await session.open(streamId: "s", source: .mic, generation: 1)
+        }
+        await waitForMakeCount(1, driver: driver)
+
+        try await session.cancel(streamId: "s", source: .mic, generation: 1)
+        await driver.releaseFirst()
+
+        await assertVoidTaskThrows(.cancelled, opening)
+        let managers = await driver.managers
+        let first = try XCTUnwrap(managers.first)
+        let cancelCount = await first.cancelCount
+        let state = await session.state(streamId: "s")
+        XCTAssertEqual(cancelCount, 1)
+        XCTAssertNil(state)
+    }
+
+    func testResetReplacesOpeningGenerationAndRejectsLateManager() async throws {
+        let driver = FirstBlockingOpenDriver()
+        let session = makeSession(driver: driver)
+        let firstOpening = Task {
+            try await session.open(streamId: "s", source: .system, generation: 1)
+        }
+        await waitForMakeCount(1, driver: driver)
+
+        try await session.reset(streamId: "s", source: .system, generation: 2)
+        let resetState = await session.state(streamId: "s")
+        XCTAssertEqual(resetState?.generation, 2)
+        XCTAssertEqual(resetState?.lifecycle, .open)
+        await driver.releaseFirst()
+
+        await assertVoidTaskThrows(.cancelled, firstOpening)
+        let managers = await driver.managers
+        XCTAssertEqual(managers.count, 2)
+        let oldCancelCount = await managers[0].cancelCount
+        let newCancelCount = await managers[1].cancelCount
+        XCTAssertEqual(oldCancelCount, 1)
+        XCTAssertEqual(newCancelCount, 0)
+        let finalState = await session.state(streamId: "s")
+        XCTAssertEqual(finalState?.generation, 2)
+    }
+
+    func testCancelledOpenTaskCannotInstallManagerAfterBlockedConstruction() async throws {
+        let driver = FirstBlockingOpenDriver()
+        let session = makeSession(driver: driver)
+        let opening = Task {
+            try await session.open(streamId: "s", source: .mic, generation: 1)
+        }
+        await waitForMakeCount(1, driver: driver)
+
+        opening.cancel()
+        await driver.releaseFirst()
+
+        await assertVoidTaskThrows(.cancelled, opening)
+        let managers = await driver.managers
+        let manager = try XCTUnwrap(managers.first)
+        let cancelCount = await manager.cancelCount
+        let state = await session.state(streamId: "s")
+        XCTAssertEqual(cancelCount, 1)
+        XCTAssertNil(state)
+    }
+
     func testFailedOpenRollsBackSourceAndCapacityReservation() async throws {
         let session = makeSession(driver: RecoveringOpenDriver())
         await assertThrows(
@@ -855,11 +990,41 @@ final class ParakeetLiveSessionTests: XCTestCase {
         }
     }
 
+    private func assertVoidTaskThrows(
+        _ expected: LiveRuntimeFailure,
+        _ task: Task<Void, Error>
+    ) async {
+        do {
+            try await task.value
+            XCTFail("expected \(expected)")
+        } catch {
+            XCTAssertEqual(error as? LiveRuntimeFailure, expected)
+        }
+    }
+
     private func waitForAppendCount(_ expected: Int, manager: BlockingLiveManager) async {
         for _ in 0..<1_000 {
             if await manager.appendedNames.count == expected { return }
             await Task.yield()
         }
         XCTFail("append did not start")
+    }
+
+    private func waitForCapabilityCount(
+        _ expected: Int, driver: BlockingCapabilityDriver
+    ) async {
+        for _ in 0..<1_000 {
+            if await driver.capabilityCount == expected { return }
+            await Task.yield()
+        }
+        XCTFail("capability check did not start")
+    }
+
+    private func waitForMakeCount(_ expected: Int, driver: FirstBlockingOpenDriver) async {
+        for _ in 0..<1_000 {
+            if await driver.makeCount == expected { return }
+            await Task.yield()
+        }
+        XCTFail("manager construction did not start")
     }
 }

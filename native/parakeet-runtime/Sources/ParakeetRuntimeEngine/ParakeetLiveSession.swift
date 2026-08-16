@@ -189,7 +189,7 @@ public struct LiveFlushResult: Equatable, Sendable {
 }
 
 public enum ParakeetLiveLifecycle: Equatable, Sendable {
-    case open, flushing, cancelled, failed
+    case opening, open, flushing, cancelled, failed
 }
 public struct ParakeetLiveSessionState: Equatable, Sendable {
     public let source: LiveSource
@@ -225,8 +225,10 @@ public actor ParakeetLiveSession {
         var drainWaiters: [CheckedContinuation<Void, Error>] = []
     }
     private struct OpenReservation: Equatable, Sendable {
+        let token: UUID
         let source: LiveSource
         let generation: Int
+        let lifecycle: ParakeetLiveLifecycle
     }
 
     private let driver: any ParakeetLiveDriving
@@ -253,21 +255,26 @@ public actor ParakeetLiveSession {
 
     public func open(streamId: String, source: LiveSource, generation: Int) async throws {
         guard generation > 0 else { throw LiveRuntimeFailure.generationMismatch }
-        guard await driver.capabilities().supportsRequiredContract else {
-            throw LiveRuntimeFailure.unsupportedCapability
-        }
         guard canReserve(streamId: streamId, source: source) else {
             throw LiveRuntimeFailure.streamCapacity
         }
-        let reservation = OpenReservation(source: source, generation: generation)
+        let reservation = OpenReservation(
+            token: UUID(), source: source, generation: generation, lifecycle: .opening
+        )
         reservations[streamId] = reservation
+        let capabilities = await driver.capabilities()
+        try validateOpening(streamId: streamId, reservation: reservation)
+        guard capabilities.supportsRequiredContract else {
+            removeReservation(streamId: streamId, matching: reservation)
+            throw LiveRuntimeFailure.unsupportedCapability
+        }
         var isDirectory: ObjCBool = false
         guard
             FileManager.default.fileExists(
                 atPath: activeModelURL.path, isDirectory: &isDirectory
             ), isDirectory.boolValue
         else {
-            reservations[streamId] = nil
+            removeReservation(streamId: streamId, matching: reservation)
             throw LiveRuntimeFailure.modelUnavailable
         }
         let manager: any ParakeetLiveManaging
@@ -278,12 +285,21 @@ public actor ParakeetLiveSession {
                     configuration: configuration, vocabularyMode: .finalOnly
                 ))
         } catch {
-            reservations[streamId] = nil
+            let wasCurrent = reservations[streamId] == reservation
+            removeReservation(streamId: streamId, matching: reservation)
+            do {
+                try Task.checkCancellation()
+            } catch {
+                throw LiveRuntimeFailure.cancelled
+            }
+            guard wasCurrent else { throw LiveRuntimeFailure.cancelled }
             throw LiveRuntimeFailure.modelUnavailable
         }
-        guard reservations[streamId] == reservation else {
+        do {
+            try validateOpening(streamId: streamId, reservation: reservation)
+        } catch {
             await manager.cancel()
-            throw LiveRuntimeFailure.cancelled
+            throw error
         }
         reservations[streamId] = nil
         streams[streamId] = StreamState(
@@ -370,30 +386,63 @@ public actor ParakeetLiveSession {
     public func cancel(
         streamId: String, source: LiveSource, generation: Int
     ) async throws {
-        let stream = try requireStream(
-            streamId: streamId, source: source, generation: generation
-        )
-        await terminate(streamId: streamId, stream: stream, reason: .cancelled)
+        if let stream = streams[streamId] {
+            guard stream.source == source else { throw LiveRuntimeFailure.sourceMismatch }
+            guard stream.generation == generation else {
+                throw LiveRuntimeFailure.generationMismatch
+            }
+            await terminate(streamId: streamId, stream: stream, reason: .cancelled)
+            return
+        }
+        guard let reservation = reservations[streamId] else {
+            throw LiveRuntimeFailure.streamNotFound
+        }
+        guard reservation.source == source else { throw LiveRuntimeFailure.sourceMismatch }
+        guard reservation.generation == generation else {
+            throw LiveRuntimeFailure.generationMismatch
+        }
+        reservations[streamId] = nil
     }
 
     public func reset(
         streamId: String, source: LiveSource, generation: Int
     ) async throws {
-        guard let current = streams[streamId] else { throw LiveRuntimeFailure.streamNotFound }
-        guard current.source == source else { throw LiveRuntimeFailure.sourceMismatch }
-        guard generation > current.generation else {
+        let currentSource: LiveSource
+        let currentGeneration: Int
+        if let current = streams[streamId] {
+            currentSource = current.source
+            currentGeneration = current.generation
+        } else if let opening = reservations[streamId] {
+            currentSource = opening.source
+            currentGeneration = opening.generation
+        } else {
+            throw LiveRuntimeFailure.streamNotFound
+        }
+        guard currentSource == source else { throw LiveRuntimeFailure.sourceMismatch }
+        guard generation > currentGeneration else {
             throw LiveRuntimeFailure.generationMismatch
         }
-        await terminate(streamId: streamId, stream: current, reason: .cancelled)
+        if let current = streams[streamId] {
+            await terminate(streamId: streamId, stream: current, reason: .cancelled)
+        } else {
+            reservations[streamId] = nil
+        }
         try await open(streamId: streamId, source: source, generation: generation)
     }
 
     public func state(streamId: String) -> ParakeetLiveSessionState? {
-        streams[streamId].map {
+        if let stream = streams[streamId] {
             ParakeetLiveSessionState(
-                source: $0.source, generation: $0.generation,
-                nextSequence: $0.nextSequence, lifecycle: $0.lifecycle
+                source: stream.source, generation: stream.generation,
+                nextSequence: stream.nextSequence, lifecycle: stream.lifecycle
             )
+        } else if let opening = reservations[streamId] {
+            ParakeetLiveSessionState(
+                source: opening.source, generation: opening.generation,
+                nextSequence: 1, lifecycle: opening.lifecycle
+            )
+        } else {
+            nil
         }
     }
 
@@ -412,6 +461,28 @@ public actor ParakeetLiveSession {
         guard streams.count + reservations.count < maximumStreams else { return false }
         return !streams.values.contains { $0.source == source }
             && !reservations.values.contains { $0.source == source }
+    }
+
+    private func validateOpening(
+        streamId: String, reservation: OpenReservation
+    ) throws {
+        do {
+            try Task.checkCancellation()
+        } catch {
+            removeReservation(streamId: streamId, matching: reservation)
+            throw LiveRuntimeFailure.cancelled
+        }
+        guard reservations[streamId] == reservation else {
+            throw LiveRuntimeFailure.cancelled
+        }
+    }
+
+    private func removeReservation(
+        streamId: String, matching reservation: OpenReservation
+    ) {
+        if reservations[streamId] == reservation {
+            reservations[streamId] = nil
+        }
     }
 
     private func requireStream(
