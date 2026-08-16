@@ -76,8 +76,15 @@ export class ParakeetFinalClient {
   private async prepareInLease(
     lease: Awaited<ReturnType<ParakeetRuntimeHost['acquire']>>,
   ): Promise<TranscriptionRuntimeHealth> {
+    let preempted = false;
+    lease.setPreemptionHandler(async () => {
+      preempted = true;
+      await this.cancelAndSettleActivePrepare();
+    });
     try {
-      return await this.prepareWithLease();
+      const health = await this.prepareWithLease();
+      if (preempted) throw new Error('parakeet_cancelled');
+      return health;
     } finally {
       await lease.release();
     }
@@ -158,22 +165,7 @@ export class ParakeetFinalClient {
       let preempted = false;
       lease.setPreemptionHandler(async () => {
         preempted = true;
-        const activePrepare = this.activePrepare;
-        if (!activePrepare) return;
-        const cancelID = this.requestID('cancel');
-        const cancellation = await this.runtimeHost.transport.request({
-          schemaVersion: 1,
-          id: cancelID,
-          method: 'cancel',
-          targetId: activePrepare.id,
-        });
-        if (
-          !cancellation.ok &&
-          cancellation.error?.code !== 'parakeet_cancelled'
-        ) {
-          this.requireSuccess(cancellation);
-        }
-        await activePrepare.settled;
+        await this.cancelAndSettleActivePrepare();
       });
       const health = await this.prepareWithLease();
       if (preempted || request.signal?.aborted) {
@@ -270,6 +262,22 @@ export class ParakeetFinalClient {
     } finally {
       await lease.release();
     }
+  }
+
+  private async cancelAndSettleActivePrepare(): Promise<void> {
+    const activePrepare = this.activePrepare;
+    if (!activePrepare) return;
+    const cancelID = this.requestID('cancel');
+    const cancellation = await this.runtimeHost.transport.request({
+      schemaVersion: 1,
+      id: cancelID,
+      method: 'cancel',
+      targetId: activePrepare.id,
+    });
+    if (!cancellation.ok && cancellation.error?.code !== 'parakeet_cancelled') {
+      this.requireSuccess(cancellation);
+    }
+    await activePrepare.settled;
   }
 
   private requireSuccess(response: NativeResponse): Record<string, unknown> {

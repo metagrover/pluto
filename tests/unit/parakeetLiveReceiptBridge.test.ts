@@ -10,14 +10,14 @@ describe('ParakeetLiveReceiptBridge', () => {
       source: 'mic',
       generation: 1,
       sequence: 1,
-      receipt: { meetingId: 'meeting-1', checksumSha256: 'a' },
+      receipt: { meetingId: 'meeting-1', sequence: 0, checksumSha256: 'a' },
     });
     bridge.record({
       streamId: 'meeting-1:mic',
       source: 'mic',
       generation: 1,
       sequence: 2,
-      receipt: { meetingId: 'meeting-1', checksumSha256: 'b' },
+      receipt: { meetingId: 'meeting-1', sequence: 1, checksumSha256: 'b' },
     });
 
     expect(
@@ -29,8 +29,16 @@ describe('ParakeetLiveReceiptBridge', () => {
         tentativeThroughSequence: 2,
       }),
     ).toEqual({
-      committedThroughReceipt: { meetingId: 'meeting-1', checksumSha256: 'a' },
-      tentativeThroughReceipt: { meetingId: 'meeting-1', checksumSha256: 'b' },
+      committedThroughReceipt: {
+        meetingId: 'meeting-1',
+        sequence: 0,
+        checksumSha256: 'a',
+      },
+      tentativeThroughReceipt: {
+        meetingId: 'meeting-1',
+        sequence: 1,
+        checksumSha256: 'b',
+      },
     });
   });
 

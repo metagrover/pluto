@@ -406,14 +406,15 @@ const appendParakeetLiveReceipt = async (
   if (path.relative(audioRoot, audioPath).startsWith('..')) {
     throw new Error('parakeet_path_not_allowed');
   }
+  const parakeetSequence = receipt.sequence + 1;
   parakeetLiveReceiptBridge.record({
     ...identity,
-    sequence: receipt.sequence,
+    sequence: parakeetSequence,
     receipt,
   });
   await client.append({
     ...identity,
-    sequence: receipt.sequence,
+    sequence: parakeetSequence,
     audioPath,
     chunkStartSeconds: receipt.chunkStartSec,
     chunkEndSeconds: receipt.chunkEndSec,

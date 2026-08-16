@@ -312,6 +312,43 @@ describe('ParakeetFinalClient', () => {
     expect(child.writes).toHaveLength(2);
   });
 
+  it('preempts a direct prepare before granting live ownership', async () => {
+    const child = new FakeChild();
+    const persisted = vi.fn(async () => undefined);
+    const host = makeRuntimeHost({
+      paths,
+      spawn: () => child,
+      persistInterruptedFinalization: persisted,
+    });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+    const preparing = client.prepare();
+    await vi.waitFor(() => expect(child.writes).toHaveLength(1));
+    const prepareID = String(child.writes[0].id);
+    let liveResolved = false;
+    const live = host.startRecordingLive().then((lease) => {
+      liveResolved = true;
+      return lease;
+    });
+    await vi.waitFor(() => expect(child.writes).toHaveLength(2));
+    child.respond({
+      schemaVersion: 1,
+      id: child.writes[1].id,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(liveResolved).toBe(false);
+    child.respond({
+      schemaVersion: 1,
+      id: prepareID,
+      ok: false,
+      error: { code: 'parakeet_cancelled' },
+    });
+    await expect(preparing).rejects.toThrow('parakeet_cancelled');
+    await expect(live).resolves.toMatchObject({ kind: 'live' });
+    expect(persisted).toHaveBeenCalledTimes(1);
+  });
+
   it('drops native stderr content', async () => {
     const child = new FakeChild();
     const diagnostic = vi.fn();
