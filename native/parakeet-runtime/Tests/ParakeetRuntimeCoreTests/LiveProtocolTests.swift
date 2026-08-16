@@ -76,6 +76,34 @@ final class LiveProtocolTests: XCTestCase {
         }
     }
 
+    func testValidBatchRequestsPreserveAllowedNullOptionals() throws {
+        let requests = [
+            #"{"schemaVersion":1,"id":"p","method":"prepare","modelRoot":null}"#,
+            #"{"schemaVersion":1,"id":"t","method":"transcribe","audioPath":null,"language":null,"vocabulary":null}"#,
+            #"{"schemaVersion":1,"id":"c","method":"cancel","targetId":null}"#,
+            #"{"schemaVersion":1,"id":"s","method":"shutdown"}"#,
+        ]
+
+        for json in requests {
+            XCTAssertNoThrow(
+                try decoder.decode(RuntimeRequest.self, from: Data(json.utf8)))
+        }
+    }
+
+    func testRejectsMethodIncompatibleKnownKeysEvenWhenNull() {
+        let invalid = [
+            #"{"schemaVersion":1,"id":"p","method":"prepare","audioPath":null}"#,
+            #"{"schemaVersion":1,"id":"t","method":"transcribe","modelRoot":null}"#,
+            #"{"schemaVersion":1,"id":"c","method":"cancel","vocabulary":null}"#,
+            #"{"schemaVersion":1,"id":"s","method":"shutdown","targetId":null}"#,
+            #"{"schemaVersion":1,"id":"p","method":"prepare","streamId":null}"#,
+            #"{"schemaVersion":1,"id":"o","method":"stream_open","streamId":"s","source":"mic","generation":1,"audioPath":null}"#,
+            #"{"schemaVersion":1,"id":"a","method":"stream_append","streamId":"s","source":"mic","generation":1,"sequence":1,"audioPath":"/approved/a.wav","chunkStartSeconds":0,"chunkEndSeconds":1,"targetId":null}"#,
+        ]
+
+        assertAllReject(invalid)
+    }
+
     func testRejectsMalformedLiveRequestIdentityAndSource() {
         let invalid = [
             #"{"schemaVersion":2,"id":"a","method":"stream_open","streamId":"s","source":"mic","generation":1}"#,
@@ -141,7 +169,7 @@ final class LiveProtocolTests: XCTestCase {
                     source: .system,
                     generation: 2,
                     revision: 3,
-                    priorTentativeQualified: true,
+                    qualifiesPriorTentative: true,
                     text: "synthetic",
                     confidence: 0.9,
                     audioEndSeconds: 25
@@ -189,7 +217,7 @@ final class LiveProtocolTests: XCTestCase {
                 source: .system,
                 generation: 2,
                 revision: 3,
-                priorTentativeQualified: true,
+                qualifiesPriorTentative: true,
                 text: "synthetic",
                 confidence: 0.9,
                 audioEndSeconds: 25
@@ -204,6 +232,33 @@ final class LiveProtocolTests: XCTestCase {
         XCTAssertNil(object["payload"])
     }
 
+    func testUpdateEncodesQualifiesPriorTentativeKeyExactly() throws {
+        let event = RuntimeEvent.streamUpdate(
+            LiveStreamUpdate(
+                streamId: "stream-01",
+                source: .mic,
+                generation: 1,
+                revision: 1,
+                qualifiesPriorTentative: true,
+                text: "synthetic",
+                confidence: 0.5,
+                audioEndSeconds: 1
+            ))
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoder.encode(event)) as? [String: Any])
+        XCTAssertEqual(object["qualifiesPriorTentative"] as? Bool, true)
+        XCTAssertNil(object["priorTentativeQualified"])
+    }
+
+    func testUpdateRejectsLegacyPriorTentativeQualifiedKey() {
+        let legacy = Data(
+            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"stream-01","source":"mic","generation":1,"revision":1,"priorTentativeQualified":false,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#
+                .utf8)
+
+        XCTAssertThrowsError(try decoder.decode(RuntimeEvent.self, from: legacy))
+    }
+
     func testUpdateEncodesRevisionKeyExactly() throws {
         let event = RuntimeEvent.streamUpdate(
             LiveStreamUpdate(
@@ -211,7 +266,7 @@ final class LiveProtocolTests: XCTestCase {
                 source: .mic,
                 generation: 1,
                 revision: 7,
-                priorTentativeQualified: false,
+                qualifiesPriorTentative: false,
                 text: "synthetic",
                 confidence: 0.5,
                 audioEndSeconds: 1
@@ -225,7 +280,7 @@ final class LiveProtocolTests: XCTestCase {
 
     func testUpdateRejectsLegacyEventSequenceKey() {
         let legacy = Data(
-            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"eventSequence":1,"priorTentativeQualified":false,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#
+            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"eventSequence":1,"qualifiesPriorTentative":false,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#
                 .utf8)
 
         XCTAssertThrowsError(try decoder.decode(RuntimeEvent.self, from: legacy))
@@ -233,7 +288,7 @@ final class LiveProtocolTests: XCTestCase {
 
     func testRejectsMalformedUpdateNumbersAndIdentity() {
         let base =
-            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"revision":1,"priorTentativeQualified":false,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#
+            #"{"schemaVersion":1,"kind":"event","event":"stream_update","streamId":"s","source":"mic","generation":1,"revision":1,"qualifiesPriorTentative":false,"text":"synthetic","confidence":0.5,"audioEndSeconds":1}"#
         let invalid = [
             base.replacingOccurrences(of: #""streamId":"s""#, with: #""streamId":"""#),
             base.replacingOccurrences(of: #""source":"mic""#, with: #""source":"mixed""#),
@@ -286,7 +341,7 @@ final class LiveProtocolTests: XCTestCase {
             source: .mic,
             generation: 1,
             revision: 1,
-            priorTentativeQualified: false,
+            qualifiesPriorTentative: false,
             text: "private synthetic transcript",
             confidence: 0.5,
             audioEndSeconds: 1
@@ -297,6 +352,69 @@ final class LiveProtocolTests: XCTestCase {
         XCTAssertFalse(String(reflecting: update).contains("private synthetic transcript"))
         XCTAssertFalse(String(describing: event).contains("private synthetic transcript"))
         XCTAssertFalse(String(reflecting: event).contains("private synthetic transcript"))
+    }
+
+    func testRejectsNonOpaqueStreamIdentifiers() {
+        let tooLong = String(repeating: "a", count: 129)
+        let invalid = [
+            "/private/audio.wav",
+            "private meeting transcript",
+            "../stream",
+            "stream/01",
+            "stream-🔒",
+            tooLong,
+        ].map {
+            #"{"schemaVersion":1,"id":"o","method":"stream_open","streamId":"\#($0)","source":"mic","generation":1}"#
+        }
+
+        assertAllReject(invalid)
+    }
+
+    func testAcceptsBoundedOpaqueStreamIdentifier() throws {
+        let data = Data(
+            #"{"schemaVersion":1,"id":"o","method":"stream_open","streamId":"stream_01:mic.v1","source":"mic","generation":1}"#
+                .utf8)
+
+        let request = try decoder.decode(RuntimeRequest.self, from: data)
+
+        XCTAssertEqual(request.live?.streamId, "stream_01:mic.v1")
+    }
+
+    func testDiagnosticsRedactOpaqueStreamIdentifier() {
+        let update = LiveStreamUpdate(
+            streamId: "opaque-123",
+            source: .mic,
+            generation: 1,
+            revision: 1,
+            qualifiesPriorTentative: false,
+            text: "synthetic",
+            confidence: 0.5,
+            audioEndSeconds: 1
+        )
+        let failurePayload = LiveStreamFailed(
+            streamId: "opaque-123",
+            source: .mic,
+            generation: 1,
+            revision: 2,
+            reason: .inferenceFailed
+        )
+        let degradationPayload = LiveStreamDegraded(
+            streamId: "opaque-123",
+            source: .mic,
+            generation: 1,
+            revision: 3,
+            reason: .partialWindow
+        )
+        let failed = RuntimeEvent.streamFailed(failurePayload)
+
+        XCTAssertFalse(String(describing: update).contains("opaque-123"))
+        XCTAssertFalse(String(reflecting: update).contains("opaque-123"))
+        XCTAssertFalse(String(describing: failurePayload).contains("opaque-123"))
+        XCTAssertFalse(String(reflecting: failurePayload).contains("opaque-123"))
+        XCTAssertFalse(String(describing: degradationPayload).contains("opaque-123"))
+        XCTAssertFalse(String(reflecting: degradationPayload).contains("opaque-123"))
+        XCTAssertFalse(String(describing: failed).contains("opaque-123"))
+        XCTAssertFalse(String(reflecting: failed).contains("opaque-123"))
     }
 
     func testRejectsEncodingMalformedDegradedIdentity() {

@@ -45,7 +45,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         self.live = live
     }
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion
         case id
         case method
@@ -67,6 +67,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         id = try container.decode(String.self, forKey: .id)
         method = try container.decode(RuntimeMethod.self, forKey: .method)
+        try Self.rejectMethodIncompatibleKeys(in: container, method: method)
         modelRoot = try container.decodeIfPresent(String.self, forKey: .modelRoot)
         audioPath = try container.decodeIfPresent(String.self, forKey: .audioPath)
         language = try container.decodeIfPresent(String.self, forKey: .language)
@@ -83,8 +84,8 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
             let streamId = try container.decode(String.self, forKey: .streamId)
             let source = try container.decode(LiveSource.self, forKey: .source)
             let generation = try container.decode(Int.self, forKey: .generation)
-            guard !streamId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw protocolDecodingError(CodingKeys.streamId, "missing stream identity")
+            guard isValidOpaqueStreamId(streamId) else {
+                throw protocolDecodingError(CodingKeys.streamId, "invalid stream identity")
             }
             guard isPositiveSafeInteger(generation) else {
                 throw protocolDecodingError(CodingKeys.generation, "invalid generation")
@@ -156,8 +157,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                         codingPath: [], debugDescription: "live method requires schema v1 metadata")
                 )
             }
-            guard !live.streamId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                isPositiveSafeInteger(live.generation)
+            guard isValidOpaqueStreamId(live.streamId), isPositiveSafeInteger(live.generation)
             else {
                 throw EncodingError.invalidValue(
                     live,
@@ -206,6 +206,42 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
             try container.encodeIfPresent(live.sequence, forKey: .sequence)
             try container.encodeIfPresent(live.chunkStartSeconds, forKey: .chunkStartSeconds)
             try container.encodeIfPresent(live.chunkEndSeconds, forKey: .chunkEndSeconds)
+        }
+    }
+
+    private static func rejectMethodIncompatibleKeys(
+        in container: KeyedDecodingContainer<CodingKeys>,
+        method: RuntimeMethod
+    ) throws {
+        let common: Set<CodingKeys> = [.schemaVersion, .id, .method]
+        let allowed: Set<CodingKeys>
+        switch method {
+        case .prepare:
+            allowed = common.union([.modelRoot])
+        case .transcribe:
+            allowed = common.union([.audioPath, .language, .vocabulary])
+        case .cancel:
+            allowed = common.union([.targetId])
+        case .shutdown:
+            allowed = common
+        case .streamOpen, .streamFlush, .streamCancel, .streamReset:
+            allowed = common.union([.streamId, .source, .generation])
+        case .streamAppend:
+            allowed = common.union([
+                .streamId,
+                .source,
+                .generation,
+                .sequence,
+                .audioPath,
+                .chunkStartSeconds,
+                .chunkEndSeconds,
+            ])
+        }
+
+        if let incompatible = CodingKeys.allCases.first(where: {
+            container.contains($0) && !allowed.contains($0)
+        }) {
+            throw protocolDecodingError(incompatible, "method-incompatible request field")
         }
     }
 }

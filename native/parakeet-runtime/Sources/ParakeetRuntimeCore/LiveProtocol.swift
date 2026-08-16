@@ -69,7 +69,7 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
     public let source: LiveSource
     public let generation: Int
     public let revision: Int
-    public let priorTentativeQualified: Bool
+    public let qualifiesPriorTentative: Bool
     public let text: String
     public let confidence: Double
     public let audioEndSeconds: Double
@@ -79,7 +79,7 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
         source: LiveSource,
         generation: Int,
         revision: Int,
-        priorTentativeQualified: Bool,
+        qualifiesPriorTentative: Bool,
         text: String,
         confidence: Double,
         audioEndSeconds: Double
@@ -88,20 +88,22 @@ public struct LiveStreamUpdate: Equatable, Sendable, CustomStringConvertible,
         self.source = source
         self.generation = generation
         self.revision = revision
-        self.priorTentativeQualified = priorTentativeQualified
+        self.qualifiesPriorTentative = qualifiesPriorTentative
         self.text = text
         self.confidence = confidence
         self.audioEndSeconds = audioEndSeconds
     }
 
     public var description: String {
-        "LiveStreamUpdate(streamId: \(streamId), source: \(source.rawValue), generation: \(generation), revision: \(revision), priorTentativeQualified: \(priorTentativeQualified), confidence: \(confidence), audioEndSeconds: \(audioEndSeconds), text: <redacted>)"
+        "LiveStreamUpdate(streamId: <redacted>, source: \(source.rawValue), generation: \(generation), revision: \(revision), qualifiesPriorTentative: \(qualifiesPriorTentative), confidence: \(confidence), audioEndSeconds: \(audioEndSeconds), text: <redacted>)"
     }
 
     public var debugDescription: String { description }
 }
 
-public struct LiveStreamDegraded: Equatable, Sendable {
+public struct LiveStreamDegraded: Equatable, Sendable, CustomStringConvertible,
+    CustomDebugStringConvertible
+{
     public let streamId: String
     public let source: LiveSource
     public let generation: Int
@@ -130,9 +132,17 @@ public struct LiveStreamDegraded: Equatable, Sendable {
         self.chunkStartSeconds = chunkStartSeconds
         self.chunkEndSeconds = chunkEndSeconds
     }
+
+    public var description: String {
+        "LiveStreamDegraded(streamId: <redacted>, source: \(source.rawValue), generation: \(generation), revision: \(revision), reason: \(reason.rawValue))"
+    }
+
+    public var debugDescription: String { description }
 }
 
-public struct LiveStreamFailed: Equatable, Sendable {
+public struct LiveStreamFailed: Equatable, Sendable, CustomStringConvertible,
+    CustomDebugStringConvertible
+{
     public let streamId: String
     public let source: LiveSource
     public let generation: Int
@@ -152,6 +162,12 @@ public struct LiveStreamFailed: Equatable, Sendable {
         self.revision = revision
         self.reason = reason
     }
+
+    public var description: String {
+        "LiveStreamFailed(streamId: <redacted>, source: \(source.rawValue), generation: \(generation), revision: \(revision), reason: \(reason.rawValue))"
+    }
+
+    public var debugDescription: String { description }
 }
 
 public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
@@ -169,10 +185,10 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
             return "RuntimeEvent.streamUpdate(\(update))"
         case .streamDegraded(let degraded):
             return
-                "RuntimeEvent.streamDegraded(streamId: \(degraded.streamId), source: \(degraded.source.rawValue), generation: \(degraded.generation), revision: \(degraded.revision), reason: \(degraded.reason.rawValue))"
+                "RuntimeEvent.streamDegraded(streamId: <redacted>, source: \(degraded.source.rawValue), generation: \(degraded.generation), revision: \(degraded.revision), reason: \(degraded.reason.rawValue))"
         case .streamFailed(let failed):
             return
-                "RuntimeEvent.streamFailed(streamId: \(failed.streamId), source: \(failed.source.rawValue), generation: \(failed.generation), revision: \(failed.revision), reason: \(failed.reason.rawValue))"
+                "RuntimeEvent.streamFailed(streamId: <redacted>, source: \(failed.source.rawValue), generation: \(failed.generation), revision: \(failed.revision), reason: \(failed.reason.rawValue))"
         }
     }
 
@@ -186,7 +202,7 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
         case source
         case generation
         case revision
-        case priorTentativeQualified
+        case qualifiesPriorTentative
         case text
         case confidence
         case audioEndSeconds
@@ -225,9 +241,9 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
                 source: source,
                 generation: generation,
                 revision: revision,
-                priorTentativeQualified: try container.decode(
+                qualifiesPriorTentative: try container.decode(
                     Bool.self,
-                    forKey: .priorTentativeQualified
+                    forKey: .qualifiesPriorTentative
                 ),
                 text: try container.decode(String.self, forKey: .text),
                 confidence: try container.decode(Double.self, forKey: .confidence),
@@ -275,8 +291,8 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
             try validate(update)
             try encodeIdentity(update, name: .streamUpdate, into: &container)
             try container.encode(
-                update.priorTentativeQualified,
-                forKey: .priorTentativeQualified
+                update.qualifiesPriorTentative,
+                forKey: .qualifiesPriorTentative
             )
             try container.encode(update.text, forKey: .text)
             try container.encode(update.confidence, forKey: .confidence)
@@ -406,14 +422,35 @@ func isPositiveSafeInteger(_ value: Int) -> Bool {
     value > 0 && value <= maximumJSONSafeInteger
 }
 
+func isValidOpaqueStreamId(_ value: String) -> Bool {
+    let bytes = Array(value.utf8)
+    guard !bytes.isEmpty, bytes.count <= 128 else { return false }
+
+    func isASCIIAlphanumeric(_ byte: UInt8) -> Bool {
+        (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+    }
+
+    guard let first = bytes.first, let last = bytes.last,
+        isASCIIAlphanumeric(first), isASCIIAlphanumeric(last)
+    else {
+        return false
+    }
+
+    let safeSeparators: Set<UInt8> = [45, 46, 58, 95]  // - . : _
+    guard bytes.allSatisfy({ isASCIIAlphanumeric($0) || safeSeparators.contains($0) }) else {
+        return false
+    }
+    return !value.contains("..")
+}
+
 func validateLiveIdentity<Key: CodingKey>(
     streamId: String,
     generation: Int,
     sequence: Int,
     sequenceKey: Key
 ) throws {
-    guard !streamId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        throw protocolDecodingError(sequenceKey, "missing stream identity")
+    guard isValidOpaqueStreamId(streamId) else {
+        throw protocolDecodingError(sequenceKey, "invalid stream identity")
     }
     guard isPositiveSafeInteger(generation) else {
         throw protocolDecodingError(sequenceKey, "invalid generation")
