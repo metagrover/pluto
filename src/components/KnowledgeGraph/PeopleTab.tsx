@@ -96,9 +96,11 @@ const formatDate = (value: string | null) => {
 
 export const PeopleBriefing = ({
   rows,
+  selectedPersonId,
   onOpenMeeting,
 }: {
   rows: PersonBriefingRow[];
+  selectedPersonId?: string | null;
   onOpenMeeting: (meetingId: string) => void;
 }) => {
   const [query, setQuery] = useState('');
@@ -122,51 +124,71 @@ export const PeopleBriefing = ({
       ),
     [filtered],
   );
-  const focusRows = query ? prioritized : prioritized.slice(0, 6);
+  const focusRows = useMemo(() => {
+    if (query) return prioritized;
+
+    const selectedRow = selectedPersonId
+      ? prioritized.find((row) => row.id === selectedPersonId)
+      : null;
+    if (!selectedRow) return prioritized.slice(0, 6);
+
+    return [
+      selectedRow,
+      ...prioritized.filter((row) => row.id !== selectedRow.id).slice(0, 5),
+    ];
+  }, [prioritized, query, selectedPersonId]);
   const hasCommitments = focusRows.some((row) => row.openCommitmentCount > 0);
 
-  const renderPerson = (person: PersonBriefingRow) => (
-    <article className="person-row" key={person.id}>
-      <div className="person-avatar" aria-hidden="true">
-        {person.name.slice(0, 1).toUpperCase()}
-      </div>
-      <div className="person-identity">
-        <h3>{person.name}</h3>
-        <p>{person.role}</p>
-      </div>
-      <div className="person-context">
-        <p>{person.latestMeetingTitle ?? 'No linked conversation yet'}</p>
-        {person.context && <span>{person.context}</span>}
-      </div>
-      <div className="person-meta">
-        {person.openCommitmentCount > 0 ? (
-          <span className="person-commitments">
-            {person.openCommitmentCount} open commitment
-            {person.openCommitmentCount === 1 ? '' : 's'}
-          </span>
-        ) : (
-          <span>
-            <MessageCircle aria-hidden="true" size={13} />
-            {person.meetingCount} conversation
-            {person.meetingCount === 1 ? '' : 's'}
-          </span>
-        )}
-        <span>
-          <Clock3 aria-hidden="true" size={13} />
-          {formatDate(person.latestMeetingAt)}
-        </span>
-      </div>
-      <button
-        type="button"
-        disabled={!person.latestMeetingId}
-        onClick={() =>
-          person.latestMeetingId && onOpenMeeting(person.latestMeetingId)
-        }
+  const renderPerson = (person: PersonBriefingRow) => {
+    const selected = selectedPersonId === person.id;
+    return (
+      <article
+        className={`person-row ${selected ? 'person-row--selected' : ''}`}
+        data-person-id={person.id}
+        data-selected={selected ? 'true' : undefined}
+        key={person.id}
       >
-        Open <ArrowRight aria-hidden="true" size={14} />
-      </button>
-    </article>
-  );
+        <div className="person-avatar" aria-hidden="true">
+          {person.name.slice(0, 1).toUpperCase()}
+        </div>
+        <div className="person-identity">
+          <h3>{person.name}</h3>
+          <p>{person.role}</p>
+        </div>
+        <div className="person-context">
+          <p>{person.latestMeetingTitle ?? 'No linked conversation yet'}</p>
+          {person.context && <span>{person.context}</span>}
+        </div>
+        <div className="person-meta">
+          {person.openCommitmentCount > 0 ? (
+            <span className="person-commitments">
+              {person.openCommitmentCount} open commitment
+              {person.openCommitmentCount === 1 ? '' : 's'}
+            </span>
+          ) : (
+            <span>
+              <MessageCircle aria-hidden="true" size={13} />
+              {person.meetingCount} conversation
+              {person.meetingCount === 1 ? '' : 's'}
+            </span>
+          )}
+          <span>
+            <Clock3 aria-hidden="true" size={13} />
+            {formatDate(person.latestMeetingAt)}
+          </span>
+        </div>
+        <button
+          type="button"
+          disabled={!person.latestMeetingId}
+          onClick={() =>
+            person.latestMeetingId && onOpenMeeting(person.latestMeetingId)
+          }
+        >
+          Open <ArrowRight aria-hidden="true" size={14} />
+        </button>
+      </article>
+    );
+  };
 
   return (
     <section aria-labelledby="people-heading" className="people-briefing">
@@ -226,8 +248,9 @@ export const PeopleBriefing = ({
 };
 
 export const PeopleTab: React.FC<{
+  selectedPersonId?: string | null;
   onOpenMeeting?: (meetingId: string) => void;
-}> = ({ onOpenMeeting = () => {} }) => {
+}> = ({ selectedPersonId = null, onOpenMeeting = () => {} }) => {
   const [rows, setRows] = useState<PersonBriefingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -297,5 +320,11 @@ export const PeopleTab: React.FC<{
       </div>
     );
   }
-  return <PeopleBriefing rows={rows} onOpenMeeting={onOpenMeeting} />;
+  return (
+    <PeopleBriefing
+      rows={rows}
+      selectedPersonId={selectedPersonId}
+      onOpenMeeting={onOpenMeeting}
+    />
+  );
 };

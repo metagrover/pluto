@@ -475,9 +475,10 @@ const QuickAddTask: React.FC<{
 export const ProjectHealthCard: React.FC<{
   project: Entity;
   tasks: Entity[];
+  selected?: boolean;
   onToggleTask: (task: Entity) => void;
   onTaskAdded: () => void;
-}> = ({ project, tasks, onToggleTask, onTaskAdded }) => {
+}> = ({ project, tasks, selected = false, onToggleTask, onTaskAdded }) => {
   const briefing = buildProjectsBriefing(tasks);
   const [expanded, setExpanded] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -493,7 +494,13 @@ export const ProjectHealthCard: React.FC<{
   });
 
   return (
-    <section className="overflow-hidden border-b border-pro-border">
+    <section
+      className={`overflow-hidden border-b border-pro-border ${
+        selected ? 'bg-pro-accent/5 ring-2 ring-pro-accent/35' : ''
+      }`}
+      data-project-id={project.id}
+      data-selected={selected ? 'true' : undefined}
+    >
       {/* Project Header */}
       <button
         type="button"
@@ -596,7 +603,9 @@ export const ProjectHealthCard: React.FC<{
 };
 
 // ─── Main: ProjectsExecutionTab ──────────────────────────────────
-export const ProjectsExecutionTab: React.FC = () => {
+export const ProjectsExecutionTab: React.FC<{
+  selectedProjectId?: string | null;
+}> = ({ selectedProjectId = null }) => {
   const [projects, setProjects] = useState<Entity[]>([]);
   const [allTasks, setAllTasks] = useState<Entity[]>([]);
   const [taskLinks, setTaskLinks] = useState<EntityLink[]>([]);
@@ -792,6 +801,7 @@ export const ProjectsExecutionTab: React.FC = () => {
               name: formatProjectName(project.name) || project.name,
             }}
             tasks={groupedTasks[project.id] || []}
+            selected={selectedProjectId === project.id}
             onToggleTask={toggleTask}
             onTaskAdded={fetchData}
           />
@@ -799,7 +809,12 @@ export const ProjectsExecutionTab: React.FC = () => {
       </div>
 
       {completedProjects.length > 0 && (
-        <details className="rounded-2xl border border-pro-border bg-pro-surface/20">
+        <details
+          className="rounded-2xl border border-pro-border bg-pro-surface/20"
+          open={completedProjects.some(
+            (project) => project.id === selectedProjectId,
+          )}
+        >
           <summary className="cursor-pointer list-none px-5 py-4 text-sm font-bold text-pro-text-muted">
             Browse {completedProjects.length} completed project
             {completedProjects.length === 1 ? '' : 's'}
@@ -813,6 +828,7 @@ export const ProjectsExecutionTab: React.FC = () => {
                   name: formatProjectName(project.name) || project.name,
                 }}
                 tasks={groupedTasks[project.id] || []}
+                selected={selectedProjectId === project.id}
                 onToggleTask={toggleTask}
                 onTaskAdded={fetchData}
               />

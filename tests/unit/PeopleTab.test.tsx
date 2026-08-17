@@ -51,6 +51,29 @@ describe('PeopleBriefing', () => {
     expect(markup).not.toContain('undefined');
   });
 
+  it('promotes the selected person into the visible priority rows', () => {
+    const manyRows = Array.from({ length: 8 }, (_, index) => ({
+      ...rows[0],
+      id: `person-${index}`,
+      name: `Person ${index}`,
+      openCommitmentCount: 0,
+      latestMeetingAt: `2026-07-${String(index + 1).padStart(2, '0')}T12:00:00.000Z`,
+    }));
+    const markup = renderToStaticMarkup(
+      <PeopleBriefing
+        rows={manyRows}
+        selectedPersonId="person-7"
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('data-person-id="person-7"');
+    expect(markup).toContain('data-selected="true"');
+    expect(markup.indexOf('data-person-id="person-7"')).toBeLessThan(
+      markup.indexOf('Browse all 8 people'),
+    );
+  });
+
   it('teaches the surface when no relationship context exists', () => {
     const markup = renderToStaticMarkup(
       <PeopleBriefing rows={[]} onOpenMeeting={() => {}} />,
