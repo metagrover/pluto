@@ -607,6 +607,67 @@ ${transcript}`;
 };
 
 /**
+ * Global editorial prompt for the local multi-pass pipeline.
+ * Consolidates independently analyzed transcript windows without changing the
+ * canonical transcript or weakening settled-item evidence requirements.
+ */
+export const getStructuredAnalysisEditorialPrompt = (
+  transcript: string,
+  draftAnalysisJson: string,
+  userNotes?: string,
+): string => {
+  const userNotesBlock = userNotes
+    ? `\nUser notes (high-priority emphasis, not independent evidence):\n${userNotes}\n`
+    : '';
+
+  return `You are Pluto's global meeting-notes editor.
+
+${STRUCTURED_EXTRACTION_POLICY}
+
+Revise the draft local analysis into one coherent JSON object with this exact schema:
+
+{
+  "overview": "A factual 3-sentence executive summary of purpose, outcomes, commitments, risks, and unresolved blockers.",
+  "topics": [
+    {
+      "title": "Short descriptive outcome-level title",
+      "summary": "A concise factual digest of the final state and material constraints.",
+      "key_points": [
+        { "text": "High-signal fact or constraint", "speaker": "Name or null", "from_user_notes": false }
+      ],
+      "decisions": [
+        { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from raw transcript" }
+      ],
+      "action_items": [
+        { "text": "task", "assignee": "Name or null", "due": "deadline or null", "evidence": "required short verbatim quote from raw transcript" }
+      ],
+      "open_questions": ["genuinely unresolved question or thread"],
+      "transcript_range": [startSegmentIndex, endSegmentIndex]
+    }
+  ],
+  "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title", "evidence": "required short verbatim quote from raw transcript"}],
+  "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from raw transcript"}],
+  "meeting_type": "one_on_one | team_sync | brainstorm | presentation | general"
+}
+
+Editorial rules:
+- Merge overlapping or duplicate topics created by transcript windows. Prefer a small number of coherent outcome-level topics, but do not force unrelated material together.
+- Produce a factual 3-sentence executive summary. Never enumerate every topic title.
+- Re-scan the raw transcript for explicit assignments, accepted requests, deadlines, and settled decisions omitted by the draft.
+- Use meeting-wide terminology consistently only when repeated transcript context strongly supports the interpretation. Treat draft spellings as hypotheses. Preserve the raw wording when ambiguous.
+- Never alter quoted evidence. Evidence must remain a short verbatim slice of the raw transcript.
+- Preserve uncertainty, conditions, dates, numeric targets, and speaker ambiguity.
+- Rebuild the top-level action and decision arrays from the final topics.
+- Return the complete JSON object only. Do not include markdown or commentary.
+${userNotesBlock}
+Raw transcript:
+${transcript}
+
+Draft local analysis:
+${draftAnalysisJson}`;
+};
+
+/**
  * Topic segmentation prompt for multi-pass (Ollama) pipeline.
  * Pass 1: identify distinct discussion topics with segment ranges.
  */
