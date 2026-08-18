@@ -26,9 +26,14 @@ export type AnalysisErrorCategory =
   | 'unsupported_decision'
   | 'unsupported_decision_decider'
   | 'unsupported_decision_rationale'
+  | 'unsupported_key_point_speaker'
   | 'unsupported_action_item'
   | 'unsupported_action_item_owner'
-  | 'unsupported_action_item_due';
+  | 'unsupported_action_item_due'
+  | 'editorial_invalid_json'
+  | 'editorial_input_too_large'
+  | 'editorial_dropped_settled_item'
+  | 'editorial_failed';
 
 export interface AnalysisQualityV3 {
   format_pass: boolean;

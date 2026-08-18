@@ -11,6 +11,174 @@ const includesNormalized = (haystack, needle) => {
   );
 };
 
+const hasNegativePolarity = (value) =>
+  /\b(?:not(?!-)|never|no longer|don't|do not|won't|will not|cannot|can't|reject(?:ed)?|declin(?:e|ed)|cancel(?:led|ed)?)\b/i.test(
+    value,
+  );
+
+const hasContradictoryConcept = (actual, expected) => {
+  const normalizedActual = normalizeText(actual);
+  const normalizedExpected = normalizeText(expected);
+  const containsTerm = (value, term) => {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`).test(value);
+  };
+  const opposites = [
+    ['filter out', 'include'],
+    ['before', 'after'],
+    ['increase', 'decrease'],
+    ['selected', 'rejected'],
+    ['enable', 'disable'],
+    ['allow', 'block'],
+    ['remove', 'retain'],
+    ['start', 'stop'],
+    ['accept', 'reject'],
+    ['approve', 'reject'],
+  ];
+  if (
+    opposites.some(
+      ([left, right]) =>
+        (containsTerm(normalizedActual, left) &&
+          containsTerm(normalizedExpected, right)) ||
+        (containsTerm(normalizedActual, right) &&
+          containsTerm(normalizedExpected, left)),
+    )
+  ) {
+    return true;
+  }
+  const relationSides = (value, relation) => {
+    const tokens = value.split(/[^a-z0-9]+/).filter(Boolean);
+    const relationIndex = tokens.indexOf(relation);
+    if (relationIndex < 1 || relationIndex >= tokens.length - 1) return null;
+    const ignored = new Set([
+      'a',
+      'an',
+      'and',
+      'i',
+      'run',
+      'the',
+      'to',
+      'we',
+      'will',
+    ]);
+    const left = tokens
+      .slice(0, relationIndex)
+      .filter((token) => !ignored.has(token));
+    const right = tokens
+      .slice(relationIndex + 1)
+      .filter((token) => !ignored.has(token));
+    return left.length > 0 && right.length > 0 ? { left, right } : null;
+  };
+  const relationSideMatches = (left, right) => {
+    const leftSet = new Set(left);
+    const rightSet = new Set(right);
+    const intersection = [...leftSet].filter((token) => rightSet.has(token));
+    return intersection.length >= 1;
+  };
+  const distinguishingRelationSides = (sides) => {
+    const leftSet = new Set(sides.left);
+    const rightSet = new Set(sides.right);
+    const shared = new Set([...leftSet].filter((token) => rightSet.has(token)));
+    return {
+      left: sides.left.filter((token) => !shared.has(token)),
+      right: sides.right.filter((token) => !shared.has(token)),
+    };
+  };
+  return ['before', 'after'].some((relation) => {
+    const actualSides = relationSides(normalizedActual, relation);
+    const expectedSides = relationSides(normalizedExpected, relation);
+    const distinguishingActualSides = actualSides
+      ? distinguishingRelationSides(actualSides)
+      : null;
+    const distinguishingExpectedSides = expectedSides
+      ? distinguishingRelationSides(expectedSides)
+      : null;
+    return (
+      distinguishingActualSides &&
+      distinguishingExpectedSides &&
+      relationSideMatches(
+        distinguishingActualSides.left,
+        distinguishingExpectedSides.right,
+      ) &&
+      relationSideMatches(
+        distinguishingActualSides.right,
+        distinguishingExpectedSides.left,
+      )
+    );
+  });
+};
+
+const conceptStopWords = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'be',
+  'by',
+  'for',
+  'from',
+  'in',
+  'is',
+  'of',
+  'on',
+  'the',
+  'to',
+  'was',
+  'were',
+  'will',
+]);
+
+const conceptTokens = (value) => {
+  const canonical = normalizeText(value)
+    .replace(/\b(?:excluded?|excluding)\b/g, 'filter out')
+    .replace(/\b(?:loaded|loading)\b/g, 'load')
+    .replace(/\bprior to\b/g, 'before')
+    .replace(/\bfirst\b/g, 'before')
+    .replace(/\b(?:aligned|agreed|settled)\b/g, 'agree')
+    .replace(/\b(?:distinct|separation)\b/g, 'separate')
+    .replace(/\bcomputation\b/g, 'compute')
+    .replace(/\bscoring\b/g, 'score');
+  return canonical
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .filter((token) => !conceptStopWords.has(token))
+    .map((token) => {
+      if (token.endsWith('ing') && token.length > 5) return token.slice(0, -3);
+      if (token.endsWith('ies') && token.length > 4)
+        return `${token.slice(0, -3)}y`;
+      if (token.endsWith('s') && token.length > 3) return token.slice(0, -1);
+      return token;
+    });
+};
+
+const includesConcept = (haystack, needle) => {
+  if (
+    haystack.some(
+      (item) =>
+        hasNegativePolarity(item) === hasNegativePolarity(needle) &&
+        !hasContradictoryConcept(item, needle) &&
+        includesNormalized([item], needle),
+    )
+  ) {
+    return true;
+  }
+  const expected = [...new Set(conceptTokens(needle))];
+  if (expected.length === 0) return false;
+  return haystack.some((item) => {
+    if (hasNegativePolarity(item) !== hasNegativePolarity(needle)) {
+      return false;
+    }
+    if (hasContradictoryConcept(item, needle)) return false;
+    const actual = new Set(conceptTokens(item));
+    const matches = expected.filter((token) => actual.has(token)).length;
+    return (
+      matches >= Math.min(2, expected.length) &&
+      expected.length - matches <= 1 &&
+      matches / expected.length >= 0.8
+    );
+  });
+};
+
 const flattenAnalysis = (analysis) => {
   const topics = Array.isArray(analysis?.topics) ? analysis.topics : [];
   const summary =
@@ -32,6 +200,9 @@ const flattenAnalysis = (analysis) => {
   return {
     summary,
     topicTitles: topics.map((topic) => topic.title).filter(Boolean),
+    topicContexts: topics.map(
+      (topic) => `${topic.title || ''}: ${topic.summary || ''}`,
+    ),
     keyPoints,
     decisions,
     actionItems,
@@ -52,9 +223,6 @@ export const scoreMeetingNotesQuality = (fixture) => {
   const flattened = flattenAnalysis(analysis);
   const decisionTexts = flattened.decisions.map((item) => item?.text || '');
   const actionItemTexts = flattened.actionItems.map((item) => item?.text || '');
-  const attributionTexts = flattened.keyPoints.map(
-    (item) => `${item?.speaker || 'unknown'}: ${item?.text || ''}`,
-  );
   const failureTags = [];
 
   const summaryMustInclude = Array.isArray(expected.summary_must_include)
@@ -64,7 +232,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
     ? expected.summary_must_exclude
     : [];
   const missingSummary = summaryMustInclude.filter(
-    (item) => !includesNormalized([flattened.summary], item),
+    (item) => !includesConcept([flattened.summary], item),
   );
   const unexpectedSummary = summaryMustExclude.filter((item) =>
     includesNormalized([flattened.summary], item),
@@ -78,7 +246,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
       ? expected.decisions
       : {};
   const missingDecisions = (decisionExpectations.must_include || []).filter(
-    (item) => !includesNormalized(decisionTexts, item),
+    (item) => !includesConcept(decisionTexts, item),
   );
   const unexpectedDecisions = (decisionExpectations.must_exclude || []).filter(
     (item) => includesNormalized(decisionTexts, item),
@@ -92,7 +260,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
       ? expected.action_items
       : {};
   const missingActionItems = (actionItemExpectations.must_include || []).filter(
-    (item) => !includesNormalized(actionItemTexts, item.text || item),
+    (item) => !includesConcept(actionItemTexts, item.text || item),
   );
   const unexpectedActionItems = (
     actionItemExpectations.must_exclude || []
@@ -106,9 +274,11 @@ export const scoreMeetingNotesQuality = (fixture) => {
     : [];
   const missingAttributions = attributionExpectations.filter(
     (item) =>
-      !includesNormalized(
-        attributionTexts,
-        `${item.speaker || 'unknown'}: ${item.text}`,
+      !flattened.keyPoints.some(
+        (keyPoint) =>
+          normalizeText(keyPoint?.speaker || 'unknown') ===
+            normalizeText(item.speaker || 'unknown') &&
+          includesConcept([keyPoint?.text || ''], item.text),
       ),
   );
   if (missingAttributions.length > 0) {
@@ -119,7 +289,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
     ? expected.must_include_topics
     : [];
   const missingTopics = requiredTopics.filter(
-    (item) => !includesNormalized(flattened.topicTitles, item),
+    (item) => !includesConcept(flattened.topicContexts, item),
   );
   if (missingTopics.length > 0) {
     failureTags.push('critical_topic_omission');

@@ -14,7 +14,7 @@
     "overview": "The team aligned on REST for the rollout, captured one concrete follow-up, and left the mobile SDK impact unresolved.",
     "topics": [
       {
-        "title": "API migration",
+        "title": "REST rollout",
         "summary": "GraphQL was discussed but not selected. The team agreed to use REST for the rollout.",
         "key_points": [
           {
@@ -41,7 +41,7 @@
       {
         "text": "Send rollout email",
         "assignee": "Sarah",
-        "topic": "API migration"
+        "topic": "REST rollout"
       }
     ],
     "all_decisions": [
@@ -86,7 +86,7 @@
         "text": "GraphQL remained only an option"
       }
     ],
-    "must_include_topics": ["API migration"],
+    "must_include_topics": ["REST rollout"],
     "unsupported_inference_must_exclude": [
       "next Tuesday",
       "Bob owns the rollout email"

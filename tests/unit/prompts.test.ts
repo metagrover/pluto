@@ -4,6 +4,7 @@ import {
   getEntitiesPrompt,
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
+  getStructuredAnalysisEditorialPrompt,
   getStructuredAnalysisPrompt,
   getStructuredAnalysisRepairPrompt,
   getSummaryPrompt,
@@ -125,9 +126,45 @@ describe('structured analysis extraction policy', () => {
       expect(prompt).toContain('Proposal or recommendation:');
       expect(prompt).toContain('Open question:');
       expect(prompt).toContain('directly states the extracted claim');
+      expect(prompt).toContain('name the distinctive system');
+      expect(prompt).toContain('exact speaker label');
       expect(prompt).not.toContain('explicit and implied decisions');
       expect(prompt).not.toContain('when possible');
     }
+  });
+});
+
+describe('global structured analysis editor', () => {
+  it('consolidates local drafts while preserving raw evidence and uncertainty', () => {
+    const prompt = getStructuredAnalysisEditorialPrompt(
+      [
+        'Me: Cloud Code is available in the workspace.',
+        'Them: The cloud-code access remains limited.',
+      ].join('\n'),
+      JSON.stringify({
+        overview: 'Two local topic summaries.',
+        topics: [
+          { title: 'Claude Code access', summary: 'Access is limited.' },
+          { title: 'Cloud-code access', summary: 'Access is constrained.' },
+        ],
+        meeting_type: 'team_sync',
+      }),
+      'Access constraints matter most.',
+    );
+
+    expect(prompt).toContain('global meeting-notes editor');
+    expect(prompt).toContain('Merge overlapping or duplicate topics');
+    expect(prompt).toContain('meeting-wide terminology');
+    expect(prompt).toContain('Never alter quoted evidence');
+    expect(prompt).toContain('Preserve uncertainty');
+    expect(prompt).toContain('3-sentence executive summary');
+    expect(prompt).toContain('transcript vocabulary and word order');
+    expect(prompt).toContain('bare verb phrase');
+    expect(prompt).toContain('enough adjacent transcript lines');
+    expect(prompt).toContain('conversational framing');
+    expect(prompt).toContain('Raw transcript');
+    expect(prompt).toContain('Draft local analysis');
+    expect(prompt).toContain('Access constraints matter most.');
   });
 });
 
@@ -179,6 +216,7 @@ describe('v3 accuracy prompts', () => {
 
     expect(prompt).toContain('Committed action: retain only');
     expect(prompt).toContain('required short verbatim quote');
+    expect(prompt).toContain('"title": "Short outcome-level topic title"');
     expect(prompt).toContain('Do not turn suggestions');
     expect(prompt).toContain('Person will do task by date');
     expect(prompt).toContain('numeric targets and success metrics');

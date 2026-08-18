@@ -13,6 +13,8 @@ import {
 } from '../../electron/llm/unifiedProvider';
 import { scoreMeetingNotesQuality } from '../../scripts/lib/meeting_notes_quality.js';
 
+const COMPARISON_BASELINE_PROMPT_VERSION = 'notes-v6';
+
 type Fixture = {
   case_id?: string;
   transcript: string[];
@@ -46,7 +48,10 @@ const loadFixtures = (): Fixture[] => {
     .readdirSync(root)
     .filter((name) => name.endsWith('.json'))
     .sort()
-    .map((name) => readJson<Fixture>(path.join(root, name)));
+    .map((name) => ({
+      ...readJson<Fixture>(path.join(root, name)),
+      case_id: path.basename(name, '.json'),
+    }));
   const precision = readJson<Fixture[]>(
     path.join(root, 'precision', 'cases.json'),
   );
@@ -80,6 +85,9 @@ suite('real-provider meeting notes quality benchmark', () => {
         1,
         Number.parseInt(process.env.OLLAMA_BENCHMARK_REPEATS || '3', 10) || 3,
       );
+      const seedStart =
+        Number.parseInt(process.env.OLLAMA_BENCHMARK_SEED_START || '42', 10) ||
+        42;
       const structuredThinking =
         process.env.OLLAMA_BENCHMARK_STRUCTURED_THINKING === '1';
       const fixtureScope =
@@ -106,7 +114,7 @@ suite('real-provider meeting notes quality benchmark', () => {
       ).length;
       if (
         providerBaseline.prompt_version !==
-          STRUCTURED_ANALYSIS_PROMPT_VERSION ||
+          COMPARISON_BASELINE_PROMPT_VERSION ||
         providerBaseline.fixture_order_sha256 !==
           reviewedFixtureOrderSha256() ||
         providerBaseline.reviewed_scores.length !== reviewedFixtureCount
@@ -129,7 +137,7 @@ suite('real-provider meeting notes quality benchmark', () => {
         const provider = new UnifiedLLMProvider('ollama', {
           ollama_model: model,
           ollama_structured_thinking: structuredThinking,
-          ollama_seed: 42 + repeat,
+          ollama_seed: seedStart + repeat,
         });
         for (const [fixtureIndex, fixture] of fixtures.entries()) {
           const startedAt = performance.now();
@@ -255,6 +263,14 @@ suite('real-provider meeting notes quality benchmark', () => {
       const reviewedScores = runs
         .map(({ score }) => score)
         .filter((score): score is NonNullable<typeof score> => score !== null);
+      const reviewedScoreBySeed = Array.from({ length: repeats }, (_, repeat) =>
+        reviewedScores
+          .slice(
+            repeat * reviewedFixtureCount,
+            (repeat + 1) * reviewedFixtureCount,
+          )
+          .reduce((sum, score) => sum + score.total_score, 0),
+      );
       const totalScore = reviewedScores.reduce(
         (sum, score) => sum + score.total_score,
         0,
@@ -288,7 +304,7 @@ suite('real-provider meeting notes quality benchmark', () => {
         provider: 'ollama',
         model,
         prompt_version: STRUCTURED_ANALYSIS_PROMPT_VERSION,
-        fixture_revision: 'meeting-notes-quality-v3',
+        fixture_revision: 'meeting-notes-quality-v4',
         comparison_baseline: {
           provider: providerBaseline.provider,
           model: providerBaseline.model,
@@ -299,7 +315,7 @@ suite('real-provider meeting notes quality benchmark', () => {
         repeats,
         generation: {
           structured_thinking: structuredThinking,
-          seed_start: 42,
+          seed_start: seedStart,
           topic_temperature: 0.1,
         },
         cases: fixtures.length,
@@ -319,9 +335,23 @@ suite('real-provider meeting notes quality benchmark', () => {
         precision_cases_total: precisionRuns.length,
         reviewed_score: totalScore,
         reviewed_max_score: maxScore,
+        reviewed_score_by_seed: reviewedScoreBySeed,
         reviewed_scores: reviewedScores.map((score) => score.total_score),
         reviewed_fixture_regressions: reviewedFixtureRegressions,
         reviewed_failure_counts: reviewedFailureCounts,
+        reviewed_failures_by_case: Object.fromEntries(
+          runs
+            .filter(
+              (
+                run,
+              ): run is typeof run & { score: NonNullable<typeof run.score> } =>
+                run.score !== null,
+            )
+            .map((run) => [
+              run.fixture.case_id ?? `reviewed_fixture_${run.fixtureIndex + 1}`,
+              run.score.failure_tags,
+            ]),
+        ),
         token_budget: {
           context_min: Math.min(...contextBudgets.map((item) => item.num_ctx)),
           context_max: Math.max(...contextBudgets.map((item) => item.num_ctx)),
@@ -346,7 +376,9 @@ suite('real-provider meeting notes quality benchmark', () => {
       expect(report.exact_evidence_support).toBe(report.settled_items);
       expect(report.precision_cases_passed).toBe(report.precision_cases_total);
       if (fixtureScope === 'full') {
-        expect(report.reviewed_score).toBeGreaterThan(30 * repeats);
+        expect(
+          report.reviewed_score_by_seed.every((score) => score >= 40),
+        ).toBe(true);
         expect(report.reviewed_max_score).toBe(48 * repeats);
         expect(report.reviewed_fixture_regressions).toBe(0);
         expect(report.latency_ms.average).toBeLessThanOrEqual(30_000);

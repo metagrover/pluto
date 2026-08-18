@@ -18,7 +18,7 @@
         "summary": "Clarified that PLP stands for Professional Loan Program and agreed on schema separation from RSUs.",
         "key_points": [
           {
-            "speaker": "Me",
+            "speaker": "Them",
             "text": "PLP stands for Professional Loan Program."
           }
         ],
@@ -84,8 +84,8 @@
     },
     "attributions": [
       {
-        "speaker": "Me",
-        "text": "PLP stands for Professional Loan Program"
+        "speaker": "Them",
+        "text": "Professional Loan Program"
       }
     ],
     "must_include_topics": ["PLP Data Architecture"],

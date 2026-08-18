@@ -515,8 +515,12 @@ export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 - Proposal or recommendation: keep in the topic summary or key points, never in decisions or action items unless the transcript later records explicit agreement or commitment.
 - Open question: extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
 - Discussion context: keep factual or exploratory material in summaries and key points without creating a commitment.
-- Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. If no exact evidence slice exists, omit the settled item.
-- Assignee, decider, due date, and rationale fields must be null unless the same evidence line directly supports them.`;
+- Phrase user-facing fields with the lightest useful compression. Preserve distinctive transcript vocabulary and word order instead of substituting synonyms or abstract business language.
+- In the overview, topic title, and topic summary, name the distinctive system, program, or subject and state the concrete primary outcome. Do not replace a named outcome with abstractions such as "the approach", "the order", or "the plan".
+- Write decision and action text as a bare verb phrase without conversational framing such as "we decided to", "the team will", or "I will". Keep deadlines in the due field rather than repeating them in action text.
+- Remove conversational framing from key points. When a key point comes from one identifiable transcript turn, set speaker to that turn's exact speaker label; use null only for a synthesis across turns or genuinely unclear attribution.
+- Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. Quote enough adjacent transcript lines to support the full claim when its subject and resolution are split across turns. If no exact evidence slice exists, omit the settled item.
+- Assignee, decider, due date, and rationale fields must be null unless the same evidence slice directly supports them.`;
 
 /**
  * Single-pass structured analysis prompt for cloud providers.
@@ -565,6 +569,7 @@ Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON 
    - BAD: "The speaker outlines two technical goals regarding API performance."
    - GOOD: "The primary technical goals are achieving sub-second API performance and migrating to the S3 domain."
 2. **Signal Constraint:** Ignore small talk, filler, and exploratory brainstorming unless it results in a concrete constraint or decision. Treat the transcript as the source of truth. User notes sharpen emphasis but do not override facts.
+   - Brief rapport and personal check-ins may be included as minor context. Do not make them major topics or lead the overview when the meeting is work-focused.
 3. **Resolution Constraint:** If a task lacks an owner or date, leave those fields null. Do not hallucinate them. Extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
 4. **General Rules:** Identify distinct topics chronologically. Roll up all action items and decisions into the top-level arrays. Preserve exact acronym definitions and technical terms.
 
@@ -606,6 +611,68 @@ ${transcript}`;
 };
 
 /**
+ * Global editorial prompt for the local multi-pass pipeline.
+ * Consolidates independently analyzed transcript windows without changing the
+ * canonical transcript or weakening settled-item evidence requirements.
+ */
+export const getStructuredAnalysisEditorialPrompt = (
+  transcript: string,
+  draftAnalysisJson: string,
+  userNotes?: string,
+): string => {
+  const userNotesBlock = userNotes
+    ? `\nUser notes (high-priority emphasis, not independent evidence):\n${userNotes}\n`
+    : '';
+
+  return `You are Pluto's global meeting-notes editor.
+
+${STRUCTURED_EXTRACTION_POLICY}
+
+Revise the draft local analysis into one coherent JSON object with this exact schema:
+
+{
+  "overview": "A factual 3-sentence executive summary of purpose, outcomes, commitments, risks, and unresolved blockers.",
+  "topics": [
+    {
+      "title": "Short descriptive outcome-level title",
+      "summary": "A concise factual digest of the final state and material constraints.",
+      "key_points": [
+        { "text": "High-signal fact or constraint", "speaker": "Name or null", "from_user_notes": false }
+      ],
+      "decisions": [
+        { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from raw transcript" }
+      ],
+      "action_items": [
+        { "text": "task", "assignee": "Name or null", "due": "deadline or null", "evidence": "required short verbatim quote from raw transcript" }
+      ],
+      "open_questions": ["genuinely unresolved question or thread"],
+      "transcript_range": [startSegmentIndex, endSegmentIndex]
+    }
+  ],
+  "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title", "evidence": "required short verbatim quote from raw transcript"}],
+  "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from raw transcript"}],
+  "meeting_type": "one_on_one | team_sync | brainstorm | presentation | general"
+}
+
+Editorial rules:
+- Merge overlapping or duplicate topics created by transcript windows. Prefer a small number of coherent outcome-level topics, but do not force unrelated material together.
+- Name topics with the transcript's distinctive subject or system plus the outcome or operation; avoid generic process labels.
+- Produce a factual 3-sentence executive summary. Never enumerate every topic title.
+- Re-scan the raw transcript for explicit assignments, accepted requests, deadlines, and settled decisions omitted by the draft.
+- Use meeting-wide terminology consistently only when repeated transcript context strongly supports the interpretation. Treat draft spellings as hypotheses. Preserve the raw wording when ambiguous.
+- Never alter quoted evidence. Evidence must remain a short verbatim slice of the raw transcript.
+- Preserve uncertainty, conditions, dates, numeric targets, and speaker ambiguity.
+- Rebuild the top-level action and decision arrays from the final topics.
+- Return the complete JSON object only. Do not include markdown or commentary.
+${userNotesBlock}
+Raw transcript:
+${transcript}
+
+Draft local analysis:
+${draftAnalysisJson}`;
+};
+
+/**
  * Topic segmentation prompt for multi-pass (Ollama) pipeline.
  * Pass 1: identify distinct discussion topics with segment ranges.
  */
@@ -621,6 +688,7 @@ Return valid JSON only in this exact shape:
 
 Rules:
 - Each topic should represent a coherent discussion thread.
+- Build each title from distinctive transcript nouns plus the outcome or operation. Preserve named systems, products, programs, and technical terms; avoid generic labels such as "Discussion" or "Approach".
 - Use segment indices (0-based, line numbers in the transcript) to mark the approximate start and end.
 - If the meeting has a single topic throughout, return one topic covering all segments.
 - Keep titles concise and descriptive (3-8 words).
@@ -653,6 +721,7 @@ ${STRUCTURED_EXTRACTION_POLICY}
 
 Return valid JSON only in this exact shape:
 {
+  "title": "Short outcome-level topic title",
   "summary": "A 1-sentence factual TLDR of the outcome. No filler.",
   "key_points": [
     { "text": "High-signal bullet point. Answer: what mattered, why it mattered, what constraint emerged. No fluff.", "speaker": "Name or null", "from_user_notes": false }
@@ -672,6 +741,9 @@ Return valid JSON only in this exact shape:
    - GOOD: "The primary technical goals are achieving sub-second API performance and migrating to the S3 domain."
 2. **Signal Constraint:** Ignore small talk, filler, and exploratory brainstorming unless it results in a concrete constraint or decision. Treat the transcript as the source of truth. User notes sharpen emphasis but do not override facts.
 3. **Resolution Constraint:** If a task lacks an owner or date, leave those fields null. Do not hallucinate them. Extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
+   - Treat explicit third-person commitments such as "Person will do task by date" as action items only when the same evidence supports the owner and timing.
+   - Do not turn suggestions, ideas, possible tasks, or hypothetical work into action items.
+   - Preserve dates, conditions, and qualifiers so conditional agreements remain conditional.
 4. **General Rules:** Preserve exact acronym definitions and technical terms. Preserve numeric targets and success metrics.
 
 **Output Format:**
