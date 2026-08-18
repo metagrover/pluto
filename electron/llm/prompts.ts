@@ -565,6 +565,7 @@ Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON 
    - BAD: "The speaker outlines two technical goals regarding API performance."
    - GOOD: "The primary technical goals are achieving sub-second API performance and migrating to the S3 domain."
 2. **Signal Constraint:** Ignore small talk, filler, and exploratory brainstorming unless it results in a concrete constraint or decision. Treat the transcript as the source of truth. User notes sharpen emphasis but do not override facts.
+   - Brief rapport and personal check-ins may be included as minor context. Do not make them major topics or lead the overview when the meeting is work-focused.
 3. **Resolution Constraint:** If a task lacks an owner or date, leave those fields null. Do not hallucinate them. Extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
 4. **General Rules:** Identify distinct topics chronologically. Roll up all action items and decisions into the top-level arrays. Preserve exact acronym definitions and technical terms.
 
@@ -672,6 +673,9 @@ Return valid JSON only in this exact shape:
    - GOOD: "The primary technical goals are achieving sub-second API performance and migrating to the S3 domain."
 2. **Signal Constraint:** Ignore small talk, filler, and exploratory brainstorming unless it results in a concrete constraint or decision. Treat the transcript as the source of truth. User notes sharpen emphasis but do not override facts.
 3. **Resolution Constraint:** If a task lacks an owner or date, leave those fields null. Do not hallucinate them. Extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
+   - Treat explicit third-person commitments such as "Person will do task by date" as action items only when the same evidence supports the owner and timing.
+   - Do not turn suggestions, ideas, possible tasks, or hypothetical work into action items.
+   - Preserve dates, conditions, and qualifiers so conditional agreements remain conditional.
 4. **General Rules:** Preserve exact acronym definitions and technical terms. Preserve numeric targets and success metrics.
 
 **Output Format:**
