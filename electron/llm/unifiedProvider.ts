@@ -1187,7 +1187,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private getClaudeMaxTokens(task: LLMTask): number {
-    if (task === 'analysisEditorial') return 4096;
+    if (task === 'analysisEditorial') return 2048;
     if (task === 'structuredAnalysis') return 4096;
     if (task === 'topicSegmentation') return 512;
     if (task === 'topicAnalysis') return 2048;
@@ -1288,12 +1288,13 @@ export function calculateOllamaContextBudget(
   task: string,
 ): { num_ctx: number; num_predict: number } {
   const outputTokenBudget =
-    task === 'knowledgeDoc' ||
-    task === 'structuredAnalysis' ||
-    task === 'analysisEditorial' ||
-    task === 'summary'
-      ? 4096
-      : 2500;
+    task === 'analysisEditorial'
+      ? 2048
+      : task === 'knowledgeDoc' ||
+          task === 'structuredAnalysis' ||
+          task === 'summary'
+        ? 4096
+        : 2500;
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =

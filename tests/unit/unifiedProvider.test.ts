@@ -975,6 +975,16 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     expect(budget.num_predict).toBe(4096);
   });
 
+  it('bounds the global editor output to a concise complete document', () => {
+    const budget = calculateOllamaContextBudget(
+      'a'.repeat(30_000),
+      'analysisEditorial',
+    );
+
+    expect(budget.num_ctx).toBeGreaterThanOrEqual(12288);
+    expect(budget.num_predict).toBe(2048);
+  });
+
   it('sliceTranscriptWindows slices transcript into overlapping windows when line count exceeds maxLinesPerWindow', () => {
     const lines = Array.from(
       { length: 300 },
