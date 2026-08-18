@@ -134,4 +134,85 @@ describe('buildSearchPlutoResults', () => {
       'meeting-old',
     ]);
   });
+
+  it('filters project and person entities by the search query', () => {
+    const results = buildSearchPlutoResults({
+      query: 'launch',
+      meetings: [],
+      entities: [
+        makeEntity({
+          id: 'project-launch',
+          type: 'project',
+          name: 'Launch Project',
+        }),
+        makeEntity({
+          id: 'project-hiring',
+          type: 'project',
+          name: 'Hiring Plan',
+          normalized_name: 'hiring plan',
+        }),
+        makeEntity({
+          id: 'person-launch',
+          type: 'person',
+          name: 'Launch Partner',
+        }),
+        makeEntity({
+          id: 'person-finance',
+          type: 'person',
+          name: 'Finley Ops',
+          normalized_name: 'finley ops',
+        }),
+      ],
+    });
+
+    expect(results.map((result) => result.id)).toEqual([
+      'project-launch',
+      'person-launch',
+    ]);
+  });
+
+  it('caps Search Pluto results to a bounded set', () => {
+    const results = buildSearchPlutoResults({
+      query: 'launch',
+      meetings: Array.from({ length: 12 }, (_, index) =>
+        makeMeeting({
+          id: `meeting-${index}`,
+          title: `Launch Meeting ${index}`,
+          created_at: `2026-08-${String(index + 1).padStart(2, '0')}T10:00:00.000Z`,
+          started_at: `2026-08-${String(index + 1).padStart(2, '0')}T10:00:00.000Z`,
+        }),
+      ),
+      entities: [
+        ...Array.from({ length: 12 }, (_, index) =>
+          makeEntity({
+            id: `project-${index}`,
+            type: 'project' as const,
+            name: `Launch Project ${index}`,
+            created_at: `2026-08-${String(index + 1).padStart(2, '0')}T10:00:00.000Z`,
+            updated_at: `2026-08-${String(index + 1).padStart(2, '0')}T10:00:00.000Z`,
+          }),
+        ),
+        ...Array.from({ length: 12 }, (_, index) =>
+          makeEntity({
+            id: `person-${index}`,
+            type: 'person' as const,
+            name: `Launch Person ${index}`,
+            created_at: `2026-08-${String(index + 1).padStart(2, '0')}T10:00:00.000Z`,
+            updated_at: `2026-08-${String(index + 1).padStart(2, '0')}T10:00:00.000Z`,
+          }),
+        ),
+      ],
+    });
+
+    expect(results).toHaveLength(15);
+    expect(results.filter((result) => result.kind === 'project')).toHaveLength(
+      5,
+    );
+    expect(results.filter((result) => result.kind === 'person')).toHaveLength(
+      5,
+    );
+    expect(results.filter((result) => result.kind === 'meeting')).toHaveLength(
+      5,
+    );
+  });
 });

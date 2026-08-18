@@ -161,8 +161,8 @@ describe('SearchOverlay', () => {
     act(() => buttons[1]?.click());
     act(() => buttons[2]?.click());
 
-    expect(onOpenProjects).toHaveBeenCalledOnce();
-    expect(onOpenPeople).toHaveBeenCalledOnce();
+    expect(onOpenProjects).toHaveBeenCalledWith('project-1');
+    expect(onOpenPeople).toHaveBeenCalledWith('person-1');
     expect(onOpenMeeting).toHaveBeenCalledWith('meeting-1');
     expect(setSearchVisible).toHaveBeenCalledWith(false);
   });

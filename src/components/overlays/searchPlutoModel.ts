@@ -11,6 +11,8 @@ export interface SearchPlutoResult {
   updatedAt?: string | null;
 }
 
+export const SEARCH_PLUTO_LIMIT_PER_KIND = 5;
+
 interface BuildSearchPlutoResultsInput {
   query: string;
   meetings: Meeting[];
@@ -41,24 +43,36 @@ export const buildSearchPlutoResults = ({
   if (!normalizedQuery) return [];
 
   const projectResults = sortLatestCreated(
-    entities.filter((entity) => entity.type === 'project'),
-  ).map<SearchPlutoResult>((entity) => ({
-    kind: 'project',
-    id: entity.id,
-    title: entity.name,
-    subtitle: 'Project',
-    updatedAt: entity.updated_at,
-  }));
+    entities.filter(
+      (entity) =>
+        entity.type === 'project' &&
+        matchesQuery(normalizedQuery, entity.name, entity.normalized_name),
+    ),
+  )
+    .slice(0, SEARCH_PLUTO_LIMIT_PER_KIND)
+    .map<SearchPlutoResult>((entity) => ({
+      kind: 'project',
+      id: entity.id,
+      title: entity.name,
+      subtitle: 'Project',
+      updatedAt: entity.updated_at,
+    }));
 
   const peopleResults = sortLatestCreated(
-    entities.filter((entity) => entity.type === 'person'),
-  ).map<SearchPlutoResult>((entity) => ({
-    kind: 'person',
-    id: entity.id,
-    title: entity.name,
-    subtitle: 'Person',
-    updatedAt: entity.updated_at,
-  }));
+    entities.filter(
+      (entity) =>
+        entity.type === 'person' &&
+        matchesQuery(normalizedQuery, entity.name, entity.normalized_name),
+    ),
+  )
+    .slice(0, SEARCH_PLUTO_LIMIT_PER_KIND)
+    .map<SearchPlutoResult>((entity) => ({
+      kind: 'person',
+      id: entity.id,
+      title: entity.name,
+      subtitle: 'Person',
+      updatedAt: entity.updated_at,
+    }));
 
   const meetingResults = sortLatestCreated(
     meetings.filter((meeting) =>
@@ -69,13 +83,15 @@ export const buildSearchPlutoResults = ({
         meeting.user_notes,
       ),
     ),
-  ).map<SearchPlutoResult>((meeting) => ({
-    kind: 'meeting',
-    id: meeting.id,
-    title: meeting.title || 'Untitled Session',
-    subtitle: 'Meeting',
-    updatedAt: meeting.started_at || meeting.created_at,
-  }));
+  )
+    .slice(0, SEARCH_PLUTO_LIMIT_PER_KIND)
+    .map<SearchPlutoResult>((meeting) => ({
+      kind: 'meeting',
+      id: meeting.id,
+      title: meeting.title || 'Untitled Session',
+      subtitle: 'Meeting',
+      updatedAt: meeting.started_at || meeting.created_at,
+    }));
 
   return [...projectResults, ...peopleResults, ...meetingResults];
 };

@@ -91,6 +91,10 @@ function App() {
   const [selectedMeetingId, setSelectedMeetingId] = useState<
     string | number | null
   >(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
+    null,
+  );
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
     'hub' | 'people' | 'projects' | 'wiki'
   >(window.__PLUTO_BROWSER_PREVIEW__ ? 'wiki' : 'hub');
@@ -101,6 +105,7 @@ function App() {
   const [searchEntitiesResults, setSearchEntitiesResults] = useState<Entity[]>(
     [],
   );
+  const searchRequestIdRef = useRef(0);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [permissionsVisible, setPermissionsVisible] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState({
@@ -617,23 +622,29 @@ function App() {
   useEffect(() => {
     const trimmed = searchQuery.trim();
     if (!searchVisible || !trimmed) {
+      searchRequestIdRef.current += 1;
       setSearchEntitiesResults([]);
       return;
     }
 
-    let cancelled = false;
-    searchEntities(trimmed)
-      .then((entities) => {
-        if (!cancelled) setSearchEntitiesResults(entities);
-      })
-      .catch((error) => {
-        console.error('Failed to search entities', error);
-        if (!cancelled) setSearchEntitiesResults([]);
-      });
+    const requestId = searchRequestIdRef.current + 1;
+    searchRequestIdRef.current = requestId;
+    const timeout = window.setTimeout(() => {
+      searchEntities(trimmed)
+        .then((entities) => {
+          if (searchRequestIdRef.current === requestId) {
+            setSearchEntitiesResults(entities);
+          }
+        })
+        .catch((error) => {
+          console.error('Failed to search entities', error);
+          if (searchRequestIdRef.current === requestId) {
+            setSearchEntitiesResults([]);
+          }
+        });
+    }, 200);
 
-    return () => {
-      cancelled = true;
-    };
+    return () => window.clearTimeout(timeout);
   }, [searchQuery, searchVisible]);
 
   const probeMicrophonePermission = async () => {
@@ -1015,12 +1026,13 @@ function App() {
             ) : activeTab === 'people' ? (
               <div className="mx-auto w-full max-w-[1180px] animate-in pb-20">
                 <PeopleTab
+                  selectedPersonId={selectedPersonId}
                   onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
                 />
               </div>
             ) : activeTab === 'projects' ? (
               <div className="max-w-5xl mx-auto w-full space-y-12 animate-in pb-20">
-                <ProjectsExecutionTab />
+                <ProjectsExecutionTab selectedProjectId={selectedProjectId} />
               </div>
             ) : activeTab === 'wiki' ? (
               <div className="h-full w-full animate-in pb-10">
@@ -1098,13 +1110,19 @@ function App() {
         results={searchPlutoResults}
         onOpenMeeting={(meetingId) => {
           setSelectedMeetingId(meetingId);
+          setSelectedProjectId(null);
+          setSelectedPersonId(null);
           setActiveTab('hub');
         }}
-        onOpenProjects={() => {
+        onOpenProjects={(projectId) => {
+          setSelectedProjectId(String(projectId));
+          setSelectedPersonId(null);
           setActiveTab('projects');
           setSelectedMeetingId(null);
         }}
-        onOpenPeople={() => {
+        onOpenPeople={(personId) => {
+          setSelectedPersonId(String(personId));
+          setSelectedProjectId(null);
           setActiveTab('people');
           setSelectedMeetingId(null);
         }}

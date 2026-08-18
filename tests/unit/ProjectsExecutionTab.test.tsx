@@ -223,6 +223,34 @@ describe('ProjectHealthCard', () => {
     expect(markup).toContain('Finalize rollout checklist');
     expect(markup).not.toContain('completed task');
   });
+
+  it('marks the selected project card with its exact entity id', () => {
+    const project = makeEntity({
+      id: 'project-selected',
+      metadata: JSON.stringify({ context: 'Execution board' }),
+    });
+    const activeTask = makeEntity({
+      id: 'task-selected',
+      type: 'action_item',
+      name: 'Finalize rollout checklist',
+      metadata: JSON.stringify({
+        full_description: 'Finalize rollout checklist',
+      }),
+    });
+
+    const markup = renderToStaticMarkup(
+      <ProjectHealthCard
+        project={project}
+        tasks={[activeTask]}
+        selected
+        onToggleTask={() => {}}
+        onTaskAdded={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('data-project-id="project-selected"');
+    expect(markup).toContain('data-selected="true"');
+  });
 });
 
 describe('partitionProjectsForDisplay', () => {

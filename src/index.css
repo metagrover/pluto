@@ -66,6 +66,9 @@
   .person-row {
     @apply grid min-h-[92px] grid-cols-[44px_minmax(130px,0.55fr)_minmax(240px,1.25fr)_minmax(150px,0.65fr)_auto] items-center gap-4 border-b border-pro-border py-4;
   }
+  .person-row--selected {
+    @apply bg-pro-accent/5 ring-2 ring-pro-accent/35;
+  }
   .person-avatar {
     @apply flex h-10 w-10 items-center justify-center rounded-xl bg-pro-hover text-sm font-black text-pro-accent;
   }

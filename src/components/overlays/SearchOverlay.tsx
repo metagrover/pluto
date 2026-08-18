@@ -12,8 +12,8 @@ interface SearchOverlayProps {
   setSearchQuery: (val: string) => void;
   results: SearchPlutoResult[];
   onOpenMeeting: (id: string | number) => void;
-  onOpenProjects: () => void;
-  onOpenPeople: () => void;
+  onOpenProjects: (id: string | number) => void;
+  onOpenPeople: (id: string | number) => void;
 }
 
 const KIND_LABELS: Record<SearchPlutoResultKind, string> = {
@@ -59,9 +59,9 @@ export const SearchOverlay = ({
     if (result.kind === 'meeting') {
       onOpenMeeting(result.id);
     } else if (result.kind === 'project') {
-      onOpenProjects();
+      onOpenProjects(result.id);
     } else {
-      onOpenPeople();
+      onOpenPeople(result.id);
     }
     setSearchVisible(false);
     setSearchQuery('');
