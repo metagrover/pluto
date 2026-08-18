@@ -515,8 +515,11 @@ export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 - Proposal or recommendation: keep in the topic summary or key points, never in decisions or action items unless the transcript later records explicit agreement or commitment.
 - Open question: extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
 - Discussion context: keep factual or exploratory material in summaries and key points without creating a commitment.
-- Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. If no exact evidence slice exists, omit the settled item.
-- Assignee, decider, due date, and rationale fields must be null unless the same evidence line directly supports them.`;
+- Phrase user-facing fields with the lightest useful compression. Preserve distinctive transcript vocabulary and word order instead of substituting synonyms or abstract business language.
+- Write decision and action text as a bare verb phrase without conversational framing such as "we decided to", "the team will", or "I will". Keep deadlines in the due field rather than repeating them in action text.
+- Remove conversational framing from key points, and retain the source speaker whenever the transcript makes attribution clear.
+- Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. Quote enough adjacent transcript lines to support the full claim when its subject and resolution are split across turns. If no exact evidence slice exists, omit the settled item.
+- Assignee, decider, due date, and rationale fields must be null unless the same evidence slice directly supports them.`;
 
 /**
  * Single-pass structured analysis prompt for cloud providers.
@@ -652,6 +655,7 @@ Revise the draft local analysis into one coherent JSON object with this exact sc
 
 Editorial rules:
 - Merge overlapping or duplicate topics created by transcript windows. Prefer a small number of coherent outcome-level topics, but do not force unrelated material together.
+- Name topics with the transcript's distinctive subject or system plus the outcome or operation; avoid generic process labels.
 - Produce a factual 3-sentence executive summary. Never enumerate every topic title.
 - Re-scan the raw transcript for explicit assignments, accepted requests, deadlines, and settled decisions omitted by the draft.
 - Use meeting-wide terminology consistently only when repeated transcript context strongly supports the interpretation. Treat draft spellings as hypotheses. Preserve the raw wording when ambiguous.
@@ -683,6 +687,7 @@ Return valid JSON only in this exact shape:
 
 Rules:
 - Each topic should represent a coherent discussion thread.
+- Build each title from distinctive transcript nouns plus the outcome or operation. Preserve named systems, products, programs, and technical terms; avoid generic labels such as "Discussion" or "Approach".
 - Use segment indices (0-based, line numbers in the transcript) to mark the approximate start and end.
 - If the meeting has a single topic throughout, return one topic covering all segments.
 - Keep titles concise and descriptive (3-8 words).

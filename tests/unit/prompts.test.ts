@@ -156,6 +156,10 @@ describe('global structured analysis editor', () => {
     expect(prompt).toContain('Never alter quoted evidence');
     expect(prompt).toContain('Preserve uncertainty');
     expect(prompt).toContain('3-sentence executive summary');
+    expect(prompt).toContain('transcript vocabulary and word order');
+    expect(prompt).toContain('bare verb phrase');
+    expect(prompt).toContain('enough adjacent transcript lines');
+    expect(prompt).toContain('conversational framing');
     expect(prompt).toContain('Raw transcript');
     expect(prompt).toContain('Draft local analysis');
     expect(prompt).toContain('Access constraints matter most.');

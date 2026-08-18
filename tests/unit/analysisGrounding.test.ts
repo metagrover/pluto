@@ -178,6 +178,29 @@ describe('analysis grounding', () => {
     );
   });
 
+  it('clears an explicitly unset due date even when adjacent evidence contains it', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare the launch notes',
+        assignee: 'Nira',
+        due: 'not set yet',
+        evidence: 'I will prepare the launch notes. The timing is not set yet.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: I will prepare the launch notes.',
+        'Milo: The timing is not set yet.',
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_action_items[0]).not.toHaveProperty('due');
+    expect(result.errorCategories).toContain('unsupported_action_item_due');
+  });
+
   it('does not accept token overlap without a resolvable evidence slice', () => {
     const input = document();
     input.topics[0].decisions = [

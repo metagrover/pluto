@@ -92,6 +92,16 @@ const fieldSupportedBySource = (
   );
 };
 
+const isSettledDueValue = (value: string): boolean => {
+  const normalized = normalizeTranscriptEvidence(value);
+  return (
+    normalized.length > 0 &&
+    !/^(?:tbd|unknown|none|unset|not set(?: yet)?|no (?:date|deadline|timing))$/.test(
+      normalized,
+    )
+  );
+};
+
 const deduplicateByText = <T extends { text: string }>(items: T[]): T[] => {
   const seen = new Set<string>();
   return items.filter((item) => {
@@ -167,7 +177,10 @@ export const groundAnalysisDocument = (
         }
       }
       if (item.due) {
-        if (fieldSupportedBySource(item.due, resolved.sourceLine)) {
+        if (
+          isSettledDueValue(item.due) &&
+          fieldSupportedBySource(item.due, resolved.sourceLine)
+        ) {
           grounded.due = item.due;
         } else {
           pushCategory(errorCategories, 'unsupported_action_item_due');
