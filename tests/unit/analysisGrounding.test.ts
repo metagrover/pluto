@@ -68,6 +68,29 @@ describe('analysis grounding', () => {
     ).toContain('Nira');
   });
 
+  it('resolves verbatim evidence split across adjacent transcript segments', () => {
+    expect(
+      resolveTranscriptEvidence(
+        "I'll prepare the rollout checklist by Friday.",
+        ["Milo: I'll prepare the rollout", 'Milo: checklist by Friday.'].join(
+          '\n',
+        ),
+      ),
+    ).toMatchObject({
+      lineIndex: 0,
+      sourceLine: "Milo: I'll prepare the rollout checklist by Friday.",
+    });
+  });
+
+  it('does not resolve evidence across more than three transcript lines', () => {
+    expect(
+      resolveTranscriptEvidence(
+        "I'll prepare the checklist.",
+        ["Milo: I'll prepare", '', '', 'Milo: the checklist.'].join('\n'),
+      ),
+    ).toBeNull();
+  });
+
   it('removes unsupported settled items and clears unsupported fields', () => {
     const result = groundAnalysisDocument(
       document(),

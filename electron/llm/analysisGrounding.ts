@@ -19,6 +19,14 @@ export type ResolvedTranscriptEvidence = {
   lineIndex: number;
 };
 
+const MAX_EVIDENCE_SPAN_LINES = 3;
+
+const transcriptLineContent = (line: string): string => {
+  const bracketed = line.match(/^\s*\[[^\]]+\]\s*(?:\([^)]*\))?\s*:\s*(.*)$/);
+  if (bracketed) return bracketed[1];
+  return line.replace(/^\s*[^:\n]{1,80}:\s*/, '');
+};
+
 export const resolveTranscriptEvidence = (
   evidence: string | undefined,
   transcript: string,
@@ -26,15 +34,32 @@ export const resolveTranscriptEvidence = (
   const normalizedEvidence = normalizeTranscriptEvidence(evidence ?? '');
   if (!normalizedEvidence) return null;
   const lines = transcript.split(/\r?\n/);
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    if (
-      normalizeTranscriptEvidence(lines[lineIndex]).includes(normalizedEvidence)
+  for (
+    let spanLength = 1;
+    spanLength <= MAX_EVIDENCE_SPAN_LINES;
+    spanLength += 1
+  ) {
+    for (
+      let lineIndex = 0;
+      lineIndex + spanLength <= lines.length;
+      lineIndex += 1
     ) {
-      return {
-        evidence: evidence?.trim() ?? '',
-        sourceLine: lines[lineIndex],
-        lineIndex,
-      };
+      const span = lines.slice(lineIndex, lineIndex + spanLength);
+      const sourceLine = span
+        .map((line, index) =>
+          index === 0 ? line : transcriptLineContent(line),
+        )
+        .filter((line) => line.trim().length > 0)
+        .join(' ');
+      if (
+        normalizeTranscriptEvidence(sourceLine).includes(normalizedEvidence)
+      ) {
+        return {
+          evidence: evidence?.trim() ?? '',
+          sourceLine,
+          lineIndex,
+        };
+      }
     }
   }
   return null;
