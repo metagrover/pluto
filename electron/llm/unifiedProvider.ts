@@ -460,12 +460,11 @@ export class UnifiedLLMProvider implements LLMProvider {
 
     // Generate overview from topics
     const overview =
-      topics
-        .map((t) => t.summary)
-        .filter(Boolean)
-        .join(' ')
-        .slice(0, 1000) ||
-      'Conversation captured. See topics below for details.';
+      topics.length > 0
+        ? `This meeting covered ${topics.length} primary topics, including: ${topics
+            .map((t) => t.title)
+            .join(', ')}.`
+        : 'Conversation captured. See topics below for details.';
 
     return this.finalizeStructuredAnalysis({
       analysis: {

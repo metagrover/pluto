@@ -513,7 +513,7 @@ export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 - Generic rejection pattern: "We rejected option A. We will keep option B." produces exactly one decision whose text reuses "We will keep option B" and whose evidence quotes the resolving clause. Do not copy this example into output.
 - Committed action: retain only when a participant explicitly commits to concrete follow-through, accepts a request, receives an explicit assignment, or a mandated follow-up is clearly stated. Mentions of work, possible tasks, questions, suggestions, and hypothetical next steps are not actions.
 - Proposal or recommendation: keep in the topic summary or key points, never in decisions or action items unless the transcript later records explicit agreement or commitment.
-- Open question: keep in open_questions, never in decisions or action items while unresolved.
+- Open question: extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
 - Discussion context: keep factual or exploratory material in summaries and key points without creating a commitment.
 - Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. If no exact evidence slice exists, omit the settled item.
 - Assignee, decider, due date, and rationale fields must be null unless the same evidence line directly supports them.`;
@@ -530,20 +530,20 @@ export const getStructuredAnalysisPrompt = (
     ? `\nUser Notes (the user took these during the meeting — incorporate relevant notes as emphasis within the matching topic's key points, setting from_user_notes to true):\n${userNotes}\n`
     : '';
 
-  return `You are a rigorous meeting analyst for Pluto. Produce a structured JSON document that reads like well-organized meeting notes.
+  return `**Role:** You are a Chief of Staff specializing in executive meeting synthesis. Your goal is to distill raw transcripts into concise, high-signal intelligence that focuses strictly on outcomes, facts, and commitments.
 
 ${STRUCTURED_EXTRACTION_POLICY}
 
 Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON object with this exact schema:
 
 {
-  "overview": "2-3 sentence summary — if you read nothing else, what was this meeting about and what happened?",
+  "overview": "A 3-sentence executive summary stating the meeting's purpose and primary outcome. Must be factual and objective.",
   "topics": [
     {
       "title": "Short descriptive title for this discussion topic",
-      "summary": "2-4 sentence digest of what was discussed under this topic",
+      "summary": "A 1-sentence factual TLDR of the outcome. No filler.",
       "key_points": [
-        { "text": "specific insight or statement", "speaker": "Name or null", "from_user_notes": false }
+        { "text": "High-signal bullet point. Answer: what mattered, why it mattered, what constraint emerged. No fluff.", "speaker": "Name or null", "from_user_notes": false }
       ],
       "decisions": [
         { "text": "what was decided", "decided_by": "Name or null", "rationale": "why, if stated or null", "evidence": "required short verbatim quote from transcript" }
@@ -560,23 +560,15 @@ Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON 
   "meeting_type": "one_on_one | team_sync | brainstorm | presentation | general"
 }
 
-Rules:
-- Identify distinct discussion topics chronologically from the transcript.
-- For each topic, extract speaker-attributed key points, decisions (with who decided), action items (with assignee and due date), and open questions.
-- Map each topic to approximate transcript segment index ranges.
-- Use only transcript${userNotes ? ' and user-note' : ''} details. Never invent facts, owners, decisions, or deadlines.
-- Preserve exact acronym definitions, proper nouns, and technical terms directly as stated in the transcript (for example, if PLP is defined in the transcript as "Professional Loan Program", do NOT replace or expand it with generic external terms like "Personal Learning Plan").
-- Keep technical meaning exact. Do not flip problem/solution, cause/effect, shipped/planned, or agreed/questioned.
-- Treat the transcript as source of truth. User notes sharpen emphasis but do not override.
-- Brief rapport and personal check-ins may be included as minor context, but Do not make them major topics or lead the overview when most of the meeting is work-focused.
-- If a personal topic is sustained, produces follow-up, or is the clear purpose of the meeting, represent it normally.
-- If discussion is exploratory, say that. Do not convert brainstorming into decisions.
-- Distinguish between explicit decisions, proposals/recommendations, and unresolved questions.
-- Apply the classification policy exactly and omit unsupported settled items.
-- If the task is mentioned without a clear owner or timing, keep the task text but leave owner and due fields null.
-- Roll up all action items and decisions into the top-level arrays.
-- Classify the meeting type.
+**Constraints:**
+1. **Perspective Constraint:** NEVER use play-by-play language (e.g., "The team discussed", "Speaker A mentioned", "The speaker outlines"). Describe the final state of reality, system states, and outcomes directly.
+   - BAD: "The speaker outlines two technical goals regarding API performance."
+   - GOOD: "The primary technical goals are achieving sub-second API performance and migrating to the S3 domain."
+2. **Signal Constraint:** Ignore small talk, filler, and exploratory brainstorming unless it results in a concrete constraint or decision. Treat the transcript as the source of truth. User notes sharpen emphasis but do not override facts.
+3. **Resolution Constraint:** If a task lacks an owner or date, leave those fields null. Do not hallucinate them. Extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
+4. **General Rules:** Identify distinct topics chronologically. Roll up all action items and decisions into the top-level arrays. Preserve exact acronym definitions and technical terms.
 
+**Output Format:**
 Return valid JSON only. No markdown fences, no commentary.
 ${userNotesBlock}
 Transcript:
@@ -653,15 +645,17 @@ export const getTopicAnalysisPrompt = (
     ? `\nUser Notes (incorporate relevant notes as emphasis, setting from_user_notes to true):\n${userNotes}\n`
     : '';
 
-  return `You are a meeting analyst. Analyze this transcript slice for the topic "${topicTitle}".
+  return `**Role:** You are a Chief of Staff specializing in executive meeting synthesis. Your goal is to distill raw transcripts into concise, high-signal intelligence that focuses strictly on outcomes, facts, and commitments.
+  
+Analyze this transcript slice for the topic "${topicTitle}".
 
 ${STRUCTURED_EXTRACTION_POLICY}
 
 Return valid JSON only in this exact shape:
 {
-  "summary": "2-4 sentence digest of this topic's discussion",
+  "summary": "A 1-sentence factual TLDR of the outcome. No filler.",
   "key_points": [
-    { "text": "specific insight", "speaker": "Name or null", "from_user_notes": false }
+    { "text": "High-signal bullet point. Answer: what mattered, why it mattered, what constraint emerged. No fluff.", "speaker": "Name or null", "from_user_notes": false }
   ],
   "decisions": [
     { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from transcript" }
@@ -672,19 +666,15 @@ Return valid JSON only in this exact shape:
   "open_questions": ["unresolved question"]
 }
 
-Rules:
-- Use only the transcript text provided. Never invent facts.
-- Preserve exact acronym definitions, proper nouns, and technical terms directly as stated in the transcript (e.g. if PLP is defined as "Professional Loan Program", do NOT replace or expand it with generic external terms like "Personal Learning Plan").
-- Speaker attribution: use name when clearly identifiable, null otherwise.
-- Apply the classification policy exactly. Extraction count is not a quality goal.
-- Treat explicit third-person commitments such as "Person will do task by date" as action items, preserving the owner and deadline.
-- Preserve numeric targets and success metrics as key points; do not round, omit, or generalize them.
-- Preserve dates, conditions, and qualifiers in decisions so conditional agreements remain conditional.
-- Check every transcript sentence for distinct commitments, decisions, blockers, metrics, and follow-ups before responding.
-- If owner or due date is not directly supported by the transcript, leave that field null.
-- Do not turn suggestions, ideas, possible tasks, or hypothetical work into action items.
-- If discussion is exploratory, reflect that in the summary.
+**Constraints:**
+1. **Perspective Constraint:** NEVER use play-by-play language (e.g., "The team discussed", "Speaker A mentioned", "The speaker outlines"). Describe the final state of reality, system states, and outcomes directly.
+   - BAD: "The speaker outlines two technical goals regarding API performance."
+   - GOOD: "The primary technical goals are achieving sub-second API performance and migrating to the S3 domain."
+2. **Signal Constraint:** Ignore small talk, filler, and exploratory brainstorming unless it results in a concrete constraint or decision. Treat the transcript as the source of truth. User notes sharpen emphasis but do not override facts.
+3. **Resolution Constraint:** If a task lacks an owner or date, leave those fields null. Do not hallucinate them. Extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
+4. **General Rules:** Preserve exact acronym definitions and technical terms. Preserve numeric targets and success metrics.
 
+**Output Format:**
 Return valid JSON only. No markdown fences, no commentary.
 ${userNotesBlock}
 Transcript slice:

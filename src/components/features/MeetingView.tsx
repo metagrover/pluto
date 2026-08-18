@@ -1017,7 +1017,9 @@ export const MeetingView = ({
     <div
       key={selectedMeeting.id}
       data-meeting-page
-      className="max-w-4xl mx-auto w-full space-y-20 animate-in pb-32"
+      className={`mx-auto w-full space-y-8 animate-in pb-32 ${
+        version === 3 && v3 ? 'max-w-3xl' : 'max-w-4xl'
+      }`}
     >
       <TranscriptIntegrityPanel
         status={selectedMeeting.transcript_status}
