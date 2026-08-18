@@ -248,15 +248,9 @@ describe('UnifiedLLMProvider', () => {
       }
       const body = parseRequestBody(init);
       selectedModels.push(String(body.model));
-      if (selectedModels.length === 1) {
-        return jsonResponse({
-          response: JSON.stringify({
-            topics: [{ title: 'Synthetic', start_segment: 0, end_segment: 0 }],
-          }),
-        });
-      }
       return jsonResponse({
         response: JSON.stringify({
+          title: 'Synthetic update',
           summary: 'Synthetic summary.',
           key_points: [],
           decisions: [],
@@ -272,7 +266,7 @@ describe('UnifiedLLMProvider', () => {
     );
 
     expect(analysis.generation_metadata?.model).toBe('qwen3.5:9b');
-    expect(selectedModels).toEqual(['qwen3.5:9b', 'qwen3.5:9b']);
+    expect(selectedModels).toEqual(['qwen3.5:9b']);
   });
 
   it('avoids embedding-only ollama models during auto-detection', async () => {
@@ -357,7 +351,17 @@ describe('UnifiedLLMProvider', () => {
       ollama_model: 'phi4-mini:3.8b',
     });
     await provider.generateStructuredAnalysis(
-      ['Me: alpha-only detail', 'Them: beta-only detail'].join('\n'),
+      [
+        'Me: alpha-only detail',
+        'Them: beta-only detail',
+        'Me: neutral detail two',
+        'Them: neutral detail three',
+        'Me: neutral detail four',
+        'Them: neutral detail five',
+        'Me: neutral detail six',
+        'Them: neutral detail seven',
+        'Me: neutral detail eight',
+      ].join('\n'),
     );
 
     expect(topicPrompts).toHaveLength(2);
@@ -480,6 +484,9 @@ describe('UnifiedLLMProvider', () => {
       }
       return jsonResponse({
         response: JSON.stringify({
+          title: prompt.includes('Cloud-code access')
+            ? 'Cloud-code access'
+            : 'Tooling access',
           summary: 'A local topic summary.',
           key_points: [],
           decisions: [],
@@ -496,6 +503,13 @@ describe('UnifiedLLMProvider', () => {
       [
         'Me: Cloud Code is available in the workspace.',
         'Them: Tooling access remains constrained.',
+        'Me: Access will be reviewed after provisioning.',
+        'Them: The workspace owner is reviewing access.',
+        'Me: Provisioning is still in progress.',
+        'Them: The team needs one consistent tool name.',
+        'Me: The access policy applies across projects.',
+        'Them: No exception has been approved.',
+        'Me: We will revisit this after provisioning.',
       ].join('\n'),
     );
 
@@ -507,6 +521,57 @@ describe('UnifiedLLMProvider', () => {
     expect(analysis.overview).toBe('The edited executive summary.');
     expect(analysis.topics).toHaveLength(1);
     expect(analysis.topics[0].title).toBe('Cloud Code access');
+  });
+
+  it('skips global editing for a two-segment transcript', async () => {
+    const prompts: string[] = [];
+    installFetchMock((_url, init) => {
+      const body = parseRequestBody(init);
+      const prompt = String(body.prompt || '');
+      prompts.push(prompt);
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Request', start_segment: 0, end_segment: 0 },
+              { title: 'Response', start_segment: 1, end_segment: 1 },
+            ],
+          }),
+        });
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          title: 'Launch memo request',
+          summary: 'A local topic summary.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      ['Nira: Could someone prepare a memo?', 'Milo: Leave that open.'].join(
+        '\n',
+      ),
+    );
+
+    expect(
+      prompts.filter((prompt) =>
+        prompt.includes('global meeting-notes editor'),
+      ),
+    ).toHaveLength(0);
+    expect(
+      prompts.filter((prompt) =>
+        prompt.includes('Analyze this transcript slice'),
+      ),
+    ).toHaveLength(1);
+    expect(analysis.topics).toHaveLength(1);
+    expect(analysis.topics[0].title).toBe('Launch memo request');
   });
 
   it('falls back to the local draft when global editing returns invalid JSON', async () => {
@@ -541,7 +606,17 @@ describe('UnifiedLLMProvider', () => {
       ollama_model: 'qwen3.5:9b',
     });
     const analysis = await provider.generateStructuredAnalysis(
-      ['Me: Alpha detail.', 'Them: Beta detail.'].join('\n'),
+      [
+        'Me: Alpha detail.',
+        'Them: Beta detail.',
+        'Me: Both topics need review.',
+        'Them: Alpha remains separate.',
+        'Me: Beta remains separate.',
+        'Them: The local draft covers both.',
+        'Me: The editor should consolidate them.',
+        'Them: Evidence must remain exact.',
+        'Me: Invalid editor output should fall back.',
+      ].join('\n'),
     );
 
     expect(analysis.topics.map((topic) => topic.title)).toEqual([

@@ -30,9 +30,14 @@ const transcriptLineContent = (line: string): string => {
 export const resolveTranscriptEvidence = (
   evidence: string | undefined,
   transcript: string,
+  claim?: string,
 ): ResolvedTranscriptEvidence | null => {
   const normalizedEvidence = normalizeTranscriptEvidence(evidence ?? '');
   if (!normalizedEvidence) return null;
+  const evidenceClaimSupport = claim
+    ? claimSupportRatio(claim, evidence ?? '')
+    : 1;
+  const evidenceSupportsClaim = evidenceClaimSupport >= 0.8;
   const lines = transcript.split(/\r?\n/);
   for (
     let spanLength = 1;
@@ -54,8 +59,38 @@ export const resolveTranscriptEvidence = (
       if (
         normalizeTranscriptEvidence(sourceLine).includes(normalizedEvidence)
       ) {
+        if (
+          !evidenceSupportsClaim &&
+          (spanLength !== 2 ||
+            (!normalizeTranscriptEvidence(
+              transcriptLineContent(span[span.length - 1]),
+            ).includes(normalizedEvidence) &&
+              !(
+                normalizeTranscriptEvidence(
+                  transcriptLineContent(span[0]),
+                ).includes(normalizedEvidence) &&
+                evidenceClaimSupport >= 0.5 &&
+                /\b(?:agreed|decided|will use|we will|approved|selected)\b/i.test(
+                  evidence ?? '',
+                )
+              )))
+        ) {
+          continue;
+        }
+        if (
+          !evidenceSupportsClaim &&
+          (!claim || claimSupportRatio(claim, sourceLine) < 0.8)
+        ) {
+          continue;
+        }
+        const expandedEvidence = span
+          .map(transcriptLineContent)
+          .filter((line) => line.trim().length > 0)
+          .join(' ');
         return {
-          evidence: evidence?.trim() ?? '',
+          evidence: evidenceSupportsClaim
+            ? (evidence?.trim() ?? '')
+            : expandedEvidence,
           sourceLine,
           lineIndex,
         };
@@ -65,8 +100,9 @@ export const resolveTranscriptEvidence = (
   return null;
 };
 
-const claimSupportRatio = (claim: string, evidence: string): number => {
+function claimSupportRatio(claim: string, evidence: string): number {
   const claimTokens = normalizeTranscriptEvidence(claim)
+    .replace(/\b(?:proceed|move forward) with\b/g, 'use')
     .split(' ')
     .filter((token) => token.length >= 2);
   if (claimTokens.length === 0) return 0;
@@ -79,7 +115,7 @@ const claimSupportRatio = (claim: string, evidence: string): number => {
     claimTokens.filter((token) => evidenceTokens.has(token)).length /
     claimTokens.length
   );
-};
+}
 
 const fieldSupportedBySource = (
   value: string | undefined,
@@ -101,6 +137,19 @@ const isSettledDueValue = (value: string): boolean => {
     )
   );
 };
+
+const isUnacceptedRequest = (evidence: string): boolean =>
+  evidence.includes('?') &&
+  !/\b(?:agreed|i can|i will|i'll|sure|yes|will do)\b/i.test(evidence);
+
+const isPassiveUnownedNeed = (evidence: string): boolean =>
+  /\bneeds? to be\b/i.test(evidence) &&
+  !/\b(?:assigned|i can|i will|i'll|owns?|sure|yes|will do)\b/i.test(evidence);
+
+const isUnresolvedDeferral = (claim: string): boolean =>
+  /\b(?:leave|leaving|left|remain|remains|remaining)\b[^.]*\bopen\b/i.test(
+    claim,
+  );
 
 const deduplicateByText = <T extends { text: string }>(items: T[]): T[] => {
   const seen = new Set<string>();
@@ -129,10 +178,15 @@ export const groundAnalysisDocument = (
   const errorCategories: AnalysisErrorCategory[] = [];
   const topics = analysis.topics.map((topic) => {
     const decisions = topic.decisions.flatMap((decision): DecisionV3[] => {
-      const resolved = resolveTranscriptEvidence(decision.evidence, transcript);
+      const resolved = resolveTranscriptEvidence(
+        decision.evidence,
+        transcript,
+        decision.text,
+      );
       if (
         !resolved ||
-        claimSupportRatio(decision.text, resolved.evidence) < 0.8
+        claimSupportRatio(decision.text, resolved.evidence) < 0.8 ||
+        isUnresolvedDeferral(decision.text)
       ) {
         pushCategory(errorCategories, 'unsupported_decision');
         return [];
@@ -159,8 +213,17 @@ export const groundAnalysisDocument = (
     });
 
     const action_items = topic.action_items.flatMap((item): ActionItemV3[] => {
-      const resolved = resolveTranscriptEvidence(item.evidence, transcript);
-      if (!resolved || claimSupportRatio(item.text, resolved.evidence) < 0.8) {
+      const resolved = resolveTranscriptEvidence(
+        item.evidence,
+        transcript,
+        item.text,
+      );
+      if (
+        !resolved ||
+        claimSupportRatio(item.text, resolved.evidence) < 0.8 ||
+        isUnacceptedRequest(resolved.evidence) ||
+        isPassiveUnownedNeed(resolved.evidence)
+      ) {
         pushCategory(errorCategories, 'unsupported_action_item');
         return [];
       }

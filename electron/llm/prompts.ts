@@ -720,6 +720,7 @@ ${STRUCTURED_EXTRACTION_POLICY}
 
 Return valid JSON only in this exact shape:
 {
+  "title": "Short outcome-level topic title",
   "summary": "A 1-sentence factual TLDR of the outcome. No filler.",
   "key_points": [
     { "text": "High-signal bullet point. Answer: what mattered, why it mattered, what constraint emerged. No fluff.", "speaker": "Name or null", "from_user_notes": false }

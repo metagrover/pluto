@@ -79,4 +79,56 @@ describe('meeting notes quality scoring', () => {
       unsupported_inference_rate: 1,
     });
   });
+
+  it('accepts faithful wording variants without requiring literal phrasing', () => {
+    const result = scoreMeetingNotesQuality({
+      generated_analysis: {
+        overview:
+          'Clients on the do-not-contact list are excluded prior to lead score computation.',
+        topics: [
+          {
+            title: 'Lead Score Filtering',
+            summary:
+              'Client filtering and scoring excludes do-not-contact records.',
+            key_points: [
+              {
+                speaker: 'Me',
+                text: 'We need to filter out the clients first.',
+              },
+            ],
+          },
+        ],
+        all_decisions: [],
+        all_action_items: [],
+      },
+      expected: {
+        summary_must_include: [
+          'filter out do-not-contact clients before computing lead score',
+        ],
+        attributions: [{ speaker: 'Me', text: 'Filter out clients' }],
+        must_include_topics: ['Client Filtering and Scoring'],
+      },
+    });
+
+    expect(result.failure_tags).toEqual([]);
+  });
+
+  it('still rejects wording that omits the required concept', () => {
+    const result = scoreMeetingNotesQuality({
+      generated_analysis: {
+        overview: 'The rollout approach remains under discussion.',
+        topics: [{ title: 'General rollout', summary: 'No choice was made.' }],
+        all_decisions: [],
+        all_action_items: [],
+      },
+      expected: {
+        summary_must_include: ['aligned on REST'],
+        must_include_topics: ['REST rollout'],
+      },
+    });
+
+    expect(result.failure_tags).toEqual(
+      expect.arrayContaining(['summary_factuality', 'critical_topic_omission']),
+    );
+  });
 });

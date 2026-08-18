@@ -47,6 +47,7 @@ const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 const OLLAMA_DEFAULT_ANALYSIS_MODEL = 'qwen3.5:9b';
+const SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS = 8;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v7';
 
 // The default local Ollama runtime has one generation slot. Queue every
@@ -229,49 +230,62 @@ export class UnifiedLLMProvider implements LLMProvider {
 
     for (const win of windows) {
       const winTranscript = win.lines.join('\n');
+      const isShortMeeting =
+        windows.length === 1 &&
+        win.lines.length <= SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS;
       let topicSegments: Array<{
         title: string;
         start_segment: number;
         end_segment: number;
-      }> = [];
+      }> = isShortMeeting
+        ? [
+            {
+              title: 'Meeting outcomes',
+              start_segment: win.startSegment,
+              end_segment: win.endSegment,
+            },
+          ]
+        : [];
 
-      try {
-        const segmentationPrompt = getTopicSegmentationPrompt(winTranscript);
-        const segRaw = await this.generateText({
-          prompt: segmentationPrompt,
-          task: 'topicSegmentation',
-          jsonMode: true,
-        });
-        const segParsed = JSON.parse(this.cleanJsonText(segRaw)) as Record<
-          string,
-          unknown
-        >;
-        if (Array.isArray(segParsed.topics)) {
-          topicSegments = segParsed.topics
-            .filter(
-              (t): t is Record<string, unknown> =>
-                t !== null && typeof t === 'object',
-            )
-            .map((t) => ({
-              title:
-                typeof t.title === 'string' ? t.title.trim() : 'Discussion',
-              start_segment:
-                typeof t.start_segment === 'number'
-                  ? t.start_segment + win.startSegment
-                  : win.startSegment,
-              end_segment:
-                typeof t.end_segment === 'number'
-                  ? t.end_segment + win.startSegment
-                  : win.endSegment,
-            }))
-            .filter((t) => t.title.length > 0);
+      if (!isShortMeeting) {
+        try {
+          const segmentationPrompt = getTopicSegmentationPrompt(winTranscript);
+          const segRaw = await this.generateText({
+            prompt: segmentationPrompt,
+            task: 'topicSegmentation',
+            jsonMode: true,
+          });
+          const segParsed = JSON.parse(this.cleanJsonText(segRaw)) as Record<
+            string,
+            unknown
+          >;
+          if (Array.isArray(segParsed.topics)) {
+            topicSegments = segParsed.topics
+              .filter(
+                (t): t is Record<string, unknown> =>
+                  t !== null && typeof t === 'object',
+              )
+              .map((t) => ({
+                title:
+                  typeof t.title === 'string' ? t.title.trim() : 'Discussion',
+                start_segment:
+                  typeof t.start_segment === 'number'
+                    ? t.start_segment + win.startSegment
+                    : win.startSegment,
+                end_segment:
+                  typeof t.end_segment === 'number'
+                    ? t.end_segment + win.startSegment
+                    : win.endSegment,
+              }))
+              .filter((t) => t.title.length > 0);
+          }
+        } catch (e) {
+          if (isAbortError(e)) throw e;
+          console.warn(
+            `[${this.name}] Topic segmentation failed for window ${win.windowIndex}, using single-topic fallback:`,
+            e,
+          );
         }
-      } catch (e) {
-        if (isAbortError(e)) throw e;
-        console.warn(
-          `[${this.name}] Topic segmentation failed for window ${win.windowIndex}, using single-topic fallback:`,
-          e,
-        );
       }
 
       if (topicSegments.length === 0) {
@@ -310,6 +324,19 @@ export class UnifiedLLMProvider implements LLMProvider {
           end_segment: nextStart === undefined ? win.endSegment : nextStart - 1,
         };
       });
+      if (
+        windows.length === 1 &&
+        win.lines.length <= SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS &&
+        topicSegments.length > 1
+      ) {
+        topicSegments = [
+          {
+            title: topicSegments.map((topic) => topic.title).join(' / '),
+            start_segment: win.startSegment,
+            end_segment: win.endSegment,
+          },
+        ];
+      }
 
       for (const segment of topicSegments) {
         const lastLineIndex = Math.max(0, win.lines.length - 1);
@@ -344,6 +371,10 @@ export class UnifiedLLMProvider implements LLMProvider {
           const topicParsed = JSON.parse(
             this.cleanJsonText(topicRaw),
           ) as Record<string, unknown>;
+          const analyzedTitle =
+            typeof topicParsed.title === 'string' && topicParsed.title.trim()
+              ? topicParsed.title.trim()
+              : segment.title;
 
           const key_points = Array.isArray(topicParsed.key_points)
             ? topicParsed.key_points
@@ -407,7 +438,7 @@ export class UnifiedLLMProvider implements LLMProvider {
                     typeof a.evidence === 'string'
                       ? a.evidence.trim() || undefined
                       : undefined,
-                  topic: segment.title,
+                  topic: analyzedTitle,
                 }))
                 .filter((a) => a.text.length > 0)
             : [];
@@ -420,7 +451,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             : [];
 
           topics.push({
-            title: segment.title,
+            title: analyzedTitle,
             summary:
               typeof topicParsed.summary === 'string'
                 ? topicParsed.summary.trim()
@@ -487,8 +518,11 @@ export class UnifiedLLMProvider implements LLMProvider {
       },
     };
     let finalDraft = localDraft;
+    const transcriptSegmentCount = transcript
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0).length;
 
-    if (draftTopics.length > 1) {
+    if (draftTopics.length > 1 && transcriptSegmentCount >= 3) {
       try {
         const draftContext = JSON.stringify({
           overview: localDraft.overview,

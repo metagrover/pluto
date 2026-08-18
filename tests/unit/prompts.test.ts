@@ -214,6 +214,7 @@ describe('v3 accuracy prompts', () => {
 
     expect(prompt).toContain('Committed action: retain only');
     expect(prompt).toContain('required short verbatim quote');
+    expect(prompt).toContain('"title": "Short outcome-level topic title"');
     expect(prompt).toContain('Do not turn suggestions');
     expect(prompt).toContain('Person will do task by date');
     expect(prompt).toContain('numeric targets and success metrics');

@@ -11,6 +11,60 @@ const includesNormalized = (haystack, needle) => {
   );
 };
 
+const conceptStopWords = new Set([
+  'a',
+  'an',
+  'are',
+  'be',
+  'by',
+  'for',
+  'from',
+  'in',
+  'is',
+  'of',
+  'on',
+  'the',
+  'to',
+  'was',
+  'were',
+  'will',
+]);
+
+const conceptTokens = (value) => {
+  const canonical = normalizeText(value)
+    .replace(/\b(?:excluded?|excluding)\b/g, 'filter out')
+    .replace(/\bprior to\b/g, 'before')
+    .replace(/\bfirst\b/g, 'before')
+    .replace(/\b(?:aligned|agreed|settled)\b/g, 'agree')
+    .replace(/\b(?:distinct|separation)\b/g, 'separate')
+    .replace(/\bcomputation\b/g, 'compute');
+  return canonical
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .filter((token) => !conceptStopWords.has(token))
+    .map((token) => {
+      if (token.endsWith('ing') && token.length > 5) return token.slice(0, -3);
+      if (token.endsWith('ies') && token.length > 4)
+        return `${token.slice(0, -3)}y`;
+      if (token.endsWith('s') && token.length > 3) return token.slice(0, -1);
+      return token;
+    });
+};
+
+const includesConcept = (haystack, needle) => {
+  if (includesNormalized(haystack, needle)) return true;
+  const expected = [...new Set(conceptTokens(needle))];
+  if (expected.length === 0) return false;
+  return haystack.some((item) => {
+    const actual = new Set(conceptTokens(item));
+    const matches = expected.filter((token) => actual.has(token)).length;
+    return (
+      matches >= Math.min(2, expected.length) &&
+      matches / expected.length >= 0.6
+    );
+  });
+};
+
 const flattenAnalysis = (analysis) => {
   const topics = Array.isArray(analysis?.topics) ? analysis.topics : [];
   const summary =
@@ -32,6 +86,9 @@ const flattenAnalysis = (analysis) => {
   return {
     summary,
     topicTitles: topics.map((topic) => topic.title).filter(Boolean),
+    topicContexts: topics.map(
+      (topic) => `${topic.title || ''}: ${topic.summary || ''}`,
+    ),
     keyPoints,
     decisions,
     actionItems,
@@ -64,7 +121,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
     ? expected.summary_must_exclude
     : [];
   const missingSummary = summaryMustInclude.filter(
-    (item) => !includesNormalized([flattened.summary], item),
+    (item) => !includesConcept([flattened.summary], item),
   );
   const unexpectedSummary = summaryMustExclude.filter((item) =>
     includesNormalized([flattened.summary], item),
@@ -78,7 +135,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
       ? expected.decisions
       : {};
   const missingDecisions = (decisionExpectations.must_include || []).filter(
-    (item) => !includesNormalized(decisionTexts, item),
+    (item) => !includesConcept(decisionTexts, item),
   );
   const unexpectedDecisions = (decisionExpectations.must_exclude || []).filter(
     (item) => includesNormalized(decisionTexts, item),
@@ -92,7 +149,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
       ? expected.action_items
       : {};
   const missingActionItems = (actionItemExpectations.must_include || []).filter(
-    (item) => !includesNormalized(actionItemTexts, item.text || item),
+    (item) => !includesConcept(actionItemTexts, item.text || item),
   );
   const unexpectedActionItems = (
     actionItemExpectations.must_exclude || []
@@ -106,7 +163,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
     : [];
   const missingAttributions = attributionExpectations.filter(
     (item) =>
-      !includesNormalized(
+      !includesConcept(
         attributionTexts,
         `${item.speaker || 'unknown'}: ${item.text}`,
       ),
@@ -119,7 +176,7 @@ export const scoreMeetingNotesQuality = (fixture) => {
     ? expected.must_include_topics
     : [];
   const missingTopics = requiredTopics.filter(
-    (item) => !includesNormalized(flattened.topicTitles, item),
+    (item) => !includesConcept(flattened.topicContexts, item),
   );
   if (missingTopics.length > 0) {
     failureTags.push('critical_topic_omission');

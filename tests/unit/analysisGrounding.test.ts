@@ -82,6 +82,55 @@ describe('analysis grounding', () => {
     });
   });
 
+  it('expands adjacent evidence when the resolving turn omits the decision subject', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Filter out do-not-contact clients before computing lead score',
+        evidence: 'Agreed, filter them out before computing the lead score.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Me: We need to filter out clients on the do-not-contact list first.',
+        'Alain: Agreed, filter them out before computing the lead score.',
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_decisions).toHaveLength(1);
+    expect(result.analysis.all_decisions[0].evidence).toContain(
+      'do-not-contact list first',
+    );
+    expect(result.analysis.all_decisions[0].evidence).toContain(
+      'Agreed, filter them out',
+    );
+  });
+
+  it('uses the following commitment turn to ground a concise decision paraphrase', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Proceed with staged migration path',
+        evidence: 'Agreed, we will use the staged path.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: Agreed, we will use the staged path.',
+        'Milo: I will prepare the migration checklist by Friday.',
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_decisions).toHaveLength(1);
+    expect(result.analysis.all_decisions[0].evidence).toContain(
+      'migration checklist',
+    );
+  });
+
   it('does not resolve evidence across more than three transcript lines', () => {
     expect(
       resolveTranscriptEvidence(
@@ -199,6 +248,92 @@ describe('analysis grounding', () => {
 
     expect(result.analysis.all_action_items[0]).not.toHaveProperty('due');
     expect(result.errorCategories).toContain('unsupported_action_item_due');
+  });
+
+  it('rejects a request that nobody accepted as an action item', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare a launch memo',
+        evidence: 'Could someone prepare a launch memo?',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: Could someone prepare a launch memo?',
+        'Milo: Let us leave that open until the plan is approved.',
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_action_items).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_action_item');
+  });
+
+  it('keeps an explicitly open request out of settled decisions', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Leave the launch memo preparation open until approval',
+        evidence:
+          'Could someone prepare a launch memo? Let us leave that open until the plan is approved.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: Could someone prepare a launch memo?',
+        'Milo: Let us leave that open until the plan is approved.',
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_decision');
+  });
+
+  it('retains an accepted request when the evidence contains the commitment', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare the launch memo',
+        assignee: 'Milo',
+        evidence:
+          "Could you prepare the launch memo? Sure, I'll prepare the launch memo.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: Could you prepare the launch memo?',
+        "Milo: Sure, I'll prepare the launch memo.",
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_action_items).toHaveLength(1);
+  });
+
+  it('does not promote passive needed work with no owner to a commitment', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Review the launch checklist before launch',
+        evidence: 'The checklist needs to be reviewed before launch.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: The checklist needs to be reviewed before launch.',
+        'Milo: We have not assigned an owner yet.',
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_action_items).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_action_item');
   });
 
   it('does not accept token overlap without a resolvable evidence slice', () => {
