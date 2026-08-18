@@ -6,7 +6,7 @@ import {
   resolvePlutoDbPath,
 } from './lib/meeting_backfill_helpers.js';
 
-const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
+const OLLAMA_DEFAULT_MODEL = 'qwen3.5:9b';
 
 const runPythonJson = (code, args) => {
   const output = execFileSync('python3', ['-c', code, ...args], {

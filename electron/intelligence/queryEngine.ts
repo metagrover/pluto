@@ -171,7 +171,7 @@ export const parseQuery = async (text: string): Promise<ParsedQuery> => {
     console.log('[QueryEngine] Classifying intent via LLM...');
     const response = await provider.classifyQueryIntent(prompt);
 
-    // Parse JSON with cleaning to handle markdown wrappers (common in phi4-mini)
+    // Parse JSON with cleaning to handle model-generated markdown wrappers.
     const cleanedResponse =
       typeof response === 'string' ? cleanJsonText(response) : response;
     const parsed =

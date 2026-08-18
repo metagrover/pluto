@@ -212,8 +212,8 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps Phi for non-analysis tasks when auto-detecting ollama model', async () => {
-    let selectedModel = '';
+  it('uses Qwen as the single default across meeting-intelligence tasks', async () => {
+    const selectedModels: string[] = [];
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
         return jsonResponse({
@@ -226,16 +226,41 @@ describe('UnifiedLLMProvider', () => {
       }
       if (url.endsWith('/api/generate')) {
         const body = parseRequestBody(init);
-        selectedModel = String(body.model);
-        return jsonResponse({ response: validAnalysisMarkdown });
+        selectedModels.push(String(body.model));
+        const prompt = String(body.prompt || '');
+        if (prompt.includes('generate a concise, descriptive meeting title')) {
+          return jsonResponse({ response: 'Synthetic Title' });
+        }
+        if (prompt.includes('extracting hidden internal signals')) {
+          return jsonResponse({
+            response: JSON.stringify({
+              continuity: [],
+              accountability_risks: [],
+              decision_impacts: [],
+              extra_tags: [],
+            }),
+          });
+        }
+        return jsonResponse({
+          response: JSON.stringify({
+            people: [],
+            topics: [],
+            action_items: [],
+            decisions: [],
+            projects: [],
+            relationships: [],
+          }),
+        });
       }
       throw new Error(`Unexpected URL: ${url}`);
     });
 
     const provider = new UnifiedLLMProvider('ollama', {});
-    await provider.generateUserAnalysisMarkdown('Speaker A: status update');
+    await provider.generateTitle('Speaker A: status update');
+    await provider.extractValueSignals('Speaker A: status update');
+    await provider.extractEntities('Speaker A: status update');
 
-    expect(selectedModel).toBe('phi4-mini:3.8b:latest');
+    expect(selectedModels).toEqual(['qwen3.5:9b', 'qwen3.5:9b', 'qwen3.5:9b']);
   });
 
   it('prefers promoted Qwen for structured meeting analysis', async () => {
@@ -884,7 +909,7 @@ describe('UnifiedLLMProvider', () => {
     const provider = new UnifiedLLMProvider('ollama', {});
     await provider.generateUserAnalysisMarkdown('Speaker A: status update');
 
-    expect(selectedModel).toBe('phi4-mini:3.8b');
+    expect(selectedModel).toBe('qwen3.5:9b');
   });
 
   it('stops the multi-pass pipeline after a local model timeout', async () => {
@@ -1267,6 +1292,7 @@ describe('LLM factory', () => {
     expect(settings.llm_provider).toBe('ollama');
     expect(settings.openai_api_key).toBe('openai-key');
     expect(settings.ollama_model).toBeUndefined();
+    expect(settings).not.toHaveProperty('ollama_analysis_model');
     expect(settings.ollama_structured_thinking).toBe(false);
     expect(settings.ollama_seed).toBeUndefined();
   });
