@@ -13,6 +13,8 @@ import {
 } from '../../electron/llm/unifiedProvider';
 import { scoreMeetingNotesQuality } from '../../scripts/lib/meeting_notes_quality.js';
 
+const COMPARISON_BASELINE_PROMPT_VERSION = 'notes-v6';
+
 type Fixture = {
   case_id?: string;
   transcript: string[];
@@ -106,7 +108,7 @@ suite('real-provider meeting notes quality benchmark', () => {
       ).length;
       if (
         providerBaseline.prompt_version !==
-          STRUCTURED_ANALYSIS_PROMPT_VERSION ||
+          COMPARISON_BASELINE_PROMPT_VERSION ||
         providerBaseline.fixture_order_sha256 !==
           reviewedFixtureOrderSha256() ||
         providerBaseline.reviewed_scores.length !== reviewedFixtureCount

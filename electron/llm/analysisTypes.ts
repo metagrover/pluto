@@ -28,7 +28,9 @@ export type AnalysisErrorCategory =
   | 'unsupported_decision_rationale'
   | 'unsupported_action_item'
   | 'unsupported_action_item_owner'
-  | 'unsupported_action_item_due';
+  | 'unsupported_action_item_due'
+  | 'editorial_invalid_json'
+  | 'editorial_failed';
 
 export interface AnalysisQualityV3 {
   format_pass: boolean;

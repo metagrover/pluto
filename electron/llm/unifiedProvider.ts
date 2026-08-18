@@ -22,6 +22,7 @@ import { ollamaHttpFetch } from './ollamaHttpTransport';
 import {
   getEntitiesPrompt,
   getSpeakerIdentityPrompt,
+  getStructuredAnalysisEditorialPrompt,
   getStructuredAnalysisPrompt,
   getStructuredAnalysisRepairPrompt,
   getSummaryPrompt,
@@ -46,7 +47,7 @@ const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 const OLLAMA_DEFAULT_ANALYSIS_MODEL = 'qwen3.5:9b';
-export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v6';
+export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v7';
 
 // The default local Ollama runtime has one generation slot. Queue every
 // generation at the provider boundary so request timeouts measure model work,
@@ -57,6 +58,7 @@ type LLMTask =
   | 'summary'
   | 'summaryRepair'
   | 'structuredAnalysis'
+  | 'analysisEditorial'
   | 'topicSegmentation'
   | 'topicAnalysis'
   | 'speaker'
@@ -69,6 +71,7 @@ type LLMTask =
 
 const isStructuredAnalysisTask = (task: LLMTask): boolean =>
   task === 'structuredAnalysis' ||
+  task === 'analysisEditorial' ||
   task === 'topicSegmentation' ||
   task === 'topicAnalysis';
 
@@ -458,29 +461,64 @@ export class UnifiedLLMProvider implements LLMProvider {
       (a) => a.assignee,
     );
 
-    // Generate overview from topics
+    const draftTopics = deduplicateExtractedItems(
+      topics,
+      (topic) => topic.title,
+    );
     const overview =
-      topics.length > 0
-        ? `This meeting covered ${topics.length} primary topics, including: ${topics
-            .map((t) => t.title)
-            .join(', ')}.`
-        : 'Conversation captured. See topics below for details.';
+      draftTopics
+        .map((topic) => topic.summary)
+        .filter(Boolean)
+        .join(' ')
+        .slice(0, 1000) ||
+      'Conversation captured. See topics below for details.';
+    const localDraft: AnalysisDocumentV3 = {
+      analysis_schema_version: 3,
+      overview,
+      topics: draftTopics,
+      all_action_items: allActionItems,
+      all_decisions: allDecisions,
+      meeting_type: 'general',
+      quality: {
+        format_pass: true,
+        retry_count: 0,
+        fallback_used: false,
+        issues: [],
+      },
+    };
+    let finalDraft = localDraft;
+
+    if (draftTopics.length > 1) {
+      try {
+        const draftContext = JSON.stringify({
+          overview: localDraft.overview,
+          topics: localDraft.topics,
+          meeting_type: localDraft.meeting_type,
+        });
+        const editedRaw = await this.generateText({
+          prompt: getStructuredAnalysisEditorialPrompt(
+            transcript,
+            draftContext,
+            userNotes,
+          ),
+          task: 'analysisEditorial',
+          jsonMode: true,
+        });
+        const edited = parseAnalysisDocumentV3(this.cleanJsonText(editedRaw));
+        if (edited && edited.topics.length > 0) {
+          finalDraft = edited;
+        } else {
+          this.pushErrorCategory(errorCategories, 'editorial_invalid_json');
+        }
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        console.warn('[Analysis] Global editorial synthesis failed:', error);
+        this.pushErrorCategory(errorCategories, 'editorial_failed');
+      }
+    }
 
     return this.finalizeStructuredAnalysis({
-      analysis: {
-        analysis_schema_version: 3,
-        overview,
-        topics: deduplicateExtractedItems(topics, (t) => t.title),
-        all_action_items: allActionItems,
-        all_decisions: allDecisions,
-        meeting_type: 'general',
-        quality: {
-          format_pass: true,
-          retry_count: 0,
-          fallback_used: false,
-          issues: [],
-        },
-      },
+      analysis: finalDraft,
       transcript,
       retryCount: 0,
       errorCategories,
@@ -1094,6 +1132,9 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private getSystemInstruction(task: LLMTask): string {
+    if (task === 'analysisEditorial') {
+      return 'You are a rigorous global meeting-notes editor. Always respond with valid JSON only.';
+    }
     if (task === 'structuredAnalysis') {
       return 'You are a rigorous meeting analyst. Always respond with valid JSON only.';
     }
@@ -1131,6 +1172,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private getTemperature(task: LLMTask): number {
+    if (task === 'analysisEditorial') return 0.1;
     if (task === 'structuredAnalysis') return 0.7;
     if (task === 'topicSegmentation') return 0.1;
     if (task === 'topicAnalysis') return 0.1;
@@ -1145,6 +1187,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private getClaudeMaxTokens(task: LLMTask): number {
+    if (task === 'analysisEditorial') return 4096;
     if (task === 'structuredAnalysis') return 4096;
     if (task === 'topicSegmentation') return 512;
     if (task === 'topicAnalysis') return 2048;
@@ -1247,12 +1290,14 @@ export function calculateOllamaContextBudget(
   const outputTokenBudget =
     task === 'knowledgeDoc' ||
     task === 'structuredAnalysis' ||
+    task === 'analysisEditorial' ||
     task === 'summary'
       ? 4096
       : 2500;
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
-  const maxCap = task === 'knowledgeDoc' ? 32768 : 16384;
+  const maxCap =
+    task === 'knowledgeDoc' || task === 'analysisEditorial' ? 32768 : 16384;
   const num_ctx = Math.min(
     maxCap,
     Math.max(4096, Math.ceil(totalNeeded / 1024) * 1024),

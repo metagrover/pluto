@@ -320,6 +320,26 @@ describe('UnifiedLLMProvider', () => {
           }),
         });
       }
+      if (prompt.includes('global meeting-notes editor')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            overview: 'Edited summary.',
+            topics: [
+              {
+                title: 'Combined topic',
+                summary: 'Combined summary.',
+                key_points: [],
+                decisions: [],
+                action_items: [],
+                open_questions: [],
+              },
+            ],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'general',
+          }),
+        });
+      }
       topicPrompts.push(prompt);
       topicTemperatures.push(Number(options.temperature));
       return jsonResponse({
@@ -364,6 +384,26 @@ describe('UnifiedLLMProvider', () => {
           }),
         });
       }
+      if (prompt.includes('global meeting-notes editor')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            overview: 'Edited summary.',
+            topics: [
+              {
+                title: 'Combined topic',
+                summary: 'Combined summary.',
+                key_points: [],
+                decisions: [],
+                action_items: [],
+                open_questions: [],
+              },
+            ],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'general',
+          }),
+        });
+      }
       topicPrompts.push(prompt);
       return jsonResponse({
         response: JSON.stringify({
@@ -397,6 +437,120 @@ describe('UnifiedLLMProvider', () => {
     ]) {
       expect(combinedPrompts.split(detail)).toHaveLength(2);
     }
+  });
+
+  it('globally edits multi-topic Ollama analysis once', async () => {
+    const prompts: string[] = [];
+    installFetchMock((_url, init) => {
+      const body = parseRequestBody(init);
+      const prompt = String(body.prompt || '');
+      prompts.push(prompt);
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Cloud-code access', start_segment: 0, end_segment: 0 },
+              { title: 'Tooling access', start_segment: 1, end_segment: 1 },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('global meeting-notes editor')) {
+        expect(prompt).toContain('Cloud Code is available');
+        expect(prompt).toContain('Cloud-code access');
+        return jsonResponse({
+          response: JSON.stringify({
+            overview: 'The edited executive summary.',
+            topics: [
+              {
+                title: 'Cloud Code access',
+                summary: 'Access remains constrained.',
+                key_points: [],
+                decisions: [],
+                action_items: [],
+                open_questions: [],
+                transcript_range: [0, 1],
+              },
+            ],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'team_sync',
+          }),
+        });
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'A local topic summary.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      [
+        'Me: Cloud Code is available in the workspace.',
+        'Them: Tooling access remains constrained.',
+      ].join('\n'),
+    );
+
+    expect(
+      prompts.filter((prompt) =>
+        prompt.includes('global meeting-notes editor'),
+      ),
+    ).toHaveLength(1);
+    expect(analysis.overview).toBe('The edited executive summary.');
+    expect(analysis.topics).toHaveLength(1);
+    expect(analysis.topics[0].title).toBe('Cloud Code access');
+  });
+
+  it('falls back to the local draft when global editing returns invalid JSON', async () => {
+    installFetchMock((_url, init) => {
+      const body = parseRequestBody(init);
+      const prompt = String(body.prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
+              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('global meeting-notes editor')) {
+        return jsonResponse({ response: '{invalid json' });
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'A grounded local summary.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      ['Me: Alpha detail.', 'Them: Beta detail.'].join('\n'),
+    );
+
+    expect(analysis.topics.map((topic) => topic.title)).toEqual([
+      'Alpha topic',
+      'Beta topic',
+    ]);
+    expect(analysis.generation_metadata?.error_categories).toContain(
+      'editorial_invalid_json',
+    );
   });
 
   it('falls back to default ollama model when model listing fails', async () => {
