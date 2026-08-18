@@ -130,7 +130,7 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain('Retry transcript validation');
   });
 
-  it('shows recovered recordings without claiming speech loss', () => {
+  it('does not expose internal validation work for recovered recordings', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel
         status="needs_attention"
@@ -164,12 +164,9 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(markup).toContain('Transcript needs attention');
-    expect(markup).toContain(
-      'Recording recovered. Validate the transcript before creating intelligence.',
-    );
+    expect(markup).toBe('');
     expect(markup).not.toContain('could not account for all captured speech');
-    expect(markup).toContain('Validate transcript');
+    expect(markup).not.toMatch(/validat|needs attention|retry|recovery/i);
   });
 
   it('blocks derived intelligence until validation succeeds', () => {
@@ -222,7 +219,7 @@ describe('MeetingView transcript integrity', () => {
     ).toBe(false);
   });
 
-  it('shows a recovery-required meeting without offering transcript retry', () => {
+  it('describes a terminal recording failure without pipeline vocabulary', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel
         status="needs_attention"
@@ -232,10 +229,9 @@ describe('MeetingView transcript integrity', () => {
     );
 
     expect(markup).toContain('Recording saved');
-    expect(markup).toContain(
-      'Processing needs recovery before this meeting is complete.',
-    );
-    expect(markup).not.toContain('Retry transcript validation');
+    expect(markup).toContain('finish the transcript');
+    expect(markup).toContain('Your recording is safe.');
+    expect(markup).not.toMatch(/validat|needs attention|retry|recovery/i);
   });
 
   it('does not offer deletion for a recovery-required meeting', () => {
@@ -270,7 +266,7 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toContain('Delete Session');
   });
 
-  it('renders durable retry stage and recoverable timeout state', () => {
+  it('keeps ordinary retry stages out of the product surface', () => {
     const validating = renderToStaticMarkup(
       <TranscriptIntegrityPanel
         status="validating"
@@ -284,10 +280,145 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(validating).toContain('Preparing meeting analysis');
-    expect(validating).toContain(
-      'Pluto is validating the preserved recording, then it will build the standard meeting analysis.',
+    expect(validating).toBe('');
+    expect(timedOut).toBe('');
+  });
+
+  it('shows transcript content while analysis uses a layout skeleton', () => {
+    const markup = renderToStaticMarkup(
+      <MeetingView
+        selectedMeeting={{
+          id: 'meeting-progressive',
+          title: 'Design review',
+          meeting_type: 'Recording',
+          created_at: '2026-08-17T18:00:00.000Z',
+          started_at: '2026-08-17T18:00:00.000Z',
+          transcript_status: 'validating',
+          finalization_status: 'finalized',
+          transcript_json: JSON.stringify({
+            lifecycleStatus: 'validating',
+            segments: [
+              {
+                speaker: 'Me',
+                text: 'The transcript is already useful.',
+                startTime: 0,
+                endTime: 2,
+              },
+            ],
+          }),
+        }}
+        editingTitle={false}
+        setEditingTitle={vi.fn()}
+        titleValue="Design review"
+        setTitleValue={vi.fn()}
+        fetchMeetings={vi.fn()}
+        handleCopySummary={vi.fn()}
+        copySuccess={false}
+        handleDeleteMeeting={vi.fn()}
+        highlightEntities={(text) => text}
+        transcriptVisible
+        setTranscriptVisible={vi.fn()}
+      />,
     );
-    expect(timedOut).toContain('stopped after its safety deadline');
+
+    expect(markup).toContain('data-meeting-artifact="analysis"');
+    expect(markup).toContain('data-state="loading"');
+    expect(markup).toContain('data-meeting-skeleton="analysis"');
+    expect(markup).toContain('The transcript is already useful.');
+    expect(markup).toContain('data-meeting-artifact="transcript"');
+    expect(markup).not.toMatch(
+      /analysis not ready|validat|needs attention|retry transcript|recovery required/i,
+    );
+  });
+
+  it('shows an independent transcript skeleton until transcript content exists', () => {
+    const markup = renderToStaticMarkup(
+      <MeetingView
+        selectedMeeting={{
+          id: 'meeting-loading-transcript',
+          title: 'Meeting',
+          meeting_type: 'Recording',
+          created_at: '2026-08-17T18:00:00.000Z',
+          started_at: '2026-08-17T18:00:00.000Z',
+          transcript_status: 'provisional',
+          finalization_status: 'finalized',
+          transcript_json: JSON.stringify({
+            lifecycleStatus: 'provisional',
+            segments: [],
+          }),
+        }}
+        editingTitle={false}
+        setEditingTitle={vi.fn()}
+        titleValue="Meeting"
+        setTitleValue={vi.fn()}
+        fetchMeetings={vi.fn()}
+        handleCopySummary={vi.fn()}
+        copySuccess={false}
+        handleDeleteMeeting={vi.fn()}
+        highlightEntities={(text) => text}
+        transcriptVisible
+        setTranscriptVisible={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('data-meeting-skeleton="analysis"');
+    expect(markup).toContain('data-meeting-skeleton="transcript"');
+    expect(markup).not.toContain('No Content Recorded');
+    expect(markup).not.toContain('No biometric voice data found');
+  });
+
+  it('does not offer regeneration while the transcript is still being prepared', () => {
+    const markup = renderToStaticMarkup(
+      <MeetingView
+        selectedMeeting={{
+          id: 'meeting-analysis-with-internal-work',
+          title: 'Design review',
+          meeting_type: 'Recording',
+          created_at: '2026-08-17T18:00:00.000Z',
+          started_at: '2026-08-17T18:00:00.000Z',
+          transcript_status: 'needs_attention',
+          finalization_status: 'finalized',
+          transcript_json: JSON.stringify({
+            lifecycleStatus: 'needs_attention',
+            segments: [
+              {
+                speaker: 'Me',
+                text: 'Existing transcript content.',
+                startTime: 0,
+                endTime: 2,
+              },
+            ],
+          }),
+          analysis_json: JSON.stringify({
+            analysis_schema_version: 3,
+            overview: 'Existing analysis content.',
+            topics: [],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'general',
+            quality: {
+              format_pass: true,
+              retry_count: 0,
+              fallback_used: false,
+              issues: [],
+            },
+          }),
+        }}
+        editingTitle={false}
+        setEditingTitle={vi.fn()}
+        titleValue="Design review"
+        setTitleValue={vi.fn()}
+        fetchMeetings={vi.fn()}
+        handleCopySummary={vi.fn()}
+        copySuccess={false}
+        handleDeleteMeeting={vi.fn()}
+        highlightEntities={(text) => text}
+        transcriptVisible={false}
+        setTranscriptVisible={vi.fn()}
+      />,
+    );
+
+    expect(markup).not.toContain('Regenerate Enhanced Notes');
+    expect(markup).not.toMatch(/validat|needs attention|retry transcript/i);
   });
 });

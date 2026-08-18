@@ -10,12 +10,22 @@ import {
   collectDisposableRecordingArtifactPaths,
   createSealedCaptureActivityHandoff,
   getStrongerSpeakerAttributionPolicy,
+  getTerminalRecordingFailureMessage,
   planForegroundTranscriptValidation,
   resolveFinalizationCleanupPaths,
   sealCaptureJournalBeforeFinalization,
 } from '../../src/utils/recordingFinalization';
 
 describe('recording finalization helpers', () => {
+  it('describes terminal transcript failure without pipeline vocabulary', () => {
+    const message = getTerminalRecordingFailureMessage();
+
+    expect(message).toBe(
+      "Recording saved, but Pluto couldn't finish the transcript.",
+    );
+    expect(message).not.toMatch(/validat|needs attention|recovery|retry/i);
+  });
+
   it('never runs full-session ASR in the foreground after capture stops', () => {
     expect(
       planForegroundTranscriptValidation({

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getDownstreamProcessingPresentation } from '../../src/components/features/downstreamProcessingPresentation';
 
 describe('downstream processing presentation', () => {
-  it('shows analysis progress separately from transcript validation', () => {
+  it('maps ordinary analysis work to a copy-free loading state', () => {
     expect(
       getDownstreamProcessingPresentation({
         transcript_status: 'validated',
@@ -12,36 +12,42 @@ describe('downstream processing presentation', () => {
           stage: 'analysis',
         }),
       }),
-    ).toEqual({
-      state: 'processing',
-      title: 'Building meeting analysis',
-      detail:
-        'Pluto is turning the validated transcript into grounded meeting intelligence.',
-      canRetry: false,
-    });
-  });
+    ).toEqual({ state: 'loading' });
 
-  it('shows a truthful retryable failure', () => {
     expect(
       getDownstreamProcessingPresentation({
-        transcript_status: 'validated',
-        downstream_processing_json: JSON.stringify({
-          schemaVersion: 1,
-          state: 'failed',
-          stage: 'analysis',
-          failure: 'stage_timeout',
+        transcript_status: 'provisional',
+        transcript_json: JSON.stringify({
+          lifecycleStatus: 'provisional',
+          segments: [{ speaker: 'Me', text: 'Ready transcript text' }],
         }),
       }),
-    ).toEqual({
-      state: 'failed',
-      title: 'Meeting analysis stopped safely',
-      detail:
-        'The validated transcript is safe. Pluto can retry the analysis without recording again.',
-      canRetry: true,
-    });
+    ).toEqual({ state: 'loading' });
   });
 
-  it('does not claim synthesis is ready without derived artifacts', () => {
+  it('uses plain artifact language for a terminal analysis failure', () => {
+    const presentation = getDownstreamProcessingPresentation({
+      transcript_status: 'validated',
+      downstream_processing_json: JSON.stringify({
+        schemaVersion: 1,
+        state: 'failed',
+        stage: 'analysis',
+        failure: 'stage_timeout',
+      }),
+    });
+
+    expect(presentation).toEqual({
+      state: 'failed',
+      title: "Couldn't finish the analysis",
+      detail:
+        'Your transcript is available. Pluto will try again automatically.',
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(
+      /validat|needs attention|recovery|retry meeting/i,
+    );
+  });
+
+  it('keeps showing a skeleton when completion has no analysis artifact', () => {
     expect(
       getDownstreamProcessingPresentation({
         transcript_status: 'validated',
@@ -50,17 +56,18 @@ describe('downstream processing presentation', () => {
           state: 'complete',
         }),
       })?.state,
-    ).toBe('missing');
+    ).toBe('loading');
   });
 
-  it('returns ready only when complete analysis exists', () => {
+  it('returns ready as soon as analysis exists even if later work continues', () => {
     expect(
       getDownstreamProcessingPresentation({
         transcript_status: 'validated',
         analysis_json: '{"analysis_schema_version":3}',
         downstream_processing_json: JSON.stringify({
           schemaVersion: 1,
-          state: 'complete',
+          state: 'processing',
+          stage: 'knowledge_synthesis',
         }),
       })?.state,
     ).toBe('ready');

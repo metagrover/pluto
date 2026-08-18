@@ -38,6 +38,7 @@ import {
   buildMeetingTiming,
   buildRecoverableSealFailureMeeting,
   createSealedCaptureActivityHandoff,
+  getTerminalRecordingFailureMessage,
   sealCaptureJournalBeforeFinalization,
 } from '../utils/recordingFinalization';
 import {
@@ -3930,7 +3931,7 @@ export const AudioManager = ({
           throw new Error('Failed to preserve recording recovery state');
         }
         onSessionComplete?.(degradedMeeting.id);
-        alert('Recording saved - processing needs recovery');
+        alert(getTerminalRecordingFailureMessage());
         return;
       }
       sealedActivityEvidence = journalSealOutcome.activityEvidence;

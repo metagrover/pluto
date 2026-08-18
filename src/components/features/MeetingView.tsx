@@ -3,7 +3,6 @@ import {
   Check,
   ChevronDown,
   Copy,
-  FileText,
   Loader2,
   MessageSquare,
   Sparkles,
@@ -44,7 +43,6 @@ import {
 } from '../../utils/analysisDocument';
 import {
   buildAnalysisTranscriptFromJson,
-  isTranscriptJsonEffectivelyEmpty,
   parseTranscriptSegments,
 } from '../../utils/transcript';
 import {
@@ -75,8 +73,6 @@ interface MeetingViewProps {
   highlightEntities: (text: string) => ReactNode;
   transcriptVisible: boolean;
   setTranscriptVisible: (val: boolean) => void;
-  onRetryTranscriptValidation?: () => void;
-  transcriptValidationRetrying?: boolean;
 }
 
 export const TranscriptIntegrityPanel = ({
@@ -90,8 +86,6 @@ export const TranscriptIntegrityPanel = ({
   mixedAudioPath,
   activityEvidenceAvailable = false,
   hasExistingAnalysis = false,
-  onRetry,
-  retrying = false,
 }: {
   status: Meeting['transcript_status'];
   finalizationStatus?: Meeting['finalization_status'];
@@ -108,8 +102,6 @@ export const TranscriptIntegrityPanel = ({
 }) => {
   let micActivitySeconds = 0;
   let systemActivitySeconds = 0;
-  let retryStage: string | null = null;
-  let retryFailure: string | null = null;
   try {
     const integrity = JSON.parse(integrityJson || '{}') as {
       activityEvidence?: {
@@ -119,9 +111,6 @@ export const TranscriptIntegrityPanel = ({
           endTime?: unknown;
         }>;
       };
-      retry?: { stage?: unknown };
-      retryFailure?: unknown;
-      causes?: Array<{ code?: unknown }>;
     };
     for (const window of integrity.activityEvidence?.windows || []) {
       if (
@@ -134,14 +123,6 @@ export const TranscriptIntegrityPanel = ({
       if (window.speaker === 'Me') micActivitySeconds += duration;
       if (window.speaker === 'Them') systemActivitySeconds += duration;
     }
-    retryStage =
-      typeof integrity.retry?.stage === 'string' ? integrity.retry.stage : null;
-    retryFailure =
-      typeof integrity.retryFailure === 'string'
-        ? integrity.retryFailure
-        : typeof integrity.causes?.[0]?.code === 'string'
-          ? integrity.causes[0].code
-          : null;
   } catch {
     // The resolver maps invalid content-free metadata to an honest safe state.
   }
@@ -173,142 +154,97 @@ export const TranscriptIntegrityPanel = ({
     capabilities,
   );
   if (hasExistingAnalysis && trust.kind !== 'capture_gap') return null;
-  if (
-    trust.kind === 'validated' ||
-    trust.kind === 'legacy_complete' ||
-    (status !== 'validating' &&
-      status !== 'needs_attention' &&
-      finalizationStatus !== 'recovery_required')
-  ) {
-    return null;
-  }
-  const validatingDetail =
-    retryStage === 'transcribing'
-      ? 'Transcribing the preserved recording.'
-      : retryStage === 'reviewing_evidence'
-        ? 'Reviewing captured-speech evidence.'
-        : retryStage === 'saving'
-          ? 'Saving the validated transcript.'
-          : 'Pluto is checking the complete recording before creating intelligence.';
-  const copy = {
-    capture_recovery_required:
-      'Processing needs recovery before this meeting is complete.',
-    validation_state_corrupt:
-      'The recording is safe, but Pluto cannot safely read its transcript validation state.',
-    validation_in_progress: validatingDetail,
-    recovered_awaiting_validation:
-      'Recording recovered. Validate the transcript before creating intelligence.',
-    capture_gap: hasExistingAnalysis
-      ? 'Analysis uses the available transcript. Some captured audio could not be recovered, so this transcript remains partial.'
-      : 'Pluto recovered the available recording, but some captured audio is missing.',
-    speech_unaccounted:
-      'The recording is safe, but Pluto could not account for all captured speech.',
-    integrity_needs_attention:
-      'The recording is safe, but transcript validation needs another pass.',
-    validation_retry_failed:
-      retryFailure === 'retry_timeout' ||
-      retryFailure === 'validation_retry_timeout'
-        ? 'Validation stopped after its safety deadline. The recording and prior evidence are safe.'
-        : 'Validation stopped safely before completion. The recording and prior evidence are safe.',
-    final_transcription_unavailable:
-      "Pluto's high-accuracy local transcription model was unavailable. The recording and provisional transcript are safe.",
-    final_transcription_resource_paused:
-      'High-accuracy transcription paused to protect system memory or temperature. The recording and provisional transcript are safe.',
-    validated: '',
-    legacy_complete: '',
-    legacy_needs_attention:
-      'The recording is safe, but its transcript has not been validated with the current pipeline.',
-  } as const;
-  const showValidationAction =
-    trust.action === 'start_validation' || trust.action === 'retry_validation';
-  const preparingAnalysis = retrying || trust.kind === 'validation_in_progress';
-  const title = preparingAnalysis
-    ? 'Preparing meeting analysis'
-    : trust.kind === 'capture_gap' && hasExistingAnalysis
-      ? 'Partial transcript'
-      : trust.kind === 'capture_recovery_required'
-        ? 'Recording saved'
-        : trust.kind === 'validation_in_progress'
-          ? 'Validating transcript'
-          : 'Transcript needs attention';
+
+  const terminalCopy =
+    trust.kind === 'capture_recovery_required'
+      ? {
+          title: 'Recording saved',
+          detail:
+            "Pluto couldn't finish the transcript. Your recording is safe.",
+        }
+      : trust.kind === 'capture_gap'
+        ? {
+            title: 'Partial transcript',
+            detail: hasExistingAnalysis
+              ? 'Analysis uses the available transcript. Some captured audio is missing.'
+              : 'Some captured audio is missing from this transcript.',
+          }
+        : trust.kind === 'final_transcription_unavailable'
+          ? {
+              title: "Couldn't finish the transcript",
+              detail: 'Your recording and the available transcript are safe.',
+            }
+          : null;
+
+  if (!terminalCopy) return null;
+
   return (
     <section
       aria-live="polite"
-      className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-5"
+      className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] p-5"
     >
-      <strong className="text-sm text-pro-text">{title}</strong>
-      <p className="mt-1 text-sm text-pro-text-muted">
-        {preparingAnalysis
-          ? 'Pluto is validating the preserved recording, then it will build the standard meeting analysis.'
-          : copy[trust.copyKey]}
-      </p>
-      {showValidationAction ? (
-        <button
-          type="button"
-          disabled={retrying}
-          onClick={onRetry}
-          className="mt-4 rounded-xl bg-pro-accent px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
-        >
-          {retrying
-            ? 'Retrying validation…'
-            : trust.action === 'start_validation'
-              ? 'Validate transcript'
-              : 'Retry transcript validation'}
-        </button>
-      ) : null}
+      <strong className="text-sm text-pro-text">{terminalCopy.title}</strong>
+      <p className="mt-1 text-sm text-pro-text-muted">{terminalCopy.detail}</p>
     </section>
   );
 };
 
-export const DownstreamProcessingPanel = ({
-  meeting,
-  onRetry,
-  retrying = false,
-}: {
-  meeting: Partial<Meeting>;
-  onRetry?: () => void;
-  retrying?: boolean;
-}) => {
-  const presentation = getDownstreamProcessingPresentation(meeting);
-  if (!presentation || presentation.state === 'ready') return null;
-  const processing = presentation.state === 'processing';
-  return (
-    <section
-      aria-live="polite"
-      className={`rounded-2xl border p-5 ${
-        processing
-          ? 'border-pro-accent/25 bg-pro-accent/5'
-          : 'border-amber-500/25 bg-amber-500/5'
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        {processing ? (
-          <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-pro-accent" />
-        ) : (
-          <Sparkles className="mt-0.5 h-4 w-4 text-amber-500" />
-        )}
-        <div>
-          <strong className="text-sm text-pro-text">
-            {presentation.title}
-          </strong>
-          <p className="mt-1 text-sm text-pro-text-muted">
-            {presentation.detail}
-          </p>
-          {presentation.canRetry && onRetry ? (
-            <button
-              type="button"
-              disabled={retrying}
-              onClick={onRetry}
-              className="mt-4 rounded-xl bg-pro-accent px-4 py-2 text-xs font-bold text-white disabled:opacity-60"
-            >
-              {retrying ? 'Retrying analysis…' : 'Retry meeting analysis'}
-            </button>
-          ) : null}
+export const MeetingAnalysisSkeleton = () => (
+  <section
+    aria-label="Preparing meeting analysis"
+    data-meeting-artifact="analysis"
+    data-state="loading"
+    data-meeting-skeleton="analysis"
+    className="space-y-12 animate-pulse motion-reduce:animate-none"
+  >
+    <div className="space-y-5">
+      <div className="h-3 w-28 rounded-full bg-pro-text-muted/10" />
+      <div className="space-y-3 rounded-[2rem] border border-pro-border/30 bg-pro-surface/30 p-8">
+        <div className="h-5 w-11/12 rounded-full bg-pro-text-muted/10" />
+        <div className="h-5 w-full rounded-full bg-pro-text-muted/10" />
+        <div className="h-5 w-3/4 rounded-full bg-pro-text-muted/10" />
+      </div>
+    </div>
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+      {[0, 1].map((card) => (
+        <div
+          key={card}
+          className="space-y-4 rounded-2xl border border-pro-border/30 bg-pro-surface/20 p-6"
+        >
+          <div className="h-4 w-2/5 rounded-full bg-pro-text-muted/10" />
+          <div className="h-3 w-full rounded-full bg-pro-text-muted/10" />
+          <div className="h-3 w-4/5 rounded-full bg-pro-text-muted/10" />
+        </div>
+      ))}
+    </div>
+  </section>
+);
+
+export const MeetingTranscriptSkeleton = () => (
+  <div
+    aria-label="Preparing transcript"
+    data-meeting-skeleton="transcript"
+    className="mx-auto max-w-xl space-y-8 pt-4 animate-pulse motion-reduce:animate-none"
+  >
+    {[
+      ['w-12', 'w-full'],
+      ['w-16', 'w-10/12'],
+      ['w-10', 'w-11/12'],
+    ].map(([speakerWidth, textWidth], index) => (
+      <div key={index} className="flex gap-12">
+        <div
+          className={`mt-1 h-3 ${speakerWidth} shrink-0 rounded-full bg-pro-text-muted/10`}
+        />
+        <div className="flex-1 space-y-3">
+          <div
+            className={`h-4 ${textWidth} rounded-full bg-pro-text-muted/10`}
+          />
+          <div className="h-4 w-3/4 rounded-full bg-pro-text-muted/10" />
         </div>
       </div>
-    </section>
-  );
-};
+    ))}
+  </div>
+);
 
 export const canGenerateMeetingIntelligence = (meeting: Partial<Meeting>) => {
   const trust = resolveTranscriptTrustState(
@@ -550,8 +486,6 @@ export const MeetingView = ({
   highlightEntities,
   transcriptVisible,
   setTranscriptVisible,
-  onRetryTranscriptValidation,
-  transcriptValidationRetrying = false,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
 
@@ -765,7 +699,29 @@ export const MeetingView = ({
   const { version, v2, v3 } = resolveMeetingAnalysis(selectedMeeting);
   const downstreamPresentation =
     getDownstreamProcessingPresentation(selectedMeeting);
+  const canRegenerateMeetingIntelligence =
+    canGenerateMeetingIntelligence(selectedMeeting);
   const editsMap = parseUserEditsJson(selectedMeeting.user_edits_json);
+  let transcriptSegments: TranscriptSegment[] = [];
+  try {
+    transcriptSegments = parseTranscriptSegments(
+      selectedMeeting.transcript_json,
+    ) as TranscriptSegment[];
+  } catch (error) {
+    console.error('Failed to parse transcript', error);
+  }
+  const mergedTranscriptSegments: TranscriptSegment[] = [];
+  for (const segment of transcriptSegments) {
+    const previous = mergedTranscriptSegments.at(-1);
+    if (previous && String(previous.speaker) === String(segment.speaker)) {
+      previous.text += ` ${segment.text}`;
+    } else {
+      mergedTranscriptSegments.push({ ...segment });
+    }
+  }
+  const hasTranscriptContent = mergedTranscriptSegments.some((segment) =>
+    Boolean(segment.text?.trim()),
+  );
 
   const canonicalAnalysisMarkdown = v3
     ? analysisDocumentV3ToMarkdown(v3)
@@ -807,7 +763,7 @@ export const MeetingView = ({
     if (isRegeneratingNotes) return;
     if (!canGenerateMeetingIntelligence(selectedMeeting)) {
       setRegenerateNotesError(
-        'Transcript validation must finish before Pluto creates intelligence.',
+        'This transcript is still being prepared. Try again when it is ready.',
       );
       return;
     }
@@ -1060,6 +1016,7 @@ export const MeetingView = ({
   return (
     <div
       key={selectedMeeting.id}
+      data-meeting-page
       className="max-w-4xl mx-auto w-full space-y-20 animate-in pb-32"
     >
       <TranscriptIntegrityPanel
@@ -1079,26 +1036,15 @@ export const MeetingView = ({
         hasExistingAnalysis={Boolean(
           selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
         )}
-        onRetry={onRetryTranscriptValidation}
-        retrying={transcriptValidationRetrying}
-      />
-      <DownstreamProcessingPanel
-        meeting={selectedMeeting}
-        onRetry={onRetryTranscriptValidation}
-        retrying={transcriptValidationRetrying}
       />
       {/* Clean Hero Header */}
       <div className="flex flex-col md:flex-row items-start justify-between gap-8 border-b border-pro-border/40 pb-12">
         <div className="space-y-4 flex-1">
           <div className="flex items-center gap-4">
             <span className="text-[10px] font-bold text-pro-accent uppercase tracking-widest bg-pro-accent/5 px-2 py-1 rounded">
-              {selectedMeeting.finalization_status === 'recovery_required'
-                ? 'Recovery required'
-                : downstreamPresentation?.state === 'ready'
-                  ? 'Synthesis ready'
-                  : downstreamPresentation?.state === 'processing'
-                    ? 'Synthesis in progress'
-                    : 'Analysis not ready'}
+              {downstreamPresentation.state === 'ready'
+                ? 'Meeting ready'
+                : 'Meeting saved'}
             </span>
             <span className="text-[10px] text-pro-text-muted/60 font-medium uppercase tracking-widest">
               {new Date(
@@ -1190,39 +1136,44 @@ export const MeetingView = ({
           </div>
         </div>
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={regenerateEnhancedNotes}
-            disabled={isRegeneratingNotes}
-            className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${
-              isRegeneratingNotes
-                ? 'bg-pro-bg border-pro-border/40 text-pro-text-muted cursor-not-allowed'
-                : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'
-            }`}
-            title={
-              isRegeneratingNotes
-                ? 'Generating Enhanced Notes...'
-                : 'Regenerate Enhanced Notes'
-            }
-          >
-            {isRegeneratingNotes ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Sparkles className="w-4 h-4 opacity-70" />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
-            className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'}`}
-            title="Copy Summary"
-          >
-            {copySuccess ? (
-              <Check className="w-4 h-4" />
-            ) : (
-              <Copy className="w-4 h-4 opacity-60" />
-            )}
-          </button>
+          {downstreamPresentation.state === 'ready' &&
+          canRegenerateMeetingIntelligence ? (
+            <>
+              <button
+                type="button"
+                onClick={regenerateEnhancedNotes}
+                disabled={isRegeneratingNotes}
+                className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${
+                  isRegeneratingNotes
+                    ? 'bg-pro-bg border-pro-border/40 text-pro-text-muted cursor-not-allowed'
+                    : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'
+                }`}
+                title={
+                  isRegeneratingNotes
+                    ? 'Generating Enhanced Notes...'
+                    : 'Regenerate Enhanced Notes'
+                }
+              >
+                {isRegeneratingNotes ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4 opacity-70" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
+                className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'}`}
+                title="Copy Summary"
+              >
+                {copySuccess ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Copy className="w-4 h-4 opacity-60" />
+                )}
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -1431,16 +1382,39 @@ export const MeetingView = ({
       </div>
 
       {/* Summary & Analysis Section */}
+      {downstreamPresentation.state === 'loading' ? (
+        <MeetingAnalysisSkeleton />
+      ) : downstreamPresentation.state === 'failed' ? (
+        <section
+          aria-live="polite"
+          data-meeting-artifact="analysis"
+          data-state="failed"
+          className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] p-6"
+        >
+          <strong className="text-sm text-pro-text">
+            {downstreamPresentation.title}
+          </strong>
+          <p className="mt-1 text-sm text-pro-text-muted">
+            {downstreamPresentation.detail}
+          </p>
+        </section>
+      ) : null}
       {version === 3 && v3 ? (
-        <V3AnalysisViewer
-          meetingId={selectedMeeting.id}
-          doc={v3}
-          editsMap={editsMap}
-          highlightEntities={highlightEntities}
-          onEditSaved={fetchMeetings}
-        />
+        <div data-meeting-artifact="analysis" data-state="ready">
+          <V3AnalysisViewer
+            meetingId={selectedMeeting.id}
+            doc={v3}
+            editsMap={editsMap}
+            highlightEntities={highlightEntities}
+            onEditSaved={fetchMeetings}
+          />
+        </div>
       ) : v2 ? (
-        <div className="space-y-16">
+        <div
+          data-meeting-artifact="analysis"
+          data-state="ready"
+          className="space-y-16"
+        >
           <div className="grid grid-cols-12 gap-8 items-start overflow-visible">
             {/* Left Column: Executive Summary & Key Points */}
             <div className="col-span-12 lg:col-span-7 space-y-12">
@@ -1560,186 +1534,132 @@ export const MeetingView = ({
         </div>
       ) : null}
 
-      {/* Empty State vs Content */}
-      {!v2 &&
-      !v3 &&
-      !selectedMeeting?.enhanced_notes &&
-      !selectedMeeting?.user_notes &&
-      (!selectedMeeting?.transcript_json ||
-        isTranscriptJsonEffectivelyEmpty(selectedMeeting.transcript_json)) ? (
-        <div className="flex-1 flex flex-col items-center justify-center p-20 text-center space-y-6 opacity-60">
-          <div className="w-16 h-16 rounded-2xl bg-stone-100 flex items-center justify-center mb-4">
-            <FileText className="w-8 h-8 text-stone-300" />
-          </div>
-          <h3 className="text-xl font-bold text-pro-text-main">
-            No Content Recorded
-          </h3>
-          <p className="text-sm text-pro-text-muted max-w-sm">
-            No audio was detected during this session, so no transcript or
-            summary could be generated.
-          </p>
-        </div>
-      ) : (
-        <div
-          className={`flex-1 flex flex-col ${transcriptVisible ? 'lg:flex-row' : 'lg:flex-col'} h-auto overflow-visible relative`}
-        >
-          {/* Right: Transcript (Collapsible) - Visual polish */}
-          <div className="relative bg-pro-bg lg:bg-transparent z-20 flex-1 border-l border-pro-border/40 lg:border-l-0">
+      <div
+        data-meeting-artifact="transcript"
+        data-state={hasTranscriptContent ? 'ready' : 'loading'}
+        className={`flex-1 flex flex-col ${transcriptVisible ? 'lg:flex-row' : 'lg:flex-col'} h-auto overflow-visible relative`}
+      >
+        {/* Right: Transcript (Collapsible) - Visual polish */}
+        <div className="relative bg-pro-bg lg:bg-transparent z-20 flex-1 border-l border-pro-border/40 lg:border-l-0">
+          {transcriptVisible && (
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg dark:bg-pro-bg z-20" />
+          )}
+          <div className="flex flex-col">
             {transcriptVisible && (
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg dark:bg-pro-bg z-20" />
-            )}
-            <div className="flex flex-col">
-              {transcriptVisible && (
-                <div
-                  className="sticky z-30 bg-pro-bg dark:bg-pro-bg pt-6"
-                  style={{ top: '-65px' }}
-                >
-                  <div className="bg-pro-surface dark:bg-pro-bg shadow-md dark:shadow-none border-b border-transparent dark:border-transparent overflow-hidden">
-                    <div className="p-6 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-pro-accent/10 flex items-center justify-center text-pro-accent">
-                          <MessageSquare size={14} />
-                        </div>
-                        <div>
-                          <h3 className="text-xs font-black uppercase tracking-[0.2em] text-pro-text-main">
-                            Transcript
-                          </h3>
-                          <p className="text-[9px] font-bold text-pro-text-muted uppercase tracking-widest mt-0.5">
-                            Verbatim Record
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setTranscriptVisible(false)}
-                        className="lg:hidden p-2 hover:bg-black/5 rounded-full transition-colors"
-                      >
-                        <ChevronDown className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <div
-                className={`transition-[max-height,opacity] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] overflow-hidden ${
-                  transcriptVisible
-                    ? 'opacity-100'
-                    : 'opacity-0 pointer-events-none'
-                }`}
-                style={{
-                  maxHeight: transcriptVisible ? transcriptBodyHeight : 0,
-                }}
+                className="sticky z-30 bg-pro-bg dark:bg-pro-bg pt-6"
+                style={{ top: '-65px' }}
               >
-                <div
-                  ref={transcriptBodyRef}
-                  className="px-8 pb-10 pt-6 bg-stone-50/30 dark:bg-transparent"
-                >
-                  <div className="space-y-8 max-w-xl mx-auto pt-4">
-                    {(() => {
-                      if (!selectedMeeting?.transcript_json) return null;
-                      let segments: TranscriptSegment[] = [];
-                      try {
-                        segments = parseTranscriptSegments(
-                          selectedMeeting.transcript_json,
-                        ) as TranscriptSegment[];
-                      } catch (e) {
-                        console.error('Failed to parse transcript', e);
-                        return null;
-                      }
-
-                      if (segments.length === 0) {
-                        return (
-                          <div className="flex flex-col items-center justify-center py-20 opacity-40">
-                            <Sparkles className="w-5 h-5 text-pro-accent/20 mx-auto mb-3" />
-                            <p className="text-pro-text-muted/40 font-bold uppercase tracking-widest text-[9px]">
-                              No biometric voice data found
-                            </p>
-                          </div>
-                        );
-                      }
-
-                      const mergedSegments: TranscriptSegment[] = [];
-                      for (const segment of segments) {
-                        const lastSegment =
-                          mergedSegments[mergedSegments.length - 1];
-                        if (
-                          lastSegment &&
-                          String(lastSegment.speaker) ===
-                            String(segment.speaker)
-                        ) {
-                          lastSegment.text += ` ${segment.text}`;
-                        } else {
-                          mergedSegments.push({ ...segment });
-                        }
-                      }
-
-                      return mergedSegments.map((s: TranscriptSegment) => {
-                        const segmentKey = `${String(s.speaker ?? 'unknown')}-${s.start}-${s.end}-${s.text}`;
-                        return (
-                          <div
-                            key={segmentKey}
-                            className="group flex gap-12 transition-all"
-                          >
-                            <div className="w-20 shrink-0 pt-1 text-right">
-                              <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
-                                {s.speaker || 'Unknown'}
-                              </span>
-                            </div>
-                            <div className="flex-1">
-                              <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
-                                {highlightEntities(s.text)}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      });
-                    })()}
+                <div className="bg-pro-surface dark:bg-pro-bg shadow-md dark:shadow-none border-b border-transparent dark:border-transparent overflow-hidden">
+                  <div className="p-6 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-pro-accent/10 flex items-center justify-center text-pro-accent">
+                        <MessageSquare size={14} />
+                      </div>
+                      <div>
+                        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-pro-text-main">
+                          Transcript
+                        </h3>
+                        <p className="text-[9px] font-bold text-pro-text-muted uppercase tracking-widest mt-0.5">
+                          Verbatim Record
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTranscriptVisible(false)}
+                      className="lg:hidden p-2 hover:bg-black/5 rounded-full transition-colors"
+                    >
+                      <ChevronDown className="w-5 h-5" />
+                    </button>
                   </div>
                 </div>
               </div>
+            )}
 
-              {/* Expansion Action Bar - Refined Gradient & integrated button */}
-              {transcriptVisible && (
-                <div className="relative flex items-end justify-center pb-8 transition-all duration-700 pt-16 pb-24">
-                  <button
-                    type="button"
-                    onClick={() => setTranscriptVisible(!transcriptVisible)}
-                    className="group relative px-8 py-3 bg-pro-surface border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
-                  >
-                    <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
-                      Collapse Transcript
-                    </span>
-                    <div className="w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500 rotate-180">
-                      <ChevronDown className="w-3 h-3 text-pro-accent" />
-                    </div>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {!transcriptVisible && (
-            <div className="flex w-full items-center justify-center py-6">
-              <button
-                type="button"
-                onClick={() => setTranscriptVisible(true)}
-                className="group relative px-8 py-3 bg-pro-surface border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
+            <div
+              className={`transition-[max-height,opacity] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] overflow-hidden ${
+                transcriptVisible
+                  ? 'opacity-100'
+                  : 'opacity-0 pointer-events-none'
+              }`}
+              style={{
+                maxHeight: transcriptVisible ? transcriptBodyHeight : 0,
+              }}
+            >
+              <div
+                ref={transcriptBodyRef}
+                className="px-8 pb-10 pt-6 bg-stone-50/30 dark:bg-transparent"
               >
-                <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
-                  Explore Full Transcript
-                </span>
-                <div className="w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500">
-                  <ChevronDown className="w-3 h-3 text-pro-accent" />
+                <div className="space-y-8 max-w-xl mx-auto pt-4">
+                  {hasTranscriptContent ? (
+                    mergedTranscriptSegments.map((s: TranscriptSegment) => {
+                      const segmentKey = `${String(s.speaker ?? 'unknown')}-${s.start}-${s.end}-${s.text}`;
+                      return (
+                        <div
+                          key={segmentKey}
+                          className="group flex gap-12 transition-all"
+                        >
+                          <div className="w-20 shrink-0 pt-1 text-right">
+                            <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
+                              {s.speaker || 'Unknown'}
+                            </span>
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
+                              {highlightEntities(s.text)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <MeetingTranscriptSkeleton />
+                  )}
                 </div>
-                <div className="absolute -right-2 -top-2 flex items-center justify-center w-5 h-5 bg-pro-accent text-white rounded-full text-[9px] font-bold shadow-sm animate-in zoom-in duration-300 delay-100">
-                  +
-                </div>
-              </button>
+              </div>
             </div>
-          )}
+
+            {/* Expansion Action Bar - Refined Gradient & integrated button */}
+            {transcriptVisible && (
+              <div className="relative flex items-end justify-center pb-8 transition-all duration-700 pt-16 pb-24">
+                <button
+                  type="button"
+                  onClick={() => setTranscriptVisible(!transcriptVisible)}
+                  className="group relative px-8 py-3 bg-pro-surface border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
+                >
+                  <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
+                    Collapse Transcript
+                  </span>
+                  <div className="w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500 rotate-180">
+                    <ChevronDown className="w-3 h-3 text-pro-accent" />
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+
+        {!transcriptVisible && (
+          <div className="flex w-full items-center justify-center py-6">
+            <button
+              type="button"
+              onClick={() => setTranscriptVisible(true)}
+              className="group relative px-8 py-3 bg-pro-surface border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
+            >
+              <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
+                Explore Full Transcript
+              </span>
+              <div className="w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500">
+                <ChevronDown className="w-3 h-3 text-pro-accent" />
+              </div>
+              <div className="absolute -right-2 -top-2 flex items-center justify-center w-5 h-5 bg-pro-accent text-white rounded-full text-[9px] font-bold shadow-sm animate-in zoom-in duration-300 delay-100">
+                +
+              </div>
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Discreet Footer */}
       <div className="pt-12 flex items-center justify-between border-t border-pro-border/20 px-4">
