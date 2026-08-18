@@ -48,7 +48,10 @@ const loadFixtures = (): Fixture[] => {
     .readdirSync(root)
     .filter((name) => name.endsWith('.json'))
     .sort()
-    .map((name) => readJson<Fixture>(path.join(root, name)));
+    .map((name) => ({
+      ...readJson<Fixture>(path.join(root, name)),
+      case_id: path.basename(name, '.json'),
+    }));
   const precision = readJson<Fixture[]>(
     path.join(root, 'precision', 'cases.json'),
   );
@@ -336,6 +339,19 @@ suite('real-provider meeting notes quality benchmark', () => {
         reviewed_scores: reviewedScores.map((score) => score.total_score),
         reviewed_fixture_regressions: reviewedFixtureRegressions,
         reviewed_failure_counts: reviewedFailureCounts,
+        reviewed_failures_by_case: Object.fromEntries(
+          runs
+            .filter(
+              (
+                run,
+              ): run is typeof run & { score: NonNullable<typeof run.score> } =>
+                run.score !== null,
+            )
+            .map((run) => [
+              run.fixture.case_id ?? `reviewed_fixture_${run.fixtureIndex + 1}`,
+              run.score.failure_tags,
+            ]),
+        ),
         token_budget: {
           context_min: Math.min(...contextBudgets.map((item) => item.num_ctx)),
           context_max: Math.max(...contextBudgets.map((item) => item.num_ctx)),

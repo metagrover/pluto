@@ -9,7 +9,10 @@ import {
   fallbackAnalysisDocumentV3,
   parseAnalysisDocumentV3,
 } from './analysisDocumentV3';
-import { groundAnalysisDocument } from './analysisGrounding';
+import {
+  groundAnalysisDocument,
+  normalizeTranscriptEvidence,
+} from './analysisGrounding';
 import type {
   ActionItemV3,
   AnalysisDocumentV3,
@@ -48,7 +51,130 @@ const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation c
 const OLLAMA_DEFAULT_MODEL = 'phi4-mini:3.8b';
 const OLLAMA_DEFAULT_ANALYSIS_MODEL = 'qwen3.5:9b';
 const SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS = 8;
+const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
+const OLLAMA_EDITORIAL_OUTPUT_TOKENS = 2_048;
+const CONSERVATIVE_CHARACTERS_PER_TOKEN = 1;
 export const STRUCTURED_ANALYSIS_PROMPT_VERSION = 'notes-v7';
+
+const mergeUniqueByKey = <T>(
+  primary: T[],
+  fallback: T[],
+  key: (item: T) => string,
+): T[] => {
+  const seen = new Set(primary.map(key));
+  return [
+    ...primary,
+    ...fallback.filter((item) => {
+      const itemKey = key(item);
+      if (!itemKey || seen.has(itemKey)) return false;
+      seen.add(itemKey);
+      return true;
+    }),
+  ];
+};
+
+const mergeSettledItems = <T extends { text: string; evidence?: string }>(
+  primary: T[],
+  fallback: T[],
+): { items: T[]; restoredCount: number } => {
+  const unmatchedPrimary = new Set(primary.map((_, index) => index));
+  const restored: T[] = [];
+  for (const fallbackItem of fallback) {
+    const fallbackEvidence = normalizeTranscriptEvidence(
+      fallbackItem.evidence ?? '',
+    );
+    const matchingIndex = [...unmatchedPrimary].find((index) => {
+      const primaryItem = primary[index];
+      const primaryClaim = normalizeTranscriptEvidence(
+        primaryItem.text,
+      ).replace(/\b(?:proceed|move forward) with\b/g, 'use');
+      const fallbackClaim = normalizeTranscriptEvidence(
+        fallbackItem.text,
+      ).replace(/\b(?:proceed|move forward) with\b/g, 'use');
+      const sameEvidence =
+        fallbackEvidence.length > 0 &&
+        normalizeTranscriptEvidence(primaryItem.evidence ?? '') ===
+          fallbackEvidence;
+      return (
+        sameEvidence &&
+        calculateJaccardSimilarity(primaryClaim, fallbackClaim) >= 0.5
+      );
+    });
+    if (matchingIndex === undefined) {
+      restored.push(fallbackItem);
+    } else {
+      unmatchedPrimary.delete(matchingIndex);
+    }
+  }
+  return {
+    items: [...primary, ...restored],
+    restoredCount: restored.length,
+  };
+};
+
+const mergeEditorialWithGroundedLocal = (
+  localDraft: AnalysisDocumentV3,
+  editedDraft: AnalysisDocumentV3,
+  transcript: string,
+): { analysis: AnalysisDocumentV3; repairedSettledOmission: boolean } => {
+  const groundedLocal = groundAnalysisDocument(localDraft, transcript).analysis;
+  const topics = editedDraft.topics.map((topic) => ({
+    ...topic,
+    key_points: [...topic.key_points],
+    decisions: [...topic.decisions],
+    action_items: [...topic.action_items],
+    open_questions: [...topic.open_questions],
+  }));
+  let repairedSettledOmission = false;
+
+  for (const localTopic of groundedLocal.topics) {
+    let targetIndex = -1;
+    let bestSimilarity = 0;
+    for (let index = 0; index < topics.length; index += 1) {
+      const similarity = calculateJaccardSimilarity(
+        localTopic.title,
+        `${topics[index].title} ${topics[index].summary}`,
+      );
+      if (similarity > bestSimilarity) {
+        bestSimilarity = similarity;
+        targetIndex = index;
+      }
+    }
+    if (topics.length === 1) targetIndex = 0;
+    if (targetIndex < 0 && topics.length > 0) targetIndex = 0;
+    if (targetIndex < 0) continue;
+
+    const target = topics[targetIndex];
+    const mergedDecisions = mergeSettledItems(
+      target.decisions,
+      localTopic.decisions,
+    );
+    const mergedActions = mergeSettledItems(
+      target.action_items,
+      localTopic.action_items,
+    );
+    if (mergedDecisions.restoredCount > 0 || mergedActions.restoredCount > 0) {
+      repairedSettledOmission = true;
+    }
+    target.key_points = mergeUniqueByKey(
+      target.key_points,
+      localTopic.key_points,
+      (item) => normalizeTranscriptEvidence(item.text),
+    );
+    target.decisions = mergedDecisions.items;
+    target.action_items = mergedActions.items;
+    target.key_points = mergeUniqueByKey(
+      target.key_points,
+      localTopic.summary ? [{ text: localTopic.summary }] : [],
+      (item) => normalizeTranscriptEvidence(item.text),
+    );
+  }
+
+  return {
+    analysis: { ...editedDraft, topics },
+    repairedSettledOmission,
+  };
+};
 
 // The default local Ollama runtime has one generation slot. Queue every
 // generation at the provider boundary so request timeouts measure model work,
@@ -324,20 +450,6 @@ export class UnifiedLLMProvider implements LLMProvider {
           end_segment: nextStart === undefined ? win.endSegment : nextStart - 1,
         };
       });
-      if (
-        windows.length === 1 &&
-        win.lines.length <= SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS &&
-        topicSegments.length > 1
-      ) {
-        topicSegments = [
-          {
-            title: topicSegments.map((topic) => topic.title).join(' / '),
-            start_segment: win.startSegment,
-            end_segment: win.endSegment,
-          },
-        ];
-      }
-
       for (const segment of topicSegments) {
         const lastLineIndex = Math.max(0, win.lines.length - 1);
         const requestedStart = Math.floor(
@@ -518,34 +630,58 @@ export class UnifiedLLMProvider implements LLMProvider {
       },
     };
     let finalDraft = localDraft;
-    const transcriptSegmentCount = transcript
-      .split(/\r?\n/)
-      .filter((line) => line.trim().length > 0).length;
-
-    if (draftTopics.length > 1 && transcriptSegmentCount >= 3) {
+    if (draftTopics.length > 1) {
       try {
         const draftContext = JSON.stringify({
           overview: localDraft.overview,
           topics: localDraft.topics,
           meeting_type: localDraft.meeting_type,
         });
-        const editedRaw = await this.generateText({
-          prompt: getStructuredAnalysisEditorialPrompt(
-            transcript,
-            draftContext,
-            userNotes,
-          ),
-          task: 'analysisEditorial',
-          jsonMode: true,
-        });
-        const edited = parseAnalysisDocumentV3(this.cleanJsonText(editedRaw));
-        if (edited && edited.topics.length > 0) {
-          finalDraft = edited;
+        const editorialPrompt = getStructuredAnalysisEditorialPrompt(
+          transcript,
+          draftContext,
+          userNotes,
+        );
+        const estimatedInputTokens = Math.ceil(
+          editorialPrompt.length / CONSERVATIVE_CHARACTERS_PER_TOKEN,
+        );
+        if (
+          estimatedInputTokens + OLLAMA_EDITORIAL_OUTPUT_TOKENS >
+          OLLAMA_EDITORIAL_CONTEXT_TOKENS
+        ) {
+          this.pushErrorCategory(errorCategories, 'editorial_input_too_large');
         } else {
-          this.pushErrorCategory(errorCategories, 'editorial_invalid_json');
+          const editedRaw = await this.generateText({
+            prompt: editorialPrompt,
+            task: 'analysisEditorial',
+            jsonMode: true,
+          });
+          const edited = parseAnalysisDocumentV3(this.cleanJsonText(editedRaw));
+          if (edited && edited.topics.length > 0) {
+            if (
+              !edited.overview.trim() ||
+              edited.topics.some((topic) => !topic.summary.trim())
+            ) {
+              this.pushErrorCategory(errorCategories, 'editorial_invalid_json');
+            } else {
+              const merged = mergeEditorialWithGroundedLocal(
+                localDraft,
+                edited,
+                transcript,
+              );
+              finalDraft = merged.analysis;
+              if (merged.repairedSettledOmission) {
+                this.pushErrorCategory(
+                  errorCategories,
+                  'editorial_dropped_settled_item',
+                );
+              }
+            }
+          } else {
+            this.pushErrorCategory(errorCategories, 'editorial_invalid_json');
+          }
         }
       } catch (error) {
-        if (isAbortError(error)) throw error;
         console.warn('[Analysis] Global editorial synthesis failed:', error);
         this.pushErrorCategory(errorCategories, 'editorial_failed');
       }
@@ -1221,7 +1357,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private getClaudeMaxTokens(task: LLMTask): number {
-    if (task === 'analysisEditorial') return 2048;
+    if (task === 'analysisEditorial') return OLLAMA_EDITORIAL_OUTPUT_TOKENS;
     if (task === 'structuredAnalysis') return 4096;
     if (task === 'topicSegmentation') return 512;
     if (task === 'topicAnalysis') return 2048;
@@ -1323,7 +1459,7 @@ export function calculateOllamaContextBudget(
 ): { num_ctx: number; num_predict: number } {
   const outputTokenBudget =
     task === 'analysisEditorial'
-      ? 2048
+      ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
       : task === 'knowledgeDoc' ||
           task === 'structuredAnalysis' ||
           task === 'summary'
@@ -1332,7 +1468,9 @@ export function calculateOllamaContextBudget(
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =
-    task === 'knowledgeDoc' || task === 'analysisEditorial' ? 32768 : 16384;
+    task === 'knowledgeDoc' || task === 'analysisEditorial'
+      ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
+      : 16384;
   const num_ctx = Math.min(
     maxCap,
     Math.max(4096, Math.ceil(totalNeeded / 1024) * 1024),

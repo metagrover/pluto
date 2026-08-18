@@ -126,6 +126,8 @@ describe('structured analysis extraction policy', () => {
       expect(prompt).toContain('Proposal or recommendation:');
       expect(prompt).toContain('Open question:');
       expect(prompt).toContain('directly states the extracted claim');
+      expect(prompt).toContain('name the distinctive system');
+      expect(prompt).toContain('exact speaker label');
       expect(prompt).not.toContain('explicit and implied decisions');
       expect(prompt).not.toContain('when possible');
     }

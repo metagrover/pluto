@@ -516,8 +516,9 @@ export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 - Open question: extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
 - Discussion context: keep factual or exploratory material in summaries and key points without creating a commitment.
 - Phrase user-facing fields with the lightest useful compression. Preserve distinctive transcript vocabulary and word order instead of substituting synonyms or abstract business language.
+- In the overview, topic title, and topic summary, name the distinctive system, program, or subject and state the concrete primary outcome. Do not replace a named outcome with abstractions such as "the approach", "the order", or "the plan".
 - Write decision and action text as a bare verb phrase without conversational framing such as "we decided to", "the team will", or "I will". Keep deadlines in the due field rather than repeating them in action text.
-- Remove conversational framing from key points, and retain the source speaker whenever the transcript makes attribution clear.
+- Remove conversational framing from key points. When a key point comes from one identifiable transcript turn, set speaker to that turn's exact speaker label; use null only for a synthesis across turns or genuinely unclear attribution.
 - Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. Quote enough adjacent transcript lines to support the full claim when its subject and resolution are split across turns. If no exact evidence slice exists, omit the settled item.
 - Assignee, decider, due date, and rationale fields must be null unless the same evidence slice directly supports them.`;
 

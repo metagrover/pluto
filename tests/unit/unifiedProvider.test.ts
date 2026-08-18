@@ -628,6 +628,245 @@ describe('UnifiedLLMProvider', () => {
     );
   });
 
+  it('rejects an editorial result that drops a grounded settled item', async () => {
+    installFetchMock((_url, init) => {
+      const prompt = String(parseRequestBody(init).prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Rollout', start_segment: 0, end_segment: 3 },
+              { title: 'Follow-up', start_segment: 4, end_segment: 8 },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('global meeting-notes editor')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            overview: 'A partial edited summary.',
+            topics: [
+              {
+                title: 'Rollout',
+                summary: 'The editor omitted the settled decision.',
+                key_points: [],
+                decisions: [
+                  {
+                    text: 'Proceed with REST for rollout',
+                    evidence:
+                      'We will use REST for rollout, send the rollout email, and update rollout docs.',
+                  },
+                ],
+                action_items: [
+                  {
+                    text: 'Send the rollout email',
+                    evidence:
+                      'We will use REST for rollout, send the rollout email, and update rollout docs.',
+                  },
+                ],
+                open_questions: [],
+              },
+            ],
+            meeting_type: 'general',
+          }),
+        });
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'The rollout uses REST.',
+          key_points: [{ text: 'The migration remains staged.' }],
+          decisions: [
+            {
+              text: 'Use REST for rollout',
+              evidence:
+                'We will use REST for rollout, send the rollout email, and update rollout docs.',
+            },
+          ],
+          action_items: [
+            {
+              text: 'Send the rollout email',
+              evidence:
+                'We will use REST for rollout, send the rollout email, and update rollout docs.',
+            },
+            {
+              text: 'Update rollout docs',
+              evidence:
+                'We will use REST for rollout, send the rollout email, and update rollout docs.',
+            },
+          ],
+          open_questions: ['When will the legacy endpoint be removed?'],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      [
+        'Nira: We will use REST for rollout, send the rollout email, and update rollout docs.',
+        'Milo: The rollout begins next week.',
+        'Nira: The migration remains staged.',
+        'Milo: The legacy endpoint stays available.',
+        'Nira: Documentation needs review.',
+        'Milo: Monitoring remains unchanged.',
+        'Nira: The follow-up is separate.',
+        'Milo: The rollout owner is confirmed.',
+        'Nira: The meeting covered both topics.',
+      ].join('\n'),
+    );
+
+    expect(analysis.all_decisions).toHaveLength(1);
+    expect(analysis.all_action_items).toHaveLength(2);
+    expect(
+      analysis.topics.flatMap((topic) =>
+        topic.key_points.map((point) => point.text),
+      ),
+    ).toContain('The migration remains staged.');
+    expect(
+      analysis.topics.flatMap((topic) => topic.open_questions),
+    ).not.toContain('When will the legacy endpoint be removed?');
+    expect(analysis.generation_metadata?.error_categories).toContain(
+      'editorial_dropped_settled_item',
+    );
+  });
+
+  it('falls back to the local draft when global editing fails', async () => {
+    installFetchMock((_url, init) => {
+      const prompt = String(parseRequestBody(init).prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
+              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('global meeting-notes editor')) {
+        return jsonResponse({}, false, 'editor unavailable');
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'A grounded local summary.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      Array.from({ length: 9 }, (_, index) => `Me: Detail ${index}.`).join(
+        '\n',
+      ),
+    );
+
+    expect(analysis.topics.map((topic) => topic.title)).toEqual([
+      'Alpha topic',
+      'Beta topic',
+    ]);
+    expect(analysis.generation_metadata?.error_categories).toContain(
+      'editorial_failed',
+    );
+  });
+
+  it('keeps the local draft when global editing times out', async () => {
+    installFetchMock((_url, init) => {
+      const prompt = String(parseRequestBody(init).prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Alpha topic', start_segment: 0, end_segment: 0 },
+              { title: 'Beta topic', start_segment: 1, end_segment: 1 },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('global meeting-notes editor')) {
+        return Promise.reject(new DOMException('timed out', 'AbortError'));
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'A grounded local summary.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      Array.from({ length: 9 }, (_, index) => `Me: Detail ${index}.`).join(
+        '\n',
+      ),
+    );
+
+    expect(analysis.topics.map((topic) => topic.title)).toEqual([
+      'Alpha topic',
+      'Beta topic',
+    ]);
+    expect(analysis.generation_metadata?.error_categories).toContain(
+      'editorial_failed',
+    );
+  });
+
+  it('skips global editing when the editorial prompt exceeds local context', async () => {
+    const prompts: string[] = [];
+    installFetchMock((_url, init) => {
+      const prompt = String(parseRequestBody(init).prompt || '');
+      prompts.push(prompt);
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Alpha topic', start_segment: 0, end_segment: 3 },
+              { title: 'Beta topic', start_segment: 4, end_segment: 8 },
+            ],
+          }),
+        });
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          summary: 'A grounded local summary.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      Array.from(
+        { length: 9 },
+        (_, index) => `Me: ${index} ${'detail '.repeat(1_800)}`,
+      ).join('\n'),
+    );
+
+    expect(
+      prompts.filter((prompt) =>
+        prompt.includes('global meeting-notes editor'),
+      ),
+    ).toHaveLength(0);
+    expect(analysis.generation_metadata?.error_categories).toContain(
+      'editorial_input_too_large',
+    );
+  });
+
   it('falls back to default ollama model when model listing fails', async () => {
     let selectedModel = '';
     installFetchMock((url, init) => {

@@ -131,6 +131,402 @@ describe('analysis grounding', () => {
     );
   });
 
+  it('does not turn a proposal followed by a neutral acknowledgment into a decision', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      { text: 'Use REST for rollout', evidence: 'Right.' },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      ['Nira: We could use REST for rollout.', 'Milo: Right.'].join('\n'),
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_decision');
+  });
+
+  it('rejects an affirmative decision supported only by negated evidence', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use REST for rollout',
+        evidence: 'Do not use REST for rollout.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: Do not use REST for rollout.',
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_decision');
+  });
+
+  it('rejects a positive decision negated with a contraction', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use REST for rollout',
+        evidence: "We don't use REST for rollout.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      "Nira: We don't use REST for rollout.",
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+  });
+
+  it('keeps negation scoped to the option it modifies', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use REST for rollout',
+        evidence: 'Do not use GraphQL; use REST for rollout.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: Do not use GraphQL; use REST for rollout.',
+    );
+
+    expect(result.analysis.all_decisions).toHaveLength(1);
+  });
+
+  it('does not combine negation from one option with another option', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Do not use REST for rollout',
+        evidence: 'We will not use GraphQL; we will use REST for rollout.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We will not use GraphQL; we will use REST for rollout.',
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+  });
+
+  it('rejects reversed before-and-after roles', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Run migration before validation',
+        evidence: 'We will run validation before migration.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We will run validation before migration.',
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+  });
+
+  it('rejects reversed multiword before-and-after roles', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Run database migration before final schema validation',
+        evidence: 'Run final schema validation before database migration.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: Run final schema validation before database migration.',
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+  });
+
+  it('rejects reversed relations with different framing verbs', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Fully complete database migration before carefully starting final schema validation',
+        evidence:
+          'Fully complete final schema validation before carefully starting database migration.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: Fully complete final schema validation before carefully starting database migration.',
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+  });
+
+  it('does not let an unrelated commitment settle a proposal', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use REST for rollout',
+        evidence: 'We could use REST for rollout. I will investigate.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We could use REST for rollout. I will investigate.',
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+  });
+
+  it.each([
+    'We should use REST for rollout.',
+    'Can we use REST for rollout',
+    'We may use REST for rollout.',
+  ])('rejects unresolved modal language: %s', (evidence) => {
+    const input = document();
+    input.topics[0].decisions = [{ text: 'Use REST for rollout', evidence }];
+
+    const result = groundAnalysisDocument(input, `Nira: ${evidence}`);
+
+    expect(result.analysis.all_decisions).toEqual([]);
+  });
+
+  it('retains an explicitly accepted first-person I can commitment', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare the launch memo',
+        assignee: 'Milo',
+        due: 'Friday',
+        evidence: 'Yes, I can prepare the launch memo by Friday.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: Can you prepare the launch memo?',
+        'Milo: Yes, I can prepare the launch memo by Friday.',
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_action_items[0]).toMatchObject({
+      assignee: 'Milo',
+      due: 'Friday',
+    });
+  });
+
+  it('does not mistake antonym substrings inside valid words', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Allow blockchain access',
+        evidence: 'We will allow blockchain access.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We will allow blockchain access.',
+    );
+
+    expect(result.analysis.all_decisions).toHaveLength(1);
+  });
+
+  it('rejects an affirmative action supported only by negated evidence', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Send the rollout email',
+        evidence: 'Do not send the rollout email.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: Do not send the rollout email.',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_action_item');
+  });
+
+  it('does not duplicate a technology choice as an action item', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use REST for rollout',
+        evidence: 'We will use REST for rollout.',
+      },
+    ];
+    input.topics[0].action_items = [
+      {
+        text: 'Use REST for rollout',
+        evidence: 'We will use REST for rollout.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We will use REST for rollout.',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([]);
+  });
+
+  it.each(['Switch to REST', 'Migrate to PostgreSQL'])(
+    'does not treat a technology choice as follow-through: %s',
+    (text) => {
+      const input = document();
+      input.topics[0].decisions = [
+        { text, evidence: `We will ${text.toLowerCase()}.` },
+      ];
+      input.topics[0].action_items = [
+        { text, evidence: `We will ${text.toLowerCase()}.` },
+      ];
+
+      const result = groundAnalysisDocument(
+        input,
+        `Nira: We will ${text.toLowerCase()}.`,
+      );
+
+      expect(result.analysis.all_action_items).toEqual([]);
+    },
+  );
+
+  it.each(['Go with REST', 'Default to REST', 'Settle on REST'])(
+    'requires concrete follow-through rather than a preference: %s',
+    (text) => {
+      const input = document();
+      input.topics[0].decisions = [
+        { text, evidence: `We will ${text.toLowerCase()}.` },
+      ];
+      input.topics[0].action_items = [
+        { text, evidence: `We will ${text.toLowerCase()}.` },
+      ];
+
+      const result = groundAnalysisDocument(
+        input,
+        `Nira: We will ${text.toLowerCase()}.`,
+      );
+
+      expect(result.analysis.all_action_items).toEqual([]);
+    },
+  );
+
+  it.each([
+    'Submit the expense report',
+    'Pay the invoice',
+    'Renew the certificate',
+    'Sign the contract',
+  ])('retains a directly supported concrete commitment: %s', (text) => {
+    const input = document();
+    input.topics[0].action_items = [
+      { text, evidence: `I will ${text.toLowerCase()}.` },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      `Milo: I will ${text.toLowerCase()}.`,
+    );
+
+    expect(result.analysis.all_action_items).toHaveLength(1);
+  });
+
+  it('rejects a clipped request fragment as a settled item', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      { text: 'Prepare the launch memo', evidence: 'prepare the launch memo' },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: Could someone prepare the launch memo?',
+    );
+
+    expect(result.analysis.all_action_items).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_action_item');
+  });
+
+  it('clears a key-point speaker not supported by a unique transcript line', () => {
+    const input = document();
+    input.topics[0].key_points = [
+      { text: 'The rollout remains staged', speaker: 'Milo' },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: The rollout remains staged.',
+    );
+
+    expect(result.analysis.topics[0].key_points).toEqual([
+      { text: 'The rollout remains staged' },
+    ]);
+    expect(result.errorCategories).toContain('unsupported_key_point_speaker');
+  });
+
+  it('clears a key-point speaker whose transcript turn states the opposite', () => {
+    const input = document();
+    input.topics[0].key_points = [
+      { text: 'Enable API validation before rollout', speaker: 'Nira' },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: Disable API validation before rollout.',
+    );
+
+    expect(result.analysis.topics[0].key_points[0]).not.toHaveProperty(
+      'speaker',
+    );
+  });
+
+  it('clears a due date that the evidence explicitly supersedes', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare the checklist',
+        due: 'Friday',
+        evidence: 'I will prepare the checklist, not Friday but Monday.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Milo: I will prepare the checklist, not Friday but Monday.',
+    );
+
+    expect(result.analysis.all_action_items).toHaveLength(1);
+    expect(result.analysis.all_action_items[0]).not.toHaveProperty('due');
+    expect(result.errorCategories).toContain('unsupported_action_item_due');
+  });
+
+  it("clears a due date that the evidence says won't work", () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare the checklist',
+        due: 'Friday',
+        evidence:
+          "I will prepare the checklist; Friday won't work, so Monday instead.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      "Milo: I will prepare the checklist; Friday won't work, so Monday instead.",
+    );
+
+    expect(result.analysis.all_action_items).toHaveLength(1);
+    expect(result.analysis.all_action_items[0]).not.toHaveProperty('due');
+  });
+
   it('does not resolve evidence across more than three transcript lines', () => {
     expect(
       resolveTranscriptEvidence(
@@ -315,6 +711,49 @@ describe('analysis grounding', () => {
     expect(result.analysis.all_action_items).toHaveLength(1);
   });
 
+  it('does not assign a commitment to the speaker who only made the request', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare the launch memo',
+        assignee: 'Nira',
+        evidence:
+          "Could someone prepare the launch memo? Sure, I'll prepare the launch memo.",
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      [
+        'Nira: Could someone prepare the launch memo?',
+        "Milo: Sure, I'll prepare the launch memo.",
+      ].join('\n'),
+    );
+
+    expect(result.analysis.all_action_items).toHaveLength(1);
+    expect(result.analysis.all_action_items[0]).not.toHaveProperty('assignee');
+    expect(result.errorCategories).toContain('unsupported_action_item_owner');
+  });
+
+  it('does not assign the speaker when their turn names another owner', () => {
+    const input = document();
+    input.topics[0].action_items = [
+      {
+        text: 'Prepare the launch memo',
+        assignee: 'Alice',
+        evidence: 'Yes, Bob will prepare the launch memo.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Alice: Yes, Bob will prepare the launch memo.',
+    );
+
+    expect(result.analysis.all_action_items).toHaveLength(1);
+    expect(result.analysis.all_action_items[0]).not.toHaveProperty('assignee');
+  });
+
   it('does not promote passive needed work with no owner to a commitment', () => {
     const input = document();
     input.topics[0].action_items = [
@@ -349,5 +788,70 @@ describe('analysis grounding', () => {
       'Nira: We reviewed staged options and the rollout path remained open.',
     );
     expect(result.analysis.all_decisions).toEqual([]);
+  });
+
+  it('rejects a decision whose before relation reverses single-token subjects', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Deploy backend before testing frontend',
+        evidence: 'We will test frontend before deploying backend.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We will test frontend before deploying backend.',
+    );
+
+    expect(result.analysis.all_decisions).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_decision');
+  });
+
+  it('retains a supported relation when both sides repeat a shared subject', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Deploy backend service before testing backend API',
+        evidence: 'We will deploy backend service before testing backend API.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We will deploy backend service before testing backend API.',
+    );
+
+    expect(result.analysis.all_decisions).toHaveLength(1);
+  });
+
+  it('removes a decision-shaped action duplicated in another topic', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Go with REST',
+        evidence: 'We will go with REST.',
+      },
+    ];
+    input.topics[0].action_items = [];
+    input.topics.push({
+      title: 'Implementation follow-up',
+      summary: 'The selected approach was recorded.',
+      key_points: [],
+      decisions: [],
+      action_items: [
+        {
+          text: 'Go with REST',
+          evidence: 'We will go with REST.',
+        },
+      ],
+      open_questions: [],
+    });
+
+    const result = groundAnalysisDocument(input, 'Nira: We will go with REST.');
+
+    expect(result.analysis.all_decisions).toHaveLength(1);
+    expect(result.analysis.all_action_items).toEqual([]);
+    expect(result.errorCategories).toContain('unsupported_action_item');
   });
 });
