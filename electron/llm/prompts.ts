@@ -522,6 +522,31 @@ export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 - Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. Quote enough adjacent transcript lines to support the full claim when its subject and resolution are split across turns. If no exact evidence slice exists, omit the settled item.
 - Assignee, decider, due date, and rationale fields must be null unless the same evidence slice directly supports them.`;
 
+export type MeetingNotesTemplate =
+  | 'auto'
+  | 'one_on_one'
+  | 'team_sync'
+  | 'customer_call'
+  | 'interview'
+  | 'project_kickoff';
+
+const getTemplateGuidance = (template: MeetingNotesTemplate = 'auto') => {
+  const guidance: Record<MeetingNotesTemplate, string> = {
+    auto: 'Auto: infer the meeting shape and use only the sections that add signal.',
+    one_on_one:
+      '1:1: emphasize priorities, feedback, support needed, growth, and follow-ups.',
+    team_sync:
+      'Team sync: emphasize progress, blockers, decisions, owners, and next steps.',
+    customer_call:
+      'Customer call: emphasize customer needs, pain points, evidence, commitments, and follow-ups.',
+    interview:
+      'Interview: emphasize the candidate or subject evidence, examples, strengths, concerns, and follow-ups.',
+    project_kickoff:
+      'Project kickoff: emphasize goals, scope, milestones, owners, risks, and next steps.',
+  };
+  return `Notes template — ${guidance[template] || guidance.auto}`;
+};
+
 /**
  * Single-pass structured analysis prompt for cloud providers.
  * Returns a complete AnalysisDocumentV3 as JSON.
@@ -529,6 +554,7 @@ export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 export const getStructuredAnalysisPrompt = (
   transcript: string,
   userNotes?: string,
+  template: MeetingNotesTemplate = 'auto',
 ): string => {
   const userNotesBlock = userNotes
     ? `\nUser Notes (the user took these during the meeting — incorporate relevant notes as emphasis within the matching topic's key points, setting from_user_notes to true):\n${userNotes}\n`
@@ -537,6 +563,8 @@ export const getStructuredAnalysisPrompt = (
   return `**Role:** You are a Chief of Staff specializing in executive meeting synthesis. Your goal is to distill raw transcripts into concise, high-signal intelligence that focuses strictly on outcomes, facts, and commitments.
 
 ${STRUCTURED_EXTRACTION_POLICY}
+
+${getTemplateGuidance(template)}
 
 Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON object with this exact schema:
 
@@ -571,7 +599,8 @@ Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON 
 2. **Signal Constraint:** Ignore small talk, filler, and exploratory brainstorming unless it results in a concrete constraint or decision. Treat the transcript as the source of truth. User notes sharpen emphasis but do not override facts.
    - Brief rapport and personal check-ins may be included as minor context. Do not make them major topics or lead the overview when the meeting is work-focused.
 3. **Resolution Constraint:** If a task lacks an owner or date, leave those fields null. Do not hallucinate them. Extract ONLY questions or threads that remain genuinely UNRESOLVED at the end of the meeting. If a question was asked and then answered or settled during the discussion, DO NOT extract it as an open question.
-4. **General Rules:** Identify distinct topics chronologically. Roll up all action items and decisions into the top-level arrays. Preserve exact acronym definitions and technical terms.
+4. **Document Shape:** Produce 3 to 6 coherent sections for a substantive meeting, using fewer when the meeting is narrow. Merge repeated threads, spelling variants, and later refinements into the same section. Never report how many topics were covered. Omit housekeeping such as screen sharing, greetings, tool setup, outages, and access mechanics unless it materially changed an outcome or remains a blocker.
+5. **General Rules:** Organize the sections in the order that best explains the meeting, not as a chronological play-by-play. Roll up all action items and decisions into the top-level arrays. Preserve exact acronym definitions and technical terms. Omit empty sections.
 
 **Output Format:**
 Return valid JSON only. No markdown fences, no commentary.
@@ -584,6 +613,7 @@ export const getStructuredAnalysisRepairPrompt = (
   transcript: string,
   invalidOutput: string,
   userNotes?: string,
+  template: MeetingNotesTemplate = 'auto',
 ): string => {
   const userNotesBlock = userNotes
     ? `\nUser Notes (context only; do not override transcript evidence):\n${userNotes}\n`
@@ -592,6 +622,8 @@ export const getStructuredAnalysisRepairPrompt = (
   return `Repair this meeting analysis JSON for Pluto.
 
 ${STRUCTURED_EXTRACTION_POLICY}
+
+${getTemplateGuidance(template)}
 
 Return valid JSON only in the same schema as the original structured analysis task.
 
@@ -619,6 +651,7 @@ export const getStructuredAnalysisEditorialPrompt = (
   transcript: string,
   draftAnalysisJson: string,
   userNotes?: string,
+  template: MeetingNotesTemplate = 'auto',
 ): string => {
   const userNotesBlock = userNotes
     ? `\nUser notes (high-priority emphasis, not independent evidence):\n${userNotes}\n`
@@ -627,6 +660,8 @@ export const getStructuredAnalysisEditorialPrompt = (
   return `You are Pluto's global meeting-notes editor.
 
 ${STRUCTURED_EXTRACTION_POLICY}
+
+${getTemplateGuidance(template)}
 
 Revise the draft local analysis into one coherent JSON object with this exact schema:
 
@@ -655,7 +690,8 @@ Revise the draft local analysis into one coherent JSON object with this exact sc
 }
 
 Editorial rules:
-- Merge overlapping or duplicate topics created by transcript windows. Prefer a small number of coherent outcome-level topics, but do not force unrelated material together.
+- Merge overlapping or duplicate topics created by transcript windows into 3 to 6 coherent outcome-level sections, using fewer for narrow meetings. Do not force unrelated material together.
+- Omit housekeeping such as greetings, screen sharing, tool setup, outages, and access mechanics unless it materially changed an outcome or remains a blocker. Never report how many topics were covered.
 - Name topics with the transcript's distinctive subject or system plus the outcome or operation; avoid generic process labels.
 - Produce a factual 3-sentence executive summary. Never enumerate every topic title.
 - Re-scan the raw transcript for explicit assignments, accepted requests, deadlines, and settled decisions omitted by the draft.
@@ -708,6 +744,7 @@ export const getTopicAnalysisPrompt = (
   topicTitle: string,
   transcriptSlice: string,
   userNotes?: string,
+  template: MeetingNotesTemplate = 'auto',
 ): string => {
   const userNotesBlock = userNotes
     ? `\nUser Notes (incorporate relevant notes as emphasis, setting from_user_notes to true):\n${userNotes}\n`
@@ -718,6 +755,8 @@ export const getTopicAnalysisPrompt = (
 Analyze this transcript slice for the topic "${topicTitle}".
 
 ${STRUCTURED_EXTRACTION_POLICY}
+
+${getTemplateGuidance(template)}
 
 Return valid JSON only in this exact shape:
 {

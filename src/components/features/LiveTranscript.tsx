@@ -186,6 +186,7 @@ export const LiveTranscript = ({
     <section
       className="live-transcript"
       aria-labelledby="live-transcript-title"
+      data-live-transcript
     >
       <div
         className="live-transcript-scroll"

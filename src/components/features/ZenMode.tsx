@@ -95,10 +95,6 @@ export const ZenMode = ({
         onFinish={onEndMeeting}
       />
       <div className="recording-workspace-grid">
-        <LiveTranscript
-          segments={model.transcript}
-          interimText={model.interimText}
-        />
         <RecordingMeetingRail
           title={meetingTitle}
           onTitleChange={setMeetingTitle}
@@ -113,6 +109,10 @@ export const ZenMode = ({
           }
           notes={currentNotes}
           onNotesChange={setCurrentNotes}
+        />
+        <LiveTranscript
+          segments={model.transcript}
+          interimText={model.interimText}
         />
       </div>
     </main>

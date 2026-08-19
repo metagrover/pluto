@@ -58,6 +58,9 @@ const baseMeeting: Meeting = {
 const analyzedMeeting: Meeting = {
   ...baseMeeting,
   transcript_status: 'validated',
+  transcript_validated_at: '2026-08-17T18:05:00.000Z',
+  audio_path: '/tmp/mic.wav',
+  system_audio_path: '/tmp/system.wav',
   analysis_json: JSON.stringify({
     analysis_schema_version: 3,
     overview: 'The analysis arrived in place.',
@@ -106,7 +109,7 @@ describe('MeetingView progressive reveal', () => {
         copySuccess={false}
         handleDeleteMeeting={vi.fn()}
         highlightEntities={(text) => text}
-        transcriptVisible
+        transcriptVisible={false}
         setTranscriptVisible={vi.fn()}
       />,
     );
@@ -119,7 +122,9 @@ describe('MeetingView progressive reveal', () => {
     expect(
       container.querySelector('[data-meeting-skeleton="analysis"]'),
     ).not.toBeNull();
-    expect(container.textContent).toContain('The transcript is ready first.');
+    expect(container.textContent).not.toContain(
+      'The transcript is ready first.',
+    );
 
     await act(async () => renderMeeting(analyzedMeeting));
 
@@ -130,5 +135,54 @@ describe('MeetingView progressive reveal', () => {
     expect(
       container.querySelector('[data-analysis-content]')?.textContent,
     ).toBe('The analysis arrived in place.');
+  });
+
+  it('uses Notes and Transcript as workspace tabs with Notes selected', async () => {
+    await act(async () => renderMeeting(analyzedMeeting));
+
+    const tabs = container.querySelector('[role="tablist"]');
+    const notesTab = container.querySelector<HTMLButtonElement>(
+      '[role="tab"][data-meeting-tab="notes"]',
+    );
+    const transcriptTab = container.querySelector<HTMLButtonElement>(
+      '[role="tab"][data-meeting-tab="transcript"]',
+    );
+
+    expect(tabs).not.toBeNull();
+    expect(notesTab?.getAttribute('aria-selected')).toBe('true');
+    expect(transcriptTab?.getAttribute('aria-selected')).toBe('false');
+    expect(container.querySelector('[data-analysis-content]')).not.toBeNull();
+    expect(
+      container.querySelector('[data-meeting-artifact="transcript"]'),
+    ).toBeNull();
+  });
+
+  it('offers the approved notes templates', async () => {
+    await act(async () => renderMeeting(analyzedMeeting));
+
+    const template = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Notes template"]',
+    );
+    const valueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype,
+      'value',
+    )?.set;
+
+    await act(async () => {
+      if (!template || !valueSetter) return;
+      valueSetter.call(template, 'project_kickoff');
+      template.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(template?.value).toBe('project_kickoff');
+    expect(
+      Array.from(template?.options || []).map((option) => option.text),
+    ).toEqual([
+      'Auto',
+      '1:1',
+      'Team sync',
+      'Customer call',
+      'Interview',
+      'Project kickoff',
+    ]);
   });
 });

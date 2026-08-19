@@ -1,5 +1,4 @@
 import {
-  BarChart3,
   Check,
   ChevronDown,
   Copy,
@@ -74,6 +73,14 @@ interface MeetingViewProps {
   transcriptVisible: boolean;
   setTranscriptVisible: (val: boolean) => void;
 }
+
+type MeetingNotesTemplate =
+  | 'auto'
+  | 'one_on_one'
+  | 'team_sync'
+  | 'customer_call'
+  | 'interview'
+  | 'project_kickoff';
 
 export const TranscriptIntegrityPanel = ({
   status,
@@ -501,6 +508,8 @@ export const MeetingView = ({
     null,
   );
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
+  const [notesTemplate, setNotesTemplate] =
+    useState<MeetingNotesTemplate>('auto');
   const [regenerateNotesError, setRegenerateNotesError] = useState<
     string | null
   >(null);
@@ -786,6 +795,7 @@ export const MeetingView = ({
         {
           transcript,
           userNotes: selectedMeeting.user_notes || '',
+          template: notesTemplate,
         },
       )) as { markdown?: unknown; analysis?: unknown; signals?: unknown };
 
@@ -1017,9 +1027,7 @@ export const MeetingView = ({
     <div
       key={selectedMeeting.id}
       data-meeting-page
-      className={`mx-auto w-full space-y-8 animate-in pb-32 ${
-        version === 3 && v3 ? 'max-w-3xl' : 'max-w-4xl'
-      }`}
+      className="meeting-document mx-auto w-full max-w-[920px] animate-in pb-24"
     >
       <TranscriptIntegrityPanel
         status={selectedMeeting.transcript_status}
@@ -1039,16 +1047,10 @@ export const MeetingView = ({
           selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
         )}
       />
-      {/* Clean Hero Header */}
-      <div className="flex flex-col md:flex-row items-start justify-between gap-8 border-b border-pro-border/40 pb-12">
-        <div className="space-y-4 flex-1">
-          <div className="flex items-center gap-4">
-            <span className="text-[10px] font-bold text-pro-accent uppercase tracking-widest bg-pro-accent/5 px-2 py-1 rounded">
-              {downstreamPresentation.state === 'ready'
-                ? 'Meeting ready'
-                : 'Meeting saved'}
-            </span>
-            <span className="text-[10px] text-pro-text-muted/60 font-medium uppercase tracking-widest">
+      <header className="meeting-document-header" style={{ display: 'block' }}>
+        <div className="w-full min-w-0" style={{ width: '100%' }}>
+          <div className="meeting-document-meta">
+            <span>
               {new Date(
                 selectedMeeting?.created_at ||
                   selectedMeeting?.started_at ||
@@ -1059,6 +1061,11 @@ export const MeetingView = ({
                 year: 'numeric',
               })}
             </span>
+            {selectedMeeting.duration_seconds ? (
+              <span>
+                {Math.floor(selectedMeeting.duration_seconds / 60)} min
+              </span>
+            ) : null}
           </div>
           {editingTitle ? (
             <input
@@ -1092,7 +1099,7 @@ export const MeetingView = ({
                   setEditingTitle(false);
                 }
               }}
-              className="text-4xl font-extrabold tracking-tight text-pro-text-main leading-tight bg-transparent border-b-2 border-pro-accent outline-none w-full"
+              className="meeting-document-title w-full border-b border-pro-accent bg-transparent outline-none"
             />
           ) : (
             <h1
@@ -1107,37 +1114,30 @@ export const MeetingView = ({
                   setTitleValue(selectedMeeting?.title || 'Untitled Session');
                 }
               }}
-              className="text-2xl md:text-4xl font-extrabold tracking-tight text-pro-text-main leading-tight cursor-text hover:text-pro-accent/80 transition-colors"
+              className="meeting-document-title cursor-text transition-colors hover:text-pro-accent/80"
             >
               {selectedMeeting?.title || 'Untitled Session'}
             </h1>
           )}
-          <div className="flex items-center gap-2 mt-2">
-            <div className="flex items-center gap-2 px-3 py-1 bg-pro-accent/10 rounded-full border border-pro-accent/20 ml-2 shadow-sm">
-              <BarChart3 className="w-3 h-3 text-pro-accent" />
-              <div className="flex items-center gap-0.5 h-3">
-                {Array.from({ length: 8 }, (_, barIndex) => barIndex).map(
-                  (barIndex) => (
-                    <div
-                      key={barIndex}
-                      className="w-0.5 rounded-full bg-pro-accent/60 animate-pulse"
-                      style={{
-                        height: `${Math.random() * 8 + 4}px`,
-                        animationDelay: `${barIndex * 0.1}s`,
-                      }}
-                    />
-                  ),
-                )}
-              </div>
-              <p className="text-[10px] font-black text-pro-accent uppercase tracking-widest ml-1 opacity-90">
-                {selectedMeeting?.duration_seconds
-                  ? `${Math.floor(selectedMeeting.duration_seconds / 60)}m ${selectedMeeting.duration_seconds % 60}s`
-                  : 'Biometric Audio'}
-              </p>
-            </div>
-          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="meeting-document-actions mt-4">
+          <label className="meeting-template-picker">
+            <span className="sr-only">Notes template</span>
+            <select
+              value={notesTemplate}
+              onChange={(event) =>
+                setNotesTemplate(event.target.value as MeetingNotesTemplate)
+              }
+              aria-label="Notes template"
+            >
+              <option value="auto">Auto</option>
+              <option value="one_on_one">1:1</option>
+              <option value="team_sync">Team sync</option>
+              <option value="customer_call">Customer call</option>
+              <option value="interview">Interview</option>
+              <option value="project_kickoff">Project kickoff</option>
+            </select>
+          </label>
           {downstreamPresentation.state === 'ready' &&
           canRegenerateMeetingIntelligence ? (
             <>
@@ -1145,12 +1145,12 @@ export const MeetingView = ({
                 type="button"
                 onClick={regenerateEnhancedNotes}
                 disabled={isRegeneratingNotes}
-                className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${
+                className={`meeting-toolbar-button ${
                   isRegeneratingNotes
                     ? 'bg-pro-bg border-pro-border/40 text-pro-text-muted cursor-not-allowed'
                     : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'
                 }`}
-                title={
+                aria-label={
                   isRegeneratingNotes
                     ? 'Generating Enhanced Notes...'
                     : 'Regenerate Enhanced Notes'
@@ -1161,18 +1161,20 @@ export const MeetingView = ({
                 ) : (
                   <Sparkles className="w-4 h-4 opacity-70" />
                 )}
+                <span>{isRegeneratingNotes ? 'Writing…' : 'Regenerate'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
-                className={`w-10 h-10 rounded-xl border flex items-center justify-center text-sm transition-all duration-300 ${copySuccess ? 'bg-green-500 border-green-600 text-white scale-110' : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'}`}
-                title="Copy Summary"
+                className={`meeting-toolbar-button ${copySuccess ? 'text-green-700' : ''}`}
+                aria-label="Copy notes"
               >
                 {copySuccess ? (
                   <Check className="w-4 h-4" />
                 ) : (
                   <Copy className="w-4 h-4 opacity-60" />
                 )}
+                <span>{copySuccess ? 'Copied' : 'Copy'}</span>
               </button>
             </>
           ) : null}
@@ -1190,8 +1192,8 @@ export const MeetingView = ({
                 a.click();
               }
             }}
-            className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/40 flex items-center justify-center text-pro-text-main/60 hover:text-pro-text-main hover:bg-pro-surface transition-all"
-            title="Export Session"
+            className="meeting-toolbar-button"
+            aria-label="Export meeting"
           >
             <svg
               aria-hidden="true"
@@ -1207,13 +1209,14 @@ export const MeetingView = ({
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
               />
             </svg>
+            <span>Export</span>
           </button>
           {selectedMeeting.finalization_status !== 'recovery_required' ? (
             <button
               type="button"
               onClick={() => handleDeleteMeeting(selectedMeeting.id)}
-              className="w-10 h-10 rounded-xl bg-red-500/5 border border-red-500/20 flex items-center justify-center text-red-500 hover:bg-red-500 hover:text-white transition-all active:scale-95"
-              title="Delete Meeting"
+              className="meeting-toolbar-button meeting-toolbar-button--danger"
+              aria-label="Delete meeting"
             >
               <svg
                 aria-hidden="true"
@@ -1232,457 +1235,436 @@ export const MeetingView = ({
             </button>
           ) : null}
         </div>
-      </div>
+      </header>
       {regenerateNotesError ? (
         <p className="-mt-4 text-xs font-semibold text-red-600">
           {regenerateNotesError}
         </p>
       ) : null}
 
-      {/* Discovery Hub - Related Entities (Knowledge Graph) */}
-      <div className="mb-12 space-y-6">
-        <EntitySidebar
-          meetingId={String(selectedMeeting.id)}
-          onEntityClick={(entity) => {
-            setSelectedEntity(entity);
-          }}
-        />
-        {selectedEntity && (
-          <div className="bg-pro-surface/70 border border-pro-border/50 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-2">
-                <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
-                  Entity Detail
-                </p>
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">
-                    {ENTITY_ICONS[selectedEntity.type]}
-                  </span>
-                  <div>
-                    <h3 className="text-xl font-black text-pro-text-main">
-                      {selectedEntity.name}
-                    </h3>
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-pro-text-muted/60">
-                      {getEntityTypeLabel(selectedEntity.type)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedEntity(null)}
-                className="h-8 px-3 rounded-full border border-pro-border text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60 hover:text-pro-text-main hover:border-pro-accent/30 transition-colors"
-              >
-                Close
-              </button>
-            </div>
-
-            {entityDetailsLoading ? (
-              <div className="p-5 rounded-2xl border border-pro-border/50 bg-pro-bg/50 text-[12px] font-semibold text-pro-text-muted/60">
-                Loading mentions and related entities...
-              </div>
-            ) : entityDetailsError ? (
-              <div className="p-5 rounded-2xl border border-red-200 bg-red-50/50 text-[12px] font-semibold text-red-600">
-                {entityDetailsError}
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="flex flex-wrap gap-2">
-                  <span className="px-2.5 py-1 rounded-full bg-pro-accent/10 text-[10px] font-black uppercase tracking-widest text-pro-accent">
-                    {entityMeetings.length} meetings
-                  </span>
-                  <span className="px-2.5 py-1 rounded-full bg-stone-100 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
-                    {totalEntityMentions} mentions
-                  </span>
-                  <span className="px-2.5 py-1 rounded-full bg-stone-100 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
-                    {relatedEntities.length} connections
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <div className="space-y-3">
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/40">
-                      All Mentions Across Meetings
-                    </h4>
-                    <div className="space-y-3">
-                      {entityMeetings.length === 0 ? (
-                        <p className="p-4 rounded-2xl border border-dashed border-pro-border text-[12px] text-pro-text-muted/60">
-                          No prior meeting mentions found.
-                        </p>
-                      ) : (
-                        entityMeetings.map((meeting) => (
-                          <div
-                            key={meeting.id}
-                            className="p-4 rounded-2xl border border-pro-border/50 bg-pro-surface/70 space-y-2"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <p className="text-[13px] font-bold text-pro-text-main truncate">
-                                {meeting.title || 'Untitled Session'}
-                              </p>
-                              <span className="text-[10px] font-bold uppercase tracking-widest text-pro-text-muted/50">
-                                {formatEntityMeetingDate(meeting)}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60">
-                                {meeting.mention_count} mention
-                                {meeting.mention_count === 1 ? '' : 's'}
-                              </span>
-                              {String(meeting.id) ===
-                                String(selectedMeeting.id) && (
-                                <span className="text-[9px] font-black uppercase tracking-widest text-pro-accent">
-                                  Current Meeting
-                                </span>
-                              )}
-                            </div>
-                            {meeting.context ? (
-                              <p className="text-[12px] text-pro-text-muted/80 line-clamp-3">
-                                {meeting.context}
-                              </p>
-                            ) : null}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/40">
-                      Connected Entities
-                    </h4>
-                    <div className="flex flex-wrap gap-2">
-                      {relatedEntities.length === 0 ? (
-                        <p className="w-full p-4 rounded-2xl border border-dashed border-pro-border text-[12px] text-pro-text-muted/60">
-                          No relationships inferred yet.
-                        </p>
-                      ) : (
-                        relatedEntities.map((related) => (
-                          <button
-                            key={`${related.id}-${related.relationship}-${related.direction}`}
-                            type="button"
-                            onClick={() => setSelectedEntity(related)}
-                            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-pro-border bg-pro-surface text-[11px] font-bold text-pro-text-main hover:border-pro-accent/30 hover:text-pro-accent transition-colors"
-                            title={`${related.direction === 'outgoing' ? 'Links to' : 'Linked from'} ${related.name}`}
-                          >
-                            <span>{ENTITY_ICONS[related.type]}</span>
-                            <span className="truncate max-w-[120px]">
-                              {related.name}
-                            </span>
-                            <span className="text-[9px] font-black uppercase tracking-widest text-pro-text-muted/50">
-                              {related.relationship.replace(/_/g, ' ')}
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+      <div
+        className="meeting-document-tabs"
+        role="tablist"
+        aria-label="Meeting view"
+      >
+        <button
+          type="button"
+          role="tab"
+          data-meeting-tab="notes"
+          aria-selected={!transcriptVisible}
+          onClick={() => setTranscriptVisible(false)}
+        >
+          Notes
+        </button>
+        <button
+          type="button"
+          role="tab"
+          data-meeting-tab="transcript"
+          aria-selected={transcriptVisible}
+          onClick={() => setTranscriptVisible(true)}
+        >
+          Transcript
+        </button>
       </div>
 
-      {/* Summary & Analysis Section */}
-      {downstreamPresentation.state === 'loading' ? (
-        <MeetingAnalysisSkeleton />
-      ) : downstreamPresentation.state === 'failed' ? (
-        <section
-          aria-live="polite"
-          data-meeting-artifact="analysis"
-          data-state="failed"
-          className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] p-6"
-        >
-          <strong className="text-sm text-pro-text">
-            {downstreamPresentation.title}
-          </strong>
-          <p className="mt-1 text-sm text-pro-text-muted">
-            {downstreamPresentation.detail}
-          </p>
-        </section>
-      ) : null}
-      {version === 3 && v3 ? (
-        <div data-meeting-artifact="analysis" data-state="ready">
-          <V3AnalysisViewer
-            meetingId={selectedMeeting.id}
-            doc={v3}
-            editsMap={editsMap}
-            highlightEntities={highlightEntities}
-            onEditSaved={fetchMeetings}
-          />
-        </div>
-      ) : v2 ? (
+      {!transcriptVisible && (
         <div
-          data-meeting-artifact="analysis"
-          data-state="ready"
-          className="space-y-16"
+          className="meeting-notes-surface"
+          role="tabpanel"
+          aria-label="Notes"
         >
-          <div className="grid grid-cols-12 gap-8 items-start overflow-visible">
-            {/* Left Column: Executive Summary & Key Points */}
-            <div className="col-span-12 lg:col-span-7 space-y-12">
-              {/* Executive Summary */}
-              <div className="space-y-4">
-                <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-                  Executive Summary
-                </h2>
-                <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-pro-surface/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
-                  {summaryParagraphs.map((line, i) => (
-                    <p
-                      key={`${line}-${line.length}`}
-                      className={i > 0 ? 'mt-4' : ''}
-                    >
-                      {highlightEntities(line)}
+          {/* Discovery Hub - Related Entities (Knowledge Graph) */}
+          <div className="meeting-context-panel space-y-6">
+            <EntitySidebar
+              meetingId={String(selectedMeeting.id)}
+              onEntityClick={(entity) => {
+                setSelectedEntity(entity);
+              }}
+            />
+            {selectedEntity && (
+              <div className="bg-pro-surface/70 border border-pro-border/50 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
+                      Entity Detail
                     </p>
-                  ))}
-                </div>
-              </div>
-
-              {/* Key Insights / Points */}
-              <div className="space-y-6">
-                <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                  Key Insights
-                </h2>
-                <div className="space-y-4">
-                  {(keyPoints.length > 0
-                    ? keyPoints
-                    : ['No key points were captured.']
-                  ).map((item) => (
-                    <div
-                      key={`${item}-${item.length}`}
-                      className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-sm flex gap-4 group hover:border-pro-accent/30 transition-all"
-                    >
-                      <span className="text-pro-accent group-hover:scale-125 transition-transform shrink-0 pt-0.5">
-                        ◆
-                      </span>
-                      <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
-                        {highlightEntities(item)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Decisions Section */}
-              <div className="space-y-6">
-                <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                  Decisions
-                </h2>
-                <div className="p-8 rounded-[2rem] bg-indigo-50/30 dark:bg-pro-surface/50 border border-indigo-100/50 dark:border-pro-border/30 space-y-4">
-                  {(decisions.length > 0
-                    ? decisions
-                    : ['No explicit decisions were made.']
-                  ).map((item) => (
-                    <div
-                      key={`${item}-${item.length}`}
-                      className="flex gap-3 items-baseline"
-                    >
-                      <span className="text-indigo-500 font-bold leading-none -translate-y-[3px]">
-                        ↳
-                      </span>
-                      <p className="text-[14px] font-semibold text-indigo-900/80 dark:text-indigo-200/90 leading-relaxed">
-                        {highlightEntities(item)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column: Action Items */}
-            <div className="col-span-12 lg:col-span-5 space-y-12 lg:sticky lg:top-24 lg:self-start">
-              <div className="space-y-6">
-                <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-                  Action Items
-                </h2>
-                {meetingActionError ? (
-                  <p className="-mt-2 text-xs font-semibold text-red-600">
-                    {meetingActionError}
-                  </p>
-                ) : null}
-                <div className="space-y-4">
-                  {(meetingActionItems.length > 0
-                    ? meetingActionItems
-                    : ['No concrete action items were explicitly committed.']
-                  ).map((item) =>
-                    typeof item === 'string' ? (
-                      <div
-                        key={`${item}-${item.length}`}
-                        className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect"
-                      >
-                        <div className="w-6 h-6 rounded-lg border border-pro-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-pro-accent group-hover:bg-pro-accent/5 transition-all">
-                          <Check className="w-3.5 h-3.5 text-pro-accent opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
-                        <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
-                          {highlightEntities(item)}
-                        </p>
-                      </div>
-                    ) : (
-                      <MeetingActionCards
-                        key={item.id}
-                        items={[item]}
-                        highlightEntities={highlightEntities}
-                        meetingEntitiesLoading={meetingEntitiesLoading}
-                        pendingActionId={pendingActionId}
-                        pendingAttentionId={pendingAttentionId}
-                        onToggleAction={toggleMeetingActionItem}
-                        onToggleDismissal={toggleMeetingActionDismissal}
-                      />
-                    ),
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <div
-        data-meeting-artifact="transcript"
-        data-state={hasTranscriptContent ? 'ready' : 'loading'}
-        className={`flex-1 flex flex-col ${transcriptVisible ? 'lg:flex-row' : 'lg:flex-col'} h-auto overflow-visible relative`}
-      >
-        {/* Right: Transcript (Collapsible) - Visual polish */}
-        <div className="relative bg-pro-bg lg:bg-transparent z-20 flex-1 border-l border-pro-border/40 lg:border-l-0">
-          {transcriptVisible && (
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg dark:bg-pro-bg z-20" />
-          )}
-          <div className="flex flex-col">
-            {transcriptVisible && (
-              <div
-                className="sticky z-30 bg-pro-bg dark:bg-pro-bg pt-6"
-                style={{ top: '-65px' }}
-              >
-                <div className="bg-pro-surface dark:bg-pro-bg shadow-md dark:shadow-none border-b border-transparent dark:border-transparent overflow-hidden">
-                  <div className="p-6 flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-pro-accent/10 flex items-center justify-center text-pro-accent">
-                        <MessageSquare size={14} />
-                      </div>
+                      <span className="text-2xl">
+                        {ENTITY_ICONS[selectedEntity.type]}
+                      </span>
                       <div>
-                        <h3 className="text-xs font-black uppercase tracking-[0.2em] text-pro-text-main">
-                          Transcript
+                        <h3 className="text-xl font-black text-pro-text-main">
+                          {selectedEntity.name}
                         </h3>
-                        <p className="text-[9px] font-bold text-pro-text-muted uppercase tracking-widest mt-0.5">
-                          Verbatim Record
+                        <p className="text-[11px] font-bold uppercase tracking-widest text-pro-text-muted/60">
+                          {getEntityTypeLabel(selectedEntity.type)}
                         </p>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setTranscriptVisible(false)}
-                      className="lg:hidden p-2 hover:bg-black/5 rounded-full transition-colors"
-                    >
-                      <ChevronDown className="w-5 h-5" />
-                    </button>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEntity(null)}
+                    className="h-8 px-3 rounded-full border border-pro-border text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60 hover:text-pro-text-main hover:border-pro-accent/30 transition-colors"
+                  >
+                    Close
+                  </button>
                 </div>
+
+                {entityDetailsLoading ? (
+                  <div className="p-5 rounded-2xl border border-pro-border/50 bg-pro-bg/50 text-[12px] font-semibold text-pro-text-muted/60">
+                    Loading mentions and related entities...
+                  </div>
+                ) : entityDetailsError ? (
+                  <div className="p-5 rounded-2xl border border-red-200 bg-red-50/50 text-[12px] font-semibold text-red-600">
+                    {entityDetailsError}
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="px-2.5 py-1 rounded-full bg-pro-accent/10 text-[10px] font-black uppercase tracking-widest text-pro-accent">
+                        {entityMeetings.length} meetings
+                      </span>
+                      <span className="px-2.5 py-1 rounded-full bg-stone-100 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
+                        {totalEntityMentions} mentions
+                      </span>
+                      <span className="px-2.5 py-1 rounded-full bg-stone-100 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
+                        {relatedEntities.length} connections
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="space-y-3">
+                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/40">
+                          All Mentions Across Meetings
+                        </h4>
+                        <div className="space-y-3">
+                          {entityMeetings.length === 0 ? (
+                            <p className="p-4 rounded-2xl border border-dashed border-pro-border text-[12px] text-pro-text-muted/60">
+                              No prior meeting mentions found.
+                            </p>
+                          ) : (
+                            entityMeetings.map((meeting) => (
+                              <div
+                                key={meeting.id}
+                                className="p-4 rounded-2xl border border-pro-border/50 bg-pro-surface/70 space-y-2"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <p className="text-[13px] font-bold text-pro-text-main truncate">
+                                    {meeting.title || 'Untitled Session'}
+                                  </p>
+                                  <span className="text-[10px] font-bold uppercase tracking-widest text-pro-text-muted/50">
+                                    {formatEntityMeetingDate(meeting)}
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60">
+                                    {meeting.mention_count} mention
+                                    {meeting.mention_count === 1 ? '' : 's'}
+                                  </span>
+                                  {String(meeting.id) ===
+                                    String(selectedMeeting.id) && (
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-pro-accent">
+                                      Current Meeting
+                                    </span>
+                                  )}
+                                </div>
+                                {meeting.context ? (
+                                  <p className="text-[12px] text-pro-text-muted/80 line-clamp-3">
+                                    {meeting.context}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/40">
+                          Connected Entities
+                        </h4>
+                        <div className="flex flex-wrap gap-2">
+                          {relatedEntities.length === 0 ? (
+                            <p className="w-full p-4 rounded-2xl border border-dashed border-pro-border text-[12px] text-pro-text-muted/60">
+                              No relationships inferred yet.
+                            </p>
+                          ) : (
+                            relatedEntities.map((related) => (
+                              <button
+                                key={`${related.id}-${related.relationship}-${related.direction}`}
+                                type="button"
+                                onClick={() => setSelectedEntity(related)}
+                                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-pro-border bg-pro-surface text-[11px] font-bold text-pro-text-main hover:border-pro-accent/30 hover:text-pro-accent transition-colors"
+                                title={`${related.direction === 'outgoing' ? 'Links to' : 'Linked from'} ${related.name}`}
+                              >
+                                <span>{ENTITY_ICONS[related.type]}</span>
+                                <span className="truncate max-w-[120px]">
+                                  {related.name}
+                                </span>
+                                <span className="text-[9px] font-black uppercase tracking-widest text-pro-text-muted/50">
+                                  {related.relationship.replace(/_/g, ' ')}
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
+          </div>
 
-            <div
-              className={`transition-[max-height,opacity] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] overflow-hidden ${
-                transcriptVisible
-                  ? 'opacity-100'
-                  : 'opacity-0 pointer-events-none'
-              }`}
-              style={{
-                maxHeight: transcriptVisible ? transcriptBodyHeight : 0,
-              }}
+          {/* Summary & Analysis Section */}
+          {downstreamPresentation.state === 'loading' ? (
+            <MeetingAnalysisSkeleton />
+          ) : downstreamPresentation.state === 'failed' ? (
+            <section
+              aria-live="polite"
+              data-meeting-artifact="analysis"
+              data-state="failed"
+              className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] p-6"
             >
-              <div
-                ref={transcriptBodyRef}
-                className="px-8 pb-10 pt-6 bg-stone-50/30 dark:bg-transparent"
-              >
-                <div className="space-y-8 max-w-xl mx-auto pt-4">
-                  {hasTranscriptContent ? (
-                    mergedTranscriptSegments.map((s: TranscriptSegment) => {
-                      const segmentKey = `${String(s.speaker ?? 'unknown')}-${s.start}-${s.end}-${s.text}`;
-                      return (
-                        <div
-                          key={segmentKey}
-                          className="group flex gap-12 transition-all"
+              <strong className="text-sm text-pro-text">
+                {downstreamPresentation.title}
+              </strong>
+              <p className="mt-1 text-sm text-pro-text-muted">
+                {downstreamPresentation.detail}
+              </p>
+            </section>
+          ) : null}
+          {version === 3 && v3 ? (
+            <div data-meeting-artifact="analysis" data-state="ready">
+              <V3AnalysisViewer
+                meetingId={selectedMeeting.id}
+                doc={v3}
+                editsMap={editsMap}
+                highlightEntities={highlightEntities}
+                onEditSaved={fetchMeetings}
+                onRevealSource={() => setTranscriptVisible(true)}
+              />
+            </div>
+          ) : v2 ? (
+            <div
+              data-meeting-artifact="analysis"
+              data-state="ready"
+              className="space-y-16"
+            >
+              <div className="grid grid-cols-12 gap-8 items-start overflow-visible">
+                {/* Left Column: Executive Summary & Key Points */}
+                <div className="col-span-12 lg:col-span-7 space-y-12">
+                  {/* Executive Summary */}
+                  <div className="space-y-4">
+                    <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                      Executive Summary
+                    </h2>
+                    <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-pro-surface/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
+                      {summaryParagraphs.map((line, i) => (
+                        <p
+                          key={`${line}-${line.length}`}
+                          className={i > 0 ? 'mt-4' : ''}
                         >
-                          <div className="w-20 shrink-0 pt-1 text-right">
-                            <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
-                              {s.speaker || 'Unknown'}
-                            </span>
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
-                              {highlightEntities(s.text)}
+                          {highlightEntities(line)}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Key Insights / Points */}
+                  <div className="space-y-6">
+                    <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
+                      Key Insights
+                    </h2>
+                    <div className="space-y-4">
+                      {(keyPoints.length > 0
+                        ? keyPoints
+                        : ['No key points were captured.']
+                      ).map((item) => (
+                        <div
+                          key={`${item}-${item.length}`}
+                          className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-sm flex gap-4 group hover:border-pro-accent/30 transition-all"
+                        >
+                          <span className="text-pro-accent group-hover:scale-125 transition-transform shrink-0 pt-0.5">
+                            ◆
+                          </span>
+                          <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
+                            {highlightEntities(item)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Decisions Section */}
+                  <div className="space-y-6">
+                    <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
+                      Decisions
+                    </h2>
+                    <div className="p-8 rounded-[2rem] bg-indigo-50/30 dark:bg-pro-surface/50 border border-indigo-100/50 dark:border-pro-border/30 space-y-4">
+                      {(decisions.length > 0
+                        ? decisions
+                        : ['No explicit decisions were made.']
+                      ).map((item) => (
+                        <div
+                          key={`${item}-${item.length}`}
+                          className="flex gap-3 items-baseline"
+                        >
+                          <span className="text-indigo-500 font-bold leading-none -translate-y-[3px]">
+                            ↳
+                          </span>
+                          <p className="text-[14px] font-semibold text-indigo-900/80 dark:text-indigo-200/90 leading-relaxed">
+                            {highlightEntities(item)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Action Items */}
+                <div className="col-span-12 lg:col-span-5 space-y-12 lg:sticky lg:top-24 lg:self-start">
+                  <div className="space-y-6">
+                    <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
+                      Action Items
+                    </h2>
+                    {meetingActionError ? (
+                      <p className="-mt-2 text-xs font-semibold text-red-600">
+                        {meetingActionError}
+                      </p>
+                    ) : null}
+                    <div className="space-y-4">
+                      {(meetingActionItems.length > 0
+                        ? meetingActionItems
+                        : [
+                            'No concrete action items were explicitly committed.',
+                          ]
+                      ).map((item) =>
+                        typeof item === 'string' ? (
+                          <div
+                            key={`${item}-${item.length}`}
+                            className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect"
+                          >
+                            <div className="w-6 h-6 rounded-lg border border-pro-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-pro-accent group-hover:bg-pro-accent/5 transition-all">
+                              <Check className="w-3.5 h-3.5 text-pro-accent opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                            <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
+                              {highlightEntities(item)}
                             </p>
                           </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <MeetingTranscriptSkeleton />
-                  )}
+                        ) : (
+                          <MeetingActionCards
+                            key={item.id}
+                            items={[item]}
+                            highlightEntities={highlightEntities}
+                            meetingEntitiesLoading={meetingEntitiesLoading}
+                            pendingActionId={pendingActionId}
+                            pendingAttentionId={pendingAttentionId}
+                            onToggleAction={toggleMeetingActionItem}
+                            onToggleDismissal={toggleMeetingActionDismissal}
+                          />
+                        ),
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+          ) : null}
+        </div>
+      )}
 
-            {/* Expansion Action Bar - Refined Gradient & integrated button */}
+      {transcriptVisible && (
+        <div
+          data-meeting-artifact="transcript"
+          data-state={hasTranscriptContent ? 'ready' : 'loading'}
+          className="meeting-transcript-surface flex-1 flex flex-col h-auto overflow-visible relative"
+        >
+          {/* Right: Transcript (Collapsible) - Visual polish */}
+          <div className="relative bg-pro-bg lg:bg-transparent z-20 flex-1 border-l border-pro-border/40 lg:border-l-0">
             {transcriptVisible && (
-              <div className="relative flex items-end justify-center pb-8 transition-all duration-700 pt-16 pb-24">
-                <button
-                  type="button"
-                  onClick={() => setTranscriptVisible(!transcriptVisible)}
-                  className="group relative px-8 py-3 bg-pro-surface border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
-                >
-                  <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
-                    Collapse Transcript
-                  </span>
-                  <div className="w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500 rotate-180">
-                    <ChevronDown className="w-3 h-3 text-pro-accent" />
-                  </div>
-                </button>
-              </div>
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg dark:bg-pro-bg z-20" />
             )}
-          </div>
-        </div>
+            <div className="flex flex-col">
+              {transcriptVisible && (
+                <div
+                  className="sticky z-30 bg-pro-bg dark:bg-pro-bg pt-6"
+                  style={{ top: '-65px' }}
+                >
+                  <div className="bg-pro-surface dark:bg-pro-bg shadow-md dark:shadow-none border-b border-transparent dark:border-transparent overflow-hidden">
+                    <div className="p-6 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-pro-accent/10 flex items-center justify-center text-pro-accent">
+                          <MessageSquare size={14} />
+                        </div>
+                        <div>
+                          <h3 className="text-xs font-black uppercase tracking-[0.2em] text-pro-text-main">
+                            Transcript
+                          </h3>
+                          <p className="text-[9px] font-bold text-pro-text-muted uppercase tracking-widest mt-0.5">
+                            Verbatim Record
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setTranscriptVisible(false)}
+                        className="lg:hidden p-2 hover:bg-black/5 rounded-full transition-colors"
+                      >
+                        <ChevronDown className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-        {!transcriptVisible && (
-          <div className="flex w-full items-center justify-center py-6">
-            <button
-              type="button"
-              onClick={() => setTranscriptVisible(true)}
-              className="group relative px-8 py-3 bg-pro-surface border border-pro-border/60 shadow-[0_4px_24px_rgba(0,0,0,0.04)] rounded-full hover:shadow-[0_8px_32px_rgba(0,0,0,0.08)] hover:border-pro-accent/20 transition-all flex items-center gap-3 active:scale-95"
-            >
-              <span className="text-[10px] font-black text-pro-text-main/80 uppercase tracking-widest group-hover:text-pro-text-main transition-colors">
-                Explore Full Transcript
-              </span>
-              <div className="w-5 h-5 rounded-full bg-pro-accent/5 flex items-center justify-center transition-transform duration-500">
-                <ChevronDown className="w-3 h-3 text-pro-accent" />
+              <div
+                className={`transition-[max-height,opacity] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] overflow-hidden ${
+                  transcriptVisible
+                    ? 'opacity-100'
+                    : 'opacity-0 pointer-events-none'
+                }`}
+                style={{
+                  maxHeight: transcriptVisible ? transcriptBodyHeight : 0,
+                }}
+              >
+                <div
+                  ref={transcriptBodyRef}
+                  className="px-8 pb-10 pt-6 bg-stone-50/30 dark:bg-transparent"
+                >
+                  <div className="space-y-8 max-w-xl mx-auto pt-4">
+                    {hasTranscriptContent ? (
+                      mergedTranscriptSegments.map((s: TranscriptSegment) => {
+                        const segmentKey = `${String(s.speaker ?? 'unknown')}-${s.start}-${s.end}-${s.text}`;
+                        return (
+                          <div
+                            key={segmentKey}
+                            className="group flex gap-12 transition-all"
+                          >
+                            <div className="w-20 shrink-0 pt-1 text-right">
+                              <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
+                                {s.speaker || 'Unknown'}
+                              </span>
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
+                                {highlightEntities(s.text)}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <MeetingTranscriptSkeleton />
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="absolute -right-2 -top-2 flex items-center justify-center w-5 h-5 bg-pro-accent text-white rounded-full text-[9px] font-bold shadow-sm animate-in zoom-in duration-300 delay-100">
-                +
-              </div>
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Discreet Footer */}
-      <div className="pt-12 flex items-center justify-between border-t border-pro-border/20 px-4">
-        <div className="flex items-center gap-8">
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-            <span className="text-[9px] font-bold text-pro-text-muted/40 uppercase tracking-widest">
-              Encrypted
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-pro-accent/30" />
-            <span className="text-[9px] font-bold text-pro-text-muted/40 uppercase tracking-widest">
-              Local Engine v4.2
-            </span>
+            </div>
           </div>
         </div>
-        <div className="text-[9px] font-bold text-pro-text-muted/20 uppercase tracking-widest">
-          Pluto Persistence Layer
-        </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -25,6 +25,7 @@ interface V3AnalysisViewerProps {
   valueSignals?: ValueGainSignals | null;
   highlightEntities: (text: string) => ReactNode;
   onEditSaved: () => void; // Trigger a refetch or state update in parent
+  onRevealSource?: () => void;
 }
 
 export const V3AnalysisViewer = ({
@@ -34,20 +35,21 @@ export const V3AnalysisViewer = ({
   valueSignals,
   highlightEntities,
   onEditSaved,
+  onRevealSource,
 }: V3AnalysisViewerProps) => {
   return (
-    <div className="max-w-3xl mx-auto pb-24 pt-6 font-sans">
+    <article className="meeting-notes-document mx-auto w-full max-w-[720px] pb-16 font-sans">
       {/* Overview Section */}
-      <div className="mb-12">
-        <p className="text-[19px] md:text-[21px] font-normal leading-[1.7] text-pro-text-main/90 tracking-[-0.01em]">
+      <div className="mb-10">
+        <p className="text-[17px] font-normal leading-7 text-pro-text-main/90">
           {highlightEntities(doc.overview)}
         </p>
       </div>
 
       {/* Continuity */}
       {valueSignals?.continuity && valueSignals.continuity.length > 0 && (
-        <div className="mb-16 bg-stone-50/80 dark:bg-stone-900/40 border border-stone-200/50 dark:border-stone-800/50 rounded-2xl p-6">
-          <h3 className="text-[12px] font-bold uppercase tracking-[0.15em] text-stone-500 mb-4 flex items-center gap-2">
+        <section className="mb-12 border-l-2 border-pro-border pl-5">
+          <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-pro-text-main">
             <LinkIcon size={14} className="text-stone-400" />
             Previous Context
           </h3>
@@ -62,11 +64,11 @@ export const V3AnalysisViewer = ({
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       )}
 
       {/* Topics */}
-      <div className="space-y-12">
+      <div className="space-y-10">
         {doc.topics.map((topic, i) => (
           <TopicCard
             key={`${i}-${topic.title}`}
@@ -76,17 +78,18 @@ export const V3AnalysisViewer = ({
             editsMap={editsMap}
             highlightEntities={highlightEntities}
             onEditSaved={onEditSaved}
+            onRevealSource={onRevealSource}
           />
         ))}
       </div>
 
       {/* Action Items */}
       {doc.all_action_items.length > 0 && (
-        <div className="mt-20 pt-16 border-t border-stone-200 dark:border-stone-800">
-          <h2 className="text-[24px] font-bold text-pro-text-main tracking-tight mb-8">
+        <section className="mt-12 border-t border-pro-border pt-9">
+          <h2 className="mb-5 text-xl font-semibold tracking-tight text-pro-text-main">
             Action Items
           </h2>
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
             {doc.all_action_items.map((item, i) => (
               <ActionItemCard
                 key={`global-action-${item.text}-${item.assignee ?? 'none'}-${item.due ?? 'none'}`}
@@ -97,9 +100,9 @@ export const V3AnalysisViewer = ({
               />
             ))}
           </div>
-        </div>
+        </section>
       )}
-    </div>
+    </article>
   );
 };
 
@@ -112,6 +115,7 @@ const TopicCard = ({
   editsMap,
   highlightEntities,
   onEditSaved,
+  onRevealSource,
 }: {
   topic: TopicSection;
   index: number;
@@ -119,20 +123,26 @@ const TopicCard = ({
   editsMap: UserEditsMap;
   highlightEntities: (text: string) => ReactNode;
   onEditSaved: () => void;
+  onRevealSource?: () => void;
 }) => {
   return (
-    <div className="group">
+    <section className="group">
       {/* Topic Header */}
-      <div className="mb-5">
-        <h2 className="text-[22px] md:text-[26px] font-semibold tracking-tight text-pro-text-main flex items-baseline gap-3 mb-2">
-          {topic.title}
-          {topic.transcript_range && (
-            <span className="text-[13px] font-medium text-stone-400 dark:text-stone-500 tracking-wide tabular-nums">
-              {formatTime(topic.transcript_range[0])} -{' '}
-              {formatTime(topic.transcript_range[1])}
-            </span>
-          )}
-        </h2>
+      <div className="mb-4">
+        <div className="flex items-baseline justify-between gap-4">
+          <h2 className="mb-1 text-xl font-semibold tracking-tight text-pro-text-main">
+            {topic.title}
+          </h2>
+          {topic.transcript_range && onRevealSource ? (
+            <button
+              type="button"
+              className="meeting-source-link"
+              onClick={onRevealSource}
+            >
+              View source
+            </button>
+          ) : null}
+        </div>
         {topic.summary && (
           <p className="text-[16px] leading-[1.65] font-normal text-stone-600 dark:text-stone-400">
             {highlightEntities(topic.summary)}
@@ -174,6 +184,7 @@ const TopicCard = ({
               onEditSaved={onEditSaved}
               type="decision"
               decidedBy={decision.decided_by}
+              evidence={decision.evidence}
             />
           ))}
 
@@ -194,7 +205,7 @@ const TopicCard = ({
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 };
 
@@ -209,6 +220,7 @@ const EditableItem = ({
   speaker,
   fromUserNotes,
   decidedBy,
+  evidence,
 }: {
   path: string;
   originalText: string;
@@ -220,6 +232,7 @@ const EditableItem = ({
   speaker?: string;
   fromUserNotes?: boolean;
   decidedBy?: string;
+  evidence?: string;
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const currentText = applyUserEdit(originalText, path, editsMap);
@@ -351,6 +364,7 @@ const EditableItem = ({
               </span>
             )}
           </p>
+          {evidence ? <SourceEvidence evidence={evidence} /> : null}
         </div>
         <div className="absolute right-0 top-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
           {hasEdit && (
@@ -441,8 +455,8 @@ const ActionItemCard = ({
   const hasEdit = !!editsMap[path];
 
   return (
-    <div className="group flex gap-4 items-start p-4 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-pro-bg shadow-sm hover:shadow-md hover:border-stone-300 dark:hover:border-stone-700 transition-all">
-      <div className="w-[18px] h-[18px] rounded-[4px] border-2 border-stone-300 dark:border-stone-600 flex items-center justify-center shrink-0 mt-[3px] group-hover:border-stone-400 transition-colors">
+    <div className="group flex items-start gap-3 py-1.5">
+      <div className="mt-[3px] flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border border-stone-300 dark:border-stone-600">
         {/* Unchecked state for pure read-only look, user can't actually check it here but it implies action */}
       </div>
       <div className="flex-1">
@@ -459,7 +473,7 @@ const ActionItemCard = ({
         </p>
 
         {(item.assignee || item.due || item.topic) && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3">
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-2">
             {item.assignee && (
               <span className="flex items-center gap-1.5 text-[12px] font-medium text-stone-500">
                 <UserCircle size={14} className="text-stone-400" />{' '}
@@ -478,13 +492,15 @@ const ActionItemCard = ({
             )}
           </div>
         )}
+        {item.evidence ? <SourceEvidence evidence={item.evidence} /> : null}
       </div>
     </div>
   );
 };
 
-const formatTime = (seconds: number) => {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-};
+const SourceEvidence = ({ evidence }: { evidence: string }) => (
+  <details className="meeting-source-evidence">
+    <summary>Source</summary>
+    <blockquote>{evidence}</blockquote>
+  </details>
+);

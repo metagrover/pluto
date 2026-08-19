@@ -149,6 +149,64 @@
 }
 
 @layer components {
+  .meeting-document {
+    @apply px-6 text-pro-text-main md:px-10;
+  }
+  .meeting-document-header {
+    @apply flex flex-col gap-4 border-b border-pro-border/70 pb-6 pt-4;
+  }
+  .meeting-document-meta {
+    @apply mb-2 flex items-center gap-3 text-xs text-pro-text-muted;
+  }
+  .meeting-document-meta span + span::before {
+    content: "·";
+    @apply mr-3 text-pro-border;
+  }
+  .meeting-document-title {
+    @apply text-2xl font-semibold leading-tight tracking-[-0.02em] md:text-[30px];
+  }
+  .meeting-document-actions {
+    @apply flex flex-wrap items-center gap-1.5;
+  }
+  .meeting-template-picker select {
+    @apply min-h-9 rounded-lg border border-pro-border bg-pro-surface px-2.5 text-xs font-medium text-pro-text-main outline-none hover:bg-pro-hover focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .meeting-toolbar-button {
+    @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs font-medium text-pro-text-muted transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
+  }
+  .meeting-toolbar-button--danger {
+    @apply px-2 text-red-600/70 hover:border-red-200 hover:bg-red-50 hover:text-red-700;
+  }
+  .meeting-document-tabs {
+    @apply sticky top-0 z-30 flex gap-6 border-b border-pro-border bg-pro-bg/95 pt-5 backdrop-blur;
+  }
+  .meeting-document-tabs button {
+    @apply -mb-px min-h-11 border-b-2 border-transparent px-0 text-sm font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .meeting-document-tabs button[aria-selected="true"] {
+    @apply border-pro-text-main text-pro-text-main;
+  }
+  .meeting-notes-surface {
+    @apply flex flex-col pt-8;
+  }
+  .meeting-context-panel {
+    @apply order-last mt-14 border-t border-pro-border pt-8;
+  }
+  .meeting-transcript-surface {
+    @apply pt-5;
+  }
+  .meeting-source-link {
+    @apply shrink-0 text-xs text-pro-text-muted opacity-0 transition-opacity hover:text-pro-text-main focus-visible:opacity-100 group-hover:opacity-100;
+  }
+  .meeting-source-evidence {
+    @apply mt-1.5 text-xs text-pro-text-muted;
+  }
+  .meeting-source-evidence summary {
+    @apply w-fit cursor-pointer select-none hover:text-pro-text-main;
+  }
+  .meeting-source-evidence blockquote {
+    @apply mt-2 border-l-2 border-pro-border pl-3 italic leading-5;
+  }
   .recording-workspace {
     @apply flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-pro-bg text-pro-text-main;
   }
@@ -219,10 +277,7 @@
     @apply min-h-11 gap-2 rounded-xl bg-pro-accent px-4 text-xs font-semibold text-pro-bg transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-surface disabled:cursor-wait disabled:opacity-50;
   }
   .recording-workspace-grid {
-    @apply grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px];
-  }
-  .recording-workspace-grid:has(.recording-rail--collapsed) {
-    grid-template-columns: minmax(0, 1fr) 48px;
+    @apply grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px];
   }
   .live-transcript {
     @apply relative min-h-0 min-w-0 overflow-hidden;
@@ -284,31 +339,28 @@
     @apply mt-2 block text-sm text-pro-text-muted;
   }
   .recording-rail {
-    @apply relative min-h-0 min-w-0 border-l border-pro-border bg-pro-surface;
-  }
-  .recording-rail--collapsed {
-    @apply w-12;
-  }
-  .rail-collapse {
-    @apply absolute -left-3 top-6 z-10 flex h-7 w-7 items-center justify-center rounded-full border border-pro-border bg-pro-surface text-pro-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .recording-rail--collapsed .rail-collapse svg {
-    @apply rotate-180;
+    @apply relative min-h-0 min-w-0 border-r border-pro-border bg-pro-surface;
   }
   .recording-rail-content {
-    @apply flex h-full flex-col gap-6 overscroll-contain overflow-y-auto p-5 pt-8;
+    @apply mx-auto flex h-full w-full max-w-[760px] flex-col overscroll-contain overflow-y-auto px-8 pb-8 pt-10;
   }
   .rail-heading h2 {
-    @apply mt-1 text-lg font-semibold;
+    @apply mt-2 text-2xl font-semibold tracking-tight;
   }
-  .rail-section {
-    @apply border-t border-pro-border pt-5;
+  .rail-heading > p:last-child {
+    @apply mt-2 text-sm leading-6 text-pro-text-muted;
   }
-  .rail-section h3 {
-    @apply mb-3 flex items-center gap-2 text-xs font-semibold text-pro-text-muted;
+  .rail-meta {
+    @apply mt-8 border-b border-pro-border pb-6;
+  }
+  .rail-meta h3 {
+    @apply mb-2 flex items-center gap-2 text-xs font-medium text-pro-text-muted;
   }
   .rail-title-input {
-    @apply flex h-10 w-full min-w-0 rounded-lg border border-pro-border bg-pro-bg px-3 text-sm font-medium outline-none placeholder:text-pro-text-muted focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply w-full min-w-0 border-0 bg-transparent p-0 text-lg font-medium outline-none placeholder:text-pro-text-muted focus-visible:ring-0;
+  }
+  .rail-participants {
+    @apply mt-5;
   }
   .participant-list {
     @apply mb-3 flex flex-wrap gap-2;
@@ -329,10 +381,10 @@
     @apply flex h-8 w-8 items-center justify-center text-pro-text-muted;
   }
   .rail-notes {
-    @apply flex min-h-0 flex-1 flex-col;
+    @apply flex min-h-0 flex-1 flex-col pt-6;
   }
   .rail-notes textarea {
-    @apply min-h-40 flex-1 resize-none rounded-xl border border-pro-border bg-pro-bg p-3 text-sm leading-6 outline-none placeholder:text-pro-text-muted focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-base leading-7 outline-none placeholder:text-pro-text-muted/60 focus-visible:ring-0;
   }
   .rail-diagnostics {
     @apply border-t border-pro-border pt-4 text-xs text-pro-text-muted;
@@ -356,6 +408,9 @@
       @apply grid-cols-1;
     }
     .recording-rail {
+      @apply block border-r-0;
+    }
+    .live-transcript {
       @apply hidden;
     }
   }

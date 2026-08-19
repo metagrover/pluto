@@ -133,7 +133,6 @@ function App() {
   >(null);
   const [currentNotes, setCurrentNotes] = useState('');
   const [transcriptVisible, setTranscriptVisible] = useState(false);
-  const expandTranscriptForMeetingRef = useRef<string | number | null>(null);
   const [copySuccess, setCopySuccess] = useState(false);
   const [autoEndEnabled, setAutoEndEnabled] = useState(true);
 
@@ -275,14 +274,7 @@ function App() {
   };
 
   useEffect(() => {
-    const shouldExpand =
-      selectedMeetingId !== null &&
-      String(expandTranscriptForMeetingRef.current) ===
-        String(selectedMeetingId);
-    setTranscriptVisible(shouldExpand);
-    if (shouldExpand) {
-      expandTranscriptForMeetingRef.current = null;
-    }
+    setTranscriptVisible(false);
     if (contentScrollRef.current) {
       contentScrollRef.current.scrollTo({ top: 0, behavior: 'auto' });
     }
@@ -765,7 +757,6 @@ function App() {
           onSessionComplete={async (meetingId) => {
             await fetchMeetings();
             if (meetingId) {
-              expandTranscriptForMeetingRef.current = meetingId;
               setSelectedMeetingId(meetingId);
             }
           }}
