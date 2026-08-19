@@ -2451,7 +2451,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'GENERATE_ANALYSIS_V2',
-    async (_event, { transcript, userNotes }) => {
+    async (_event, { transcript, userNotes, template }) => {
       try {
         if (!transcript || !transcript.trim()) {
           return {
@@ -2467,6 +2467,7 @@ app.whenReady().then(async () => {
         const analysis = await provider.generateStructuredAnalysis(
           transcript,
           userNotes,
+          template,
         );
         const signals = await provider.extractValueSignals(
           transcript,

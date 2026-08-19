@@ -192,7 +192,7 @@ describe('recording workspace components', () => {
     expect(html).not.toContain('No transcript');
   });
 
-  it('keeps notes and participants in a labeled secondary rail', () => {
+  it('presents notes as the primary recording document', () => {
     const html = renderToStaticMarkup(
       <RecordingMeetingRail
         title="Launch review"
@@ -206,11 +206,43 @@ describe('recording workspace components', () => {
         onNotesChange={() => {}}
       />,
     );
-    expect(html).toContain('Meeting details');
+    expect(html).toContain('aria-label="Meeting notes"');
+    expect(html).toContain('Capture what matters');
     expect(html).toContain('Meeting title');
     expect(html).toContain('value="Launch review"');
     expect(html).toContain('Notes');
     expect(html).toContain('Remove Avery');
+    expect(html).not.toContain('Collapse meeting details');
+  });
+
+  it('places the scratchpad before the live transcript', () => {
+    const html = renderToStaticMarkup(
+      <ZenMode
+        isProcessing={false}
+        onEndMeeting={() => {}}
+        onBackHome={() => {}}
+        meetingTitle="Launch review"
+        setMeetingTitle={() => {}}
+        meetingParticipants={[]}
+        setMeetingParticipants={() => {}}
+        participantInput=""
+        setParticipantInput={() => {}}
+        currentNotes=""
+        setCurrentNotes={() => {}}
+        liveTranscript={[]}
+        captureHealth={{
+          microphone: 'healthy',
+          systemAudio: 'healthy',
+          captureDurability: 'healthy',
+        }}
+        liveTranscriptIntegrity="healthy"
+        recordingStartedAtMs={null}
+      />,
+    );
+
+    expect(html.indexOf('data-recording-scratchpad')).toBeLessThan(
+      html.indexOf('data-live-transcript'),
+    );
   });
 
   it('updates the recording meeting title from the details rail', () => {

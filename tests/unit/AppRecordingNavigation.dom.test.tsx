@@ -202,7 +202,7 @@ describe('App recording navigation', () => {
     await act(async () => root.unmount());
   });
 
-  it('opens a completed meeting with its ready transcript expanded', async () => {
+  it('opens a completed meeting on Notes with Transcript secondary', async () => {
     const { default: App } = await import('../../src/App');
     const root = createRoot(container);
 
@@ -229,11 +229,26 @@ describe('App recording navigation', () => {
     });
 
     expect(container.textContent).toContain('Just stopped meeting');
+    expect(
+      container
+        .querySelector('[data-meeting-tab="notes"]')
+        ?.getAttribute('aria-selected'),
+    ).toBe('true');
+    expect(
+      container
+        .querySelector('[data-meeting-tab="transcript"]')
+        ?.getAttribute('aria-selected'),
+    ).toBe('false');
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-meeting-tab="transcript"]')
+        ?.click();
+      await flushPromises();
+    });
     expect(container.textContent).toContain(
       'Visible as soon as recording stops.',
     );
-    expect(container.textContent).toContain('Collapse Transcript');
-    expect(container.textContent).not.toContain('Explore Full Transcript');
 
     await act(async () => root.unmount());
   });

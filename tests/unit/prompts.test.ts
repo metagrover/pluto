@@ -109,6 +109,20 @@ describe('getSummaryRepairPrompt', () => {
 });
 
 describe('structured analysis extraction policy', () => {
+  it('produces a compact document and applies the selected notes template', () => {
+    const prompt = getStructuredAnalysisPrompt(
+      'A: We agreed to ship Friday.',
+      'The deadline matters.',
+      'project_kickoff',
+    );
+
+    expect(prompt).toContain('3 to 6 coherent sections');
+    expect(prompt).toContain('screen sharing');
+    expect(prompt).toContain('Never report how many topics');
+    expect(prompt).toContain('Project kickoff');
+    expect(prompt).toContain('milestones, owners, risks, and next steps');
+  });
+
   it('uses one strict taxonomy in single-pass, topic, and repair prompts', () => {
     const prompts = [
       getStructuredAnalysisPrompt('Nira: Synthetic transcript.'),

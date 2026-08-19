@@ -35,6 +35,7 @@ import {
   getTopicSegmentationPrompt,
   getValueSignalsPrompt,
 } from './prompts';
+import type { MeetingNotesTemplate } from './prompts';
 import type {
   AnalysisArtifacts,
   EntityExtractionContext,
@@ -418,22 +419,32 @@ export class UnifiedLLMProvider implements LLMProvider {
   async generateStructuredAnalysis(
     transcript: string,
     userNotes?: string,
+    template: MeetingNotesTemplate = 'auto',
   ): Promise<AnalysisDocumentV3> {
     if (this.providerType === 'ollama') {
-      return this.generateStructuredAnalysisMultiPass(transcript, userNotes);
+      return this.generateStructuredAnalysisMultiPass(
+        transcript,
+        userNotes,
+        template,
+      );
     }
-    return this.generateStructuredAnalysisSinglePass(transcript, userNotes);
+    return this.generateStructuredAnalysisSinglePass(
+      transcript,
+      userNotes,
+      template,
+    );
   }
 
   private async generateStructuredAnalysisSinglePass(
     transcript: string,
     userNotes?: string,
+    template: MeetingNotesTemplate = 'auto',
   ): Promise<AnalysisDocumentV3> {
     const errorCategories: AnalysisErrorCategory[] = [];
 
     try {
       const raw = await this.generateText({
-        prompt: getStructuredAnalysisPrompt(transcript, userNotes),
+        prompt: getStructuredAnalysisPrompt(transcript, userNotes, template),
         task: 'structuredAnalysis',
         jsonMode: true,
       });
@@ -449,6 +460,7 @@ export class UnifiedLLMProvider implements LLMProvider {
               transcript,
               raw,
               userNotes,
+              template,
             ),
             task: 'structuredAnalysis',
             jsonMode: true,
@@ -493,6 +505,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async generateStructuredAnalysisMultiPass(
     transcript: string,
     userNotes?: string,
+    template: MeetingNotesTemplate = 'auto',
   ): Promise<AnalysisDocumentV3> {
     const errorCategories: AnalysisErrorCategory[] = [];
     const windows = sliceTranscriptWindows(transcript, 120, 15);
@@ -620,6 +633,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             segment.title,
             slice,
             userNotes,
+            template,
           );
           const topicRaw = await this.generateText({
             prompt: topicPrompt,
@@ -769,6 +783,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           transcript,
           draftContext,
           userNotes,
+          template,
         );
         if (!editorialPromptFits(editorialPrompt)) {
           this.pushErrorCategory(errorCategories, 'editorial_input_too_large');

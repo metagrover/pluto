@@ -71,6 +71,7 @@ export interface DecisionV3 {
   text: string;
   decided_by?: string;
   rationale?: string;
+  evidence?: string;
 }
 
 export interface ActionItemV3 {
@@ -78,6 +79,7 @@ export interface ActionItemV3 {
   assignee?: string;
   due?: string;
   topic?: string;
+  evidence?: string;
 }
 
 export interface TopicSection {
