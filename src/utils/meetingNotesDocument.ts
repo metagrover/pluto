@@ -7,8 +7,7 @@ import type {
 import { applyUserEdit } from './analysisDocument';
 
 export type MeetingNotesSectionKind =
-  | 'decisions'
-  | 'actions'
+  | 'outcomes'
   | 'scratchpad'
   | 'current_read'
   | 'discussion'
@@ -29,6 +28,7 @@ export interface MeetingNotesBlock {
   evidence?: string;
   transcriptRange?: [number, number];
   completed?: boolean;
+  blockType?: 'decision' | 'action' | 'note';
 }
 
 export interface MeetingNotesSection {
@@ -72,6 +72,7 @@ const toBlock = ({
   evidence?: string;
   transcriptRange?: [number, number];
   completed?: boolean;
+  blockType?: 'decision' | 'action' | 'note';
 }): MeetingNotesBlock => ({
   id,
   path,
@@ -136,42 +137,39 @@ const buildV3Sections = (
 ): MeetingNotesSection[] => {
   const sections: MeetingNotesSection[] = [];
 
-  if (doc.all_decisions.length > 0) {
+  if (doc.all_decisions.length > 0 || doc.all_action_items.length > 0) {
     sections.push({
-      id: 'decisions',
-      kind: 'decisions',
-      title: 'Decisions',
-      blocks: doc.all_decisions.map((decision, index) =>
-        toBlock({
-          id: `decision-${index}`,
-          path: `all_decisions:${index}`,
-          text: decision.text,
-          editsMap,
-          speaker: decision.decided_by,
-          evidence: decision.evidence,
-        }),
-      ),
-    });
-  }
-
-  if (doc.all_action_items.length > 0) {
-    sections.push({
-      id: 'actions',
-      kind: 'actions',
-      title: 'Next steps',
-      blocks: doc.all_action_items.map((item, index) =>
-        toBlock({
-          id: `action-${index}`,
-          path: `all_action_items:${index}`,
-          text: item.text,
-          editsMap,
-          assignee: item.assignee,
-          due: item.due,
-          evidence: item.evidence,
-          completed:
-            editsMap[`completion:all_action_items:${index}`]?.edited === 'true',
-        }),
-      ),
+      id: 'outcomes',
+      kind: 'outcomes',
+      title: 'Decisions & next steps',
+      blocks: [
+        ...doc.all_decisions.map((decision, index) =>
+          toBlock({
+            id: `decision-${index}`,
+            path: `all_decisions:${index}`,
+            text: decision.text,
+            editsMap,
+            speaker: decision.decided_by,
+            evidence: decision.evidence,
+            blockType: 'decision',
+          }),
+        ),
+        ...doc.all_action_items.map((item, index) =>
+          toBlock({
+            id: `action-${index}`,
+            path: `all_action_items:${index}`,
+            text: item.text,
+            editsMap,
+            assignee: item.assignee,
+            due: item.due,
+            evidence: item.evidence,
+            completed:
+              editsMap[`completion:all_action_items:${index}`]?.edited ===
+              'true',
+            blockType: 'action',
+          }),
+        ),
+      ],
     });
   }
 
@@ -186,7 +184,7 @@ const buildV3Sections = (
     sections.push({
       id: 'current-read',
       kind: 'current_read',
-      title: 'Current read',
+      title: 'What changed',
       blocks: [
         toBlock({
           id: 'overview',
@@ -199,8 +197,8 @@ const buildV3Sections = (
   }
 
   const openQuestionBlocks: MeetingNotesBlock[] = [];
+  const allDiscussionBlocks: MeetingNotesBlock[] = [];
   for (const group of groupTopics(doc.topics)) {
-    const topicIndex = group.entries[0].index;
     const discussionBlocks = uniqueBlocks(
       group.entries.flatMap(({ topic, index }) => [
         ...(topic.summary
@@ -228,21 +226,7 @@ const buildV3Sections = (
       ]),
     );
 
-    if (discussionBlocks.length > 0) {
-      sections.push({
-        id: `topic-${topicIndex}`,
-        kind: 'discussion',
-        title: applyUserEdit(
-          group.title,
-          `topic:${topicIndex}:title`,
-          editsMap,
-        ),
-        titlePath: `topic:${topicIndex}:title`,
-        titleOriginal: group.title,
-        transcriptRange: group.transcriptRange,
-        blocks: discussionBlocks,
-      });
-    }
+    allDiscussionBlocks.push(...discussionBlocks);
 
     group.entries.forEach(({ topic, index }) => {
       topic.open_questions.forEach((question, questionIndex) => {
@@ -256,6 +240,16 @@ const buildV3Sections = (
           }),
         );
       });
+    });
+  }
+
+  const uniqueDiscussion = uniqueBlocks(allDiscussionBlocks);
+  if (uniqueDiscussion.length > 0) {
+    sections.push({
+      id: 'discussion',
+      kind: 'discussion',
+      title: 'Discussion notes',
+      blocks: uniqueDiscussion,
     });
   }
 
@@ -277,36 +271,33 @@ const buildV2Sections = (
   editsMap: UserEditsMap,
 ): MeetingNotesSection[] => {
   const sections: MeetingNotesSection[] = [];
-  if (doc.decisions.length > 0) {
+  if (doc.decisions.length > 0 || doc.action_items.length > 0) {
     sections.push({
-      id: 'decisions',
-      kind: 'decisions',
-      title: 'Decisions',
-      blocks: doc.decisions.map((text, index) =>
-        toBlock({
-          id: `v2-decision-${index}`,
-          path: `v2:decision:${index}`,
-          text,
-          editsMap,
-        }),
-      ),
-    });
-  }
-  if (doc.action_items.length > 0) {
-    sections.push({
-      id: 'actions',
-      kind: 'actions',
-      title: 'Next steps',
-      blocks: doc.action_items.map((text, index) =>
-        toBlock({
-          id: `v2-action-${index}`,
-          path: `v2:action:${index}`,
-          text,
-          editsMap,
-          completed:
-            editsMap[`completion:v2:action:${index}`]?.edited === 'true',
-        }),
-      ),
+      id: 'outcomes',
+      kind: 'outcomes',
+      title: 'Decisions & next steps',
+      blocks: [
+        ...doc.decisions.map((text, index) =>
+          toBlock({
+            id: `v2-decision-${index}`,
+            path: `v2:decision:${index}`,
+            text,
+            editsMap,
+            blockType: 'decision',
+          }),
+        ),
+        ...doc.action_items.map((text, index) =>
+          toBlock({
+            id: `v2-action-${index}`,
+            path: `v2:action:${index}`,
+            text,
+            editsMap,
+            completed:
+              editsMap[`completion:v2:action:${index}`]?.edited === 'true',
+            blockType: 'action',
+          }),
+        ),
+      ],
     });
   }
 
@@ -321,7 +312,7 @@ const buildV2Sections = (
     sections.push({
       id: 'current-read',
       kind: 'current_read',
-      title: 'Current read',
+      title: 'What changed',
       blocks: doc.summary.map((text, index) =>
         toBlock({
           id: `v2-summary-${index}`,
@@ -373,6 +364,21 @@ export const buildMeetingNotesDocument = ({
             blocks: [],
           },
         ];
+  const currentRead = sections.find(
+    (section) => section.kind === 'current_read',
+  );
+  const discussion = sections.find((section) => section.kind === 'discussion');
+  if (currentRead && discussion) {
+    currentRead.blocks = uniqueBlocks([
+      ...currentRead.blocks,
+      ...discussion.blocks,
+    ]);
+    sections.splice(sections.indexOf(discussion), 1);
+  } else if (discussion) {
+    discussion.id = 'current-read';
+    discussion.kind = 'current_read';
+    discussion.title = 'What changed';
+  }
   const scratchpad = sections.find((section) => section.kind === 'scratchpad');
   if (scratchpad && userNotes.trim()) {
     scratchpad.blocks = [
@@ -383,6 +389,10 @@ export const buildMeetingNotesDocument = ({
         authorship: 'human',
       }),
     ];
+  }
+  if (scratchpad && sections.at(-1) !== scratchpad) {
+    sections.splice(sections.indexOf(scratchpad), 1);
+    sections.push(scratchpad);
   }
 
   return { sections, hasAnalysis: Boolean(v2 || v3) };

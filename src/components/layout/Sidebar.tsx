@@ -20,6 +20,27 @@ interface SidebarProps {
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
 
+const meetingDayLabel = (value: string): string => {
+  const date = new Date(value);
+  const today = new Date();
+  const startOfToday = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  const startOfDate = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
+  const days = Math.round(
+    (startOfToday.getTime() - startOfDate.getTime()) / 86_400_000,
+  );
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return date.toLocaleDateString([], { month: 'long', day: 'numeric' });
+};
+
 export const Sidebar = ({
   sidebarVisible,
   activeTab,
@@ -34,6 +55,82 @@ export const Sidebar = ({
   theme,
   setTheme,
 }: SidebarProps) => {
+  if (selectedMeetingId) {
+    const groupedMeetings = safeMeetings
+      .slice(0, 14)
+      .reduce((groups, meeting) => {
+        const date = meeting.created_at || meeting.started_at;
+        const label = meetingDayLabel(date);
+        const entries = groups.get(label) || [];
+        entries.push(meeting);
+        groups.set(label, entries);
+        return groups;
+      }, new Map<string, Meeting[]>());
+
+    return (
+      <aside
+        className={`app-sidebar meeting-timeline-sidebar ${
+          sidebarVisible
+            ? 'translate-x-0'
+            : '-translate-x-full lg:-translate-x-[228px] lg:-mr-[228px]'
+        }`}
+        aria-label="Meeting timeline"
+      >
+        <div className="meeting-window-lights" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
+        <div className="meeting-timeline-list">
+          {[...groupedMeetings].map(([label, meetings]) => (
+            <section key={label}>
+              <h2>{label}</h2>
+              {meetings.map((meeting) => (
+                <button
+                  type="button"
+                  key={meeting.id}
+                  onClick={() => {
+                    setSelectedMeetingId(meeting.id);
+                    setActiveTab('hub');
+                  }}
+                  className={
+                    String(selectedMeetingId) === String(meeting.id)
+                      ? 'is-current'
+                      : undefined
+                  }
+                >
+                  <time>
+                    {new Date(
+                      meeting.created_at || meeting.started_at,
+                    ).toLocaleTimeString([], {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </time>
+                  <span>{meeting.title || 'Untitled meeting'}</span>
+                  <span
+                    className="meeting-timeline-status"
+                    aria-hidden="true"
+                  />
+                </button>
+              ))}
+            </section>
+          ))}
+        </div>
+        <button
+          type="button"
+          className="meeting-sidebar-settings"
+          onClick={() => setSettingsVisible(true)}
+          aria-label="Settings"
+        >
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside
       className={`

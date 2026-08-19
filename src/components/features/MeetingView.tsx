@@ -731,7 +731,7 @@ export const MeetingView = ({
     <div
       key={selectedMeeting.id}
       data-meeting-page
-      className="meeting-document mx-auto w-full max-w-[1280px] animate-in pb-24"
+      className="meeting-document w-full"
     >
       <TranscriptIntegrityPanel
         status={selectedMeeting.transcript_status}
@@ -751,26 +751,8 @@ export const MeetingView = ({
           selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
         )}
       />
-      <header className="meeting-document-header" style={{ display: 'block' }}>
-        <div className="w-full min-w-0" style={{ width: '100%' }}>
-          <div className="meeting-document-meta">
-            <span>
-              {new Date(
-                selectedMeeting?.created_at ||
-                  selectedMeeting?.started_at ||
-                  Date.now(),
-              ).toLocaleDateString([], {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </span>
-            {selectedMeeting.duration_seconds ? (
-              <span>
-                {Math.floor(selectedMeeting.duration_seconds / 60)} min
-              </span>
-            ) : null}
-          </div>
+      <header className="meeting-document-header">
+        <div className="w-full min-w-0">
           {editingTitle ? (
             <input
               type="text"
@@ -820,8 +802,29 @@ export const MeetingView = ({
               </button>
             </h1>
           )}
+          <div className="meeting-document-meta">
+            <span>
+              {new Date(
+                selectedMeeting?.created_at ||
+                  selectedMeeting?.started_at ||
+                  Date.now(),
+              ).toLocaleString([], {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
+            </span>
+            {selectedMeeting.duration_seconds ? (
+              <span>
+                {Math.floor(selectedMeeting.duration_seconds / 60)} min
+              </span>
+            ) : null}
+            <span>Saved locally</span>
+          </div>
         </div>
-        <div className="meeting-document-actions mt-4">
+        <div className="meeting-document-actions">
           {editsMap[ANALYSIS_SNAPSHOT_PATH] ? (
             <button
               type="button"

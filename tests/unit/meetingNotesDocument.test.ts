@@ -54,12 +54,10 @@ describe('buildMeetingNotesDocument', () => {
     });
 
     expect(document.sections.map((section) => section.kind)).toEqual([
-      'decisions',
-      'actions',
-      'scratchpad',
+      'outcomes',
       'current_read',
-      'discussion',
       'open_questions',
+      'scratchpad',
     ]);
     expect(document.sections[0].blocks[0]).toMatchObject({
       path: 'all_decisions:0',
@@ -94,14 +92,12 @@ describe('buildMeetingNotesDocument', () => {
     });
 
     expect(document.sections.map((section) => section.kind)).toEqual([
-      'decisions',
-      'actions',
-      'scratchpad',
+      'outcomes',
       'current_read',
-      'discussion',
+      'scratchpad',
     ]);
     expect(document.sections[0].blocks[0].path).toBe('v2:decision:0');
-    expect(document.sections.at(-1)?.title).toBe('Discussion highlights');
+    expect(document.sections.at(-2)?.title).toBe('What changed');
   });
 
   it('applies saved edits to every generated block type', () => {
@@ -173,18 +169,17 @@ describe('buildMeetingNotesDocument', () => {
       userNotes: '',
       editsMap: {},
     });
-    const discussions = document.sections.filter(
-      (section) => section.kind === 'discussion',
+    const whatChanged = document.sections.find(
+      (section) => section.kind === 'current_read',
     );
 
-    expect(discussions).toHaveLength(1);
-    expect(discussions[0].blocks.map((block) => block.text)).toEqual([
+    expect(whatChanged?.blocks.map((block) => block.text)).toEqual([
+      'The architecture was reviewed.',
       'The service boundaries were agreed.',
       'Keep the gateway thin.',
       'Move validation into services.',
     ]);
-    expect(discussions[0].blocks.at(-1)?.path).toBe('topic:1:point:1');
-    expect(discussions[0].transcriptRange).toEqual([1, 8]);
+    expect(whatChanged?.blocks.at(-1)?.path).toBe('topic:1:point:1');
   });
 
   it('keeps legacy completion state on actions rather than decisions', () => {
@@ -211,6 +206,6 @@ describe('buildMeetingNotesDocument', () => {
     });
 
     expect(document.sections[0].blocks[0].completed).toBeUndefined();
-    expect(document.sections[1].blocks[0].completed).toBe(true);
+    expect(document.sections[0].blocks[1].completed).toBe(true);
   });
 });

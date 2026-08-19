@@ -23,9 +23,9 @@ const model: MeetingNotesDocumentModel = {
   hasAnalysis: true,
   sections: [
     {
-      id: 'decisions',
-      kind: 'decisions',
-      title: 'Decisions',
+      id: 'outcomes',
+      kind: 'outcomes',
+      title: 'Decisions & next steps',
       blocks: [
         {
           id: 'decision-0',
@@ -35,6 +35,7 @@ const model: MeetingNotesDocumentModel = {
           authorship: 'ai',
           edited: false,
           evidence: 'Maya: We will use docs as code.',
+          blockType: 'decision',
         },
       ],
     },
@@ -122,7 +123,7 @@ describe('MeetingNotesDocument', () => {
       container.querySelectorAll('[data-notes-section] > h2'),
     ).map((heading) => heading.textContent?.trim());
     expect(sectionHeadings).toEqual([
-      'Decisions',
+      'Decisions & next steps',
       'Your notes',
       'Documentation architecture',
     ]);
@@ -138,7 +139,7 @@ describe('MeetingNotesDocument', () => {
     );
     await act(async () => sourceButton?.click());
 
-    const source = container.querySelector('[data-notes-source]');
+    const source = document.querySelector('[data-notes-source]');
     expect(source?.textContent).toContain('Use docs as code.');
     expect(source?.textContent).toContain('Maya');
     expect(source?.textContent).toContain('0:07');
@@ -181,9 +182,9 @@ describe('MeetingNotesDocument', () => {
       hasAnalysis: true,
       sections: [
         {
-          id: 'actions',
-          kind: 'actions',
-          title: 'Next steps',
+          id: 'outcomes',
+          kind: 'outcomes',
+          title: 'Decisions & next steps',
           blocks: [
             {
               id: 'action-0',
@@ -192,6 +193,7 @@ describe('MeetingNotesDocument', () => {
               originalText: 'Publish the guide.',
               authorship: 'ai',
               edited: false,
+              blockType: 'action',
             },
           ],
         },

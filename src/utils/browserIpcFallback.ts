@@ -5,6 +5,7 @@ import type {
   KnowledgeGraphStats,
 } from '../api/knowledgeGraph';
 import type { KnowledgeWorkspacePayload } from '../api/knowledgeWorkspace';
+import type { Meeting } from '../types';
 
 type IpcRendererLike = Window['ipcRenderer'];
 type BrowserCaptureJournal = {
@@ -16,6 +17,109 @@ type BrowserCaptureJournal = {
 };
 
 const now = new Date().toISOString();
+
+const meetingPreviewEnabled = (): boolean =>
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('preview') === 'meeting';
+
+const previewMeeting: Meeting = {
+  id: 'preview-architecture-docs',
+  title: 'Architecture docs review',
+  meeting_type: 'Recording',
+  created_at: '2025-05-14T10:02:00.000Z',
+  started_at: '2025-05-14T10:02:00.000Z',
+  duration_seconds: 54 * 60,
+  finalization_status: 'finalized',
+  transcript_status: 'validated',
+  transcript_validated_at: '2025-05-14T10:56:00.000Z',
+  user_notes:
+    'Keep the documentation lightweight and make architectural decisions easy to find.',
+  transcript_json: JSON.stringify({
+    lifecycleStatus: 'validated',
+    segments: [
+      {
+        speaker: 'Maya Chen',
+        start: 300,
+        end: 326,
+        text: "I'd like us to adopt a docs-as-code approach using Markdown in the repo so that documentation lives alongside the code and can be versioned and reviewed the same way.",
+      },
+      {
+        speaker: 'Daniel Lee',
+        start: 360,
+        end: 383,
+        text: 'Agreed. Markdown keeps it lightweight, and we can use frontmatter for metadata. It will also make contributions easier.',
+      },
+      {
+        speaker: 'Priya Nair',
+        start: 420,
+        end: 438,
+        text: "Shipping docs with the repo will help us catch issues earlier in PRs. Let's do that.",
+      },
+    ],
+  }),
+  analysis_schema_version: 3,
+  analysis_json: JSON.stringify({
+    analysis_schema_version: 3,
+    overview: 'System context diagrams now reflect the new data pipeline.',
+    all_decisions: [
+      {
+        text: 'We will adopt a docs-as-code approach using Markdown in the repo.',
+        decided_by: 'Maya Chen',
+        evidence:
+          "Maya Chen: I'd like us to adopt a docs-as-code approach using Markdown in the repo.",
+      },
+      {
+        text: 'Architecture diagrams will be generated from code and reviewed in CI.',
+        decided_by: 'Team',
+      },
+      {
+        text: 'The docs site will remain on the existing Docusaurus setup.',
+        decided_by: 'Team',
+      },
+    ],
+    all_action_items: [
+      {
+        text: 'Add a “How decisions are made” section to the architecture overview.',
+        assignee: 'Daniel Lee',
+        due: 'Friday',
+        topic: 'Documentation architecture',
+      },
+      {
+        text: 'Schedule the next architecture review in two weeks.',
+        assignee: 'Priya Nair',
+        topic: 'Documentation architecture',
+      },
+    ],
+    topics: [
+      {
+        title: 'Documentation architecture',
+        summary: 'ADR-042 was accepted and its sequence diagram was added.',
+        key_points: [
+          { text: 'Terminology now uses “tenant” instead of “account”.' },
+          {
+            text: 'Performance constraints now include error-budget targets.',
+          },
+        ],
+        decisions: [],
+        action_items: [],
+        open_questions: [
+          'How will we version the OpenAPI docs alongside the service?',
+          'Do we need a separate repository for decision records?',
+          'What is the retention policy for diagrams generated in CI?',
+          'Should automatic link checking run in the docs build?',
+        ],
+        transcript_range: [0, 2],
+      },
+    ],
+    meeting_type: 'team_sync',
+    quality: {
+      format_pass: true,
+      retry_count: 0,
+      fallback_used: false,
+      issues: [],
+    },
+  }),
+};
 
 const createDoc = (
   id: string,
@@ -275,6 +379,8 @@ const createInvokeFallback =
         result = { ready: true };
         break;
       case 'GET_MEETINGS':
+        result = meetingPreviewEnabled() ? [previewMeeting] : [];
+        break;
       case 'GET_KNOWLEDGE_DOC_SOURCES':
       case 'GET_KNOWLEDGE_CORRECTIONS':
         result = [];

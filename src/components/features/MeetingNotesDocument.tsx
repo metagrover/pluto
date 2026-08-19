@@ -4,10 +4,10 @@ import {
   FileText,
   Loader2,
   Pencil,
-  Quote,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Meeting, TranscriptSegment } from '../../types';
 import type {
   MeetingNotesBlock,
@@ -31,6 +31,33 @@ type SourceSelection = {
   transcriptRange?: [number, number];
 };
 
+const previewSourceSelection = (
+  model: MeetingNotesDocumentModel,
+): SourceSelection | null => {
+  if (
+    typeof window === 'undefined' ||
+    new URLSearchParams(window.location.search).get('source') !== '1' ||
+    !window.__PLUTO_BROWSER_PREVIEW__
+  ) {
+    return null;
+  }
+  const block = model.sections
+    .flatMap((section) => section.blocks)
+    .find((candidate) => candidate.evidence || candidate.transcriptRange);
+  return block
+    ? {
+        label: block.text,
+        evidence: block.evidence,
+        transcriptRange: block.transcriptRange,
+      }
+    : null;
+};
+
+const sourceUsesOverlay = (): boolean =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(max-width: 1179px)').matches;
+
 const formatTimestamp = (seconds?: number): string => {
   const value = Number.isFinite(seconds) ? Math.max(0, seconds || 0) : 0;
   const minutes = Math.floor(value / 60);
@@ -44,6 +71,45 @@ const normalizeEvidence = (value: string): string =>
     .replace(/^[^:]{1,40}:\s*/, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+
+const EvidenceText = ({
+  text,
+  claim,
+}: {
+  text: string;
+  claim: string;
+}) => {
+  const claimTokens = claim.toLocaleLowerCase().match(/[a-z0-9]+/g) || [];
+  let match: RegExpExecArray | null = null;
+  for (
+    let size = Math.min(8, claimTokens.length);
+    size >= 2 && !match;
+    size -= 1
+  ) {
+    for (let start = 0; start <= claimTokens.length - size; start += 1) {
+      const phrase = claimTokens
+        .slice(start, start + size)
+        .map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('\\W+');
+      const candidate = new RegExp(phrase, 'i').exec(text);
+      if (candidate) {
+        match = candidate;
+        break;
+      }
+    }
+  }
+  if (!match) return <>{text}</>;
+  const before = text.slice(0, match.index);
+  const selected = text.slice(match.index, match.index + match[0].length);
+  const after = text.slice(match.index + match[0].length);
+  return (
+    <>
+      {before}
+      <mark>{selected}</mark>
+      {after}
+    </>
+  );
+};
 
 const resolveSourceSegments = (
   selection: SourceSelection,
@@ -220,18 +286,21 @@ const NoteBlock = ({
   meetingId,
   onSaved,
   onSelectSource,
+  selected,
 }: {
   block: MeetingNotesBlock;
   section: MeetingNotesSection;
   meetingId: string | number;
   onSaved: () => void;
   onSelectSource: (selection: SourceSelection) => void;
+  selected: boolean;
 }) => {
   const [completionPending, setCompletionPending] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
   const sourceRange = block.transcriptRange || section.transcriptRange;
   const hasSource = Boolean(block.evidence || sourceRange);
-  const isAction = section.kind === 'actions';
+  const isAction = block.blockType === 'action';
+  const isDecision = block.blockType === 'decision';
 
   const toggleCompleted = async () => {
     if (!block.path || completionPending) return;
@@ -256,7 +325,7 @@ const NoteBlock = ({
 
   return (
     <div
-      className={`meeting-note-block meeting-note-block--${section.kind}`}
+      className={`meeting-note-block meeting-note-block--${section.kind} ${selected ? 'is-source-selected' : ''}`}
       data-authorship={block.authorship}
     >
       {isAction ? (
@@ -273,6 +342,10 @@ const NoteBlock = ({
             onChange={() => void toggleCompleted()}
           />
         </label>
+      ) : isDecision ? (
+        <span className="meeting-decision-mark" aria-label="Decision">
+          <Check aria-hidden="true" size={14} />
+        </span>
       ) : (
         <span className="meeting-note-block__marker" aria-hidden="true" />
       )}
@@ -314,7 +387,9 @@ const NoteBlock = ({
                 })
               }
             >
-              <Quote aria-hidden="true" size={12} /> Source
+              <span className="meeting-source-indicator" aria-hidden="true">
+                {selected ? '1' : ''}
+              </span>
             </button>
           ) : null}
         </div>
@@ -340,20 +415,20 @@ const SourcePane = ({
   const segments = resolveSourceSegments(selection, transcriptSegments);
   return (
     <aside
-      className="meeting-source-pane"
+      className="meeting-document meeting-source-pane"
       data-notes-source
       aria-label="Source"
     >
       <div className="meeting-source-pane__header">
-        <div>
-          <span>Source for</span>
-          <strong>{selection.label}</strong>
-        </div>
-        <button type="button" onClick={onClose} aria-label="Close source">
-          <X aria-hidden="true" size={17} />
+        <strong>Source</strong>
+        <button type="button" onClick={onClose} aria-label="Back to note">
+          <span aria-hidden="true">←</span> Back to note
         </button>
       </div>
       <div className="meeting-source-pane__body">
+        <p className="meeting-source-pane__claim">
+          <span>Showing evidence for:</span>“{selection.label}”
+        </p>
         {segments.length > 0 ? (
           segments.map((segment, index) => (
             <blockquote
@@ -363,7 +438,9 @@ const SourcePane = ({
                 <strong>{segment.speaker || 'Unknown speaker'}</strong>
                 <time>{formatTimestamp(segment.start)}</time>
               </header>
-              <p>{segment.text}</p>
+              <p>
+                <EvidenceText text={segment.text} claim={selection.label} />
+              </p>
             </blockquote>
           ))
         ) : selection.evidence ? (
@@ -398,7 +475,8 @@ export const MeetingNotesDocument = ({
   const [draftNotes, setDraftNotes] = useState(meeting.user_notes || '');
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [sourceSelection, setSourceSelection] =
-    useState<SourceSelection | null>(null);
+    useState<SourceSelection | null>(() => previewSourceSelection(model));
+  const [sourceAsOverlay, setSourceAsOverlay] = useState(sourceUsesOverlay);
   const meetingRef = useRef(meeting);
   const savedNotesRef = useRef(meeting.user_notes || '');
   const onDocumentChangedRef = useRef(onDocumentChanged);
@@ -413,8 +491,16 @@ export const MeetingNotesDocument = ({
     setDraftNotes(meeting.user_notes || '');
     savedNotesRef.current = meeting.user_notes || '';
     setSaveState('saved');
-    setSourceSelection(null);
-  }, [meeting.id, meeting.user_notes]);
+    setSourceSelection(previewSourceSelection(model));
+  }, [meeting.id, meeting.user_notes, model]);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(max-width: 1179px)');
+    const update = () => setSourceAsOverlay(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     if (draftNotes === savedNotesRef.current) return;
@@ -511,6 +597,7 @@ export const MeetingNotesDocument = ({
                       meetingId={meeting.id}
                       onSaved={onDocumentChanged}
                       onSelectSource={setSourceSelection}
+                      selected={sourceSelection?.label === block.text}
                     />
                   ))}
                 </div>
@@ -520,14 +607,19 @@ export const MeetingNotesDocument = ({
         ))}
       </article>
 
-      {sourceSelection ? (
-        <SourcePane
-          selection={sourceSelection}
-          transcriptSegments={transcriptSegments}
-          onClose={() => setSourceSelection(null)}
-          onShowTranscript={onShowTranscript}
-        />
-      ) : null}
+      {sourceSelection
+        ? (() => {
+            const pane = (
+              <SourcePane
+                selection={sourceSelection}
+                transcriptSegments={transcriptSegments}
+                onClose={() => setSourceSelection(null)}
+                onShowTranscript={onShowTranscript}
+              />
+            );
+            return sourceAsOverlay ? createPortal(pane, document.body) : pane;
+          })()
+        : null}
     </div>
   );
 };
