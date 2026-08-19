@@ -296,3 +296,11 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** `qwen3.5:9b` is Pluto's single default Ollama model for structured notes, titles, value signals, entity extraction, knowledge synthesis, and queries. `ollama_model` is the sole task-independent Ollama override; the hidden `ollama_analysis_model` split is removed.
 - **Rationale:** A validated meeting silently switched between Qwen for visible notes and Phi for adjacent intelligence tasks. The split made one pipeline depend on two models, introduced model swapping and terminology drift, and exposed a configuration distinction the product did not explain.
 - **Consequences:** Default local text work consistently uses the model that passed Pluto's grounded analysis gate. Explicit user model overrides still win, historical Phi benchmark evidence remains for comparison, and Pluto does not automatically delete previously installed local models.
+
+## 2026-08-18 - Bound oversized meeting notes deterministically
+
+- **Status:** Accepted
+- **Source:** [Issue #637](https://github.com/metagrover/pluto/issues/637)
+- **Decision:** When the transcript plus grounded topic draft cannot fit the meeting-wide editor's context budget, Pluto deterministically merges related topic clusters down to at most six meeting-level sections. The reducer favors substantive outcomes over housekeeping titles, keeps only a few key points and unresolved questions per section, and preserves grounded decisions and action items.
+- **Rationale:** The previous all-or-nothing editor skipped synthesis on a real long meeting and exposed 46 window-level topics as the final overview. A second Qwen generation over the oversized draft repeatedly exceeded practical local-runtime limits, so another model call was not a reliable safety path.
+- **Consequences:** Oversized meetings can no longer degrade into an unbounded topic inventory, and the fallback adds no model swap or generation latency. Normal meetings still receive the same Qwen editorial pass. Canonical transcripts and existing saved analyses are not rewritten automatically.

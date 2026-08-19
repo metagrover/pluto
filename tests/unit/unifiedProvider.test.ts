@@ -846,23 +846,46 @@ describe('UnifiedLLMProvider', () => {
     );
   });
 
-  it('skips global editing when the editorial prompt exceeds local context', async () => {
-    const prompts: string[] = [];
+  it('deterministically caps oversized meetings instead of returning every window topic', async () => {
+    let transcriptEditorCount = 0;
     installFetchMock((_url, init) => {
       const prompt = String(parseRequestBody(init).prompt || '');
-      prompts.push(prompt);
       if (prompt.includes('meeting topic segmenter')) {
         return jsonResponse({
           response: JSON.stringify({
-            topics: [
-              { title: 'Alpha topic', start_segment: 0, end_segment: 3 },
-              { title: 'Beta topic', start_segment: 4, end_segment: 8 },
-            ],
+            topics: Array.from({ length: 48 }, (_, index) => ({
+              title: index === 0 ? 'Screen sharing' : `Topic ${index}`,
+              start_segment: index,
+              end_segment: index,
+            })),
           }),
         });
       }
+      if (prompt.includes('global meeting-notes editor')) {
+        transcriptEditorCount += 1;
+        return jsonResponse({
+          response: JSON.stringify({
+            overview: `Batch ${transcriptEditorCount} consolidated.`,
+            topics: [
+              {
+                title: `Batch theme ${transcriptEditorCount}`,
+                summary: `Batch ${transcriptEditorCount} consolidated.`,
+                key_points: [],
+                decisions: [],
+                action_items: [],
+                open_questions: [],
+              },
+            ],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'team_sync',
+          }),
+        });
+      }
+      const localTitle = prompt.match(/topic "([^"]+)"/)?.[1];
       return jsonResponse({
         response: JSON.stringify({
+          title: localTitle,
           summary: 'A grounded local summary.',
           key_points: [],
           decisions: [],
@@ -877,16 +900,90 @@ describe('UnifiedLLMProvider', () => {
     });
     const analysis = await provider.generateStructuredAnalysis(
       Array.from(
-        { length: 9 },
-        (_, index) => `Me: ${index} ${'detail '.repeat(1_800)}`,
+        { length: 48 },
+        (_, index) =>
+          `Me: ${index === 0 ? 'Screen sharing' : `Topic ${index}`} ${'detail '.repeat(100)}`,
       ).join('\n'),
     );
 
+    expect(transcriptEditorCount).toBe(0);
+    expect(analysis.topics).toHaveLength(6);
     expect(
-      prompts.filter((prompt) =>
-        prompt.includes('global meeting-notes editor'),
-      ),
-    ).toHaveLength(0);
+      analysis.topics.some((topic) => /screen sharing/i.test(topic.title)),
+    ).toBe(false);
+    expect(analysis.generation_metadata?.error_categories).toContain(
+      'editorial_input_too_large',
+    );
+  });
+
+  it('preserves grounded settled items when oversized input already has few topics', async () => {
+    installFetchMock((_url, init) => {
+      const prompt = String(parseRequestBody(init).prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Decision', start_segment: 0, end_segment: 3 },
+              { title: 'Follow-up', start_segment: 4, end_segment: 8 },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('topic "Decision"')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            title: 'Decision',
+            summary: 'REST was selected.',
+            key_points: [{ text: 'Local decision detail.' }],
+            decisions: [
+              {
+                text: 'Use REST',
+                evidence: 'We will use REST.',
+              },
+            ],
+            action_items: [],
+            open_questions: [],
+          }),
+        });
+      }
+      return jsonResponse({
+        response: JSON.stringify({
+          title: 'Follow-up',
+          summary: 'The rollout email has an owner.',
+          key_points: [{ text: 'Local follow-up detail.' }],
+          decisions: [],
+          action_items: [
+            {
+              text: 'Send rollout email',
+              assignee: 'Milo',
+              evidence: 'I will send rollout email.',
+            },
+          ],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const lines = Array.from(
+      { length: 9 },
+      (_, index) => `Nira: ${index} ${'detail '.repeat(1_000)}`,
+    );
+    lines[0] = `Nira: We will use REST. ${'detail '.repeat(1_000)}`;
+    lines[4] = `Milo: I will send rollout email. ${'detail '.repeat(1_000)}`;
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      lines.join('\n'),
+    );
+
+    expect(analysis.topics).toHaveLength(2);
+    expect(analysis.all_decisions.map((item) => item.text)).toEqual([
+      'Use REST',
+    ]);
+    expect(analysis.all_action_items).toEqual([
+      expect.objectContaining({ text: 'Send rollout email', assignee: 'Milo' }),
+    ]);
     expect(analysis.generation_metadata?.error_categories).toContain(
       'editorial_input_too_large',
     );
