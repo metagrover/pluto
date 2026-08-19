@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-08-19 - Use one editable meeting document for notes and analysis
+
+- **Status:** Accepted
+- **Source:** [Issue #641](https://github.com/metagrover/pluto/issues/641), owner-approved design direction on 2026-08-19
+- **Decision:** Completed meetings open as one continuously editable notes document. Pluto normalizes legacy and current analysis into the same decisions-first structure, preserves the live scratchpad as user-authored content, and reveals transcript evidence contextually instead of switching to a competing transcript product.
+- **Rationale:** Separate analysis versions, tabbed notes, dashboard cards, and raw topic inventories made the product feel generated rather than written. A calm document keeps outcomes scannable, protects the user's own notes, and makes generated claims easy to inspect without overwhelming the reading flow.
+- **Consequences:** Decisions and next steps lead the document; repeated or housekeeping topics are omitted; every generated block can be edited; regeneration keeps a recoverable prior version; authorship and save state remain visible; the transcript stays available as a supporting record; future analysis formats must normalize into this product rather than add another viewer.
+
 +## 2026-08-16 - Prefer transcript reconciliation over rolling AEC
 
 - **Status:** Accepted

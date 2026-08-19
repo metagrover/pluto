@@ -28,12 +28,6 @@ vi.mock('../../src/components/KnowledgeGraph/EntitySidebar', () => ({
   EntitySidebar: () => null,
 }));
 
-vi.mock('../../src/components/features/V3AnalysisViewer', () => ({
-  V3AnalysisViewer: ({ doc }: { doc: { overview: string } }) => (
-    <div data-analysis-content>{doc.overview}</div>
-  ),
-}));
-
 const baseMeeting: Meeting = {
   id: 'meeting-progressive-dom',
   title: 'Design review',
@@ -132,26 +126,19 @@ describe('MeetingView progressive reveal', () => {
     expect(
       container.querySelector('[data-meeting-skeleton="analysis"]'),
     ).toBeNull();
-    expect(
-      container.querySelector('[data-analysis-content]')?.textContent,
-    ).toBe('The analysis arrived in place.');
+    expect(container.textContent).toContain('The analysis arrived in place.');
   });
 
-  it('uses Notes and Transcript as workspace tabs with Notes selected', async () => {
+  it('keeps the note primary and reveals the transcript progressively', async () => {
     await act(async () => renderMeeting(analyzedMeeting));
 
-    const tabs = container.querySelector('[role="tablist"]');
-    const notesTab = container.querySelector<HTMLButtonElement>(
-      '[role="tab"][data-meeting-tab="notes"]',
-    );
-    const transcriptTab = container.querySelector<HTMLButtonElement>(
-      '[role="tab"][data-meeting-tab="transcript"]',
+    const transcriptButton = container.querySelector<HTMLButtonElement>(
+      'button[data-meeting-transcript-toggle]',
     );
 
-    expect(tabs).not.toBeNull();
-    expect(notesTab?.getAttribute('aria-selected')).toBe('true');
-    expect(transcriptTab?.getAttribute('aria-selected')).toBe('false');
-    expect(container.querySelector('[data-analysis-content]')).not.toBeNull();
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
+    expect(transcriptButton?.textContent).toContain('Transcript');
+    expect(container.textContent).toContain('The analysis arrived in place.');
     expect(
       container.querySelector('[data-meeting-artifact="transcript"]'),
     ).toBeNull();

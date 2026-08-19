@@ -150,62 +150,417 @@
 
 @layer components {
   .meeting-document {
-    @apply px-6 text-pro-text-main md:px-10;
+    --notes-paper: oklch(98.2% 0.008 82);
+    --notes-paper-raised: oklch(99.2% 0.005 82);
+    --notes-ink: oklch(24% 0.022 272);
+    --notes-muted: oklch(52% 0.018 272);
+    --notes-faint: oklch(72% 0.012 272);
+    --notes-rule: oklch(89% 0.01 82);
+    --notes-wash: oklch(95.5% 0.018 82);
+    --notes-accent: oklch(62% 0.085 55);
+    @apply px-5 text-pro-text-main sm:px-8 lg:px-10;
+    color: var(--notes-ink);
+  }
+  .dark .meeting-document {
+    --notes-paper: oklch(18% 0.018 272);
+    --notes-paper-raised: oklch(21% 0.02 272);
+    --notes-ink: oklch(91% 0.012 82);
+    --notes-muted: oklch(68% 0.015 272);
+    --notes-faint: oklch(49% 0.016 272);
+    --notes-rule: oklch(29% 0.02 272);
+    --notes-wash: oklch(23% 0.022 272);
+    --notes-accent: oklch(72% 0.07 60);
   }
   .meeting-document-header {
-    @apply flex flex-col gap-4 border-b border-pro-border/70 pb-6 pt-4;
+    @apply mx-auto flex max-w-[760px] flex-col gap-4 pb-8 pt-6;
   }
   .meeting-document-meta {
-    @apply mb-2 flex items-center gap-3 text-xs text-pro-text-muted;
+    @apply mb-3 flex items-center gap-3 text-xs;
+    color: var(--notes-muted);
   }
   .meeting-document-meta span + span::before {
     content: "·";
     @apply mr-3 text-pro-border;
   }
   .meeting-document-title {
-    @apply text-2xl font-semibold leading-tight tracking-[-0.02em] md:text-[30px];
+    @apply text-[2rem] font-semibold leading-[1.12] tracking-[-0.035em] md:text-[2.4rem];
+    color: var(--notes-ink);
+    text-wrap: balance;
   }
   .meeting-document-actions {
-    @apply flex flex-wrap items-center gap-1.5;
+    @apply relative flex min-h-10 flex-wrap items-center gap-1;
+  }
+  .meeting-document-menu {
+    @apply relative;
+  }
+  .meeting-document-menu > summary {
+    @apply flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--notes-muted);
+  }
+  .meeting-document-menu > summary::-webkit-details-marker {
+    @apply hidden;
+  }
+  .meeting-document-menu__panel {
+    @apply absolute left-0 top-12 z-50 flex min-w-48 flex-col gap-1 rounded-xl border p-2 shadow-lg;
+    border-color: var(--notes-rule);
+    background: var(--notes-paper-raised);
+  }
+  .meeting-document-menu__panel .meeting-toolbar-button {
+    @apply w-full justify-start;
+  }
+  .meeting-toolbar-button--undo {
+    @apply border;
+    border-color: var(--notes-rule);
+    background: var(--notes-paper-raised);
   }
   .meeting-template-picker select {
-    @apply min-h-9 rounded-lg border border-pro-border bg-pro-surface px-2.5 text-xs font-medium text-pro-text-main outline-none hover:bg-pro-hover focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply min-h-10 w-full rounded-lg border border-pro-border bg-pro-surface px-2.5 text-xs font-medium text-pro-text-main outline-none hover:bg-pro-hover focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .meeting-toolbar-button {
-    @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs font-medium text-pro-text-muted transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
+    @apply inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
+    color: var(--notes-muted);
+  }
+  .meeting-toolbar-button:hover {
+    color: var(--notes-ink);
+    background: var(--notes-wash);
   }
   .meeting-toolbar-button--danger {
     @apply px-2 text-red-600/70 hover:border-red-200 hover:bg-red-50 hover:text-red-700;
   }
-  .meeting-document-tabs {
-    @apply sticky top-0 z-30 flex gap-6 border-b border-pro-border bg-pro-bg/95 pt-5 backdrop-blur;
-  }
-  .meeting-document-tabs button {
-    @apply -mb-px min-h-11 border-b-2 border-transparent px-0 text-sm font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .meeting-document-tabs button[aria-selected="true"] {
-    @apply border-pro-text-main text-pro-text-main;
-  }
   .meeting-notes-surface {
-    @apply flex flex-col pt-8;
-  }
-  .meeting-context-panel {
-    @apply order-last mt-14 border-t border-pro-border pt-8;
+    @apply pt-2;
   }
   .meeting-transcript-surface {
-    @apply pt-5;
+    @apply mx-auto mt-5 max-w-[760px] pt-5;
   }
-  .meeting-source-link {
-    @apply shrink-0 text-xs text-pro-text-muted opacity-0 transition-opacity hover:text-pro-text-main focus-visible:opacity-100 group-hover:opacity-100;
+  .meeting-transcript-header {
+    @apply sticky top-0 z-20 flex items-center justify-between border-y py-4;
+    border-color: var(--notes-rule);
+    background: var(--notes-paper);
   }
-  .meeting-source-evidence {
-    @apply mt-1.5 text-xs text-pro-text-muted;
+  .meeting-transcript-header h2 {
+    @apply text-lg font-semibold tracking-tight;
+    color: var(--notes-ink);
   }
-  .meeting-source-evidence summary {
-    @apply w-fit cursor-pointer select-none hover:text-pro-text-main;
+  .meeting-transcript-header p {
+    @apply mt-0.5 text-xs;
+    color: var(--notes-muted);
   }
-  .meeting-source-evidence blockquote {
-    @apply mt-2 border-l-2 border-pro-border pl-3 italic leading-5;
+  .meeting-transcript-header button {
+    @apply flex h-10 w-10 items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--notes-muted);
+  }
+  .meeting-transcript-record {
+    @apply pb-12;
+  }
+  .meeting-transcript-row {
+    @apply grid gap-3 border-b py-5 sm:grid-cols-[9rem_minmax(0,1fr)];
+    border-color: var(--notes-rule);
+  }
+  .meeting-transcript-row > div {
+    @apply flex items-baseline justify-between gap-3 sm:block;
+  }
+  .meeting-transcript-row strong {
+    @apply block text-xs font-semibold;
+    color: var(--notes-ink);
+  }
+  .meeting-transcript-row time {
+    @apply mt-1 block text-xs tabular-nums;
+    color: var(--notes-muted);
+  }
+  .meeting-transcript-row p {
+    @apply text-[0.95rem] leading-7;
+    color: var(--notes-ink);
+    text-wrap: pretty;
+  }
+
+  .meeting-document-workspace {
+    @apply mx-auto grid max-w-[1180px] justify-center gap-8;
+    grid-template-columns: minmax(0, 720px);
+  }
+  .meeting-document-workspace:has(.meeting-document-outline) {
+    grid-template-columns: minmax(0, 720px);
+  }
+  .meeting-notes-document {
+    @apply min-w-0 pb-16;
+    color: var(--notes-ink);
+  }
+  .meeting-document-save-row {
+    @apply mb-8 flex min-h-5 justify-end;
+  }
+  .meeting-save-state {
+    @apply inline-flex items-center gap-1.5 text-[0.72rem] font-medium;
+    color: var(--notes-muted);
+  }
+  .meeting-save-state--dirty,
+  .meeting-save-state--saving {
+    color: var(--notes-accent);
+  }
+  .meeting-save-state--error,
+  .meeting-edit-error {
+    color: oklch(58% 0.17 25);
+  }
+  .dark .meeting-save-state--error,
+  .dark .meeting-edit-error {
+    color: oklch(74% 0.13 25);
+  }
+  .meeting-notes-section {
+    @apply scroll-mt-24 border-b pb-9;
+    border-color: var(--notes-rule);
+  }
+  .meeting-notes-section + .meeting-notes-section {
+    @apply pt-9;
+  }
+  .meeting-notes-section > h2,
+  .meeting-notes-section > .meeting-editable-copy h2 {
+    @apply text-xl font-semibold leading-tight tracking-[-0.025em];
+    color: var(--notes-ink);
+    text-wrap: balance;
+  }
+  .meeting-notes-section--decisions > h2,
+  .meeting-notes-section--actions > h2,
+  .meeting-notes-section--decisions > .meeting-editable-copy h2,
+  .meeting-notes-section--actions > .meeting-editable-copy h2 {
+    @apply text-2xl;
+  }
+  .meeting-notes-section__content {
+    @apply mt-5 flex flex-col gap-3;
+  }
+  .meeting-notes-section--current_read .meeting-notes-section__content {
+    @apply gap-5;
+  }
+  .meeting-notes-section--current_read
+    .meeting-note-block__body
+    > .meeting-editable-copy
+    > p {
+    @apply text-[1.08rem] leading-8;
+  }
+  .meeting-notes-section--scratchpad textarea {
+    @apply mt-4 w-full resize-y rounded-xl border bg-transparent px-4 py-3 text-base leading-7 outline-none transition-colors placeholder:text-pro-text-muted/70 focus-visible:ring-2 focus-visible:ring-pro-accent;
+    min-height: 7rem;
+    border-color: var(--notes-rule);
+    background: var(--notes-paper-raised);
+    color: var(--notes-ink);
+  }
+  .meeting-scratchpad-caption {
+    @apply mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5;
+    color: var(--notes-muted);
+  }
+  .meeting-note-block {
+    @apply relative flex min-w-0 items-start gap-3 rounded-lg px-1 py-1.5;
+  }
+  .meeting-note-block__marker {
+    @apply mt-[0.72rem] h-1.5 w-1.5 shrink-0 rounded-full;
+    background: var(--notes-faint);
+  }
+  .meeting-note-block--decisions .meeting-note-block__marker {
+    @apply mt-[0.58rem] h-2 w-2;
+    background: var(--notes-accent);
+  }
+  .meeting-note-block__body {
+    @apply min-w-0 flex-1;
+  }
+  .meeting-note-block__body > .meeting-editable-copy > p,
+  .meeting-note-block__body > p {
+    @apply max-w-[70ch] text-base leading-7;
+    color: var(--notes-ink);
+    text-wrap: pretty;
+  }
+  .meeting-note-block--actions
+    .meeting-note-block__body
+    > .meeting-editable-copy
+    > p {
+    @apply font-medium;
+  }
+  .meeting-action-check {
+    @apply -m-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center;
+  }
+  .meeting-note-block--actions input[type="checkbox"] {
+    @apply h-5 w-5 shrink-0 cursor-pointer rounded border-2 accent-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2;
+    border-color: var(--notes-faint);
+  }
+  .meeting-note-block--actions
+    input[type="checkbox"]:checked
+    + .meeting-note-block__body {
+    color: var(--notes-muted);
+    text-decoration-color: var(--notes-faint);
+  }
+  .meeting-editable-copy {
+    @apply flex min-w-0 items-start gap-2;
+  }
+  .meeting-editable-copy > :first-child {
+    @apply min-w-0 flex-1;
+  }
+  .meeting-editable-copy > button {
+    @apply mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md opacity-30 transition-[opacity,background-color,color] hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--notes-muted);
+  }
+  .meeting-editable-copy > button:hover {
+    color: var(--notes-ink);
+    background: var(--notes-wash);
+  }
+  .meeting-note-block__meta {
+    @apply mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.7rem];
+    color: var(--notes-muted);
+  }
+  .meeting-note-block__meta > span,
+  .meeting-note-block__meta > button {
+    @apply inline-flex items-center gap-1;
+  }
+  .meeting-note-block__meta > button {
+    @apply min-h-8 rounded-md px-1.5 transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .meeting-authorship {
+    @apply font-medium;
+    color: var(--notes-faint);
+  }
+  .meeting-authorship--human {
+    color: var(--notes-accent);
+  }
+  .meeting-inline-editor {
+    @apply w-full rounded-xl border p-3;
+    border-color: var(--notes-rule);
+    background: var(--notes-paper-raised);
+  }
+  .meeting-inline-editor textarea {
+    @apply block w-full resize-y bg-transparent text-base leading-7 outline-none;
+    color: var(--notes-ink);
+  }
+  .meeting-inline-editor__actions {
+    @apply mt-3 flex flex-wrap items-center gap-2;
+  }
+  .meeting-inline-editor__actions button {
+    @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-50;
+    color: var(--notes-muted);
+    background: var(--notes-wash);
+  }
+  .meeting-edit-error {
+    @apply mt-2 text-xs leading-5;
+  }
+  .meeting-document-outline {
+    @apply hidden;
+  }
+  .meeting-source-pane {
+    @apply z-40 overflow-hidden rounded-2xl border;
+    border-color: var(--notes-rule);
+    background: var(--notes-paper-raised);
+    color: var(--notes-ink);
+  }
+  .meeting-source-pane__header {
+    @apply flex items-start justify-between gap-4 border-b p-5;
+    border-color: var(--notes-rule);
+  }
+  .meeting-source-pane__header > div {
+    @apply flex min-w-0 flex-col gap-1;
+  }
+  .meeting-source-pane__header span {
+    @apply text-[0.68rem] font-semibold uppercase tracking-[0.08em];
+    color: var(--notes-muted);
+  }
+  .meeting-source-pane__header strong {
+    @apply line-clamp-3 text-sm leading-5;
+  }
+  .meeting-source-pane__header button {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--notes-muted);
+  }
+  .meeting-source-pane__body {
+    @apply max-h-[52vh] space-y-0 overflow-y-auto px-5;
+  }
+  .meeting-source-pane blockquote {
+    @apply border-b py-5;
+    border-color: var(--notes-rule);
+  }
+  .meeting-source-pane blockquote header {
+    @apply mb-2 flex items-center justify-between gap-4 text-xs;
+  }
+  .meeting-source-pane blockquote time {
+    @apply tabular-nums;
+    color: var(--notes-muted);
+  }
+  .meeting-source-pane blockquote p {
+    @apply text-sm leading-6;
+    text-wrap: pretty;
+  }
+  .meeting-source-pane__empty {
+    @apply py-6 text-sm leading-6;
+    color: var(--notes-muted);
+  }
+  .meeting-source-pane__transcript,
+  .meeting-transcript-toggle {
+    @apply flex min-h-11 items-center gap-2 rounded-lg text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--notes-muted);
+  }
+  .meeting-source-pane__transcript {
+    @apply m-4 px-3;
+  }
+  .meeting-transcript-toggle {
+    @apply mx-auto mt-3 w-full max-w-[720px] border-t px-1 py-5 text-left;
+    border-color: var(--notes-rule);
+  }
+  .meeting-transcript-toggle span {
+    @apply ml-auto text-xs font-normal;
+    color: var(--notes-faint);
+  }
+  .meeting-analysis-error {
+    @apply mx-auto mb-6 max-w-[720px] rounded-xl border p-4 text-sm;
+    border-color: oklch(75% 0.08 75);
+    background: oklch(96% 0.025 75);
+  }
+  .dark .meeting-analysis-error {
+    border-color: oklch(45% 0.07 75);
+    background: oklch(23% 0.025 75);
+  }
+  .meeting-analysis-error p {
+    @apply mt-1 leading-6;
+    color: var(--notes-muted);
+  }
+
+  @media (min-width: 1024px) {
+    .meeting-document-workspace--source-open {
+      grid-template-columns: minmax(0, 680px) minmax(280px, 320px);
+      align-items: start;
+    }
+    .meeting-source-pane {
+      @apply sticky top-8;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .meeting-document-workspace:has(.meeting-document-outline) {
+      grid-template-columns: 132px minmax(0, 720px);
+    }
+    .meeting-document-workspace--source-open:has(.meeting-document-outline) {
+      grid-template-columns: 120px minmax(0, 640px) minmax(280px, 320px);
+    }
+    .meeting-document-outline {
+      @apply sticky top-8 flex flex-col gap-1 self-start pt-14 text-xs;
+      color: var(--notes-muted);
+    }
+    .meeting-document-outline > span {
+      @apply mb-2 font-semibold;
+      color: var(--notes-ink);
+    }
+    .meeting-document-outline a {
+      @apply rounded-md py-1.5 transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    }
+  }
+
+  @media (max-width: 1023px) {
+    .meeting-document-workspace--source-open {
+      @apply relative;
+    }
+    .meeting-source-pane {
+      @apply fixed inset-x-4 bottom-4 max-h-[72vh] shadow-2xl;
+    }
+  }
+
+  @media (pointer: coarse) {
+    .meeting-editable-copy > button,
+    .meeting-note-block__meta > button,
+    .meeting-source-pane__header button {
+      @apply min-h-11 min-w-11;
+    }
   }
   .recording-workspace {
     @apply flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-pro-bg text-pro-text-main;
@@ -344,23 +699,29 @@
   .recording-rail-content {
     @apply mx-auto flex h-full w-full max-w-[760px] flex-col overscroll-contain overflow-y-auto px-8 pb-8 pt-10;
   }
-  .rail-heading h2 {
-    @apply mt-2 text-2xl font-semibold tracking-tight;
+  .rail-heading__status {
+    @apply mb-4 flex items-center justify-between gap-4;
   }
-  .rail-heading > p:last-child {
-    @apply mt-2 text-sm leading-6 text-pro-text-muted;
+  .rail-heading__status > span {
+    @apply inline-flex items-center gap-1.5 text-xs font-medium text-pro-text-muted;
   }
   .rail-meta {
-    @apply mt-8 border-b border-pro-border pb-6;
+    @apply mt-6 border-t border-pro-border pt-4;
+  }
+  .rail-meta > summary {
+    @apply flex min-h-11 cursor-pointer list-none items-center rounded-lg text-xs font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+  }
+  .rail-meta > summary::-webkit-details-marker {
+    @apply hidden;
   }
   .rail-meta h3 {
     @apply mb-2 flex items-center gap-2 text-xs font-medium text-pro-text-muted;
   }
   .rail-title-input {
-    @apply w-full min-w-0 border-0 bg-transparent p-0 text-lg font-medium outline-none placeholder:text-pro-text-muted focus-visible:ring-0;
+    @apply w-full min-w-0 border-0 bg-transparent p-0 text-2xl font-semibold tracking-tight outline-none placeholder:text-pro-text-muted focus-visible:ring-0;
   }
   .rail-participants {
-    @apply mt-5;
+    @apply pb-2 pt-3;
   }
   .participant-list {
     @apply mb-3 flex flex-wrap gap-2;
@@ -381,10 +742,10 @@
     @apply flex h-8 w-8 items-center justify-center text-pro-text-muted;
   }
   .rail-notes {
-    @apply flex min-h-0 flex-1 flex-col pt-6;
+    @apply mt-6 flex min-h-0 flex-1 flex-col border-y border-pro-border py-6;
   }
   .rail-notes textarea {
-    @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-base leading-7 outline-none placeholder:text-pro-text-muted/60 focus-visible:ring-0;
+    @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-base leading-7 outline-none placeholder:text-pro-text-muted/70 focus-visible:ring-0;
   }
   .rail-diagnostics {
     @apply border-t border-pro-border pt-4 text-xs text-pro-text-muted;

@@ -284,7 +284,7 @@ describe('MeetingView transcript integrity', () => {
     expect(timedOut).toBe('');
   });
 
-  it('shows transcript content when the Transcript tab is selected', () => {
+  it('shows transcript content as supporting evidence without hiding notes', () => {
     const markup = renderToStaticMarkup(
       <MeetingView
         selectedMeeting={{
@@ -321,7 +321,7 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(markup).not.toContain('data-meeting-artifact="analysis"');
+    expect(markup).toContain('data-meeting-artifact="analysis"');
     expect(markup).toContain('The transcript is already useful.');
     expect(markup).toContain('data-meeting-artifact="transcript"');
     expect(markup).not.toMatch(
@@ -329,7 +329,7 @@ describe('MeetingView transcript integrity', () => {
     );
   });
 
-  it('shows a transcript skeleton on the Transcript tab until content exists', () => {
+  it('shows a transcript skeleton without replacing the notes surface', () => {
     const markup = renderToStaticMarkup(
       <MeetingView
         selectedMeeting={{
@@ -359,7 +359,7 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(markup).not.toContain('data-meeting-skeleton="analysis"');
+    expect(markup).toContain('data-meeting-skeleton="analysis"');
     expect(markup).toContain('data-meeting-skeleton="transcript"');
     expect(markup).not.toContain('No Content Recorded');
     expect(markup).not.toContain('No biometric voice data found');

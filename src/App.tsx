@@ -17,6 +17,7 @@ import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { MeetingView } from './components/features/MeetingView';
+import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
 import { RecordingNamePopover } from './components/features/RecordingNamePopover';
 import { ZenMode } from './components/features/ZenMode';
 import {
@@ -131,7 +132,9 @@ function App() {
   const [dashboardActionError, setDashboardActionError] = useState<
     string | null
   >(null);
-  const [currentNotes, setCurrentNotes] = useState('');
+  const [currentNotes, setCurrentNotes] = useState(
+    () => window.localStorage.getItem(RECORDING_SCRATCHPAD_STORAGE_KEY) || '',
+  );
   const [transcriptVisible, setTranscriptVisible] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [autoEndEnabled, setAutoEndEnabled] = useState(true);
@@ -498,7 +501,6 @@ function App() {
     setIsRecording(recording);
     if (recording && !wasRecording) {
       setZenVisible(true);
-      setCurrentNotes('');
       setMeetingTitle('');
       setMeetingParticipants([]);
       setParticipantInput('');
@@ -757,6 +759,8 @@ function App() {
           onSessionComplete={async (meetingId) => {
             await fetchMeetings();
             if (meetingId) {
+              window.localStorage.removeItem(RECORDING_SCRATCHPAD_STORAGE_KEY);
+              setCurrentNotes('');
               setSelectedMeetingId(meetingId);
             }
           }}

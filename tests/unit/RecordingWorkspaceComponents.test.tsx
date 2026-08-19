@@ -207,12 +207,50 @@ describe('recording workspace components', () => {
       />,
     );
     expect(html).toContain('aria-label="Meeting notes"');
-    expect(html).toContain('Capture what matters');
+    expect(html).toContain('Live note');
+    expect(html).toContain('Saved locally');
     expect(html).toContain('Meeting title');
     expect(html).toContain('value="Launch review"');
-    expect(html).toContain('Notes');
+    expect(html.indexOf('id="recording-notes"')).toBeLessThan(
+      html.indexOf('Meeting details'),
+    );
     expect(html).toContain('Remove Avery');
-    expect(html).not.toContain('Collapse meeting details');
+    expect(html).toContain('Meeting details');
+  });
+
+  it('saves live scratchpad text locally after typing pauses', async () => {
+    vi.useFakeTimers();
+    window.localStorage.clear();
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    const onNotesChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <RecordingMeetingRail
+          title="Launch review"
+          onTitleChange={() => {}}
+          participants={[]}
+          participantInput=""
+          onParticipantInputChange={() => {}}
+          onAddParticipant={() => {}}
+          onRemoveParticipant={() => {}}
+          notes="Draft note"
+          onNotesChange={onNotesChange}
+        />,
+      );
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(window.localStorage.getItem('pluto.recording-scratchpad')).toBe(
+      'Draft note',
+    );
+    expect(container.textContent).toContain('Saved locally');
+    act(() => root.unmount());
+    vi.useRealTimers();
   });
 
   it('places the scratchpad before the live transcript', () => {

@@ -1,30 +1,16 @@
 import {
   Check,
-  ChevronDown,
   Copy,
   Loader2,
   MessageSquare,
+  MoreHorizontal,
   Sparkles,
+  X,
 } from 'lucide-react';
+import { type ReactNode, useEffect, useState } from 'react';
 import {
-  type ReactNode,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
-import { getMeetingAlerts, updateAlertStatus } from '../../api/intelligence';
-import {
-  ENTITY_ICONS,
-  type Entity,
-  type EntityMeeting,
   type ValueGainSignals,
   extractAndProcessEntities,
-  getEntityMeetings,
-  getEntityTypeLabel,
-  getMeetingEntities,
-  getRelatedEntities,
-  updateEntityStatus,
 } from '../../api/knowledgeGraph';
 import type {
   AnalysisDocument,
@@ -40,6 +26,12 @@ import {
   parseUserEditsJson,
   resolveMeetingAnalysis,
 } from '../../utils/analysisDocument';
+import { buildMeetingNotesDocument } from '../../utils/meetingNotesDocument';
+import {
+  ANALYSIS_SNAPSHOT_PATH,
+  createAnalysisSnapshot,
+  restoreAnalysisSnapshot,
+} from '../../utils/meetingNotesHistory';
 import {
   buildAnalysisTranscriptFromJson,
   parseTranscriptSegments,
@@ -49,15 +41,9 @@ import {
   canUseTranscriptTrustState,
   resolveTranscriptTrustState,
 } from '../../utils/transcriptTrustState';
-import { EntitySidebar } from '../KnowledgeGraph/EntitySidebar';
-import { V3AnalysisViewer } from './V3AnalysisViewer';
+import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
-import {
-  type MeetingActionEntity,
-  type MeetingActionItemCard,
-  type MeetingLinkedAttentionItem,
-  buildMeetingActionItems,
-} from './meetingActionItems';
+import type { MeetingActionItemCard } from './meetingActionItems';
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
@@ -490,222 +476,25 @@ export const MeetingView = ({
   handleCopySummary,
   copySuccess,
   handleDeleteMeeting,
-  highlightEntities,
   transcriptVisible,
   setTranscriptVisible,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
-
-  const transcriptBodyRef = useRef<HTMLDivElement>(null);
-  const [transcriptBodyHeight, setTranscriptBodyHeight] = useState(0);
-  const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
-  const [entityMeetings, setEntityMeetings] = useState<EntityMeeting[]>([]);
-  const [relatedEntities, setRelatedEntities] = useState<
-    (Entity & { relationship: string; direction: 'outgoing' | 'incoming' })[]
-  >([]);
-  const [entityDetailsLoading, setEntityDetailsLoading] = useState(false);
-  const [entityDetailsError, setEntityDetailsError] = useState<string | null>(
-    null,
-  );
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
+  const [isRestoringNotes, setIsRestoringNotes] = useState(false);
   const [notesTemplate, setNotesTemplate] =
     useState<MeetingNotesTemplate>('auto');
   const [regenerateNotesError, setRegenerateNotesError] = useState<
     string | null
   >(null);
-  const [meetingEntities, setMeetingEntities] = useState<MeetingActionEntity[]>(
-    [],
-  );
-  const [meetingAttentionItems, setMeetingAttentionItems] = useState<
-    MeetingLinkedAttentionItem[]
-  >([]);
-  const [meetingEntitiesLoading, setMeetingEntitiesLoading] = useState(false);
-  const [meetingActionError, setMeetingActionError] = useState<string | null>(
-    null,
-  );
-  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
-  const [pendingAttentionId, setPendingAttentionId] = useState<string | null>(
-    null,
-  );
-
-  useLayoutEffect(() => {
-    if (!transcriptVisible) {
-      setTranscriptBodyHeight(0);
-      return;
-    }
-    const el = transcriptBodyRef.current;
-    if (!el) return;
-    setTranscriptBodyHeight(0);
-    const frame = requestAnimationFrame(() => {
-      setTranscriptBodyHeight(el.scrollHeight);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [
-    transcriptVisible,
-    selectedMeeting?.transcript_json,
-    selectedMeeting?.enhanced_notes,
-    selectedMeeting?.user_notes,
-  ]);
 
   useEffect(() => {
-    if (!transcriptVisible) return;
-    const handleResize = () => {
-      const el = transcriptBodyRef.current;
-      if (el) setTranscriptBodyHeight(el.scrollHeight);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [transcriptVisible]);
-
-  useEffect(() => {
-    setSelectedEntity(null);
-    setMeetingEntities([]);
-    setEntityMeetings([]);
-    setRelatedEntities([]);
-    setEntityDetailsError(null);
     setIsRegeneratingNotes(false);
+    setIsRestoringNotes(false);
     setRegenerateNotesError(null);
-    setMeetingActionError(null);
-    setPendingActionId(null);
-    setPendingAttentionId(null);
   }, [selectedMeeting.id]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchMeetingEntities = async () => {
-      setMeetingEntitiesLoading(true);
-      try {
-        const [entitiesResult, alertsResult] = await Promise.allSettled([
-          getMeetingEntities(String(selectedMeeting.id)),
-          getMeetingAlerts(String(selectedMeeting.id)),
-        ]);
-
-        const data =
-          entitiesResult.status === 'fulfilled'
-            ? (entitiesResult.value as MeetingActionEntity[])
-            : null;
-        if (!cancelled) {
-          if (data) {
-            setMeetingEntities(data);
-          }
-          if (alertsResult.status === 'fulfilled') {
-            const linkedAlerts = Array.isArray(alertsResult.value)
-              ? (
-                  alertsResult.value as Array<{
-                    id?: unknown;
-                    kind?: unknown;
-                    reason?: unknown;
-                    status?: unknown;
-                    related_entity_ids?: unknown;
-                  }>
-                )
-                  .filter(
-                    (
-                      item,
-                    ): item is {
-                      id: string;
-                      kind?: string;
-                      reason?: string;
-                      status: 'active' | 'dismissed' | 'snoozed';
-                      related_entity_ids: string[];
-                    } =>
-                      typeof item.id === 'string' &&
-                      (item.status === 'active' ||
-                        item.status === 'dismissed' ||
-                        item.status === 'snoozed') &&
-                      Array.isArray(item.related_entity_ids),
-                  )
-                  .map((item) => ({
-                    id: item.id,
-                    kind: typeof item.kind === 'string' ? item.kind : undefined,
-                    reason:
-                      typeof item.reason === 'string' ? item.reason : undefined,
-                    status: item.status,
-                    related_entity_ids: item.related_entity_ids,
-                  }))
-              : [];
-            setMeetingAttentionItems(linkedAlerts);
-          } else {
-            console.error(
-              'Failed to fetch meeting attention items:',
-              alertsResult.reason,
-            );
-            setMeetingAttentionItems([]);
-          }
-        }
-        if (entitiesResult.status === 'rejected') {
-          throw entitiesResult.reason;
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.error('Failed to fetch meeting action items:', error);
-          setMeetingActionError('Could not load linked follow-ups.');
-        }
-      } finally {
-        if (!cancelled) {
-          setMeetingEntitiesLoading(false);
-        }
-      }
-    };
-
-    const handleEntitiesUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ meetingId?: string | number }>)
-        .detail;
-      if (!detail?.meetingId) return;
-      if (String(detail.meetingId) !== String(selectedMeeting.id)) return;
-      void fetchMeetingEntities();
-    };
-
-    void fetchMeetingEntities();
-    window.addEventListener('MEETING_ENTITIES_UPDATED', handleEntitiesUpdated);
-    return () => {
-      cancelled = true;
-      window.removeEventListener(
-        'MEETING_ENTITIES_UPDATED',
-        handleEntitiesUpdated,
-      );
-    };
-  }, [selectedMeeting.id]);
-
-  useEffect(() => {
-    if (!selectedEntity) {
-      setEntityMeetings([]);
-      setRelatedEntities([]);
-      setEntityDetailsLoading(false);
-      setEntityDetailsError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setEntityDetailsLoading(true);
-    setEntityDetailsError(null);
-
-    Promise.all([
-      getEntityMeetings(selectedEntity.id),
-      getRelatedEntities(selectedEntity.id),
-    ])
-      .then(([meetings, related]) => {
-        if (cancelled) return;
-        setEntityMeetings(meetings);
-        setRelatedEntities(related);
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error('Failed to fetch entity details:', error);
-        setEntityDetailsError('Could not load entity details.');
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setEntityDetailsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedEntity]);
-
-  const { version, v2, v3 } = resolveMeetingAnalysis(selectedMeeting);
+  const { v2, v3 } = resolveMeetingAnalysis(selectedMeeting);
   const downstreamPresentation =
     getDownstreamProcessingPresentation(selectedMeeting);
   const canRegenerateMeetingIntelligence =
@@ -738,35 +527,12 @@ export const MeetingView = ({
       ? analysisDocumentToMarkdown(v2)
       : selectedMeeting.enhanced_notes || selectedMeeting.user_notes || '';
 
-  const summaryParagraphs = v2?.summary?.length
-    ? v2.summary
-    : ['No summary was generated for this meeting.'];
-  const keyPoints = v2?.key_points || [];
-  const actionItems =
-    v3?.all_action_items.map((item) => item.text) || v2?.action_items || [];
-  const decisions =
-    v3?.all_decisions.map((decision) => decision.text) || v2?.decisions || [];
-  const totalEntityMentions = entityMeetings.reduce(
-    (sum, meeting) => sum + meeting.mention_count,
-    0,
-  );
-  const meetingActionItems = buildMeetingActionItems({
-    meetingEntities,
-    linkedAttentionItems: meetingAttentionItems,
-    fallbackActionItems: actionItems,
+  const notesDocument = buildMeetingNotesDocument({
+    v2,
+    v3,
+    userNotes: selectedMeeting.user_notes || '',
+    editsMap,
   });
-
-  const formatEntityMeetingDate = (meeting: EntityMeeting): string => {
-    const value = meeting.started_at || meeting.created_at;
-    if (!value) return 'Unknown date';
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return 'Unknown date';
-    return parsed.toLocaleDateString([], {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  };
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
@@ -892,6 +658,9 @@ export const MeetingView = ({
           artifacts?.signals != null
             ? JSON.stringify(artifacts.signals)
             : selectedMeeting.value_signals_json || null,
+        user_edits_json: JSON.stringify(
+          createAnalysisSnapshot(selectedMeeting),
+        ),
       });
       try {
         window.dispatchEvent(
@@ -938,88 +707,23 @@ export const MeetingView = ({
     }
   };
 
-  const toggleMeetingActionItem = async (
-    actionId: string,
-    completed: boolean,
-  ) => {
-    if (pendingActionId) return;
+  const restorePreviousGeneratedNotes = async () => {
+    if (isRestoringNotes) return;
+    const restored = restoreAnalysisSnapshot(selectedMeeting);
+    if (!restored) return;
 
-    setMeetingActionError(null);
-    setPendingActionId(actionId);
-    const nextStatus = completed ? 'active' : 'completed';
-
-    setMeetingEntities((prev) =>
-      prev.map((entity) =>
-        entity.id === actionId ? { ...entity, status: nextStatus } : entity,
-      ),
-    );
-
+    setIsRestoringNotes(true);
+    setRegenerateNotesError(null);
     try {
-      await updateEntityStatus(actionId, nextStatus);
-      window.dispatchEvent(
-        new CustomEvent('MEETING_ENTITIES_UPDATED', {
-          detail: { meetingId: String(selectedMeeting.id) },
-        }),
-      );
+      await window.ipcRenderer.invoke('SAVE_MEETING', restored);
+      await fetchMeetings();
     } catch (error) {
-      console.error('Failed to update meeting action item status:', error);
-      setMeetingActionError('Could not update this follow-up right now.');
-      setMeetingEntities((prev) =>
-        prev.map((entity) =>
-          entity.id === actionId
-            ? {
-                ...entity,
-                status: completed ? 'completed' : 'active',
-              }
-            : entity,
-        ),
+      console.error('Failed to restore previous generated notes:', error);
+      setRegenerateNotesError(
+        'The previous version could not be restored. Your current notes are unchanged.',
       );
     } finally {
-      setPendingActionId(null);
-    }
-  };
-
-  const toggleMeetingActionDismissal = async (
-    attentionItemId: string,
-    nextStatus: 'active' | 'dismissed' | 'snoozed',
-  ) => {
-    if (pendingAttentionId) return;
-
-    setMeetingActionError(null);
-    setPendingAttentionId(attentionItemId);
-    const previous = meetingAttentionItems.find(
-      (item) => item.id === attentionItemId,
-    );
-    const previousStatus = previous?.status ?? 'active';
-
-    setMeetingAttentionItems((prev) =>
-      prev.map((item) =>
-        item.id === attentionItemId ? { ...item, status: nextStatus } : item,
-      ),
-    );
-
-    try {
-      await updateAlertStatus(attentionItemId, nextStatus);
-      window.dispatchEvent(
-        new CustomEvent('MEETING_ENTITIES_UPDATED', {
-          detail: { meetingId: String(selectedMeeting.id) },
-        }),
-      );
-    } catch (error) {
-      console.error('Failed to update meeting follow-up dismissal:', error);
-      setMeetingActionError('Could not update this follow-up right now.');
-      setMeetingAttentionItems((prev) =>
-        prev.map((item) =>
-          item.id === attentionItemId
-            ? {
-                ...item,
-                status: previousStatus,
-              }
-            : item,
-        ),
-      );
-    } finally {
-      setPendingAttentionId(null);
+      setIsRestoringNotes(false);
     }
   };
 
@@ -1027,7 +731,7 @@ export const MeetingView = ({
     <div
       key={selectedMeeting.id}
       data-meeting-page
-      className="meeting-document mx-auto w-full max-w-[920px] animate-in pb-24"
+      className="meeting-document mx-auto w-full max-w-[1280px] animate-in pb-24"
     >
       <TranscriptIntegrityPanel
         status={selectedMeeting.transcript_status}
@@ -1102,138 +806,160 @@ export const MeetingView = ({
               className="meeting-document-title w-full border-b border-pro-accent bg-transparent outline-none"
             />
           ) : (
-            <h1
-              onClick={() => {
-                setEditingTitle(true);
-                setTitleValue(selectedMeeting?.title || 'Untitled Session');
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
+            <h1 className="meeting-document-title">
+              <button
+                type="button"
+                aria-label="Edit meeting title"
+                onClick={() => {
                   setEditingTitle(true);
                   setTitleValue(selectedMeeting?.title || 'Untitled Session');
-                }
-              }}
-              className="meeting-document-title cursor-text transition-colors hover:text-pro-accent/80"
-            >
-              {selectedMeeting?.title || 'Untitled Session'}
+                }}
+                className="cursor-text text-left transition-colors hover:text-pro-accent/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+              >
+                {selectedMeeting?.title || 'Untitled Session'}
+              </button>
             </h1>
           )}
         </div>
         <div className="meeting-document-actions mt-4">
-          <label className="meeting-template-picker">
-            <span className="sr-only">Notes template</span>
-            <select
-              value={notesTemplate}
-              onChange={(event) =>
-                setNotesTemplate(event.target.value as MeetingNotesTemplate)
-              }
-              aria-label="Notes template"
-            >
-              <option value="auto">Auto</option>
-              <option value="one_on_one">1:1</option>
-              <option value="team_sync">Team sync</option>
-              <option value="customer_call">Customer call</option>
-              <option value="interview">Interview</option>
-              <option value="project_kickoff">Project kickoff</option>
-            </select>
-          </label>
-          {downstreamPresentation.state === 'ready' &&
-          canRegenerateMeetingIntelligence ? (
-            <>
-              <button
-                type="button"
-                onClick={regenerateEnhancedNotes}
-                disabled={isRegeneratingNotes}
-                className={`meeting-toolbar-button ${
-                  isRegeneratingNotes
-                    ? 'bg-pro-bg border-pro-border/40 text-pro-text-muted cursor-not-allowed'
-                    : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'
-                }`}
-                aria-label={
-                  isRegeneratingNotes
-                    ? 'Generating Enhanced Notes...'
-                    : 'Regenerate Enhanced Notes'
-                }
-              >
-                {isRegeneratingNotes ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Sparkles className="w-4 h-4 opacity-70" />
-                )}
-                <span>{isRegeneratingNotes ? 'Writing…' : 'Regenerate'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
-                className={`meeting-toolbar-button ${copySuccess ? 'text-green-700' : ''}`}
-                aria-label="Copy notes"
-              >
-                {copySuccess ? (
-                  <Check className="w-4 h-4" />
-                ) : (
-                  <Copy className="w-4 h-4 opacity-60" />
-                )}
-                <span>{copySuccess ? 'Copied' : 'Copy'}</span>
-              </button>
-            </>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => {
-              if (selectedMeeting) {
-                const summaryText = canonicalAnalysisMarkdown;
-                const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${summaryText}\n\nTranscript:\n${selectedMeeting.transcript_json}`;
-                const blob = new Blob([content], { type: 'text/plain' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `pluto-session-${selectedMeeting.id}.txt`;
-                a.click();
-              }
-            }}
-            className="meeting-toolbar-button"
-            aria-label="Export meeting"
-          >
-            <svg
-              aria-hidden="true"
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-              />
-            </svg>
-            <span>Export</span>
-          </button>
-          {selectedMeeting.finalization_status !== 'recovery_required' ? (
+          {editsMap[ANALYSIS_SNAPSHOT_PATH] ? (
             <button
               type="button"
-              onClick={() => handleDeleteMeeting(selectedMeeting.id)}
-              className="meeting-toolbar-button meeting-toolbar-button--danger"
-              aria-label="Delete meeting"
+              onClick={() => void restorePreviousGeneratedNotes()}
+              disabled={isRestoringNotes}
+              className="meeting-toolbar-button meeting-toolbar-button--undo"
+              aria-label="Restore previous generated notes"
             >
-              <svg
-                aria-hidden="true"
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                />
-              </svg>
+              {isRestoringNotes ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <span aria-hidden="true">↶</span>
+              )}
+              <span>{isRestoringNotes ? 'Restoring…' : 'Undo rewrite'}</span>
             </button>
           ) : null}
+          <details className="meeting-document-menu">
+            <summary aria-label="Meeting note actions">
+              <MoreHorizontal aria-hidden="true" size={18} />
+            </summary>
+            <div className="meeting-document-menu__panel">
+              <label className="meeting-template-picker">
+                <span className="sr-only">Notes template</span>
+                <select
+                  value={notesTemplate}
+                  onChange={(event) =>
+                    setNotesTemplate(event.target.value as MeetingNotesTemplate)
+                  }
+                  aria-label="Notes template"
+                >
+                  <option value="auto">Auto</option>
+                  <option value="one_on_one">1:1</option>
+                  <option value="team_sync">Team sync</option>
+                  <option value="customer_call">Customer call</option>
+                  <option value="interview">Interview</option>
+                  <option value="project_kickoff">Project kickoff</option>
+                </select>
+              </label>
+              {downstreamPresentation.state === 'ready' &&
+              canRegenerateMeetingIntelligence ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={regenerateEnhancedNotes}
+                    disabled={isRegeneratingNotes}
+                    className={`meeting-toolbar-button ${
+                      isRegeneratingNotes
+                        ? 'bg-pro-bg border-pro-border/40 text-pro-text-muted cursor-not-allowed'
+                        : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'
+                    }`}
+                    aria-label={
+                      isRegeneratingNotes
+                        ? 'Generating Enhanced Notes...'
+                        : 'Regenerate Enhanced Notes'
+                    }
+                  >
+                    {isRegeneratingNotes ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-4 h-4 opacity-70" />
+                    )}
+                    <span>
+                      {isRegeneratingNotes ? 'Writing…' : 'Regenerate'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCopySummary(canonicalAnalysisMarkdown)}
+                    className={`meeting-toolbar-button ${copySuccess ? 'text-green-700' : ''}`}
+                    aria-label="Copy notes"
+                  >
+                    {copySuccess ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      <Copy className="w-4 h-4 opacity-60" />
+                    )}
+                    <span>{copySuccess ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedMeeting) {
+                    const summaryText = canonicalAnalysisMarkdown;
+                    const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${summaryText}\n\nTranscript:\n${selectedMeeting.transcript_json}`;
+                    const blob = new Blob([content], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `pluto-session-${selectedMeeting.id}.txt`;
+                    a.click();
+                  }
+                }}
+                className="meeting-toolbar-button"
+                aria-label="Export meeting"
+              >
+                <svg
+                  aria-hidden="true"
+                  className="w-4 h-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                  />
+                </svg>
+                <span>Export</span>
+              </button>
+              {selectedMeeting.finalization_status !== 'recovery_required' ? (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteMeeting(selectedMeeting.id)}
+                  className="meeting-toolbar-button meeting-toolbar-button--danger"
+                  aria-label="Delete meeting"
+                >
+                  <svg
+                    aria-hidden="true"
+                    className="w-4 h-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+          </details>
         </div>
       </header>
       {regenerateNotesError ? (
@@ -1242,428 +968,95 @@ export const MeetingView = ({
         </p>
       ) : null}
 
-      <div
-        className="meeting-document-tabs"
-        role="tablist"
-        aria-label="Meeting view"
-      >
-        <button
-          type="button"
-          role="tab"
-          data-meeting-tab="notes"
-          aria-selected={!transcriptVisible}
-          onClick={() => setTranscriptVisible(false)}
+      <div className="meeting-notes-surface" aria-label="Notes">
+        {downstreamPresentation.state === 'loading' &&
+        !notesDocument.hasAnalysis ? (
+          <MeetingAnalysisSkeleton />
+        ) : downstreamPresentation.state === 'failed' ? (
+          <section
+            aria-live="polite"
+            data-meeting-artifact="analysis"
+            data-state="failed"
+            className="meeting-analysis-error"
+          >
+            <strong>{downstreamPresentation.title}</strong>
+            <p>{downstreamPresentation.detail}</p>
+          </section>
+        ) : null}
+        <div
+          data-meeting-artifact="analysis"
+          data-state={notesDocument.hasAnalysis ? 'ready' : 'notes-only'}
         >
-          Notes
-        </button>
-        <button
-          type="button"
-          role="tab"
-          data-meeting-tab="transcript"
-          aria-selected={transcriptVisible}
-          onClick={() => setTranscriptVisible(true)}
-        >
-          Transcript
-        </button>
+          <MeetingNotesDocument
+            meeting={selectedMeeting}
+            model={notesDocument}
+            transcriptSegments={transcriptSegments}
+            onDocumentChanged={fetchMeetings}
+            onShowTranscript={() => setTranscriptVisible(true)}
+          />
+        </div>
       </div>
 
-      {!transcriptVisible && (
-        <div
-          className="meeting-notes-surface"
-          role="tabpanel"
-          aria-label="Notes"
+      {!transcriptVisible ? (
+        <button
+          type="button"
+          data-meeting-transcript-toggle
+          className="meeting-transcript-toggle"
+          onClick={() => setTranscriptVisible(true)}
         >
-          {/* Discovery Hub - Related Entities (Knowledge Graph) */}
-          <div className="meeting-context-panel space-y-6">
-            <EntitySidebar
-              meetingId={String(selectedMeeting.id)}
-              onEntityClick={(entity) => {
-                setSelectedEntity(entity);
-              }}
-            />
-            {selectedEntity && (
-              <div className="bg-pro-surface/70 border border-pro-border/50 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
-                      Entity Detail
-                    </p>
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">
-                        {ENTITY_ICONS[selectedEntity.type]}
-                      </span>
-                      <div>
-                        <h3 className="text-xl font-black text-pro-text-main">
-                          {selectedEntity.name}
-                        </h3>
-                        <p className="text-[11px] font-bold uppercase tracking-widest text-pro-text-muted/60">
-                          {getEntityTypeLabel(selectedEntity.type)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedEntity(null)}
-                    className="h-8 px-3 rounded-full border border-pro-border text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60 hover:text-pro-text-main hover:border-pro-accent/30 transition-colors"
-                  >
-                    Close
-                  </button>
-                </div>
-
-                {entityDetailsLoading ? (
-                  <div className="p-5 rounded-2xl border border-pro-border/50 bg-pro-bg/50 text-[12px] font-semibold text-pro-text-muted/60">
-                    Loading mentions and related entities...
-                  </div>
-                ) : entityDetailsError ? (
-                  <div className="p-5 rounded-2xl border border-red-200 bg-red-50/50 text-[12px] font-semibold text-red-600">
-                    {entityDetailsError}
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    <div className="flex flex-wrap gap-2">
-                      <span className="px-2.5 py-1 rounded-full bg-pro-accent/10 text-[10px] font-black uppercase tracking-widest text-pro-accent">
-                        {entityMeetings.length} meetings
-                      </span>
-                      <span className="px-2.5 py-1 rounded-full bg-stone-100 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
-                        {totalEntityMentions} mentions
-                      </span>
-                      <span className="px-2.5 py-1 rounded-full bg-stone-100 text-[10px] font-black uppercase tracking-widest text-pro-text-muted/70">
-                        {relatedEntities.length} connections
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      <div className="space-y-3">
-                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/40">
-                          All Mentions Across Meetings
-                        </h4>
-                        <div className="space-y-3">
-                          {entityMeetings.length === 0 ? (
-                            <p className="p-4 rounded-2xl border border-dashed border-pro-border text-[12px] text-pro-text-muted/60">
-                              No prior meeting mentions found.
-                            </p>
-                          ) : (
-                            entityMeetings.map((meeting) => (
-                              <div
-                                key={meeting.id}
-                                className="p-4 rounded-2xl border border-pro-border/50 bg-pro-surface/70 space-y-2"
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <p className="text-[13px] font-bold text-pro-text-main truncate">
-                                    {meeting.title || 'Untitled Session'}
-                                  </p>
-                                  <span className="text-[10px] font-bold uppercase tracking-widest text-pro-text-muted/50">
-                                    {formatEntityMeetingDate(meeting)}
-                                  </span>
-                                </div>
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60">
-                                    {meeting.mention_count} mention
-                                    {meeting.mention_count === 1 ? '' : 's'}
-                                  </span>
-                                  {String(meeting.id) ===
-                                    String(selectedMeeting.id) && (
-                                    <span className="text-[9px] font-black uppercase tracking-widest text-pro-accent">
-                                      Current Meeting
-                                    </span>
-                                  )}
-                                </div>
-                                {meeting.context ? (
-                                  <p className="text-[12px] text-pro-text-muted/80 line-clamp-3">
-                                    {meeting.context}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ))
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/40">
-                          Connected Entities
-                        </h4>
-                        <div className="flex flex-wrap gap-2">
-                          {relatedEntities.length === 0 ? (
-                            <p className="w-full p-4 rounded-2xl border border-dashed border-pro-border text-[12px] text-pro-text-muted/60">
-                              No relationships inferred yet.
-                            </p>
-                          ) : (
-                            relatedEntities.map((related) => (
-                              <button
-                                key={`${related.id}-${related.relationship}-${related.direction}`}
-                                type="button"
-                                onClick={() => setSelectedEntity(related)}
-                                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-pro-border bg-pro-surface text-[11px] font-bold text-pro-text-main hover:border-pro-accent/30 hover:text-pro-accent transition-colors"
-                                title={`${related.direction === 'outgoing' ? 'Links to' : 'Linked from'} ${related.name}`}
-                              >
-                                <span>{ENTITY_ICONS[related.type]}</span>
-                                <span className="truncate max-w-[120px]">
-                                  {related.name}
-                                </span>
-                                <span className="text-[9px] font-black uppercase tracking-widest text-pro-text-muted/50">
-                                  {related.relationship.replace(/_/g, ' ')}
-                                </span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Summary & Analysis Section */}
-          {downstreamPresentation.state === 'loading' ? (
-            <MeetingAnalysisSkeleton />
-          ) : downstreamPresentation.state === 'failed' ? (
-            <section
-              aria-live="polite"
-              data-meeting-artifact="analysis"
-              data-state="failed"
-              className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] p-6"
-            >
-              <strong className="text-sm text-pro-text">
-                {downstreamPresentation.title}
-              </strong>
-              <p className="mt-1 text-sm text-pro-text-muted">
-                {downstreamPresentation.detail}
-              </p>
-            </section>
-          ) : null}
-          {version === 3 && v3 ? (
-            <div data-meeting-artifact="analysis" data-state="ready">
-              <V3AnalysisViewer
-                meetingId={selectedMeeting.id}
-                doc={v3}
-                editsMap={editsMap}
-                highlightEntities={highlightEntities}
-                onEditSaved={fetchMeetings}
-                onRevealSource={() => setTranscriptVisible(true)}
-              />
-            </div>
-          ) : v2 ? (
-            <div
-              data-meeting-artifact="analysis"
-              data-state="ready"
-              className="space-y-16"
-            >
-              <div className="grid grid-cols-12 gap-8 items-start overflow-visible">
-                {/* Left Column: Executive Summary & Key Points */}
-                <div className="col-span-12 lg:col-span-7 space-y-12">
-                  {/* Executive Summary */}
-                  <div className="space-y-4">
-                    <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-                      Executive Summary
-                    </h2>
-                    <div className="text-xl font-medium leading-[1.6] text-pro-text-main/90 bg-pro-surface/40 backdrop-blur-sm p-8 rounded-[2rem] border border-pro-border/40 shadow-sm">
-                      {summaryParagraphs.map((line, i) => (
-                        <p
-                          key={`${line}-${line.length}`}
-                          className={i > 0 ? 'mt-4' : ''}
-                        >
-                          {highlightEntities(line)}
-                        </p>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Key Insights / Points */}
-                  <div className="space-y-6">
-                    <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                      Key Insights
-                    </h2>
-                    <div className="space-y-4">
-                      {(keyPoints.length > 0
-                        ? keyPoints
-                        : ['No key points were captured.']
-                      ).map((item) => (
-                        <div
-                          key={`${item}-${item.length}`}
-                          className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-sm flex gap-4 group hover:border-pro-accent/30 transition-all"
-                        >
-                          <span className="text-pro-accent group-hover:scale-125 transition-transform shrink-0 pt-0.5">
-                            ◆
-                          </span>
-                          <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
-                            {highlightEntities(item)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Decisions Section */}
-                  <div className="space-y-6">
-                    <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-                      Decisions
-                    </h2>
-                    <div className="p-8 rounded-[2rem] bg-indigo-50/30 dark:bg-pro-surface/50 border border-indigo-100/50 dark:border-pro-border/30 space-y-4">
-                      {(decisions.length > 0
-                        ? decisions
-                        : ['No explicit decisions were made.']
-                      ).map((item) => (
-                        <div
-                          key={`${item}-${item.length}`}
-                          className="flex gap-3 items-baseline"
-                        >
-                          <span className="text-indigo-500 font-bold leading-none -translate-y-[3px]">
-                            ↳
-                          </span>
-                          <p className="text-[14px] font-semibold text-indigo-900/80 dark:text-indigo-200/90 leading-relaxed">
-                            {highlightEntities(item)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Column: Action Items */}
-                <div className="col-span-12 lg:col-span-5 space-y-12 lg:sticky lg:top-24 lg:self-start">
-                  <div className="space-y-6">
-                    <h2 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em] flex items-center gap-2">
-                      Action Items
-                    </h2>
-                    {meetingActionError ? (
-                      <p className="-mt-2 text-xs font-semibold text-red-600">
-                        {meetingActionError}
-                      </p>
-                    ) : null}
-                    <div className="space-y-4">
-                      {(meetingActionItems.length > 0
-                        ? meetingActionItems
-                        : [
-                            'No concrete action items were explicitly committed.',
-                          ]
-                      ).map((item) =>
-                        typeof item === 'string' ? (
-                          <div
-                            key={`${item}-${item.length}`}
-                            className="p-6 rounded-2xl bg-pro-surface border border-pro-border shadow-premium flex gap-4 group hover:border-pro-accent/30 transition-all card-hover-effect"
-                          >
-                            <div className="w-6 h-6 rounded-lg border border-pro-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-pro-accent group-hover:bg-pro-accent/5 transition-all">
-                              <Check className="w-3.5 h-3.5 text-pro-accent opacity-0 group-hover:opacity-100 transition-opacity" />
-                            </div>
-                            <p className="text-[15px] font-medium leading-relaxed text-pro-text-main/80">
-                              {highlightEntities(item)}
-                            </p>
-                          </div>
-                        ) : (
-                          <MeetingActionCards
-                            key={item.id}
-                            items={[item]}
-                            highlightEntities={highlightEntities}
-                            meetingEntitiesLoading={meetingEntitiesLoading}
-                            pendingActionId={pendingActionId}
-                            pendingAttentionId={pendingAttentionId}
-                            onToggleAction={toggleMeetingActionItem}
-                            onToggleDismissal={toggleMeetingActionDismissal}
-                          />
-                        ),
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      )}
+          <MessageSquare aria-hidden="true" size={15} />
+          Transcript
+          <span>Open the verbatim record</span>
+        </button>
+      ) : null}
 
       {transcriptVisible && (
-        <div
+        <section
           data-meeting-artifact="transcript"
           data-state={hasTranscriptContent ? 'ready' : 'loading'}
-          className="meeting-transcript-surface flex-1 flex flex-col h-auto overflow-visible relative"
+          className="meeting-transcript-surface"
+          aria-labelledby="meeting-transcript-heading"
         >
-          {/* Right: Transcript (Collapsible) - Visual polish */}
-          <div className="relative bg-pro-bg lg:bg-transparent z-20 flex-1 border-l border-pro-border/40 lg:border-l-0">
-            {transcriptVisible && (
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-32 bg-pro-bg dark:bg-pro-bg z-20" />
-            )}
-            <div className="flex flex-col">
-              {transcriptVisible && (
-                <div
-                  className="sticky z-30 bg-pro-bg dark:bg-pro-bg pt-6"
-                  style={{ top: '-65px' }}
-                >
-                  <div className="bg-pro-surface dark:bg-pro-bg shadow-md dark:shadow-none border-b border-transparent dark:border-transparent overflow-hidden">
-                    <div className="p-6 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-pro-accent/10 flex items-center justify-center text-pro-accent">
-                          <MessageSquare size={14} />
-                        </div>
-                        <div>
-                          <h3 className="text-xs font-black uppercase tracking-[0.2em] text-pro-text-main">
-                            Transcript
-                          </h3>
-                          <p className="text-[9px] font-bold text-pro-text-muted uppercase tracking-widest mt-0.5">
-                            Verbatim Record
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setTranscriptVisible(false)}
-                        className="lg:hidden p-2 hover:bg-black/5 rounded-full transition-colors"
-                      >
-                        <ChevronDown className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div
-                className={`transition-[max-height,opacity] duration-500 ease-[cubic-bezier(0.23,1,0.32,1)] overflow-hidden ${
-                  transcriptVisible
-                    ? 'opacity-100'
-                    : 'opacity-0 pointer-events-none'
-                }`}
-                style={{
-                  maxHeight: transcriptVisible ? transcriptBodyHeight : 0,
-                }}
-              >
-                <div
-                  ref={transcriptBodyRef}
-                  className="px-8 pb-10 pt-6 bg-stone-50/30 dark:bg-transparent"
-                >
-                  <div className="space-y-8 max-w-xl mx-auto pt-4">
-                    {hasTranscriptContent ? (
-                      mergedTranscriptSegments.map((s: TranscriptSegment) => {
-                        const segmentKey = `${String(s.speaker ?? 'unknown')}-${s.start}-${s.end}-${s.text}`;
-                        return (
-                          <div
-                            key={segmentKey}
-                            className="group flex gap-12 transition-all"
-                          >
-                            <div className="w-20 shrink-0 pt-1 text-right">
-                              <span className="text-[10px] font-black text-pro-accent uppercase tracking-[0.2em] opacity-40 group-hover:opacity-100 transition-opacity">
-                                {s.speaker || 'Unknown'}
-                              </span>
-                            </div>
-                            <div className="flex-1">
-                              <p className="text-pro-text-main text-lg leading-[1.8] font-medium opacity-80 group-hover:opacity-100 transition-opacity">
-                                {highlightEntities(s.text)}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <MeetingTranscriptSkeleton />
-                    )}
-                  </div>
-                </div>
-              </div>
+          <header className="meeting-transcript-header">
+            <div>
+              <h2 id="meeting-transcript-heading">Transcript</h2>
+              <p>Verbatim record</p>
             </div>
+            <button
+              type="button"
+              onClick={() => setTranscriptVisible(false)}
+              aria-label="Close transcript"
+            >
+              <X aria-hidden="true" size={17} />
+            </button>
+          </header>
+          <div className="meeting-transcript-record">
+            {hasTranscriptContent ? (
+              mergedTranscriptSegments.map((segment: TranscriptSegment) => {
+                const segmentKey = `${String(segment.speaker ?? 'unknown')}-${segment.start}-${segment.end}-${segment.text}`;
+                const seconds = Number.isFinite(segment.start)
+                  ? Math.max(0, segment.start || 0)
+                  : 0;
+                const timestamp = `${Math.floor(seconds / 60)}:${Math.floor(
+                  seconds % 60,
+                )
+                  .toString()
+                  .padStart(2, '0')}`;
+                return (
+                  <div key={segmentKey} className="meeting-transcript-row">
+                    <div>
+                      <strong>{segment.speaker || 'Unknown speaker'}</strong>
+                      <time>{timestamp}</time>
+                    </div>
+                    <p>{segment.text}</p>
+                  </div>
+                );
+              })
+            ) : (
+              <MeetingTranscriptSkeleton />
+            )}
           </div>
-        </div>
+        </section>
       )}
     </div>
   );

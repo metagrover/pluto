@@ -215,12 +215,23 @@ const editorialPromptFits = (prompt: string): boolean =>
 const HOUSEKEEPING_TOPIC =
   /\b(screen shar(?:e|ing)|introductions?|repository links?|link sharing|tool mechanics?)\b/i;
 
-const collapseOversizedTopics = (
+export const collapseOversizedTopics = (
   topics: TopicSection[],
   maxTopics = 6,
 ): TopicSection[] => {
-  if (topics.length <= maxTopics) return topics;
-  const clusters = topics.map((topic, index) => ({ topics: [topic], index }));
+  const substantiveTopics = topics.filter(
+    (topic) =>
+      !HOUSEKEEPING_TOPIC.test(topic.title) ||
+      topic.decisions.length > 0 ||
+      topic.action_items.length > 0,
+  );
+  const eligibleTopics =
+    substantiveTopics.length > 0 ? substantiveTopics : topics;
+  if (eligibleTopics.length <= maxTopics) return eligibleTopics;
+  const clusters = eligibleTopics.map((topic, index) => ({
+    topics: [topic],
+    index,
+  }));
 
   while (clusters.length > maxTopics) {
     let bestPair: [number, number] = [0, 1];
@@ -327,6 +338,18 @@ const collapseOversizedTopics = (
             : undefined,
       };
     });
+};
+
+const compactOversizedAnalysis = (
+  analysis: AnalysisDocumentV3,
+): AnalysisDocumentV3 => {
+  if (analysis.topics.length <= 6) return analysis;
+  const topics = collapseOversizedTopics(analysis.topics);
+  return {
+    ...buildDraftFromTopics(topics, analysis.meeting_type),
+    overview: analysis.overview,
+    quality: analysis.quality,
+  };
 };
 
 // The default local Ollama runtime has one generation slot. Queue every
@@ -489,7 +512,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       }
 
       return this.finalizeStructuredAnalysis({
-        analysis: parsed,
+        analysis: compactOversizedAnalysis(parsed),
         transcript,
         retryCount,
         errorCategories,
@@ -821,6 +844,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         this.pushErrorCategory(errorCategories, 'editorial_failed');
       }
     }
+
+    finalDraft = compactOversizedAnalysis(finalDraft);
 
     return this.finalizeStructuredAnalysis({
       analysis: finalDraft,
