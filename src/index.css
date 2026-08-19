@@ -393,11 +393,11 @@
   }
 
   .meeting-document-workspace {
-    @apply grid w-full justify-center gap-0;
-    grid-template-columns: minmax(0, 760px);
+    @apply grid w-full justify-start gap-0;
+    grid-template-columns: minmax(0, 900px);
   }
   .meeting-document-workspace:has(.meeting-document-outline) {
-    grid-template-columns: minmax(0, 720px);
+    grid-template-columns: minmax(0, 900px);
   }
   .meeting-notes-document {
     @apply w-full min-w-0 px-8 pb-16 pt-7 md:px-10;
@@ -466,6 +466,8 @@
   }
   .meeting-note-block {
     @apply relative flex min-w-0 items-start gap-3 rounded-md px-1 py-2;
+    width: fit-content;
+    max-width: min(66ch, 100%);
   }
   .meeting-note-block__marker {
     @apply mt-[0.72rem] h-1.5 w-1.5 shrink-0 rounded-full;
@@ -494,15 +496,22 @@
   .meeting-action-check {
     @apply -m-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center;
   }
-  .meeting-note-block--outcomes input[type="checkbox"] {
-    @apply h-5 w-5 shrink-0 cursor-pointer rounded border-2 accent-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2;
+  .meeting-action-box {
+    @apply grid h-5 w-5 shrink-0 place-content-center rounded border-2 transition-colors;
     border-color: var(--notes-faint);
+    background: transparent;
+    color: transparent;
   }
-  .meeting-note-block--outcomes
-    input[type="checkbox"]:checked
-    + .meeting-note-block__body {
-    color: var(--notes-muted);
-    text-decoration-color: var(--notes-faint);
+  .meeting-action-check:hover .meeting-action-box {
+    border-color: var(--notes-muted);
+  }
+  .meeting-action-check input:focus-visible + .meeting-action-box {
+    @apply ring-2 ring-pro-accent ring-offset-2;
+  }
+  .meeting-action-check input:checked + .meeting-action-box {
+    border-color: var(--notes-muted);
+    background: var(--notes-muted);
+    color: var(--notes-paper-raised);
   }
   .meeting-editable-copy {
     @apply flex min-w-0 items-start gap-2;
@@ -620,7 +629,7 @@
     @apply hidden;
   }
   .meeting-source-pane {
-    @apply z-40 min-h-[calc(100vh-168px)] overflow-hidden border-l;
+    @apply z-40 flex h-[calc(100vh-168px)] min-h-[calc(100vh-168px)] flex-col overflow-hidden border-l;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
     color: var(--notes-ink);
@@ -630,14 +639,14 @@
     border-color: var(--notes-rule);
   }
   .meeting-source-pane__header strong {
-    @apply text-sm font-semibold;
+    @apply flex items-center gap-2 text-sm font-semibold;
   }
   .meeting-source-pane__header button {
     @apply flex min-h-9 shrink-0 items-center gap-2 rounded-md px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
   }
   .meeting-source-pane__body {
-    @apply max-h-[calc(100vh-278px)] space-y-0 overflow-y-auto px-6;
+    @apply min-h-0 flex-1 space-y-0 overflow-y-auto px-6;
   }
   .meeting-source-pane__claim {
     @apply pb-6 pt-5 text-[0.95rem] italic leading-7;
@@ -681,6 +690,10 @@
   .meeting-source-pane__transcript {
     @apply m-4 px-3;
   }
+  .meeting-source-pane__footer {
+    @apply mx-6 mb-6 mt-2 flex flex-col text-xs leading-5;
+    color: var(--notes-faint);
+  }
   .meeting-transcript-toggle {
     @apply mx-auto mt-3 w-full max-w-[720px] border-t px-1 py-5 text-left;
     border-color: var(--notes-rule);
@@ -705,14 +718,14 @@
 
   @media (min-width: 1180px) {
     .meeting-document-workspace--source-open {
-      grid-template-columns: minmax(520px, 1fr) minmax(340px, 400px);
+      grid-template-columns: minmax(520px, 1fr) minmax(400px, 440px);
       align-items: start;
     }
     .meeting-source-pane {
       @apply sticky top-0;
     }
     .meeting-document-workspace--source-open .meeting-notes-document {
-      @apply mx-auto w-full max-w-[760px];
+      @apply m-0 w-full max-w-none pl-10 pr-16;
     }
   }
 
@@ -728,6 +741,8 @@
     }
     .meeting-source-pane {
       @apply fixed inset-x-4 bottom-4 max-h-[72vh] shadow-2xl;
+      height: 72vh;
+      min-height: 0;
       width: auto;
       min-width: 0;
       max-width: none;

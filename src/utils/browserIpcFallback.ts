@@ -26,8 +26,8 @@ const previewMeeting: Meeting = {
   id: 'preview-architecture-docs',
   title: 'Architecture docs review',
   meeting_type: 'Recording',
-  created_at: '2025-05-14T10:02:00.000Z',
-  started_at: '2025-05-14T10:02:00.000Z',
+  created_at: '2025-05-14T10:02:00-07:00',
+  started_at: '2025-05-14T10:02:00-07:00',
   duration_seconds: 54 * 60,
   finalization_status: 'finalized',
   transcript_status: 'validated',
@@ -120,6 +120,52 @@ const previewMeeting: Meeting = {
     },
   }),
 };
+
+const previewTimelineMeetings: Meeting[] = [
+  previewMeeting,
+  {
+    ...previewMeeting,
+    id: 'preview-roadmap-sync',
+    title: 'Q2 roadmap sync',
+    created_at: '2025-05-13T15:30:00-07:00',
+    started_at: '2025-05-13T15:30:00-07:00',
+  },
+  {
+    ...previewMeeting,
+    id: 'preview-design-critique',
+    title: 'Design critique',
+    created_at: '2025-05-13T11:00:00-07:00',
+    started_at: '2025-05-13T11:00:00-07:00',
+  },
+  {
+    ...previewMeeting,
+    id: 'preview-api-review',
+    title: 'API review',
+    created_at: '2025-05-12T16:00:00-07:00',
+    started_at: '2025-05-12T16:00:00-07:00',
+  },
+  {
+    ...previewMeeting,
+    id: 'preview-weekly-eng',
+    title: 'Weekly eng sync',
+    created_at: '2025-05-09T09:30:00-07:00',
+    started_at: '2025-05-09T09:30:00-07:00',
+  },
+  {
+    ...previewMeeting,
+    id: 'preview-incident',
+    title: 'Incident postmortem',
+    created_at: '2025-05-07T14:00:00-07:00',
+    started_at: '2025-05-07T14:00:00-07:00',
+  },
+  {
+    ...previewMeeting,
+    id: 'preview-hiring-plan',
+    title: 'Hiring plan review',
+    created_at: '2025-05-05T10:30:00-07:00',
+    started_at: '2025-05-05T10:30:00-07:00',
+  },
+];
 
 const createDoc = (
   id: string,
@@ -379,7 +425,7 @@ const createInvokeFallback =
         result = { ready: true };
         break;
       case 'GET_MEETINGS':
-        result = meetingPreviewEnabled() ? [previewMeeting] : [];
+        result = meetingPreviewEnabled() ? previewTimelineMeetings : [];
         break;
       case 'GET_KNOWLEDGE_DOC_SOURCES':
       case 'GET_KNOWLEDGE_CORRECTIONS':

@@ -520,6 +520,11 @@ export const MeetingView = ({
   const hasTranscriptContent = mergedTranscriptSegments.some((segment) =>
     Boolean(segment.text?.trim()),
   );
+  const participantCount = new Set(
+    transcriptSegments
+      .map((segment) => String(segment.speaker || '').trim())
+      .filter(Boolean),
+  ).size;
 
   const canonicalAnalysisMarkdown = v3
     ? analysisDocumentV3ToMarkdown(v3)
@@ -816,7 +821,12 @@ export const MeetingView = ({
                 minute: '2-digit',
               })}
             </span>
-            {selectedMeeting.duration_seconds ? (
+            {participantCount > 0 ? (
+              <span>
+                {participantCount}{' '}
+                {participantCount === 1 ? 'participant' : 'participants'}
+              </span>
+            ) : selectedMeeting.duration_seconds ? (
               <span>
                 {Math.floor(selectedMeeting.duration_seconds / 60)} min
               </span>

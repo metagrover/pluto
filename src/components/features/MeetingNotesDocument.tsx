@@ -129,7 +129,9 @@ const resolveSourceSegments = (
     const text = normalizeEvidence(segment.text);
     return text.includes(evidence) || evidence.includes(text);
   });
-  return match ? [match] : [];
+  if (!match) return [];
+  const matchIndex = transcriptSegments.indexOf(match);
+  return transcriptSegments.slice(matchIndex, matchIndex + 3);
 };
 
 const SaveStatus = ({ state }: { state: SaveState }) => {
@@ -335,12 +337,16 @@ const NoteBlock = ({
             {block.text}
           </span>
           <input
+            className="sr-only"
             type="checkbox"
             checked={Boolean(block.completed)}
             disabled={!block.path || completionPending}
             aria-label={`${block.completed ? 'Mark incomplete' : 'Mark complete'}: ${block.text}`}
             onChange={() => void toggleCompleted()}
           />
+          <span className="meeting-action-box" aria-hidden="true">
+            <Check size={13} />
+          </span>
         </label>
       ) : isDecision ? (
         <span className="meeting-decision-mark" aria-label="Decision">
@@ -406,11 +412,13 @@ const SourcePane = ({
   transcriptSegments,
   onClose,
   onShowTranscript,
+  meetingDate,
 }: {
   selection: SourceSelection;
   transcriptSegments: TranscriptSegment[];
   onClose: () => void;
   onShowTranscript: () => void;
+  meetingDate: string;
 }) => {
   const segments = resolveSourceSegments(selection, transcriptSegments);
   return (
@@ -420,7 +428,9 @@ const SourcePane = ({
       aria-label="Source"
     >
       <div className="meeting-source-pane__header">
-        <strong>Source</strong>
+        <strong>
+          <span aria-hidden="true">←</span> Source
+        </strong>
         <button type="button" onClick={onClose} aria-label="Back to note">
           <span aria-hidden="true">←</span> Back to note
         </button>
@@ -461,6 +471,18 @@ const SourcePane = ({
       >
         <FileText aria-hidden="true" size={15} /> Open full transcript
       </button>
+      <footer className="meeting-source-pane__footer">
+        <span>Source: meeting transcript</span>
+        <time>
+          {new Date(meetingDate).toLocaleString([], {
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          })}
+        </time>
+      </footer>
     </aside>
   );
 };
@@ -615,6 +637,7 @@ export const MeetingNotesDocument = ({
                 transcriptSegments={transcriptSegments}
                 onClose={() => setSourceSelection(null)}
                 onShowTranscript={onShowTranscript}
+                meetingDate={meeting.created_at || meeting.started_at}
               />
             );
             return sourceAsOverlay ? createPortal(pane, document.body) : pane;

@@ -142,6 +142,7 @@ describe('MeetingNotesDocument', () => {
     const source = document.querySelector('[data-notes-source]');
     expect(source?.textContent).toContain('Use docs as code.');
     expect(source?.textContent).toContain('Maya');
+    expect(source?.textContent).toContain('Daniel');
     expect(source?.textContent).toContain('0:07');
     expect(container.textContent).toContain('Documentation architecture');
   });
