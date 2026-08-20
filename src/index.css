@@ -768,8 +768,7 @@
     color: var(--notes-faint);
   }
   .meeting-transcript-toggle {
-    @apply mx-auto mt-0 w-full max-w-[760px] border-t px-6 py-5 text-left transition-colors md:px-8;
-    border-color: var(--notes-rule);
+    @apply mx-auto mt-2 w-full max-w-[760px] px-6 py-5 text-left transition-colors md:px-8;
   }
   .meeting-transcript-toggle:hover {
     color: var(--notes-ink);
