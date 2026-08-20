@@ -281,7 +281,7 @@ export const formatCurrentReadHeadline = (headline: string): string => {
 
 const StatusBadge = ({ status }: { status: KnowledgeDocStatus }) => (
   <span
-    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black capitalize ${STATUS_STYLES[status]}`}
+    className={`inline-flex items-center rounded border px-2.5 py-1 text-[10px] font-semibold capitalize ${STATUS_STYLES[status]}`}
   >
     {formatDocStatus(status)}
   </span>
@@ -291,7 +291,7 @@ const EmptyState = () => (
   <div className="flex h-full items-center justify-center bg-pro-bg px-6">
     <div className="max-w-md rounded-lg border border-pro-border bg-pro-surface p-8 text-center shadow-sm">
       <Sparkles className="mx-auto h-7 w-7 text-pro-text-muted" />
-      <h2 className="mt-4 text-2xl font-black tracking-tight text-pro-text-main">
+      <h2 className="mt-4 text-2xl font-semibold text-pro-text-main">
         No Knowledge yet
       </h2>
       <p className="mt-3 text-sm leading-6 text-pro-text-muted">
@@ -331,12 +331,8 @@ const SectionShell = ({
   children: React.ReactNode;
 }) => (
   <section className="border-b border-pro-border py-7 last:border-b-0">
-    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted">
-      {eyebrow}
-    </p>
-    <h2 className="mt-2 text-xl font-black tracking-tight text-pro-text-main">
-      {title}
-    </h2>
+    <p className="text-[10px] font-medium text-pro-text-muted">{eyebrow}</p>
+    <h2 className="mt-2 text-xl font-semibold text-pro-text-main">{title}</h2>
     <p className="mt-2 max-w-2xl text-sm leading-6 text-pro-text-muted">
       {description}
     </p>
@@ -420,7 +416,7 @@ const CurrentRead = ({
       <div className="flex flex-col gap-4 border-b border-pro-border pb-5 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           {needsRetry && hasReliableRead ? (
-            <span className="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black text-amber-500">
+            <span className="inline-flex items-center rounded border border-amber-500/20 bg-amber-500/10 px-2.5 py-1 text-[10px] font-semibold text-amber-500">
               Last reliable read
             </span>
           ) : (
@@ -475,7 +471,7 @@ const CurrentRead = ({
       </div>
 
       <div className="pt-5">
-        <h1 className="max-w-3xl text-2xl font-black leading-tight tracking-tight text-pro-text-main md:text-3xl">
+        <h1 className="max-w-3xl text-2xl font-semibold leading-tight text-pro-text-main md:text-3xl">
           {currentRead}
         </h1>
 
@@ -512,7 +508,7 @@ const CurrentRead = ({
               {trustStatus && (
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span
-                    className={`inline-flex rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-[0.14em] ${
+                    className={`inline-flex rounded border px-2 py-1 text-[9px] font-medium ${
                       TRUST_STYLES[getTrustStatusMeta(trustStatus).tone]
                     }`}
                     title={
@@ -547,7 +543,7 @@ const CurrentRead = ({
         {supportingItems.length > 0 && (
           <div className="mt-5 space-y-2">
             {!isCompiled && (
-              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-pro-text-muted">
+              <p className="text-[10px] font-medium text-pro-text-muted">
                 Captured so far
               </p>
             )}
@@ -603,15 +599,15 @@ const NeedsAttention = ({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span
-                      className={`rounded-full border px-2.5 py-1 text-[10px] font-black ${style.badge}`}
+                      className={`rounded border px-2.5 py-1 text-[10px] font-semibold ${style.badge}`}
                     >
                       {labelForSeverity(item.severity)}
                     </span>
-                    <span className="text-[10px] font-black uppercase tracking-[0.14em] text-pro-text-muted">
+                    <span className="text-[10px] font-medium text-pro-text-muted">
                       {labelForAttentionKind(item.kind)}
                     </span>
                   </div>
-                  <h3 className="mt-3 text-base font-black leading-6 text-pro-text-main">
+                  <h3 className="mt-3 text-base font-semibold leading-6 text-pro-text-main">
                     {item.title}
                   </h3>
                   <p className="mt-2 text-sm leading-6 text-pro-text-muted">
@@ -652,15 +648,15 @@ const ActiveStreams = ({
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-pro-border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                  <span className="rounded border border-pro-border px-2 py-0.5 text-[10px] font-medium text-pro-text-muted">
                     {stream.domain}
                   </span>
-                  <span className="text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                  <span className="text-[10px] font-medium text-pro-text-muted">
                     {stream.source_count} source
                     {stream.source_count === 1 ? '' : 's'}
                   </span>
                 </div>
-                <h3 className="mt-3 text-base font-black text-pro-text-main">
+                <h3 className="mt-3 text-base font-semibold text-pro-text-main">
                   {stream.title}
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-pro-text-muted">
@@ -729,15 +725,15 @@ const V2ItemList = ({
           >
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-pro-border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                <span className="rounded border border-pro-border px-2 py-0.5 text-[10px] font-medium text-pro-text-muted">
                   {item.kind.replace(/_/g, ' ')}
                 </span>
-                <span className="text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                <span className="text-[10px] font-medium text-pro-text-muted">
                   {item.evidence_quality.mode} ·{' '}
                   {Math.round(item.evidence_quality.confidence * 100)}%
                 </span>
               </div>
-              <p className="mt-3 text-sm font-black leading-6 text-pro-text-main">
+              <p className="mt-3 text-sm font-semibold leading-6 text-pro-text-main">
                 {item.title}
               </p>
               <p className="mt-2 text-sm leading-6 text-pro-text-muted">
@@ -787,15 +783,15 @@ const SourceQualitySummary = ({
           >
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-pro-border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                <span className="rounded border border-pro-border px-2 py-0.5 text-[10px] font-medium text-pro-text-muted">
                   {record.domain}
                 </span>
-                <span className="text-[10px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                <span className="text-[10px] font-medium text-pro-text-muted">
                   {record.usable ? 'included' : 'excluded'} · score{' '}
                   {record.score}
                 </span>
               </div>
-              <p className="mt-2 text-sm font-black text-pro-text-main">
+              <p className="mt-2 text-sm font-semibold text-pro-text-main">
                 {record.title}
               </p>
               {record.reasons.length > 0 && (
@@ -838,7 +834,7 @@ const RisksAndUnknowns = ({
             className="flex flex-col gap-3 py-4 md:flex-row md:items-start md:justify-between"
           >
             <div>
-              <p className="text-sm font-black leading-6 text-pro-text-main">
+              <p className="text-sm font-semibold leading-6 text-pro-text-main">
                 {item.text}
               </p>
               {item.why_it_matters && (
@@ -865,7 +861,7 @@ const RisksAndUnknowns = ({
             className="flex flex-col gap-3 py-4 md:flex-row md:items-start md:justify-between"
           >
             <div>
-              <p className="text-sm font-black leading-6 text-pro-text-main">
+              <p className="text-sm font-semibold leading-6 text-pro-text-main">
                 {item.title}
               </p>
               <p className="mt-2 text-sm leading-6 text-pro-text-muted">
@@ -909,7 +905,7 @@ const BrowseMemory = ({ children }: { children: React.ReactNode }) => (
 const QuietUnavailableState = ({
   selectedDoc,
 }: { selectedDoc: KnowledgeDoc }) => (
-  <section className="rounded-lg border border-dashed border-pro-border bg-pro-surface/70 p-5 text-sm leading-6 text-pro-text-muted">
+  <section className="rounded-lg border border-dashed border-pro-border bg-pro-surface p-5 text-sm leading-6 text-pro-text-muted">
     {selectedDoc.status === 'failed'
       ? 'A compiled Knowledge view will appear after synthesis succeeds. Retry synthesis from Current Read when you are ready.'
       : selectedDoc.status === 'inactive' && window.__PLUTO_BROWSER_PREVIEW__
@@ -938,10 +934,10 @@ const WhySheet = ({
       <aside className="relative h-full w-full max-w-[420px] overflow-y-auto border-l border-pro-border bg-pro-surface p-5 shadow-xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted">
+            <p className="text-[10px] font-medium text-pro-text-muted">
               Why this appears
             </p>
-            <h2 className="mt-2 text-xl font-black leading-7 text-pro-text-main">
+            <h2 className="mt-2 text-xl font-semibold leading-7 text-pro-text-main">
               {item.title}
             </h2>
           </div>
@@ -969,7 +965,7 @@ const WhySheet = ({
 
         {item.reasons.length > 0 && (
           <div className="mt-6">
-            <h3 className="text-xs font-black uppercase tracking-[0.16em] text-pro-text-muted">
+            <h3 className="text-xs font-medium text-pro-text-muted">
               Reasoning
             </h3>
             <div className="mt-3 space-y-2">
@@ -986,9 +982,7 @@ const WhySheet = ({
         )}
 
         <div className="mt-6">
-          <h3 className="text-xs font-black uppercase tracking-[0.16em] text-pro-text-muted">
-            Evidence
-          </h3>
+          <h3 className="text-xs font-medium text-pro-text-muted">Evidence</h3>
           {item.evidenceEntries?.length ? (
             <div className="mt-3 space-y-3">
               {item.evidenceEntries.map((entry) => (
@@ -996,7 +990,7 @@ const WhySheet = ({
                   key={entry.id}
                   className="rounded-lg border border-pro-border bg-pro-bg p-3"
                 >
-                  <p className="text-[11px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                  <p className="text-[11px] font-medium text-pro-text-muted">
                     {entry.meeting_title || entry.meeting_id}
                   </p>
                   <p className="mt-1 text-[11px] font-bold text-pro-text-muted">
@@ -1020,7 +1014,7 @@ const WhySheet = ({
                   className="rounded-lg border border-pro-border bg-pro-bg p-3"
                 >
                   {citation.meeting_id && (
-                    <p className="text-[11px] font-black uppercase tracking-[0.12em] text-pro-text-muted">
+                    <p className="text-[11px] font-medium text-pro-text-muted">
                       {citation.meeting_id}
                     </p>
                   )}

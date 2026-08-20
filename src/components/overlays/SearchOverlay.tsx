@@ -70,7 +70,7 @@ export const SearchOverlay = ({
   return (
     <div className="fixed inset-0 z-[1000] flex items-start justify-center px-4 pt-[calc(12vh+64px)] animate-in">
       <div
-        className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"
+        className="absolute inset-0 bg-black/50"
         onClick={() => setSearchVisible(false)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -81,7 +81,7 @@ export const SearchOverlay = ({
       />
       <div
         data-search-panel
-        className="w-full max-w-2xl bg-pro-surface/95 rounded-2xl shadow-2xl border border-pro-border overflow-hidden relative scale-in-center"
+        className="w-full max-w-2xl bg-pro-surface rounded-md shadow-2xl border border-pro-border overflow-hidden relative scale-in-center"
       >
         <div className="px-5 py-4 border-b border-pro-border/35 flex items-center gap-3">
           <Search
@@ -98,7 +98,7 @@ export const SearchOverlay = ({
             className="flex-1 bg-transparent border-none outline-none text-lg font-medium tracking-normal placeholder:text-pro-text-muted/55 text-pro-text-main"
           />
           <div className="flex items-center gap-2">
-            <span className="px-2 py-1 bg-pro-bg/80 border border-pro-border/70 rounded-lg text-[10px] font-bold text-pro-text-muted/60 uppercase">
+            <span className="px-2 py-1 bg-pro-bg border border-pro-border/70 rounded-lg text-[10px] font-bold text-pro-text-muted/60">
               Esc
             </span>
           </div>
@@ -124,7 +124,7 @@ export const SearchOverlay = ({
               {groupedResults.map((group) =>
                 group.results.length > 0 ? (
                   <div key={group.kind} className="space-y-1">
-                    <h3 className="px-3 pt-2 pb-1 text-[10px] font-bold text-pro-text-muted/70 uppercase tracking-[0.18em]">
+                    <h3 className="px-3 pt-2 pb-1 text-[10px] font-bold text-pro-text-muted/70 font-medium">
                       {group.label}
                     </h3>
                     <div className="space-y-1">
@@ -134,21 +134,21 @@ export const SearchOverlay = ({
                           data-search-result-kind={result.kind}
                           key={`${result.kind}-${result.id}`}
                           onClick={() => handleSelect(result)}
-                          className="w-full text-left px-3 py-2.5 rounded-xl border border-transparent hover:bg-pro-surface/40 focus-visible:border-pro-border focus-visible:bg-pro-surface/50 focus-visible:outline-none transition-all duration-300 flex items-center gap-3 group hover-lift active-push"
+                          className="w-full text-left px-3 py-2.5 rounded-md border border-transparent hover:bg-pro-surface focus-visible:border-pro-border focus-visible:bg-pro-surface focus-visible:outline-none transition-all duration-300 flex items-center gap-3 group transition-colors "
                         >
-                          <div className="w-7 h-7 rounded-lg bg-pro-bg/70 border border-pro-border/40 flex items-center justify-center text-pro-text-muted/75 group-hover:text-pro-text-main transition-colors">
+                          <div className="w-7 h-7 rounded-lg bg-pro-bg border border-pro-border/40 flex items-center justify-center text-pro-text-muted/75 group-hover:text-pro-text-main transition-colors">
                             <ResultIcon kind={result.kind} />
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-semibold text-pro-text-main tracking-normal line-clamp-1">
                               {result.title}
                             </p>
-                            <span className="text-[10px] font-semibold text-pro-text-muted/65 uppercase tracking-[0.12em]">
+                            <span className="text-[10px] font-semibold text-pro-text-muted/65 font-medium">
                               {result.subtitle}
                             </span>
                           </div>
                           {result.updatedAt && (
-                            <span className="text-[10px] font-semibold text-pro-text-muted/55 uppercase">
+                            <span className="text-[10px] font-semibold text-pro-text-muted/55">
                               {new Date(result.updatedAt).toLocaleDateString(
                                 [],
                                 {

@@ -376,7 +376,7 @@ const TaskRow: React.FC<{
       {/* Task info */}
       <div className="flex-1 min-w-0">
         <p
-          className={`text-[13px] font-bold tracking-tight leading-snug truncate ${
+          className={`text-[13px] font-bold leading-snug truncate ${
             isCompleted
               ? 'line-through text-pro-text-muted'
               : 'text-pro-text-main'
@@ -396,7 +396,7 @@ const TaskRow: React.FC<{
       {/* Due date */}
       {task.due_date && (
         <span
-          className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md shrink-0 ${
+          className={`text-[10px] font-medium px-2 py-1 rounded-md shrink-0 ${
             isOverdue
               ? 'bg-red-500/10 text-red-500'
               : 'bg-pro-bg text-pro-text-muted'
@@ -462,7 +462,7 @@ const QuickAddTask: React.FC<{
           type="button"
           onClick={handleSubmit}
           disabled={saving}
-          className="text-[10px] font-black uppercase tracking-widest text-pro-accent hover:text-pro-accent/80 transition-colors"
+          className="text-[10px] font-medium text-pro-accent hover:text-pro-accent/80 transition-colors"
         >
           {saving ? '...' : '↵ Add'}
         </button>
@@ -507,11 +507,11 @@ export const ProjectHealthCard: React.FC<{
         onClick={() => setExpanded(!expanded)}
         className="group flex w-full items-center gap-4 px-1 py-5 text-left"
       >
-        <div className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/30 flex items-center justify-center text-lg shrink-0">
+        <div className="w-10 h-10 rounded-md bg-pro-bg border border-pro-border/30 flex items-center justify-center text-lg shrink-0">
           📁
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className="text-[15px] font-black text-pro-text-main tracking-tight truncate">
+          <h3 className="text-[15px] font-semibold text-pro-text-main truncate">
             {project.name}
           </h3>
           {metadata.context && (
@@ -523,7 +523,7 @@ export const ProjectHealthCard: React.FC<{
         <div className="flex items-center gap-3 shrink-0">
           {/* Health badge */}
           <span
-            className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg ${healthInfo.color} ${healthInfo.bg}`}
+            className={`text-[10px] font-medium px-2.5 py-1 rounded-lg ${healthInfo.color} ${healthInfo.bg}`}
           >
             {healthInfo.dot} {healthInfo.label}
           </span>
@@ -723,7 +723,7 @@ export const ProjectsExecutionTab: React.FC<{
         {[1, 2, 3].map((i) => (
           <div
             key={i}
-            className="h-40 bg-pro-surface rounded-2xl border border-pro-border/30"
+            className="h-40 bg-pro-surface rounded-md border border-pro-border/30"
           />
         ))}
       </div>
@@ -733,11 +733,11 @@ export const ProjectsExecutionTab: React.FC<{
   if (projects.length === 0 && allTasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
-        <div className="w-20 h-20 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-4xl shadow-premium">
+        <div className="w-20 h-20 rounded-md bg-pro-surface border border-pro-border flex items-center justify-center text-4xl shadow-sm">
           📁
         </div>
         <div className="space-y-2">
-          <h3 className="text-xl font-black text-pro-text-main tracking-tight">
+          <h3 className="text-xl font-semibold text-pro-text-main">
             No Projects Yet
           </h3>
           <p className="text-sm text-pro-text-muted max-w-md">
@@ -756,11 +756,11 @@ export const ProjectsExecutionTab: React.FC<{
   ) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
-        <div className="w-20 h-20 rounded-2xl bg-pro-surface border border-pro-border flex items-center justify-center text-4xl shadow-premium">
+        <div className="w-20 h-20 rounded-md bg-pro-surface border border-pro-border flex items-center justify-center text-4xl shadow-sm">
           ✅
         </div>
         <div className="space-y-2">
-          <h3 className="text-xl font-black text-pro-text-main tracking-tight">
+          <h3 className="text-xl font-semibold text-pro-text-main">
             No tasks are linked to projects yet
           </h3>
           <p className="text-sm text-pro-text-muted max-w-md">
@@ -769,7 +769,7 @@ export const ProjectsExecutionTab: React.FC<{
             project.
           </p>
         </div>
-        <div className="rounded-2xl border border-dashed border-pro-border/40 bg-pro-bg/30 px-6 py-4">
+        <div className="rounded-md border border-dashed border-pro-border/40 bg-pro-bg px-6 py-4">
           <QuickAddTask onTaskAdded={fetchData} />
         </div>
       </div>
@@ -782,7 +782,7 @@ export const ProjectsExecutionTab: React.FC<{
       <div className="flex items-center justify-between">
         <div>
           <p className="workspace-eyebrow">Execution brief</p>
-          <h1 className="mt-2 text-3xl font-black tracking-tight text-pro-text-main">
+          <h1 className="mt-2 text-3xl font-semibold text-pro-text-main">
             {executionSummary.heading}
           </h1>
           <p className="mt-2 text-sm font-medium text-pro-text-muted">
@@ -810,7 +810,7 @@ export const ProjectsExecutionTab: React.FC<{
 
       {completedProjects.length > 0 && (
         <details
-          className="rounded-2xl border border-pro-border bg-pro-surface/20"
+          className="rounded-md border border-pro-border bg-pro-surface"
           open={completedProjects.some(
             (project) => project.id === selectedProjectId,
           )}
@@ -839,13 +839,13 @@ export const ProjectsExecutionTab: React.FC<{
 
       {/* Ungrouped / Inbox Tasks */}
       {ungroupedTasks.length > 0 && (
-        <div className="rounded-2xl border border-pro-border bg-pro-surface/30 overflow-hidden">
+        <div className="rounded-md border border-pro-border bg-pro-surface overflow-hidden">
           <div className="flex items-center gap-3 p-5 border-b border-pro-border/30">
-            <div className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border/30 flex items-center justify-center text-lg shrink-0">
+            <div className="w-10 h-10 rounded-md bg-pro-bg border border-pro-border/30 flex items-center justify-center text-lg shrink-0">
               📥
             </div>
             <div>
-              <h3 className="text-[15px] font-black text-pro-text-main tracking-tight">
+              <h3 className="text-[15px] font-semibold text-pro-text-main">
                 Inbox
               </h3>
               <p className="text-[11px] text-pro-text-muted">
@@ -889,7 +889,7 @@ export const ProjectsExecutionTab: React.FC<{
 
       {/* Quick-add at footer if no ungrouped section */}
       {ungroupedTasks.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-pro-border/40 bg-pro-bg/30">
+        <div className="rounded-md border border-dashed border-pro-border/40 bg-pro-bg">
           <QuickAddTask onTaskAdded={fetchData} />
         </div>
       )}

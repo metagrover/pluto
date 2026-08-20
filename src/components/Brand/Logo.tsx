@@ -53,7 +53,7 @@ export const Logo: React.FC<LogoProps> = ({
         <div className="flex flex-col">
           {showText && (
             <span
-              className="font-bold tracking-tight leading-none dark:!text-[#FAFAFA]"
+              className="font-bold leading-none dark:!text-[#FAFAFA]"
               style={{ color: mainColor, fontSize: size * 0.7 }}
             >
               Pluto
@@ -61,7 +61,7 @@ export const Logo: React.FC<LogoProps> = ({
           )}
           {showTagline && (
             <span
-              className="font-normal tracking-tight opacity-70 mt-1 dark:!text-[#FAFAFA]/70"
+              className="font-normal opacity-70 mt-1 dark:!text-[#FAFAFA]/70"
               style={{ color: mainColor, fontSize: size * 0.22 }}
             >
               Your Second Brain for Work

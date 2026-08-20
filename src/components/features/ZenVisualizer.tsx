@@ -56,14 +56,14 @@ export const ZenVisualizer = ({
     <div
       className={`flex items-center gap-4 px-6 py-3 rounded-full border shadow-sm animate-in fade-in slide-in-from-top-4 duration-700 transition-colors cursor-default ${
         isProcessing
-          ? 'bg-pro-bg/80 border-pro-border/60'
-          : 'bg-pro-surface/40 backdrop-blur-xl border-white/60 hover:bg-pro-surface/60'
+          ? 'bg-pro-bg border-pro-border/60'
+          : 'bg-pro-surface border-white/60 hover:bg-pro-surface'
       }`}
     >
       <div className="flex items-center gap-3">
         <div className="relative flex items-center justify-center w-3 h-3">
           <div
-            className={`w-2.5 h-2.5 rounded-full z-10 transition-transform duration-100 ${isProcessing ? 'bg-amber-400' : 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'}`}
+            className={`w-2.5 h-2.5 rounded-full z-10 transition-transform duration-100 ${isProcessing ? 'bg-amber-400' : 'bg-red-500 shadow-lg'}`}
             style={{
               transform: isProcessing
                 ? 'scale(1)'
@@ -78,7 +78,7 @@ export const ZenVisualizer = ({
           )}
         </div>
         <span
-          className={`text-[11px] font-black uppercase tracking-[0.2em] ${isProcessing ? 'text-amber-500/80' : 'text-red-500/80'}`}
+          className={`text-[11px] font-medium ${isProcessing ? 'text-amber-500/80' : 'text-red-500/80'}`}
         >
           {isProcessing ? 'Processing' : 'Recording'}
         </span>
@@ -87,7 +87,7 @@ export const ZenVisualizer = ({
       <div className="h-4 w-px bg-stone-300/50" />
 
       <div className="flex items-center gap-2">
-        <span className="text-[14px] font-medium font-mono text-pro-text-main/80 tabular-nums tracking-wide">
+        <span className="text-[14px] font-medium font-mono text-pro-text-main/80 tabular-nums">
           {formatTime(elapsed)}
         </span>
         {isProcessing && (

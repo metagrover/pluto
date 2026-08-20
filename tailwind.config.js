@@ -19,12 +19,14 @@ export default {
       },
       boxShadow: {
         premium:
-          '0 10px 30px -5px rgba(26, 35, 64, 0.1), 0 4px 10px -3px rgba(26, 35, 64, 0.05)',
+          '0 15px 30px -5px rgba(0, 0, 0, 0.08), 0 4px 10px -3px rgba(0, 0, 0, 0.04)',
         'inner-soft': 'inset 0 2px 4px 0 rgba(26, 35, 64, 0.03)',
       },
       borderRadius: {
-        '2xl': '1.25rem',
-        '3xl': '1.75rem',
+        lg: '0.375rem',
+        xl: '0.375rem',
+        '2xl': '0.5rem',
+        '3xl': '0.5rem',
       },
     },
   },

@@ -149,118 +149,6 @@
 }
 
 @layer components {
-  .meeting-app-shell {
-    --meeting-shell-paper: oklch(98.5% 0.006 82);
-    --meeting-shell-rule: oklch(88.5% 0.01 82);
-    @apply rounded-none border-l;
-    border-color: var(--meeting-shell-rule);
-    background: var(--meeting-shell-paper);
-    min-width: 0;
-    width: 100%;
-  }
-  .dark .meeting-app-shell {
-    --meeting-shell-paper: oklch(17.5% 0.014 272);
-    --meeting-shell-rule: oklch(28% 0.018 272);
-  }
-  .meeting-app-toolbar {
-    @apply flex h-14 items-center justify-between border-b px-5;
-    border-color: var(--meeting-shell-rule);
-    background: var(--meeting-shell-paper);
-    -webkit-app-region: drag;
-  }
-  .meeting-app-toolbar__history,
-  .meeting-app-toolbar__actions {
-    @apply flex items-center gap-1;
-    -webkit-app-region: no-drag;
-  }
-  .meeting-app-toolbar button {
-    @apply flex h-9 w-9 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:opacity-35;
-  }
-  .meeting-app-scroll {
-    @apply p-0;
-    background: var(--meeting-shell-paper);
-    min-width: 0;
-    width: 100%;
-    overflow-x: hidden;
-  }
-  .meeting-timeline-sidebar {
-    @apply absolute z-40 flex h-full w-[85vw] shrink-0 flex-col border-r transition-transform duration-200 ease-out md:w-[228px] lg:relative;
-    border-color: var(--meeting-shell-rule, oklch(88.5% 0.01 82));
-    background: oklch(97.7% 0.008 82);
-    color: oklch(26% 0.018 272);
-  }
-  .dark .meeting-timeline-sidebar {
-    background: oklch(16.5% 0.014 272);
-    color: oklch(90% 0.01 82);
-  }
-  .meeting-window-lights {
-    @apply flex h-14 shrink-0 items-center gap-2 px-5;
-    -webkit-app-region: drag;
-  }
-  .meeting-window-lights span {
-    @apply h-3 w-3 rounded-full;
-  }
-  .meeting-window-lights span:nth-child(1) {
-    background: oklch(66% 0.2 28);
-  }
-  .meeting-window-lights span:nth-child(2) {
-    background: oklch(79% 0.16 82);
-  }
-  .meeting-window-lights span:nth-child(3) {
-    background: oklch(69% 0.17 145);
-  }
-  .meeting-timeline-list {
-    @apply min-h-0 flex-1 overflow-y-auto px-2 pb-5;
-  }
-  .meeting-timeline-list section + section {
-    @apply mt-5;
-  }
-  .meeting-timeline-list h2 {
-    @apply px-3 pb-2 text-[0.76rem] font-medium;
-    color: oklch(50% 0.012 272);
-  }
-  .meeting-timeline-list button {
-    @apply relative block w-full rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-black/[0.035] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .dark .meeting-timeline-list button:hover {
-    background: oklch(22% 0.016 272);
-  }
-  .meeting-timeline-list button.is-current {
-    background: oklch(92.5% 0.016 82);
-  }
-  .dark .meeting-timeline-list button.is-current {
-    background: oklch(23% 0.02 272);
-  }
-  .meeting-timeline-list time {
-    @apply block text-[0.72rem] tabular-nums;
-    color: oklch(54% 0.012 272);
-  }
-  .meeting-timeline-list button > span:not(.meeting-timeline-status) {
-    @apply mt-0.5 block truncate text-[0.78rem] font-medium;
-  }
-  .meeting-timeline-list .meeting-timeline-status {
-    @apply absolute right-3 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full;
-    background: oklch(63% 0.015 272);
-  }
-  .meeting-sidebar-settings {
-    @apply m-4 flex h-9 w-9 shrink-0 flex-col items-center justify-center gap-[3px] rounded-md text-pro-text-muted hover:bg-black/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .meeting-sidebar-settings span {
-    @apply relative block h-px w-4 bg-current;
-  }
-  .meeting-sidebar-settings span::after {
-    content: "";
-    @apply absolute -top-[2px] h-[5px] w-[5px] rounded-full border bg-inherit;
-    border-color: currentColor;
-  }
-  .meeting-sidebar-settings span:nth-child(1)::after,
-  .meeting-sidebar-settings span:nth-child(3)::after {
-    @apply left-1;
-  }
-  .meeting-sidebar-settings span:nth-child(2)::after {
-    @apply right-1;
-  }
-
   .meeting-document {
     --notes-paper: oklch(98.2% 0.008 82);
     --notes-paper-raised: oklch(99.2% 0.005 82);
@@ -270,9 +158,8 @@
     --notes-rule: oklch(89% 0.01 82);
     --notes-wash: oklch(95.5% 0.018 82);
     --notes-accent: oklch(62% 0.085 55);
-    @apply text-pro-text-main;
+    @apply px-5 text-pro-text-main sm:px-8 lg:px-10;
     color: var(--notes-ink);
-    background: var(--notes-paper);
   }
   .dark .meeting-document {
     --notes-paper: oklch(18% 0.018 272);
@@ -285,11 +172,10 @@
     --notes-accent: oklch(72% 0.07 60);
   }
   .meeting-document-header {
-    @apply grid min-h-[112px] grid-cols-[minmax(0,1fr)_auto] items-end gap-8 px-8 pb-5 pt-4 md:px-10;
-    border-color: transparent;
+    @apply mx-auto flex max-w-[760px] flex-col gap-4 pb-8 pt-6;
   }
   .meeting-document-meta {
-    @apply mt-2 flex flex-wrap items-center gap-3 text-xs;
+    @apply mb-3 flex items-center gap-3 text-xs;
     color: var(--notes-muted);
   }
   .meeting-document-meta span + span::before {
@@ -297,16 +183,12 @@
     @apply mr-3 text-pro-border;
   }
   .meeting-document-title {
-    @apply text-[40px] font-bold leading-[1.2] tracking-[-0.02em];
+    @apply text-[2rem] font-semibold leading-[1.12] tracking-[-0.035em] md:text-[2.4rem];
     color: var(--notes-ink);
     text-wrap: balance;
   }
-  .meeting-document-title button {
-    max-width: 100%;
-    white-space: normal;
-  }
   .meeting-document-actions {
-    @apply relative flex min-h-10 items-center justify-end gap-1;
+    @apply relative flex min-h-10 flex-wrap items-center gap-1;
   }
   .meeting-document-menu {
     @apply relative;
@@ -319,7 +201,7 @@
     @apply hidden;
   }
   .meeting-document-menu__panel {
-    @apply absolute right-0 top-12 z-50 flex min-w-48 flex-col gap-1 rounded-xl border p-2 shadow-lg;
+    @apply absolute left-0 top-12 z-50 flex min-w-48 flex-col gap-1 rounded-xl border p-2 shadow-lg;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
   }
@@ -346,7 +228,7 @@
     @apply px-2 text-red-600/70 hover:border-red-200 hover:bg-red-50 hover:text-red-700;
   }
   .meeting-notes-surface {
-    @apply pt-0;
+    @apply pt-2;
   }
   .meeting-transcript-surface {
     @apply mx-auto mt-5 max-w-[760px] pt-5;
@@ -393,21 +275,18 @@
   }
 
   .meeting-document-workspace {
-    @apply grid w-full justify-center gap-0;
-    grid-template-columns: minmax(0, 900px);
+    @apply mx-auto grid max-w-[1180px] justify-center gap-8;
+    grid-template-columns: minmax(0, 720px);
   }
   .meeting-document-workspace:has(.meeting-document-outline) {
-    grid-template-columns: minmax(0, 900px) minmax(260px, 320px);
-    justify-content: center;
-    align-items: start;
+    grid-template-columns: minmax(0, 720px);
   }
   .meeting-notes-document {
-    @apply relative w-full min-w-0 px-8 pb-16 pt-7 md:px-[60px] mx-auto max-w-[900px];
+    @apply min-w-0 pb-16;
     color: var(--notes-ink);
   }
   .meeting-document-save-row {
-    @apply fixed top-6 right-8 text-xs font-medium opacity-50 hover:opacity-100 transition-opacity z-50;
-    color: var(--notes-muted);
+    @apply mb-8 flex min-h-5 justify-end;
   }
   .meeting-save-state {
     @apply inline-flex items-center gap-1.5 text-[0.72rem] font-medium;
@@ -426,46 +305,49 @@
     color: oklch(74% 0.13 25);
   }
   .meeting-notes-section {
-    @apply scroll-mt-24 pb-7;
+    @apply scroll-mt-24 border-b pb-9;
+    border-color: var(--notes-rule);
   }
   .meeting-notes-section + .meeting-notes-section {
-    @apply pt-3;
+    @apply pt-9;
   }
   .meeting-notes-section > h2,
   .meeting-notes-section > .meeting-editable-copy h2 {
-    @apply text-[30px] font-semibold leading-[1.3] tracking-tight mb-2 mt-8;
+    @apply text-xl font-semibold leading-tight tracking-[-0.025em];
     color: var(--notes-ink);
     text-wrap: balance;
   }
-  
+  .meeting-notes-section--decisions > h2,
+  .meeting-notes-section--actions > h2,
+  .meeting-notes-section--decisions > .meeting-editable-copy h2,
+  .meeting-notes-section--actions > .meeting-editable-copy h2 {
+    @apply text-2xl;
+  }
   .meeting-notes-section__content {
-    @apply mt-4 flex flex-col gap-1.5;
+    @apply mt-5 flex flex-col gap-3;
   }
   .meeting-notes-section--current_read .meeting-notes-section__content {
-    @apply gap-1;
+    @apply gap-5;
   }
   .meeting-notes-section--current_read
     .meeting-note-block__body
     > .meeting-editable-copy
     > p {
-    @apply text-[16px] leading-[1.55];
+    @apply text-[1.08rem] leading-8;
   }
   .meeting-notes-section--scratchpad textarea {
-    @apply mt-4 w-full resize-y rounded-md px-4 py-3 text-base leading-[1.55] outline-none transition-colors placeholder:text-pro-text-muted/50;
+    @apply mt-4 w-full resize-y rounded-xl border bg-transparent px-4 py-3 text-base leading-7 outline-none transition-colors placeholder:text-pro-text-muted/70 focus-visible:ring-2 focus-visible:ring-pro-accent;
     min-height: 7rem;
-    border: none;
-    background: var(--notes-wash);
+    border-color: var(--notes-rule);
+    background: var(--notes-paper-raised);
     color: var(--notes-ink);
-    display: block;
-    width: 100%;
-    box-sizing: border-box;
   }
   .meeting-scratchpad-caption {
     @apply mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5;
     color: var(--notes-muted);
   }
   .meeting-note-block {
-    @apply relative flex min-w-0 items-start gap-3 rounded-md px-1 py-1 w-full max-w-none;
+    @apply relative flex min-w-0 items-start gap-3 rounded-lg px-1 py-1.5;
   }
   .meeting-note-block__marker {
     @apply mt-[0.72rem] h-1.5 w-1.5 shrink-0 rounded-full;
@@ -479,12 +361,12 @@
     @apply min-w-0 flex-1;
   }
   .meeting-note-block__body > .meeting-editable-copy > p,
-  .meeting-note-block__body > .meeting-editable-copy > p,
   .meeting-note-block__body > p {
-    @apply w-full max-w-none text-[16px] leading-[1.55];
+    @apply max-w-[70ch] text-base leading-7;
     color: var(--notes-ink);
+    text-wrap: pretty;
   }
-  .meeting-note-block--outcomes
+  .meeting-note-block--actions
     .meeting-note-block__body
     > .meeting-editable-copy
     > p {
@@ -493,88 +375,25 @@
   .meeting-action-check {
     @apply -m-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center;
   }
-  .meeting-action-box {
-    @apply grid h-4 w-4 shrink-0 place-content-center rounded border-[1.5px] transition-colors mt-1;
+  .meeting-note-block--actions input[type="checkbox"] {
+    @apply h-5 w-5 shrink-0 cursor-pointer rounded border-2 accent-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2;
     border-color: var(--notes-faint);
-    background: transparent;
-    color: transparent;
   }
-  .meeting-action-check:hover .meeting-action-box {
-    border-color: var(--notes-muted);
-  }
-  .meeting-action-check input:focus-visible + .meeting-action-box {
-    @apply ring-2 ring-pro-accent ring-offset-2;
-  }
-  .meeting-action-check input:checked + .meeting-action-box {
-    border-color: var(--notes-accent);
-    background: var(--notes-accent);
-    color: #FFFFFF;
+  .meeting-note-block--actions
+    input[type="checkbox"]:checked
+    + .meeting-note-block__body {
+    color: var(--notes-muted);
+    text-decoration-color: var(--notes-faint);
   }
   .meeting-editable-copy {
     @apply flex min-w-0 items-start gap-2;
-  }
-  .meeting-decision-mark {
-    @apply mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border;
-    border-color: oklch(58% 0.012 272);
-    background: oklch(55% 0.012 272);
-    color: var(--notes-paper-raised);
-  }
-  .meeting-note-block.is-source-selected {
-    background: oklch(93% 0.025 82);
-  }
-  .dark .meeting-note-block.is-source-selected {
-    background: oklch(25% 0.025 62);
-  }
-  .meeting-note-block--outcomes {
-    @apply pr-9;
-  }
-  .meeting-note-block--outcomes .meeting-note-block__meta {
-    @apply absolute inset-y-0 right-1 m-0 flex items-center;
-  }
-  .meeting-note-block--outcomes .meeting-note-block__meta > span {
-    @apply hidden;
-  }
-  .meeting-note-block--outcomes .meeting-note-block__meta > button {
-    @apply h-2 min-h-0 w-2 overflow-hidden rounded-full p-0;
-    background: var(--notes-faint);
-  }
-  .meeting-note-block--outcomes.is-source-selected
-    .meeting-note-block__meta
-    > button {
-    @apply h-6 w-6 border text-[0.7rem] font-medium;
-    border-color: var(--notes-faint);
-    background: var(--notes-paper-raised);
-  }
-  .meeting-source-indicator {
-    @apply flex h-full w-full items-center justify-center;
-  }
-  .meeting-note-block:not(.meeting-note-block--outcomes) {
-    @apply pr-7;
-  }
-  .meeting-note-block:not(.meeting-note-block--outcomes)
-    .meeting-note-block__meta {
-    @apply absolute inset-y-0 right-1 m-0 flex items-center;
-  }
-  .meeting-note-block:not(.meeting-note-block--outcomes)
-    .meeting-note-block__meta
-    > span {
-    @apply hidden;
-  }
-  .meeting-note-block:not(.meeting-note-block--outcomes)
-    .meeting-note-block__meta
-    > button {
-    @apply h-2 min-h-0 w-2 overflow-hidden rounded-full p-0;
-    background: var(--notes-faint);
   }
   .meeting-editable-copy > :first-child {
     @apply min-w-0 flex-1;
   }
   .meeting-editable-copy > button {
-    @apply mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md opacity-0 transition-[opacity,background-color,color] hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md opacity-30 transition-[opacity,background-color,color] hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
-  }
-  .meeting-note-block:hover .meeting-editable-copy > button {
-    @apply opacity-40;
   }
   .meeting-editable-copy > button:hover {
     color: var(--notes-ink);
@@ -590,10 +409,6 @@
   }
   .meeting-note-block__meta > button {
     @apply min-h-8 rounded-md px-1.5 transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .meeting-note-block .meeting-note-block__meta > button {
-    min-height: 0;
-    padding: 0;
   }
   .meeting-authorship {
     @apply font-medium;
@@ -626,54 +441,46 @@
     @apply hidden;
   }
   .meeting-source-pane {
-    @apply z-40 flex h-[calc(100vh-168px)] min-h-[calc(100vh-168px)] flex-col overflow-hidden border-l;
+    @apply z-40 overflow-hidden rounded-2xl border;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
     color: var(--notes-ink);
   }
   .meeting-source-pane__header {
-    @apply flex h-14 items-center justify-between gap-4 px-6;
+    @apply flex items-start justify-between gap-4 border-b p-5;
     border-color: var(--notes-rule);
   }
+  .meeting-source-pane__header > div {
+    @apply flex min-w-0 flex-col gap-1;
+  }
+  .meeting-source-pane__header span {
+    @apply text-[0.68rem] font-semibold uppercase tracking-[0.08em];
+    color: var(--notes-muted);
+  }
   .meeting-source-pane__header strong {
-    @apply flex items-center gap-2 text-sm font-semibold;
+    @apply line-clamp-3 text-sm leading-5;
   }
   .meeting-source-pane__header button {
-    @apply flex min-h-9 shrink-0 items-center gap-2 rounded-md px-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
   }
   .meeting-source-pane__body {
-    @apply min-h-0 flex-1 space-y-0 overflow-y-auto px-6;
-  }
-  .meeting-source-pane__claim {
-    @apply pb-6 pt-5 text-[0.95rem] italic leading-7;
-    color: var(--notes-ink);
-    overflow-wrap: anywhere;
-  }
-  .meeting-source-pane__claim span {
-    @apply mb-1 block not-italic;
-    color: var(--notes-muted);
+    @apply max-h-[52vh] space-y-0 overflow-y-auto px-5;
   }
   .meeting-source-pane blockquote {
     @apply border-b py-5;
     border-color: var(--notes-rule);
   }
   .meeting-source-pane blockquote header {
-    @apply mb-3 flex items-center justify-between gap-4 text-sm;
+    @apply mb-2 flex items-center justify-between gap-4 text-xs;
   }
   .meeting-source-pane blockquote time {
     @apply tabular-nums;
     color: var(--notes-muted);
   }
   .meeting-source-pane blockquote p {
-    @apply text-[0.95rem] leading-7;
+    @apply text-sm leading-6;
     text-wrap: pretty;
-    overflow-wrap: anywhere;
-  }
-  .meeting-source-pane mark {
-    @apply rounded-sm px-0.5;
-    color: inherit;
-    background: oklch(88% 0.085 82 / 0.72);
   }
   .meeting-source-pane__empty {
     @apply py-6 text-sm leading-6;
@@ -686,10 +493,6 @@
   }
   .meeting-source-pane__transcript {
     @apply m-4 px-3;
-  }
-  .meeting-source-pane__footer {
-    @apply mx-6 mb-6 mt-2 flex flex-col text-xs leading-5;
-    color: var(--notes-faint);
   }
   .meeting-transcript-toggle {
     @apply mx-auto mt-3 w-full max-w-[720px] border-t px-1 py-5 text-left;
@@ -713,69 +516,42 @@
     color: var(--notes-muted);
   }
 
-  @media (min-width: 1180px) {
+  @media (min-width: 1024px) {
     .meeting-document-workspace--source-open {
-      grid-template-columns: minmax(520px, 1fr) minmax(400px, 440px);
+      grid-template-columns: minmax(0, 680px) minmax(280px, 320px);
       align-items: start;
     }
     .meeting-source-pane {
-      @apply sticky top-0;
-    }
-    .meeting-document-workspace--source-open .meeting-notes-document {
-      @apply m-0 w-full max-w-none pl-10 pr-16;
+      @apply sticky top-8;
     }
   }
 
   @media (min-width: 1280px) {
+    .meeting-document-workspace:has(.meeting-document-outline) {
+      grid-template-columns: 132px minmax(0, 720px);
+    }
+    .meeting-document-workspace--source-open:has(.meeting-document-outline) {
+      grid-template-columns: 120px minmax(0, 640px) minmax(280px, 320px);
+    }
     .meeting-document-outline {
-      @apply hidden;
+      @apply sticky top-8 flex flex-col gap-1 self-start pt-14 text-xs;
+      color: var(--notes-muted);
+    }
+    .meeting-document-outline > span {
+      @apply mb-2 font-semibold;
+      color: var(--notes-ink);
+    }
+    .meeting-document-outline a {
+      @apply rounded-md py-1.5 transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     }
   }
 
-  @media (max-width: 1179px) {
+  @media (max-width: 1023px) {
     .meeting-document-workspace--source-open {
       @apply relative;
     }
     .meeting-source-pane {
       @apply fixed inset-x-4 bottom-4 max-h-[72vh] shadow-2xl;
-      height: 72vh;
-      min-height: 0;
-      width: auto;
-      min-width: 0;
-      max-width: none;
-      box-sizing: border-box;
-    }
-  }
-
-  @media (max-width: 520px) {
-    .meeting-app-toolbar {
-      @apply px-3;
-    }
-    .meeting-app-toolbar button {
-      @apply h-8 w-8;
-    }
-    .meeting-document-header {
-      @apply min-h-0 grid-cols-[minmax(0,1fr)_auto] gap-2 px-5 pb-4 pt-6;
-    }
-    .meeting-document-title {
-      @apply text-[1.75rem];
-    }
-    .meeting-document-meta {
-      @apply gap-2 text-[0.7rem];
-    }
-    .meeting-document-meta span + span::before {
-      @apply mr-2;
-    }
-    .meeting-notes-document {
-      @apply px-5 pt-7;
-    }
-    
-    .meeting-source-pane {
-      @apply inset-x-2 bottom-2 max-h-[76vh];
-      width: calc(100vw - 1rem);
-      min-width: 0;
-      max-width: calc(100vw - 1rem);
-      box-sizing: border-box;
     }
   }
 
@@ -1012,26 +788,32 @@
 
 :root {
   /* Fluid Typography & Spacing */
-  --font-main: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
-  --font-secondary: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-main: "Inter", system-ui, -apple-system, sans-serif;
+  --font-secondary: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
 
   /* HSL Color System - Pluto Official Palette */
-  --pro-bg: 0 0% 100%;
-  --pro-surface: 60 4% 96%; /* #F7F7F5 */
-  --pro-text-main: 0 0% 22%; /* #37352f */
-  --pro-text-muted: 0 0% 60%; /* rgba(55, 53, 47, 0.65) */
-  --pro-accent: 212 80% 42%; /* #155DB1 - WCAG AA compliant */
-  --pro-accent-alt: 210 76% 80%;
-  --pro-border: 0 0% 92%; /* #EBEBEB */
+  --pro-bg: 42 40% 96%;
+  /* Warm Cream #F8F5F0 */
+  --pro-text-main: 227 42% 18%;
+  /* Midnight Blue #1A2340 */
+  --pro-text-muted: 227 15% 42%;
+  /* Muted Midnight Blue */
+  --pro-accent: 37 49% 67%;
+  /* Champagne Gold #D4B483 */
+  --pro-accent-alt: 37 30% 80%;
+  /* Muted Gold */
+  --pro-border: 42 20% 88%;
+  /* Subtle Cream Border */
+  --pro-surface: 0 0% 100%;
   /* Pure White */
-  --pro-hover: 0 0% 92%; /* #EBEBEB */
+  --pro-hover: 42 35% 93%;
   /* Slightly darker cream for hover */
 
   /* Semantic Status Colors */
-  --pro-urgent: 0 75% 45%; /* Notion Red */
-  --pro-warning: 30 100% 30%; /* Notion Orange/Brown */
-  --pro-success: 140 70% 30%; /* Notion Green */
+  --pro-urgent: 0 84% 60%;
+  --pro-warning: 38 92% 50%;
+  --pro-success: 142 71% 45%;
 
   /* Soft Premium Shadows */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.02);
@@ -1057,17 +839,19 @@
 
 .dark {
   /* Dark Mode Palette based on design */
-  --pro-bg: 0 0% 10%; /* #191919 */
-  --pro-surface: 0 0% 12%; /* #202020 */
-  --pro-text-main: 0 0% 90%; /* rgba(255, 255, 255, 0.9) */
-  --pro-text-muted: 0 0% 60%; /* rgba(255, 255, 255, 0.5) */
-  --pro-border: 0 0% 18%; /* #2F2F2F */
-  --pro-hover: 0 0% 18%; /* #2F2F2F */
+  --pro-bg: 231 22% 11%;
+  /* Very Dark Navy #161A23 */
+  --pro-surface: 231 28% 14%;
+  /* Slightly lighter card #1A1F2D */
+  --pro-text-main: 0 0% 100%;
+  /* Pure White */
+  --pro-text-muted: 227 15% 60%;
+  /* Muted Steel */
+  --pro-border: 231 20% 20%;
+  /* Soft Navy Border */
+  --pro-hover: 231 25% 18%;
   /* Darker background for hover */
-  --pro-accent: 212 90% 65%; /* Notion dark mode blue */
-  --pro-urgent: 0 75% 65%; /* Dark Mode Red */
-  --pro-warning: 30 90% 60%; /* Dark Mode Orange */
-  --pro-success: 140 60% 55%; /* Dark Mode Green */
+  --pro-accent: 37 49% 67%;
   /* Champagne Gold (Maintained for branding) */
   --pro-accent-alt: 37 30% 50%;
   /* Muted Gold for Dark */
@@ -1082,10 +866,16 @@
 /* Premium Component Primitives */
 .glass {
   background: hsla(var(--pro-bg) / 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid hsla(var(--pro-border) / 0.1);
 }
 
-
+.glass-dark {
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
 
 /* Advanced Animations */
 @keyframes transcript-caret {
@@ -1172,11 +962,11 @@
 
 /* Interactivity */
 .hover-lift {
-  transition: transform 0.15s ease-in-out;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .hover-lift:hover {
-  transform: translateY(-1px);
+  transform: translateY(-4px);
 }
 
 .active-push:active {

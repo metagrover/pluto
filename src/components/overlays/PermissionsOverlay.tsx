@@ -48,7 +48,7 @@ export const PermissionsOverlay = ({
   return (
     <div className="fixed inset-0 z-[1100] flex items-start justify-center pt-32 px-6 animate-in">
       <div
-        className="absolute inset-0 bg-slate-950/60 backdrop-blur-md"
+        className="absolute inset-0 bg-black/50"
         onClick={onClose}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -58,19 +58,17 @@ export const PermissionsOverlay = ({
         }}
       />
       <div
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-[2rem] border border-pro-border bg-pro-surface shadow-2xl scale-in-center"
+        className="relative z-10 w-full max-w-lg overflow-hidden rounded-lg border border-pro-border bg-pro-surface shadow-2xl scale-in-center"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="p-8 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg/50">
+        <div className="p-8 border-b border-pro-border/40 flex items-center justify-between bg-pro-bg">
           <div className="flex items-center gap-5">
-            <div className="w-12 h-12 rounded-2xl bg-pro-surface flex items-center justify-center text-xl border border-pro-border/40 shadow-sm">
+            <div className="w-12 h-12 rounded-md bg-pro-surface flex items-center justify-center text-xl border border-pro-border/40 shadow-sm">
               🔒
             </div>
             <div>
-              <h2 className="text-2xl font-black tracking-tighter">
-                Permissions Required
-              </h2>
-              <p className="text-[10px] text-pro-text-muted/60 font-black uppercase tracking-[0.2em] mt-1.5">
+              <h2 className="text-2xl font-semibolder">Permissions Required</h2>
+              <p className="text-[10px] text-pro-text-muted/60 font-medium mt-1.5">
                 Access Needed
               </p>
             </div>
@@ -82,7 +80,7 @@ export const PermissionsOverlay = ({
               e.stopPropagation();
               onClose();
             }}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-pro-border/60 bg-pro-surface/80 text-pro-text-muted transition-all hover:bg-pro-bg hover:text-pro-text-main"
+            className="flex h-8 w-11 items-center justify-center rounded-md border border-pro-border/60 bg-pro-surface text-pro-text-muted transition-all hover:bg-pro-bg hover:text-pro-text-main"
           >
             ✕
           </button>
@@ -96,13 +94,13 @@ export const PermissionsOverlay = ({
             </p>
           </div>
 
-          <div className="p-6 rounded-[1.5rem] border border-pro-border/40 bg-pro-surface shadow-sm ring-4 ring-pro-bg/30">
+          <div className="p-6 rounded-lg border border-pro-border/40 bg-pro-surface shadow-sm ring-4 ring-pro-bg/30">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
+              <h3 className="text-[11px] font-semibold text-pro-text-main font-medium">
                 Microphone
               </h3>
               <span
-                className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${statusTone(micStatus)}`}
+                className={`text-[10px] font-medium px-3 py-1 rounded-full border ${statusTone(micStatus)}`}
               >
                 {statusLabel(micStatus)}
               </span>
@@ -113,19 +111,19 @@ export const PermissionsOverlay = ({
             <button
               type="button"
               onClick={() => onOpenSystemSettings('microphone')}
-              className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-pro-surface hover:border-pro-accent/40 transition-all active-push"
+              className="w-full h-10 rounded-md border border-pro-border/50 bg-pro-bg text-pro-text-main font-semibold text-[10px] font-medium hover:bg-pro-surface hover:border-pro-accent/40 transition-all "
             >
               Open System Settings
             </button>
           </div>
 
-          <div className="p-6 rounded-[1.5rem] border border-pro-border/40 bg-pro-surface shadow-sm ring-4 ring-pro-bg/30">
+          <div className="p-6 rounded-lg border border-pro-border/40 bg-pro-surface shadow-sm ring-4 ring-pro-bg/30">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[11px] font-black text-pro-text-main uppercase tracking-[0.2em]">
+              <h3 className="text-[11px] font-semibold text-pro-text-main font-medium">
                 System Audio
               </h3>
               <span
-                className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border ${statusTone(systemAudioStatus)}`}
+                className={`text-[10px] font-medium px-3 py-1 rounded-full border ${statusTone(systemAudioStatus)}`}
               >
                 {statusLabel(systemAudioStatus)}
               </span>
@@ -137,7 +135,7 @@ export const PermissionsOverlay = ({
             <button
               type="button"
               onClick={() => onOpenSystemSettings('system-audio')}
-              className="w-full h-10 rounded-xl border border-pro-border/50 bg-pro-bg/50 text-pro-text-main font-black text-[10px] uppercase tracking-[0.2em] hover:bg-pro-surface hover:border-pro-accent/40 transition-all active-push"
+              className="w-full h-10 rounded-md border border-pro-border/50 bg-pro-bg text-pro-text-main font-semibold text-[10px] font-medium hover:bg-pro-surface hover:border-pro-accent/40 transition-all "
             >
               Open System Settings
             </button>
@@ -150,14 +148,14 @@ export const PermissionsOverlay = ({
                 e.stopPropagation();
                 onClose();
               }}
-              className="flex-1 h-12 rounded-2xl border border-pro-border/50 bg-pro-surface text-pro-text-muted font-black text-[10px] uppercase tracking-[0.2em] hover:text-pro-text-main transition-all active-push"
+              className="flex-1 h-12 rounded-md border border-pro-border/50 bg-pro-surface text-pro-text-muted font-semibold text-[10px] font-medium hover:text-pro-text-main transition-all "
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleCheckAgain}
-              className="flex-[2] h-12 rounded-2xl bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] font-black text-[10px] uppercase tracking-[0.2em] hover:bg-pro-accent transition-all active-push shadow-premium"
+              className="flex-[2] h-12 rounded-md bg-pro-text-main dark:bg-pro-accent text-white font-semibold text-[10px] font-medium hover:bg-pro-accent transition-all  shadow-sm"
             >
               Restart App
             </button>

@@ -54,7 +54,7 @@ export const EntityPill: React.FC<EntityPillProps> = ({
       {showStatus && status && statusColor && (
         <span
           className={`
-          ml-1 px-1.5 py-0.25 rounded-md text-[8px] uppercase tracking-wider
+          ml-1 px-1.5 py-0.25 rounded-md text-[8px] font-medium
           ${statusColor.bg} ${statusColor.text}
         `}
         >

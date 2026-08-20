@@ -21,6 +21,7 @@ interface MeetingNotesDocumentProps {
   transcriptSegments: TranscriptSegment[];
   onDocumentChanged: () => void;
   onShowTranscript: () => void;
+  header?: React.ReactNode;
 }
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error';
@@ -157,6 +158,37 @@ const SaveStatus = ({ state }: { state: SaveState }) => {
   );
 };
 
+import TextareaAutosize from 'react-textarea-autosize';
+
+const getBlockTextarea = (block: HTMLElement): HTMLTextAreaElement | null =>
+  block.querySelector('textarea');
+
+const navigateToAdjacentTextarea = (
+  current: HTMLTextAreaElement,
+  direction: 'up' | 'down',
+) => {
+  const textareas = Array.from(
+    document.querySelectorAll(
+      '.meeting-notes-document textarea:not([disabled])',
+    ),
+  ) as HTMLTextAreaElement[];
+  const index = textareas.indexOf(current);
+  if (index === -1) return;
+  const nextIndex = direction === 'up' ? index - 1 : index + 1;
+  if (nextIndex >= 0 && nextIndex < textareas.length) {
+    const nextTextarea = textareas[nextIndex];
+    nextTextarea.focus();
+    const len = nextTextarea.value.length;
+    // Set timeout to allow focus to settle before moving cursor
+    setTimeout(() => {
+      nextTextarea.setSelectionRange(
+        direction === 'up' ? len : 0,
+        direction === 'up' ? len : 0,
+      );
+    }, 0);
+  }
+};
+
 const InlineEditableText = ({
   meetingId,
   path,
@@ -172,25 +204,28 @@ const InlineEditableText = ({
   asHeading?: boolean;
   onSaved: () => void;
 }) => {
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => setDraft(text), [text]);
-  useEffect(() => {
-    if (editing) textareaRef.current?.focus();
-  }, [editing]);
+
+  const className = asHeading
+    ? 'w-full resize-none overflow-hidden bg-transparent outline-none text-[30px] font-semibold leading-[1.3] m-0 p-0 block'
+    : 'w-full resize-none overflow-hidden bg-transparent outline-none text-[16px] leading-[1.55] m-0 p-0 block';
 
   if (!path) {
-    return asHeading ? <h2>{text}</h2> : <p>{text}</p>;
+    return asHeading ? (
+      <h2 className={className}>{text}</h2>
+    ) : (
+      <p className={className}>{text}</p>
+    );
   }
 
-  const save = async () => {
-    const next = draft.trim();
+  const save = async (newValue: string) => {
+    const next = newValue.trim();
     if (!next || next === text) {
-      setEditing(false);
+      setDraft(text);
       return;
     }
     setSaving(true);
@@ -209,75 +244,56 @@ const InlineEditableText = ({
           edited: next,
         });
       }
-      setEditing(false);
       onSaved();
     } catch (cause) {
       console.error('Failed to save meeting note edit', cause);
       setError('This edit was not saved. Try again.');
+      setDraft(text);
     } finally {
       setSaving(false);
     }
   };
 
-  if (editing) {
-    return (
-      <div className="meeting-inline-editor">
-        <textarea
-          ref={textareaRef}
-          aria-label={asHeading ? 'Edit section heading' : 'Edit note'}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              setDraft(text);
-              setEditing(false);
-            }
-            if (event.key === 'Enter' && !event.shiftKey && !asHeading) {
-              event.preventDefault();
-              void save();
-            }
-          }}
-          disabled={saving}
-          rows={
-            asHeading ? 1 : Math.min(8, Math.max(2, draft.split('\n').length))
-          }
-        />
-        <div className="meeting-inline-editor__actions">
-          <button type="button" onClick={() => void save()} disabled={saving}>
-            {saving ? (
-              <Loader2 aria-hidden="true" size={15} className="animate-spin" />
-            ) : (
-              <Check aria-hidden="true" size={15} />
-            )}
-            Save
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(text);
-              setEditing(false);
-            }}
-            disabled={saving}
-          >
-            <X aria-hidden="true" size={15} /> Keep original
-          </button>
-        </div>
-        {error ? <p className="meeting-edit-error">{error}</p> : null}
-      </div>
-    );
-  }
-
-  const content = asHeading ? <h2>{text}</h2> : <p>{text}</p>;
   return (
-    <div className="meeting-editable-copy">
-      {content}
-      <button
-        type="button"
-        aria-label={`Edit ${asHeading ? 'section heading' : text}`}
-        onClick={() => setEditing(true)}
-      >
-        <Pencil aria-hidden="true" size={14} />
-      </button>
+    <div className="relative group w-full">
+      <TextareaAutosize
+        className={className}
+        style={{ color: 'var(--notes-ink)' }}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={(event) => void save(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            setDraft(text);
+            event.currentTarget.blur();
+          }
+          if (event.key === 'ArrowUp') {
+            const target = event.currentTarget;
+            if (target.selectionStart === 0) {
+              event.preventDefault();
+              navigateToAdjacentTextarea(target, 'up');
+            }
+          }
+          if (event.key === 'ArrowDown') {
+            const target = event.currentTarget;
+            if (target.selectionEnd === target.value.length) {
+              event.preventDefault();
+              navigateToAdjacentTextarea(target, 'down');
+            }
+          }
+          if (event.key === 'Backspace') {
+            const target = event.currentTarget;
+            if (target.selectionStart === 0 && target.selectionEnd === 0) {
+              event.preventDefault();
+              navigateToAdjacentTextarea(target, 'up');
+            }
+          }
+          // We remove the Enter -> blur logic so users can press Enter to add new lines like a real text editor
+        }}
+        disabled={saving}
+        spellCheck={false}
+      />
+      {error && <p className="text-red-500 text-[13px] mt-1">{error}</p>}
     </div>
   );
 };
@@ -493,14 +509,13 @@ export const MeetingNotesDocument = ({
   transcriptSegments,
   onDocumentChanged,
   onShowTranscript,
+  header,
 }: MeetingNotesDocumentProps) => {
-  const [draftNotes, setDraftNotes] = useState(meeting.user_notes || '');
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [sourceSelection, setSourceSelection] =
     useState<SourceSelection | null>(() => previewSourceSelection(model));
   const [sourceAsOverlay, setSourceAsOverlay] = useState(sourceUsesOverlay);
   const meetingRef = useRef(meeting);
-  const savedNotesRef = useRef(meeting.user_notes || '');
   const onDocumentChangedRef = useRef(onDocumentChanged);
 
   useEffect(() => {
@@ -510,8 +525,6 @@ export const MeetingNotesDocument = ({
     onDocumentChangedRef.current = onDocumentChanged;
   }, [onDocumentChanged]);
   useEffect(() => {
-    setDraftNotes(meeting.user_notes || '');
-    savedNotesRef.current = meeting.user_notes || '';
     setSaveState('saved');
     setSourceSelection(previewSourceSelection(model));
   }, [meeting.id, meeting.user_notes, model]);
@@ -523,31 +536,6 @@ export const MeetingNotesDocument = ({
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
   }, []);
-
-  useEffect(() => {
-    if (draftNotes === savedNotesRef.current) return;
-    setSaveState('dirty');
-    const timer = window.setTimeout(async () => {
-      setSaveState('saving');
-      try {
-        await window.ipcRenderer.invoke('SAVE_MEETING', {
-          ...meetingRef.current,
-          user_notes: draftNotes,
-        });
-        meetingRef.current = {
-          ...meetingRef.current,
-          user_notes: draftNotes,
-        };
-        savedNotesRef.current = draftNotes;
-        setSaveState('saved');
-        onDocumentChangedRef.current();
-      } catch (cause) {
-        console.error('Failed to save meeting notes', cause);
-        setSaveState('error');
-      }
-    }, 650);
-    return () => window.clearTimeout(timer);
-  }, [draftNotes]);
 
   const outline = useMemo(
     () => model.sections.filter((section) => section.kind !== 'scratchpad'),
@@ -570,63 +558,46 @@ export const MeetingNotesDocument = ({
       ) : null}
 
       <article className="meeting-notes-document" aria-label="Meeting notes">
+        {header}
         <output className="meeting-document-save-row" aria-live="polite">
           <SaveStatus state={saveState} />
         </output>
-        {model.sections.map((section) => (
-          <section
-            key={section.id}
-            id={`meeting-section-${section.id}`}
-            className={`meeting-notes-section meeting-notes-section--${section.kind}`}
-            data-notes-section={section.kind}
-          >
-            {section.kind === 'scratchpad' ? (
-              <>
-                <h2>{section.title}</h2>
-                <p className="meeting-scratchpad-caption">
-                  <span className="meeting-authorship meeting-authorship--human">
-                    Written by you
-                  </span>
-                  These are yours. Pluto never replaces them.
-                </p>
-                <textarea
-                  aria-label="Your meeting notes"
-                  value={draftNotes}
-                  onChange={(event) => setDraftNotes(event.target.value)}
-                  placeholder="Add context, questions, or anything you want Pluto to preserve."
-                  rows={Math.min(
-                    14,
-                    Math.max(4, draftNotes.split('\n').length + 1),
-                  )}
-                />
-              </>
-            ) : (
-              <>
-                <InlineEditableText
-                  meetingId={meeting.id}
-                  path={section.titlePath}
-                  originalText={section.titleOriginal || section.title}
-                  text={section.title}
-                  asHeading
-                  onSaved={onDocumentChanged}
-                />
-                <div className="meeting-notes-section__content">
-                  {section.blocks.map((block) => (
-                    <NoteBlock
-                      key={block.id}
-                      block={block}
-                      section={section}
-                      meetingId={meeting.id}
-                      onSaved={onDocumentChanged}
-                      onSelectSource={setSourceSelection}
-                      selected={sourceSelection?.label === block.text}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </section>
-        ))}
+        {model.sections
+          .filter((s) => s.kind != 'scratchpad')
+          .map((section) => (
+            <section
+              key={section.id}
+              id={`meeting-section-${section.id}`}
+              className={`meeting-notes-section meeting-notes-section--${section.kind}`}
+              data-notes-section={section.kind}
+            >
+              {
+                <>
+                  <InlineEditableText
+                    meetingId={meeting.id}
+                    path={section.titlePath}
+                    originalText={section.titleOriginal || section.title}
+                    text={section.title}
+                    asHeading
+                    onSaved={onDocumentChanged}
+                  />
+                  <div className="meeting-notes-section__content">
+                    {section.blocks.map((block) => (
+                      <NoteBlock
+                        key={block.id}
+                        block={block}
+                        section={section}
+                        meetingId={meeting.id}
+                        onSaved={onDocumentChanged}
+                        onSelectSource={setSourceSelection}
+                        selected={sourceSelection?.label === block.text}
+                      />
+                    ))}
+                  </div>
+                </>
+              }
+            </section>
+          ))}
       </article>
 
       {sourceSelection

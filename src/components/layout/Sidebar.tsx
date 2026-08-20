@@ -1,11 +1,26 @@
-import { Search } from 'lucide-react';
-import type { Meeting } from '../../types'; // I'll create this type file if it doesn't exist, or just define it here for now
+import {
+  BookText,
+  CheckCircle2,
+  Clock,
+  FolderKanban,
+  Home,
+  Monitor,
+  Moon,
+  PlusCircle,
+  Search,
+  Settings,
+  Sun,
+  Trash2,
+  Users,
+} from 'lucide-react';
+import type { Meeting } from '../../types';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
-import { Logo } from '../Brand/Logo';
 
 type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki';
 
 interface SidebarProps {
+  transcriptVisible?: boolean;
+  setTranscriptVisible?: (visible: boolean) => void;
   sidebarVisible: boolean;
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
@@ -20,28 +35,9 @@ interface SidebarProps {
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
 
-const meetingDayLabel = (value: string): string => {
-  const date = new Date(value);
-  const today = new Date();
-  const startOfToday = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
-  );
-  const startOfDate = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-  );
-  const days = Math.round(
-    (startOfToday.getTime() - startOfDate.getTime()) / 86_400_000,
-  );
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  return date.toLocaleDateString([], { month: 'long', day: 'numeric' });
-};
-
 export const Sidebar = ({
+  transcriptVisible,
+  setTranscriptVisible,
   sidebarVisible,
   activeTab,
   setActiveTab,
@@ -55,157 +51,94 @@ export const Sidebar = ({
   theme,
   setTheme,
 }: SidebarProps) => {
-  if (selectedMeetingId) {
-    const groupedMeetings = safeMeetings
-      .slice(0, 14)
-      .reduce((groups, meeting) => {
-        const date = meeting.created_at || meeting.started_at;
-        const label = meetingDayLabel(date);
-        const entries = groups.get(label) || [];
-        entries.push(meeting);
-        groups.set(label, entries);
-        return groups;
-      }, new Map<string, Meeting[]>());
-
-    return (
-      <aside
-        className={`app-sidebar meeting-timeline-sidebar ${
-          sidebarVisible
-            ? 'translate-x-0'
-            : '-translate-x-full lg:-translate-x-[228px] lg:-mr-[228px]'
-        }`}
-        aria-label="Meeting timeline"
-      >
-        <div className="meeting-window-lights" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
-        <div className="meeting-timeline-list">
-          {[...groupedMeetings].map(([label, meetings]) => (
-            <section key={label}>
-              <h2>{label}</h2>
-              {meetings.map((meeting) => (
-                <button
-                  type="button"
-                  key={meeting.id}
-                  onClick={() => {
-                    setSelectedMeetingId(meeting.id);
-                    setActiveTab('hub');
-                  }}
-                  className={
-                    String(selectedMeetingId) === String(meeting.id)
-                      ? 'is-current'
-                      : undefined
-                  }
-                >
-                  <time>
-                    {new Date(
-                      meeting.created_at || meeting.started_at,
-                    ).toLocaleTimeString([], {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </time>
-                  <span>{meeting.title || 'Untitled meeting'}</span>
-                  <span
-                    className="meeting-timeline-status"
-                    aria-hidden="true"
-                  />
-                </button>
-              ))}
-            </section>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="meeting-sidebar-settings"
-          onClick={() => setSettingsVisible(true)}
-          aria-label="Settings"
-        >
-          <span aria-hidden="true" />
-          <span aria-hidden="true" />
-          <span aria-hidden="true" />
-        </button>
-      </aside>
-    );
-  }
-
   return (
     <aside
       className={`
-                app-sidebar w-[85vw] md:w-80 bg-pro-bg/95 backdrop-blur-xl border-r border-pro-border flex flex-col shrink-0 absolute lg:relative h-full z-40 transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none
-                ${sidebarVisible ? 'translate-x-0' : '-translate-x-full lg:-translate-x-80'}
-                ${sidebarVisible ? '' : 'lg:-mr-80'}
+                app-sidebar w-[85vw] md:w-[260px] bg-pro-surface border-r border-pro-border flex flex-col shrink-0 absolute lg:relative h-full z-40 transition-transform duration-300 ease-in-out shadow-2xl lg:shadow-none
+                ${sidebarVisible ? 'translate-x-0' : '-translate-x-full lg:-translate-x-[260px]'}
+                ${sidebarVisible ? '' : 'lg:-mr-[260px]'}
             `}
     >
-      <div className="p-9 pb-8 flex items-center">
-        <Logo size={40} showText variant="default" />
+      <div className="pt-4 pb-2 px-4 flex items-center">
+        <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white cursor-pointer transition-colors w-full">
+          <div className="w-[22px] h-[22px] rounded-[4px] bg-pro-text-main text-pro-surface flex items-center justify-center font-bold text-xs">
+            P
+          </div>
+          <span className="text-[14px] font-medium text-pro-text-main truncate">
+            Pluto Workspace
+          </span>
+        </div>
       </div>
 
-      <div className="px-6 pb-4 pt-1 space-y-3">
+      <div className="px-3 pb-3 space-y-0.5">
         <button
           type="button"
-          data-sidebar-search
           onClick={onOpenSearch}
-          className="flex min-h-11 w-full items-center gap-3 rounded-xl border border-pro-border/70 bg-pro-surface/35 px-4 text-pro-text-muted shadow-sm transition-all hover:border-pro-border hover:bg-pro-surface/60 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+          className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-muted hover:bg-black/5 dark:hover:bg-white transition-colors focus-visible:outline-none group"
         >
-          <Search aria-hidden="true" size={18} className="shrink-0" />
-          <span className="flex-1 text-left text-[14px] font-bold tracking-tight">
+          <Search aria-hidden="true" size={16} className="shrink-0" />
+          <span className="flex-1 text-left text-[14px] font-medium">
             Search
           </span>
-          <kbd className="font-sans text-[12px] font-bold text-pro-text-muted/60">
+          <kbd className="font-sans text-[11px] font-medium text-pro-text-muted/60 opacity-0 group-hover:opacity-100 transition-opacity">
             ⌘P
           </kbd>
         </button>
         <button
           type="button"
-          onClick={onStartRecording}
-          className="flex min-h-11 w-full items-center justify-between rounded-xl bg-pro-accent px-4 text-[#1A2340] shadow-sm transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent dark:bg-white dark:text-[#161A23] dark:hover:bg-white/90"
+          onClick={() => setSettingsVisible(true)}
+          className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-muted hover:bg-black/5 dark:hover:bg-white transition-colors focus-visible:outline-none"
         >
-          <span className="flex items-center gap-2 text-[12px] font-black">
-            <span aria-hidden="true" className="text-[13px]">
-              ●
-            </span>
-            Start recording
+          <Settings aria-hidden="true" size={16} className="shrink-0" />
+          <span className="flex-1 text-left text-[14px] font-medium">
+            Settings & members
           </span>
-          <kbd className="font-sans text-[9px] font-bold opacity-45">⌘ N</kbd>
+        </button>
+        <button
+          type="button"
+          onClick={onStartRecording}
+          className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-muted hover:bg-black/5 dark:hover:bg-white transition-colors focus-visible:outline-none group"
+        >
+          <PlusCircle
+            aria-hidden="true"
+            size={16}
+            className="shrink-0 group-hover:text-pro-accent transition-colors"
+          />
+          <span className="flex-1 text-left text-[14px] font-medium">
+            New meeting
+          </span>
+          <kbd className="font-sans text-[11px] font-medium text-pro-text-muted/60 opacity-0 group-hover:opacity-100 transition-opacity">
+            ⌘N
+          </kbd>
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-6 space-y-10 custom-scrollbar sidebar-mask no-drag">
-        {/* Workspace Section */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <h3 className="text-[10px] font-bold text-pro-text-muted/50 uppercase tracking-[0.15em]">
-              Overview
-            </h3>
-          </div>
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-6 custom-scrollbar">
+        {/* Overview Section */}
+        <div className="space-y-0.5">
           <button
             type="button"
             onClick={() => {
               setActiveTab('hub');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === 'hub' && !selectedMeetingId ? 'bg-pro-surface text-pro-text-main shadow-premium border border-pro-border/50' : 'text-pro-text-muted hover:bg-pro-surface/50 hover:text-pro-text-main border border-transparent'}`}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'hub' && !selectedMeetingId ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium' : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'}`}
           >
-            <span
-              className={`text-base transition-transform group-hover:scale-110 ${activeTab === 'hub' && !selectedMeetingId ? 'opacity-100' : 'opacity-60'}`}
-            >
-              🏠
-            </span>
-            <span className="text-[13px] font-bold tracking-tight">
-              Dashboard
-            </span>
-            {activeTab === 'hub' && !selectedMeetingId && (
-              <div className="absolute left-[-12px] w-1 h-5 bg-pro-accent rounded-full" />
-            )}
+            <Home
+              size={16}
+              className={
+                activeTab === 'hub' && !selectedMeetingId
+                  ? 'text-pro-text-main'
+                  : ''
+              }
+            />
+            <span className="text-[14px]">Dashboard</span>
           </button>
         </div>
 
         {/* Execution Section */}
-        <div className="space-y-1 pt-4">
-          <h3 className="px-4 text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-[0.2em] mb-3">
+        <div className="space-y-0.5">
+          <h3 className="px-3 text-[11px] font-semibold text-pro-text-muted/70 hover:text-pro-text-muted cursor-default mb-1 transition-colors">
             Execution
           </h3>
           <button
@@ -214,31 +147,29 @@ export const Sidebar = ({
               setActiveTab('projects');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === 'projects' && !selectedMeetingId ? 'bg-pro-surface text-pro-text-main shadow-premium border border-pro-border/50' : 'text-pro-text-muted hover:bg-pro-surface/50 hover:text-pro-text-main border border-transparent'}`}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'projects' && !selectedMeetingId ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium' : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'}`}
           >
-            <span
-              className={`text-base transition-transform group-hover:scale-110 ${activeTab === 'projects' && !selectedMeetingId ? 'opacity-100' : 'opacity-60'}`}
-            >
-              📁
-            </span>
-            <span className="text-[13px] font-bold tracking-tight">
-              Projects
-            </span>
-            {activeTab === 'projects' && !selectedMeetingId && (
-              <div className="absolute left-[-12px] w-1 h-5 bg-pro-accent rounded-full" />
-            )}
+            <FolderKanban
+              size={16}
+              className={
+                activeTab === 'projects' && !selectedMeetingId
+                  ? 'text-pro-text-main'
+                  : ''
+              }
+            />
+            <span className="text-[14px]">Projects</span>
           </button>
         </div>
 
         {/* Intelligence Section */}
-        <div className="space-y-1 pt-4">
-          <h3 className="px-4 text-[10px] font-bold text-pro-text-muted/30 uppercase tracking-[0.2em] mb-3">
+        <div className="space-y-0.5">
+          <h3 className="px-3 text-[11px] font-semibold text-pro-text-muted/70 hover:text-pro-text-muted cursor-default mb-1 transition-colors">
             Intelligence
           </h3>
           {(
             [
-              { id: 'wiki', name: 'Knowledge', icon: '🧠' },
-              { id: 'people', name: 'People', icon: '👤' },
+              { id: 'wiki', name: 'Knowledge', icon: BookText },
+              { id: 'people', name: 'People', icon: Users },
             ] as const
           ).map((item) => (
             <button
@@ -248,33 +179,35 @@ export const Sidebar = ({
                 setActiveTab(item.id);
                 setSelectedMeetingId(null);
               }}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-300 group relative ${activeTab === item.id && !selectedMeetingId ? 'bg-pro-surface text-pro-text-main shadow-premium border border-pro-border/50' : 'text-pro-text-muted hover:bg-pro-surface/50 hover:text-pro-text-main border border-transparent'}`}
+              className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === item.id && !selectedMeetingId ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium' : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'}`}
             >
-              <span
-                className={`text-base transition-transform group-hover:scale-110 ${activeTab === item.id && !selectedMeetingId ? 'opacity-100' : 'opacity-60'}`}
-              >
-                {item.icon}
-              </span>
-              <span className="text-[13px] font-bold tracking-tight">
-                {item.name}
-              </span>
-              {activeTab === item.id && !selectedMeetingId && (
-                <div className="absolute left-[-12px] w-1 h-5 bg-pro-accent rounded-full" />
-              )}
+              <item.icon
+                size={16}
+                className={
+                  activeTab === item.id && !selectedMeetingId
+                    ? 'text-pro-text-main'
+                    : ''
+                }
+              />
+              <span className="text-[14px]">{item.name}</span>
             </button>
           ))}
         </div>
 
-        {/* Archive Section */}
-        <div className="space-y-1 pt-2">
-          <div className="flex items-center justify-between px-4 mb-3">
-            <h3 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
-              Timeline
+        {/* Timeline / Private Section */}
+        <div className="space-y-0.5">
+          <div className="flex items-center justify-between px-3 mb-1 group cursor-pointer">
+            <h3 className="text-[11px] font-semibold text-pro-text-muted/70 group-hover:text-pro-text-muted transition-colors">
+              Private
             </h3>
-            <div className="w-1.5 h-1.5 rounded-full bg-pro-accent shadow-status-ok" />
+            <PlusCircle
+              size={14}
+              className="text-pro-text-muted/0 group-hover:text-pro-text-muted/70 transition-colors"
+              onClick={onStartRecording}
+            />
           </div>
-          <div className="space-y-1.5">
-            {safeMeetings.slice(0, 10).map((m, i) => (
+          <div className="space-y-0.5">
+            {safeMeetings.map((m) => (
               <div key={m.id} className="relative group">
                 <button
                   type="button"
@@ -283,34 +216,17 @@ export const Sidebar = ({
                     setActiveTab('hub');
                   }}
                   className={`
-                                        w-full text-left px-4 py-3 rounded-xl transition-all border duration-300 relative
+                                        w-full flex items-center gap-2 text-left px-3 py-[7px] rounded-md transition-colors
                                         ${
                                           selectedMeetingId === m.id
-                                            ? 'bg-pro-surface border-pro-border shadow-premium'
-                                            : 'border-transparent hover:bg-pro-surface/40 hover-lift'
+                                            ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium'
+                                            : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'
                                         }
                                     `}
                 >
-                  <div className="flex items-center justify-between gap-3 pr-6">
-                    <span
-                      className={`text-[12px] font-bold block truncate ${selectedMeetingId === m.id ? 'text-pro-text-main' : 'text-pro-text-muted/70 group-hover:text-pro-text-main'}`}
-                    >
-                      {m.title || 'Untitled Session'}
-                    </span>
-                    {i === 0 && (
-                      <span
-                        className="recency-dot w-1.5 h-1.5 rounded-full bg-pro-accent shrink-0 shadow-status-ok"
-                        title="Most Recent"
-                      />
-                    )}
-                  </div>
-                  <span className="text-[9px] font-black text-pro-text-muted/30 uppercase tracking-widest mt-1 block px-[1px]">
-                    {new Date(
-                      m.created_at || m.started_at || Date.now(),
-                    ).toLocaleDateString([], {
-                      month: 'short',
-                      day: 'numeric',
-                    })}
+                  <Clock size={16} className="shrink-0 opacity-70" />
+                  <span className="text-[14px] truncate flex-1 leading-5">
+                    {m.title || 'Untitled'}
                   </span>
                 </button>
                 {canDeleteMeeting(m.finalization_status) ? (
@@ -320,23 +236,10 @@ export const Sidebar = ({
                       e.stopPropagation();
                       handleDeleteMeeting(m.id);
                     }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg bg-red-500/0 hover:bg-red-500/10 text-red-500 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center z-30"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-black/10 dark:hover:bg-white text-pro-text-muted opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center z-30"
                     title="Delete Session"
                   >
-                    <svg
-                      aria-hidden="true"
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
+                    <Trash2 size={13} />
                   </button>
                 ) : null}
               </div>
@@ -345,42 +248,39 @@ export const Sidebar = ({
         </div>
       </div>
 
-      <div className="p-8 border-t border-pro-border/20 flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setSettingsVisible(true)}
-            className="flex-1 flex items-center gap-3 text-[11px] font-semibold text-pro-text-muted hover:text-pro-accent transition-all active-push group"
-          >
-            <div className="w-8 h-8 rounded-lg bg-pro-surface border border-pro-border/40 flex items-center justify-center text-sm group-hover:bg-pro-bg transition-colors shadow-sm bg-transparent dark:bg-pro-surface/5">
-              ⚙️
-            </div>
-            <span className="uppercase tracking-widest">Settings</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              setTheme(
-                theme === 'dark'
-                  ? 'light'
-                  : theme === 'light'
-                    ? 'system'
-                    : 'dark',
-              )
-            }
-            className="w-8 h-8 rounded-lg bg-pro-surface border border-pro-border/40 flex items-center justify-center text-sm hover:bg-pro-bg transition-colors shadow-sm text-pro-text-muted hover:text-pro-accent active-push bg-transparent dark:bg-pro-surface/5"
-            title={`Theme: ${theme}`}
-          >
-            {theme === 'dark' ? '🌙' : theme === 'light' ? '☀️' : '💻'}
-          </button>
-        </div>
-        <div className="flex items-center gap-2 px-1">
-          <div className="w-1.5 h-1.5 rounded-full bg-[#10B981] shadow-[0_0_12px_rgba(16,185,129,0.3)]" />
-          <span className="text-[9px] font-bold text-pro-text-muted/40 uppercase tracking-widest leading-none">
-            Safe to Record
+      <div className="px-4 py-3 border-t border-pro-border flex items-center justify-between">
+        <div className="flex items-center gap-2 group cursor-pointer">
+          <CheckCircle2
+            size={14}
+            className="text-[#10B981] group-hover:opacity-80 transition-opacity"
+          />
+          <span className="text-[11px] font-medium text-pro-text-muted group-hover:text-pro-text-main transition-colors">
+            Safe to record
           </span>
         </div>
+
+        <button
+          type="button"
+          onClick={() =>
+            setTheme(
+              theme === 'dark'
+                ? 'light'
+                : theme === 'light'
+                  ? 'system'
+                  : 'dark',
+            )
+          }
+          className="w-6 h-6 rounded-md hover:bg-black/5 dark:hover:bg-white flex items-center justify-center text-pro-text-muted transition-colors"
+          title={`Theme: ${theme}`}
+        >
+          {theme === 'dark' ? (
+            <Moon size={14} />
+          ) : theme === 'light' ? (
+            <Sun size={14} />
+          ) : (
+            <Monitor size={14} />
+          )}
+        </button>
       </div>
     </aside>
   );

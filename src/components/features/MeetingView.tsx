@@ -174,7 +174,7 @@ export const TranscriptIntegrityPanel = ({
   return (
     <section
       aria-live="polite"
-      className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] p-5"
+      className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] p-5"
     >
       <strong className="text-sm text-pro-text">{terminalCopy.title}</strong>
       <p className="mt-1 text-sm text-pro-text-muted">{terminalCopy.detail}</p>
@@ -191,22 +191,22 @@ export const MeetingAnalysisSkeleton = () => (
     className="space-y-12 animate-pulse motion-reduce:animate-none"
   >
     <div className="space-y-5">
-      <div className="h-3 w-28 rounded-full bg-pro-text-muted/10" />
-      <div className="space-y-3 rounded-[2rem] border border-pro-border/30 bg-pro-surface/30 p-8">
-        <div className="h-5 w-11/12 rounded-full bg-pro-text-muted/10" />
-        <div className="h-5 w-full rounded-full bg-pro-text-muted/10" />
-        <div className="h-5 w-3/4 rounded-full bg-pro-text-muted/10" />
+      <div className="h-3 w-28 rounded bg-pro-text-muted/10" />
+      <div className="space-y-3 rounded-lg border border-pro-border/30 bg-pro-surface p-8">
+        <div className="h-5 w-11/12 rounded bg-pro-text-muted/10" />
+        <div className="h-5 w-full rounded bg-pro-text-muted/10" />
+        <div className="h-5 w-3/4 rounded bg-pro-text-muted/10" />
       </div>
     </div>
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
       {[0, 1].map((card) => (
         <div
           key={card}
-          className="space-y-4 rounded-2xl border border-pro-border/30 bg-pro-surface/20 p-6"
+          className="space-y-4 rounded-md border border-pro-border/30 bg-pro-surface p-6"
         >
-          <div className="h-4 w-2/5 rounded-full bg-pro-text-muted/10" />
-          <div className="h-3 w-full rounded-full bg-pro-text-muted/10" />
-          <div className="h-3 w-4/5 rounded-full bg-pro-text-muted/10" />
+          <div className="h-4 w-2/5 rounded bg-pro-text-muted/10" />
+          <div className="h-3 w-full rounded bg-pro-text-muted/10" />
+          <div className="h-3 w-4/5 rounded bg-pro-text-muted/10" />
         </div>
       ))}
     </div>
@@ -226,13 +226,11 @@ export const MeetingTranscriptSkeleton = () => (
     ].map(([speakerWidth, textWidth], index) => (
       <div key={index} className="flex gap-12">
         <div
-          className={`mt-1 h-3 ${speakerWidth} shrink-0 rounded-full bg-pro-text-muted/10`}
+          className={`mt-1 h-3 ${speakerWidth} shrink-0 rounded bg-pro-text-muted/10`}
         />
         <div className="flex-1 space-y-3">
-          <div
-            className={`h-4 ${textWidth} rounded-full bg-pro-text-muted/10`}
-          />
-          <div className="h-4 w-3/4 rounded-full bg-pro-text-muted/10" />
+          <div className={`h-4 ${textWidth} rounded bg-pro-text-muted/10`} />
+          <div className="h-4 w-3/4 rounded bg-pro-text-muted/10" />
         </div>
       </div>
     ))}
@@ -291,7 +289,7 @@ export const MeetingActionCards = ({
     {items.map((item) => (
       <div
         key={item.id}
-        className={`p-6 rounded-2xl border shadow-premium flex gap-4 transition-all card-hover-effect ${
+        className={`p-6 rounded-md border shadow-sm flex gap-4 transition-all card-hover-effect ${
           item.attentionStatus === 'dismissed'
             ? 'bg-amber-500/5 border-amber-500/20'
             : item.attentionStatus === 'snoozed'
@@ -335,7 +333,7 @@ export const MeetingActionCards = ({
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] ${
+              className={`rounded px-2.5 py-1 text-[10px] font-medium ${
                 item.status === 'completed'
                   ? 'bg-emerald-500/10 text-emerald-600'
                   : item.status === 'overdue'
@@ -350,41 +348,41 @@ export const MeetingActionCards = ({
               {item.status === 'fallback' ? 'Summary' : item.status}
             </span>
             {item.topicLabel ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+              <span className="text-[11px] font-bold font-medium text-pro-text-muted/65">
                 Topic: {item.topicLabel}
               </span>
             ) : null}
             {item.assignee ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+              <span className="text-[11px] font-bold font-medium text-pro-text-muted/65">
                 Owner: {item.assignee}
               </span>
             ) : null}
             {item.statusLabel ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+              <span className="text-[11px] font-bold font-medium text-pro-text-muted/65">
                 Status: {item.statusLabel}
               </span>
             ) : null}
             {item.attentionKindLabel ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+              <span className="text-[11px] font-bold font-medium text-pro-text-muted/65">
                 {item.attentionKindLabel}
               </span>
             ) : null}
             {item.isBlocked ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-red-600">
+              <span className="text-[11px] font-bold font-medium text-red-600">
                 Blocked
               </span>
             ) : null}
             {item.attentionStatus === 'dismissed' ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
+              <span className="text-[11px] font-bold font-medium text-amber-700 dark:text-amber-300">
                 Dismissed
               </span>
             ) : item.attentionStatus === 'snoozed' ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">
+              <span className="text-[11px] font-bold font-medium text-sky-700 dark:text-sky-300">
                 Snoozed
               </span>
             ) : null}
             {item.dueLabel ? (
-              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-pro-text-muted/65">
+              <span className="text-[11px] font-bold font-medium text-pro-text-muted/65">
                 {item.dueLabel}
               </span>
             ) : null}
@@ -419,7 +417,7 @@ export const MeetingActionCards = ({
                         : 'dismissed',
                     )
                   }
-                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                  className={`text-[11px] font-medium transition-colors ${
                     pendingAttentionId === item.attentionItemId
                       ? 'cursor-not-allowed text-pro-text-muted/50'
                       : item.attentionStatus === 'dismissed'
@@ -445,7 +443,7 @@ export const MeetingActionCards = ({
                       item.attentionStatus === 'snoozed' ? 'active' : 'snoozed',
                     )
                   }
-                  className={`text-[11px] font-black uppercase tracking-[0.16em] transition-colors ${
+                  className={`text-[11px] font-medium transition-colors ${
                     pendingAttentionId === item.attentionItemId
                       ? 'cursor-not-allowed text-pro-text-muted/50'
                       : item.attentionStatus === 'snoozed'

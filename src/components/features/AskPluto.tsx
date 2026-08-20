@@ -185,12 +185,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex w-full h-full bg-pro-bg/98 backdrop-blur-3xl animate-in fade-in duration-300 flex-col">
+    <div className="fixed inset-0 z-[1000] flex w-full h-full bg-pro-bg animate-in fade-in duration-300 flex-col">
       {/* Close button */}
       <button
         onClick={onClose}
         type="button"
-        className="absolute top-8 right-8 z-[1010] w-10 h-10 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-all hover:scale-105 active-push group"
+        className="absolute top-8 right-8 z-[1010] w-10 h-10 rounded-full bg-white border border-white/10 hover:bg-white flex items-center justify-center text-white/50 hover:text-white transition-all hover:scale-105  group"
       >
         <svg
           aria-hidden="true"
@@ -212,10 +212,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       <div className="flex-1 relative flex flex-col pt-12 md:pt-20 px-6 sm:px-8 lg:px-12 overflow-hidden h-full w-full max-w-5xl mx-auto">
         <div className="mb-6 flex items-center gap-3 shrink-0">
           <Logo size={28} variant="gold" />
-          <h2 className="text-xl font-black text-pro-text-main heading-premium tracking-tight">
+          <h2 className="text-xl font-semibold text-pro-text-main heading-premium">
             Ask Pluto
           </h2>
-          <span className="text-[10px] bg-pro-accent/10 border border-pro-accent/20 text-pro-accent font-black uppercase px-2 py-0.5 rounded-full tracking-widest ml-2">
+          <span className="text-[10px] bg-pro-accent/10 border border-pro-accent/20 text-pro-accent font-semibold px-2 py-0.5 rounded-full ml-2">
             Beta
           </span>
         </div>
@@ -223,12 +223,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pb-12 flex flex-col pt-2">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center space-y-8 pb-10">
-              <div className="w-24 h-24 rounded-[2.5rem] bg-pro-accent/5 border border-pro-accent/20 flex items-center justify-center shadow-[0_0_100px_rgba(198,170,121,0.05)] relative group">
+              <div className="w-24 h-24 rounded-lg bg-pro-accent/5 border border-pro-accent/20 flex items-center justify-center shadow-lg relative group">
                 <span className="text-4xl relative z-10 group-hover:scale-110 transition-transform">
                   🧠
                 </span>
               </div>
-              <h3 className="text-2xl font-black text-pro-text-main tracking-tight">
+              <h3 className="text-2xl font-semibold text-pro-text-main">
                 Hi! I'm Pluto.
               </h3>
               <p className="text-pro-text-muted text-base max-w-lg mx-auto leading-relaxed">
@@ -238,9 +238,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               <div className="flex flex-wrap items-center justify-center gap-3 w-full max-w-xl mx-auto px-4 mt-4">
                 {isLoadingQueries ? (
                   <>
-                    <div className="px-5 py-4 w-64 rounded-2xl bg-pro-surface/20 border border-pro-border/30 animate-pulse" />
-                    <div className="px-5 py-4 w-72 rounded-2xl bg-pro-surface/20 border border-pro-border/30 animate-pulse" />
-                    <div className="px-5 py-4 w-56 rounded-2xl bg-pro-surface/20 border border-pro-border/30 animate-pulse" />
+                    <div className="px-5 py-4 w-64 rounded-md bg-pro-surface border border-pro-border/30 animate-pulse" />
+                    <div className="px-5 py-4 w-72 rounded-md bg-pro-surface border border-pro-border/30 animate-pulse" />
+                    <div className="px-5 py-4 w-56 rounded-md bg-pro-surface border border-pro-border/30 animate-pulse" />
                   </>
                 ) : dynamicQueries.length === 0 ? (
                   <p className="text-pro-text-muted/60 text-sm font-medium italic">
@@ -253,10 +253,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                       key={sq}
                       type="button"
                       onClick={() => handleSubmit(undefined, sq)}
-                      className="px-5 py-3 rounded-2xl bg-pro-surface/40 hover:bg-pro-surface hover:scale-[1.02] border border-pro-border text-pro-text-muted hover:text-pro-text-main hover:border-pro-accent/40 text-[13px] font-semibold transition-all shadow-sm flex items-center gap-2 group/btn"
+                      className="px-5 py-3 rounded-md bg-pro-surface hover:bg-pro-surface hover:scale-[1.02] border border-pro-border text-pro-text-muted hover:text-pro-text-main hover:border-pro-accent/40 text-[13px] font-semibold transition-all shadow-sm flex items-center gap-2 group/btn"
                     >
                       {sq}
-                      <span className="text-[10px] opacity-0 group-hover/btn:opacity-100 transition-opacity translate-x-[-10px] group-hover/btn:translate-x-0 tracking-widest uppercase font-black text-pro-accent">
+                      <span className="text-[10px] opacity-0 group-hover/btn:opacity-100 transition-opacity translate-x-[-10px] group-hover/btn:translate-x-0 font-semibold text-pro-accent">
                         →
                       </span>
                     </button>
@@ -271,7 +271,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                 className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'assistant' && (
-                  <div className="w-10 h-10 rounded-2xl bg-[#163758]/50 border border-pro-accent/20 flex items-center justify-center shrink-0 shadow-sm mt-1">
+                  <div className="w-10 h-10 rounded-md bg-[#163758]/50 border border-pro-accent/20 flex items-center justify-center shrink-0 shadow-sm mt-1">
                     <Logo size={18} variant="gold" />
                   </div>
                 )}
@@ -281,10 +281,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   }`}
                 >
                   <div
-                    className={`p-5 rounded-3xl w-full text-[14px] leading-relaxed relative ${
+                    className={`p-5 rounded-lg w-full text-[14px] leading-relaxed relative ${
                       msg.role === 'user'
                         ? 'bg-pro-text-main text-[#161A23] font-semibold shadow-md rounded-tr-lg border border-transparent'
-                        : 'bg-pro-surface/60 border border-pro-border/70 text-pro-text-main shadow-sm rounded-tl-lg'
+                        : 'bg-pro-surface border border-pro-border/70 text-pro-text-main shadow-sm rounded-tl-lg'
                     }`}
                   >
                     {msg.isLoading ? (
@@ -294,7 +294,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                           <div className="w-1.5 h-1.5 rounded-full bg-pro-accent animate-bounce [animation-delay:-.2s]" />
                           <div className="w-1.5 h-1.5 rounded-full bg-pro-accent animate-bounce [animation-delay:-.4s]" />
                         </div>
-                        <span className="text-[10px] font-black uppercase tracking-widest text-pro-accent/80 pl-2">
+                        <span className="text-[10px] font-medium text-pro-accent/80 pl-2">
                           Retrieving Intel
                         </span>
                       </div>
@@ -312,10 +312,10 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                     msg.citations &&
                     msg.citations.length > 0 && (
                       <div className="w-full space-y-3 pl-1">
-                        <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] text-pro-text-muted/50">
+                        <div className="flex items-center gap-3 text-[10px] font-medium text-pro-text-muted/50">
                           <span>Evidence</span>
                           <span className="h-px flex-1 bg-pro-border/30" />
-                          <span className="text-[#10B981] tracking-widest">
+                          <span className="text-[#10B981]st">
                             {msg.citations.length} Found
                           </span>
                         </div>
@@ -352,14 +352,14 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full bg-pro-surface/80 border border-pro-border focus:border-pro-accent/50 rounded-2xl p-4 pl-5 pr-16 text-sm font-medium text-pro-text-main focus:bg-pro-surface hover:border-pro-border/80 outline-none transition-all shadow-premium"
+              className="w-full bg-pro-surface border border-pro-border focus:border-pro-accent/50 rounded-md p-4 pl-5 pr-16 text-sm font-medium text-pro-text-main focus:bg-pro-surface hover:border-pro-border/80 outline-none transition-all shadow-sm"
               placeholder="Search recent meetings or ask a question..."
               disabled={isProcessing}
             />
             <button
               type="submit"
               disabled={!query.trim() || isProcessing}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl bg-pro-accent/10 border border-pro-accent/20 text-pro-accent flex items-center justify-center disabled:opacity-30 disabled:hover:scale-100 hover:bg-pro-accent hover:text-[#163758] hover:scale-105 transition-all shadow-sm"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-md bg-pro-accent/10 border border-pro-accent/20 text-pro-accent flex items-center justify-center disabled:opacity-30 disabled:hover:scale-100 hover:bg-pro-accent hover:text-[#163758] hover:scale-105 transition-all shadow-sm"
             >
               <svg
                 aria-hidden="true"

@@ -36,21 +36,21 @@ export const CitationCard: React.FC<CitationCardProps> = ({
           : 'bg-red-500/10 border-red-500/20 text-red-500';
   const trustDot =
     trustMeta.tone === 'success'
-      ? 'bg-[#10B981] shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+      ? 'bg-[#10B981] shadow-lg'
       : trustMeta.tone === 'warning'
-        ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.35)]'
+        ? 'bg-amber-500 shadow-lg'
         : trustMeta.tone === 'accent'
-          ? 'bg-pro-accent shadow-[0_0_8px_rgba(198,170,121,0.35)]'
-          : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]';
+          ? 'bg-pro-accent shadow-lg'
+          : 'bg-red-500 shadow-lg';
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`p-5 rounded-2xl border transition-all cursor-pointer group flex flex-col gap-4 ${
+      className={`p-5 rounded-md border transition-all cursor-pointer group flex flex-col gap-4 ${
         isActive
-          ? 'bg-pro-surface border-pro-accent/40 shadow-[0_8px_30px_rgba(0,0,0,0.12)] -translate-y-1'
-          : 'bg-pro-surface/40 border-pro-border/40 hover:border-pro-border/80 hover:bg-pro-surface/80 selection-none'
+          ? 'bg-pro-surface border-pro-accent/40 shadow-lg -translate-y-1'
+          : 'bg-pro-surface border-pro-border/40 hover:border-pro-border/80 hover:bg-pro-surface selection-none'
       } text-left w-full`}
     >
       <div className="flex items-start justify-between">
@@ -58,7 +58,7 @@ export const CitationCard: React.FC<CitationCardProps> = ({
           <h4 className="text-[13px] font-bold text-pro-text-main leading-tight group-hover:text-pro-accent transition-colors">
             {citation.meeting_title}
           </h4>
-          <span className="text-[10px] font-black uppercase tracking-widest text-pro-text-muted/60">
+          <span className="text-[10px] font-medium text-pro-text-muted/60">
             Source Log
           </span>
         </div>
@@ -68,9 +68,7 @@ export const CitationCard: React.FC<CitationCardProps> = ({
           title={trustMeta.description}
         >
           <div className={`w-1.5 h-1.5 rounded-full ${trustDot}`} />
-          <span className="text-[9px] font-black uppercase tracking-widest">
-            {trustMeta.label}
-          </span>
+          <span className="text-[9px] font-medium">{trustMeta.label}</span>
         </div>
       </div>
 
@@ -86,10 +84,10 @@ export const CitationCard: React.FC<CitationCardProps> = ({
 
       <div className="flex flex-col gap-3 pt-2 border-t border-pro-border/30">
         <div className="flex items-start gap-2">
-          <span className="text-[10px] font-black text-pro-accent uppercase tracking-widest shrink-0 pt-0.5">
+          <span className="text-[10px] font-semibold text-pro-accent font-medium shrink-0 pt-0.5">
             Claim:
           </span>
-          <span className="text-[11px] text-pro-text-muted font-medium bg-pro-bg/50 px-2.5 py-1 rounded-md line-clamp-2">
+          <span className="text-[11px] text-pro-text-muted font-medium bg-pro-bg px-2.5 py-1 rounded-md line-clamp-2">
             {citation.claim}
           </span>
         </div>
@@ -99,7 +97,7 @@ export const CitationCard: React.FC<CitationCardProps> = ({
             e.stopPropagation();
             onNavigateToMeeting(citation.meeting_id);
           }}
-          className="self-end text-[10px] font-black cursor-pointer uppercase tracking-widest text-pro-text-muted hover:text-pro-accent transition-colors flex items-center gap-1 group/btn"
+          className="self-end text-[10px] font-semibold cursor-pointer font-medium text-pro-text-muted hover:text-pro-accent transition-colors flex items-center gap-1 group/btn"
         >
           Context{' '}
           <span className="group-hover/btn:translate-x-1 transition-transform">

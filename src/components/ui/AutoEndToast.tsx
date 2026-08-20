@@ -21,8 +21,8 @@ export const AutoEndToast = ({
 
   return (
     <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[2000] animate-in slide-in-from-bottom-4">
-      <div className="flex items-center gap-4 px-6 py-4 bg-white rounded-2xl border border-pro-border shadow-premium">
-        <div className="w-10 h-10 rounded-xl bg-pro-accent/10 flex items-center justify-center shrink-0">
+      <div className="flex items-center gap-4 px-6 py-4 bg-white rounded-md border border-pro-border shadow-sm">
+        <div className="w-10 h-10 rounded-md bg-pro-accent/10 flex items-center justify-center shrink-0">
           <svg
             className="w-5 h-5 text-pro-accent"
             fill="none"
@@ -39,7 +39,7 @@ export const AutoEndToast = ({
           </svg>
         </div>
         <div className="flex flex-col min-w-0">
-          <span className="text-[13px] font-black tracking-tight text-pro-text-main">
+          <span className="text-[13px] font-semibold text-pro-text-main">
             Meeting ended automatically
           </span>
           <span className="text-[11px] text-pro-text-muted/60 font-bold truncate">
@@ -50,14 +50,14 @@ export const AutoEndToast = ({
           <button
             type="button"
             onClick={onReopen}
-            className="h-9 px-5 rounded-xl bg-pro-accent text-white text-[11px] font-black uppercase tracking-[0.15em] hover:bg-pro-accent/90 transition-all active-push"
+            className="h-9 px-5 rounded-md bg-pro-accent text-white text-[11px] font-medium hover:bg-pro-accent/90 transition-all "
           >
             Reopen
           </button>
           <button
             type="button"
             onClick={onDismiss}
-            className="h-9 w-9 rounded-xl border border-pro-border/40 bg-pro-bg flex items-center justify-center text-pro-text-muted hover:bg-pro-bg/80 transition-all active-push"
+            className="h-9 w-9 rounded-md border border-pro-border/40 bg-pro-bg flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all "
           >
             <span className="text-xs font-bold">✕</span>
           </button>

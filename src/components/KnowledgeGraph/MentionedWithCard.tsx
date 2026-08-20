@@ -53,7 +53,7 @@ export const MentionedWithCard: React.FC<MentionedWithCardProps> = ({
 
   if (loading) {
     return (
-      <div className="bg-pro-surface border border-pro-border rounded-xl p-5 animate-pulse">
+      <div className="bg-pro-surface border border-pro-border rounded-md p-5 animate-pulse">
         <div className="h-4 w-32 bg-pro-bg rounded mb-4" />
         <div className="flex gap-2">
           {[1, 2, 3].map((i) => (
@@ -67,10 +67,10 @@ export const MentionedWithCard: React.FC<MentionedWithCardProps> = ({
   if (coMentions.length === 0) return null;
 
   return (
-    <div className="bg-pro-surface border border-pro-border rounded-xl p-5 hover:shadow-sm transition-shadow">
+    <div className="bg-pro-surface border border-pro-border rounded-md p-5 hover:shadow-sm transition-shadow">
       <div className="flex items-center gap-2 mb-4">
         <span className="text-sm">🔗</span>
-        <h4 className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.15em]">
+        <h4 className="text-[10px] font-semibold text-pro-text-muted/50 font-medium">
           Mentioned With
         </h4>
       </div>
@@ -96,7 +96,7 @@ export const MentionedWithCard: React.FC<MentionedWithCardProps> = ({
               }
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pro-bg border transition-all group ${
                 isHighSaliency
-                  ? 'text-[13px] border-pro-accent/30 font-black shadow-sm'
+                  ? 'text-[13px] border-pro-accent/30 font-semibold shadow-sm'
                   : isLowSaliency
                     ? 'text-[11px] border-pro-border/40 font-medium'
                     : 'text-[12px] border-pro-border/60 font-bold'
@@ -105,9 +105,7 @@ export const MentionedWithCard: React.FC<MentionedWithCardProps> = ({
               <span className="opacity-60 group-hover:opacity-100 transition-opacity">
                 {ENTITY_ICONS[cm.type] || '📍'}
               </span>
-              <span className="truncate max-w-[140px] tracking-tight">
-                {cm.name}
-              </span>
+              <span className="truncate max-w-[140px]">{cm.name}</span>
             </button>
           );
         })}

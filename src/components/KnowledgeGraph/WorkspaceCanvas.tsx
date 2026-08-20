@@ -61,7 +61,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
           label: (
             <div className="flex flex-col items-start text-left w-full gap-1">
               <span
-                className="text-[10px] font-black uppercase tracking-widest opacity-80"
+                className="text-[10px] font-medium opacity-80"
                 style={{ color: theme.text }}
               >
                 {node.type.replace('_', ' ')}
@@ -133,7 +133,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
   }, [initialNodes, initialEdges, setFlowNodes, setFlowEdges]);
 
   return (
-    <div className="flex-1 relative bg-gradient-to-br from-pro-bg to-pro-surface/50 overflow-hidden shadow-inner-soft">
+    <div className="flex-1 relative bg-pro-surface overflow-hidden ">
       <div className="absolute inset-0 w-full h-full">
         <ReactFlow
           nodes={flowNodes}
@@ -167,7 +167,7 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
               );
             }}
             maskColor="rgba(248, 250, 252, 0.7)"
-            className="bg-pro-surface rounded-xl shadow-premium border border-pro-border"
+            className="bg-pro-surface rounded-md shadow-sm border border-pro-border"
           />
         </ReactFlow>
       </div>
@@ -175,10 +175,10 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
       {/* Floating Toolbar / Title / Breadcrumbs */}
       <div className="absolute top-6 left-8 z-20 pointer-events-none flex flex-col gap-3">
         {/* Breadcrumb Traversal */}
-        <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white/70 backdrop-blur-3xl border border-white/40 shadow-premium pointer-events-auto">
+        <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-md bg-white border border-white/40 shadow-sm pointer-events-auto">
           <button
             type="button"
-            className="flex items-center text-[12px] font-black uppercase tracking-widest text-pro-text-muted hover:text-pro-accent transition-colors cursor-pointer group"
+            className="flex items-center text-[12px] font-medium text-pro-text-muted hover:text-pro-accent transition-colors cursor-pointer group"
             onClick={() => onSelectEntity('')}
           >
             <Home className="w-4 h-4 mr-2 text-pro-text-muted/60 group-hover:text-pro-accent transition-colors" />
@@ -195,17 +195,17 @@ export const WorkspaceCanvas: React.FC<WorkspaceCanvasProps> = ({
                 s
               </div>
               <ChevronRight className="w-4 h-4 text-pro-text-muted/30" />
-              <div className="text-[12px] font-black uppercase tracking-widest text-white bg-pro-accent shadow-md shadow-pro-accent/20 px-2.5 py-1 rounded-lg">
+              <div className="text-[12px] font-medium text-white bg-pro-accent shadow-md shadow-pro-accent/20 px-2.5 py-1 rounded-lg">
                 {nodes.find((n) => n.id === selectedEntityId)?.label}
               </div>
             </>
           )}
         </div>
 
-        <div className="bg-white/50 backdrop-blur-3xl p-5 rounded-2xl border border-white/50 shadow-premium max-w-sm">
-          <h2 className="text-2xl font-black text-pro-text-main flex items-center gap-3 tracking-tight">
+        <div className="bg-white p-5 rounded-md border border-white/50 shadow-sm max-w-sm">
+          <h2 className="text-2xl font-semibold text-pro-text-main flex items-center gap-3">
             Knowledge Canvas
-            <span className="px-2.5 py-1 rounded-lg bg-pro-accent text-[11px] font-black text-white uppercase tracking-widest shadow-sm shadow-pro-accent/30">
+            <span className="px-2.5 py-1 rounded-lg bg-pro-accent text-[11px] font-semibold text-white font-medium shadow-sm shadow-pro-accent/30">
               {nodes.length} Nodes
             </span>
           </h2>

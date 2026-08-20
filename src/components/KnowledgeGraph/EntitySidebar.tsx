@@ -86,14 +86,14 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
       <div className="space-y-6 animate-pulse">
         {['People', 'Projects', 'Topics'].map((label, i) => (
           <div key={label} className="space-y-3">
-            <div className="text-[10px] font-black text-pro-text-muted/30 uppercase tracking-[0.2em] px-1">
+            <div className="text-[10px] font-semibold text-pro-text-muted/30 font-medium px-1">
               {label}
             </div>
             <div className="flex flex-wrap gap-3">
-              <div className="h-8 w-40 rounded-full bg-pro-surface/70 border border-pro-border/50 shadow-sm" />
-              <div className="h-8 w-32 rounded-full bg-pro-surface/70 border border-pro-border/50 shadow-sm" />
+              <div className="h-8 w-40 rounded-full bg-pro-surface border border-pro-border/50 shadow-sm" />
+              <div className="h-8 w-32 rounded-full bg-pro-surface border border-pro-border/50 shadow-sm" />
               {i === 2 && (
-                <div className="h-8 w-52 rounded-full bg-pro-surface/70 border border-pro-border/50 shadow-sm" />
+                <div className="h-8 w-52 rounded-full bg-pro-surface border border-pro-border/50 shadow-sm" />
               )}
             </div>
           </div>
@@ -117,12 +117,12 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
     return (
       <div className="space-y-4">
         {processing && (
-          <div className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
+          <div className="text-[10px] font-semibold text-pro-text-muted/50 font-medium">
             Processing entities...
           </div>
         )}
-        <div className="p-6 bg-pro-bg/30 border border-dashed border-pro-border rounded-2xl text-center">
-          <p className="text-[10px] font-black text-pro-text-muted/30 uppercase tracking-[0.2em]">
+        <div className="p-6 bg-pro-bg border border-dashed border-pro-border rounded-md text-center">
+          <p className="text-[10px] font-semibold text-pro-text-muted/30 font-medium">
             No entities identified
           </p>
         </div>
@@ -145,7 +145,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
   return (
     <div className="space-y-6">
       {processing && (
-        <div className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.2em]">
+        <div className="text-[10px] font-semibold text-pro-text-muted/50 font-medium">
           Processing entities...
         </div>
       )}
@@ -162,7 +162,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
         return (
           <div key={type} className="space-y-3">
             <div className="flex items-center justify-between px-1">
-              <h3 className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-[0.2em]">
+              <h3 className="text-[10px] font-semibold text-pro-text-muted/40 font-medium">
                 {labels[type]}
               </h3>
               <div className="flex items-center gap-2">
@@ -213,7 +213,7 @@ export const EntitySidebar: React.FC<EntitySidebarProps> = ({
                       setActiveAddType(type);
                       setAddName('');
                     }}
-                    className="h-7 w-7 rounded-full border border-pro-border/40 bg-pro-surface/70 text-pro-text-muted/50 hover:text-pro-text-main hover:border-pro-accent/30 transition-colors flex items-center justify-center"
+                    className="h-7 w-7 rounded-full border border-pro-border/40 bg-pro-surface text-pro-text-muted/50 hover:text-pro-text-main hover:border-pro-accent/30 transition-colors flex items-center justify-center"
                     aria-label={`Add ${labels[type]}`}
                   >
                     <Plus size={12} />

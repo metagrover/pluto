@@ -38,7 +38,7 @@ function GroundingBadge({
 }) {
   if (score < 0.4 || meetingCount === 0) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-500 text-[10px] font-black uppercase tracking-widest shadow-sm">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-500 text-[10px] font-medium shadow-sm">
         <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-pulse" />{' '}
         Inferred
       </span>
@@ -46,13 +46,13 @@ function GroundingBadge({
   }
   if (score < 0.8 || !hasContext) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-black uppercase tracking-widest shadow-sm">
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-medium shadow-sm">
         <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Synthesized
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/30 text-green-400 text-[10px] font-black uppercase tracking-widest shadow-sm">
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/30 text-green-400 text-[10px] font-medium shadow-sm">
       <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Grounded
     </span>
   );
@@ -63,11 +63,11 @@ function GroundingBadge({
 function TruthMeter({ meetingCount }: { meetingCount: number }) {
   return (
     <div className="flex flex-col gap-3 p-5 h-full items-center justify-center text-center">
-      <div className="w-10 h-10 rounded-xl bg-pro-bg border border-pro-border flex items-center justify-center text-lg">
+      <div className="w-10 h-10 rounded-md bg-pro-bg border border-pro-border flex items-center justify-center text-lg">
         🔭
       </div>
       <div className="space-y-1.5">
-        <p className="text-[11px] font-black text-pro-text-muted/60 uppercase tracking-widest">
+        <p className="text-[11px] font-semibold text-pro-text-muted/60 font-medium">
           High-Level Synthesis
         </p>
         <p className="text-xs text-pro-text-muted leading-relaxed max-w-[280px]">
@@ -194,7 +194,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={clearSelection}
-            className="fixed inset-0 bg-pro-bg/50 backdrop-blur-sm z-40 transition-opacity"
+            className="fixed inset-0 bg-pro-bg z-40 transition-opacity"
           />
 
           <motion.div
@@ -205,7 +205,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
             className="fixed top-0 right-0 bottom-0 w-[400px] md:w-[500px] lg:w-[600px] bg-pro-surface border-l border-pro-border shadow-2xl z-[100] flex flex-col overflow-hidden"
           >
             {/* 1. Header (Shrink-0) */}
-            <header className="shrink-0 bg-pro-surface/80 backdrop-blur-md border-b border-pro-border p-6 flex items-center justify-between z-20">
+            <header className="shrink-0 bg-pro-surface border-b border-pro-border p-6 flex items-center justify-between z-20">
               <div className="flex flex-col gap-0.5">
                 <h2 className="text-2xl font-bold text-pro-text-primary capitalize">
                   {selectedEntityNode.label}
@@ -229,7 +229,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                       clearSelection();
                       onOpenProjectsTab();
                     }}
-                    className="px-4 py-2 rounded-xl bg-pro-accent text-white text-[11px] font-black uppercase tracking-widest hover:bg-pro-accent/90 transition-all active:scale-[0.98] shadow-md flex items-center gap-2"
+                    className="px-4 py-2 rounded-md bg-pro-accent text-white text-[11px] font-medium hover:bg-pro-accent/90 transition-all active:scale-[0.98] shadow-md flex items-center gap-2"
                   >
                     <span>View Active Tasks</span>
                     <span>→</span>
@@ -304,7 +304,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                           >
                             <div className="flex justify-between items-start">
                               <span
-                                className={`text-[9px] font-black uppercase tracking-widest ${isSuggested ? 'text-pro-accent' : 'text-pro-text-muted'}`}
+                                className={`text-[9px] font-medium ${isSuggested ? 'text-pro-accent' : 'text-pro-text-muted'}`}
                               >
                                 {isSuggested ? 'New Claim' : 'Existing Record'}
                               </span>
@@ -320,7 +320,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                               onClick={() =>
                                 handleResolve(edge.id, otherEdge.id)
                               }
-                              className="mt-2 w-full py-2 bg-pro-surface hover:bg-pro-accent hover:text-white border border-pro-border rounded text-[10px] font-black uppercase tracking-widest transition-all"
+                              className="mt-2 w-full py-2 bg-pro-surface hover:bg-pro-accent hover:text-white border border-pro-border rounded text-[10px] font-medium transition-all"
                             >
                               Accept
                             </button>
@@ -334,7 +334,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                 {/* Synthetic Summary */}
                 <section className="flex flex-col gap-4">
                   <div className="flex justify-between items-center border-b border-pro-border/50 pb-2">
-                    <h3 className="font-bold text-pro-text-primary text-[11px] uppercase tracking-widest">
+                    <h3 className="font-bold text-pro-text-primary text-[11px] font-medium">
                       Synthetic Summary
                     </h3>
                     <div className="flex items-center gap-2">
@@ -398,7 +398,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
 
                 {/* Relational Discovery */}
                 <section className="flex flex-col gap-4">
-                  <h3 className="font-bold text-pro-text-primary text-[11px] uppercase tracking-widest border-b border-pro-border/50 pb-2">
+                  <h3 className="font-bold text-pro-text-primary text-[11px] font-medium border-b border-pro-border/50 pb-2">
                     Relational Discovery
                   </h3>
                   <MentionedWithCard entity={selectedEntityNode} />
@@ -407,7 +407,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
 
                 {/* Meeting Context */}
                 <section className="flex flex-col gap-4 pb-12">
-                  <h3 className="font-bold text-pro-text-primary text-[11px] uppercase tracking-widest border-b border-pro-border/50 pb-2">
+                  <h3 className="font-bold text-pro-text-primary text-[11px] font-medium border-b border-pro-border/50 pb-2">
                     Mentioned In
                   </h3>
                   <div className="flex flex-col gap-4 border-l-2 border-pro-border ml-2 pl-4">
@@ -425,7 +425,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                           <div
                             className={`absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full border-2 border-pro-surface ${idx === 0 ? 'bg-pro-accent' : 'bg-pro-border'}`}
                           />
-                          <div className="text-[10px] text-pro-text-muted font-bold uppercase tracking-tighter mb-1">
+                          <div className="text-[10px] text-pro-text-muted font-bold mb-1">
                             {m.started_at
                               ? new Date(m.started_at).toLocaleDateString(
                                   undefined,
@@ -459,8 +459,8 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
 
             {/* 3. True Sticky Footer Evidence Dock (Pinned to Bottom of Sheet Viewport) */}
             <div
-              className={`absolute bottom-0 left-0 right-0 z-50 border-t bg-pro-surface/95 backdrop-blur-md shadow-[0_-10px_30px_rgba(0,0,0,0.15)] transition-all duration-500 ease-in-out ${
-                evidenceDrawerOpen ? 'h-[40%]' : 'h-11'
+              className={`absolute bottom-0 left-0 right-0 z-50 border-t bg-pro-surface shadow-lg transition-all duration-500 ease-in-out ${
+                evidenceDrawerOpen ? 'h-[40%]' : 'h-8'
               }`}
             >
               {!evidenceDrawerOpen ? (
@@ -473,7 +473,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                     <span className="text-pro-accent animate-pulse font-bold text-xs">
                       ●
                     </span>
-                    <span className="text-[10px] font-black text-pro-text-muted/60 uppercase tracking-[0.2em] group-hover:text-pro-text-primary transition-colors">
+                    <span className="text-[10px] font-semibold text-pro-text-muted/60 font-medium group-hover:text-pro-text-primary transition-colors">
                       {meetingsLoading
                         ? 'Indexing Proofs…'
                         : `Found ${snippetCount} Evidence Snippets`}
@@ -485,15 +485,15 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                   />
                 </button>
               ) : (
-                <div className="h-full flex flex-col bg-pro-bg/80 backdrop-blur-xl">
+                <div className="h-full flex flex-col bg-pro-bg">
                   {/* Drawer Header */}
-                  <div className="flex items-center justify-between px-5 py-3 border-b border-pro-border/50 bg-pro-surface/60 backdrop-blur-sm shrink-0">
+                  <div className="flex items-center justify-between px-5 py-3 border-b border-pro-border/50 bg-pro-surface shrink-0">
                     <div className="flex items-center gap-3">
-                      <h3 className="font-black text-pro-text-primary text-[10px] uppercase tracking-[0.2em]">
+                      <h3 className="font-semibold text-pro-text-primary text-[10px] font-medium">
                         Evidence Dock
                       </h3>
                       {snippetCount > 0 && (
-                        <span className="px-2 py-0.5 rounded bg-pro-accent/10 text-pro-accent text-[9px] font-black border border-pro-accent/20">
+                        <span className="px-2 py-0.5 rounded bg-pro-accent/10 text-pro-accent text-[9px] font-semibold border border-pro-accent/20">
                           {snippetCount} Grounded
                         </span>
                       )}
@@ -509,7 +509,7 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
 
                   <div className="flex flex-1 overflow-hidden">
                     {/* Left: Meeting List */}
-                    <div className="w-[35%] border-r border-pro-border/40 overflow-y-auto bg-pro-bg/50">
+                    <div className="w-[35%] border-r border-pro-border/40 overflow-y-auto bg-pro-bg">
                       {entityMeetings.map((m) => (
                         <button
                           key={m.id}
@@ -518,13 +518,13 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                           className={`w-full text-left px-5 py-4 border-b border-pro-border/30 transition-all ${
                             activeMeetingId === m.id
                               ? 'bg-pro-surface border-l-4 border-l-pro-accent'
-                              : 'hover:bg-pro-surface/50 border-l-4 border-l-transparent'
+                              : 'hover:bg-pro-surface border-l-4 border-l-transparent'
                           }`}
                         >
                           <div className="text-[11px] font-bold text-pro-text-primary truncate">
                             {m.title}
                           </div>
-                          <div className="text-[9px] text-pro-text-muted/50 mt-1 uppercase font-bold tracking-tighter">
+                          <div className="text-[9px] text-pro-text-muted/50 mt-1 font-bold">
                             {m.started_at
                               ? new Date(m.started_at).toLocaleDateString([], {
                                   month: 'short',
@@ -537,26 +537,26 @@ export const FocusSheet: React.FC<FocusSheetProps> = ({
                     </div>
 
                     {/* Right: Snippet */}
-                    <div className="flex-1 overflow-y-auto bg-pro-surface/40 p-6">
+                    <div className="flex-1 overflow-y-auto bg-pro-surface p-6">
                       {activeMeeting?.context ? (
                         <div className="flex flex-col gap-6">
                           <div className="flex items-center justify-between">
-                            <h4 className="text-[10px] font-black text-pro-accent uppercase tracking-widest flex items-center gap-2">
+                            <h4 className="text-[10px] font-semibold text-pro-accent font-medium flex items-center gap-2">
                               <span className="w-1.5 h-1.5 rounded-full bg-pro-accent" />
                               Primary Proof
                             </h4>
-                            <span className="text-[9px] font-mono text-pro-text-muted/40 uppercase">
+                            <span className="text-[9px] font-mono text-pro-text-muted/40">
                               ID: {activeMeeting.id.slice(0, 8)}
                             </span>
                           </div>
-                          <div className="bg-pro-bg rounded-2xl border border-pro-border/50 p-6 shadow-inner-soft">
+                          <div className="bg-pro-bg rounded-md border border-pro-border/50 p-6 ">
                             <p className="text-sm text-pro-text-muted leading-relaxed font-medium">
                               "{activeMeeting.context}"
                             </p>
                           </div>
                           <button
                             type="button"
-                            className="h-10 px-6 rounded-xl bg-pro-accent text-white text-[10px] font-black uppercase tracking-widest hover:bg-pro-accent/90 transition-all flex items-center justify-center gap-2 w-fit"
+                            className="h-10 px-6 rounded-md bg-pro-accent text-white text-[10px] font-medium hover:bg-pro-accent/90 transition-all flex items-center justify-center gap-2 w-fit"
                           >
                             <span>▶</span> Playback Sync
                           </button>

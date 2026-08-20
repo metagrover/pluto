@@ -38,7 +38,7 @@ export const EvolutionCard: React.FC<EvolutionCardProps> = ({ entity }) => {
 
   if (loading) {
     return (
-      <div className="bg-pro-surface border border-pro-border rounded-xl p-5 animate-pulse">
+      <div className="bg-pro-surface border border-pro-border rounded-md p-5 animate-pulse">
         <div className="h-4 w-32 bg-pro-bg rounded mb-4" />
         <div className="space-y-3">
           {[1, 2].map((i) => (
@@ -57,10 +57,10 @@ export const EvolutionCard: React.FC<EvolutionCardProps> = ({ entity }) => {
     : meetingsWithContext.slice(0, 3);
 
   return (
-    <div className="bg-pro-surface border border-pro-border rounded-xl p-5 hover:shadow-sm transition-shadow">
+    <div className="bg-pro-surface border border-pro-border rounded-md p-5 hover:shadow-sm transition-shadow">
       <div className="flex items-center gap-2 mb-4">
         <span className="text-sm">📈</span>
-        <h4 className="text-[10px] font-black text-pro-text-muted/50 uppercase tracking-[0.15em]">
+        <h4 className="text-[10px] font-semibold text-pro-text-muted/50 font-medium">
           Evolution
         </h4>
         <span className="text-[10px] text-pro-text-muted/40 ml-auto">
@@ -75,7 +75,7 @@ export const EvolutionCard: React.FC<EvolutionCardProps> = ({ entity }) => {
           <div key={meeting.id} className="relative py-2">
             <div className="absolute -left-[21px] top-3 w-2 h-2 rounded-full bg-pro-accent/60" />
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-black text-pro-text-muted/40 uppercase tracking-widest">
+              <span className="text-[10px] font-semibold text-pro-text-muted/40 font-medium">
                 {meeting.started_at
                   ? new Date(meeting.started_at).toLocaleDateString([], {
                       month: 'short',
@@ -100,7 +100,7 @@ export const EvolutionCard: React.FC<EvolutionCardProps> = ({ entity }) => {
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}
-          className="mt-3 text-[10px] font-black uppercase tracking-widest text-pro-accent hover:text-pro-accent/80 transition-colors"
+          className="mt-3 text-[10px] font-medium text-pro-accent hover:text-pro-accent/80 transition-colors"
         >
           {expanded
             ? '↑ Show less'

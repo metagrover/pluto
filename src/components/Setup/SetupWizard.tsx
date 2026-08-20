@@ -141,13 +141,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center px-8 py-14">
         {step === 1 ? (
           <section className="mx-auto w-full max-w-lg text-center">
-            <div className="mx-auto mb-10 flex h-24 w-24 items-center justify-center rounded-3xl border border-pro-border bg-pro-surface shadow-premium">
+            <div className="mx-auto mb-8 flex h-16 w-16 items-center justify-center rounded-lg border border-pro-border bg-pro-surface shadow-sm">
               <Logo size={62} />
             </div>
-            <p className="mb-4 text-xs font-bold uppercase tracking-[0.18em] text-pro-accent">
+            <p className="mb-4 text-xs font-bold font-medium text-pro-accent">
               Welcome to Pluto
             </p>
-            <h1 className="text-4xl font-black tracking-tight md:text-5xl">
+            <h1 className="text-3xl font-semibold md:text-4xl">
               Meetings remembered, privately
             </h1>
             <p className="mx-auto mt-6 max-w-md text-base leading-7 text-pro-text-muted">
@@ -157,7 +157,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
             <button
               type="button"
               onClick={() => void startSetup()}
-              className="mt-10 h-14 w-full rounded-2xl bg-pro-text-main px-6 text-sm font-bold text-white shadow-premium transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] dark:bg-pro-accent dark:text-[#1A2340]"
+              className="mt-10 h-10 w-full rounded-md bg-pro-text-main px-6 text-sm font-bold text-white shadow-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] dark:bg-pro-accent dark:text-white"
             >
               Set up Pluto
             </button>
@@ -169,10 +169,10 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
         ) : (
           <section className="w-full">
             <div className="mb-9">
-              <p className="mb-3 text-xs font-bold uppercase tracking-[0.18em] text-pro-accent">
+              <p className="mb-3 text-xs font-bold font-medium text-pro-accent">
                 Recording setup
               </p>
-              <h1 className="text-3xl font-black tracking-tight md:text-4xl">
+              <h1 className="text-3xl font-semibold md:text-3xl">
                 {readiness.status === 'ready'
                   ? 'Ready to record'
                   : 'Getting Pluto ready'}
@@ -183,7 +183,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               </p>
             </div>
 
-            <div className="divide-y divide-pro-border overflow-hidden rounded-3xl border border-pro-border bg-pro-surface shadow-premium">
+            <div className="divide-y divide-pro-border overflow-hidden rounded-lg border border-pro-border bg-pro-surface shadow-sm">
               <RequirementRow
                 icon={<Download size={20} />}
                 title="Local transcription"
@@ -202,7 +202,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                     <button
                       type="button"
                       onClick={() => void prepareLocalModels()}
-                      className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700"
+                      className="rounded-md border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700"
                     >
                       Try again
                     </button>
@@ -219,7 +219,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                     <button
                       type="button"
                       onClick={() => void requestMicrophone()}
-                      className="rounded-xl border border-pro-border px-4 py-2 text-xs font-bold"
+                      className="rounded-md border border-pro-border px-4 py-2 text-xs font-bold"
                     >
                       Allow microphone
                     </button>
@@ -237,14 +237,14 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                       <button
                         type="button"
                         onClick={() => void openSystemAudioSettings()}
-                        className="rounded-xl border border-pro-border px-4 py-2 text-xs font-bold"
+                        className="rounded-md border border-pro-border px-4 py-2 text-xs font-bold"
                       >
                         Open Settings
                       </button>
                       <button
                         type="button"
                         onClick={() => void checkPermissions()}
-                        className="rounded-xl bg-pro-bg px-4 py-2 text-xs font-bold"
+                        className="rounded-md bg-pro-bg px-4 py-2 text-xs font-bold"
                       >
                         Check again
                       </button>
@@ -258,7 +258,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               type="button"
               onClick={() => void finish()}
               disabled={!readiness.canComplete || finishing}
-              className="mt-8 h-14 w-full rounded-2xl bg-pro-text-main px-6 text-sm font-bold text-white shadow-premium transition-all disabled:cursor-not-allowed disabled:opacity-35 dark:bg-pro-accent dark:text-[#1A2340]"
+              className="mt-8 h-10 w-full rounded-md bg-pro-text-main px-6 text-sm font-bold text-white shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-35 dark:bg-pro-accent dark:text-white"
             >
               {finishing ? 'Opening Pluto…' : 'Start using Pluto'}
             </button>
@@ -287,7 +287,7 @@ const RequirementRow = ({
   return (
     <div className="flex min-h-24 items-center gap-4 px-6 py-5">
       <div
-        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${requirementTone(ready, blocked)}`}
+        className={`flex h-8 w-11 shrink-0 items-center justify-center rounded-md border ${requirementTone(ready, blocked)}`}
       >
         {ready ? <Check size={20} /> : icon}
       </div>
@@ -295,8 +295,8 @@ const RequirementRow = ({
         <h2 className="text-sm font-bold">{title}</h2>
         <p className="mt-1 text-xs leading-5 text-pro-text-muted">{detail}</p>
         {(state === 'checking' || state === 'preparing') && (
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-pro-bg">
-            <div className="h-full w-2/3 animate-pulse rounded-full bg-pro-accent" />
+          <div className="mt-3 h-1.5 overflow-hidden rounded bg-pro-bg">
+            <div className="h-full w-2/3 animate-pulse rounded bg-pro-accent" />
           </div>
         )}
       </div>

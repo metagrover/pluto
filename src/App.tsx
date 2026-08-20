@@ -758,7 +758,7 @@ function App() {
 
   if (setupNeeded === null || (!setupNeeded && !isServerReady))
     return (
-      <div className="app-init-drag h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-black uppercase tracking-[0.2em] animate-pulse text-xs">
+      <div className="app-init-drag h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-medium animate-pulse text-xs">
         <div className="w-8 h-8 rounded-full border-2 border-pro-accent border-t-transparent animate-spin mb-4" />
         <span>Initializing Neural Engine...</span>
       </div>
@@ -810,7 +810,7 @@ function App() {
       {!showZenMode && (
         <>
           <div
-            className={`fixed inset-0 bg-black/20 backdrop-blur-sm z-30 lg:hidden transition-opacity duration-300 ${sidebarVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+            className={`fixed inset-0 bg-black/20 z-30 lg:hidden transition-opacity duration-300 ${sidebarVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
             onClick={() => setSidebarVisible(false)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
@@ -834,6 +834,8 @@ function App() {
             onOpenSearch={() => setSearchVisible(true)}
             handleDeleteMeeting={handleDeleteMeeting}
             setSettingsVisible={setSettingsVisible}
+            transcriptVisible={transcriptVisible}
+            setTranscriptVisible={setTranscriptVisible}
             theme={theme}
             setTheme={(newTheme) => {
               setTheme(newTheme);
@@ -881,7 +883,7 @@ function App() {
             className={`app-titlebar shrink-0 sticky top-0 z-20 ${
               selectedMeetingId
                 ? 'meeting-app-toolbar'
-                : `grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-6 md:px-12 bg-pro-bg/40 backdrop-blur-3xl border-b border-pro-border/20 ${activeTab === 'wiki' ? 'h-20' : 'h-28'}`
+                : `grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-6 md:px-12 bg-pro-bg border-b border-pro-border/20 ${activeTab === 'wiki' ? 'h-20' : 'h-28'}`
             }`}
           >
             {selectedMeetingId ? (
@@ -927,7 +929,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setSidebarVisible((prev) => !prev)}
-                    className="w-11 h-11 rounded-xl bg-pro-surface border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push group"
+                    className="w-11 h-8 rounded-md bg-pro-surface border border-pro-border/40 shadow-sm flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all  group"
                   >
                     <svg
                       aria-hidden="true"
@@ -945,7 +947,7 @@ function App() {
                     </svg>
                   </button>
                   <div>
-                    <h2 className="text-sm font-black tracking-tight text-pro-text-main group cursor-default">
+                    <h2 className="text-sm font-semibold text-pro-text-main group cursor-default">
                       {isProcessing
                         ? 'Processing Intelligence...'
                         : isRecording
@@ -959,7 +961,7 @@ function App() {
                                 : activeTab.charAt(0).toUpperCase() +
                                   activeTab.slice(1)}
                     </h2>
-                    <p className="text-[10px] font-bold text-pro-text-muted/60 uppercase tracking-widest mt-1">
+                    <p className="text-[10px] font-bold text-pro-text-muted/60 font-medium mt-1">
                       {isRecording
                         ? 'Neural Stream Live'
                         : selectedMeetingId
@@ -985,10 +987,10 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setAskPlutoVisible(true)}
-                    className="h-10 px-5 rounded-full bg-white dark:bg-pro-surface border border-pro-border/40 dark:border-pro-border/50 shadow-sm flex items-center gap-3 hover:border-pro-accent/40 transition-all active-push group"
+                    className="h-10 px-5 rounded-full bg-white dark:bg-pro-surface border border-pro-border/40 dark:border-pro-border/50 shadow-sm flex items-center gap-3 hover:border-pro-accent/40 transition-all  group"
                   >
                     <span className="text-sm">🧠</span>
-                    <span className="text-[9px] font-black text-pro-text-muted/60 dark:text-pro-text-main/70 uppercase tracking-[0.2em] pt-[1px]">
+                    <span className="text-[9px] font-semibold text-pro-text-muted/60 dark:text-pro-text-main/70 font-medium pt-[1px]">
                       Ask Pluto
                     </span>
                     <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity ml-2">
@@ -1004,7 +1006,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setSettingsVisible(true)}
-                    className="w-11 h-11 rounded-xl bg-pro-surface border border-pro-border/40 shadow-premium flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all active-push"
+                    className="w-11 h-8 rounded-md bg-pro-surface border border-pro-border/40 shadow-sm flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all "
                   >
                     <svg
                       aria-hidden="true"
@@ -1111,7 +1113,7 @@ function App() {
             ) : (
               <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pro-accent/5 rounded-full blur-[120px] pointer-events-none" />
-                <div className="w-32 h-32 rounded-[3.5rem] bg-pro-surface border border-pro-border flex items-center justify-center text-5xl mx-auto mb-10 shadow-premium active-push group">
+                <div className="w-32 h-32 rounded-lg bg-pro-surface border border-pro-border flex items-center justify-center text-5xl mx-auto mb-10 shadow-sm  group">
                   <span className="group-hover:rotate-12 transition-transform duration-500">
                     {activeTab === 'people'
                       ? '👤'
@@ -1123,10 +1125,10 @@ function App() {
                   </span>
                 </div>
                 <div className="space-y-6 relative z-10">
-                  <h2 className="text-5xl font-black heading-premium tracking-tighter uppercase italic opacity-10">
+                  <h2 className="text-5xl font-semibold heading-premiumer italic opacity-10">
                     {activeTab} Terminal
                   </h2>
-                  <h2 className="text-4xl font-black tracking-tight tracking-tighter">
+                  <h2 className="text-4xl font-semibolder">
                     Your {activeTab} space is{' '}
                     <span className="gradient-text">awaiting context.</span>
                   </h2>
@@ -1142,11 +1144,11 @@ function App() {
                     onClick={() => {
                       if (startSessionRef.current) startSessionRef.current();
                     }}
-                    className="h-16 px-12 rounded-3xl bg-pro-text-main dark:bg-pro-accent text-white dark:text-[#1A2340] font-black text-xs uppercase tracking-[0.2em] shadow-2xl hover:bg-pro-accent hover:scale-[1.02] transition-all active-push"
+                    className="h-16 px-12 rounded-lg bg-pro-text-main dark:bg-pro-accent text-white font-semibold text-xs font-medium shadow-2xl hover:bg-pro-accent hover:scale-[1.02] transition-all "
                   >
                     Initialize Capture
                   </button>
-                  <p className="text-[10px] font-black text-pro-text-muted/30 uppercase tracking-[0.3em]">
+                  <p className="text-[10px] font-semibold text-pro-text-muted/30 font-medium">
                     Ready for M-Series Deployment
                   </p>
                 </div>

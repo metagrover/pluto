@@ -59,9 +59,7 @@ export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
       <div className="flex items-center justify-center h-full w-full">
         <div className="animate-pulse flex flex-col items-center gap-4 text-pro-text-muted">
           <div className="w-8 h-8 rounded-full border-2 border-pro-accent border-t-transparent animate-spin" />
-          <span className="text-xs uppercase tracking-widest font-black">
-            Loading Knowledge Base...
-          </span>
+          <span className="text-xs font-medium">Loading Knowledge Base...</span>
         </div>
       </div>
     );

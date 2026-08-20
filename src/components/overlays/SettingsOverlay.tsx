@@ -24,14 +24,12 @@ interface SettingsOverlayProps {
 }
 
 const cardClass =
-  'rounded-[2rem] border border-pro-border/70 bg-pro-surface/95 shadow-[0_18px_48px_-24px_rgba(0,0,0,0.35)]';
-const sectionTitleClass =
-  'text-[11px] font-black uppercase tracking-[0.2em] text-pro-text-main';
-const labelClass =
-  'text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted';
+  'rounded-lg border border-pro-border/70 bg-pro-surface shadow-lg';
+const sectionTitleClass = 'text-[11px] font-medium text-pro-text-main';
+const labelClass = 'text-[10px] font-medium text-pro-text-muted';
 const helperClass = 'text-[11px] leading-relaxed text-pro-text-muted/75';
 const controlClass =
-  'w-full rounded-2xl border border-pro-border bg-pro-bg/60 px-4 py-3 text-[14px] font-bold tracking-tight text-pro-text-main outline-none transition-all placeholder:text-pro-text-muted/45 focus:border-pro-accent focus:bg-pro-surface';
+  'w-full rounded-md border border-pro-border bg-pro-bg px-4 py-3 text-[14px] font-bold text-pro-text-main outline-none transition-all placeholder:text-pro-text-muted/45 focus:border-pro-accent focus:bg-pro-surface';
 
 const providerOptions = [
   { id: 'ollama', name: 'Ollama', detail: 'Local' },
@@ -122,7 +120,7 @@ export const SettingsOverlay = ({
   return (
     <div className="fixed inset-0 z-[1000] flex items-start justify-center px-4 py-4 sm:px-6 sm:py-8 no-drag">
       <div
-        className="absolute inset-0 bg-slate-950/55 backdrop-blur-md dark:bg-slate-950/72"
+        className="absolute inset-0 bg-black/50 dark:bg-black/50"
         onClick={() => setSettingsVisible(false)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -133,16 +131,16 @@ export const SettingsOverlay = ({
       />
 
       <div
-        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-[2.5rem] border border-pro-border bg-pro-bg shadow-[0_32px_100px_-32px_rgba(0,0,0,0.5)] sm:max-h-[calc(100vh-4rem)] no-drag"
+        className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-pro-border bg-pro-bg shadow-lg sm:max-h-[calc(100vh-4rem)] no-drag"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="border-b border-pro-border/50 bg-gradient-to-br from-pro-surface via-pro-surface to-pro-bg/90 px-5 py-5 sm:px-7 sm:py-6 no-drag">
+        <div className="border-b border-pro-border/50 bg-pro-surface px-5 py-5 sm:px-7 sm:py-6 no-drag">
           <div className="flex items-start justify-between gap-6">
             <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-[1.2rem] border border-pro-border/60 bg-pro-surface text-xl shadow-sm">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-pro-border/60 bg-pro-surface text-xl shadow-sm">
                 ⚙️
               </div>
-              <h2 className="text-2xl font-black tracking-tight text-pro-text-main sm:text-[2rem]">
+              <h2 className="text-2xl font-semibold text-pro-text-main sm:text-[2rem]">
                 System Settings
               </h2>
             </div>
@@ -153,7 +151,7 @@ export const SettingsOverlay = ({
                 e.stopPropagation();
                 setSettingsVisible(false);
               }}
-              className="no-drag flex h-11 w-11 items-center justify-center rounded-2xl border border-pro-border/80 bg-pro-bg/80 text-pro-text-main transition-all hover:border-pro-accent/40 hover:bg-pro-surface active:scale-[0.98]"
+              className="no-drag flex h-8 w-11 items-center justify-center rounded-md border border-pro-border/80 bg-pro-bg text-pro-text-main transition-all hover:border-pro-accent/40 hover:bg-pro-surface active:scale-[0.98]"
             >
               ✕
             </button>
@@ -173,18 +171,18 @@ export const SettingsOverlay = ({
                       setLlmProvider(provider.id);
                       persistSetting('llm_provider', provider.id);
                     }}
-                    className={`rounded-[1.25rem] border px-4 py-3.5 text-left transition-all ${
+                    className={`rounded-lg border px-4 py-3.5 text-left transition-all ${
                       active
-                        ? 'border-pro-accent bg-pro-accent/8 text-pro-text-main shadow-premium'
-                        : 'border-pro-border/80 bg-pro-bg/55 text-pro-text-main hover:border-pro-accent/30 hover:bg-pro-surface'
+                        ? 'border-pro-accent bg-pro-accent/8 text-pro-text-main shadow-sm'
+                        : 'border-pro-border/80 bg-pro-bg text-pro-text-main hover:border-pro-accent/30 hover:bg-pro-surface'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0">
-                        <div className="text-[14px] font-black tracking-tight">
+                        <div className="text-[14px] font-semibold">
                           {provider.name}
                         </div>
-                        <div className="mt-0.5 text-[10px] font-black uppercase tracking-[0.18em] text-pro-text-muted/65">
+                        <div className="mt-0.5 text-[10px] font-medium text-pro-text-muted/65">
                           {provider.detail}
                         </div>
                       </div>
@@ -199,7 +197,7 @@ export const SettingsOverlay = ({
               })}
             </div>
 
-            <div className="rounded-[1.25rem] border border-pro-border/70 bg-pro-bg/45 px-4 py-3">
+            <div className="rounded-lg border border-pro-border/70 bg-pro-bg px-4 py-3">
               <p className={helperClass}>
                 Analysis provider affects summaries and extraction only. It does
                 not change the managed transcription pipeline.
@@ -256,8 +254,8 @@ export const SettingsOverlay = ({
           </Section>
 
           <Section title="Recording">
-            <div className="rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
-              <div className="text-[14px] font-black tracking-tight text-pro-text-main">
+            <div className="rounded-md border border-pro-border bg-pro-bg px-4 py-4">
+              <div className="text-[14px] font-semibold text-pro-text-main">
                 Local transcription
               </div>
               <p className={helperClass}>
@@ -285,9 +283,9 @@ export const SettingsOverlay = ({
               />
             </Field>
 
-            <div className="flex items-center justify-between gap-6 rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
+            <div className="flex items-center justify-between gap-6 rounded-md border border-pro-border bg-pro-bg px-4 py-4">
               <div className="space-y-1.5">
-                <div className="text-[14px] font-black tracking-tight text-pro-text-main">
+                <div className="text-[14px] font-semibold text-pro-text-main">
                   Local speaker attribution
                 </div>
                 <p className={helperClass}>
@@ -309,7 +307,7 @@ export const SettingsOverlay = ({
                     setSpeakerModelsState('error');
                   }
                 }}
-                className="shrink-0 rounded-xl bg-pro-text-main px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white disabled:opacity-50 dark:bg-pro-accent dark:text-[#1A2340]"
+                className="shrink-0 rounded-md bg-pro-text-main px-4 py-2 text-[10px] font-medium text-white disabled:opacity-50 dark:bg-pro-accent dark:text-white"
               >
                 {speakerModelsState === 'preparing'
                   ? 'Preparing…'
@@ -321,9 +319,9 @@ export const SettingsOverlay = ({
               </button>
             </div>
 
-            <div className="flex items-center justify-between gap-6 rounded-2xl border border-pro-border bg-pro-bg/50 px-4 py-4">
+            <div className="flex items-center justify-between gap-6 rounded-md border border-pro-border bg-pro-bg px-4 py-4">
               <div className="space-y-1.5">
-                <div className="text-[14px] font-black tracking-tight text-pro-text-main">
+                <div className="text-[14px] font-semibold text-pro-text-main">
                   Auto-end when the call ends
                 </div>
                 <p className={helperClass}>
@@ -359,15 +357,15 @@ export const SettingsOverlay = ({
                     key={option.id}
                     type="button"
                     onClick={() => setTheme(option.id)}
-                    className={`rounded-[1.4rem] border px-4 py-4 text-left transition-all ${
+                    className={`rounded-lg border px-4 py-4 text-left transition-all ${
                       active
-                        ? 'border-pro-accent bg-pro-accent/8 text-pro-text-main shadow-premium'
-                        : 'border-pro-border/80 bg-pro-bg/55 text-pro-text-main hover:border-pro-accent/35 hover:bg-pro-surface'
+                        ? 'border-pro-accent bg-pro-accent/8 text-pro-text-main shadow-sm'
+                        : 'border-pro-border/80 bg-pro-bg text-pro-text-main hover:border-pro-accent/35 hover:bg-pro-surface'
                     }`}
                   >
                     <div className="space-y-1.5">
                       <div className="text-2xl">{option.icon}</div>
-                      <div className="text-[14px] font-black tracking-tight">
+                      <div className="text-[14px] font-semibold">
                         {option.name}
                       </div>
                     </div>
@@ -380,7 +378,7 @@ export const SettingsOverlay = ({
           <Section title="Danger Zone">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-1">
-                <div className="text-[14px] font-black tracking-tight text-pro-text-main">
+                <div className="text-[14px] font-semibold text-pro-text-main">
                   Reset knowledge base
                 </div>
                 <p className={helperClass}>
@@ -389,7 +387,7 @@ export const SettingsOverlay = ({
               </div>
               <button
                 type="button"
-                className="rounded-2xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-[11px] font-black uppercase tracking-[0.16em] text-red-500 transition-colors hover:bg-red-500/14"
+                className="rounded-md border border-red-500/25 bg-red-500/8 px-4 py-3 text-[11px] font-medium text-red-500 transition-colors hover:bg-red-500/14"
                 onClick={async () => {
                   if (
                     confirm(
@@ -414,14 +412,14 @@ export const SettingsOverlay = ({
           </Section>
         </div>
 
-        <div className="flex justify-end border-t border-pro-border/70 bg-pro-surface/85 px-6 py-4 sm:px-8 no-drag">
+        <div className="flex justify-end border-t border-pro-border/70 bg-pro-surface px-6 py-4 sm:px-8 no-drag">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               setSettingsVisible(false);
             }}
-            className="no-drag rounded-full bg-pro-text-main px-8 py-3 text-[11px] font-black uppercase tracking-[0.18em] text-white transition-all hover:bg-pro-accent dark:bg-pro-accent dark:text-[#1A2340]"
+            className="no-drag rounded bg-pro-text-main px-8 py-3 text-[11px] font-medium text-white transition-all hover:bg-pro-accent dark:bg-pro-accent dark:text-white"
           >
             Done
           </button>
