@@ -47,6 +47,7 @@ export type ShadowResourceSample = {
 type ShadowFailureCode =
   | 'append_failed'
   | 'cleanup_uncertain'
+  | 'create_failed'
   | 'flush_failed'
   | 'open_failed'
   | 'resource_fence'
@@ -146,13 +147,7 @@ export class ParakeetLiveMeetingCoordinator {
   private identities: Record<ShadowSource, ShadowIdentity> | null = null;
   private assemblers: Record<ShadowSource, ShadowWindowAssembler> | null = null;
   private nextOrdinals = sourceCounts();
-  private report: Omit<DualShadowTrialReport, 'verdict'> = {
-    windowsSubmitted: sourceCounts(),
-    windowsCompleted: sourceCounts(),
-    unresolved: sourceCounts(),
-    flush: sourceFlushes(),
-    failureCodes: [],
-  };
+  private report = this.emptyReport();
   private fenced = false;
   private aborting: Promise<void> | null = null;
   private reported = false;
@@ -182,7 +177,7 @@ export class ParakeetLiveMeetingCoordinator {
     if (this.client && this.meetingId === meetingId) return;
     await this.stop();
     if (this.fenced || !this.options.enabled()) return;
-    this.client = await this.options.createClient();
+    this.resetMeeting();
     this.meetingId = meetingId;
     this.identities = Object.fromEntries(
       SOURCES.map((source) => [
@@ -196,6 +191,12 @@ export class ParakeetLiveMeetingCoordinator {
         new ShadowWindowAssembler({ windowSeconds: 30 }),
       ]),
     ) as Record<ShadowSource, ShadowWindowAssembler>;
+    try {
+      this.client = await this.options.createClient();
+    } catch {
+      await this.abort('create_failed');
+      return;
+    }
     try {
       for (const source of SOURCES)
         await this.client.open(this.identities[source]);
@@ -247,12 +248,15 @@ export class ParakeetLiveMeetingCoordinator {
       await this.abort('flush_failed');
       return;
     }
-    await this.writeReport();
     const result = await this.client
       .close()
       .catch(() => 'cleanup_failed' as const);
-    if (result !== 'exited') await this.abort('cleanup_uncertain');
-    else this.clear();
+    if (result !== 'exited') {
+      await this.abort('cleanup_uncertain');
+      return;
+    }
+    await this.writeReport();
+    this.clear();
   }
 
   private async submitWindow(window: ShadowWindow): Promise<void> {
@@ -359,5 +363,21 @@ export class ParakeetLiveMeetingCoordinator {
     this.meetingId = null;
     this.identities = null;
     this.assemblers = null;
+  }
+
+  private resetMeeting(): void {
+    this.nextOrdinals = sourceCounts();
+    this.report = this.emptyReport();
+    this.reported = false;
+  }
+
+  private emptyReport(): Omit<DualShadowTrialReport, 'verdict'> {
+    return {
+      windowsSubmitted: sourceCounts(),
+      windowsCompleted: sourceCounts(),
+      unresolved: sourceCounts(),
+      flush: sourceFlushes(),
+      failureCodes: [],
+    };
   }
 }

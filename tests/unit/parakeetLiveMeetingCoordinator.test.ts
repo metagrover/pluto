@@ -62,10 +62,12 @@ const makeCoordinator = (overrides: Record<string, unknown> = {}) => {
 const appendFullWindow = async (
   coordinator: ParakeetLiveMeetingCoordinator,
   source: 'mic' | 'system',
+  meetingId = 'meeting-1',
 ) => {
   for (let sequence = 0; sequence < 6; sequence += 1) {
     await coordinator.append(
       receipt({
+        meetingId,
         source,
         sequence,
         chunkStartSec: sequence * 5,
@@ -123,7 +125,7 @@ describe('ParakeetLiveMeetingCoordinator', () => {
     expect(dependencies.removeTemporaryAudio).toHaveBeenCalledTimes(2);
   });
 
-  it('submits both durable tails, flushes both streams, reports once, then closes', async () => {
+  it('submits both durable tails, flushes both streams, closes, then reports once', async () => {
     const { coordinator, client, dependencies } = makeCoordinator();
     await coordinator.start('meeting-1');
     await coordinator.append(receipt({ source: 'mic' }));
@@ -133,9 +135,9 @@ describe('ParakeetLiveMeetingCoordinator', () => {
     expect(client.flush).toHaveBeenCalledTimes(2);
     expect(dependencies.removeTemporaryAudio).toHaveBeenCalledTimes(2);
     expect(dependencies.writeReport).toHaveBeenCalledOnce();
-    expect(client.close.mock.invocationCallOrder[0]).toBeGreaterThan(
-      dependencies.writeReport.mock.invocationCallOrder[0]!,
-    );
+    expect(
+      dependencies.writeReport.mock.invocationCallOrder[0],
+    ).toBeGreaterThan(client.close.mock.invocationCallOrder[0]!);
   });
 
   it('records a missing stitched WAV as a content-free source failure', async () => {
@@ -223,5 +225,118 @@ describe('ParakeetLiveMeetingCoordinator', () => {
     expect(client.cancel).toHaveBeenCalledTimes(2);
     expect(dependencies.writeReport).toHaveBeenCalledOnce();
     expect(coordinator.hasActiveClient()).toBe(true);
+  });
+
+  it('resets source ordinals and aggregate counters for a consecutive meeting', async () => {
+    const firstClient = makeClient();
+    const secondClient = makeClient();
+    const createClient = vi
+      .fn()
+      .mockResolvedValueOnce(firstClient)
+      .mockResolvedValueOnce(secondClient);
+    const { coordinator, dependencies } = makeCoordinator({ createClient });
+
+    await coordinator.start('meeting-1');
+    await appendFullWindow(coordinator, 'system');
+    await coordinator.stop();
+    await coordinator.start('meeting-2');
+    await appendFullWindow(coordinator, 'system', 'meeting-2');
+    await coordinator.stop();
+
+    expect(secondClient.append).toHaveBeenCalledWith(
+      expect.objectContaining({ sequence: 1 }),
+    );
+    expect(dependencies.writeReport).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        windowsSubmitted: { mic: 0, system: 1 },
+        windowsCompleted: { mic: 0, system: 1 },
+        unresolved: { mic: 0, system: 0 },
+      }),
+    );
+  });
+
+  it('rolls back and reports when creating the client fails', async () => {
+    const rollback = vi.fn(async () => true);
+    const { coordinator, dependencies } = makeCoordinator({
+      createClient: async () => {
+        throw new Error('not exposed');
+      },
+      rollback,
+    });
+
+    await coordinator.start('meeting-1');
+
+    expect(rollback).toHaveBeenCalledOnce();
+    expect(dependencies.writeReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdict: 'failed',
+        failureCodes: expect.arrayContaining(['create_failed']),
+      }),
+    );
+  });
+
+  it('cancels, rolls back, and reports when opening the second stream fails', async () => {
+    const client = makeClient();
+    client.open
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('not exposed'));
+    const rollback = vi.fn(async () => true);
+    const { coordinator, dependencies } = makeCoordinator({
+      createClient: async () => client,
+      rollback,
+    });
+
+    await coordinator.start('meeting-1');
+
+    expect(client.cancel).toHaveBeenCalledTimes(2);
+    expect(rollback).toHaveBeenCalledOnce();
+    expect(dependencies.writeReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdict: 'failed',
+        failureCodes: expect.arrayContaining(['open_failed']),
+      }),
+    );
+  });
+
+  it('cancels, rolls back, and reports when flushing a stream fails', async () => {
+    const client = makeClient();
+    client.flush.mockRejectedValueOnce(new Error('not exposed'));
+    const rollback = vi.fn(async () => true);
+    const { coordinator, dependencies } = makeCoordinator({
+      createClient: async () => client,
+      rollback,
+    });
+
+    await coordinator.start('meeting-1');
+    await coordinator.stop();
+
+    expect(client.cancel).toHaveBeenCalledTimes(2);
+    expect(rollback).toHaveBeenCalledOnce();
+    expect(dependencies.writeReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdict: 'failed',
+        failureCodes: expect.arrayContaining(['flush_failed']),
+      }),
+    );
+  });
+
+  it('persists only a failed cleanup report when normal close fails', async () => {
+    const client = makeClient();
+    client.close.mockResolvedValueOnce('cleanup_failed');
+    const { coordinator, dependencies } = makeCoordinator({
+      createClient: async () => client,
+    });
+
+    await coordinator.start('meeting-1');
+    await coordinator.stop();
+
+    expect(dependencies.writeReport).toHaveBeenCalledOnce();
+    expect(dependencies.writeReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdict: 'failed',
+        failureCodes: expect.arrayContaining(['cleanup_uncertain']),
+      }),
+    );
   });
 });
