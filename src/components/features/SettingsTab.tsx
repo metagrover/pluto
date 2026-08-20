@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PageHeader } from '../ui/PageHeader';
 
 interface SettingsTabProps {
   llmProvider: 'ollama' | 'gemini' | 'openai' | 'claude';
@@ -95,6 +96,7 @@ export const SettingsTab = ({
 
   return (
     <div className="max-w-4xl mx-auto w-full animate-in pb-32">
+      <PageHeader title="Settings" />
       <div>
         <Section title="Analysis">
           <div className="space-y-8">

@@ -104,11 +104,8 @@ export const KnowledgeTab: React.FC<KnowledgeTabProps> = ({
   };
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-transparent">
-      <div className="shrink-0 px-5 pt-6 pb-4 md:px-8">
-        <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">Knowledge</h1>
-      </div>
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+    <div className="relative h-full w-full overflow-hidden bg-transparent">
+      <div className="relative h-full overflow-hidden">
         <MainStage
           docs={docs}
           selectedDoc={selectedDoc}

@@ -53,7 +53,7 @@ export const Logo: React.FC<LogoProps> = ({
         <div className="flex flex-col">
           {showText && (
             <span
-              className="font-bold leading-none dark:!text-[#FAFAFA]"
+              className="relative top-px font-serif font-semibold leading-none dark:!text-[#FAFAFA]"
               style={{ color: mainColor, fontSize: size * 0.7 }}
             >
               Pluto

@@ -13,6 +13,7 @@ import {
   getEntitiesByType,
   getEntityMeetings,
 } from '../../api/knowledgeGraph';
+import { PageHeader } from '../ui/PageHeader';
 
 export type PersonBriefingRow = {
   id: string;
@@ -124,21 +125,14 @@ export const PeopleBriefing = ({
       ),
     [filtered],
   );
-  const focusRows = useMemo(() => {
-    if (query) return prioritized;
-
-    const selectedRow = selectedPersonId
-      ? prioritized.find((row) => row.id === selectedPersonId)
-      : null;
-    if (!selectedRow) return prioritized.slice(0, 6);
-
-    return [
-      selectedRow,
-      ...prioritized.filter((row) => row.id !== selectedRow.id).slice(0, 5),
-    ];
-  }, [prioritized, query, selectedPersonId]);
-  const hasCommitments = focusRows.some((row) => row.openCommitmentCount > 0);
-
+  const linkedRows = useMemo(
+    () => prioritized.filter((row) => row.latestMeetingId),
+    [prioritized],
+  );
+  const unlinkedRows = useMemo(
+    () => prioritized.filter((row) => !row.latestMeetingId),
+    [prioritized],
+  );
   const renderPerson = (person: PersonBriefingRow) => {
     const selected = selectedPersonId === person.id;
     const canOpenMeeting = Boolean(person.latestMeetingId);
@@ -199,13 +193,10 @@ export const PeopleBriefing = ({
 
   return (
     <section aria-label="People" className="people-briefing">
-      <div className="people-briefing__toolbar">
-        <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">
-          People
-        </h1>
+      <PageHeader title="People">
         {rows.length > 0 && (
           <label className="people-search">
-            <Search aria-hidden="true" size={16} />
+            <Search aria-hidden="true" size={13} />
             <span className="sr-only">Search people</span>
             <input
               value={query}
@@ -214,7 +205,7 @@ export const PeopleBriefing = ({
             />
           </label>
         )}
-      </div>
+      </PageHeader>
 
       {rows.length === 0 ? (
         <div className="people-empty">
@@ -224,16 +215,18 @@ export const PeopleBriefing = ({
         </div>
       ) : (
         <div className="people-list" aria-label="Relationship priorities">
-          <div className="people-list__heading">
-            <h2>{hasCommitments ? 'Needs you now' : 'Recently active'}</h2>
-            <div aria-hidden="true" />
-          </div>
-          {focusRows.map(renderPerson)}
-          {!query && prioritized.length > focusRows.length && (
-            <details className="people-directory">
-              <summary>Browse all {prioritized.length} people</summary>
-              <div>{prioritized.slice(focusRows.length).map(renderPerson)}</div>
-            </details>
+          {linkedRows.map(renderPerson)}
+          {unlinkedRows.length > 0 && (
+            <section
+              aria-label="People without linked conversations"
+              className="people-unlinked"
+            >
+              <div className="people-list__heading">
+                <h2>No linked conversations</h2>
+                <div aria-hidden="true" />
+              </div>
+              {unlinkedRows.map(renderPerson)}
+            </section>
           )}
           {filtered.length === 0 && (
             <p className="people-no-results">No people match “{query}”.</p>

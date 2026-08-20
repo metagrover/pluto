@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { Meeting } from '../../types';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
+import { PageHeader } from '../ui/PageHeader';
 
 interface AllMeetingsTabProps {
   meetings: Meeting[];
@@ -88,22 +89,22 @@ export const AllMeetingsTab = ({
     <div className="max-w-4xl mx-auto w-full animate-in pb-32 px-4 md:px-0">
 
       {/* Title + Controls */}
-      <div className="flex items-center justify-between gap-4 border-b border-pro-border/30 pb-4 mb-10">
-        <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">Meetings</h1>
+      <PageHeader title="Meetings">
         <div className="flex items-center gap-2">
 
           {/* Search — expands on focus */}
           <div className="relative group">
             <Search
               size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-pro-text-muted/50 group-focus-within:text-pro-accent transition-colors duration-200"
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-pro-text-muted group-focus-within:text-pro-accent transition-colors duration-200"
             />
             <input
               type="text"
               placeholder="Search…"
+              aria-label="Search meetings"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-[160px] focus:w-[230px] pl-8 pr-7 py-1.5 bg-transparent hover:bg-pro-surface/50 focus:bg-pro-surface/70 border border-pro-border/40 hover:border-pro-border/60 focus:border-pro-accent/50 rounded-lg text-[13px] text-pro-text-main placeholder:text-pro-text-muted/35 outline-none transition-all duration-300"
+              className="w-[160px] focus:w-[230px] pl-8 pr-7 py-1.5 bg-pro-surface border border-pro-border hover:border-pro-text-muted/60 focus:border-pro-accent rounded-lg text-[13px] text-pro-text-main placeholder:text-pro-text-muted/80 outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-pro-bg transition-all duration-300"
             />
             {searchQuery && (
               <button
@@ -129,7 +130,7 @@ export const AllMeetingsTab = ({
             <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
           </button>
         </div>
-      </div>
+      </PageHeader>
 
       {/* No search results */}
       {groupedMeetings.length === 0 ? (
@@ -197,7 +198,7 @@ export const AllMeetingsTab = ({
                         </span>
                         <ChevronRight
                           size={13}
-                          className="text-pro-text-muted/20 group-hover/row:text-pro-accent/50 transition-colors duration-150 -mr-1"
+                          className={`text-pro-text-muted/20 group-hover/row:text-pro-accent/50 transition-opacity duration-150 -mr-1 ${canDeleteMeeting(meeting.finalization_status) ? 'group-hover/row:opacity-0' : ''}`}
                         />
                       </div>
                     </button>
@@ -207,7 +208,8 @@ export const AllMeetingsTab = ({
                       <button
                         onClick={(e) => { e.stopPropagation(); handleDeleteMeeting(meeting.id); }}
                         title="Delete session"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 p-1.5 text-pro-text-muted/40 hover:text-red-500 hover:bg-red-500/10 rounded-md"
+                        aria-label={`Delete ${meeting.title || 'untitled meeting'}`}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 p-1.5 text-pro-text-muted/40 hover:text-red-500 hover:bg-red-500/10 rounded-md"
                       >
                         <Trash2 size={12} />
                       </button>
@@ -222,4 +224,3 @@ export const AllMeetingsTab = ({
     </div>
   );
 };
-

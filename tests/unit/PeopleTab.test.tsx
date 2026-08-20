@@ -25,14 +25,14 @@ describe('PeopleBriefing', () => {
     const markup = renderToStaticMarkup(
       <PeopleBriefing rows={rows} onOpenMeeting={() => {}} />,
     );
-    expect(markup).toContain('Needs you now');
+    expect(markup).not.toContain('Needs you now');
     expect(markup).toContain('Product review');
     expect(markup).toContain('2 open commitments');
     expect(markup).toContain('person-row__meeting');
     expect(markup).not.toContain('>Open <');
   });
 
-  it('keeps the first viewport focused and moves the directory behind disclosure', () => {
+  it('renders every linked person in ranked order without a loader', () => {
     const manyRows = Array.from({ length: 12 }, (_, index) => ({
       ...rows[0],
       id: `person-${index}`,
@@ -44,13 +44,16 @@ describe('PeopleBriefing', () => {
       <PeopleBriefing rows={manyRows} onOpenMeeting={() => {}} />,
     );
 
-    expect(markup).toContain('Needs you now');
+    expect(markup).not.toContain('Needs you now');
     expect(markup).toContain('3 open commitments');
-    expect(markup).toContain('Browse all 12 people');
+    expect(markup).toContain('data-person-id="person-0"');
+    expect(markup).toContain('data-person-id="person-11"');
+    expect(markup).not.toContain('Show all');
+    expect(markup).not.toContain('<details');
     expect(markup).not.toContain('undefined');
   });
 
-  it('promotes the selected person into the visible priority rows', () => {
+  it('keeps the selected person in the ranked list', () => {
     const manyRows = Array.from({ length: 8 }, (_, index) => ({
       ...rows[0],
       id: `person-${index}`,
@@ -68,8 +71,30 @@ describe('PeopleBriefing', () => {
 
     expect(markup).toContain('data-person-id="person-7"');
     expect(markup).toContain('data-selected="true"');
-    expect(markup.indexOf('data-person-id="person-7"')).toBeLessThan(
-      markup.indexOf('Browse all 8 people'),
+  });
+
+  it('buckets people without linked conversations after active relationships', () => {
+    const unlinkedPerson = {
+      ...rows[0],
+      id: 'person-unlinked',
+      name: 'Jordan Lee',
+      latestMeetingId: null,
+      latestMeetingTitle: null,
+      latestMeetingAt: null,
+    };
+    const markup = renderToStaticMarkup(
+      <PeopleBriefing
+        rows={[rows[0], unlinkedPerson]}
+        onOpenMeeting={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('No linked conversations');
+    expect(markup.indexOf('data-person-id="person-1"')).toBeLessThan(
+      markup.indexOf('No linked conversations'),
+    );
+    expect(markup.indexOf('data-person-id="person-unlinked"')).toBeGreaterThan(
+      markup.indexOf('No linked conversations'),
     );
   });
 

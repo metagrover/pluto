@@ -21,6 +21,7 @@ import type { KnowledgeProjectHealthCard } from '../../api/knowledgeWorkspace';
 import { getWorkingMemorySnapshot } from '../../api/workingMemory';
 import type { TrustStatus } from '../../utils/trustStatus';
 import { getTrustStatusMeta } from '../../utils/trustStatus';
+import { PageHeader } from '../ui/PageHeader';
 import {
   type KnowledgeBriefCoverage,
   type KnowledgeCitation,
@@ -324,14 +325,18 @@ const SectionShell = ({
   title,
   description,
   children,
+  className = '',
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   description: string;
   children: React.ReactNode;
+  className?: string;
 }) => (
-  <section className="border-b border-pro-border py-7 last:border-b-0">
-    <p className="text-[10px] font-medium text-pro-text-muted">{eyebrow}</p>
+  <section className={`border-b border-pro-border py-7 last:border-b-0 ${className}`}>
+    {eyebrow ? (
+      <p className="text-[10px] font-medium text-pro-text-muted">{eyebrow}</p>
+    ) : null}
     <h2 className="mt-2 text-xl font-semibold text-pro-text-main">{title}</h2>
     <p className="mt-2 max-w-2xl text-sm leading-6 text-pro-text-muted">
       {description}
@@ -409,9 +414,9 @@ const CurrentRead = ({
 
   return (
     <SectionShell
-      eyebrow="Knowledge"
       title="Current Read"
       description="The shortest trustworthy read across the selected knowledge scope."
+      className="pt-0"
     >
       <div className="flex flex-col gap-4 border-b border-pro-border pb-5 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-wrap items-center gap-2">
@@ -1205,8 +1210,9 @@ export const MainStage: React.FC<MainStageProps> = ({
     <div className="h-full w-full overflow-y-scroll">
       <div
         data-testid="knowledge-operating-picture"
-        className="mx-auto flex w-full max-w-[1120px] flex-col px-5 py-6 md:px-8 lg:py-8"
+        className="mx-auto flex w-full max-w-[1120px] flex-col px-5 pt-[50px] pb-6 md:px-8 md:pb-8"
       >
+        <PageHeader title="Knowledge" className="mb-4" />
         <CurrentRead
           selectedDoc={selectedDoc}
           sources={sources}

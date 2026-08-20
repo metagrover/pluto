@@ -31,6 +31,7 @@ export default {
       fontFamily: {
         serif: ['Lora', 'Georgia', 'serif'],
       },
+    },
   },
   plugins: [],
 };

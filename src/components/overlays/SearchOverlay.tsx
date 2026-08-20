@@ -95,7 +95,7 @@ export const SearchOverlay = ({
             placeholder="Search Pluto"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="flex-1 bg-transparent border-none outline-none text-lg font-medium tracking-normal placeholder:text-pro-text-muted/55 text-pro-text-main"
+            className="flex-1 bg-transparent border-none outline-none text-lg font-medium tracking-normal placeholder:font-serif placeholder:text-pro-text-muted/55 text-pro-text-main"
           />
           <div className="flex items-center gap-2">
             <span className="px-2 py-1 bg-pro-bg border border-pro-border/70 rounded-lg text-[10px] font-bold text-pro-text-muted/60">
