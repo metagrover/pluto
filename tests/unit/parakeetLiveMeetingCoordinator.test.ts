@@ -5,7 +5,11 @@ import {
   type ShadowReceipt,
   descendantPids,
 } from '../../electron/transcription/parakeetLiveMeetingCoordinator';
-import { selectShadowFreePercent } from '../../electron/transcription/shadowMemoryPressure';
+import {
+  CachedMemoryPressureFreePercent,
+  MAX_SHADOW_MEMORY_PRESSURE_AGE_MS,
+  selectShadowFreePercent,
+} from '../../electron/transcription/shadowMemoryPressure';
 
 const receipt = (overrides: Partial<ShadowReceipt> = {}): ShadowReceipt => ({
   durable: true,
@@ -242,6 +246,32 @@ describe('ParakeetLiveMeetingCoordinator', () => {
 
     await coordinator.start('meeting-1');
     await appendFullWindow(coordinator, 'system');
+
+    expect(coordinator.isFenced()).toBe(true);
+    expect(client.append).not.toHaveBeenCalled();
+  });
+
+  it('fences when an expired pressure cache falls back to 9% os free memory', async () => {
+    let now = 0;
+    const cache = new CachedMemoryPressureFreePercent(
+      async () => 20,
+      () => now,
+    );
+    cache.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    now = MAX_SHADOW_MEMORY_PRESSURE_AGE_MS + 1;
+
+    const { coordinator, client } = makeCoordinator({
+      sampleResources: () => ({
+        ...safeResources(),
+        freePercent: selectShadowFreePercent({
+          memoryPressureFreePercent: cache.current(),
+          osFreePercent: 9,
+        }),
+      }),
+    });
+
+    await coordinator.start('meeting-1');
 
     expect(coordinator.isFenced()).toBe(true);
     expect(client.append).not.toHaveBeenCalled();

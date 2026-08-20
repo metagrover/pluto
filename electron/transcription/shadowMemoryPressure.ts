@@ -4,6 +4,8 @@ const isValidPercent = (value: number | undefined): value is number =>
   value >= 0 &&
   value <= 100;
 
+export const MAX_SHADOW_MEMORY_PRESSURE_AGE_MS = 45_000;
+
 export const selectShadowFreePercent = ({
   memoryPressureFreePercent,
   osFreePercent,
@@ -17,11 +19,20 @@ export const selectShadowFreePercent = ({
 
 export class CachedMemoryPressureFreePercent {
   private value: number | undefined;
+  private updatedAt: number | undefined;
   private refreshInFlight: Promise<void> | undefined;
 
-  constructor(private readonly probe: () => Promise<number | null>) {}
+  constructor(
+    private readonly probe: () => Promise<number | null>,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   current(): number | undefined {
+    if (
+      this.updatedAt === undefined ||
+      this.now() - this.updatedAt > MAX_SHADOW_MEMORY_PRESSURE_AGE_MS
+    )
+      return undefined;
     return this.value;
   }
 
@@ -31,8 +42,12 @@ export class CachedMemoryPressureFreePercent {
       .then((value) => {
         const percentage = value ?? undefined;
         this.value = isValidPercent(percentage) ? percentage : undefined;
+        this.updatedAt = this.value === undefined ? undefined : this.now();
       })
-      .catch(() => {})
+      .catch(() => {
+        this.value = undefined;
+        this.updatedAt = undefined;
+      })
       .finally(() => {
         this.refreshInFlight = undefined;
       });
