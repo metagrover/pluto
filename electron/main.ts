@@ -54,6 +54,12 @@ import {
   transcribeJournalAlignedAudio,
 } from './recoveryTranscriptionAudio';
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
+import {
+  DUAL_SHADOW_TRIAL_EVIDENCE_DIGEST,
+  activateDualShadowTrial,
+  resolveDualShadowTrial,
+} from './transcription/dualShadowTrial';
+import { writeDualShadowTrialReport } from './transcription/dualShadowTrialReport';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { LiveTranscriptionRolloutStore } from './transcription/liveTranscriptionRolloutStore';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
@@ -66,6 +72,10 @@ import {
   type ParakeetRuntimeHost,
   makeRuntimeHost,
 } from './transcription/parakeetRuntimeHost';
+import {
+  CachedMemoryPressureFreePercent,
+  selectShadowFreePercent,
+} from './transcription/shadowMemoryPressure';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -101,46 +111,43 @@ const probeAudioDuration = async (inputPath: string) =>
     });
   });
 
-const probeAvailableMemory = async () =>
-  await new Promise<{
-    availableMemoryBytes: number;
-    memoryPressureFreePercent?: number;
-  }>((resolve) => {
+const probeMacMemoryPressureFreePercent = async (): Promise<number | null> =>
+  await new Promise<number | null>((resolve) => {
     const probe = spawn('/usr/bin/memory_pressure', ['-Q']);
     let stdout = '';
     let settled = false;
-    const finish = (value: {
-      availableMemoryBytes: number;
-      memoryPressureFreePercent?: number;
-    }) => {
+    const finish = (value: number | null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
       resolve(value);
     };
     const timeout = setTimeout(() => {
       probe.kill('SIGTERM');
-      finish({ availableMemoryBytes: os.freemem() });
+      finish(null);
     }, 2_000);
     probe.stdout.on('data', (chunk) => {
       stdout += String(chunk);
     });
-    probe.on('error', () => finish({ availableMemoryBytes: os.freemem() }));
+    probe.on('error', () => finish(null));
     probe.on('close', (code) => {
-      clearTimeout(timeout);
-      const percentage =
-        code === 0 ? parseMacMemoryPressureFreePercent(stdout) : null;
-      finish(
-        percentage === null
-          ? { availableMemoryBytes: os.freemem() }
-          : {
-              availableMemoryBytes: Math.floor(
-                (os.totalmem() * percentage) / 100,
-              ),
-              memoryPressureFreePercent: percentage,
-            },
-      );
+      finish(code === 0 ? parseMacMemoryPressureFreePercent(stdout) : null);
     });
   });
+
+const probeAvailableMemory = async () => {
+  const percentage = await probeMacMemoryPressureFreePercent();
+  return percentage === null
+    ? { availableMemoryBytes: os.freemem() }
+    : {
+        availableMemoryBytes: Math.floor((os.totalmem() * percentage) / 100),
+        memoryPressureFreePercent: percentage,
+      };
+};
+
+const shadowMemoryPressure = new CachedMemoryPressureFreePercent(
+  probeMacMemoryPressureFreePercent,
+);
 
 const sampleOwnedRuntimeRss = ():
   | { mlxRssBytes: number; parakeetRssBytes: number }
@@ -476,6 +483,8 @@ app.on('before-quit', async () => {
 });
 
 app.whenReady().then(async () => {
+  shadowMemoryPressure.refresh();
+  setInterval(() => shadowMemoryPressure.refresh(), 30_000).unref();
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
@@ -508,65 +517,24 @@ app.whenReady().then(async () => {
     diagnostic: (code) => console.warn(`[Pluto] ${code}`),
   });
   const rolloutOwnerToken = randomUUID();
+  const dualShadowTrial = resolveDualShadowTrial({
+    isPackaged: app.isPackaged,
+    environment: process.env,
+  });
   const rolloutStore = new LiveTranscriptionRolloutStore({
     filePath: path.join(
       app.getPath('userData'),
       'live-transcription-rollout.json',
     ),
     ownerToken: rolloutOwnerToken,
-    approvedStageEvidenceDigests: {},
+    approvedStageEvidenceDigests: dualShadowTrial.enabled
+      ? { dual_shadow: [DUAL_SHADOW_TRIAL_EVIDENCE_DIGEST] }
+      : {},
   });
-  parakeetShadowCoordinator = new ParakeetLiveMeetingCoordinator({
-    enabled: () => {
-      const state = rolloutStore.read();
-      return state.mode === 'parakeet' && state.stage === 'system_shadow';
-    },
-    createClient: async () => {
-      if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
-      const lease = await parakeetRuntimeHost.startRecordingLive();
-      const client = new ParakeetLiveClient({
-        runtimeHost: parakeetRuntimeHost,
-        runtimeLease: lease,
-        maxQueuedAppends: 2,
-      });
-      return {
-        open: (identity) => client.open(identity),
-        append: async ({ checksumSha256: _checksumSha256, ...request }) =>
-          await client.append(request),
-        close: async () => {
-          await client.close();
-          return 'exited' as const;
-        },
-      };
-    },
-    resolveRepairPath: (relativePath) => {
-      const root = path.resolve(getMeetingArtifactsRootDir());
-      const candidate = path.resolve(root, relativePath);
-      if (!candidate.startsWith(`${root}${path.sep}`))
-        throw new Error('parakeet_path_not_allowed');
-      return candidate;
-    },
-    sampleResources: () => {
-      const thermal = powerMonitor.getCurrentThermalState();
-      const owned = sampleOwnedRuntimeRss();
-      if (thermal === 'unknown' || !owned) return undefined;
-      const electronRssBytes = process.memoryUsage().rss;
-      return {
-        mlxRssBytes: owned.mlxRssBytes,
-        parakeetRssBytes: owned.parakeetRssBytes,
-        electronRssBytes,
-        freePercent: (os.freemem() / os.totalmem()) * 100,
-        thermal,
-      };
-    },
-    rollback: async () => {
-      const state = rolloutStore.read();
-      return rolloutStore.rollback({
-        reason: 'watchdog',
-        engineEpoch: state.engineEpoch,
-        ownerToken: rolloutOwnerToken,
-      }).accepted;
-    },
+  activateDualShadowTrial({
+    trial: dualShadowTrial,
+    store: rolloutStore,
+    ownerToken: rolloutOwnerToken,
   });
 
   // Local transcription handlers. IPC names remain stable for compatibility.
@@ -1669,6 +1637,86 @@ app.whenReady().then(async () => {
         .save(outputPath);
     });
   };
+
+  parakeetShadowCoordinator = new ParakeetLiveMeetingCoordinator({
+    enabled: () => {
+      const state = rolloutStore.read();
+      return state.mode === 'parakeet' && state.stage === 'dual_shadow';
+    },
+    createClient: async () => {
+      if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
+      const lease = await parakeetRuntimeHost.startRecordingLive();
+      const client = new ParakeetLiveClient({
+        runtimeHost: parakeetRuntimeHost,
+        runtimeLease: lease,
+        maxQueuedAppends: 2,
+      });
+      return {
+        open: (identity) => client.open(identity),
+        append: async ({ checksumSha256: _checksumSha256, ...request }) =>
+          await client.append(request),
+        flush: (identity) => client.flush(identity),
+        cancel: (identity) => client.cancel(identity),
+        close: async () => {
+          await client.close();
+          return 'exited' as const;
+        },
+      };
+    },
+    resolveRepairPath: (relativePath) => {
+      const root = path.resolve(getMeetingArtifactsRootDir());
+      const candidate = path.resolve(root, relativePath);
+      if (!candidate.startsWith(`${root}${path.sep}`))
+        throw new Error('parakeet_path_not_allowed');
+      return candidate;
+    },
+    sampleResources: () => {
+      const thermal = powerMonitor.getCurrentThermalState();
+      const owned = sampleOwnedRuntimeRss();
+      if (thermal === 'unknown' || !owned) return undefined;
+      return {
+        mlxRssBytes: owned.mlxRssBytes,
+        parakeetRssBytes: owned.parakeetRssBytes,
+        electronRssBytes: process.memoryUsage().rss,
+        freePercent: selectShadowFreePercent({
+          memoryPressureFreePercent: shadowMemoryPressure.current(),
+          osFreePercent: (os.freemem() / os.totalmem()) * 100,
+        }),
+        thermal,
+      };
+    },
+    rollback: async () => {
+      const state = rolloutStore.read();
+      return rolloutStore.rollback({
+        reason: 'watchdog',
+        engineEpoch: state.engineEpoch,
+        ownerToken: rolloutOwnerToken,
+      }).accepted;
+    },
+    stitchWindow: async ({ source, sequenceStart, segments }) =>
+      await stitchWavSegments({
+        segments: segments.map((segment) => ({
+          path: segment.path,
+          startSec: segment.startSec,
+          endSec: segment.endSec,
+          chunkIndex: segment.sequence,
+        })),
+        outputTag: `parakeet-shadow-${source}-${sequenceStart}`,
+      }),
+    removeTemporaryAudio: async (audioPath) => {
+      try {
+        await fs.promises.unlink(audioPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    },
+    writeReport: async (report) => {
+      writeDualShadowTrialReport({
+        userDataPath: app.getPath('userData'),
+        report,
+      });
+    },
+  });
 
   ipcMain.handle(
     'AUDIO_STITCH_WAV_SEGMENTS',
