@@ -1045,19 +1045,21 @@ export const MeetingView = ({
       </div>
 
       {!transcriptVisible ? (
-        <button
-          type="button"
-          data-meeting-transcript-toggle
-          className="meeting-transcript-toggle"
-          onClick={() => setTranscriptVisible(true)}
-        >
-          <MessageSquare aria-hidden="true" size={17} />
-          <span>Transcript</span>
-          <span className="meeting-transcript-toggle__action">
-            View
-            <ChevronRight aria-hidden="true" size={16} />
-          </span>
-        </button>
+        <div className="meeting-transcript-toggle-wrap">
+          <button
+            type="button"
+            data-meeting-transcript-toggle
+            className="meeting-transcript-toggle"
+            onClick={() => setTranscriptVisible(true)}
+          >
+            <MessageSquare aria-hidden="true" size={17} />
+            <span>Transcript</span>
+            <span className="meeting-transcript-toggle__action">
+              View
+              <ChevronRight aria-hidden="true" size={16} />
+            </span>
+          </button>
+        </div>
       ) : null}
 
       {transcriptVisible && (

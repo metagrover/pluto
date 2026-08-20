@@ -767,8 +767,11 @@
     @apply mx-6 mb-6 mt-2 flex flex-col text-xs leading-5;
     color: var(--notes-faint);
   }
+  .meeting-transcript-toggle-wrap {
+    @apply mx-auto mt-6 w-full max-w-[760px] px-6 pb-8 md:px-8;
+  }
   .meeting-transcript-toggle {
-    @apply mx-auto mt-2 w-full max-w-[760px] px-6 py-5 text-left transition-colors md:px-8;
+    @apply min-h-10 gap-2 rounded-md px-2 py-2 text-left transition-colors;
   }
   .meeting-transcript-toggle:hover {
     color: var(--notes-ink);
