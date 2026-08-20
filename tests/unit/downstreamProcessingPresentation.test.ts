@@ -38,9 +38,8 @@ describe('downstream processing presentation', () => {
 
     expect(presentation).toEqual({
       state: 'failed',
-      title: "Couldn't finish the analysis",
-      detail:
-        'Your transcript is available. Pluto will try again automatically.',
+      title: 'Analysis needs another pass',
+      detail: 'Your transcript is ready.',
     });
     expect(JSON.stringify(presentation)).not.toMatch(
       /validat|needs attention|recovery|retry meeting/i,

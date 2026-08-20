@@ -54,9 +54,8 @@ export const getDownstreamProcessingPresentation = (
   if (state === 'failed') {
     return {
       state: 'failed',
-      title: "Couldn't finish the analysis",
-      detail:
-        'Your transcript is available. Pluto will try again automatically.',
+      title: 'Analysis needs another pass',
+      detail: 'Your transcript is ready.',
     };
   }
 

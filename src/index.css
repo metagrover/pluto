@@ -331,6 +331,34 @@
   .meeting-notes-surface {
     @apply pt-0;
   }
+  .meeting-failure-notice {
+    @apply mx-auto flex w-full max-w-[760px] items-center gap-3 border-y px-6 py-4 md:px-8;
+    border-color: var(--notes-rule);
+  }
+  .meeting-failure-notice__marker {
+    @apply h-2 w-2 shrink-0 rounded-full;
+    background: var(--notes-accent);
+  }
+  .meeting-failure-notice__copy {
+    @apply min-w-0;
+  }
+  .meeting-failure-notice__copy strong {
+    @apply block text-sm font-semibold leading-5;
+    color: var(--notes-ink);
+  }
+  .meeting-failure-notice__copy p {
+    @apply mt-0.5 text-sm leading-5;
+    color: var(--notes-muted);
+  }
+  .meeting-failure-notice__action {
+    @apply ml-auto min-h-11 shrink-0 rounded-lg border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-60;
+    border-color: var(--notes-rule);
+    color: var(--notes-ink);
+    background: var(--notes-paper-raised);
+  }
+  .meeting-failure-notice__action:hover {
+    background: var(--notes-wash);
+  }
   .meeting-transcript-surface {
     @apply mx-auto mt-5 max-w-[760px] pt-5;
   }

@@ -234,7 +234,7 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toMatch(/validat|needs attention|retry|recovery/i);
   });
 
-  it('offers a retry for a preserved Parakeet finalization failure', () => {
+  it('renders one editorial recovery notice for a preserved Parakeet finalization failure', () => {
     const markup = renderToStaticMarkup(
       <TranscriptIntegrityPanel
         status="needs_attention"
@@ -255,9 +255,24 @@ describe('MeetingView transcript integrity', () => {
       />,
     );
 
-    expect(markup).toContain('finish the transcript');
+    expect(markup).toContain('Transcript needs another pass');
     expect(markup).toContain('Your recording is safe.');
-    expect(markup).toContain('Try again');
+    expect(markup).toContain('Retry transcription');
+    expect(markup).not.toContain("Couldn't finish the transcript");
+  });
+
+  it('uses the same notice for retryable analysis without a second alert', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="validated"
+        downstreamFailed
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('Analysis needs another pass');
+    expect(markup).toContain('Your transcript is ready.');
+    expect(markup).toContain('Retry analysis');
   });
 
   it('does not offer deletion for a recovery-required meeting', () => {

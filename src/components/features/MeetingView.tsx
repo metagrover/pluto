@@ -44,6 +44,7 @@ import {
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
+import { resolveMeetingFailurePresentation } from './meetingFailurePresentation';
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
@@ -81,6 +82,7 @@ export const TranscriptIntegrityPanel = ({
   mixedAudioPath,
   activityEvidenceAvailable = false,
   hasExistingAnalysis = false,
+  downstreamFailed = false,
   onRetry,
   retrying = false,
 }: {
@@ -94,6 +96,7 @@ export const TranscriptIntegrityPanel = ({
   mixedAudioPath?: string;
   activityEvidenceAvailable?: boolean;
   hasExistingAnalysis?: boolean;
+  downstreamFailed?: boolean;
   onRetry?: () => void;
   retrying?: boolean;
 }) => {
@@ -152,27 +155,6 @@ export const TranscriptIntegrityPanel = ({
   );
   if (hasExistingAnalysis && trust.kind !== 'capture_gap') return null;
 
-  const terminalCopy =
-    trust.kind === 'capture_recovery_required'
-      ? {
-          title: 'Recording saved',
-          detail:
-            "Pluto couldn't finish the transcript. Your recording is safe.",
-        }
-      : trust.kind === 'capture_gap'
-        ? {
-            title: 'Partial transcript',
-            detail: hasExistingAnalysis
-              ? 'Analysis uses the available transcript. Some captured audio is missing.'
-              : 'Some captured audio is missing from this transcript.',
-          }
-        : trust.kind === 'final_transcription_unavailable'
-          ? {
-              title: "Couldn't finish the transcript",
-              detail: 'Your recording and the available transcript are safe.',
-            }
-          : null;
-
   let canRetryFinalTranscription = false;
   try {
     const integrity = JSON.parse(integrityJson || '{}') as {
@@ -185,31 +167,31 @@ export const TranscriptIntegrityPanel = ({
     canRetryFinalTranscription = false;
   }
 
-  const finalTranscriptionCopy = canRetryFinalTranscription
-    ? {
-        title: "Couldn't finish the transcript",
-        detail: 'Your recording is safe.',
-      }
-    : null;
-  const panelCopy = terminalCopy || finalTranscriptionCopy;
+  const panelCopy = resolveMeetingFailurePresentation({
+    retryableFinalTranscription: canRetryFinalTranscription,
+    captureRecoveryRequired: trust.kind === 'capture_recovery_required',
+    captureGap: trust.kind === 'capture_gap',
+    hasExistingAnalysis,
+    downstreamFailed,
+  });
 
   if (!panelCopy) return null;
 
   return (
-    <section
-      aria-live="polite"
-      className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] p-5"
-    >
-      <strong className="text-sm text-pro-text">{panelCopy.title}</strong>
-      <p className="mt-1 text-sm text-pro-text-muted">{panelCopy.detail}</p>
-      {canRetryFinalTranscription && onRetry ? (
+    <section aria-live="polite" className="meeting-failure-notice">
+      <span className="meeting-failure-notice__marker" aria-hidden="true" />
+      <div className="meeting-failure-notice__copy">
+        <strong>{panelCopy.title}</strong>
+        <p>{panelCopy.detail}</p>
+      </div>
+      {panelCopy.actionLabel && onRetry ? (
         <button
           type="button"
-          className="mt-3 text-sm font-semibold text-pro-accent hover:underline disabled:cursor-wait disabled:opacity-60"
+          className="meeting-failure-notice__action"
           onClick={onRetry}
           disabled={retrying}
         >
-          {retrying ? 'Trying again…' : 'Try again'}
+          {retrying ? 'Retrying…' : panelCopy.actionLabel}
         </button>
       ) : null}
     </section>
@@ -772,26 +754,6 @@ export const MeetingView = ({
       data-meeting-page
       className="meeting-document w-full"
     >
-      <TranscriptIntegrityPanel
-        status={selectedMeeting.transcript_status}
-        finalizationStatus={selectedMeeting.finalization_status}
-        integrityJson={selectedMeeting.transcript_integrity_json}
-        transcriptJson={selectedMeeting.transcript_json}
-        transcriptValidatedAt={selectedMeeting.transcript_validated_at}
-        audioPath={selectedMeeting.audio_path}
-        systemAudioPath={selectedMeeting.system_audio_path}
-        mixedAudioPath={selectedMeeting.mixed_audio_path}
-        activityEvidenceAvailable={Boolean(
-          selectedMeeting.transcript_integrity_json?.includes(
-            '"activityEvidence"',
-          ),
-        )}
-        hasExistingAnalysis={Boolean(
-          selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
-        )}
-        onRetry={onRetryTranscriptValidation}
-        retrying={transcriptValidationRetrying}
-      />
       <header className="meeting-document-header">
         <div className="w-full min-w-0">
           {editingTitle ? (
@@ -1010,6 +972,27 @@ export const MeetingView = ({
           </details>
         </div>
       </header>
+      <TranscriptIntegrityPanel
+        status={selectedMeeting.transcript_status}
+        finalizationStatus={selectedMeeting.finalization_status}
+        integrityJson={selectedMeeting.transcript_integrity_json}
+        transcriptJson={selectedMeeting.transcript_json}
+        transcriptValidatedAt={selectedMeeting.transcript_validated_at}
+        audioPath={selectedMeeting.audio_path}
+        systemAudioPath={selectedMeeting.system_audio_path}
+        mixedAudioPath={selectedMeeting.mixed_audio_path}
+        activityEvidenceAvailable={Boolean(
+          selectedMeeting.transcript_integrity_json?.includes(
+            '"activityEvidence"',
+          ),
+        )}
+        hasExistingAnalysis={Boolean(
+          selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
+        )}
+        downstreamFailed={downstreamPresentation.state === 'failed'}
+        onRetry={onRetryTranscriptValidation}
+        retrying={transcriptValidationRetrying}
+      />
       {regenerateNotesError ? (
         <p className="-mt-4 text-xs font-semibold text-red-600">
           {regenerateNotesError}
@@ -1020,16 +1003,6 @@ export const MeetingView = ({
         {downstreamPresentation.state === 'loading' &&
         !notesDocument.hasAnalysis ? (
           <MeetingAnalysisSkeleton />
-        ) : downstreamPresentation.state === 'failed' ? (
-          <section
-            aria-live="polite"
-            data-meeting-artifact="analysis"
-            data-state="failed"
-            className="meeting-analysis-error"
-          >
-            <strong>{downstreamPresentation.title}</strong>
-            <p>{downstreamPresentation.detail}</p>
-          </section>
         ) : null}
         <div
           data-meeting-artifact="analysis"
