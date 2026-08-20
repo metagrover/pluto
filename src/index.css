@@ -391,20 +391,19 @@
     @apply mx-auto mt-0 w-full max-w-[760px] px-6 pb-16 md:px-8;
   }
   .meeting-transcript-header {
-    @apply sticky top-0 z-20 flex items-center justify-between border-y py-4;
+    @apply flex items-end justify-between border-b pb-5 pt-9;
     border-color: var(--notes-rule);
-    background: var(--notes-paper);
   }
   .meeting-transcript-header h2 {
-    @apply text-base font-semibold tracking-tight;
+    @apply mt-1 text-[26px] font-semibold leading-none tracking-tight;
     color: var(--notes-ink);
   }
   .meeting-transcript-header p {
-    @apply mt-0.5 text-xs;
+    @apply text-[11px] font-semibold uppercase tracking-[0.11em];
     color: var(--notes-muted);
   }
   .meeting-transcript-header button {
-    @apply inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
   }
   .meeting-transcript-record {

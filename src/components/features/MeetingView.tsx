@@ -1,12 +1,12 @@
 import {
   Check,
   ChevronRight,
+  ChevronUp,
   Copy,
   FileText,
   Loader2,
   MoreHorizontal,
   Sparkles,
-  X,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import {
@@ -1072,16 +1072,16 @@ export const MeetingView = ({
         >
           <header className="meeting-transcript-header">
             <div className="meeting-transcript-header__title">
+              <p>Source record</p>
               <h2 id="meeting-transcript-heading">Transcript</h2>
-              <p>Verbatim record</p>
             </div>
             <button
               type="button"
               onClick={() => setTranscriptVisible(false)}
               aria-label="Close transcript"
             >
-              <X aria-hidden="true" size={17} />
-              <span>Close</span>
+              <span>Hide</span>
+              <ChevronUp aria-hidden="true" size={15} />
             </button>
           </header>
           <div className="meeting-transcript-record">
