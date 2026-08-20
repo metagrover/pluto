@@ -3,6 +3,17 @@ interface TranscriptSegmentLike {
   speaker?: unknown;
 }
 
+export const getTranscriptSegmentStartTime = (segment: {
+  start?: unknown;
+  startTime?: unknown;
+}): number => {
+  const value =
+    typeof segment.start === 'number' ? segment.start : segment.startTime;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, value)
+    : 0;
+};
+
 /** Parse legacy array or v2 `{ segments }` wrapper. */
 export const parseTranscriptSegments = (
   transcriptJson?: string | null,

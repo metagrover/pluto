@@ -10,6 +10,7 @@ import type {
   MeetingNotesDocumentModel,
   MeetingNotesSection,
 } from '../../utils/meetingNotesDocument';
+import { getTranscriptSegmentStartTime } from '../../utils/transcript';
 
 interface MeetingNotesDocumentProps {
   meeting: Meeting;
@@ -482,7 +483,9 @@ const SourcePane = ({
             >
               <header>
                 <strong>{segment.speaker || 'Unknown speaker'}</strong>
-                <time>{formatTimestamp(segment.start)}</time>
+                <time>
+                  {formatTimestamp(getTranscriptSegmentStartTime(segment))}
+                </time>
               </header>
               <p>
                 <EvidenceText text={segment.text} claim={selection.label} />

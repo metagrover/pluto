@@ -35,6 +35,7 @@ import {
 } from '../../utils/meetingNotesHistory';
 import {
   buildAnalysisTranscriptFromJson,
+  getTranscriptSegmentStartTime,
   parseTranscriptSegments,
 } from '../../utils/transcript';
 import {
@@ -1087,9 +1088,7 @@ export const MeetingView = ({
             {hasTranscriptContent ? (
               mergedTranscriptSegments.map((segment: TranscriptSegment) => {
                 const segmentKey = `${String(segment.speaker ?? 'unknown')}-${segment.start}-${segment.end}-${segment.text}`;
-                const seconds = Number.isFinite(segment.start)
-                  ? Math.max(0, segment.start || 0)
-                  : 0;
+                const seconds = getTranscriptSegmentStartTime(segment);
                 const timestamp = `${Math.floor(seconds / 60)}:${Math.floor(
                   seconds % 60,
                 )

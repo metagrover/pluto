@@ -90,7 +90,7 @@ describe('MeetingView progressive reveal', () => {
     container.remove();
   });
 
-  const renderMeeting = (meeting: Meeting) =>
+  const renderMeeting = (meeting: Meeting, transcriptVisible = false) =>
     root.render(
       <MeetingView
         selectedMeeting={meeting}
@@ -103,7 +103,7 @@ describe('MeetingView progressive reveal', () => {
         copySuccess={false}
         handleDeleteMeeting={vi.fn()}
         highlightEntities={(text) => text}
-        transcriptVisible={false}
+        transcriptVisible={transcriptVisible}
         setTranscriptVisible={vi.fn()}
       />,
     );
@@ -147,6 +147,33 @@ describe('MeetingView progressive reveal', () => {
     expect(
       container.querySelector('[data-meeting-artifact="transcript"]'),
     ).toBeNull();
+  });
+
+  it('renders timestamps from canonical transcript timing fields', async () => {
+    await act(async () =>
+      renderMeeting(
+        {
+          ...analyzedMeeting,
+          transcript_json: JSON.stringify({
+            lifecycleStatus: 'validated',
+            segments: [
+              {
+                speaker: 'Me',
+                text: 'The canonical timestamp is preserved.',
+                startTime: 75,
+                endTime: 80,
+              },
+            ],
+          }),
+        },
+        true,
+      ),
+    );
+
+    expect(
+      container.querySelector('[data-meeting-artifact="transcript"] time')
+        ?.textContent,
+    ).toBe('1:15');
   });
 
   it('keeps the saved transcript at the end when analysis is unavailable', async () => {
