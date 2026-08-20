@@ -127,6 +127,24 @@ describe('ShadowWindowAssembler', () => {
     });
   });
 
+  it('keeps a shortened boundary-aligned span until flush', () => {
+    const assembler = new ShadowWindowAssembler({ windowSeconds: 30 });
+    const emitted = Array.from({ length: 5 }, (_, index) =>
+      assembler.add(
+        receipt({
+          sequence: index,
+          chunkStartSec: 5 + index * 5,
+          chunkEndSec: 10 + index * 5,
+        }),
+      ),
+    ).flat();
+
+    expect(emitted).toEqual([]);
+    expect(assembler.flush()).toMatchObject([
+      { startSec: 5, endSec: 30, firstSequence: 0, lastSequence: 4 },
+    ]);
+  });
+
   it('emits a partial tail only once when flushed and makes empty flush idempotent', () => {
     const assembler = new ShadowWindowAssembler({ windowSeconds: 30 });
     assembler.add(receipt());

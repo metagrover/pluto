@@ -105,7 +105,10 @@ export class ShadowWindowAssembler {
     this.receipts.push(receipt);
     this.previousReceipt = receipt;
 
-    return receipt.chunkEndSec === windowEnd ? [this.seal(windowEnd)] : [];
+    return receipt.chunkEndSec === windowEnd &&
+      this.receipts[0]!.chunkStartSec === windowStart
+      ? [this.seal(windowEnd)]
+      : [];
   }
 
   flush(): ShadowWindow[] {
