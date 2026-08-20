@@ -56,6 +56,11 @@ import {
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { LiveTranscriptionRolloutStore } from './transcription/liveTranscriptionRolloutStore';
+import {
+  activateDualShadowTrial,
+  DUAL_SHADOW_TRIAL_EVIDENCE_DIGEST,
+  resolveDualShadowTrial,
+} from './transcription/dualShadowTrial';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
 import { ParakeetLiveClient } from './transcription/parakeetLiveClient';
 import {
@@ -508,65 +513,24 @@ app.whenReady().then(async () => {
     diagnostic: (code) => console.warn(`[Pluto] ${code}`),
   });
   const rolloutOwnerToken = randomUUID();
+  const dualShadowTrial = resolveDualShadowTrial({
+    isPackaged: app.isPackaged,
+    environment: process.env,
+  });
   const rolloutStore = new LiveTranscriptionRolloutStore({
     filePath: path.join(
       app.getPath('userData'),
       'live-transcription-rollout.json',
     ),
     ownerToken: rolloutOwnerToken,
-    approvedStageEvidenceDigests: {},
+    approvedStageEvidenceDigests: dualShadowTrial.enabled
+      ? { dual_shadow: [DUAL_SHADOW_TRIAL_EVIDENCE_DIGEST] }
+      : {},
   });
-  parakeetShadowCoordinator = new ParakeetLiveMeetingCoordinator({
-    enabled: () => {
-      const state = rolloutStore.read();
-      return state.mode === 'parakeet' && state.stage === 'system_shadow';
-    },
-    createClient: async () => {
-      if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
-      const lease = await parakeetRuntimeHost.startRecordingLive();
-      const client = new ParakeetLiveClient({
-        runtimeHost: parakeetRuntimeHost,
-        runtimeLease: lease,
-        maxQueuedAppends: 2,
-      });
-      return {
-        open: (identity) => client.open(identity),
-        append: async ({ checksumSha256: _checksumSha256, ...request }) =>
-          await client.append(request),
-        close: async () => {
-          await client.close();
-          return 'exited' as const;
-        },
-      };
-    },
-    resolveRepairPath: (relativePath) => {
-      const root = path.resolve(getMeetingArtifactsRootDir());
-      const candidate = path.resolve(root, relativePath);
-      if (!candidate.startsWith(`${root}${path.sep}`))
-        throw new Error('parakeet_path_not_allowed');
-      return candidate;
-    },
-    sampleResources: () => {
-      const thermal = powerMonitor.getCurrentThermalState();
-      const owned = sampleOwnedRuntimeRss();
-      if (thermal === 'unknown' || !owned) return undefined;
-      const electronRssBytes = process.memoryUsage().rss;
-      return {
-        mlxRssBytes: owned.mlxRssBytes,
-        parakeetRssBytes: owned.parakeetRssBytes,
-        electronRssBytes,
-        freePercent: (os.freemem() / os.totalmem()) * 100,
-        thermal,
-      };
-    },
-    rollback: async () => {
-      const state = rolloutStore.read();
-      return rolloutStore.rollback({
-        reason: 'watchdog',
-        engineEpoch: state.engineEpoch,
-        ownerToken: rolloutOwnerToken,
-      }).accepted;
-    },
+  activateDualShadowTrial({
+    trial: dualShadowTrial,
+    store: rolloutStore,
+    ownerToken: rolloutOwnerToken,
   });
 
   // Local transcription handlers. IPC names remain stable for compatibility.
@@ -1669,6 +1633,79 @@ app.whenReady().then(async () => {
         .save(outputPath);
     });
   };
+
+  parakeetShadowCoordinator = new ParakeetLiveMeetingCoordinator({
+    enabled: () => {
+      const state = rolloutStore.read();
+      return state.mode === 'parakeet' && state.stage === 'dual_shadow';
+    },
+    createClient: async () => {
+      if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
+      const lease = await parakeetRuntimeHost.startRecordingLive();
+      const client = new ParakeetLiveClient({
+        runtimeHost: parakeetRuntimeHost,
+        runtimeLease: lease,
+        maxQueuedAppends: 2,
+      });
+      return {
+        open: (identity) => client.open(identity),
+        append: async ({ checksumSha256: _checksumSha256, ...request }) =>
+          await client.append(request),
+        flush: (identity) => client.flush(identity),
+        cancel: (identity) => client.cancel(identity),
+        close: async () => {
+          await client.close();
+          return 'exited' as const;
+        },
+      };
+    },
+    resolveRepairPath: (relativePath) => {
+      const root = path.resolve(getMeetingArtifactsRootDir());
+      const candidate = path.resolve(root, relativePath);
+      if (!candidate.startsWith(`${root}${path.sep}`))
+        throw new Error('parakeet_path_not_allowed');
+      return candidate;
+    },
+    sampleResources: () => {
+      const thermal = powerMonitor.getCurrentThermalState();
+      const owned = sampleOwnedRuntimeRss();
+      if (thermal === 'unknown' || !owned) return undefined;
+      return {
+        mlxRssBytes: owned.mlxRssBytes,
+        parakeetRssBytes: owned.parakeetRssBytes,
+        electronRssBytes: process.memoryUsage().rss,
+        freePercent: (os.freemem() / os.totalmem()) * 100,
+        thermal,
+      };
+    },
+    rollback: async () => {
+      const state = rolloutStore.read();
+      return rolloutStore.rollback({
+        reason: 'watchdog',
+        engineEpoch: state.engineEpoch,
+        ownerToken: rolloutOwnerToken,
+      }).accepted;
+    },
+    stitchWindow: async ({ source, sequenceStart, segments }) =>
+      await stitchWavSegments({
+        segments: segments.map((segment) => ({
+          path: segment.path,
+          startSec: segment.startSec,
+          endSec: segment.endSec,
+          chunkIndex: segment.sequence,
+        })),
+        outputTag: `parakeet-shadow-${source}-${sequenceStart}`,
+      }),
+    removeTemporaryAudio: async (audioPath) => {
+      try {
+        await fs.promises.unlink(audioPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    },
+    // Task 4 wires the strict, content-free report writer. Until then the
+    // coordinator remains fail-closed and cannot process trial audio.
+  });
 
   ipcMain.handle(
     'AUDIO_STITCH_WAV_SEGMENTS',

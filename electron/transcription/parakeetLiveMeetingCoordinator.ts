@@ -79,6 +79,12 @@ type CoordinatorOptions = {
     sequenceStart: number;
     sequenceEnd: number;
     repairPaths: readonly string[];
+    segments: readonly {
+      path: string;
+      startSec: number;
+      endSec: number;
+      sequence: number;
+    }[];
   }): Promise<string | null>;
   removeTemporaryAudio?(audioPath: string): Promise<void>;
   writeReport?(report: DualShadowTrialReport): Promise<void>;
@@ -284,6 +290,14 @@ export class ParakeetLiveMeetingCoordinator {
           repairPaths: window.receipts.map((receipt) =>
             this.options.resolveRepairPath(receipt.repairAudioRelativePath),
           ),
+          segments: window.receipts.map((receipt) => ({
+            path: this.options.resolveRepairPath(
+              receipt.repairAudioRelativePath,
+            ),
+            startSec: receipt.chunkStartSec,
+            endSec: receipt.chunkEndSec,
+            sequence: receipt.sequence,
+          })),
         })) ?? null;
     } catch {
       this.unresolved(source, 'stitch_failed');
