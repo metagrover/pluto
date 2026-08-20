@@ -59,6 +59,7 @@ import {
   activateDualShadowTrial,
   resolveDualShadowTrial,
 } from './transcription/dualShadowTrial';
+import { writeDualShadowTrialReport } from './transcription/dualShadowTrialReport';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { LiveTranscriptionRolloutStore } from './transcription/liveTranscriptionRolloutStore';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
@@ -1703,8 +1704,12 @@ app.whenReady().then(async () => {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
     },
-    // Task 4 wires the strict, content-free report writer. Until then the
-    // coordinator remains fail-closed and cannot process trial audio.
+    writeReport: async (report) => {
+      writeDualShadowTrialReport({
+        userDataPath: app.getPath('userData'),
+        report,
+      });
+    },
   });
 
   ipcMain.handle(

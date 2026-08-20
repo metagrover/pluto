@@ -1,3 +1,9 @@
+import type {
+  DualShadowTrialReport,
+  DualShadowTrialRssBucket,
+  DualShadowTrialThermalState,
+  DualShadowTrialFailureCode as ShadowFailureCode,
+} from './dualShadowTrialReport';
 import {
   type ShadowReceipt as AssembledShadowReceipt,
   type ShadowWindow,
@@ -44,27 +50,7 @@ export type ShadowResourceSample = {
   thermal: 'nominal' | 'fair' | 'serious' | 'critical';
 };
 
-type ShadowFailureCode =
-  | 'append_failed'
-  | 'cleanup_uncertain'
-  | 'create_failed'
-  | 'flush_failed'
-  | 'open_failed'
-  | 'report_write_failed'
-  | 'resource_fence'
-  | 'stitch_failed'
-  | 'stitch_missing'
-  | 'temporary_audio_cleanup_failed'
-  | 'window_invalid';
-
-export type DualShadowTrialReport = {
-  verdict: 'passed' | 'failed';
-  windowsSubmitted: Record<ShadowSource, number>;
-  windowsCompleted: Record<ShadowSource, number>;
-  unresolved: Record<ShadowSource, number>;
-  flush: Record<ShadowSource, 'completed' | 'failed' | 'skipped'>;
-  failureCodes: ShadowFailureCode[];
-};
+export type { DualShadowTrialReport } from './dualShadowTrialReport';
 
 type CoordinatorOptions = {
   enabled(): boolean;
@@ -148,6 +134,26 @@ const sourceFlushes = (): DualShadowTrialReport['flush'] => ({
   system: 'skipped',
 });
 
+const emptyResource = (): DualShadowTrialReport['resource'] => ({
+  peakCombinedRssBucket: 'unavailable',
+  worstThermal: 'unavailable',
+});
+const rssBucket = (rssBytes: number): DualShadowTrialRssBucket => {
+  const mib = 1024 ** 2;
+  if (rssBytes < 512 * mib) return 'under_512mb';
+  if (rssBytes < 1024 * mib) return '512mb_to_1gb';
+  if (rssBytes < 2 * 1024 * mib) return '1gb_to_2gb';
+  if (rssBytes < 4.5 * 1024 * mib) return '2gb_to_4_5gb';
+  return 'over_4_5gb';
+};
+const thermalSeverity: Record<DualShadowTrialThermalState, number> = {
+  unavailable: -1,
+  nominal: 0,
+  fair: 1,
+  serious: 2,
+  critical: 3,
+};
+
 /** Main-process-only, receipt-bound dual-source shadow ingestion. */
 export class ParakeetLiveMeetingCoordinator {
   private client: ShadowClient | null = null;
@@ -156,6 +162,7 @@ export class ParakeetLiveMeetingCoordinator {
   private assemblers: Record<ShadowSource, ShadowWindowAssembler> | null = null;
   private nextOrdinals = sourceCounts();
   private report = this.emptyReport();
+  private resource = emptyResource();
   private fenced = false;
   private aborting: Promise<void> | null = null;
   private reported = false;
@@ -183,7 +190,7 @@ export class ParakeetLiveMeetingCoordinator {
     if (this.fenced || !this.options.enabled()) return;
     this.resetMeeting();
     this.meetingId = meetingId;
-    if (unsafeResources(this.options.sampleResources())) {
+    if (this.hasUnsafeResources()) {
       await this.abort('resource_fence');
       return;
     }
@@ -273,7 +280,7 @@ export class ParakeetLiveMeetingCoordinator {
   }
 
   private async submitWindow(window: ShadowWindow): Promise<void> {
-    if (unsafeResources(this.options.sampleResources())) {
+    if (this.hasUnsafeResources()) {
       await this.abort('resource_fence');
       return;
     }
@@ -310,7 +317,7 @@ export class ParakeetLiveMeetingCoordinator {
     this.report.windowsSubmitted[source] += 1;
     let appendFailure: ShadowFailureCode | null = null;
     try {
-      if (unsafeResources(this.options.sampleResources())) {
+      if (this.hasUnsafeResources()) {
         appendFailure = 'resource_fence';
       } else {
         await this.client!.append({
@@ -382,6 +389,7 @@ export class ParakeetLiveMeetingCoordinator {
     if (this.reported) return;
     await this.options.writeReport?.({
       ...this.report,
+      resource: this.resource,
       verdict: this.report.failureCodes.length === 0 ? 'passed' : 'failed',
     });
     this.reported = true;
@@ -397,10 +405,11 @@ export class ParakeetLiveMeetingCoordinator {
   private resetMeeting(): void {
     this.nextOrdinals = sourceCounts();
     this.report = this.emptyReport();
+    this.resource = emptyResource();
     this.reported = false;
   }
 
-  private emptyReport(): Omit<DualShadowTrialReport, 'verdict'> {
+  private emptyReport(): Omit<DualShadowTrialReport, 'verdict' | 'resource'> {
     return {
       windowsSubmitted: sourceCounts(),
       windowsCompleted: sourceCounts(),
@@ -408,5 +417,42 @@ export class ParakeetLiveMeetingCoordinator {
       flush: sourceFlushes(),
       failureCodes: [],
     };
+  }
+
+  private hasUnsafeResources(): boolean {
+    const sample = this.options.sampleResources();
+    this.recordResource(sample);
+    return unsafeResources(sample);
+  }
+
+  private recordResource(sample: ShadowResourceSample | undefined): void {
+    if (
+      !sample ||
+      !finiteNonNegative(sample.mlxRssBytes) ||
+      !finiteNonNegative(sample.parakeetRssBytes) ||
+      !finiteNonNegative(sample.electronRssBytes)
+    )
+      return;
+    const bucket = rssBucket(
+      sample.mlxRssBytes + sample.parakeetRssBytes + sample.electronRssBytes,
+    );
+    const bucketOrder: DualShadowTrialRssBucket[] = [
+      'unavailable',
+      'under_512mb',
+      '512mb_to_1gb',
+      '1gb_to_2gb',
+      '2gb_to_4_5gb',
+      'over_4_5gb',
+    ];
+    if (
+      bucketOrder.indexOf(bucket) >
+      bucketOrder.indexOf(this.resource.peakCombinedRssBucket)
+    )
+      this.resource.peakCombinedRssBucket = bucket;
+    if (
+      thermalSeverity[sample.thermal] >
+      thermalSeverity[this.resource.worstThermal]
+    )
+      this.resource.worstThermal = sample.thermal;
   }
 }

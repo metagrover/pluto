@@ -135,6 +135,14 @@ describe('ParakeetLiveMeetingCoordinator', () => {
     expect(client.flush).toHaveBeenCalledTimes(2);
     expect(dependencies.removeTemporaryAudio).toHaveBeenCalledTimes(2);
     expect(dependencies.writeReport).toHaveBeenCalledOnce();
+    expect(dependencies.writeReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resource: {
+          peakCombinedRssBucket: 'under_512mb',
+          worstThermal: 'nominal',
+        },
+      }),
+    );
     expect(
       dependencies.writeReport.mock.invocationCallOrder[0],
     ).toBeGreaterThan(client.close.mock.invocationCallOrder[0]!);
