@@ -104,11 +104,14 @@ describe('ShadowWindowAssembler', () => {
     ).toThrow('shadow_time_gap');
   });
 
-  it('never splits a receipt that crosses a fixed window boundary', () => {
+  it('never splits a receipt that crosses a logical window boundary', () => {
     const assembler = new ShadowWindowAssembler({ windowSeconds: 30 });
+    assembler.add(receipt({ chunkStartSec: 5, chunkEndSec: 25 }));
 
     expect(() =>
-      assembler.add(receipt({ chunkStartSec: 25, chunkEndSec: 31 })),
+      assembler.add(
+        receipt({ sequence: 1, chunkStartSec: 25, chunkEndSec: 36 }),
+      ),
     ).toThrow('shadow_crosses_window_boundary');
   });
 
@@ -142,6 +145,26 @@ describe('ShadowWindowAssembler', () => {
     expect(emitted).toEqual([]);
     expect(assembler.flush()).toMatchObject([
       { startSec: 5, endSec: 30, firstSequence: 0, lastSequence: 4 },
+    ]);
+  });
+
+  it('anchors consecutive logical windows at the first receipt start', () => {
+    const assembler = new ShadowWindowAssembler({ windowSeconds: 30 });
+    const emitted = Array.from({ length: 11 }, (_, index) =>
+      assembler.add(
+        receipt({
+          sequence: index,
+          chunkStartSec: 5 + index * 5,
+          chunkEndSec: 10 + index * 5,
+        }),
+      ),
+    ).flat();
+
+    expect(emitted).toMatchObject([
+      { startSec: 5, endSec: 35, firstSequence: 0, lastSequence: 5 },
+    ]);
+    expect(assembler.flush()).toMatchObject([
+      { startSec: 35, endSec: 60, firstSequence: 6, lastSequence: 10 },
     ]);
   });
 

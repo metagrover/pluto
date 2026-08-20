@@ -76,8 +76,7 @@ export class ShadowWindowAssembler {
     if (!receiptIsValid(receipt)) invalid();
 
     const windowStart =
-      Math.floor(receipt.chunkStartSec / this.options.windowSeconds) *
-      this.options.windowSeconds;
+      this.receipts[0]?.chunkStartSec ?? receipt.chunkStartSec;
     const windowEnd = windowStart + this.options.windowSeconds;
     if (receipt.chunkEndSec > windowEnd) {
       throw new Error('shadow_crosses_window_boundary');
@@ -105,10 +104,7 @@ export class ShadowWindowAssembler {
     this.receipts.push(receipt);
     this.previousReceipt = receipt;
 
-    return receipt.chunkEndSec === windowEnd &&
-      this.receipts[0]!.chunkStartSec === windowStart
-      ? [this.seal(windowEnd)]
-      : [];
+    return receipt.chunkEndSec === windowEnd ? [this.seal(windowEnd)] : [];
   }
 
   flush(): ShadowWindow[] {
