@@ -62,13 +62,14 @@ import {
 } from './api/knowledgeGraph';
 // Knowledge Graph
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
+import { AllMeetingsTab } from "./components/features/AllMeetingsTab";
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
 
 // Overlays
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
-import { SettingsOverlay } from './components/overlays/SettingsOverlay';
+import { SettingsTab } from './components/features/SettingsTab';
 import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel';
 
 // Types
@@ -108,7 +109,7 @@ function App() {
   );
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    'hub' | 'people' | 'projects' | 'wiki'
+    'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat' | 'settings'
   >(
     window.__PLUTO_BROWSER_PREVIEW__ && !meetingPreviewEnabled ? 'wiki' : 'hub',
   );
@@ -121,7 +122,6 @@ function App() {
     [],
   );
   const searchRequestIdRef = useRef(0);
-  const [settingsVisible, setSettingsVisible] = useState(false);
   const [permissionsVisible, setPermissionsVisible] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState({
     mic: 'unknown',
@@ -139,7 +139,6 @@ function App() {
   const [whisperLanguage, setWhisperLanguage] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
-  const [askPlutoVisible, setAskPlutoVisible] = useState(false);
   const [updatingDashboardTaskIds, setUpdatingDashboardTaskIds] = useState<
     Set<string>
   >(new Set());
@@ -437,7 +436,8 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setAskPlutoVisible(true);
+        setActiveTab((prev) => (prev === 'chat' ? 'hub' : 'chat'));
+        setSelectedMeetingId(null);
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
         e.preventDefault();
@@ -445,11 +445,11 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') {
         e.preventDefault();
-        setSettingsVisible(true);
+        setActiveTab('settings');
+        setSelectedMeetingId(null);
       }
       if (e.key === 'Escape') {
         setSearchVisible(false);
-        setAskPlutoVisible(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -833,9 +833,6 @@ function App() {
             }}
             onOpenSearch={() => setSearchVisible(true)}
             handleDeleteMeeting={handleDeleteMeeting}
-            setSettingsVisible={setSettingsVisible}
-            transcriptVisible={transcriptVisible}
-            setTranscriptVisible={setTranscriptVisible}
             theme={theme}
             setTheme={(newTheme) => {
               setTheme(newTheme);
@@ -879,6 +876,7 @@ function App() {
               : 'rounded-l-[2.5rem] border-l border-pro-border/10'
           }`}
         >
+          {!!selectedMeetingId && (
           <header
             className={`app-titlebar shrink-0 sticky top-0 z-20 ${
               selectedMeetingId
@@ -906,7 +904,10 @@ function App() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setAskPlutoVisible(true)}
+                    onClick={() => {
+                      setActiveTab('chat');
+                      setSelectedMeetingId(null);
+                    }}
                     aria-label="Ask Pluto about this meeting"
                   >
                     <MessageCircle aria-hidden="true" size={19} />
@@ -929,7 +930,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => setSidebarVisible((prev) => !prev)}
-                    className="w-11 h-8 rounded-md bg-pro-surface border border-pro-border/40 shadow-sm flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all  group"
+                    className="w-8 h-8 rounded-md flex items-center justify-center text-pro-text-muted hover:bg-black/5 dark:hover:bg-white/5 transition-all group"
                   >
                     <svg
                       aria-hidden="true"
@@ -986,27 +987,8 @@ function App() {
                 <div className="flex items-center gap-4 justify-self-end">
                   <button
                     type="button"
-                    onClick={() => setAskPlutoVisible(true)}
-                    className="h-10 px-5 rounded-full bg-white dark:bg-pro-surface border border-pro-border/40 dark:border-pro-border/50 shadow-sm flex items-center gap-3 hover:border-pro-accent/40 transition-all  group"
-                  >
-                    <span className="text-sm">🧠</span>
-                    <span className="text-[9px] font-semibold text-pro-text-muted/60 dark:text-pro-text-main/70 font-medium pt-[1px]">
-                      Ask Pluto
-                    </span>
-                    <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity ml-2">
-                      <span className="w-4 h-4 rounded border border-pro-border flex items-center justify-center text-[8px] font-bold">
-                        ⌘
-                      </span>
-                      <span className="w-4 h-4 rounded border border-pro-border flex items-center justify-center text-[8px] font-bold">
-                        K
-                      </span>
-                    </div>
-                  </button>
-                  <div className="w-[1px] h-6 bg-pro-border/20" />
-                  <button
-                    type="button"
                     onClick={() => setSettingsVisible(true)}
-                    className="w-11 h-8 rounded-md bg-pro-surface border border-pro-border/40 shadow-sm flex items-center justify-center text-pro-text-muted hover:bg-pro-bg transition-all "
+                    className="w-8 h-8 rounded-md flex items-center justify-center text-pro-text-muted hover:bg-black/5 dark:hover:bg-white/5 transition-all"
                   >
                     <svg
                       aria-hidden="true"
@@ -1033,30 +1015,37 @@ function App() {
               </>
             )}
           </header>
+          )}
 
           <div
             ref={contentScrollRef}
-            className={`flex-1 overflow-y-auto flex flex-col scroll-smooth relative ${
+            className={`flex-1 flex flex-col scroll-smooth relative ${
+              activeTab === 'wiki' && !selectedMeetingId ? 'overflow-hidden' : 'overflow-y-scroll'
+            } ${
               selectedMeetingId
                 ? 'meeting-app-scroll'
                 : activeTab === 'wiki'
                   ? 'px-0 py-0'
+                  : activeTab === 'chat'
+                    ? 'px-0 py-0'
+                  : activeTab === 'settings'
+                    ? 'px-5 py-6 md:px-8 md:py-8'
                   : !selectedMeetingId && activeTab === 'hub'
                     ? 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
                     : !selectedMeetingId && activeTab === 'people'
                       ? 'px-5 py-6 md:px-8 md:py-8'
                       : !selectedMeetingId && activeTab === 'projects'
                         ? 'px-5 py-6 md:px-8 md:py-8'
-                        : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
+                        : !selectedMeetingId && activeTab === 'meetings'
+                          ? 'px-5 py-6 md:px-8 md:py-8'
+                          : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
             }`}
           >
-            {!selectedMeetingId ? (
-              <>
-                <div className="fixed top-0 right-0 w-[800px] h-[800px] bg-pro-accent/5 rounded-full blur-[120px] -mr-96 -mt-96 pointer-events-none z-0" />
-                <div className="fixed bottom-0 left-0 w-[600px] h-[600px] bg-pro-accent/5 rounded-full blur-[100px] -ml-40 -mb-40 pointer-events-none z-0" />
-                <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-pro-accent/5 rounded-full blur-[150px] pointer-events-none z-0 opacity-40" />
-              </>
-            ) : null}
+            <>
+              <div className="fixed top-0 right-0 w-[800px] h-[800px] bg-pro-accent/5 rounded-full blur-[120px] -mr-96 -mt-96 pointer-events-none z-0" />
+              <div className="fixed bottom-0 left-0 w-[600px] h-[600px] bg-pro-accent/5 rounded-full blur-[100px] -ml-40 -mb-40 pointer-events-none z-0" />
+              <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-pro-accent/5 rounded-full blur-[150px] pointer-events-none z-0 opacity-40" />
+            </>
 
             {selectedMeetingId ? (
               <MeetingView
@@ -1080,7 +1069,6 @@ function App() {
                 isRecording={isRecording}
                 setSelectedMeetingId={setSelectedMeetingId}
                 setActiveTab={setActiveTab}
-                setAskPlutoVisible={setAskPlutoVisible}
                 updatingTaskIds={updatingDashboardTaskIds}
                 actionError={dashboardActionError}
                 handleCompleteTask={handleCompleteTask}
@@ -1110,6 +1098,47 @@ function App() {
                   onOpenProjectsTab={() => setActiveTab('projects')}
                 />
               </div>
+            ) : activeTab === 'meetings' ? (
+              <AllMeetingsTab 
+                meetings={safeMeetings}
+                onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                handleDeleteMeeting={handleDeleteMeeting}
+              />
+            ) : activeTab === 'chat' ? (
+              <div className="flex-1 w-full animate-in flex flex-col">
+                <AskPluto
+                  visible={true}
+                  onClose={() => setActiveTab('hub')}
+                  onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                />
+              </div>
+            ) : activeTab === 'settings' ? (
+              <SettingsTab
+                llmProvider={llmProvider}
+                setLlmProvider={setLlmProvider}
+                geminiApiKey={geminiApiKey}
+                setGeminiApiKey={setGeminiApiKey}
+                openaiApiKey={openaiApiKey}
+                setOpenaiApiKey={setOpenaiApiKey}
+                claudeApiKey={claudeApiKey}
+                setClaudeApiKey={setClaudeApiKey}
+                ollamaModel={ollamaModel}
+                setOllamaModel={setOllamaModel}
+                whisperLanguage={whisperLanguage}
+                setWhisperLanguage={setWhisperLanguage}
+                autoEndEnabled={autoEndEnabled}
+                setAutoEndEnabled={setAutoEndEnabled}
+                fetchMeetings={fetchMeetings}
+                setSelectedMeetingId={setSelectedMeetingId}
+                theme={theme}
+                setTheme={(newTheme) => {
+                  setTheme(newTheme);
+                  window.ipcRenderer.invoke('SET_SETTING', {
+                    key: 'theme',
+                    value: newTheme,
+                  });
+                }}
+              />
             ) : (
               <div className="max-w-4xl mx-auto w-full space-y-24 animate-in duration-1000 text-center py-40 relative">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pro-accent/5 rounded-full blur-[120px] pointer-events-none" />
@@ -1159,15 +1188,6 @@ function App() {
       )}
 
       {/* Global Overlays */}
-      <AskPluto
-        visible={askPlutoVisible}
-        onClose={() => setAskPlutoVisible(false)}
-        onOpenMeeting={(meetingId) => {
-          setSelectedMeetingId(meetingId);
-          setAskPlutoVisible(false);
-        }}
-      />
-
       <SearchOverlay
         searchVisible={searchVisible}
         setSearchVisible={setSearchVisible}
@@ -1191,35 +1211,6 @@ function App() {
           setSelectedProjectId(null);
           setActiveTab('people');
           setSelectedMeetingId(null);
-        }}
-      />
-
-      <SettingsOverlay
-        settingsVisible={settingsVisible}
-        setSettingsVisible={setSettingsVisible}
-        llmProvider={llmProvider}
-        setLlmProvider={setLlmProvider}
-        geminiApiKey={geminiApiKey}
-        setGeminiApiKey={setGeminiApiKey}
-        openaiApiKey={openaiApiKey}
-        setOpenaiApiKey={setOpenaiApiKey}
-        claudeApiKey={claudeApiKey}
-        setClaudeApiKey={setClaudeApiKey}
-        ollamaModel={ollamaModel}
-        setOllamaModel={setOllamaModel}
-        whisperLanguage={whisperLanguage}
-        setWhisperLanguage={setWhisperLanguage}
-        autoEndEnabled={autoEndEnabled}
-        setAutoEndEnabled={setAutoEndEnabled}
-        fetchMeetings={fetchMeetings}
-        setSelectedMeetingId={setSelectedMeetingId}
-        theme={theme}
-        setTheme={(newTheme) => {
-          setTheme(newTheme);
-          window.ipcRenderer.invoke('SET_SETTING', {
-            key: 'theme',
-            value: newTheme,
-          });
         }}
       />
 

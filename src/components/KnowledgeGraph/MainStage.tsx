@@ -288,7 +288,7 @@ const StatusBadge = ({ status }: { status: KnowledgeDocStatus }) => (
 );
 
 const EmptyState = () => (
-  <div className="flex h-full items-center justify-center bg-pro-bg px-6">
+  <div className="flex h-full items-center justify-center px-6">
     <div className="max-w-md rounded-lg border border-pro-border bg-pro-surface p-8 text-center shadow-sm">
       <Sparkles className="mx-auto h-7 w-7 text-pro-text-muted" />
       <h2 className="mt-4 text-2xl font-semibold text-pro-text-main">
@@ -471,7 +471,7 @@ const CurrentRead = ({
       </div>
 
       <div className="pt-5">
-        <h1 className="max-w-3xl text-2xl font-semibold leading-tight text-pro-text-main md:text-3xl">
+        <h1 className="max-w-3xl text-[40px] font-serif font-medium leading-[1.2] tracking-[-0.01em] text-pro-text-main">
           {currentRead}
         </h1>
 
@@ -1202,7 +1202,7 @@ export const MainStage: React.FC<MainStageProps> = ({
   };
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-pro-bg">
+    <div className="h-full w-full overflow-y-scroll">
       <div
         data-testid="knowledge-operating-picture"
         className="mx-auto flex w-full max-w-[1120px] flex-col px-5 py-6 md:px-8 lg:py-8"

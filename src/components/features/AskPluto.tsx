@@ -2,6 +2,7 @@ import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ArrowRight } from 'lucide-react';
 import { Logo } from '../Brand/Logo';
 import { CitationCard, type CitationChain } from './CitationCard';
 
@@ -28,34 +29,33 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeCitationKey, setActiveCitationKey] = useState<string | null>(
-    null,
-  );
-
+  const [activeCitationKey, setActiveCitationKey] = useState<string | null>(null);
   const [dynamicQueries, setDynamicQueries] = useState<string[]>([]);
   const [isLoadingQueries, setIsLoadingQueries] = useState(false);
-  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(
-    null,
-  );
-  const messageCounterRef = useRef(0);
-  const nextMessageId = () =>
-    `msg-${Date.now()}-${messageCounterRef.current++}`;
 
+  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(null);
+  const messageCounterRef = useRef(0);
+  const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const nextMessageId = () => `msg-${Date.now()}-${messageCounterRef.current++}`;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   });
 
+  // Restore focus whenever the input becomes enabled (after send) or on mount
+  useEffect(() => {
+    if (visible && !isProcessing) inputRef.current?.focus();
+  }, [visible, isProcessing]);
+
   useEffect(() => {
     if (visible) {
-      // TTL cache: skip IPC if we fetched within the last 30 seconds
       const cache = queryCacheRef.current;
       if (cache && Date.now() - cache.fetchedAt < 30_000) {
         setDynamicQueries(cache.queries);
         return;
       }
-
       if (window.ipcRenderer) {
         setIsLoadingQueries(true);
         window.ipcRenderer
@@ -68,9 +68,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             console.error('Failed to load dynamic queries', e);
             setDynamicQueries([]);
           })
-          .finally(() => {
-            setIsLoadingQueries(false);
-          });
+          .finally(() => setIsLoadingQueries(false));
       } else {
         setDynamicQueries(['What decisions were made about API Migration?']);
       }
@@ -89,7 +87,6 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     ]);
     setIsProcessing(true);
     setActiveCitationKey(null);
-
     setMessages((prev) => [
       ...prev,
       { id: nextMessageId(), role: 'assistant', content: '', isLoading: true },
@@ -104,14 +101,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         setMessages((prev) => {
           const newMsg = [...prev];
           newMsg.pop();
-          const content =
-            typeof response === 'string' ? response : (response.answer ?? '');
+          const content = typeof response === 'string' ? response : (response.answer ?? '');
           newMsg.push({
             id: nextMessageId(),
             role: 'assistant',
             content,
-            citations:
-              typeof response === 'string' ? undefined : response.citations,
+            citations: typeof response === 'string' ? undefined : response.citations,
           });
           return newMsg;
         });
@@ -123,8 +118,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             newMsg.push({
               id: nextMessageId(),
               role: 'assistant',
-              content:
-                'Based on the recent standup, the **API migration** was delayed by 2 days. The engineering team decided to use GraphQL over REST for the new endpoints.',
+              content: 'Based on the recent standup, the **API migration** was delayed by 2 days. The engineering team decided to use GraphQL over REST for the new endpoints.',
               citations: [
                 {
                   claim: 'API Migration delayed',
@@ -132,8 +126,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   meeting_title: 'Monday Tech Sync',
                   evidence_valid: true,
                   trust_status: 'grounded',
-                  evidence_span:
-                    'We need to push the api migration by 2 days due to integration testing issues.',
+                  evidence_span: 'We need to push the api migration by 2 days due to integration testing issues.',
                 },
                 {
                   claim: 'GraphQL chosen for new endpoints',
@@ -141,8 +134,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   meeting_title: 'Architecture Review',
                   evidence_valid: false,
                   trust_status: 'needs_review',
-                  evidence_span:
-                    "I'm thinking we should probably use GraphQL for that new service.",
+                  evidence_span: "I'm thinking we should probably use GraphQL for that new service.",
                 },
               ],
             });
@@ -153,30 +145,20 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       }
     } catch (e: unknown) {
       console.error('Ask Pluto error:', e);
-
       let errorMsg = "I'm sorry, there was an error processing your request.";
       if (e instanceof Error && e.message) {
         let msg = e.message.replace(/^Error:\s*/, '');
-        if (
-          msg.includes('SqliteError') ||
-          msg.includes('invoking remote method')
-        ) {
-          msg =
-            'An internal system error occurred while searching your knowledge base.';
+        if (msg.includes('SqliteError') || msg.includes('invoking remote method')) {
+          msg = 'An internal system error occurred while searching your knowledge base.';
         }
         errorMsg += `\n\nDetails: ${msg}`;
       } else if (typeof e === 'string') {
         errorMsg += `\n\nDetails: ${e}`;
       }
-
       setMessages((prev) => {
         const newMsg = [...prev];
         newMsg.pop();
-        newMsg.push({
-          id: nextMessageId(),
-          role: 'assistant',
-          content: errorMsg,
-        });
+        newMsg.push({ id: nextMessageId(), role: 'assistant', content: errorMsg });
         return newMsg;
       });
     } finally {
@@ -185,67 +167,33 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[1000] flex w-full h-full bg-pro-bg animate-in fade-in duration-300 flex-col">
-      {/* Close button */}
-      <button
-        onClick={onClose}
-        type="button"
-        className="absolute top-8 right-8 z-[1010] w-10 h-10 rounded-full bg-white border border-white/10 hover:bg-white flex items-center justify-center text-white/50 hover:text-white transition-all hover:scale-105  group"
-      >
-        <svg
-          aria-hidden="true"
-          className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <title>Close Ask Pluto</title>
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M6 18L18 6M6 6l12 12"
-          />
-        </svg>
-      </button>
-
-      <div className="flex-1 relative flex flex-col pt-12 md:pt-20 px-6 sm:px-8 lg:px-12 overflow-hidden h-full w-full max-w-5xl mx-auto">
-        <div className="mb-6 flex items-center gap-3 shrink-0">
-          <Logo size={28} variant="gold" />
-          <h2 className="text-xl font-semibold text-pro-text-main heading-premium">
-            Ask Pluto
-          </h2>
-          <span className="text-[10px] bg-pro-accent/10 border border-pro-accent/20 text-pro-accent font-semibold px-2 py-0.5 rounded-full ml-2">
-            Beta
-          </span>
-        </div>
-
-        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-8 pb-12 flex flex-col pt-2">
+    <div className="flex flex-col flex-1 w-full relative animate-in fade-in duration-300 bg-pro-bg">
+      {/* Scrollable message area — same width as the input */}
+      <div className="flex-1 relative flex flex-col w-full max-w-3xl mx-auto px-4 sm:px-8">
+        <div className="flex-1 space-y-10 pb-32 flex flex-col pt-16 w-full">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center space-y-8 pb-10">
-              <div className="w-24 h-24 rounded-lg bg-pro-accent/5 border border-pro-accent/20 flex items-center justify-center shadow-lg relative group">
-                <span className="text-4xl relative z-10 group-hover:scale-110 transition-transform">
-                  🧠
-                </span>
+            <div className="flex flex-col items-start justify-center h-full space-y-8 pb-20 mt-4 animate-in fade-in zoom-in-95 duration-700">
+              {/* Greeting — serif, left-aligned to match input */}
+              <div>
+                <h1 className="font-serif text-[36px] font-medium tracking-[-0.01em] text-pro-text-main leading-tight">
+                  Hello, I'm Pluto.
+                </h1>
+                <p className="text-[16px] text-pro-text-muted/70 font-medium mt-2 leading-relaxed">
+                  Ask me about your past meetings, decisions, or action items.
+                </p>
               </div>
-              <h3 className="text-2xl font-semibold text-pro-text-main">
-                Hi! I'm Pluto.
-              </h3>
-              <p className="text-pro-text-muted text-base max-w-lg mx-auto leading-relaxed">
-                Are there any meeting insights I can help you with? I can answer
-                questions and find details based on your past meetings.
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-3 w-full max-w-xl mx-auto px-4 mt-4">
+
+              {/* Suggested queries */}
+              <div className="flex flex-wrap items-center gap-2.5 w-full">
                 {isLoadingQueries ? (
                   <>
-                    <div className="px-5 py-4 w-64 rounded-md bg-pro-surface border border-pro-border/30 animate-pulse" />
-                    <div className="px-5 py-4 w-72 rounded-md bg-pro-surface border border-pro-border/30 animate-pulse" />
-                    <div className="px-5 py-4 w-56 rounded-md bg-pro-surface border border-pro-border/30 animate-pulse" />
+                    <div className="h-9 w-48 rounded-full bg-black/5 dark:bg-white/5 animate-pulse" />
+                    <div className="h-9 w-56 rounded-full bg-black/5 dark:bg-white/5 animate-pulse" />
+                    <div className="h-9 w-40 rounded-full bg-black/5 dark:bg-white/5 animate-pulse" />
                   </>
                 ) : dynamicQueries.length === 0 ? (
-                  <p className="text-pro-text-muted/60 text-sm font-medium italic">
-                    Record your first meeting to get personalized questions
-                    here.
+                  <p className="text-pro-text-muted/50 text-[13px] font-medium">
+                    Record a meeting to get personalized suggestions.
                   </p>
                 ) : (
                   dynamicQueries.map((sq) => (
@@ -253,12 +201,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                       key={sq}
                       type="button"
                       onClick={() => handleSubmit(undefined, sq)}
-                      className="px-5 py-3 rounded-md bg-pro-surface hover:bg-pro-surface hover:scale-[1.02] border border-pro-border text-pro-text-muted hover:text-pro-text-main hover:border-pro-accent/40 text-[13px] font-semibold transition-all shadow-sm flex items-center gap-2 group/btn"
+                      className="px-4 py-2 rounded-full bg-transparent border border-pro-border/50 hover:bg-pro-surface hover:border-pro-border text-pro-text-muted hover:text-pro-text-main text-[13px] font-medium transition-all duration-200"
                     >
                       {sq}
-                      <span className="text-[10px] opacity-0 group-hover/btn:opacity-100 transition-opacity translate-x-[-10px] group-hover/btn:translate-x-0 font-semibold text-pro-accent">
-                        →
-                      </span>
                     </button>
                   ))
                 )}
@@ -268,38 +213,31 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'assistant' && (
-                  <div className="w-10 h-10 rounded-md bg-[#163758]/50 border border-pro-accent/20 flex items-center justify-center shrink-0 shadow-sm mt-1">
-                    <Logo size={18} variant="gold" />
+                  <div className="w-7 h-7 flex items-center justify-center shrink-0 mt-0.5">
+                    <Logo size={18} variant="default" />
                   </div>
                 )}
-                <div
-                  className={`flex flex-col gap-4 max-w-[85%] ${
-                    msg.role === 'user' ? 'items-end' : 'items-start'
-                  }`}
-                >
+                <div className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                   <div
-                    className={`p-5 rounded-lg w-full text-[14px] leading-relaxed relative ${
+                    className={`px-5 py-3.5 text-[15px] leading-relaxed relative ${
                       msg.role === 'user'
-                        ? 'bg-pro-text-main text-[#161A23] font-semibold shadow-md rounded-tr-lg border border-transparent'
-                        : 'bg-pro-surface border border-pro-border/70 text-pro-text-main shadow-sm rounded-tl-lg'
+                        ? 'bg-black/5 dark:bg-white/10 text-pro-text-main rounded-2xl rounded-tr-sm'
+                        : 'bg-white dark:bg-[#202020] border border-black/5 dark:border-white/5 shadow-sm text-pro-text-main rounded-2xl rounded-tl-sm'
                     }`}
                   >
                     {msg.isLoading ? (
-                      <div className="flex items-center gap-2 py-1 px-1">
-                        <div className="flex gap-1.5 opacity-70">
-                          <div className="w-1.5 h-1.5 rounded-full bg-pro-accent animate-bounce" />
-                          <div className="w-1.5 h-1.5 rounded-full bg-pro-accent animate-bounce [animation-delay:-.2s]" />
-                          <div className="w-1.5 h-1.5 rounded-full bg-pro-accent animate-bounce [animation-delay:-.4s]" />
+                      <div className="flex items-center gap-2 h-[22px] px-1">
+                        <div className="flex gap-1.5 opacity-60">
+                          <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce" />
+                          <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.2s]" />
+                          <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.4s]" />
                         </div>
-                        <span className="text-[10px] font-medium text-pro-accent/80 pl-2">
-                          Retrieving Intel
-                        </span>
                       </div>
                     ) : (
-                      <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_p]:my-2 [&_strong]:text-pro-text-main [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-pro-text-main [&_h3]:mt-3 [&_h3]:mb-1">
+                      <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:text-pro-text-main [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-pro-text-main [&_h3]:mt-3 [&_h3]:mb-1">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {msg.content}
                         </ReactMarkdown>
@@ -307,39 +245,29 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                     )}
                   </div>
 
-                  {msg.role === 'assistant' &&
-                    !msg.isLoading &&
-                    msg.citations &&
-                    msg.citations.length > 0 && (
-                      <div className="w-full space-y-3 pl-1">
-                        <div className="flex items-center gap-3 text-[10px] font-medium text-pro-text-muted/50">
-                          <span>Evidence</span>
-                          <span className="h-px flex-1 bg-pro-border/30" />
-                          <span className="text-[#10B981]st">
-                            {msg.citations.length} Found
-                          </span>
-                        </div>
-                        <div className="space-y-3">
-                          {msg.citations.map((cit) => {
-                            const citationKey = `${msg.id}-${cit.meeting_id}-${cit.claim}`;
-
-                            return (
-                              <CitationCard
-                                key={citationKey}
-                                citation={cit}
-                                isActive={activeCitationKey === citationKey}
-                                onClick={() =>
-                                  setActiveCitationKey(citationKey)
-                                }
-                                onNavigateToMeeting={() =>
-                                  onOpenMeeting(cit.meeting_id)
-                                }
-                              />
-                            );
-                          })}
-                        </div>
+                  {msg.role === 'assistant' && !msg.isLoading && msg.citations && msg.citations.length > 0 && (
+                    <div className="w-full space-y-3 pl-1">
+                      <div className="flex items-center gap-3 text-[10px] font-medium text-pro-text-muted/50">
+                        <span>Evidence</span>
+                        <span className="h-px flex-1 bg-pro-border/30" />
+                        <span className="text-[#10B981]">{msg.citations.length} Found</span>
                       </div>
-                    )}
+                      <div className="space-y-3">
+                        {msg.citations.map((cit) => {
+                          const citationKey = `${msg.id}-${cit.meeting_id}-${cit.claim}`;
+                          return (
+                            <CitationCard
+                              key={citationKey}
+                              citation={cit}
+                              isActive={activeCitationKey === citationKey}
+                              onClick={() => setActiveCitationKey(citationKey)}
+                              onNavigateToMeeting={() => onOpenMeeting(cit.meeting_id)}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))
@@ -347,34 +275,27 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           <div ref={bottomRef} className="h-4 shrink-0" />
         </div>
 
-        <div className="pb-12 relative shrink-0">
-          <form onSubmit={handleSubmit} className="relative mt-2">
+        {/* Input bar — sticky at the bottom */}
+        <div className="pb-8 pt-6 sticky bottom-0 left-0 right-0 z-10 flex justify-center bg-gradient-to-t from-pro-bg via-pro-bg/95 to-transparent pointer-events-none mt-auto">
+          <form
+            onSubmit={handleSubmit}
+            className="relative flex items-center w-full pointer-events-auto bg-white dark:bg-[#202020] border border-black/10 dark:border-white/10 rounded-full shadow-[0_4px_16px_-4px_rgba(0,0,0,0.04)] dark:shadow-[0_4px_16px_-4px_rgba(0,0,0,0.2)] transition-all duration-300 focus-within:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.08)] dark:focus-within:shadow-[0_8px_24px_-4px_rgba(0,0,0,0.3)] hover:border-black/20 dark:hover:border-white/20"
+          >
             <input
+              ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full bg-pro-surface border border-pro-border focus:border-pro-accent/50 rounded-md p-4 pl-5 pr-16 text-sm font-medium text-pro-text-main focus:bg-pro-surface hover:border-pro-border/80 outline-none transition-all shadow-sm"
-              placeholder="Search recent meetings or ask a question..."
+              className="w-full bg-transparent min-h-[56px] py-4 pl-6 pr-14 text-[15px] text-pro-text-main outline-none placeholder:text-pro-text-muted/60 rounded-full"
+              placeholder="Ask Pluto…"
               disabled={isProcessing}
+              autoFocus
             />
             <button
               type="submit"
               disabled={!query.trim() || isProcessing}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-md bg-pro-accent/10 border border-pro-accent/20 text-pro-accent flex items-center justify-center disabled:opacity-30 disabled:hover:scale-100 hover:bg-pro-accent hover:text-[#163758] hover:scale-105 transition-all shadow-sm"
+              className="absolute right-3 w-8 h-8 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-all active:scale-95 group/submit"
             >
-              <svg
-                aria-hidden="true"
-                className="w-4 h-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2.5}
-                  d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                />
-              </svg>
+              <ArrowRight className="w-4 h-4 opacity-90 transition-transform group-hover/submit:translate-x-0.5" strokeWidth={2} />
             </button>
           </form>
         </div>
@@ -382,3 +303,4 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     </div>
   );
 };
+

@@ -191,16 +191,9 @@ export const PeopleBriefing = ({
   };
 
   return (
-    <section aria-labelledby="people-heading" className="people-briefing">
-      <header className="people-briefing__header">
-        <div>
-          <p className="workspace-eyebrow">Relationship context</p>
-          <h1 id="people-heading">Relationships in motion</h1>
-          <p>
-            Start with the people tied to open commitments, then return to
-            recent context.
-          </p>
-        </div>
+    <section aria-label="People" className="people-briefing">
+      <div className="people-briefing__toolbar">
+        <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">People</h1>
         {rows.length > 0 && (
           <label className="people-search">
             <Search aria-hidden="true" size={16} />
@@ -212,7 +205,7 @@ export const PeopleBriefing = ({
             />
           </label>
         )}
-      </header>
+      </div>
 
       {rows.length === 0 ? (
         <div className="people-empty">

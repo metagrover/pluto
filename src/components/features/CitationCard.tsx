@@ -47,47 +47,47 @@ export const CitationCard: React.FC<CitationCardProps> = ({
     <button
       type="button"
       onClick={onClick}
-      className={`p-5 rounded-md border transition-all cursor-pointer group flex flex-col gap-4 ${
+      className={`p-4 rounded-2xl border transition-all cursor-pointer group flex flex-col gap-3 ${
         isActive
-          ? 'bg-pro-surface border-pro-accent/40 shadow-lg -translate-y-1'
-          : 'bg-pro-surface border-pro-border/40 hover:border-pro-border/80 hover:bg-pro-surface selection-none'
+          ? 'bg-black/[0.04] dark:bg-white/[0.05] border-black/10 dark:border-white/10 shadow-sm'
+          : 'bg-black/[0.02] dark:bg-white/[0.02] border-transparent hover:border-black/5 dark:hover:border-white/5 hover:bg-black/[0.03] dark:hover:bg-white/[0.03]'
       } text-left w-full`}
     >
-      <div className="flex items-start justify-between">
-        <div className="flex flex-col gap-1 pr-4">
-          <h4 className="text-[13px] font-bold text-pro-text-main leading-tight group-hover:text-pro-accent transition-colors">
+      <div className="flex items-start justify-between w-full">
+        <div className="flex flex-col gap-0.5 pr-3 overflow-hidden">
+          <h4 className="text-[13px] font-semibold text-pro-text-main truncate group-hover:text-pro-accent transition-colors">
             {citation.meeting_title}
           </h4>
-          <span className="text-[10px] font-medium text-pro-text-muted/60">
+          <span className="text-[10px] text-pro-text-muted/60">
             Source Log
           </span>
         </div>
 
         <div
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border shadow-sm shrink-0 ${trustTone}`}
+          className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border shadow-[0_1px_2px_rgba(0,0,0,0.05)] shrink-0 ${trustTone}`}
           title={trustMeta.description}
         >
           <div className={`w-1.5 h-1.5 rounded-full ${trustDot}`} />
-          <span className="text-[9px] font-medium">{trustMeta.label}</span>
+          <span className="text-[9px] font-semibold uppercase tracking-wide">{trustMeta.label}</span>
         </div>
       </div>
 
-      <p className="text-[11px] font-semibold leading-relaxed text-pro-text-muted/75">
+      <p className="text-[11px] text-pro-text-muted/80 leading-relaxed">
         {trustMeta.description}
       </p>
 
       {citation.evidence_span && (
-        <blockquote className="text-[13px] text-pro-text-muted/80 italic border-l-[3px] border-pro-accent/40 pl-4 py-1 my-1">
+        <blockquote className="text-[12px] text-pro-text-muted italic border-l-[3px] border-pro-accent/40 pl-3 py-0.5">
           "{citation.evidence_span}"
         </blockquote>
       )}
 
-      <div className="flex flex-col gap-3 pt-2 border-t border-pro-border/30">
+      <div className="flex flex-col gap-2 pt-2 border-t border-black/5 dark:border-white/5">
         <div className="flex items-start gap-2">
-          <span className="text-[10px] font-semibold text-pro-accent font-medium shrink-0 pt-0.5">
-            Claim:
+          <span className="text-[10px] font-semibold text-pro-accent shrink-0 pt-0.5">
+            Claim
           </span>
-          <span className="text-[11px] text-pro-text-muted font-medium bg-pro-bg px-2.5 py-1 rounded-md line-clamp-2">
+          <span className="text-[11px] text-pro-text-muted leading-relaxed line-clamp-2">
             {citation.claim}
           </span>
         </div>
@@ -97,9 +97,9 @@ export const CitationCard: React.FC<CitationCardProps> = ({
             e.stopPropagation();
             onNavigateToMeeting(citation.meeting_id);
           }}
-          className="self-end text-[10px] font-semibold cursor-pointer font-medium text-pro-text-muted hover:text-pro-accent transition-colors flex items-center gap-1 group/btn"
+          className="self-end text-[10px] font-semibold cursor-pointer text-pro-text-muted/70 hover:text-pro-accent transition-colors flex items-center gap-1 group/btn mt-1"
         >
-          Context{' '}
+          View Context
           <span className="group-hover/btn:translate-x-1 transition-transform">
             →
           </span>

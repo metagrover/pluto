@@ -23,8 +23,7 @@ interface DashboardProps {
   loading: boolean;
   isRecording: boolean;
   setSelectedMeetingId: (id: string | number | null) => void;
-  setActiveTab: (tab: 'hub' | 'people' | 'projects' | 'wiki') => void;
-  setAskPlutoVisible: (visible: boolean) => void;
+  setActiveTab: (tab: 'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat') => void;
   updatingTaskIds: Set<string>;
   actionError: string | null;
   handleCompleteTask: (id: string) => Promise<void>;
@@ -265,7 +264,6 @@ export const Dashboard = ({
   isRecording,
   setSelectedMeetingId,
   setActiveTab,
-  setAskPlutoVisible,
   updatingTaskIds,
   actionError,
   handleCompleteTask,
@@ -273,9 +271,8 @@ export const Dashboard = ({
   handleUpdateAttentionStatus,
 }: DashboardProps) => {
   const runAction = (action: DashboardAction) => {
-    if (action.target === 'ask') return setAskPlutoVisible(true);
-    if (action.target === 'meeting')
-      return setSelectedMeetingId(action.meetingId);
+    if (action.target === 'ask') return setActiveTab('chat');
+    if (action.target === 'meeting') return setSelectedMeetingId(action.meetingId);
     setActiveTab(action.target);
   };
 
@@ -344,7 +341,7 @@ export const Dashboard = ({
               </button>
               <button
                 type="button"
-                onClick={() => setAskPlutoVisible(true)}
+                onClick={() => setActiveTab('chat')}
                 className="inline-flex h-8 items-center gap-2 rounded-md px-3 text-[12px] font-bold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
               >
                 <Sparkles className="h-4 w-4" /> Ask Pluto
@@ -398,7 +395,7 @@ export const Dashboard = ({
                 </p>
                 <h2
                   id="attention-title"
-                  className="mt-1 text-[22px] font-semibold text-pro-text-main"
+                  className="mt-1 text-[22px] font-serif font-medium text-pro-text-main"
                 >
                   Attention
                 </h2>
@@ -591,7 +588,7 @@ export const Dashboard = ({
                 </p>
                 <h2
                   id="memory-title"
-                  className="mt-1 text-[22px] font-semibold text-pro-text-main"
+                  className="mt-1 text-[22px] font-serif font-medium text-pro-text-main"
                 >
                   Memory in motion
                 </h2>

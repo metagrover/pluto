@@ -28,7 +28,9 @@ export default {
         '2xl': '0.5rem',
         '3xl': '0.5rem',
       },
-    },
+      fontFamily: {
+        serif: ['Lora', 'Georgia', 'serif'],
+      },
   },
   plugins: [],
 };

@@ -778,18 +778,7 @@ export const ProjectsExecutionTab: React.FC<{
 
   return (
     <div className="flex flex-col gap-8" data-testid="projects-briefing">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="workspace-eyebrow">Execution brief</p>
-          <h1 className="mt-2 text-3xl font-semibold text-pro-text-main">
-            {executionSummary.heading}
-          </h1>
-          <p className="mt-2 text-sm font-medium text-pro-text-muted">
-            {executionSummary.detail}
-          </p>
-        </div>
-      </div>
+      <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">Projects</h1>
 
       {/* Project Groups */}
       <div className="flex flex-col">

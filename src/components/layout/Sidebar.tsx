@@ -1,12 +1,13 @@
 import {
   BookText,
-  CheckCircle2,
+  MessageSquare,
   Clock,
   FolderKanban,
   Home,
   Library,
   Monitor,
   Moon,
+  Plus,
   PlusCircle,
   Search,
   Settings,
@@ -16,8 +17,9 @@ import {
 } from 'lucide-react';
 import type { Meeting } from '../../types';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
+import { Logo } from '../Brand/Logo';
 
-type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki' | 'meetings';
+type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat' | 'settings';
 
 interface SidebarProps {
   sidebarVisible: boolean;
@@ -29,7 +31,6 @@ interface SidebarProps {
   onStartRecording: () => void;
   onOpenSearch: () => void;
   handleDeleteMeeting: (id: string | number) => void;
-  setSettingsVisible: (visible: boolean) => void;
   theme: 'light' | 'dark' | 'system';
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
 }
@@ -44,7 +45,6 @@ export const Sidebar = ({
   onStartRecording,
   onOpenSearch,
   handleDeleteMeeting,
-  setSettingsVisible,
   theme,
   setTheme,
 }: SidebarProps) => {
@@ -56,22 +56,15 @@ export const Sidebar = ({
                 ${sidebarVisible ? '' : 'lg:-mr-[260px]'}
             `}
     >
-      <div className="pt-4 pb-2 px-4 flex items-center">
-        <div className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white cursor-pointer transition-colors w-full">
-          <div className="w-[22px] h-[22px] rounded-[4px] bg-pro-text-main text-pro-surface flex items-center justify-center font-bold text-xs">
-            P
-          </div>
-          <span className="text-[14px] font-medium text-pro-text-main truncate">
-            Pluto Workspace
-          </span>
-        </div>
+      <div className="pt-[60px] pb-6 px-6 flex items-center">
+        <Logo size={24} showText />
       </div>
 
       <div className="px-3 pb-3 space-y-0.5">
         <button
           type="button"
           onClick={onOpenSearch}
-          className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-muted hover:bg-black/5 dark:hover:bg-white transition-colors focus-visible:outline-none group"
+          className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 transition-colors focus-visible:outline-none group"
         >
           <Search aria-hidden="true" size={16} className="shrink-0" />
           <span className="flex-1 text-left text-[14px] font-medium">
@@ -83,25 +76,15 @@ export const Sidebar = ({
         </button>
         <button
           type="button"
-          onClick={() => setSettingsVisible(true)}
-          className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-muted hover:bg-black/5 dark:hover:bg-white transition-colors focus-visible:outline-none"
-        >
-          <Settings aria-hidden="true" size={16} className="shrink-0" />
-          <span className="flex-1 text-left text-[14px] font-medium">
-            Settings & members
-          </span>
-        </button>
-        <button
-          type="button"
           onClick={onStartRecording}
-          className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-3 text-pro-text-muted hover:bg-black/5 dark:hover:bg-white transition-colors focus-visible:outline-none group"
+          className="flex min-h-[34px] w-full items-center gap-2 rounded-lg px-3 border border-black/5 dark:border-white/10 bg-white dark:bg-white/10 hover:border-black/15 dark:hover:border-white/20 hover:shadow-[0_0_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_0_12px_rgba(255,255,255,0.08)] text-pro-text-main transition-all duration-300 focus-visible:outline-none group shadow-[0_1px_2px_rgba(0,0,0,0.04)] mt-1"
         >
-          <PlusCircle
+          <Plus
             aria-hidden="true"
             size={16}
-            className="shrink-0 group-hover:text-pro-accent transition-colors"
+            className="shrink-0 text-pro-text-muted group-hover:text-pro-text-main transition-colors"
           />
-          <span className="flex-1 text-left text-[14px] font-medium">
+          <span className="flex-1 text-left text-[13px] font-medium">
             New meeting
           </span>
           <kbd className="font-sans text-[11px] font-medium text-pro-text-muted/60 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -119,7 +102,7 @@ export const Sidebar = ({
               setActiveTab('hub');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'hub' && !selectedMeetingId ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium' : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'}`}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'hub' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <Home
               size={16}
@@ -144,7 +127,7 @@ export const Sidebar = ({
               setActiveTab('projects');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'projects' && !selectedMeetingId ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium' : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'}`}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'projects' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <FolderKanban
               size={16}
@@ -163,6 +146,20 @@ export const Sidebar = ({
           <h3 className="px-3 text-[11px] font-semibold text-pro-text-muted/70 hover:text-pro-text-muted cursor-default mb-1 transition-colors">
             Intelligence
           </h3>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('chat');
+              setSelectedMeetingId(null);
+            }}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'chat' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium group focus-visible:outline-none'}`}
+          >
+            <MessageSquare size={16} className={activeTab === 'chat' && !selectedMeetingId ? 'text-pro-text-main shrink-0' : 'text-pro-text-muted group-hover:text-pro-text-main transition-colors shrink-0'} />
+            <span className="text-[14px] flex-1 text-left">Chat with Pluto</span>
+            <kbd className="font-sans text-[11px] font-medium text-pro-text-muted opacity-0 group-hover:opacity-100 transition-opacity">
+              ⌘K
+            </kbd>
+          </button>
           {(
             [
               { id: 'wiki', name: 'Knowledge', icon: BookText },
@@ -176,7 +173,7 @@ export const Sidebar = ({
                 setActiveTab(item.id);
                 setSelectedMeetingId(null);
               }}
-              className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === item.id && !selectedMeetingId ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium' : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'}`}
+              className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === item.id && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
             >
               <item.icon
                 size={16}
@@ -202,7 +199,7 @@ export const Sidebar = ({
               setActiveTab('meetings');
               setSelectedMeetingId(null);
             }}
-            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'meetings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium' : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'}`}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'meetings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'}`}
           >
             <Library
               size={16}
@@ -219,8 +216,8 @@ export const Sidebar = ({
         {/* Timeline / Private Section */}
         <div className="space-y-0.5">
           <div className="flex items-center justify-between px-3 mb-1 group cursor-pointer">
-            <h3 className="text-[11px] font-semibold text-pro-text-muted/70 group-hover:text-pro-text-muted transition-colors">
-              Recent Private
+            <h3 className="text-[11px] font-semibold text-pro-text-muted/70 group-hover:text-pro-text-main/70 hover:text-pro-text-main transition-colors">
+              Recent Meetings
             </h3>
             <PlusCircle
               size={14}
@@ -229,7 +226,7 @@ export const Sidebar = ({
             />
           </div>
           <div className="space-y-0.5">
-            {safeMeetings.slice(0, 5).map((m) => (
+            {safeMeetings.slice(0, 3).map((m) => (
               <div key={m.id} className="relative group">
                 <button
                   type="button"
@@ -241,8 +238,8 @@ export const Sidebar = ({
                                         w-full flex items-center gap-2 text-left px-3 py-[7px] rounded-md transition-colors
                                         ${
                                           selectedMeetingId === m.id
-                                            ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium'
-                                            : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'
+                                            ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium'
+                                            : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'
                                         }
                                     `}
                 >
@@ -258,7 +255,7 @@ export const Sidebar = ({
                       e.stopPropagation();
                       handleDeleteMeeting(m.id);
                     }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-black/10 dark:hover:bg-white text-pro-text-muted opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center z-30"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-pro-text-muted opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center z-30"
                     title="Delete Session"
                   >
                     <Trash2 size={13} />
@@ -270,16 +267,20 @@ export const Sidebar = ({
         </div>
       </div>
 
-      <div className="px-4 py-3 border-t border-pro-border flex items-center justify-between">
-        <div className="flex items-center gap-2 group cursor-pointer">
-          <CheckCircle2
-            size={14}
-            className="text-[#10B981] group-hover:opacity-80 transition-opacity"
-          />
-          <span className="text-[11px] font-medium text-pro-text-muted group-hover:text-pro-text-main transition-colors">
-            Safe to record
+      <div className="px-3 py-3 border-t border-pro-border flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('settings');
+            setSelectedMeetingId(null);
+          }}
+          className={`flex-1 flex items-center gap-2 group cursor-pointer px-2 py-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors focus-visible:outline-none ${activeTab === 'settings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : ''}`}
+        >
+          <Settings size={15} className={`${activeTab === 'settings' && !selectedMeetingId ? 'text-pro-text-main' : 'text-pro-text-main/70 group-hover:text-pro-text-main'} transition-colors shrink-0`} />
+          <span className={`text-[13px] ${activeTab === 'settings' && !selectedMeetingId ? 'font-medium text-pro-text-main' : 'font-medium text-pro-text-main/70 group-hover:text-pro-text-main'} transition-colors`}>
+            Settings
           </span>
-        </div>
+        </button>
 
         <button
           type="button"
@@ -292,7 +293,7 @@ export const Sidebar = ({
                   : 'dark',
             )
           }
-          className="w-6 h-6 rounded-md hover:bg-black/5 dark:hover:bg-white flex items-center justify-center text-pro-text-muted transition-colors"
+          className="w-6 h-6 rounded-md hover:bg-black/5 dark:hover:bg-white/10 flex items-center justify-center text-pro-text-main/70 hover:text-pro-text-main transition-colors"
           title={`Theme: ${theme}`}
         >
           {theme === 'dark' ? (
