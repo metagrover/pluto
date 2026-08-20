@@ -1,7 +1,7 @@
 # Dual-Channel Parakeet Shadow Trial
 
-**Issue:** #630  
-**Status:** Approved for a guarded sample; implementation remains gated  
+**Issue:** #630
+**Status:** Approved for a guarded sample; implementation remains gated
 **Depends on:** #441 final-transcription runtime and #629 mic-source evidence work
 
 ## Outcome
