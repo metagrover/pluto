@@ -215,14 +215,15 @@ export const MeetingAnalysisSkeleton = () => (
     data-meeting-artifact="analysis"
     data-state="loading"
     data-meeting-skeleton="analysis"
-    className="mx-auto flex min-h-[280px] w-full max-w-[760px] flex-col justify-center space-y-6 px-6 py-12 animate-pulse motion-reduce:animate-none md:px-8"
+    className="mx-auto flex min-h-[440px] w-full max-w-[760px] flex-col justify-start space-y-8 px-6 pb-16 pt-5 animate-pulse motion-reduce:animate-none md:px-8"
   >
     <p className="text-xs font-medium text-pro-text-muted/70">
       Preparing notes
     </p>
-    <div className="space-y-4">
-      <div className="h-3 w-5/6 rounded bg-pro-text-muted/10" />
-      <div className="h-3 w-3/5 rounded bg-pro-text-muted/10" />
+    <div className="space-y-5">
+      <div className="h-4 w-5/6 rounded bg-pro-text-muted/10" />
+      <div className="h-4 w-3/5 rounded bg-pro-text-muted/10" />
+      <div className="h-4 w-4/5 rounded bg-pro-text-muted/10" />
     </div>
   </section>
 );
