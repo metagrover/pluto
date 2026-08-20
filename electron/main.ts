@@ -54,13 +54,13 @@ import {
   transcribeJournalAlignedAudio,
 } from './recoveryTranscriptionAudio';
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
-import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
-import { LiveTranscriptionRolloutStore } from './transcription/liveTranscriptionRolloutStore';
 import {
-  activateDualShadowTrial,
   DUAL_SHADOW_TRIAL_EVIDENCE_DIGEST,
+  activateDualShadowTrial,
   resolveDualShadowTrial,
 } from './transcription/dualShadowTrial';
+import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
+import { LiveTranscriptionRolloutStore } from './transcription/liveTranscriptionRolloutStore';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
 import { ParakeetLiveClient } from './transcription/parakeetLiveClient';
 import {
