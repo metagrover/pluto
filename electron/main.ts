@@ -72,6 +72,10 @@ import {
   type ParakeetRuntimeHost,
   makeRuntimeHost,
 } from './transcription/parakeetRuntimeHost';
+import {
+  CachedMemoryPressureFreePercent,
+  selectShadowFreePercent,
+} from './transcription/shadowMemoryPressure';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -107,46 +111,43 @@ const probeAudioDuration = async (inputPath: string) =>
     });
   });
 
-const probeAvailableMemory = async () =>
-  await new Promise<{
-    availableMemoryBytes: number;
-    memoryPressureFreePercent?: number;
-  }>((resolve) => {
+const probeMacMemoryPressureFreePercent = async (): Promise<number | null> =>
+  await new Promise<number | null>((resolve) => {
     const probe = spawn('/usr/bin/memory_pressure', ['-Q']);
     let stdout = '';
     let settled = false;
-    const finish = (value: {
-      availableMemoryBytes: number;
-      memoryPressureFreePercent?: number;
-    }) => {
+    const finish = (value: number | null) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timeout);
       resolve(value);
     };
     const timeout = setTimeout(() => {
       probe.kill('SIGTERM');
-      finish({ availableMemoryBytes: os.freemem() });
+      finish(null);
     }, 2_000);
     probe.stdout.on('data', (chunk) => {
       stdout += String(chunk);
     });
-    probe.on('error', () => finish({ availableMemoryBytes: os.freemem() }));
+    probe.on('error', () => finish(null));
     probe.on('close', (code) => {
-      clearTimeout(timeout);
-      const percentage =
-        code === 0 ? parseMacMemoryPressureFreePercent(stdout) : null;
-      finish(
-        percentage === null
-          ? { availableMemoryBytes: os.freemem() }
-          : {
-              availableMemoryBytes: Math.floor(
-                (os.totalmem() * percentage) / 100,
-              ),
-              memoryPressureFreePercent: percentage,
-            },
-      );
+      finish(code === 0 ? parseMacMemoryPressureFreePercent(stdout) : null);
     });
   });
+
+const probeAvailableMemory = async () => {
+  const percentage = await probeMacMemoryPressureFreePercent();
+  return percentage === null
+    ? { availableMemoryBytes: os.freemem() }
+    : {
+        availableMemoryBytes: Math.floor((os.totalmem() * percentage) / 100),
+        memoryPressureFreePercent: percentage,
+      };
+};
+
+const shadowMemoryPressure = new CachedMemoryPressureFreePercent(
+  probeMacMemoryPressureFreePercent,
+);
 
 const sampleOwnedRuntimeRss = ():
   | { mlxRssBytes: number; parakeetRssBytes: number }
@@ -482,6 +483,8 @@ app.on('before-quit', async () => {
 });
 
 app.whenReady().then(async () => {
+  shadowMemoryPressure.refresh();
+  setInterval(() => shadowMemoryPressure.refresh(), 30_000).unref();
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
@@ -1675,7 +1678,10 @@ app.whenReady().then(async () => {
         mlxRssBytes: owned.mlxRssBytes,
         parakeetRssBytes: owned.parakeetRssBytes,
         electronRssBytes: process.memoryUsage().rss,
-        freePercent: (os.freemem() / os.totalmem()) * 100,
+        freePercent: selectShadowFreePercent({
+          memoryPressureFreePercent: shadowMemoryPressure.current(),
+          osFreePercent: (os.freemem() / os.totalmem()) * 100,
+        }),
         thermal,
       };
     },

@@ -5,6 +5,7 @@ import {
   type ShadowReceipt,
   descendantPids,
 } from '../../electron/transcription/parakeetLiveMeetingCoordinator';
+import { selectShadowFreePercent } from '../../electron/transcription/shadowMemoryPressure';
 
 const receipt = (overrides: Partial<ShadowReceipt> = {}): ShadowReceipt => ({
   durable: true,
@@ -204,6 +205,46 @@ describe('ParakeetLiveMeetingCoordinator', () => {
     expect(client.append).not.toHaveBeenCalled();
     expect(dependencies.stitchWindow).not.toHaveBeenCalled();
     expect(dependencies.writeReport).toHaveBeenCalledOnce();
+  });
+
+  it('admits a 20% macOS pressure reading despite lower os free memory', async () => {
+    const { coordinator, client } = makeCoordinator({
+      sampleResources: () => ({
+        ...safeResources(),
+        freePercent: selectShadowFreePercent({
+          memoryPressureFreePercent: 20,
+          osFreePercent: 9,
+        }),
+      }),
+    });
+
+    await coordinator.start('meeting-1');
+    await appendFullWindow(coordinator, 'system');
+
+    expect(coordinator.isFenced()).toBe(false);
+    expect(client.append).toHaveBeenCalledOnce();
+  });
+
+  it('fences when pressure is unavailable and os free memory is below 15%', async () => {
+    let samples = 0;
+    const { coordinator, client } = makeCoordinator({
+      sampleResources: () =>
+        samples++ === 0
+          ? safeResources()
+          : {
+              ...safeResources(),
+              freePercent: selectShadowFreePercent({
+                memoryPressureFreePercent: undefined,
+                osFreePercent: 9,
+              }),
+            },
+    });
+
+    await coordinator.start('meeting-1');
+    await appendFullWindow(coordinator, 'system');
+
+    expect(coordinator.isFenced()).toBe(true);
+    expect(client.append).not.toHaveBeenCalled();
   });
 
   it('removes each stitched WAV exactly once after its append settles', async () => {
