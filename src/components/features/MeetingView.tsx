@@ -1,5 +1,6 @@
 import {
   Check,
+  ChevronRight,
   Copy,
   Loader2,
   MessageSquare,
@@ -1050,9 +1051,17 @@ export const MeetingView = ({
           className="meeting-transcript-toggle"
           onClick={() => setTranscriptVisible(true)}
         >
-          <MessageSquare aria-hidden="true" size={15} />
-          Transcript
-          <span>Open the saved record</span>
+          <span className="meeting-transcript-toggle__icon" aria-hidden="true">
+            <MessageSquare size={17} />
+          </span>
+          <span className="meeting-transcript-toggle__identity">
+            <span>Transcript</span>
+            <span>Saved record</span>
+          </span>
+          <span className="meeting-transcript-toggle__action">
+            View transcript
+            <ChevronRight aria-hidden="true" size={16} />
+          </span>
         </button>
       ) : null}
 
