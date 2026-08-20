@@ -339,4 +339,72 @@ describe('ParakeetLiveMeetingCoordinator', () => {
       }),
     );
   });
+
+  it('resets before an unsafe second-meeting preflight and records its own failure', async () => {
+    const client = makeClient();
+    let samples = 0;
+    const { coordinator, dependencies } = makeCoordinator({
+      createClient: async () => client,
+      sampleResources: () =>
+        samples++ === 0
+          ? safeResources()
+          : { ...safeResources(), thermal: 'serious' as const },
+    });
+
+    await coordinator.start('meeting-1');
+    await coordinator.stop();
+    await coordinator.start('meeting-2');
+
+    expect(dependencies.writeReport).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        verdict: 'failed',
+        windowsSubmitted: { mic: 0, system: 0 },
+        failureCodes: expect.arrayContaining(['resource_fence']),
+      }),
+    );
+  });
+
+  it('fences and reports a temporary WAV deletion failure after a successful append', async () => {
+    const removeTemporaryAudio = vi.fn(async () => {
+      throw new Error('not exposed');
+    });
+    const { coordinator, client, dependencies } = makeCoordinator({
+      removeTemporaryAudio,
+    });
+
+    await coordinator.start('meeting-1');
+    await appendFullWindow(coordinator, 'system');
+
+    expect(client.append).toHaveBeenCalledOnce();
+    expect(coordinator.isFenced()).toBe(true);
+    expect(dependencies.writeReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdict: 'failed',
+        failureCodes: expect.arrayContaining([
+          'temporary_audio_cleanup_failed',
+        ]),
+      }),
+    );
+  });
+
+  it('retries report persistence with abort failure evidence after a passed report write fails', async () => {
+    const writeReport = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('not exposed'))
+      .mockResolvedValueOnce(undefined);
+    const { coordinator } = makeCoordinator({ writeReport });
+
+    await coordinator.start('meeting-1');
+    await coordinator.stop();
+
+    expect(writeReport).toHaveBeenCalledTimes(2);
+    expect(writeReport).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        verdict: 'failed',
+        failureCodes: expect.arrayContaining(['report_write_failed']),
+      }),
+    );
+  });
 });

@@ -50,9 +50,11 @@ type ShadowFailureCode =
   | 'create_failed'
   | 'flush_failed'
   | 'open_failed'
+  | 'report_write_failed'
   | 'resource_fence'
   | 'stitch_failed'
   | 'stitch_missing'
+  | 'temporary_audio_cleanup_failed'
   | 'window_invalid';
 
 export type DualShadowTrialReport = {
@@ -170,15 +172,15 @@ export class ParakeetLiveMeetingCoordinator {
       !this.options.writeReport
     )
       return;
-    if (unsafeResources(this.options.sampleResources())) {
-      await this.abort('resource_fence');
-      return;
-    }
     if (this.client && this.meetingId === meetingId) return;
     await this.stop();
     if (this.fenced || !this.options.enabled()) return;
     this.resetMeeting();
     this.meetingId = meetingId;
+    if (unsafeResources(this.options.sampleResources())) {
+      await this.abort('resource_fence');
+      return;
+    }
     this.identities = Object.fromEntries(
       SOURCES.map((source) => [
         source,
@@ -255,7 +257,12 @@ export class ParakeetLiveMeetingCoordinator {
       await this.abort('cleanup_uncertain');
       return;
     }
-    await this.writeReport();
+    try {
+      await this.writeReport();
+    } catch {
+      await this.abort('report_write_failed');
+      return;
+    }
     this.clear();
   }
 
@@ -304,9 +311,11 @@ export class ParakeetLiveMeetingCoordinator {
     } catch {
       await this.abort('append_failed');
     } finally {
-      await this.options
-        .removeTemporaryAudio?.(audioPath)
-        .catch(() => undefined);
+      try {
+        await this.options.removeTemporaryAudio?.(audioPath);
+      } catch {
+        await this.abort('temporary_audio_cleanup_failed');
+      }
     }
   }
 
@@ -351,11 +360,11 @@ export class ParakeetLiveMeetingCoordinator {
 
   private async writeReport(): Promise<void> {
     if (this.reported) return;
-    this.reported = true;
     await this.options.writeReport?.({
       ...this.report,
       verdict: this.report.failureCodes.length === 0 ? 'passed' : 'failed',
     });
+    this.reported = true;
   }
 
   private clear(): void {
