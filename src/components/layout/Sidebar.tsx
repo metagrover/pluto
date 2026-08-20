@@ -1,10 +1,10 @@
 import {
   BookText,
-  MessageSquare,
   Clock,
   FolderKanban,
   Home,
   Library,
+  MessageSquare,
   Monitor,
   Moon,
   Plus,
@@ -19,7 +19,14 @@ import type { Meeting } from '../../types';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
 import { Logo } from '../Brand/Logo';
 
-type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat' | 'settings';
+type ActiveTab =
+  | 'hub'
+  | 'people'
+  | 'projects'
+  | 'wiki'
+  | 'meetings'
+  | 'chat'
+  | 'settings';
 
 interface SidebarProps {
   sidebarVisible: boolean;
@@ -29,6 +36,8 @@ interface SidebarProps {
   setSelectedMeetingId: (id: string | number | null) => void;
   safeMeetings: Meeting[];
   onStartRecording: () => void;
+  isRecordingActive?: boolean;
+  onReturnToRecording?: () => void;
   onOpenSearch: () => void;
   handleDeleteMeeting: (id: string | number) => void;
   theme: 'light' | 'dark' | 'system';
@@ -43,6 +52,8 @@ export const Sidebar = ({
   setSelectedMeetingId,
   safeMeetings,
   onStartRecording,
+  isRecordingActive = false,
+  onReturnToRecording,
   onOpenSearch,
   handleDeleteMeeting,
   theme,
@@ -76,20 +87,33 @@ export const Sidebar = ({
         </button>
         <button
           type="button"
-          onClick={onStartRecording}
+          onClick={
+            isRecordingActive
+              ? (onReturnToRecording ?? onStartRecording)
+              : onStartRecording
+          }
           className="flex min-h-[34px] w-full items-center gap-2 rounded-lg px-3 border border-black/5 dark:border-white/10 bg-white dark:bg-white/10 hover:border-black/15 dark:hover:border-white/20 hover:shadow-[0_0_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_0_12px_rgba(255,255,255,0.08)] text-pro-text-main transition-all duration-300 focus-visible:outline-none group shadow-[0_1px_2px_rgba(0,0,0,0.04)] mt-1"
         >
-          <Plus
-            aria-hidden="true"
-            size={16}
-            className="shrink-0 text-pro-text-muted group-hover:text-pro-text-main transition-colors"
-          />
+          {isRecordingActive ? (
+            <span
+              aria-hidden="true"
+              className="h-2 w-2 shrink-0 rounded-full bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.14)]"
+            />
+          ) : (
+            <Plus
+              aria-hidden="true"
+              size={16}
+              className="shrink-0 text-pro-text-muted group-hover:text-pro-text-main transition-colors"
+            />
+          )}
           <span className="flex-1 text-left text-[13px] font-medium">
-            New meeting
+            {isRecordingActive ? 'Return to recording' : 'New meeting'}
           </span>
-          <kbd className="font-sans text-[11px] font-medium text-pro-text-muted/60 opacity-0 group-hover:opacity-100 transition-opacity">
-            ⌘N
-          </kbd>
+          {!isRecordingActive && (
+            <kbd className="font-sans text-[11px] font-medium text-pro-text-muted/60 opacity-0 group-hover:opacity-100 transition-opacity">
+              ⌘N
+            </kbd>
+          )}
         </button>
       </div>
 
@@ -154,8 +178,17 @@ export const Sidebar = ({
             }}
             className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'chat' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium group focus-visible:outline-none'}`}
           >
-            <MessageSquare size={16} className={activeTab === 'chat' && !selectedMeetingId ? 'text-pro-text-main shrink-0' : 'text-pro-text-muted group-hover:text-pro-text-main transition-colors shrink-0'} />
-            <span className="text-[14px] flex-1 text-left">Chat with Pluto</span>
+            <MessageSquare
+              size={16}
+              className={
+                activeTab === 'chat' && !selectedMeetingId
+                  ? 'text-pro-text-main shrink-0'
+                  : 'text-pro-text-muted group-hover:text-pro-text-main transition-colors shrink-0'
+              }
+            />
+            <span className="text-[14px] flex-1 text-left">
+              Chat with Pluto
+            </span>
             <kbd className="font-sans text-[11px] font-medium text-pro-text-muted opacity-0 group-hover:opacity-100 transition-opacity">
               ⌘K
             </kbd>
@@ -276,8 +309,13 @@ export const Sidebar = ({
           }}
           className={`flex-1 flex items-center gap-2 group cursor-pointer px-2 py-1.5 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors focus-visible:outline-none ${activeTab === 'settings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium' : ''}`}
         >
-          <Settings size={15} className={`${activeTab === 'settings' && !selectedMeetingId ? 'text-pro-text-main' : 'text-pro-text-main/70 group-hover:text-pro-text-main'} transition-colors shrink-0`} />
-          <span className={`text-[13px] ${activeTab === 'settings' && !selectedMeetingId ? 'font-medium text-pro-text-main' : 'font-medium text-pro-text-main/70 group-hover:text-pro-text-main'} transition-colors`}>
+          <Settings
+            size={15}
+            className={`${activeTab === 'settings' && !selectedMeetingId ? 'text-pro-text-main' : 'text-pro-text-main/70 group-hover:text-pro-text-main'} transition-colors shrink-0`}
+          />
+          <span
+            className={`text-[13px] ${activeTab === 'settings' && !selectedMeetingId ? 'font-medium text-pro-text-main' : 'font-medium text-pro-text-main/70 group-hover:text-pro-text-main'} transition-colors`}
+          >
             Settings
           </span>
         </button>

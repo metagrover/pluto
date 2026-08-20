@@ -816,6 +816,8 @@ function App() {
                 startSessionRef.current();
               }
             }}
+            isRecordingActive={activeRecording}
+            onReturnToRecording={() => setZenVisible(true)}
             onOpenSearch={() => setSearchVisible(true)}
             handleDeleteMeeting={handleDeleteMeeting}
             theme={theme}

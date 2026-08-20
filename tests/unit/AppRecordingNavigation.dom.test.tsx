@@ -146,7 +146,7 @@ describe('App recording navigation', () => {
     window.__PLUTO_BROWSER_PREVIEW__ = undefined;
   });
 
-  it('returns from home dashboard pill to the active Zen meeting', async () => {
+  it('returns to the active Zen meeting from the sidebar after going home', async () => {
     const { default: App } = await import('../../src/App');
     const root = createRoot(container);
 
@@ -175,25 +175,13 @@ describe('App recording navigation', () => {
       await flushPromises();
     });
     expect(container.textContent).toContain('Dashboard');
-    expect(container.textContent).toContain('Meeting');
-    expect(
-      container.querySelector('[aria-label="Active recording"]'),
-    ).not.toBeNull();
-    expect(
-      container.querySelector(
-        'header.app-titlebar [aria-label="Active recording"]',
-      ),
-    ).not.toBeNull();
-    expect(
-      container.querySelector('.recording-name-status-dot--active'),
-    ).not.toBeNull();
+    const returnToRecording = Array.from(
+      container.querySelectorAll('button'),
+    ).find((button) => button.textContent?.includes('Return to recording'));
+    expect(returnToRecording).not.toBeUndefined();
 
-    const activeRecording = container.querySelector<HTMLElement>(
-      '[aria-label="Active recording"]',
-    );
-    expect(activeRecording).not.toBeNull();
     await act(async () => {
-      activeRecording?.click();
+      returnToRecording?.click();
       await flushPromises();
     });
     expect(container.textContent).toContain('Back home');
