@@ -116,6 +116,11 @@ describe('MeetingView progressive reveal', () => {
     expect(
       container.querySelector('[data-meeting-skeleton="analysis"]'),
     ).not.toBeNull();
+    expect(
+      container
+        .querySelector('[data-meeting-skeleton="analysis"]')
+        ?.classList.contains('max-w-[760px]'),
+    ).toBe(true);
     expect(container.textContent).not.toContain(
       'The transcript is ready first.',
     );

@@ -3,6 +3,7 @@ import { readDownstreamProcessingLease } from './downstreamProcessingLease.ts';
 import { shouldAutoProcessMeetingAnalysis } from './retryMeetingTranscriptValidation.ts';
 
 const PROCESSING_WAKE_GRACE_MS = 50;
+const PROCESSING_POLL_INTERVAL_MS = 2_000;
 
 export const shouldRunMeetingFinalTranscription = (
   meeting: Partial<Meeting> | null | undefined,
@@ -129,7 +130,10 @@ export const nextMeetingProcessingWakeDelay = (
   const deadline = lease ? Date.parse(lease.deadlineAt) : Number.NaN;
   if (!Number.isFinite(deadline)) return null;
   if (deadline > now) {
-    return deadline - now + PROCESSING_WAKE_GRACE_MS;
+    return Math.min(
+      deadline - now + PROCESSING_WAKE_GRACE_MS,
+      PROCESSING_POLL_INTERVAL_MS,
+    );
   }
   return attemptedFingerprints.has(meetingProcessingFingerprint(head))
     ? null

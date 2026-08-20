@@ -203,7 +203,7 @@ describe('post-meeting processing coordinator', () => {
     ).toBeNull();
   });
 
-  it('schedules a refresh when a durable processing lease expires', () => {
+  it('polls an active durable processing lease instead of waiting for expiry', () => {
     const now = Date.parse('2026-08-04T00:00:00.000Z');
     const meeting = {
       ...incomplete('processing'),
@@ -246,5 +246,23 @@ describe('post-meeting processing coordinator', () => {
     expect(
       selectNextMeetingForProcessing([meeting], attempted, now + 2_000)?.id,
     ).toBe('processing');
+  });
+
+  it('refreshes a long-running lease before its deadline', () => {
+    const now = Date.parse('2026-08-04T00:00:00.000Z');
+    const meeting = {
+      ...incomplete('processing'),
+      downstream_processing_json: JSON.stringify({
+        schemaVersion: 1,
+        state: 'processing',
+        transcriptValidatedAt: '2026-08-03T23:59:00.000Z',
+        runId: 'run',
+        startedAt: '2026-08-03T23:59:00.000Z',
+        deadlineAt: new Date(now + 30 * 60_000).toISOString(),
+        stage: 'analysis',
+      }),
+    };
+
+    expect(nextMeetingProcessingWakeDelay([meeting], now)).toBe(2_000);
   });
 });
