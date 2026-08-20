@@ -302,20 +302,37 @@
     @apply hidden;
   }
   .meeting-document-menu__panel {
-    @apply absolute right-0 top-12 z-50 flex min-w-48 flex-col gap-1 rounded-xl border p-2 shadow-lg;
+    @apply absolute right-0 top-12 z-50 flex min-w-56 flex-col rounded-xl border p-1.5 shadow-lg;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
   }
   .meeting-document-menu__panel .meeting-toolbar-button {
     @apply w-full justify-start;
   }
+  .meeting-document-menu__section {
+    @apply flex flex-col gap-1 p-1;
+  }
+  .meeting-document-menu__section + .meeting-document-menu__section {
+    @apply border-t pt-2;
+    border-color: var(--notes-rule);
+  }
+  .meeting-document-menu__section--danger {
+    @apply mt-1;
+  }
   .meeting-toolbar-button--undo {
     @apply border;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
   }
+  .meeting-template-picker {
+    @apply flex flex-col gap-1.5 px-1 py-1;
+  }
+  .meeting-template-picker__label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.1em];
+    color: var(--notes-muted);
+  }
   .meeting-template-picker select {
-    @apply min-h-10 w-full rounded-lg border border-pro-border bg-pro-surface px-2.5 text-xs font-medium text-pro-text-main outline-none hover:bg-pro-hover focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply min-h-10 w-full rounded-md border border-pro-border bg-pro-surface px-2.5 text-sm font-medium text-pro-text-main outline-none hover:bg-pro-hover focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .meeting-toolbar-button {
     @apply inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-50;
@@ -326,7 +343,7 @@
     background: var(--notes-wash);
   }
   .meeting-toolbar-button--danger {
-    @apply px-2 text-red-600/70 hover:border-red-200 hover:bg-red-50 hover:text-red-700;
+    @apply text-red-600/75 hover:bg-red-50 hover:text-red-700;
   }
   .meeting-notes-surface {
     @apply pt-0;
