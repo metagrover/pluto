@@ -294,28 +294,34 @@ export class ParakeetLiveMeetingCoordinator {
       return;
     }
     this.report.windowsSubmitted[source] += 1;
+    let appendFailure: ShadowFailureCode | null = null;
     try {
       if (unsafeResources(this.options.sampleResources())) {
-        await this.abort('resource_fence');
-        return;
+        appendFailure = 'resource_fence';
+      } else {
+        await this.client!.append({
+          ...this.identities![source],
+          sequence: ++this.nextOrdinals[source],
+          audioPath,
+          chunkStartSeconds: window.startSec,
+          chunkEndSeconds: window.endSec,
+          checksumSha256: window.receipts.at(-1)!.checksumSha256,
+        });
+        this.report.windowsCompleted[source] += 1;
       }
-      await this.client!.append({
-        ...this.identities![source],
-        sequence: ++this.nextOrdinals[source],
-        audioPath,
-        chunkStartSeconds: window.startSec,
-        chunkEndSeconds: window.endSec,
-        checksumSha256: window.receipts.at(-1)!.checksumSha256,
-      });
-      this.report.windowsCompleted[source] += 1;
     } catch {
-      await this.abort('append_failed');
-    } finally {
-      try {
-        await this.options.removeTemporaryAudio?.(audioPath);
-      } catch {
-        await this.abort('temporary_audio_cleanup_failed');
-      }
+      appendFailure = 'append_failed';
+    }
+    let cleanupFailure: ShadowFailureCode | null = null;
+    try {
+      await this.options.removeTemporaryAudio?.(audioPath);
+    } catch {
+      cleanupFailure = 'temporary_audio_cleanup_failed';
+    }
+    if (appendFailure || cleanupFailure) {
+      if (appendFailure) this.failure(appendFailure);
+      if (cleanupFailure) this.failure(cleanupFailure);
+      await this.abort(appendFailure ?? cleanupFailure!);
     }
   }
 

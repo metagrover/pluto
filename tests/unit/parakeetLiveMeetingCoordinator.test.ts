@@ -388,6 +388,34 @@ describe('ParakeetLiveMeetingCoordinator', () => {
     );
   });
 
+  it('reports append and temporary WAV cleanup failures together with one rollback', async () => {
+    const client = makeClient();
+    client.append.mockRejectedValueOnce(new Error('not exposed'));
+    const rollback = vi.fn(async () => true);
+    const { coordinator, dependencies } = makeCoordinator({
+      createClient: async () => client,
+      rollback,
+      removeTemporaryAudio: vi.fn(async () => {
+        throw new Error('not exposed');
+      }),
+    });
+
+    await coordinator.start('meeting-1');
+    await appendFullWindow(coordinator, 'system');
+
+    expect(rollback).toHaveBeenCalledOnce();
+    expect(dependencies.writeReport).toHaveBeenCalledOnce();
+    expect(dependencies.writeReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        verdict: 'failed',
+        failureCodes: expect.arrayContaining([
+          'append_failed',
+          'temporary_audio_cleanup_failed',
+        ]),
+      }),
+    );
+  });
+
   it('retries report persistence with abort failure evidence after a passed report write fails', async () => {
     const writeReport = vi
       .fn()
