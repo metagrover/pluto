@@ -1,13 +1,7 @@
-import {
-  Check,
-  CheckCircle2,
-  FileText,
-  Loader2,
-  Pencil,
-  X,
-} from 'lucide-react';
+import { Check, CheckCircle2, FileText, Loader2, Pencil } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import TextareaAutosize from 'react-textarea-autosize';
 import type { Meeting, TranscriptSegment } from '../../types';
 import type {
   MeetingNotesBlock,
@@ -157,11 +151,6 @@ const SaveStatus = ({ state }: { state: SaveState }) => {
     </span>
   );
 };
-
-import TextareaAutosize from 'react-textarea-autosize';
-
-const getBlockTextarea = (block: HTMLElement): HTMLTextAreaElement | null =>
-  block.querySelector('textarea');
 
 const navigateToAdjacentTextarea = (
   current: HTMLTextAreaElement,
@@ -563,7 +552,7 @@ export const MeetingNotesDocument = ({
           <SaveStatus state={saveState} />
         </output>
         {model.sections
-          .filter((s) => s.kind != 'scratchpad')
+          .filter((s) => s.kind !== 'scratchpad')
           .map((section) => (
             <section
               key={section.id}

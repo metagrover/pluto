@@ -4,6 +4,7 @@ import {
   Clock,
   FolderKanban,
   Home,
+  Library,
   Monitor,
   Moon,
   PlusCircle,
@@ -16,11 +17,9 @@ import {
 import type { Meeting } from '../../types';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
 
-type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki';
+type ActiveTab = 'hub' | 'people' | 'projects' | 'wiki' | 'meetings';
 
 interface SidebarProps {
-  transcriptVisible?: boolean;
-  setTranscriptVisible?: (visible: boolean) => void;
   sidebarVisible: boolean;
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
@@ -36,8 +35,6 @@ interface SidebarProps {
 }
 
 export const Sidebar = ({
-  transcriptVisible,
-  setTranscriptVisible,
   sidebarVisible,
   activeTab,
   setActiveTab,
@@ -194,11 +191,36 @@ export const Sidebar = ({
           ))}
         </div>
 
+        {/* All Meetings Section */}
+        <div className="space-y-0.5">
+          <h3 className="px-3 text-[11px] font-semibold text-pro-text-muted/70 hover:text-pro-text-muted cursor-default mb-1 transition-colors">
+            Meetings
+          </h3>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('meetings');
+              setSelectedMeetingId(null);
+            }}
+            className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md transition-colors ${activeTab === 'meetings' && !selectedMeetingId ? 'bg-black/5 dark:bg-white text-pro-text-main font-medium' : 'text-pro-text-muted hover:bg-black/5 dark:hover:bg-white font-medium'}`}
+          >
+            <Library
+              size={16}
+              className={
+                activeTab === 'meetings' && !selectedMeetingId
+                  ? 'text-pro-text-main'
+                  : ''
+              }
+            />
+            <span className="text-[14px]">All meetings</span>
+          </button>
+        </div>
+
         {/* Timeline / Private Section */}
         <div className="space-y-0.5">
           <div className="flex items-center justify-between px-3 mb-1 group cursor-pointer">
             <h3 className="text-[11px] font-semibold text-pro-text-muted/70 group-hover:text-pro-text-muted transition-colors">
-              Private
+              Recent Private
             </h3>
             <PlusCircle
               size={14}
@@ -207,7 +229,7 @@ export const Sidebar = ({
             />
           </div>
           <div className="space-y-0.5">
-            {safeMeetings.map((m) => (
+            {safeMeetings.slice(0, 5).map((m) => (
               <div key={m.id} className="relative group">
                 <button
                   type="button"
