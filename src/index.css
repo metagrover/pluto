@@ -332,32 +332,43 @@
     @apply pt-0;
   }
   .meeting-failure-notice {
-    @apply mx-auto flex w-full max-w-[760px] items-center gap-3 border-y px-6 py-4 md:px-8;
+    @apply mx-auto flex w-full max-w-[760px] items-center gap-3 border-y px-6 py-5 md:px-8;
     border-color: var(--notes-rule);
   }
   .meeting-failure-notice__marker {
-    @apply h-2 w-2 shrink-0 rounded-full;
+    @apply mt-0.5 h-2 w-2 shrink-0 self-start rounded-full;
     background: var(--notes-accent);
   }
   .meeting-failure-notice__copy {
     @apply min-w-0;
   }
   .meeting-failure-notice__copy strong {
-    @apply block text-sm font-semibold leading-5;
+    @apply block text-[0.95rem] font-semibold leading-5;
     color: var(--notes-ink);
   }
   .meeting-failure-notice__copy p {
-    @apply mt-0.5 text-sm leading-5;
+    @apply mt-1 text-sm leading-5;
     color: var(--notes-muted);
   }
   .meeting-failure-notice__action {
-    @apply ml-auto min-h-11 shrink-0 rounded-lg border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-60;
-    border-color: var(--notes-rule);
-    color: var(--notes-ink);
-    background: var(--notes-paper-raised);
+    @apply ml-auto inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md px-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-65;
+    color: var(--notes-muted);
   }
   .meeting-failure-notice__action:hover {
+    color: var(--notes-ink);
     background: var(--notes-wash);
+  }
+  .meeting-analysis-placeholder {
+    @apply mx-auto w-full max-w-[760px] border-b px-6 py-16 md:px-8;
+    border-color: var(--notes-rule);
+  }
+  .meeting-analysis-placeholder span {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em];
+    color: var(--notes-muted);
+  }
+  .meeting-analysis-placeholder p {
+    @apply mt-3 max-w-sm text-[0.95rem] leading-6;
+    color: var(--notes-muted);
   }
   .meeting-transcript-surface {
     @apply mx-auto mt-5 max-w-[760px] pt-5;
@@ -740,7 +751,7 @@
     color: var(--notes-faint);
   }
   .meeting-transcript-toggle {
-    @apply mx-auto mt-3 w-full max-w-[720px] border-t px-1 py-5 text-left;
+    @apply mx-auto mt-0 w-full max-w-[760px] border-b px-6 py-5 text-left md:px-8;
     border-color: var(--notes-rule);
   }
   .meeting-transcript-toggle span {

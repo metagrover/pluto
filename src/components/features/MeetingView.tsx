@@ -191,7 +191,17 @@ export const TranscriptIntegrityPanel = ({
           onClick={onRetry}
           disabled={retrying}
         >
-          {retrying ? 'Retrying…' : panelCopy.actionLabel}
+          {retrying ? (
+            <>
+              <Loader2
+                aria-hidden="true"
+                className="h-3.5 w-3.5 animate-spin"
+              />
+              Retrying analysis
+            </>
+          ) : (
+            panelCopy.actionLabel
+          )}
         </button>
       ) : null}
     </section>
@@ -229,6 +239,17 @@ export const MeetingAnalysisSkeleton = () => (
         </div>
       ))}
     </div>
+  </section>
+);
+
+export const MeetingAnalysisUnavailable = () => (
+  <section
+    aria-label="Notes are unavailable"
+    data-meeting-analysis-placeholder
+    className="meeting-analysis-placeholder"
+  >
+    <span>Notes</span>
+    <p>They will appear here when analysis completes.</p>
   </section>
 );
 
@@ -557,6 +578,7 @@ export const MeetingView = ({
     userNotes: selectedMeeting.user_notes || '',
     editsMap,
   });
+  const sourceFirst = downstreamPresentation.state !== 'ready';
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
@@ -1002,10 +1024,76 @@ export const MeetingView = ({
         </p>
       ) : null}
 
+      {sourceFirst && !transcriptVisible ? (
+        <button
+          type="button"
+          data-meeting-transcript-toggle
+          className="meeting-transcript-toggle"
+          onClick={() => setTranscriptVisible(true)}
+        >
+          <MessageSquare aria-hidden="true" size={15} />
+          Transcript
+          <span>Open the saved record</span>
+        </button>
+      ) : null}
+
+      {sourceFirst && transcriptVisible ? (
+        <section
+          data-meeting-artifact="transcript"
+          data-state={hasTranscriptContent ? 'ready' : 'loading'}
+          className="meeting-transcript-surface"
+          aria-labelledby="meeting-transcript-heading"
+        >
+          <header className="meeting-transcript-header">
+            <div>
+              <h2 id="meeting-transcript-heading">Transcript</h2>
+              <p>Saved record</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTranscriptVisible(false)}
+              aria-label="Close transcript"
+            >
+              <X aria-hidden="true" size={17} />
+            </button>
+          </header>
+          <div className="meeting-transcript-record">
+            {hasTranscriptContent ? (
+              mergedTranscriptSegments.map((segment: TranscriptSegment) => {
+                const segmentKey = `${String(segment.speaker ?? 'unknown')}-${segment.start}-${segment.end}-${segment.text}`;
+                const seconds = Number.isFinite(segment.start)
+                  ? Math.max(0, segment.start || 0)
+                  : 0;
+                const timestamp = `${Math.floor(seconds / 60)}:${Math.floor(
+                  seconds % 60,
+                )
+                  .toString()
+                  .padStart(2, '0')}`;
+                return (
+                  <div key={segmentKey} className="meeting-transcript-row">
+                    <div>
+                      <strong>{segment.speaker || 'Unknown speaker'}</strong>
+                      <time>{timestamp}</time>
+                    </div>
+                    <p>{segment.text}</p>
+                  </div>
+                );
+              })
+            ) : (
+              <MeetingTranscriptSkeleton />
+            )}
+          </div>
+        </section>
+      ) : null}
+
       <div className="meeting-notes-surface" aria-label="Notes">
         {downstreamPresentation.state === 'loading' &&
         !notesDocument.hasAnalysis ? (
           <MeetingAnalysisSkeleton />
+        ) : null}
+        {downstreamPresentation.state === 'failed' &&
+        !notesDocument.hasAnalysis ? (
+          <MeetingAnalysisUnavailable />
         ) : null}
         <div
           data-meeting-artifact="analysis"
@@ -1021,7 +1109,7 @@ export const MeetingView = ({
         </div>
       </div>
 
-      {!transcriptVisible ? (
+      {!sourceFirst && !transcriptVisible ? (
         <button
           type="button"
           data-meeting-transcript-toggle
@@ -1030,11 +1118,11 @@ export const MeetingView = ({
         >
           <MessageSquare aria-hidden="true" size={15} />
           Transcript
-          <span>Open the verbatim record</span>
+          <span>Open the saved record</span>
         </button>
       ) : null}
 
-      {transcriptVisible && (
+      {!sourceFirst && transcriptVisible && (
         <section
           data-meeting-artifact="transcript"
           data-state={hasTranscriptContent ? 'ready' : 'loading'}
@@ -1044,7 +1132,7 @@ export const MeetingView = ({
           <header className="meeting-transcript-header">
             <div>
               <h2 id="meeting-transcript-heading">Transcript</h2>
-              <p>Verbatim record</p>
+              <p>Saved record</p>
             </div>
             <button
               type="button"

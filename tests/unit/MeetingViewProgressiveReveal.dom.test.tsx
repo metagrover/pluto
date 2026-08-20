@@ -144,6 +144,36 @@ describe('MeetingView progressive reveal', () => {
     ).toBeNull();
   });
 
+  it('puts the saved transcript ahead of an unavailable analysis', async () => {
+    await act(async () =>
+      renderMeeting({
+        ...baseMeeting,
+        transcript_status: 'validated',
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'failed',
+          stage: 'analysis',
+        }),
+      }),
+    );
+
+    const transcript = container.querySelector(
+      '[data-meeting-transcript-toggle]',
+    );
+    const placeholder = container.querySelector(
+      '[data-meeting-analysis-placeholder]',
+    );
+
+    expect(transcript).not.toBeNull();
+    expect(placeholder?.textContent).toContain(
+      'They will appear here when analysis completes.',
+    );
+    expect(
+      transcript?.compareDocumentPosition(placeholder as Node) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('offers the approved notes templates', async () => {
     await act(async () => renderMeeting(analyzedMeeting));
 
