@@ -29,7 +29,7 @@ describe('transcription architecture cleanup', () => {
 
   it('does not expose obsolete backend, device, model, or quality choices', () => {
     const settings = read('src/utils/transcriptionSettings.ts');
-    const surface = read('src/components/overlays/SettingsOverlay.tsx');
+    const surface = read('src/components/features/SettingsTab.tsx');
 
     expect(settings).not.toContain(['whisperx', 'current'].join('_'));
     expect(settings).not.toContain(['whisperx', 'tuned'].join('_'));

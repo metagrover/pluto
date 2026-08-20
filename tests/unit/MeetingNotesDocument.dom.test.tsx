@@ -124,58 +124,29 @@ describe('MeetingNotesDocument', () => {
     ).map((heading) => heading.textContent?.trim());
     expect(sectionHeadings).toEqual([
       'Decisions & next steps',
-      'Your notes',
       'Documentation architecture',
     ]);
-    expect(container.textContent).toContain('Written by you');
+    expect(container.textContent).not.toContain('Written by you');
     expect(container.querySelectorAll('article')).toHaveLength(1);
   });
 
-  it('opens contextual evidence without replacing the note', async () => {
+  it('keeps the note focused when source browsing is not explicitly opened', async () => {
     await act(async () => renderDocument());
 
-    const sourceButton = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Show source for Use docs as code."]',
-    );
-    await act(async () => sourceButton?.click());
-
     const source = document.querySelector('[data-notes-source]');
-    expect(source?.textContent).toContain('Use docs as code.');
-    expect(source?.textContent).toContain('Maya');
-    expect(source?.textContent).toContain('Daniel');
-    expect(source?.textContent).toContain('0:07');
+    expect(source).toBeNull();
     expect(container.textContent).toContain('Documentation architecture');
   });
 
-  it('autosaves scratchpad changes and exposes save status', async () => {
+  it('does not render a duplicate scratchpad beside the meeting document', async () => {
     vi.useFakeTimers();
     await act(async () => renderDocument());
 
     const notes = container.querySelector<HTMLTextAreaElement>(
       'textarea[aria-label="Your meeting notes"]',
     );
-    const valueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype,
-      'value',
-    )?.set;
-    await act(async () => {
-      valueSetter?.call(notes, 'Keep the migration reversible and documented.');
-      notes?.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    expect(container.textContent).toContain('Unsaved changes');
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(700);
-    });
-
-    expect(invoke).toHaveBeenCalledWith(
-      'SAVE_MEETING',
-      expect.objectContaining({
-        id: meeting.id,
-        user_notes: 'Keep the migration reversible and documented.',
-      }),
-    );
-    expect(container.textContent).toContain('Saved locally');
+    expect(notes).toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it('uses a real persisted checkbox for generated actions', async () => {

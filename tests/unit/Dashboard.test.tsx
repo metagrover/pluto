@@ -241,7 +241,7 @@ describe('Dashboard', () => {
     expect(markup).toContain('id="dashboard-current-read-claim"');
     expect(markup).toContain('line-clamp-3');
     expect(markup).toContain('break-words');
-    expect(markup).toContain('text-[26px]');
+    expect(markup).toContain('text-[24px]');
     expect(markup).toContain('&lt;review&gt;unbrokenunbrokenunbrokenunbroken');
     expect(markup).toContain('&lt;/review&gt; &amp; keep this exact');
     expect(markup).not.toContain('Show full current read');

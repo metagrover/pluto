@@ -205,7 +205,7 @@ describe('buildMeetingNotesDocument', () => {
       },
     });
 
-    expect(document.sections[0].blocks[0].completed).toBeUndefined();
+    expect(document.sections[0].blocks[0].completed).toBe(false);
     expect(document.sections[0].blocks[1].completed).toBe(true);
   });
 });

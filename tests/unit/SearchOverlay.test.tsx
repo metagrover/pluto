@@ -105,7 +105,7 @@ describe('SearchOverlay', () => {
     ).toContain('p-2');
     expect(
       container.querySelector('[data-search-result-kind]')?.className,
-    ).toContain('hover:bg-pro-surface/40');
+    ).toContain('hover:bg-pro-surface');
   });
 
   it('does not pre-highlight a result before the user hovers or focuses it', () => {
@@ -129,7 +129,7 @@ describe('SearchOverlay', () => {
     );
 
     expect(buttons[0]?.hasAttribute('aria-selected')).toBe(false);
-    expect(buttons[0]?.className).toContain('hover:bg-pro-surface/40');
+    expect(buttons[0]?.className).toContain('hover:bg-pro-surface');
     expect(buttons[0]?.className).not.toContain('shadow-premium');
   });
 

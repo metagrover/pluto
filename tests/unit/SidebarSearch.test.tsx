@@ -45,11 +45,11 @@ describe('Sidebar search launcher', () => {
       ),
     );
 
-    const search = container.querySelector<HTMLButtonElement>(
-      '[data-sidebar-search]',
+    const search = [...container.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Search'),
     );
     const start = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Start recording'),
+      button.textContent?.includes('New meeting'),
     );
 
     expect(search?.textContent).toContain('Search');
