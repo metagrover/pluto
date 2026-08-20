@@ -58,6 +58,8 @@ interface MeetingViewProps {
   highlightEntities: (text: string) => ReactNode;
   transcriptVisible: boolean;
   setTranscriptVisible: (val: boolean) => void;
+  onRetryTranscriptValidation?: () => void;
+  transcriptValidationRetrying?: boolean;
 }
 
 type MeetingNotesTemplate =
@@ -79,6 +81,8 @@ export const TranscriptIntegrityPanel = ({
   mixedAudioPath,
   activityEvidenceAvailable = false,
   hasExistingAnalysis = false,
+  onRetry,
+  retrying = false,
 }: {
   status: Meeting['transcript_status'];
   finalizationStatus?: Meeting['finalization_status'];
@@ -169,15 +173,45 @@ export const TranscriptIntegrityPanel = ({
             }
           : null;
 
-  if (!terminalCopy) return null;
+  let canRetryFinalTranscription = false;
+  try {
+    const integrity = JSON.parse(integrityJson || '{}') as {
+      finalTranscription?: { policy?: unknown; state?: unknown };
+    };
+    canRetryFinalTranscription =
+      integrity.finalTranscription?.policy === 'parakeet_final_v1' &&
+      integrity.finalTranscription.state === 'needs_attention';
+  } catch {
+    canRetryFinalTranscription = false;
+  }
+
+  const finalTranscriptionCopy = canRetryFinalTranscription
+    ? {
+        title: "Couldn't finish the transcript",
+        detail: 'Your recording is safe.',
+      }
+    : null;
+  const panelCopy = terminalCopy || finalTranscriptionCopy;
+
+  if (!panelCopy) return null;
 
   return (
     <section
       aria-live="polite"
       className="rounded-md border border-amber-500/20 bg-amber-500/[0.04] p-5"
     >
-      <strong className="text-sm text-pro-text">{terminalCopy.title}</strong>
-      <p className="mt-1 text-sm text-pro-text-muted">{terminalCopy.detail}</p>
+      <strong className="text-sm text-pro-text">{panelCopy.title}</strong>
+      <p className="mt-1 text-sm text-pro-text-muted">{panelCopy.detail}</p>
+      {canRetryFinalTranscription && onRetry ? (
+        <button
+          type="button"
+          className="mt-3 text-sm font-semibold text-pro-accent hover:underline disabled:cursor-wait disabled:opacity-60"
+          onClick={onRetry}
+          disabled={retrying}
+        >
+          {retrying ? 'Trying again…' : 'Try again'}
+        </button>
+      ) : null}
     </section>
   );
 };
@@ -476,6 +510,8 @@ export const MeetingView = ({
   handleDeleteMeeting,
   transcriptVisible,
   setTranscriptVisible,
+  onRetryTranscriptValidation,
+  transcriptValidationRetrying = false,
 }: MeetingViewProps) => {
   if (!selectedMeeting) return null;
   const [isRegeneratingNotes, setIsRegeneratingNotes] = useState(false);
@@ -753,6 +789,8 @@ export const MeetingView = ({
         hasExistingAnalysis={Boolean(
           selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
         )}
+        onRetry={onRetryTranscriptValidation}
+        retrying={transcriptValidationRetrying}
       />
       <header className="meeting-document-header">
         <div className="w-full min-w-0">

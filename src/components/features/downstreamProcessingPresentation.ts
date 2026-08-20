@@ -16,6 +16,31 @@ export const getDownstreamProcessingPresentation = (
     return { state: 'ready' };
   }
 
+  try {
+    const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
+      finalTranscription?: {
+        policy?: unknown;
+        state?: unknown;
+        failure?: unknown;
+      };
+    };
+    const finalTranscription = integrity.finalTranscription;
+    if (
+      meeting.transcript_status === 'needs_attention' &&
+      finalTranscription?.policy === 'parakeet_final_v1' &&
+      finalTranscription.state === 'needs_attention' &&
+      typeof finalTranscription.failure === 'string'
+    ) {
+      return {
+        state: 'failed',
+        title: "Couldn't finish the transcript",
+        detail: 'Your recording is safe. Try again to continue.',
+      };
+    }
+  } catch {
+    // A malformed integrity record falls through to the existing safe loading state.
+  }
+
   let state: string | null = null;
   try {
     const parsed = JSON.parse(meeting.downstream_processing_json || '{}') as {

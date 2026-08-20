@@ -234,6 +234,32 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).not.toMatch(/validat|needs attention|retry|recovery/i);
   });
 
+  it('offers a retry for a preserved Parakeet finalization failure', () => {
+    const markup = renderToStaticMarkup(
+      <TranscriptIntegrityPanel
+        status="needs_attention"
+        integrityJson={JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          causes: [{ code: 'required_source_failed' }],
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'required_source_failed',
+          },
+        })}
+        audioPath="/synthetic/mic.wav"
+        systemAudioPath="/synthetic/system.wav"
+        activityEvidenceAvailable
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(markup).toContain('finish the transcript');
+    expect(markup).toContain('Your recording is safe.');
+    expect(markup).toContain('Try again');
+  });
+
   it('does not offer deletion for a recovery-required meeting', () => {
     expect(canDeleteMeeting('recovery_required')).toBe(false);
     expect(canDeleteMeeting('finalized')).toBe(true);

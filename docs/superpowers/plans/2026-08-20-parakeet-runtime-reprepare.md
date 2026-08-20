@@ -46,3 +46,16 @@ Add a content-free changelog fragment linked to #630.
 Run: `pnpm exec vitest run tests/unit/parakeetFinalClient.test.ts tests/unit/parakeetRuntimeHost.test.ts --reporter=dot && pnpm run changelog:check && git diff --check`
 
 Commit: `fix(transcription): reprepare Parakeet after runtime unload`
+
+### Task 2: Surface preserved final-transcription failures
+
+**Files:**
+- Modify: `src/components/features/downstreamProcessingPresentation.ts`
+- Modify: `src/components/features/MeetingView.tsx`
+- Modify: `src/App.tsx`
+- Modify: `tests/unit/downstreamProcessingPresentation.test.ts`
+- Modify: `tests/unit/MeetingViewTranscriptIntegrity.test.tsx`
+
+- [x] Treat a terminal `parakeet_final_v1` failure as a failed transcript state, not analysis in progress.
+- [x] Provide one retry action that reuses the saved meeting recovery path.
+- [x] Verify the renderer state and runtime restart regression together.

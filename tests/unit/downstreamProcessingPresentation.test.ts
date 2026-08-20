@@ -47,6 +47,27 @@ describe('downstream processing presentation', () => {
     );
   });
 
+  it('does not present a failed Parakeet finalization as pending analysis', () => {
+    expect(
+      getDownstreamProcessingPresentation({
+        transcript_status: 'needs_attention',
+        transcript_integrity_json: JSON.stringify({
+          schemaVersion: 2,
+          state: 'needs_attention',
+          finalTranscription: {
+            policy: 'parakeet_final_v1',
+            state: 'needs_attention',
+            failure: 'required_source_failed',
+          },
+        }),
+      }),
+    ).toEqual({
+      state: 'failed',
+      title: "Couldn't finish the transcript",
+      detail: 'Your recording is safe. Try again to continue.',
+    });
+  });
+
   it('keeps showing a skeleton when completion has no analysis artifact', () => {
     expect(
       getDownstreamProcessingPresentation({

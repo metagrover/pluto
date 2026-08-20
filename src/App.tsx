@@ -907,6 +907,10 @@ function App() {
                 highlightEntities={highlightEntities}
                 transcriptVisible={transcriptVisible}
                 setTranscriptVisible={setTranscriptVisible}
+                onRetryTranscriptValidation={() => {
+                  void handleRetryTranscriptValidation();
+                }}
+                transcriptValidationRetrying={transcriptValidationRetrying}
               />
             ) : activeTab === 'hub' ? (
               <Dashboard
