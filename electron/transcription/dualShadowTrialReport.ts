@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import {
   closeSync,
+  fchmodSync,
   fsyncSync,
   mkdirSync,
   openSync,
@@ -157,21 +159,42 @@ export const writeDualShadowTrialReport = ({
   report: unknown;
 }): void => {
   const filePath = join(userDataPath, 'parakeet-dual-shadow-trial-report.json');
-  const temporaryPath = join(dirname(filePath), `.${basename(filePath)}.0.tmp`);
   const payload = `${serializeDualShadowTrialReport(report)}\n`;
   mkdirSync(userDataPath, { recursive: true, mode: 0o700 });
+  let temporaryPath: string | null = null;
+  let descriptor: number | null = null;
   try {
-    writeFileSync(temporaryPath, payload, { encoding: 'utf8', mode: 0o600 });
-    const descriptor = openSync(temporaryPath, 'r');
-    try {
-      fsyncSync(descriptor);
-    } finally {
-      closeSync(descriptor);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const candidate = join(
+        dirname(filePath),
+        `.${basename(filePath)}.${randomUUID()}.tmp`,
+      );
+      try {
+        descriptor = openSync(candidate, 'wx', 0o600);
+        temporaryPath = candidate;
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      }
     }
+    if (descriptor === null || temporaryPath === null)
+      throw new Error('dual_shadow_report_temporary_collision');
+    fchmodSync(descriptor, 0o600);
+    writeFileSync(descriptor, payload, { encoding: 'utf8' });
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = null;
     renameSync(temporaryPath, filePath);
   } catch (error) {
+    if (descriptor !== null) {
+      try {
+        closeSync(descriptor);
+      } catch {
+        // Best-effort descriptor cleanup before retaining the previous report.
+      }
+    }
     try {
-      unlinkSync(temporaryPath);
+      if (temporaryPath) unlinkSync(temporaryPath);
     } catch {
       // The previous report remains authoritative if temporary cleanup fails.
     }

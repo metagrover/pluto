@@ -105,4 +105,21 @@ describe('dual shadow trial report', () => {
       ),
     ).toBe(false);
   });
+
+  it('never reuses a permissive pre-existing temporary file', () => {
+    const userDataPath = mkdtempSync(
+      join(tmpdir(), 'pluto-dual-shadow-report-'),
+    );
+    directories.push(userDataPath);
+    const staleTemporaryPath = join(
+      userDataPath,
+      '.parakeet-dual-shadow-trial-report.json.0.tmp',
+    );
+    writeFileSync(staleTemporaryPath, 'stale', { mode: 0o644 });
+
+    writeDualShadowTrialReport({ userDataPath, report: report() });
+
+    expect(readFileSync(staleTemporaryPath, 'utf8')).toBe('stale');
+    expect(statSync(staleTemporaryPath).mode & 0o777).toBe(0o644);
+  });
 });
