@@ -2,8 +2,8 @@ import {
   Check,
   ChevronRight,
   Copy,
+  FileText,
   Loader2,
-  MessageSquare,
   MoreHorizontal,
   Sparkles,
   X,
@@ -1052,7 +1052,7 @@ export const MeetingView = ({
             className="meeting-transcript-toggle"
             onClick={() => setTranscriptVisible(true)}
           >
-            <MessageSquare aria-hidden="true" size={17} />
+            <FileText aria-hidden="true" size={17} />
             <span>Transcript</span>
             <span className="meeting-transcript-toggle__action">
               View

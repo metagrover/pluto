@@ -776,7 +776,7 @@
     background: var(--notes-rule);
   }
   .meeting-transcript-toggle {
-    @apply min-h-10 gap-2 rounded-md px-2 py-2 text-left text-sm font-semibold transition-colors;
+    @apply w-full min-h-10 gap-2 rounded-md px-2 py-2 text-left text-sm font-semibold transition-colors;
   }
   .meeting-transcript-toggle:hover {
     color: var(--notes-ink);
