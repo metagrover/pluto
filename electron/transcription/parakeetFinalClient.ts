@@ -66,6 +66,9 @@ export class ParakeetFinalClient {
         idleTimeoutMs: options.idleTimeoutMs,
         diagnostic: options.diagnostic,
       });
+    this.runtimeHost.transport.onFailure(() => {
+      this.preparePromise = null;
+    });
   }
 
   prepare(): Promise<TranscriptionRuntimeHealth> {

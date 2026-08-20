@@ -79,6 +79,46 @@ describe('ParakeetFinalClient', () => {
     await expect(second).resolves.toEqual(await first);
   });
 
+  it('reprepares a new runtime after idle unload before final transcription', async () => {
+    vi.useFakeTimers();
+    const firstChild = new FakeChild();
+    const restartedChild = new FakeChild();
+    const host = makeRuntimeHost({
+      paths,
+      spawn: vi
+        .fn()
+        .mockReturnValueOnce(firstChild)
+        .mockReturnValueOnce(restartedChild),
+      idleTimeoutMs: 1,
+    });
+    const client = new ParakeetFinalClient({ paths, runtimeHost: host });
+
+    const ready = client.prepare();
+    firstChild.respond(prepared(String(firstChild.writes[0].id)));
+    await ready;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(firstChild.kill).toHaveBeenCalledWith('SIGTERM');
+
+    const transcription = client.transcribe({
+      meetingId: 'after-idle-unload',
+      role: 'final_validation',
+      source: 'system',
+      audioPath: '/user/recordings/after-idle-unload.wav',
+      language: 'en',
+    });
+    await vi.waitFor(() => expect(restartedChild.writes).toHaveLength(1));
+    expect(restartedChild.writes[0]).toMatchObject({ method: 'prepare' });
+    restartedChild.respond(prepared(String(restartedChild.writes[0].id)));
+
+    await vi.waitFor(() => expect(restartedChild.writes).toHaveLength(2));
+    expect(restartedChild.writes[1]).toMatchObject({ method: 'transcribe' });
+    restartedChild.respond(success(String(restartedChild.writes[1].id)));
+    await expect(transcription).resolves.toMatchObject({
+      segments: [{ text: 'hello' }],
+    });
+    vi.useRealTimers();
+  });
+
   it('submits final transcription requests sequentially', async () => {
     const child = new FakeChild();
     const client = new ParakeetFinalClient({ paths, spawn: () => child });
