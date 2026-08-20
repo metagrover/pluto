@@ -9,6 +9,7 @@ const receipt = (overrides: Partial<ShadowReceipt> = {}): ShadowReceipt => ({
   durable: true,
   meetingId: 'meeting-1',
   generation: 'generation-1',
+  manifestRevision: 4,
   source: 'system',
   sequence: 0,
   checksumSha256: 'a'.repeat(64),
@@ -29,6 +30,15 @@ const fiveSecondReceipts = (start = 0): ShadowReceipt[] =>
   );
 
 describe('ShadowWindowAssembler', () => {
+  it('accepts only 30-second windows', () => {
+    expect(
+      () => new ShadowWindowAssembler({ windowSeconds: 29 as 30 }),
+    ).toThrow('shadow_receipt_invalid');
+    expect(
+      () => new ShadowWindowAssembler({ windowSeconds: 30 }),
+    ).not.toThrow();
+  });
+
   it('emits one sealed 30-second window for six contiguous receipts', () => {
     const assembler = new ShadowWindowAssembler({ windowSeconds: 30 });
     const emitted = fiveSecondReceipts().flatMap((entry) =>
@@ -182,7 +192,19 @@ describe('ShadowWindowAssembler', () => {
   it('rejects invalid receipts before assembling them', () => {
     const assembler = new ShadowWindowAssembler({ windowSeconds: 30 });
 
+    expect(() => assembler.add(null as unknown as ShadowReceipt)).toThrow(
+      'shadow_receipt_invalid',
+    );
+    expect(() => assembler.add(42 as unknown as ShadowReceipt)).toThrow(
+      'shadow_receipt_invalid',
+    );
     expect(() => assembler.add(receipt({ durable: undefined }))).toThrow(
+      'shadow_receipt_invalid',
+    );
+    expect(() => assembler.add(receipt({ manifestRevision: -1 }))).toThrow(
+      'shadow_receipt_invalid',
+    );
+    expect(() => assembler.add(receipt({ manifestRevision: 1.5 }))).toThrow(
       'shadow_receipt_invalid',
     );
     expect(() =>

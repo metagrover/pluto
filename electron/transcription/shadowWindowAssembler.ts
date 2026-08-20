@@ -2,6 +2,7 @@ export type ShadowReceipt = {
   durable: true;
   meetingId: string;
   generation: string;
+  manifestRevision: number;
   source: 'mic' | 'system';
   sequence: number;
   checksumSha256: string;
@@ -36,21 +37,33 @@ const invalid = (): never => {
   throw new Error('shadow_receipt_invalid');
 };
 
-const receiptIsValid = (receipt: ShadowReceipt): boolean =>
-  receipt.durable === true &&
-  typeof receipt.meetingId === 'string' &&
-  receipt.meetingId.length > 0 &&
-  typeof receipt.generation === 'string' &&
-  receipt.generation.length > 0 &&
-  (receipt.source === 'mic' || receipt.source === 'system') &&
-  Number.isSafeInteger(receipt.sequence) &&
-  receipt.sequence >= 0 &&
-  SHA_256.test(receipt.checksumSha256) &&
-  typeof receipt.repairAudioRelativePath === 'string' &&
-  receipt.repairAudioRelativePath.length > 0 &&
-  Number.isFinite(receipt.chunkStartSec) &&
-  Number.isFinite(receipt.chunkEndSec) &&
-  receipt.chunkStartSec < receipt.chunkEndSec;
+const receiptIsValid = (receipt: unknown): receipt is ShadowReceipt => {
+  if (typeof receipt !== 'object' || receipt === null) return false;
+  const candidate = receipt as Record<string, unknown>;
+  return (
+    candidate.durable === true &&
+    typeof candidate.meetingId === 'string' &&
+    candidate.meetingId.length > 0 &&
+    typeof candidate.generation === 'string' &&
+    candidate.generation.length > 0 &&
+    typeof candidate.manifestRevision === 'number' &&
+    Number.isSafeInteger(candidate.manifestRevision) &&
+    candidate.manifestRevision >= 0 &&
+    (candidate.source === 'mic' || candidate.source === 'system') &&
+    typeof candidate.sequence === 'number' &&
+    Number.isSafeInteger(candidate.sequence) &&
+    candidate.sequence >= 0 &&
+    typeof candidate.checksumSha256 === 'string' &&
+    SHA_256.test(candidate.checksumSha256) &&
+    typeof candidate.repairAudioRelativePath === 'string' &&
+    candidate.repairAudioRelativePath.length > 0 &&
+    typeof candidate.chunkStartSec === 'number' &&
+    typeof candidate.chunkEndSec === 'number' &&
+    Number.isFinite(candidate.chunkStartSec) &&
+    Number.isFinite(candidate.chunkEndSec) &&
+    candidate.chunkStartSec < candidate.chunkEndSec
+  );
+};
 
 const sameIdentity = (left: ShadowIdentity, right: ShadowReceipt): boolean =>
   left.meetingId === right.meetingId &&
@@ -67,7 +80,7 @@ export class ShadowWindowAssembler {
   private receipts: ShadowReceipt[] = [];
 
   constructor(private readonly options: ShadowWindowAssemblerOptions) {
-    if (!Number.isFinite(options.windowSeconds) || options.windowSeconds <= 0) {
+    if (options.windowSeconds !== 30) {
       throw new Error('shadow_receipt_invalid');
     }
   }
