@@ -37,61 +37,68 @@
     @apply flex items-center justify-between gap-4 border-b border-pro-border/30 pb-4 mb-8;
   }
   .people-search {
-    @apply flex h-11 w-full items-center gap-2 rounded-xl border border-pro-border bg-pro-surface px-3 text-pro-text-muted focus-within:ring-2 focus-within:ring-pro-accent md:w-64;
+    @apply flex h-8 w-[160px] items-center gap-2 rounded-lg border border-pro-border bg-pro-surface px-3 text-pro-text-muted transition-all duration-300 hover:border-pro-text-muted/60 focus-within:w-[230px] focus-within:border-pro-accent focus-within:ring-2 focus-within:ring-pro-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-pro-bg;
   }
   .people-search input {
-    @apply min-w-0 flex-1 bg-transparent text-sm text-pro-text-main outline-none placeholder:text-pro-text-muted;
+    @apply min-w-0 flex-1 bg-transparent text-[13px] text-pro-text-main outline-none placeholder:text-pro-text-muted/80;
   }
   .people-list {
     @apply mt-7;
   }
   .people-list__heading {
-    @apply flex items-end justify-between border-b border-pro-border pb-3;
+    @apply mb-2 flex items-center gap-3 px-3 -mx-3;
   }
   .people-list__heading h2 {
-    @apply text-lg font-black tracking-tight text-pro-text-main;
+    @apply text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted/40;
   }
-  .people-list__heading span {
-    @apply text-xs font-semibold text-pro-text-muted;
+  .people-list__heading > div {
+    @apply h-px flex-1 bg-pro-border/15;
   }
   .person-commitments {
-    @apply font-bold text-amber-500;
+    @apply inline-flex items-center rounded border border-amber-500/15 bg-amber-500/8 px-1.5 py-0.5 text-[10px] font-semibold text-amber-500/90;
   }
   .person-row {
-    @apply grid min-h-[92px] grid-cols-[44px_minmax(130px,0.55fr)_minmax(240px,1.25fr)_minmax(150px,0.65fr)_auto] items-center gap-4 border-b border-pro-border py-4;
+    @apply relative;
   }
   .person-row--selected {
-    @apply bg-pro-accent/5 ring-2 ring-pro-accent/35;
+    @apply rounded-xl bg-pro-accent/5;
+  }
+  .person-row__meeting {
+    @apply flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 hover:bg-pro-surface/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-default disabled:hover:bg-transparent;
   }
   .person-avatar {
-    @apply flex h-10 w-10 items-center justify-center rounded-xl bg-pro-hover text-sm font-black text-pro-accent;
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-pro-border/40 bg-pro-surface/80 text-[11px] font-semibold text-pro-text-muted/50 transition-colors duration-150;
+  }
+  .person-row__meeting:hover .person-avatar {
+    @apply border-pro-accent/30 bg-pro-accent/5 text-pro-accent;
   }
   .person-identity {
-    @apply min-w-0;
+    @apply flex min-w-0 items-baseline gap-2.5;
   }
-  .person-identity h3 {
-    @apply truncate text-sm font-black text-pro-text-main;
+  .person-identity strong {
+    @apply truncate text-[13.5px] font-medium leading-none text-pro-text-main transition-colors duration-150;
   }
-  .person-identity p {
-    @apply mt-1 truncate text-xs text-pro-text-muted;
+  .person-identity span {
+    @apply truncate text-[11px] leading-none text-pro-text-muted/50;
+  }
+  .person-row__meeting:hover .person-identity strong {
+    @apply text-pro-accent;
   }
   .person-context {
-    @apply min-w-0;
-  }
-  .person-context p {
-    @apply truncate text-sm font-semibold text-pro-text-main;
-  }
-  .person-context span {
-    @apply mt-1 block line-clamp-2 text-xs leading-5 text-pro-text-muted;
+    @apply min-w-0 flex-1 truncate text-[12px] text-pro-text-muted/60;
   }
   .person-meta {
-    @apply flex flex-col gap-1.5 text-[11px] font-semibold text-pro-text-muted;
+    @apply flex items-center gap-3 pl-4 text-[11px] text-pro-text-muted/45;
   }
-  .person-meta span {
+  .person-meeting-count,
+  .person-date {
     @apply flex items-center gap-1.5;
   }
-  .person-row > button {
-    @apply inline-flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-pro-accent transition-colors hover:bg-pro-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-not-allowed disabled:text-pro-text-muted disabled:opacity-50;
+  .person-row__chevron {
+    @apply -mr-1 shrink-0 text-pro-text-muted/20 transition-colors duration-150;
+  }
+  .person-row__meeting:hover .person-row__chevron {
+    @apply text-pro-accent/50;
   }
   .people-directory {
     @apply border-b border-pro-border py-2;
@@ -122,22 +129,13 @@
   }
 
   @media (max-width: 980px) {
-    .person-row {
-      @apply grid-cols-[44px_minmax(120px,0.7fr)_minmax(220px,1.3fr)_auto];
-    }
-    .person-meta {
+    .person-meeting-count {
       @apply hidden;
     }
   }
   @media (max-width: 720px) {
-    .person-row {
-      @apply grid-cols-[44px_minmax(0,1fr)_auto] gap-3;
-    }
     .person-context {
-      @apply col-span-2 col-start-2;
-    }
-    .person-row > button {
-      @apply row-start-1;
+      @apply hidden;
     }
   }
 }
@@ -538,19 +536,19 @@
   .meeting-markdown-preview li {
     @apply my-1 pl-1;
   }
-  .meeting-markdown-preview li:has(> input[type='checkbox']) {
+  .meeting-markdown-preview li:has(> input[type="checkbox"]) {
     @apply -ml-6 flex list-none items-start gap-2 pl-0;
   }
-  .meeting-markdown-preview input[type='checkbox'] {
+  .meeting-markdown-preview input[type="checkbox"] {
     @apply mt-[3px] h-[18px] w-[18px] shrink-0 cursor-pointer appearance-none rounded-full border-[1.5px] bg-transparent;
     border-color: var(--notes-faint);
   }
-  .meeting-markdown-preview input[type='checkbox']:checked {
+  .meeting-markdown-preview input[type="checkbox"]:checked {
     border-color: hsl(var(--pro-accent));
     background-color: hsl(var(--pro-accent));
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.5 8 2.8 2.8L12.5 4.8' fill='none' stroke='%23f8f8f7' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'/%3E%3C/svg%3E");
   }
-  .meeting-markdown-preview input[type='checkbox']:focus-visible {
+  .meeting-markdown-preview input[type="checkbox"]:focus-visible {
     @apply outline-none ring-2 ring-pro-accent ring-offset-2;
   }
   .meeting-note-block.is-source-selected {
@@ -766,7 +764,7 @@
     .meeting-notes-document {
       @apply px-5 pt-7;
     }
-    
+
     .meeting-source-pane {
       @apply inset-x-2 bottom-2 max-h-[76vh];
       width: calc(100vw - 1rem);
@@ -1009,8 +1007,12 @@
 
 :root {
   /* Fluid Typography & Spacing */
-  --font-main: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
-  --font-secondary: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+  --font-main: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji",
+    "Segoe UI Symbol";
+  --font-secondary: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji",
+    "Segoe UI Symbol";
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
 
   /* HSL Color System - Pluto Official Palette */
@@ -1081,8 +1083,6 @@
   background: hsla(var(--pro-bg) / 0.8);
   border: 1px solid hsla(var(--pro-border) / 0.1);
 }
-
-
 
 /* Advanced Animations */
 @keyframes transcript-caret {
@@ -1258,7 +1258,10 @@
 .meeting-notes-document h3 {
   @apply text-[24px] font-semibold leading-[1.3] mt-6 mb-3 text-pro-text-main;
 }
-.meeting-notes-document p, .meeting-notes-document ul, .meeting-notes-document li, .meeting-notes-document div {
+.meeting-notes-document p,
+.meeting-notes-document ul,
+.meeting-notes-document li,
+.meeting-notes-document div {
   @apply text-[16px] leading-[1.5] text-pro-text-main;
 }
 
@@ -1278,13 +1281,15 @@
   height: 18px !important;
   margin: 3px 0 0 !important;
 }
-.meeting-action-check input[type=checkbox] {
+.meeting-action-check input[type="checkbox"] {
   @apply absolute inset-0 opacity-0 cursor-pointer w-full h-full m-0;
 }
-.meeting-action-check span[aria-hidden=true] {
+.meeting-action-check span[aria-hidden="true"] {
   @apply relative top-[2px] flex h-[18px] w-[18px] items-center justify-center rounded-full border border-pro-border bg-transparent transition-colors;
 }
-.meeting-action-check input[type=checkbox]:checked + span[aria-hidden=true] {
+.meeting-action-check
+  input[type="checkbox"]:checked
+  + span[aria-hidden="true"] {
   background: hsl(var(--pro-accent));
   border-color: hsl(var(--pro-accent));
   color: hsl(var(--pro-bg));
@@ -1292,14 +1297,14 @@
 
 /* Fix that gray dot on the right side of the list item */
 .meeting-note-block__meta {
-  @apply hidden; 
+  @apply hidden;
 }
 .meeting-note-block:hover .meeting-note-block__meta {
   @apply flex opacity-100;
 }
 
 .meeting-notes-document h1 {
-  @apply tracking-tight; 
+  @apply tracking-tight;
 }
 .meeting-notes-document h2 {
   @apply text-[24px] font-semibold tracking-tight mt-6 mb-2 border-b-0;
@@ -1337,8 +1342,12 @@
 .meeting-note-block__marker {
   @apply relative mt-[10px] ml-[8px] mr-[12px] h-[6px] w-[6px] shrink-0 rounded-full bg-pro-text-main;
 }
-.meeting-notes-document .meeting-notes-section--summary .meeting-note-block__marker,
-.meeting-notes-document .meeting-notes-section--key_points .meeting-note-block__marker {
+.meeting-notes-document
+  .meeting-notes-section--summary
+  .meeting-note-block__marker,
+.meeting-notes-document
+  .meeting-notes-section--key_points
+  .meeting-note-block__marker {
   @apply block; /* ensure regular bullets are visible */
 }
 

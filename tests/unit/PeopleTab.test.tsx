@@ -21,16 +21,15 @@ const rows: PersonBriefingRow[] = [
 ];
 
 describe('PeopleBriefing', () => {
-  it('presents people as relationship context rows', () => {
+  it('presents people as compact meeting-style rows', () => {
     const markup = renderToStaticMarkup(
       <PeopleBriefing rows={rows} onOpenMeeting={() => {}} />,
     );
-    expect(markup).toContain('Relationship context');
     expect(markup).toContain('Needs you now');
     expect(markup).toContain('Product review');
     expect(markup).toContain('2 open commitments');
-    expect(markup).not.toContain('View Profile');
-    expect(markup).not.toContain('>Person<');
+    expect(markup).toContain('person-row__meeting');
+    expect(markup).not.toContain('>Open <');
   });
 
   it('keeps the first viewport focused and moves the directory behind disclosure', () => {

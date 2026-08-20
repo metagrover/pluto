@@ -1,5 +1,5 @@
 import {
-  ArrowRight,
+  ChevronRight,
   Clock3,
   MessageCircle,
   Search,
@@ -141,6 +141,7 @@ export const PeopleBriefing = ({
 
   const renderPerson = (person: PersonBriefingRow) => {
     const selected = selectedPersonId === person.id;
+    const canOpenMeeting = Boolean(person.latestMeetingId);
     return (
       <article
         className={`person-row ${selected ? 'person-row--selected' : ''}`}
@@ -148,43 +149,49 @@ export const PeopleBriefing = ({
         data-selected={selected ? 'true' : undefined}
         key={person.id}
       >
-        <div className="person-avatar" aria-hidden="true">
-          {person.name.slice(0, 1).toUpperCase()}
-        </div>
-        <div className="person-identity">
-          <h3>{person.name}</h3>
-          <p>{person.role}</p>
-        </div>
-        <div className="person-context">
-          <p>{person.latestMeetingTitle ?? 'No linked conversation yet'}</p>
-          {person.context && <span>{person.context}</span>}
-        </div>
-        <div className="person-meta">
-          {person.openCommitmentCount > 0 ? (
-            <span className="person-commitments">
-              {person.openCommitmentCount} open commitment
-              {person.openCommitmentCount === 1 ? '' : 's'}
-            </span>
-          ) : (
-            <span>
-              <MessageCircle aria-hidden="true" size={13} />
-              {person.meetingCount} conversation
-              {person.meetingCount === 1 ? '' : 's'}
-            </span>
-          )}
-          <span>
-            <Clock3 aria-hidden="true" size={13} />
-            {formatDate(person.latestMeetingAt)}
-          </span>
-        </div>
         <button
           type="button"
-          disabled={!person.latestMeetingId}
+          className="person-row__meeting"
+          disabled={!canOpenMeeting}
           onClick={() =>
             person.latestMeetingId && onOpenMeeting(person.latestMeetingId)
           }
         >
-          Open <ArrowRight aria-hidden="true" size={14} />
+          <span className="person-avatar" aria-hidden="true">
+            {person.name.slice(0, 1).toUpperCase()}
+          </span>
+          <span className="person-identity">
+            <strong>{person.name}</strong>
+            <span>{person.role}</span>
+          </span>
+          <span className="person-context">
+            {person.latestMeetingTitle ?? 'No linked conversation yet'}
+          </span>
+          <span className="person-meta">
+            {person.openCommitmentCount > 0 ? (
+              <span className="person-commitments">
+                {person.openCommitmentCount} open commitment
+                {person.openCommitmentCount === 1 ? '' : 's'}
+              </span>
+            ) : (
+              <span className="person-meeting-count">
+                <MessageCircle aria-hidden="true" size={12} />
+                {person.meetingCount} conversation
+                {person.meetingCount === 1 ? '' : 's'}
+              </span>
+            )}
+            <span className="person-date">
+              <Clock3 aria-hidden="true" size={12} />
+              {formatDate(person.latestMeetingAt)}
+            </span>
+          </span>
+          {canOpenMeeting ? (
+            <ChevronRight
+              aria-hidden="true"
+              className="person-row__chevron"
+              size={13}
+            />
+          ) : null}
         </button>
       </article>
     );
@@ -193,7 +200,9 @@ export const PeopleBriefing = ({
   return (
     <section aria-label="People" className="people-briefing">
       <div className="people-briefing__toolbar">
-        <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">People</h1>
+        <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">
+          People
+        </h1>
         {rows.length > 0 && (
           <label className="people-search">
             <Search aria-hidden="true" size={16} />
@@ -216,13 +225,8 @@ export const PeopleBriefing = ({
       ) : (
         <div className="people-list" aria-label="Relationship priorities">
           <div className="people-list__heading">
-            <div>
-              <p className="workspace-eyebrow">Prioritized</p>
-              <h2>{hasCommitments ? 'Needs you now' : 'Recently active'}</h2>
-            </div>
-            <span>
-              Showing {focusRows.length} of {filtered.length}
-            </span>
+            <h2>{hasCommitments ? 'Needs you now' : 'Recently active'}</h2>
+            <div aria-hidden="true" />
           </div>
           {focusRows.map(renderPerson)}
           {!query && prioritized.length > focusRows.length && (
