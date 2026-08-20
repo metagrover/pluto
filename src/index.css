@@ -768,33 +768,22 @@
     color: var(--notes-faint);
   }
   .meeting-transcript-toggle {
-    @apply mx-auto mt-0 w-full max-w-[760px] border-b px-6 py-5 text-left transition-colors md:px-8;
+    @apply mx-auto mt-0 w-full max-w-[760px] border-t px-6 py-5 text-left transition-colors md:px-8;
     border-color: var(--notes-rule);
   }
   .meeting-transcript-toggle:hover {
-    background: var(--notes-wash);
-  }
-  .meeting-transcript-toggle__icon {
-    @apply grid h-8 w-8 shrink-0 place-items-center rounded-md;
-    background: var(--notes-wash);
-    color: var(--notes-muted);
-  }
-  .meeting-transcript-toggle__identity {
-    @apply flex min-w-0 flex-col gap-0.5;
-  }
-  .meeting-transcript-toggle__identity span:first-child {
-    @apply text-sm font-semibold;
     color: var(--notes-ink);
+    background: transparent;
   }
-  .meeting-transcript-toggle__identity span:last-child {
-    @apply text-xs font-normal;
-    color: var(--notes-faint);
+  .meeting-transcript-toggle > svg {
+    color: var(--notes-muted);
   }
   .meeting-transcript-toggle__action {
     @apply ml-auto inline-flex items-center gap-1 text-xs font-semibold;
     color: var(--notes-muted);
   }
-  .meeting-transcript-toggle:hover .meeting-transcript-toggle__action {
+  .meeting-transcript-toggle:hover .meeting-transcript-toggle__action,
+  .meeting-transcript-toggle:hover > svg {
     color: var(--notes-ink);
   }
   .meeting-analysis-error {

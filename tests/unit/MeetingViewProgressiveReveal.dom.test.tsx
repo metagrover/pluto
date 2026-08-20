@@ -143,8 +143,7 @@ describe('MeetingView progressive reveal', () => {
 
     expect(container.querySelector('[role="tablist"]')).toBeNull();
     expect(transcriptButton?.textContent).toContain('Transcript');
-    expect(transcriptButton?.textContent).toContain('Saved record');
-    expect(transcriptButton?.textContent).toContain('View transcript');
+    expect(transcriptButton?.textContent).toContain('View');
     expect(container.textContent).toContain('The analysis arrived in place.');
     expect(
       container.querySelector('[data-meeting-artifact="transcript"]'),

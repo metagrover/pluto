@@ -1051,15 +1051,10 @@ export const MeetingView = ({
           className="meeting-transcript-toggle"
           onClick={() => setTranscriptVisible(true)}
         >
-          <span className="meeting-transcript-toggle__icon" aria-hidden="true">
-            <MessageSquare size={17} />
-          </span>
-          <span className="meeting-transcript-toggle__identity">
-            <span>Transcript</span>
-            <span>Saved record</span>
-          </span>
+          <MessageSquare aria-hidden="true" size={17} />
+          <span>Transcript</span>
           <span className="meeting-transcript-toggle__action">
-            View transcript
+            View
             <ChevronRight aria-hidden="true" size={16} />
           </span>
         </button>
