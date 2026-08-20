@@ -1031,18 +1031,17 @@ export const MeetingView = ({
         !notesDocument.hasAnalysis ? (
           <MeetingAnalysisUnavailable />
         ) : null}
-        <div
-          data-meeting-artifact="analysis"
-          data-state={notesDocument.hasAnalysis ? 'ready' : 'notes-only'}
-        >
-          <MeetingNotesDocument
-            meeting={selectedMeeting}
-            model={notesDocument}
-            transcriptSegments={transcriptSegments}
-            onDocumentChanged={fetchMeetings}
-            onShowTranscript={() => setTranscriptVisible(true)}
-          />
-        </div>
+        {notesDocument.hasAnalysis ? (
+          <div data-meeting-artifact="analysis" data-state="ready">
+            <MeetingNotesDocument
+              meeting={selectedMeeting}
+              model={notesDocument}
+              transcriptSegments={transcriptSegments}
+              onDocumentChanged={fetchMeetings}
+              onShowTranscript={() => setTranscriptVisible(true)}
+            />
+          </div>
+        ) : null}
       </div>
 
       {!transcriptVisible ? (
