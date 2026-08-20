@@ -388,37 +388,37 @@
     color: var(--notes-muted);
   }
   .meeting-transcript-surface {
-    @apply mx-auto mt-3 w-full max-w-[760px] px-6 pb-16 md:px-8;
+    @apply mx-auto mt-0 w-full max-w-[760px] px-6 pb-16 md:px-8;
   }
   .meeting-transcript-header {
-    @apply sticky top-0 z-20 flex items-center justify-between border-b py-4;
+    @apply sticky top-0 z-20 flex items-center justify-between border-y py-4;
     border-color: var(--notes-rule);
     background: var(--notes-paper);
   }
   .meeting-transcript-header h2 {
-    @apply text-sm font-semibold tracking-tight;
+    @apply text-base font-semibold tracking-tight;
     color: var(--notes-ink);
   }
   .meeting-transcript-header p {
-    @apply mt-1 text-xs;
+    @apply mt-0.5 text-xs;
     color: var(--notes-muted);
   }
   .meeting-transcript-header button {
-    @apply flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
   }
   .meeting-transcript-record {
     @apply py-1;
   }
   .meeting-transcript-row {
-    @apply grid gap-3 border-b py-4 sm:grid-cols-[7rem_minmax(0,1fr)];
+    @apply grid gap-4 border-b py-5 sm:grid-cols-[6.5rem_minmax(0,1fr)];
     border-color: var(--notes-rule);
   }
   .meeting-transcript-row > div {
     @apply flex items-baseline justify-between gap-3 sm:block;
   }
   .meeting-transcript-row strong {
-    @apply block text-xs font-semibold leading-5;
+    @apply block text-[11px] font-semibold leading-5;
     color: var(--notes-ink);
   }
   .meeting-transcript-row time {
@@ -776,7 +776,7 @@
     background: var(--notes-rule);
   }
   .meeting-transcript-toggle {
-    @apply min-h-10 gap-2 rounded-md px-2 py-2 text-left transition-colors;
+    @apply min-h-10 gap-2 rounded-md px-2 py-2 text-left text-sm font-semibold transition-colors;
   }
   .meeting-transcript-toggle:hover {
     color: var(--notes-ink);
@@ -787,11 +787,15 @@
   }
   .meeting-transcript-toggle__action {
     @apply ml-auto inline-flex items-center gap-1 text-xs font-semibold;
+    transition: color 150ms ease-out, transform 150ms ease-out;
     color: var(--notes-muted);
   }
   .meeting-transcript-toggle:hover .meeting-transcript-toggle__action,
   .meeting-transcript-toggle:hover > svg {
     color: var(--notes-ink);
+  }
+  .meeting-transcript-toggle:hover .meeting-transcript-toggle__action svg {
+    transform: translateX(2px);
   }
   .meeting-analysis-error {
     @apply mx-auto mb-6 max-w-[720px] rounded-xl border p-4 text-sm;

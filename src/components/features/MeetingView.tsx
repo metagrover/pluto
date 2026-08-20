@@ -1070,7 +1070,7 @@ export const MeetingView = ({
           aria-labelledby="meeting-transcript-heading"
         >
           <header className="meeting-transcript-header">
-            <div>
+            <div className="meeting-transcript-header__title">
               <h2 id="meeting-transcript-heading">Transcript</h2>
               <p>Verbatim record</p>
             </div>
@@ -1080,6 +1080,7 @@ export const MeetingView = ({
               aria-label="Close transcript"
             >
               <X aria-hidden="true" size={17} />
+              <span>Close</span>
             </button>
           </header>
           <div className="meeting-transcript-record">
