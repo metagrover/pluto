@@ -35,25 +35,40 @@ const themeOptions = [
   { id: 'system', name: 'System', icon: '💻' },
 ] as const;
 
-const sectionClass = "py-8 first:pt-0 border-b border-pro-border/20 last:border-0";
-const sectionTitleClass = "text-[12px] font-semibold text-pro-text-muted mb-6 uppercase tracking-wider";
+const sectionClass =
+  'py-8 first:pt-0 border-b border-pro-border/20 last:border-0';
+const sectionTitleClass =
+  'text-[12px] font-semibold text-pro-text-muted mb-6 uppercase tracking-wider';
 const controlClass =
   'w-full max-w-md rounded-md border border-pro-border bg-pro-bg px-4 py-3 text-[14px] font-medium text-pro-text-main outline-none transition-all placeholder:text-pro-text-muted/45 focus:border-pro-accent focus:bg-pro-surface';
 const labelClass = 'text-[14px] font-medium text-pro-text-main';
 const helperClass = 'text-[13px] text-pro-text-muted leading-relaxed mt-1';
 
-const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+const Section = ({
+  title,
+  children,
+}: { title: string; children: React.ReactNode }) => (
   <section className={sectionClass}>
     <h3 className={sectionTitleClass}>{title}</h3>
-    <div className="space-y-6">
-      {children}
-    </div>
+    <div className="space-y-6">{children}</div>
   </section>
 );
 
-const Field = ({ htmlFor, label, helper, children }: { htmlFor?: string; label: string; helper?: string; children: React.ReactNode }) => (
+const Field = ({
+  htmlFor,
+  label,
+  helper,
+  children,
+}: {
+  htmlFor?: string;
+  label: string;
+  helper?: string;
+  children: React.ReactNode;
+}) => (
   <div className="flex flex-col gap-2">
-    <label htmlFor={htmlFor} className={labelClass}>{label}</label>
+    <label htmlFor={htmlFor} className={labelClass}>
+      {label}
+    </label>
     {children}
     {helper && <p className={helperClass}>{helper}</p>}
   </div>
@@ -103,7 +118,8 @@ export const SettingsTab = ({
             <div>
               <div className={labelClass}>Provider</div>
               <p className={`${helperClass} mb-3`}>
-                Analysis provider affects summaries and extraction only. It does not change the managed transcription pipeline.
+                Analysis provider affects summaries and extraction only. It does
+                not change the managed transcription pipeline.
               </p>
               <div className="grid gap-3 sm:grid-cols-2 max-w-xl">
                 {providerOptions.map((provider) => {
@@ -220,7 +236,8 @@ export const SettingsTab = ({
                   Local speaker attribution
                 </div>
                 <p className={helperClass}>
-                  Prepare the verified local models before recording finalization.
+                  Prepare the verified local models before recording
+                  finalization.
                 </p>
               </div>
               <button
@@ -271,9 +288,15 @@ export const SettingsTab = ({
               >
                 <div
                   className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform dark:bg-pro-surface ${
-                    autoEndEnabled ? 'translate-x-5.5 left-0' : 'translate-x-0.5 left-0'
+                    autoEndEnabled
+                      ? 'translate-x-5.5 left-0'
+                      : 'translate-x-0.5 left-0'
                   }`}
-                  style={{ transform: autoEndEnabled ? 'translateX(22px)' : 'translateX(2px)' }}
+                  style={{
+                    transform: autoEndEnabled
+                      ? 'translateX(22px)'
+                      : 'translateX(2px)',
+                  }}
                 />
               </button>
             </div>
@@ -296,9 +319,7 @@ export const SettingsTab = ({
                   }`}
                 >
                   <div className="text-2xl mb-1">{option.icon}</div>
-                  <div className="text-[13px] font-medium">
-                    {option.name}
-                  </div>
+                  <div className="text-[13px] font-medium">{option.name}</div>
                 </button>
               );
             })}

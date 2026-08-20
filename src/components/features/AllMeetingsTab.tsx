@@ -1,13 +1,13 @@
-import { useState, useMemo } from 'react';
-import { 
-  Clock, 
-  Loader2, 
-  Search, 
-  Trash2, 
-  X, 
+import {
   ArrowUpDown,
   ChevronRight,
+  Clock,
+  Loader2,
+  Search,
+  Trash2,
+  X,
 } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import type { Meeting } from '../../types';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
 import { PageHeader } from '../ui/PageHeader';
@@ -21,7 +21,7 @@ interface AllMeetingsTabProps {
 export const AllMeetingsTab = ({
   meetings,
   onOpenMeeting,
-  handleDeleteMeeting
+  handleDeleteMeeting,
 }: AllMeetingsTabProps) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -30,8 +30,8 @@ export const AllMeetingsTab = ({
     let filtered = meetings;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(m =>
-        (m.title || 'Untitled Meeting').toLowerCase().includes(q)
+      filtered = filtered.filter((m) =>
+        (m.title || 'Untitled Meeting').toLowerCase().includes(q),
       );
     }
     return filtered.sort((a, b) => {
@@ -43,19 +43,27 @@ export const AllMeetingsTab = ({
 
   const groupedMeetings = useMemo(() => {
     const groups: { label: string; items: Meeting[] }[] = [];
-    processedMeetings.forEach(meeting => {
+    processedMeetings.forEach((meeting) => {
       const date = new Date(meeting.created_at);
       const now = new Date();
-      let label = date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+      let label = date.toLocaleDateString(undefined, {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+      });
       if (date.toDateString() === now.toDateString()) {
         label = 'Today';
       } else {
         const yesterday = new Date(now);
         yesterday.setDate(yesterday.getDate() - 1);
-        if (date.toDateString() === yesterday.toDateString()) label = 'Yesterday';
+        if (date.toDateString() === yesterday.toDateString())
+          label = 'Yesterday';
       }
-      let group = groups.find(g => g.label === label);
-      if (!group) { group = { label, items: [] }; groups.push(group); }
+      let group = groups.find((g) => g.label === label);
+      if (!group) {
+        group = { label, items: [] };
+        groups.push(group);
+      }
       group.items.push(meeting);
     });
     return groups;
@@ -77,7 +85,9 @@ export const AllMeetingsTab = ({
         <div className="w-24 h-24 rounded-[2rem] bg-pro-surface border border-pro-border flex items-center justify-center text-4xl mx-auto mb-8 shadow-premium">
           📚
         </div>
-        <h2 className="font-serif text-3xl font-medium text-pro-text-main mb-3">Your library is empty.</h2>
+        <h2 className="font-serif text-3xl font-medium text-pro-text-main mb-3">
+          Your library is empty.
+        </h2>
         <p className="text-[15px] text-pro-text-muted font-medium max-w-sm mx-auto leading-relaxed">
           Record a session to populate this space.
         </p>
@@ -87,11 +97,9 @@ export const AllMeetingsTab = ({
 
   return (
     <div className="max-w-4xl mx-auto w-full animate-in pb-32 px-4 md:px-0">
-
       {/* Title + Controls */}
       <PageHeader title="Meetings">
         <div className="flex items-center gap-2">
-
           {/* Search — expands on focus */}
           <div className="relative group">
             <Search
@@ -118,16 +126,25 @@ export const AllMeetingsTab = ({
 
           {/* Sort toggle — accent-tinted when active */}
           <button
-            onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+            onClick={() =>
+              setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))
+            }
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-all duration-200 ${
               sortOrder === 'asc'
                 ? 'bg-pro-accent/10 border-pro-accent/25 text-pro-accent'
                 : 'bg-transparent border-pro-border/40 text-pro-text-muted hover:border-pro-border/70 hover:text-pro-text-main'
             }`}
-            title={sortOrder === 'desc' ? 'Sort oldest first' : 'Sort newest first'}
+            title={
+              sortOrder === 'desc' ? 'Sort oldest first' : 'Sort newest first'
+            }
           >
-            <ArrowUpDown size={13} className={`transition-transform duration-300 ${sortOrder === 'asc' ? 'rotate-180' : ''}`} />
-            <span className="hidden sm:inline">{sortOrder === 'desc' ? 'Newest' : 'Oldest'}</span>
+            <ArrowUpDown
+              size={13}
+              className={`transition-transform duration-300 ${sortOrder === 'asc' ? 'rotate-180' : ''}`}
+            />
+            <span className="hidden sm:inline">
+              {sortOrder === 'desc' ? 'Newest' : 'Oldest'}
+            </span>
           </button>
         </div>
       </PageHeader>
@@ -138,8 +155,12 @@ export const AllMeetingsTab = ({
           <div className="w-10 h-10 rounded-full bg-pro-surface border border-pro-border flex items-center justify-center mx-auto mb-4 text-pro-text-muted">
             <Search size={16} />
           </div>
-          <p className="text-[14px] font-semibold text-pro-text-main mb-1">No results for "{searchQuery}"</p>
-          <p className="text-[13px] text-pro-text-muted mb-6">Try a different search term.</p>
+          <p className="text-[14px] font-semibold text-pro-text-main mb-1">
+            No results for "{searchQuery}"
+          </p>
+          <p className="text-[13px] text-pro-text-muted mb-6">
+            Try a different search term.
+          </p>
           <button
             onClick={() => setSearchQuery('')}
             className="text-[13px] font-medium text-pro-accent hover:text-pro-accent/80 transition-colors"
@@ -151,7 +172,6 @@ export const AllMeetingsTab = ({
         <div className="space-y-8">
           {groupedMeetings.map((group) => (
             <div key={group.label}>
-
               {/* Date label — no background, blends with page */}
               <div className="flex items-center gap-3 mb-2 px-3 -mx-3">
                 <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-pro-text-muted/40">
@@ -187,14 +207,18 @@ export const AllMeetingsTab = ({
 
                       {/* Right: status badge + time + chevron */}
                       <div className="flex items-center gap-3 shrink-0 pl-4">
-                        {meeting.finalization_status && meeting.finalization_status !== 'finalized' && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold text-amber-500/90 bg-amber-500/8 border border-amber-500/15">
-                            <Loader2 size={9} className="animate-spin" />
-                            {meeting.finalization_status.replace(/_/g, ' ')}
-                          </span>
-                        )}
+                        {meeting.finalization_status &&
+                          meeting.finalization_status !== 'finalized' && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold text-amber-500/90 bg-amber-500/8 border border-amber-500/15">
+                              <Loader2 size={9} className="animate-spin" />
+                              {meeting.finalization_status.replace(/_/g, ' ')}
+                            </span>
+                          )}
                         <span className="text-[12px] text-pro-text-muted/45 tabular-nums">
-                          {new Date(meeting.created_at).toLocaleTimeString(undefined, { timeStyle: 'short' })}
+                          {new Date(meeting.created_at).toLocaleTimeString(
+                            undefined,
+                            { timeStyle: 'short' },
+                          )}
                         </span>
                         <ChevronRight
                           size={13}
@@ -206,7 +230,10 @@ export const AllMeetingsTab = ({
                     {/* Delete — revealed on row hover */}
                     {canDeleteMeeting(meeting.finalization_status) && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleDeleteMeeting(meeting.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteMeeting(meeting.id);
+                        }}
                         title="Delete session"
                         aria-label={`Delete ${meeting.title || 'untitled meeting'}`}
                         className="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover/row:opacity-100 transition-opacity duration-150 p-1.5 text-pro-text-muted/40 hover:text-red-500 hover:bg-red-500/10 rounded-md"

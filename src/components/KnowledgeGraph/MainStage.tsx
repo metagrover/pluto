@@ -333,7 +333,9 @@ const SectionShell = ({
   children: React.ReactNode;
   className?: string;
 }) => (
-  <section className={`border-b border-pro-border py-7 last:border-b-0 ${className}`}>
+  <section
+    className={`border-b border-pro-border py-7 last:border-b-0 ${className}`}
+  >
     {eyebrow ? (
       <p className="text-[10px] font-medium text-pro-text-muted">{eyebrow}</p>
     ) : null}
