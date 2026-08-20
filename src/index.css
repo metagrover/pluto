@@ -388,41 +388,41 @@
     color: var(--notes-muted);
   }
   .meeting-transcript-surface {
-    @apply mx-auto mt-5 max-w-[760px] pt-5;
+    @apply mx-auto mt-3 w-full max-w-[760px] px-6 pb-16 md:px-8;
   }
   .meeting-transcript-header {
-    @apply sticky top-0 z-20 flex items-center justify-between border-y py-4;
+    @apply sticky top-0 z-20 flex items-center justify-between border-b py-4;
     border-color: var(--notes-rule);
     background: var(--notes-paper);
   }
   .meeting-transcript-header h2 {
-    @apply text-lg font-semibold tracking-tight;
+    @apply text-sm font-semibold tracking-tight;
     color: var(--notes-ink);
   }
   .meeting-transcript-header p {
-    @apply mt-0.5 text-xs;
+    @apply mt-1 text-xs;
     color: var(--notes-muted);
   }
   .meeting-transcript-header button {
-    @apply flex h-10 w-10 items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    @apply flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
     color: var(--notes-muted);
   }
   .meeting-transcript-record {
-    @apply pb-12;
+    @apply py-1;
   }
   .meeting-transcript-row {
-    @apply grid gap-3 border-b py-5 sm:grid-cols-[9rem_minmax(0,1fr)];
+    @apply grid gap-3 border-b py-4 sm:grid-cols-[7rem_minmax(0,1fr)];
     border-color: var(--notes-rule);
   }
   .meeting-transcript-row > div {
     @apply flex items-baseline justify-between gap-3 sm:block;
   }
   .meeting-transcript-row strong {
-    @apply block text-xs font-semibold;
+    @apply block text-xs font-semibold leading-5;
     color: var(--notes-ink);
   }
   .meeting-transcript-row time {
-    @apply mt-1 block text-xs tabular-nums;
+    @apply mt-0.5 block text-[11px] tabular-nums;
     color: var(--notes-muted);
   }
   .meeting-transcript-row p {
@@ -768,7 +768,12 @@
     color: var(--notes-faint);
   }
   .meeting-transcript-toggle-wrap {
-    @apply mx-auto mt-6 w-full max-w-[760px] px-6 pb-8 md:px-8;
+    @apply relative mx-auto mt-6 w-full max-w-[760px] px-6 pb-8 pt-4 md:px-8;
+  }
+  .meeting-transcript-toggle-wrap::before {
+    content: "";
+    @apply absolute left-6 right-6 top-0 h-px md:left-8 md:right-8;
+    background: var(--notes-rule);
   }
   .meeting-transcript-toggle {
     @apply min-h-10 gap-2 rounded-md px-2 py-2 text-left transition-colors;

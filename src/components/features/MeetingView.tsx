@@ -1072,7 +1072,7 @@ export const MeetingView = ({
           <header className="meeting-transcript-header">
             <div>
               <h2 id="meeting-transcript-heading">Transcript</h2>
-              <p>Saved record</p>
+              <p>Verbatim record</p>
             </div>
             <button
               type="button"
