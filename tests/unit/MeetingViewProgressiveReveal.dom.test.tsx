@@ -149,7 +149,7 @@ describe('MeetingView progressive reveal', () => {
     ).toBeNull();
   });
 
-  it('puts the saved transcript ahead of an unavailable analysis', async () => {
+  it('keeps the saved transcript at the end when analysis is unavailable', async () => {
     await act(async () =>
       renderMeeting({
         ...baseMeeting,
@@ -174,7 +174,7 @@ describe('MeetingView progressive reveal', () => {
       'They will appear here when analysis completes.',
     );
     expect(
-      transcript?.compareDocumentPosition(placeholder as Node) &
+      placeholder?.compareDocumentPosition(transcript as Node) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });

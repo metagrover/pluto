@@ -578,7 +578,6 @@ export const MeetingView = ({
     userNotes: selectedMeeting.user_notes || '',
     editsMap,
   });
-  const sourceFirst = downstreamPresentation.state !== 'ready';
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
@@ -1037,68 +1036,6 @@ export const MeetingView = ({
         </p>
       ) : null}
 
-      {sourceFirst && !transcriptVisible ? (
-        <button
-          type="button"
-          data-meeting-transcript-toggle
-          className="meeting-transcript-toggle"
-          onClick={() => setTranscriptVisible(true)}
-        >
-          <MessageSquare aria-hidden="true" size={15} />
-          Transcript
-          <span>Open the saved record</span>
-        </button>
-      ) : null}
-
-      {sourceFirst && transcriptVisible ? (
-        <section
-          data-meeting-artifact="transcript"
-          data-state={hasTranscriptContent ? 'ready' : 'loading'}
-          className="meeting-transcript-surface"
-          aria-labelledby="meeting-transcript-heading"
-        >
-          <header className="meeting-transcript-header">
-            <div>
-              <h2 id="meeting-transcript-heading">Transcript</h2>
-              <p>Saved record</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setTranscriptVisible(false)}
-              aria-label="Close transcript"
-            >
-              <X aria-hidden="true" size={17} />
-            </button>
-          </header>
-          <div className="meeting-transcript-record">
-            {hasTranscriptContent ? (
-              mergedTranscriptSegments.map((segment: TranscriptSegment) => {
-                const segmentKey = `${String(segment.speaker ?? 'unknown')}-${segment.start}-${segment.end}-${segment.text}`;
-                const seconds = Number.isFinite(segment.start)
-                  ? Math.max(0, segment.start || 0)
-                  : 0;
-                const timestamp = `${Math.floor(seconds / 60)}:${Math.floor(
-                  seconds % 60,
-                )
-                  .toString()
-                  .padStart(2, '0')}`;
-                return (
-                  <div key={segmentKey} className="meeting-transcript-row">
-                    <div>
-                      <strong>{segment.speaker || 'Unknown speaker'}</strong>
-                      <time>{timestamp}</time>
-                    </div>
-                    <p>{segment.text}</p>
-                  </div>
-                );
-              })
-            ) : (
-              <MeetingTranscriptSkeleton />
-            )}
-          </div>
-        </section>
-      ) : null}
-
       <div className="meeting-notes-surface" aria-label="Notes">
         {downstreamPresentation.state === 'loading' &&
         !notesDocument.hasAnalysis ? (
@@ -1122,7 +1059,7 @@ export const MeetingView = ({
         </div>
       </div>
 
-      {!sourceFirst && !transcriptVisible ? (
+      {!transcriptVisible ? (
         <button
           type="button"
           data-meeting-transcript-toggle
@@ -1135,7 +1072,7 @@ export const MeetingView = ({
         </button>
       ) : null}
 
-      {!sourceFirst && transcriptVisible && (
+      {transcriptVisible && (
         <section
           data-meeting-artifact="transcript"
           data-state={hasTranscriptContent ? 'ready' : 'loading'}
