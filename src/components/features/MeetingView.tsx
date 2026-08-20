@@ -214,30 +214,14 @@ export const MeetingAnalysisSkeleton = () => (
     data-meeting-artifact="analysis"
     data-state="loading"
     data-meeting-skeleton="analysis"
-    className="mx-auto w-full max-w-[760px] space-y-12 px-6 py-10 animate-pulse motion-reduce:animate-none md:px-8"
+    className="mx-auto w-full max-w-[760px] space-y-4 px-6 py-8 animate-pulse motion-reduce:animate-none md:px-8"
   >
     <p className="text-xs font-medium text-pro-text-muted/70">
       Preparing notes
     </p>
-    <div className="space-y-5">
-      <div className="h-3 w-28 rounded bg-pro-text-muted/10" />
-      <div className="space-y-3 rounded-lg border border-pro-border/30 bg-pro-surface p-8">
-        <div className="h-5 w-11/12 rounded bg-pro-text-muted/10" />
-        <div className="h-5 w-full rounded bg-pro-text-muted/10" />
-        <div className="h-5 w-3/4 rounded bg-pro-text-muted/10" />
-      </div>
-    </div>
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-      {[0, 1].map((card) => (
-        <div
-          key={card}
-          className="space-y-4 rounded-md border border-pro-border/30 bg-pro-surface p-6"
-        >
-          <div className="h-4 w-2/5 rounded bg-pro-text-muted/10" />
-          <div className="h-3 w-full rounded bg-pro-text-muted/10" />
-          <div className="h-3 w-4/5 rounded bg-pro-text-muted/10" />
-        </div>
-      ))}
+    <div className="space-y-3">
+      <div className="h-3 w-5/6 rounded bg-pro-text-muted/10" />
+      <div className="h-3 w-3/5 rounded bg-pro-text-muted/10" />
     </div>
   </section>
 );
