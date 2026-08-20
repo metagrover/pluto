@@ -151,6 +151,8 @@ const buildV3Sections = (
             editsMap,
             speaker: decision.decided_by,
             evidence: decision.evidence,
+            completed:
+              editsMap[`completion:all_decisions:${index}`]?.edited === 'true',
             blockType: 'decision',
           }),
         ),
@@ -283,6 +285,8 @@ const buildV2Sections = (
             path: `v2:decision:${index}`,
             text,
             editsMap,
+            completed:
+              editsMap[`completion:v2:decision:${index}`]?.edited === 'true',
             blockType: 'decision',
           }),
         ),

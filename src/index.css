@@ -148,7 +148,7 @@
     --meeting-shell-rule: oklch(88.5% 0.01 82);
     @apply rounded-none border-l;
     border-color: var(--meeting-shell-rule);
-    background: var(--meeting-shell-paper);
+    background: transparent;
     min-width: 0;
     width: 100%;
   }
@@ -159,7 +159,7 @@
   .meeting-app-toolbar {
     @apply flex h-14 items-center justify-between border-b px-5;
     border-color: var(--meeting-shell-rule);
-    background: var(--meeting-shell-paper);
+    background: hsl(var(--pro-bg));
     -webkit-app-region: drag;
   }
   .meeting-app-toolbar__history,
@@ -172,7 +172,7 @@
   }
   .meeting-app-scroll {
     @apply p-0;
-    background: var(--meeting-shell-paper);
+    background: transparent;
     min-width: 0;
     width: 100%;
     overflow-x: hidden;
@@ -266,7 +266,7 @@
     --notes-accent: oklch(62% 0.085 55);
     @apply text-pro-text-main;
     color: var(--notes-ink);
-    background: var(--notes-paper);
+    background: transparent;
   }
   .dark .meeting-document {
     --notes-paper: oklch(18% 0.018 272);
@@ -279,7 +279,7 @@
     --notes-accent: oklch(72% 0.07 60);
   }
   .meeting-document-header {
-    @apply grid min-h-[112px] grid-cols-[minmax(0,1fr)_auto] items-end gap-8 px-8 pb-5 pt-4 md:px-10;
+    @apply grid min-h-[112px] w-full max-w-[760px] mx-auto grid-cols-[minmax(0,1fr)_auto] items-end gap-8 px-6 pb-5 pt-20 md:px-8;
     border-color: transparent;
   }
   .meeting-document-meta {
@@ -388,15 +388,10 @@
 
   .meeting-document-workspace {
     @apply grid w-full justify-center gap-0;
-    grid-template-columns: minmax(0, 900px);
-  }
-  .meeting-document-workspace:has(.meeting-document-outline) {
-    grid-template-columns: minmax(0, 900px) minmax(260px, 320px);
-    justify-content: center;
-    align-items: start;
+    grid-template-columns: minmax(0, 760px);
   }
   .meeting-notes-document {
-    @apply relative w-full min-w-0 px-8 pb-32 pt-16 md:px-[80px] mx-auto max-w-[900px];
+    @apply relative mx-auto w-full min-w-0 max-w-[760px] px-6 pb-36 pt-14 md:px-8;
     color: var(--pro-text-main);
   }
   .meeting-document-save-row {
@@ -425,15 +420,22 @@
   .meeting-notes-section + .meeting-notes-section {
     @apply pt-3;
   }
+  .meeting-notes-section--current_read {
+    @apply mb-0 bg-transparent py-0;
+  }
   .meeting-notes-section > h2,
   .meeting-notes-section > .meeting-editable-copy h2 {
     @apply text-[30px] font-semibold leading-[1.3] tracking-tight mb-2 mt-8;
     color: var(--notes-ink);
     text-wrap: balance;
   }
-  
   .meeting-notes-section__content {
     @apply mt-4 flex flex-col gap-1.5;
+  }
+  .meeting-notes-section--current_read > h2,
+  .meeting-notes-section--current_read > .meeting-editable-copy h2 {
+    @apply mb-3 text-[11px] font-semibold uppercase tracking-[0.12em];
+    color: var(--notes-muted);
   }
   .meeting-notes-section--current_read .meeting-notes-section__content {
     @apply gap-1;
@@ -488,7 +490,7 @@
     @apply -m-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center;
   }
   .meeting-action-box {
-    @apply grid h-4 w-4 shrink-0 place-content-center rounded border-[1.5px] transition-colors mt-1;
+    @apply relative top-[2px] grid h-[18px] w-[18px] shrink-0 place-content-center rounded-full border-[1.5px] transition-colors;
     border-color: var(--notes-faint);
     background: transparent;
     color: transparent;
@@ -500,18 +502,56 @@
     @apply ring-2 ring-pro-accent ring-offset-2;
   }
   .meeting-action-check input:checked + .meeting-action-box {
-    border-color: var(--notes-accent);
-    background: var(--notes-accent);
-    color: #FFFFFF;
+    border-color: hsl(var(--pro-accent));
+    background: hsl(var(--pro-accent));
+    color: hsl(var(--pro-bg));
   }
   .meeting-editable-copy {
     @apply flex min-w-0 items-start gap-2;
   }
-  .meeting-decision-mark {
-    @apply mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border;
-    border-color: oklch(58% 0.012 272);
-    background: oklch(55% 0.012 272);
-    color: var(--notes-paper-raised);
+  .meeting-markdown-preview {
+    @apply w-full cursor-text text-[16px] leading-[1.55] outline-none;
+    color: var(--notes-ink);
+  }
+  .meeting-markdown-preview > :first-child {
+    @apply mt-0;
+  }
+  .meeting-markdown-preview > :last-child {
+    @apply mb-0;
+  }
+  .meeting-markdown-preview p {
+    @apply my-0;
+  }
+  .meeting-markdown-preview p + p {
+    @apply mt-3;
+  }
+  .meeting-markdown-preview ul,
+  .meeting-markdown-preview ol {
+    @apply my-1.5 pl-6;
+  }
+  .meeting-markdown-preview ul {
+    list-style: disc;
+  }
+  .meeting-markdown-preview ol {
+    list-style: decimal;
+  }
+  .meeting-markdown-preview li {
+    @apply my-1 pl-1;
+  }
+  .meeting-markdown-preview li:has(> input[type='checkbox']) {
+    @apply -ml-6 flex list-none items-start gap-2 pl-0;
+  }
+  .meeting-markdown-preview input[type='checkbox'] {
+    @apply mt-[3px] h-[18px] w-[18px] shrink-0 cursor-pointer appearance-none rounded-full border-[1.5px] bg-transparent;
+    border-color: var(--notes-faint);
+  }
+  .meeting-markdown-preview input[type='checkbox']:checked {
+    border-color: hsl(var(--pro-accent));
+    background-color: hsl(var(--pro-accent));
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3.5 8 2.8 2.8L12.5 4.8' fill='none' stroke='%23f8f8f7' stroke-linecap='round' stroke-linejoin='round' stroke-width='2'/%3E%3C/svg%3E");
+  }
+  .meeting-markdown-preview input[type='checkbox']:focus-visible {
+    @apply outline-none ring-2 ring-pro-accent ring-offset-2;
   }
   .meeting-note-block.is-source-selected {
     background: oklch(93% 0.025 82);
@@ -616,11 +656,8 @@
   .meeting-edit-error {
     @apply mt-2 text-xs leading-5;
   }
-  .meeting-document-outline {
-    @apply hidden;
-  }
   .meeting-source-pane {
-    @apply z-40 flex h-[calc(100vh-168px)] min-h-[calc(100vh-168px)] flex-col overflow-hidden border-l;
+    @apply fixed inset-x-4 bottom-4 z-40 flex h-[72vh] max-h-[72vh] min-h-0 flex-col overflow-hidden border shadow-2xl;
     border-color: var(--notes-rule);
     background: var(--notes-paper-raised);
     color: var(--notes-ink);
@@ -705,40 +742,6 @@
   .meeting-analysis-error p {
     @apply mt-1 leading-6;
     color: var(--notes-muted);
-  }
-
-  @media (min-width: 1180px) {
-    .meeting-document-workspace--source-open {
-      grid-template-columns: minmax(520px, 1fr) minmax(400px, 440px);
-      align-items: start;
-    }
-    .meeting-source-pane {
-      @apply sticky top-0;
-    }
-    .meeting-document-workspace--source-open .meeting-notes-document {
-      @apply m-0 w-full max-w-none pl-10 pr-16;
-    }
-  }
-
-  @media (min-width: 1280px) {
-    .meeting-document-outline {
-      @apply hidden;
-    }
-  }
-
-  @media (max-width: 1179px) {
-    .meeting-document-workspace--source-open {
-      @apply relative;
-    }
-    .meeting-source-pane {
-      @apply fixed inset-x-4 bottom-4 max-h-[72vh] shadow-2xl;
-      height: 72vh;
-      min-height: 0;
-      width: auto;
-      min-width: 0;
-      max-width: none;
-      box-sizing: border-box;
-    }
   }
 
   @media (max-width: 520px) {
@@ -1270,22 +1273,21 @@
 }
 
 .meeting-action-check {
-  @apply relative mt-1 flex shrink-0 cursor-pointer items-center justify-center;
-  width: 16px;
-  height: 16px;
+  @apply relative flex shrink-0 cursor-pointer items-center justify-center;
+  width: 18px !important;
+  height: 18px !important;
+  margin: 3px 0 0 !important;
 }
 .meeting-action-check input[type=checkbox] {
   @apply absolute inset-0 opacity-0 cursor-pointer w-full h-full m-0;
 }
 .meeting-action-check span[aria-hidden=true] {
-  @apply flex h-[16px] w-[16px] items-center justify-center rounded-[3px] border border-pro-border bg-pro-bg transition-colors;
+  @apply relative top-[2px] flex h-[18px] w-[18px] items-center justify-center rounded-full border border-pro-border bg-transparent transition-colors;
 }
 .meeting-action-check input[type=checkbox]:checked + span[aria-hidden=true] {
-  @apply bg-[#2383E2] border-[#2383E2];
-}
-.meeting-action-check input[type=checkbox]:checked + span[aria-hidden=true]::after {
-  content: '';
-  @apply absolute block w-[4px] h-[8px] border-r-2 border-b-2 border-white transform rotate-45 -translate-y-[1px];
+  background: hsl(var(--pro-accent));
+  border-color: hsl(var(--pro-accent));
+  color: hsl(var(--pro-bg));
 }
 
 /* Fix that gray dot on the right side of the list item */
@@ -1322,7 +1324,14 @@
   @apply p-0 m-0 w-full rounded hover:bg-pro-hover/50 focus-within:bg-transparent transition-colors;
 }
 .meeting-editable-copy textarea {
-  @apply p-1 m-0 block w-full resize-none border-none bg-transparent outline-none ring-0 focus:ring-0;
+  @apply m-0 block w-full resize-none border-none bg-transparent outline-none ring-0 focus:ring-0;
+  padding: 0 !important;
+  line-height: 1.5 !important;
+}
+.meeting-inline-editable textarea {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1.5 !important;
 }
 
 .meeting-note-block__marker {
@@ -1331,4 +1340,13 @@
 .meeting-notes-document .meeting-notes-section--summary .meeting-note-block__marker,
 .meeting-notes-document .meeting-notes-section--key_points .meeting-note-block__marker {
   @apply block; /* ensure regular bullets are visible */
+}
+
+.meeting-note-block.is-source-selected {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px oklch(82% 0.045 82);
+}
+.dark .meeting-note-block.is-source-selected {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px oklch(38% 0.035 82);
 }

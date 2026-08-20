@@ -829,7 +829,6 @@ export const MeetingView = ({
                 {Math.floor(selectedMeeting.duration_seconds / 60)} min
               </span>
             ) : null}
-            <span>Saved locally</span>
           </div>
         </div>
         <div className="meeting-document-actions">

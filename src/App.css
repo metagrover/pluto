@@ -28,6 +28,14 @@
   -webkit-app-region: no-drag;
 }
 
+.app-background-glow {
+  background: oklch(82% 0.06 82 / 0.1);
+}
+
+.dark .app-background-glow {
+  background: oklch(62% 0.04 82 / 0.08);
+}
+
 .glass-card {
   background: rgba(255, 255, 255, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.2);

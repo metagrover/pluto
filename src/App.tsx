@@ -1,11 +1,3 @@
-import {
-  ChevronLeft,
-  ChevronRight,
-  MessageCircle,
-  MoreHorizontal,
-  Search,
-  Users,
-} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import './App.css';
 
@@ -26,7 +18,6 @@ import { AskPluto } from './components/features/AskPluto';
 import { Dashboard } from './components/features/Dashboard';
 import { MeetingView } from './components/features/MeetingView';
 import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
-import { RecordingNamePopover } from './components/features/RecordingNamePopover';
 import { ZenMode } from './components/features/ZenMode';
 import {
   DASHBOARD_ACTION_COMPLETION_ERROR,
@@ -62,14 +53,14 @@ import {
 } from './api/knowledgeGraph';
 // Knowledge Graph
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
-import { AllMeetingsTab } from "./components/features/AllMeetingsTab";
 import { PeopleTab } from './components/KnowledgeGraph/PeopleTab';
 import { ProjectsExecutionTab } from './components/KnowledgeGraph/ProjectsExecutionTab';
+import { AllMeetingsTab } from './components/features/AllMeetingsTab';
 
+import { SettingsTab } from './components/features/SettingsTab';
 // Overlays
 import { PermissionsOverlay } from './components/overlays/PermissionsOverlay';
 import { SearchOverlay } from './components/overlays/SearchOverlay';
-import { SettingsTab } from './components/features/SettingsTab';
 import { buildSearchPlutoResults } from './components/overlays/searchPlutoModel';
 
 // Types
@@ -532,12 +523,6 @@ function App() {
   );
   const activeRecording = isRecording || isProcessing;
   const showZenMode = activeRecording && zenVisible;
-  const recordingVoiceActivity =
-    liveTranscriptIntegrity === 'lagging'
-      ? 'lagging'
-      : activeRecording
-        ? 'active'
-        : 'idle';
   const handleBackHomeFromZen = () => {
     setZenVisible(false);
     setSelectedMeetingId(null);
@@ -876,151 +861,12 @@ function App() {
               : 'rounded-l-[2.5rem] border-l border-pro-border/10'
           }`}
         >
-          {!!selectedMeetingId && (
-          <header
-            className={`app-titlebar shrink-0 sticky top-0 z-20 ${
-              selectedMeetingId
-                ? 'meeting-app-toolbar'
-                : `grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-6 md:px-12 bg-pro-bg border-b border-pro-border/20 ${activeTab === 'wiki' ? 'h-20' : 'h-28'}`
-            }`}
-          >
-            {selectedMeetingId ? (
-              <>
-                <div className="meeting-app-toolbar__history">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedMeetingId(null)}
-                    aria-label="Back to meetings"
-                  >
-                    <ChevronLeft aria-hidden="true" size={20} />
-                  </button>
-                  <button type="button" disabled aria-label="Forward">
-                    <ChevronRight aria-hidden="true" size={20} />
-                  </button>
-                </div>
-                <div className="meeting-app-toolbar__actions">
-                  <button type="button" aria-label="Participants">
-                    <Users aria-hidden="true" size={19} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveTab('chat');
-                      setSelectedMeetingId(null);
-                    }}
-                    aria-label="Ask Pluto about this meeting"
-                  >
-                    <MessageCircle aria-hidden="true" size={19} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSearchVisible(true)}
-                    aria-label="Search"
-                  >
-                    <Search aria-hidden="true" size={19} />
-                  </button>
-                  <button type="button" aria-label="More workspace actions">
-                    <MoreHorizontal aria-hidden="true" size={20} />
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex min-w-0 items-center gap-8 justify-self-start">
-                  <button
-                    type="button"
-                    onClick={() => setSidebarVisible((prev) => !prev)}
-                    className="w-8 h-8 rounded-md flex items-center justify-center text-pro-text-muted hover:bg-black/5 dark:hover:bg-white/5 transition-all group"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      className={`w-5 h-5 transition-transform duration-700 ${sidebarVisible ? '' : 'rotate-180'}`}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2.5}
-                        d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
-                      />
-                    </svg>
-                  </button>
-                  <div>
-                    <h2 className="text-sm font-semibold text-pro-text-main group cursor-default">
-                      {isProcessing
-                        ? 'Processing Intelligence...'
-                        : isRecording
-                          ? 'Capturing Intelligence'
-                          : selectedMeetingId
-                            ? selectedMeeting?.title || 'Review'
-                            : activeTab === 'hub'
-                              ? 'Dashboard'
-                              : activeTab === 'wiki'
-                                ? 'Knowledge Home'
-                                : activeTab.charAt(0).toUpperCase() +
-                                  activeTab.slice(1)}
-                    </h2>
-                    <p className="text-[10px] font-bold text-pro-text-muted/60 font-medium mt-1">
-                      {isRecording
-                        ? 'Neural Stream Live'
-                        : selectedMeetingId
-                          ? 'Archived Context'
-                          : activeTab === 'wiki'
-                            ? 'Compiled Intelligence'
-                            : 'All Activities'}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="no-drag justify-self-center">
-                  {activeRecording && !showZenMode && (
-                    <RecordingNamePopover
-                      title={meetingTitle}
-                      voiceActivity={recordingVoiceActivity}
-                      onExpand={() => setZenVisible(true)}
-                    />
-                  )}
-                </div>
-
-                <div className="flex items-center gap-4 justify-self-end">
-                  <button
-                    type="button"
-                    onClick={() => setSettingsVisible(true)}
-                    className="w-8 h-8 rounded-md flex items-center justify-center text-pro-text-muted hover:bg-black/5 dark:hover:bg-white/5 transition-all"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37a1.724 1.724 0 002.572-1.065z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </>
-            )}
-          </header>
-          )}
-
           <div
             ref={contentScrollRef}
             className={`flex-1 flex flex-col scroll-smooth relative ${
-              activeTab === 'wiki' && !selectedMeetingId ? 'overflow-hidden' : 'overflow-y-scroll'
+              activeTab === 'wiki' && !selectedMeetingId
+                ? 'overflow-hidden'
+                : 'overflow-y-scroll'
             } ${
               selectedMeetingId
                 ? 'meeting-app-scroll'
@@ -1028,23 +874,23 @@ function App() {
                   ? 'px-0 py-0'
                   : activeTab === 'chat'
                     ? 'px-0 py-0'
-                  : activeTab === 'settings'
-                    ? 'px-5 py-6 md:px-8 md:py-8'
-                  : !selectedMeetingId && activeTab === 'hub'
-                    ? 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
-                    : !selectedMeetingId && activeTab === 'people'
+                    : activeTab === 'settings'
                       ? 'px-5 py-6 md:px-8 md:py-8'
-                      : !selectedMeetingId && activeTab === 'projects'
-                        ? 'px-5 py-6 md:px-8 md:py-8'
-                        : !selectedMeetingId && activeTab === 'meetings'
+                      : !selectedMeetingId && activeTab === 'hub'
+                        ? 'px-4 md:px-12 lg:px-20 py-6 md:py-10 space-y-8'
+                        : !selectedMeetingId && activeTab === 'people'
                           ? 'px-5 py-6 md:px-8 md:py-8'
-                          : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
+                          : !selectedMeetingId && activeTab === 'projects'
+                            ? 'px-5 py-6 md:px-8 md:py-8'
+                            : !selectedMeetingId && activeTab === 'meetings'
+                              ? 'px-5 py-6 md:px-8 md:py-8'
+                              : 'px-4 md:px-12 lg:px-20 py-8 md:py-16 space-y-12 md:space-y-20'
             }`}
           >
             <>
-              <div className="fixed top-0 right-0 w-[800px] h-[800px] bg-pro-accent/5 rounded-full blur-[120px] -mr-96 -mt-96 pointer-events-none z-0" />
-              <div className="fixed bottom-0 left-0 w-[600px] h-[600px] bg-pro-accent/5 rounded-full blur-[100px] -ml-40 -mb-40 pointer-events-none z-0" />
-              <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-pro-accent/5 rounded-full blur-[150px] pointer-events-none z-0 opacity-40" />
+              <div className="app-background-glow fixed top-0 right-0 w-[800px] h-[800px] rounded-full blur-[120px] -mr-96 -mt-96 pointer-events-none z-0" />
+              <div className="app-background-glow fixed bottom-0 left-0 w-[600px] h-[600px] rounded-full blur-[100px] -ml-40 -mb-40 pointer-events-none z-0" />
+              <div className="app-background-glow fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[150px] pointer-events-none z-0 opacity-40" />
             </>
 
             {selectedMeetingId ? (
@@ -1099,7 +945,7 @@ function App() {
                 />
               </div>
             ) : activeTab === 'meetings' ? (
-              <AllMeetingsTab 
+              <AllMeetingsTab
                 meetings={safeMeetings}
                 onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
                 handleDeleteMeeting={handleDeleteMeeting}

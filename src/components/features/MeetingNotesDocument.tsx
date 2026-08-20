@@ -1,7 +1,9 @@
-import { Check, CheckCircle2, FileText, Loader2, Pencil } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Check, FileText, Loader2, Pencil } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
+import remarkGfm from 'remark-gfm';
 import type { Meeting, TranscriptSegment } from '../../types';
 import type {
   MeetingNotesBlock,
@@ -47,11 +49,6 @@ const previewSourceSelection = (
       }
     : null;
 };
-
-const sourceUsesOverlay = (): boolean =>
-  typeof window !== 'undefined' &&
-  typeof window.matchMedia === 'function' &&
-  window.matchMedia('(max-width: 1179px)').matches;
 
 const formatTimestamp = (seconds?: number): string => {
   const value = Number.isFinite(seconds) ? Math.max(0, seconds || 0) : 0;
@@ -131,11 +128,7 @@ const resolveSourceSegments = (
 
 const SaveStatus = ({ state }: { state: SaveState }) => {
   const content = {
-    saved: (
-      <>
-        <CheckCircle2 aria-hidden="true" size={13} /> Saved locally
-      </>
-    ),
+    saved: null,
     dirty: 'Unsaved changes',
     saving: (
       <>
@@ -145,6 +138,8 @@ const SaveStatus = ({ state }: { state: SaveState }) => {
     ),
     error: 'Notes were not saved. Keep this window open and try again.',
   }[state];
+  if (!content) return null;
+
   return (
     <span className={`meeting-save-state meeting-save-state--${state}`}>
       {content}
@@ -178,6 +173,17 @@ const navigateToAdjacentTextarea = (
   }
 };
 
+const toggleMarkdownTask = (text: string, taskIndex: number): string => {
+  let currentTask = 0;
+  return text.replace(
+    /^(\s*[-*+]\s+\[)([ xX])(\]\s+.*)$/gm,
+    (line, prefix: string, state: string, suffix: string) => {
+      if (currentTask++ !== taskIndex) return line;
+      return `${prefix}${state.toLocaleLowerCase() === 'x' ? ' ' : 'x'}${suffix}`;
+    },
+  );
+};
+
 const InlineEditableText = ({
   meetingId,
   path,
@@ -196,20 +202,16 @@ const InlineEditableText = ({
   const [draft, setDraft] = useState(text);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(asHeading);
 
-  useEffect(() => setDraft(text), [text]);
+  useEffect(() => {
+    setDraft(text);
+    setEditing(asHeading);
+  }, [asHeading, text]);
 
   const className = asHeading
     ? 'w-full resize-none overflow-hidden bg-transparent outline-none text-[30px] font-semibold leading-[1.3] m-0 p-0 block'
     : 'w-full resize-none overflow-hidden bg-transparent outline-none text-[16px] leading-[1.55] m-0 p-0 block';
-
-  if (!path) {
-    return asHeading ? (
-      <h2 className={className}>{text}</h2>
-    ) : (
-      <p className={className}>{text}</p>
-    );
-  }
 
   const save = async (newValue: string) => {
     const next = newValue.trim();
@@ -243,14 +245,68 @@ const InlineEditableText = ({
     }
   };
 
+  const renderMarkdown = () => {
+    let taskIndex = 0;
+    return (
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          input: ({ type, checked, ...props }) => {
+            if (type !== 'checkbox') return <input type={type} {...props} />;
+            const index = taskIndex++;
+            return (
+              <input
+                {...props}
+                type="checkbox"
+                checked={Boolean(checked)}
+                aria-label={checked ? 'Mark incomplete' : 'Mark complete'}
+                disabled={saving || !path}
+                onClick={(event) => event.stopPropagation()}
+                onChange={() => {
+                  const next = toggleMarkdownTask(draft, index);
+                  setDraft(next);
+                  void save(next);
+                }}
+              />
+            );
+          },
+        }}
+      >
+        {draft}
+      </ReactMarkdown>
+    );
+  };
+
+  if (!path) {
+    return asHeading ? (
+      <h2 className={className}>{text}</h2>
+    ) : (
+      <div className="meeting-markdown-preview">{renderMarkdown()}</div>
+    );
+  }
+
+  if (!asHeading && !editing) {
+    return (
+      <div
+        className="meeting-markdown-preview"
+        onClick={() => setEditing(true)}
+      >
+        {renderMarkdown()}
+      </div>
+    );
+  }
+
   return (
-    <div className="relative group w-full">
+    <div className="meeting-inline-editable relative group w-full">
       <TextareaAutosize
         className={className}
         style={{ color: 'var(--notes-ink)' }}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
-        onBlur={(event) => void save(event.target.value)}
+        onBlur={(event) => {
+          setEditing(false);
+          void save(event.target.value);
+        }}
         onKeyDown={(event) => {
           if (event.key === 'Escape') {
             setDraft(text);
@@ -292,22 +348,18 @@ const NoteBlock = ({
   section,
   meetingId,
   onSaved,
-  onSelectSource,
   selected,
 }: {
   block: MeetingNotesBlock;
   section: MeetingNotesSection;
   meetingId: string | number;
   onSaved: () => void;
-  onSelectSource: (selection: SourceSelection) => void;
   selected: boolean;
 }) => {
   const [completionPending, setCompletionPending] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
-  const sourceRange = block.transcriptRange || section.transcriptRange;
-  const hasSource = Boolean(block.evidence || sourceRange);
   const isAction = block.blockType === 'action';
-  const isDecision = block.blockType === 'decision';
+  const isCheckable = isAction || block.blockType === 'decision';
 
   const toggleCompleted = async () => {
     if (!block.path || completionPending) return;
@@ -335,7 +387,7 @@ const NoteBlock = ({
       className={`meeting-note-block meeting-note-block--${section.kind} ${selected ? 'is-source-selected' : ''}`}
       data-authorship={block.authorship}
     >
-      {isAction ? (
+      {isCheckable ? (
         <label className="meeting-action-check">
           <span className="sr-only">
             {block.completed ? 'Mark incomplete' : 'Mark complete'}:{' '}
@@ -353,10 +405,6 @@ const NoteBlock = ({
             <Check size={13} />
           </span>
         </label>
-      ) : isDecision ? (
-        <span className="meeting-decision-mark" aria-label="Decision">
-          <Check aria-hidden="true" size={14} />
-        </span>
       ) : (
         <span className="meeting-note-block__marker" aria-hidden="true" />
       )}
@@ -385,23 +433,6 @@ const NoteBlock = ({
             <span>
               <Pencil aria-hidden="true" size={10} /> Edited
             </span>
-          ) : null}
-          {hasSource ? (
-            <button
-              type="button"
-              aria-label={`Show source for ${block.text}`}
-              onClick={() =>
-                onSelectSource({
-                  label: block.text,
-                  evidence: block.evidence,
-                  transcriptRange: sourceRange,
-                })
-              }
-            >
-              <span className="meeting-source-indicator" aria-hidden="true">
-                {selected ? '1' : ''}
-              </span>
-            </button>
           ) : null}
         </div>
         {completionError ? (
@@ -503,7 +534,6 @@ export const MeetingNotesDocument = ({
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [sourceSelection, setSourceSelection] =
     useState<SourceSelection | null>(() => previewSourceSelection(model));
-  const [sourceAsOverlay, setSourceAsOverlay] = useState(sourceUsesOverlay);
   const meetingRef = useRef(meeting);
   const onDocumentChangedRef = useRef(onDocumentChanged);
 
@@ -517,35 +547,8 @@ export const MeetingNotesDocument = ({
     setSaveState('saved');
     setSourceSelection(previewSourceSelection(model));
   }, [meeting.id, meeting.user_notes, model]);
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return;
-    const media = window.matchMedia('(max-width: 1179px)');
-    const update = () => setSourceAsOverlay(media.matches);
-    update();
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
-
-  const outline = useMemo(
-    () => model.sections.filter((section) => section.kind !== 'scratchpad'),
-    [model.sections],
-  );
-
   return (
-    <div
-      className={`meeting-document-workspace ${sourceSelection ? 'meeting-document-workspace--source-open' : ''}`}
-    >
-      {outline.length >= 5 ? (
-        <nav className="meeting-document-outline" aria-label="Note outline">
-          <span>In this note</span>
-          {outline.map((section) => (
-            <a key={section.id} href={`#meeting-section-${section.id}`}>
-              {section.title}
-            </a>
-          ))}
-        </nav>
-      ) : null}
-
+    <div className="meeting-document-workspace">
       <article className="meeting-notes-document" aria-label="Meeting notes">
         {header}
         <output className="meeting-document-save-row" aria-live="polite">
@@ -578,7 +581,6 @@ export const MeetingNotesDocument = ({
                         section={section}
                         meetingId={meeting.id}
                         onSaved={onDocumentChanged}
-                        onSelectSource={setSourceSelection}
                         selected={sourceSelection?.label === block.text}
                       />
                     ))}
@@ -600,7 +602,7 @@ export const MeetingNotesDocument = ({
                 meetingDate={meeting.created_at || meeting.started_at}
               />
             );
-            return sourceAsOverlay ? createPortal(pane, document.body) : pane;
+            return createPortal(pane, document.body);
           })()
         : null}
     </div>
