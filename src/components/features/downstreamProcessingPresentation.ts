@@ -12,10 +12,6 @@ export type DownstreamProcessingPresentation =
 export const getDownstreamProcessingPresentation = (
   meeting: Partial<Meeting>,
 ): DownstreamProcessingPresentation => {
-  if (meeting.analysis_json || meeting.enhanced_notes) {
-    return { state: 'ready' };
-  }
-
   try {
     const integrity = JSON.parse(meeting.transcript_integrity_json || '{}') as {
       finalTranscription?: {
@@ -49,6 +45,22 @@ export const getDownstreamProcessingPresentation = (
     state = typeof parsed.state === 'string' ? parsed.state : null;
   } catch {
     state = null;
+  }
+
+  // A structured analysis is safe to render while later knowledge work runs.
+  // Legacy markdown is not: it can be a stale snapshot while the current
+  // analysis lease is still writing, which previously left the notes surface
+  // blank with no visible preparation state.
+  if (meeting.analysis_json) {
+    return { state: 'ready' };
+  }
+
+  if (state === 'processing') {
+    return { state: 'loading' };
+  }
+
+  if (meeting.enhanced_notes) {
+    return { state: 'ready' };
   }
 
   if (state === 'failed') {

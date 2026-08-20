@@ -25,6 +25,20 @@ describe('downstream processing presentation', () => {
     ).toEqual({ state: 'loading' });
   });
 
+  it('keeps the preparation state visible when legacy notes exist', () => {
+    expect(
+      getDownstreamProcessingPresentation({
+        transcript_status: 'validated',
+        enhanced_notes: 'An older notes snapshot',
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'processing',
+          stage: 'analysis',
+        }),
+      }),
+    ).toEqual({ state: 'loading' });
+  });
+
   it('uses plain artifact language for a terminal analysis failure', () => {
     const presentation = getDownstreamProcessingPresentation({
       transcript_status: 'validated',

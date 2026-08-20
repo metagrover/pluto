@@ -206,6 +206,9 @@ export const MeetingAnalysisSkeleton = () => (
     data-meeting-skeleton="analysis"
     className="space-y-12 animate-pulse motion-reduce:animate-none"
   >
+    <p className="text-xs font-medium text-pro-text-muted/70">
+      Preparing notes
+    </p>
     <div className="space-y-5">
       <div className="h-3 w-28 rounded bg-pro-text-muted/10" />
       <div className="space-y-3 rounded-lg border border-pro-border/30 bg-pro-surface p-8">
