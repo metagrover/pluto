@@ -99,9 +99,11 @@ export const SettingsTab = ({
   >('idle');
 
   useEffect(() => {
-    void window.ipcRenderer.invoke('RECORDING_READINESS_STATUS').then((res: any) => {
-      setSpeakerModelsState(res?.ready ? 'ready' : 'idle');
-    });
+    void window.ipcRenderer
+      .invoke('RECORDING_READINESS_STATUS')
+      .then((res: any) => {
+        setSpeakerModelsState(res?.ready ? 'ready' : 'idle');
+      });
   }, []);
 
   const persistSetting = (key: string, value: string) => {
@@ -239,10 +241,10 @@ export const SettingsTab = ({
             <div className="flex items-center justify-between gap-6 py-2 max-w-2xl">
               <div className="space-y-1">
                 <div className="text-[14px] font-medium text-pro-text-main">
-                  Local recording readiness
+                  Parakeet local transcription
                 </div>
                 <p className={helperClass}>
-                  Prepare verified local transcription models and verify system requirements.
+                  Prepare the verified Parakeet models and local transcription stack for recording.
                 </p>
               </div>
               <button
