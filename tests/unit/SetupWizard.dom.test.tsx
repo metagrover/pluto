@@ -27,11 +27,20 @@ describe('SetupWizard', () => {
     invoke = vi.fn(async (channel: string, key?: string) => {
       if (channel === 'GET_SETTING') {
         if (key === 'setup_complete') return null;
+        if (key === 'setup_step') return null;
         return null;
       }
-      if (channel === 'TRANSCRIPTION_PREPARE_FINAL') return { ready: true };
-      if (channel === 'WHISPER_PREPARE_DIARIZATION_MODELS') {
-        return { ready: true };
+      if (channel === 'RECORDING_READINESS_STATUS') {
+        return {
+          ready: true,
+          details: { parakeetClient: true, parakeetModel: true, mlxAvailable: true, audiocapExists: true, audiocapExecutable: true, micPermission: true, systemAudioPermission: true }
+        };
+      }
+      if (channel === 'RECORDING_READINESS_PREPARE') {
+        return {
+          ready: true,
+          details: { parakeetClient: true, parakeetModel: true, mlxAvailable: true, audiocapExists: true, audiocapExecutable: true, micPermission: true, systemAudioPermission: true }
+        };
       }
       if (channel === 'CHECK_MICROPHONE_PERMISSION') return 'granted';
       if (channel === 'CHECK_SYSTEM_AUDIO_PERMISSION') return 'granted';
@@ -58,8 +67,7 @@ describe('SetupWizard', () => {
     await act(async () => start?.click());
     await flush();
 
-    expect(invoke).toHaveBeenCalledWith('TRANSCRIPTION_PREPARE_FINAL');
-    expect(invoke).toHaveBeenCalledWith('WHISPER_PREPARE_DIARIZATION_MODELS');
+    expect(invoke).toHaveBeenCalledWith('RECORDING_READINESS_PREPARE');
     expect(container.textContent).toContain('Ready to record');
     expect(container.textContent).not.toContain('Python');
     expect(container.textContent).not.toContain(
@@ -70,8 +78,14 @@ describe('SetupWizard', () => {
   it('offers a retry when local model preparation fails', async () => {
     invoke.mockImplementation(async (channel: string, key?: string) => {
       if (channel === 'GET_SETTING') return key === 'setup_step' ? '2' : null;
-      if (channel === 'TRANSCRIPTION_PREPARE_FINAL') {
+      if (channel === 'RECORDING_READINESS_PREPARE') {
         throw new Error('network unavailable');
+      }
+      if (channel === 'RECORDING_READINESS_STATUS') {
+        return {
+          ready: false,
+          details: { parakeetClient: true, parakeetModel: false, mlxAvailable: true, audiocapExists: true, audiocapExecutable: true, micPermission: true, systemAudioPermission: true }
+        };
       }
       if (channel === 'CHECK_MICROPHONE_PERMISSION') return 'granted';
       if (channel === 'CHECK_SYSTEM_AUDIO_PERMISSION') return 'granted';

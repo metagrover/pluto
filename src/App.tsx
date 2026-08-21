@@ -737,6 +737,12 @@ function App() {
     }
   }, [permissionStatus]);
 
+  useEffect(() => {
+    const handleReadinessFailed = () => setSetupNeeded(true);
+    window.addEventListener('RECORDING_READINESS_FAILED' as any, handleReadinessFailed);
+    return () => window.removeEventListener('RECORDING_READINESS_FAILED' as any, handleReadinessFailed);
+  }, []);
+
   const retryRecordingIfReady = async () => {
     await window.ipcRenderer.invoke('APP_RELAUNCH');
   };

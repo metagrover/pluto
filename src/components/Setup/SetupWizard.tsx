@@ -36,16 +36,16 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     [requirements],
   );
 
-  const checkPermissions = useCallback(async () => {
-    const [microphone, systemAudio] = await Promise.all([
-      window.ipcRenderer.invoke('CHECK_MICROPHONE_PERMISSION'),
-      window.ipcRenderer.invoke('CHECK_SYSTEM_AUDIO_PERMISSION'),
-    ]);
-    setRequirements((current) => ({
-      ...current,
-      microphone: isGranted(microphone) ? 'granted' : 'blocked',
-      systemAudio: isGranted(systemAudio) ? 'granted' : 'blocked',
-    }));
+  const checkReadiness = useCallback(async () => {
+    const status = await window.ipcRenderer.invoke('RECORDING_READINESS_STATUS');
+    setRequirements((current) => {
+      const isTranscriptionReady = status.details.parakeetClient && status.details.parakeetModel && status.details.mlxAvailable && status.details.audiocapExists && status.details.audiocapExecutable;
+      return {
+        transcription: current.transcription === 'preparing' ? 'preparing' : (isTranscriptionReady ? 'ready' : 'error'),
+        microphone: status.details.micPermission ? 'granted' : 'blocked',
+        systemAudio: status.details.systemAudioPermission ? 'granted' : 'blocked',
+      };
+    });
   }, []);
 
   const prepareLocalModels = useCallback(async () => {
@@ -54,16 +54,11 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       transcription: 'preparing',
     }));
     try {
-      const [transcription, speakers] = await Promise.all([
-        window.ipcRenderer.invoke('TRANSCRIPTION_PREPARE_FINAL'),
-        window.ipcRenderer.invoke('WHISPER_PREPARE_DIARIZATION_MODELS'),
-      ]);
-      if (transcription?.ready !== true || speakers?.ready !== true) {
-        throw new Error('local_models_not_ready');
-      }
+      const status = await window.ipcRenderer.invoke('RECORDING_READINESS_PREPARE');
+      const isTranscriptionReady = status.details.parakeetClient && status.details.parakeetModel && status.details.mlxAvailable && status.details.audiocapExists && status.details.audiocapExecutable;
       setRequirements((current) => ({
         ...current,
-        transcription: 'ready',
+        transcription: isTranscriptionReady ? 'ready' : 'error',
       }));
     } catch {
       setRequirements((current) => ({
@@ -91,8 +86,8 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
   useEffect(() => {
     if (!hydrated || step !== 2) return;
-    void Promise.all([prepareLocalModels(), checkPermissions()]);
-  }, [checkPermissions, hydrated, prepareLocalModels, step]);
+    void Promise.all([prepareLocalModels(), checkReadiness()]);
+  }, [checkReadiness, hydrated, prepareLocalModels, step]);
 
   const startSetup = async () => {
     await window.ipcRenderer.invoke('SET_SETTING', {
@@ -104,7 +99,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
   const requestMicrophone = async () => {
     await window.ipcRenderer.invoke('REQUEST_MICROPHONE_PERMISSION');
-    await checkPermissions();
+    await checkReadiness();
   };
 
   const openSystemAudioSettings = async () => {
@@ -243,7 +238,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                       </button>
                       <button
                         type="button"
-                        onClick={() => void checkPermissions()}
+                        onClick={() => void checkReadiness()}
                         className="rounded-md bg-pro-bg px-4 py-2 text-xs font-bold"
                       >
                         Check again
