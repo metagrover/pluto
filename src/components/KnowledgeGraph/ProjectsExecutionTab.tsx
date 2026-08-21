@@ -696,9 +696,7 @@ export const ProjectsExecutionTab: React.FC<{
   );
 
   // Stats
-  const briefing = buildProjectsBriefing(allTasks);
-  const activeTasks = briefing.active;
-  const overdueTasks = briefing.overdue;
+  
   const activeUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'active' || task.status === 'overdue',
   );
@@ -710,12 +708,7 @@ export const ProjectsExecutionTab: React.FC<{
   const completedUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'completed',
   );
-  const executionSummary = buildExecutionSummary({
-    activeTaskCount: activeTasks.length,
-    activeProjectCount: activeProjects.length,
-    activeInboxTaskCount: activeUngroupedTasks.length,
-    overdueTaskCount: overdueTasks.length,
-  });
+
 
   if (loading && allTasks.length === 0) {
     return (

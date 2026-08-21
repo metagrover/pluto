@@ -11,8 +11,6 @@ interface SetupWizardProps {
   onComplete: () => void;
 }
 
-const isGranted = (status: unknown) =>
-  status === 'authorized' || status === 'granted';
 
 const requirementTone = (ready: boolean, blocked = false) =>
   ready

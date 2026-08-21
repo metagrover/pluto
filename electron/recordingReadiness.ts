@@ -94,7 +94,7 @@ export async function getRecordingReadinessStatus(options: {
 
   // Permissions
   const micStatus = systemPreferences.getMediaAccessStatus('microphone');
-  if (micStatus === 'granted' || micStatus === 'authorized') {
+  if (micStatus === 'granted') {
     details.micPermission = true;
   } else {
     blockers.push('mic_permission_missing');
@@ -105,7 +105,7 @@ export async function getRecordingReadinessStatus(options: {
     details.systemAudioPermission = true;
   } else {
     const systemAudioStatus = systemPreferences.getMediaAccessStatus('screen');
-    if (systemAudioStatus === 'granted' || systemAudioStatus === 'authorized') {
+    if (systemAudioStatus === 'granted') {
       details.systemAudioPermission = true;
     } else {
       blockers.push('system_audio_permission_missing');
@@ -170,14 +170,14 @@ function downloadBinary(url: string, dest: string): Promise<void> {
           // chmod +x
           fs.chmodSync(dest, 0o755);
           // strip quarantine
-          execFile('xattr', ['-d', 'com.apple.quarantine', dest], (err) => {
+          execFile('xattr', ['-d', 'com.apple.quarantine', dest], () => {
             // Ignore error if attribute doesn't exist
             resolve();
           });
         });
       })
-      .on('error', (err) => {
-        fs.unlink(dest, () => reject(err));
+      .on('error', () => {
+        fs.unlink(dest, () => reject(new Error('Failed to download binary')));
       });
   });
 }

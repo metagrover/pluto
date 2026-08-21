@@ -1,9 +1,5 @@
 import { createCaptureJournal } from './captureJournal';
-import { captureSessionLease } from './captureSessionLease';
-import {
-  type ReadinessStatus,
-  getRecordingReadinessStatus,
-} from './recordingReadiness';
+import { getRecordingReadinessStatus } from './recordingReadiness';
 
 type GetReadinessStatusParams = Parameters<
   typeof getRecordingReadinessStatus
@@ -15,11 +11,12 @@ export async function handleAudioCaptureJournalStart(options: {
   expectedSources?: any;
   sourceAvailability?: any;
   sender: { id: number };
+  captureSessionLease: ReturnType<typeof import('./captureSessionLease').createCaptureSessionLeaseRegistry>;
   readinessParams: GetReadinessStatusParams;
   watchCaptureOwner: (sender: any) => void;
   knowledgeSynthesisPause: {
-    acquire: (k: string) => void;
-    release: (k: string) => void;
+    acquire: (k: any) => void;
+    release: (k: any) => void;
   };
   getMeetingArtifactsRootDir: () => string;
   startParakeetLiveRecording: (sender: any, id: string) => Promise<void>;
@@ -36,14 +33,20 @@ export async function handleAudioCaptureJournalStart(options: {
   }
 
   const normalizedMeetingId = String(options.meetingId || '');
-  let acquisition: ReturnType<typeof captureSessionLease.acquire>;
+  let acquisition: ReturnType<typeof options.captureSessionLease.acquire>;
   try {
-    acquisition = captureSessionLease.acquire(
+    acquisition = options.captureSessionLease.acquire(
       normalizedMeetingId,
       options.sender.id,
     );
-  } catch (error) {
-    console.warn('[CaptureLease] rejected: active_capture_exists');
+  } catch (error: any) {
+    if (error.message === 'capture_session_already_active') {
+      const active = options.captureSessionLease.activeForOwner(options.sender.id);
+      if (active?.ownerId === options.sender.id) {
+        console.log('[CaptureLease] reused by owner');
+        return { meetingId: active.meetingId, state: 'resumed' };
+      }
+    }
     throw error;
   }
   options.watchCaptureOwner(options.sender);
@@ -72,7 +75,7 @@ export async function handleAudioCaptureJournalStart(options: {
   } catch (error) {
     if (
       acquisition.status === 'acquired' &&
-      captureSessionLease.release(normalizedMeetingId, options.sender.id)
+      options.captureSessionLease.release(normalizedMeetingId, options.sender.id)
     ) {
       options.knowledgeSynthesisPause.release('capture');
       console.warn('[CaptureLease] released: journal_start_failed');

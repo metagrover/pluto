@@ -26,6 +26,12 @@ describe('handleAudioCaptureJournalStart', () => {
     expectedSources: ['mic'],
     sourceAvailability: {},
     sender: { id: 1 },
+    captureSessionLease: {
+      acquire: vi.fn().mockReturnValue({ status: 'acquired' }),
+      release: vi.fn(),
+      activeForOwner: vi.fn(),
+      getActive: vi.fn(),
+    } as any,
     readinessParams: {
       parakeetFinalClient: null,
       parakeetModelRoot: '',
@@ -73,7 +79,7 @@ describe('handleAudioCaptureJournalStart', () => {
     const manifest = await handleAudioCaptureJournalStart(defaultOptions);
 
     expect(manifest).toEqual({ schemaVersion: 3 });
-    expect(captureSessionLease.acquire).toHaveBeenCalledWith('test-meeting', 1);
+    expect(defaultOptions.captureSessionLease.acquire).toHaveBeenCalledWith('test-meeting', 1);
     expect(captureJournal.createCaptureJournal).toHaveBeenCalled();
   });
 });

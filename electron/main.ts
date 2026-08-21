@@ -27,7 +27,6 @@ import {
   appendCaptureTranscriptCheckpoint,
   authorizeCaptureJournalInterval,
   completeCaptureJournalCapturedChunk,
-  createCaptureJournal,
   deleteCaptureJournal,
   persistCaptureJournalRawChunk,
   promoteCaptureTranscriptCheckpoint,
@@ -890,6 +889,7 @@ app.whenReady().then(async () => {
         expectedSources,
         sourceAvailability,
         sender: event.sender,
+        captureSessionLease,
         readinessParams: {
           parakeetFinalClient,
           parakeetModelRoot,
