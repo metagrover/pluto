@@ -102,7 +102,8 @@ export const SettingsTab = ({
     void window.ipcRenderer
       .invoke('RECORDING_READINESS_STATUS')
       .then((res: any) => {
-        setSpeakerModelsState(res?.ready ? 'ready' : 'idle');
+        const isTranscriptionReady = res?.details?.parakeetClient && res?.details?.parakeetModel && res?.details?.mlxAvailable && res?.details?.audiocapExists && res?.details?.audiocapExecutable;
+        setSpeakerModelsState(isTranscriptionReady ? 'ready' : 'idle');
       });
   }, []);
 
@@ -244,7 +245,8 @@ export const SettingsTab = ({
                   Parakeet local transcription
                 </div>
                 <p className={helperClass}>
-                  Prepare the verified Parakeet models and local transcription stack for recording.
+                  Prepare the verified Parakeet models and local transcription
+                  stack for recording.
                 </p>
               </div>
               <button
@@ -256,8 +258,8 @@ export const SettingsTab = ({
                     const result = await window.ipcRenderer.invoke(
                       'RECORDING_READINESS_PREPARE',
                     );
-                    const isReady = result?.ready;
-                    setSpeakerModelsState(isReady ? 'ready' : 'error');
+                    const isTranscriptionReady = result?.details?.parakeetClient && result?.details?.parakeetModel && result?.details?.mlxAvailable && result?.details?.audiocapExists && result?.details?.audiocapExecutable;
+                    setSpeakerModelsState(isTranscriptionReady ? 'ready' : 'error');
                   } catch {
                     setSpeakerModelsState('error');
                   }
@@ -269,7 +271,7 @@ export const SettingsTab = ({
                   : speakerModelsState === 'ready'
                     ? 'Ready'
                     : speakerModelsState === 'error'
-                      ? 'Retry setup'
+                      ? 'Retry'
                       : 'Prepare'}
               </button>
             </div>
