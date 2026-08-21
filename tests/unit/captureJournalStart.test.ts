@@ -79,7 +79,10 @@ describe('handleAudioCaptureJournalStart', () => {
     const manifest = await handleAudioCaptureJournalStart(defaultOptions);
 
     expect(manifest).toEqual({ schemaVersion: 3 });
-    expect(defaultOptions.captureSessionLease.acquire).toHaveBeenCalledWith('test-meeting', 1);
+    expect(defaultOptions.captureSessionLease.acquire).toHaveBeenCalledWith(
+      'test-meeting',
+      1,
+    );
     expect(captureJournal.createCaptureJournal).toHaveBeenCalled();
   });
 });

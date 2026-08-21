@@ -696,7 +696,7 @@ export const ProjectsExecutionTab: React.FC<{
   );
 
   // Stats
-  
+
   const activeUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'active' || task.status === 'overdue',
   );
@@ -708,7 +708,6 @@ export const ProjectsExecutionTab: React.FC<{
   const completedUngroupedTasks = ungroupedTasks.filter(
     (task) => task.status === 'completed',
   );
-
 
   if (loading && allTasks.length === 0) {
     return (

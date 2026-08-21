@@ -11,7 +11,6 @@ interface SetupWizardProps {
   onComplete: () => void;
 }
 
-
 const requirementTone = (ready: boolean, blocked = false) =>
   ready
     ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700'

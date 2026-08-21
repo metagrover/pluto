@@ -11,7 +11,9 @@ export async function handleAudioCaptureJournalStart(options: {
   expectedSources?: any;
   sourceAvailability?: any;
   sender: { id: number };
-  captureSessionLease: ReturnType<typeof import('./captureSessionLease').createCaptureSessionLeaseRegistry>;
+  captureSessionLease: ReturnType<
+    typeof import('./captureSessionLease').createCaptureSessionLeaseRegistry
+  >;
   readinessParams: GetReadinessStatusParams;
   watchCaptureOwner: (sender: any) => void;
   knowledgeSynthesisPause: {
@@ -41,7 +43,9 @@ export async function handleAudioCaptureJournalStart(options: {
     );
   } catch (error: any) {
     if (error.message === 'capture_session_already_active') {
-      const active = options.captureSessionLease.activeForOwner(options.sender.id);
+      const active = options.captureSessionLease.activeForOwner(
+        options.sender.id,
+      );
       if (active?.ownerId === options.sender.id) {
         console.log('[CaptureLease] reused by owner');
         return { meetingId: active.meetingId, state: 'resumed' };
@@ -75,7 +79,10 @@ export async function handleAudioCaptureJournalStart(options: {
   } catch (error) {
     if (
       acquisition.status === 'acquired' &&
-      options.captureSessionLease.release(normalizedMeetingId, options.sender.id)
+      options.captureSessionLease.release(
+        normalizedMeetingId,
+        options.sender.id,
+      )
     ) {
       options.knowledgeSynthesisPause.release('capture');
       console.warn('[CaptureLease] released: journal_start_failed');

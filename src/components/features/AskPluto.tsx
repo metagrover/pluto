@@ -23,7 +23,6 @@ interface Message {
 export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenMeeting,
   visible,
-  
 }) => {
   if (!visible) return null;
   const [query, setQuery] = useState('');
