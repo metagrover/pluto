@@ -9,21 +9,33 @@ const stripMarkdownFence = (value: string): string => {
 
 const extractJsonObject = (value: string): string => {
   const firstBrace = value.indexOf('{');
-  const lastBrace = value.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+  const firstBracket = value.indexOf('[');
+
+  let startIndex = -1;
+  let endIndex = -1;
+
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    startIndex = firstBrace;
+    endIndex = value.lastIndexOf('}');
+  } else if (firstBracket !== -1) {
+    startIndex = firstBracket;
+    endIndex = value.lastIndexOf(']');
+  }
+
+  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
     return value;
   }
-  return value.slice(firstBrace, lastBrace + 1);
+
+  return value.slice(startIndex, endIndex + 1);
 };
 
 const repairCommonLocalJsonDamage = (value: string): string => {
   return value
-    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/,\s*([}\]])/g, '$1') // remove trailing commas
     .replace(
-      /("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[}\]])\s+("[-A-Za-z0-9_]+":)/g,
-      '$1,$2',
-    )
-    .replace(/([}\]])\s+([{[])/g, '$1,$2');
+      /("(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null|[}\]])\s+(?=[{"\[\d\-tfn])/g,
+      '$1,',
+    ); // add missing comma between any two consecutive JSON elements
 };
 
 const escapeLikelyUnescapedInnerQuotes = (value: string): string => {
