@@ -25,8 +25,9 @@ describe('capture thermal production boundary', () => {
   });
 
   it('holds queued synthesis behind the authoritative capture lease', () => {
-    expect(main).toContain("knowledgeSynthesisPause.acquire('capture')");
-    expect(main).toContain("knowledgeSynthesisPause.release('capture')");
+    const startLogic = readFileSync('electron/captureJournalStart.ts', 'utf8');
+    expect(startLogic).toContain("knowledgeSynthesisPause.acquire('capture')");
+    expect(startLogic).toContain("knowledgeSynthesisPause.release('capture')");
     expect(main).not.toContain('setKnowledgeDocSynthesisPaused(true)');
     expect(main).not.toContain('setKnowledgeDocSynthesisPaused(false)');
   });

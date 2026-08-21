@@ -1058,6 +1058,13 @@ export const AudioManager = ({
     }
 
     try {
+      const readiness = await window.ipcRenderer.invoke('RECORDING_READINESS_STATUS') as { ready: boolean, blockers: string[] };
+      if (!readiness.ready) {
+        console.warn('[Pluto] Recording readiness failed:', readiness.blockers);
+        window.dispatchEvent(new CustomEvent('RECORDING_READINESS_FAILED', { detail: readiness }));
+        return;
+      }
+
       const meetingId = crypto.randomUUID();
       currentMeetingIdRef.current = meetingId;
       transcriptionVocabularyRef.current = {

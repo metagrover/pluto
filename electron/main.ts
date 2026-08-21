@@ -251,6 +251,17 @@ const isDownstreamRunCurrent = (meetingId: string, runId: string): boolean => {
   return activity.state === 'processing' && activity.runId === runId;
 };
 
+const getAudioCapExecPath = () => {
+  const isDev = !app.isPackaged;
+  if (!isDev) return path.join(process.resourcesPath, 'bin', 'audiocap');
+  const appPath = app.getAppPath();
+  const directPath = path.join(appPath, 'resources/bin/audiocap');
+  if (fs.existsSync(directPath)) return directPath;
+  const parentPath = path.join(appPath, '..', 'resources/bin/audiocap');
+  if (fs.existsSync(parentPath)) return parentPath;
+  return path.join(process.cwd(), 'resources/bin/audiocap');
+};
+
 const getPreloadPath = () => {
   const preloadPathMjs = path.join(__dirname, 'preload.mjs');
   const preloadPathJs = path.join(__dirname, 'preload.js');
@@ -363,6 +374,8 @@ import {
 } from './transcription';
 import { mlxPreview } from './transcription/mlxPreviewClient';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
+import { getRecordingReadinessStatus, prepareRecordingReadiness } from './recordingReadiness';
+import { handleAudioCaptureJournalStart } from './captureJournalStart';
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
@@ -831,55 +844,44 @@ app.whenReady().then(async () => {
     return true;
   });
 
+  ipcMain.handle('RECORDING_READINESS_STATUS', async () => {
+    return await getRecordingReadinessStatus({
+      parakeetFinalClient,
+      parakeetModelRoot,
+      audiocapPath: getAudioCapExecPath(),
+    });
+  });
+
+  ipcMain.handle('RECORDING_READINESS_PREPARE', async () => {
+    return await prepareRecordingReadiness({
+      parakeetFinalClient,
+      parakeetModelRoot,
+      audiocapPath: getAudioCapExecPath(),
+    });
+  });
+
   ipcMain.handle(
     'AUDIO_CAPTURE_JOURNAL_START',
     async (
       event,
       { meetingId, startedAtMs, expectedSources, sourceAvailability } = {},
     ) => {
-      const normalizedMeetingId = String(meetingId || '');
-      let acquisition: ReturnType<typeof captureSessionLease.acquire>;
-      try {
-        acquisition = captureSessionLease.acquire(
-          normalizedMeetingId,
-          event.sender.id,
-        );
-      } catch (error) {
-        console.warn('[CaptureLease] rejected: active_capture_exists');
-        throw error;
-      }
-      watchCaptureOwner(event.sender);
-      if (acquisition.status === 'acquired') {
-        knowledgeSynthesisPause.acquire('capture');
-      }
-      try {
-        const manifest = await createCaptureJournal(
-          getMeetingArtifactsRootDir(),
-          {
-            meetingId: normalizedMeetingId,
-            startedAtMs:
-              typeof startedAtMs === 'number' ? startedAtMs : Date.now(),
-            schemaVersion: 3,
-            expectedSources,
-            sourceAvailability,
-          },
-        );
-        await startParakeetLiveRecording(
-          event.sender,
-          normalizedMeetingId,
-        ).catch(() => console.warn('[Pluto] parakeet_shadow_start_failed'));
-        console.log(`[CaptureLease] ${acquisition.status}`);
-        return manifest;
-      } catch (error) {
-        if (
-          acquisition.status === 'acquired' &&
-          captureSessionLease.release(normalizedMeetingId, event.sender.id)
-        ) {
-          knowledgeSynthesisPause.release('capture');
-          console.warn('[CaptureLease] released: journal_start_failed');
-        }
-        throw error;
-      }
+      return handleAudioCaptureJournalStart({
+        meetingId,
+        startedAtMs,
+        expectedSources,
+        sourceAvailability,
+        sender: event.sender,
+        readinessParams: {
+          parakeetFinalClient,
+          parakeetModelRoot,
+          audiocapPath: getAudioCapExecPath(),
+        },
+        watchCaptureOwner,
+        knowledgeSynthesisPause,
+        getMeetingArtifactsRootDir,
+        startParakeetLiveRecording,
+      });
     },
   );
 
@@ -1091,16 +1093,7 @@ app.whenReady().then(async () => {
     rendererDist: RENDERER_DIST,
   });
 
-  const getAudioCapExecPath = () => {
-    const isDev = !app.isPackaged;
-    if (!isDev) return path.join(process.resourcesPath, 'bin', 'audiocap');
-    const appPath = app.getAppPath();
-    const directPath = path.join(appPath, 'resources/bin/audiocap');
-    if (fs.existsSync(directPath)) return directPath;
-    const parentPath = path.join(appPath, '..', 'resources/bin/audiocap');
-    if (fs.existsSync(parentPath)) return parentPath;
-    return path.join(process.cwd(), 'resources/bin/audiocap');
-  };
+
 
   const runAudioProbe = async ({
     durationMs = 1500,
