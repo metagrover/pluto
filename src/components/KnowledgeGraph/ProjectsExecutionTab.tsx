@@ -778,7 +778,9 @@ export const ProjectsExecutionTab: React.FC<{
 
   return (
     <div className="flex flex-col gap-8" data-testid="projects-briefing">
-      <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">Projects</h1>
+      <h1 className="font-serif text-[32px] font-medium tracking-[-0.01em] text-pro-text-main">
+        Projects
+      </h1>
 
       {/* Project Groups */}
       <div className="flex flex-col">

@@ -1,14 +1,35 @@
 import fs from 'node:fs';
 import { systemPreferences } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  getRecordingReadinessStatus,
+  prepareRecordingReadiness,
+} from '../../electron/recordingReadiness';
 import { mlxPreview } from '../../electron/transcription/mlxPreviewClient';
-import { getRecordingReadinessStatus, prepareRecordingReadiness } from '../../electron/recordingReadiness';
 import type { ParakeetFinalClient } from '../../electron/transcription/parakeetFinalClient';
 
 vi.mock('node:fs');
+vi.mock('node:https', () => ({
+  default: {
+    get: vi.fn((url, cb) => {
+      return {
+        on: (event: string, handler: any) => {
+          if (event === 'error') handler(new Error('mock'));
+        },
+      };
+    }),
+  },
+}));
+vi.mock('node:child_process', () => ({
+  execFile: vi.fn((cmd, args, cb) => cb(null)),
+}));
 vi.mock('electron', () => ({
   systemPreferences: {
     getMediaAccessStatus: vi.fn(),
+  },
+  app: {
+    isPackaged: false,
+    getPath: vi.fn(() => '/mock/userData'),
   },
 }));
 vi.mock('../../electron/transcription/mlxPreviewClient', () => ({
@@ -25,18 +46,32 @@ describe('recordingReadiness', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockParakeetClient = { prepare: vi.fn().mockResolvedValue(true) } as unknown as ParakeetFinalClient;
+    mockParakeetClient = {
+      prepare: vi.fn().mockResolvedValue(true),
+    } as unknown as ParakeetFinalClient;
 
     // Default to fully ready state
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readdirSync).mockReturnValue(['model.bin'] as any);
     vi.mocked(fs.accessSync).mockImplementation(() => {});
-    vi.mocked(systemPreferences.getMediaAccessStatus).mockReturnValue('granted');
-    vi.mocked(mlxPreview.health).mockResolvedValue({ engine: 'mlx_whisper', mlx_available: true } as any);
+    vi.mocked(fs.unlink).mockImplementation((path, cb) => cb(null));
+    vi.mocked(systemPreferences.getMediaAccessStatus).mockReturnValue(
+      'granted',
+    );
+    vi.mocked(mlxPreview.health).mockResolvedValue({
+      engine: 'mlx_whisper',
+      mlx_available: true,
+    } as any);
 
     // Mock platform/arch to avoid issues
-    Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    Object.defineProperty(process, 'arch', {
+      value: 'arm64',
+      configurable: true,
+    });
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+      configurable: true,
+    });
   });
 
   describe('getRecordingReadinessStatus', () => {
@@ -87,7 +122,10 @@ describe('recordingReadiness', () => {
     });
 
     it('returns mlx_unavailable blocker when on arm64 and mlx is missing', async () => {
-      vi.mocked(mlxPreview.health).mockResolvedValue({ engine: 'unavailable', mlx_available: false } as any);
+      vi.mocked(mlxPreview.health).mockResolvedValue({
+        engine: 'unavailable',
+        mlx_available: false,
+      } as any);
 
       const status = await getRecordingReadinessStatus({
         parakeetFinalClient: mockParakeetClient,
@@ -101,8 +139,14 @@ describe('recordingReadiness', () => {
     });
 
     it('ignores mlx availability on non-arm64 architecture', async () => {
-      Object.defineProperty(process, 'arch', { value: 'x64', configurable: true });
-      vi.mocked(mlxPreview.health).mockResolvedValue({ engine: 'unavailable', mlx_available: false } as any);
+      Object.defineProperty(process, 'arch', {
+        value: 'x64',
+        configurable: true,
+      });
+      vi.mocked(mlxPreview.health).mockResolvedValue({
+        engine: 'unavailable',
+        mlx_available: false,
+      } as any);
 
       const status = await getRecordingReadinessStatus({
         parakeetFinalClient: mockParakeetClient,
@@ -116,7 +160,9 @@ describe('recordingReadiness', () => {
     });
 
     it('returns audiocap_missing blocker when audiocap does not exist', async () => {
-      vi.mocked(fs.existsSync).mockImplementation((path) => path !== audiocapPath);
+      vi.mocked(fs.existsSync).mockImplementation(
+        (path) => path !== audiocapPath,
+      );
 
       const status = await getRecordingReadinessStatus({
         parakeetFinalClient: mockParakeetClient,
@@ -146,10 +192,12 @@ describe('recordingReadiness', () => {
     });
 
     it('returns mic_permission_missing blocker when microphone is not granted', async () => {
-      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation((mediaType) => {
-        if (mediaType === 'microphone') return 'denied';
-        return 'granted';
-      });
+      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(
+        (mediaType) => {
+          if (mediaType === 'microphone') return 'denied';
+          return 'granted';
+        },
+      );
 
       const status = await getRecordingReadinessStatus({
         parakeetFinalClient: mockParakeetClient,
@@ -163,10 +211,12 @@ describe('recordingReadiness', () => {
     });
 
     it('returns system_audio_permission_missing blocker when screen is not granted on darwin', async () => {
-      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation((mediaType) => {
-        if (mediaType === 'screen') return 'denied';
-        return 'granted';
-      });
+      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(
+        (mediaType) => {
+          if (mediaType === 'screen') return 'denied';
+          return 'granted';
+        },
+      );
 
       const status = await getRecordingReadinessStatus({
         parakeetFinalClient: mockParakeetClient,
@@ -180,8 +230,13 @@ describe('recordingReadiness', () => {
     });
 
     it('ignores system audio permission on non-darwin platform', async () => {
-      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(() => 'denied');
+      Object.defineProperty(process, 'platform', {
+        value: 'win32',
+        configurable: true,
+      });
+      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(
+        () => 'denied',
+      );
 
       const status = await getRecordingReadinessStatus({
         parakeetFinalClient: mockParakeetClient,
@@ -209,7 +264,9 @@ describe('recordingReadiness', () => {
 
     it('tolerates prepare failures and still returns status', async () => {
       mockParakeetClient.prepare.mockRejectedValue(new Error('Network error'));
-      vi.mocked(mlxPreview.prepareDiarizationModels).mockRejectedValue(new Error('Disk error'));
+      vi.mocked(mlxPreview.prepareDiarizationModels).mockRejectedValue(
+        new Error('Disk error'),
+      );
 
       const status = await prepareRecordingReadiness({
         parakeetFinalClient: mockParakeetClient,

@@ -19,7 +19,7 @@ import {
 } from './parakeetRuntimeHost';
 
 export type ParakeetRuntimePaths = {
-  executablePath: string;
+  executablePath: string | (() => string);
   modelRoot: string;
   audioRoot: string;
 };

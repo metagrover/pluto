@@ -102,7 +102,12 @@ export const SettingsTab = ({
     void window.ipcRenderer
       .invoke('RECORDING_READINESS_STATUS')
       .then((res: any) => {
-        const isTranscriptionReady = res?.details?.parakeetClient && res?.details?.parakeetModel && res?.details?.mlxAvailable && res?.details?.audiocapExists && res?.details?.audiocapExecutable;
+        const isTranscriptionReady =
+          res?.details?.parakeetClient &&
+          res?.details?.parakeetModel &&
+          res?.details?.mlxAvailable &&
+          res?.details?.audiocapExists &&
+          res?.details?.audiocapExecutable;
         setSpeakerModelsState(isTranscriptionReady ? 'ready' : 'idle');
       });
   }, []);
@@ -258,8 +263,15 @@ export const SettingsTab = ({
                     const result = await window.ipcRenderer.invoke(
                       'RECORDING_READINESS_PREPARE',
                     );
-                    const isTranscriptionReady = result?.details?.parakeetClient && result?.details?.parakeetModel && result?.details?.mlxAvailable && result?.details?.audiocapExists && result?.details?.audiocapExecutable;
-                    setSpeakerModelsState(isTranscriptionReady ? 'ready' : 'error');
+                    const isTranscriptionReady =
+                      result?.details?.parakeetClient &&
+                      result?.details?.parakeetModel &&
+                      result?.details?.mlxAvailable &&
+                      result?.details?.audiocapExists &&
+                      result?.details?.audiocapExecutable;
+                    setSpeakerModelsState(
+                      isTranscriptionReady ? 'ready' : 'error',
+                    );
                   } catch {
                     setSpeakerModelsState('error');
                   }

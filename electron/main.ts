@@ -253,6 +253,9 @@ const isDownstreamRunCurrent = (meetingId: string, runId: string): boolean => {
 
 const getAudioCapExecPath = () => {
   const isDev = !app.isPackaged;
+  const downloadedPath = path.join(app.getPath('userData'), 'bin', 'audiocap');
+  if (fs.existsSync(downloadedPath)) return downloadedPath;
+
   if (!isDev) return path.join(process.resourcesPath, 'bin', 'audiocap');
   const appPath = app.getAppPath();
   const directPath = path.join(appPath, 'resources/bin/audiocap');
@@ -260,6 +263,21 @@ const getAudioCapExecPath = () => {
   const parentPath = path.join(appPath, '..', 'resources/bin/audiocap');
   if (fs.existsSync(parentPath)) return parentPath;
   return path.join(process.cwd(), 'resources/bin/audiocap');
+};
+
+const getParakeetRuntimePath = () => {
+  const isDev = !app.isPackaged;
+  const downloadedPath = path.join(
+    app.getPath('userData'),
+    'bin',
+    'parakeet-runtime',
+  );
+  if (fs.existsSync(downloadedPath)) return downloadedPath;
+
+  if (!isDev)
+    return path.join(process.resourcesPath, 'bin', 'parakeet-runtime');
+  const appRoot = process.env.APP_ROOT || process.cwd();
+  return path.join(appRoot, 'resources', 'bin', 'parakeet-runtime');
 };
 
 const getPreloadPath = () => {
@@ -325,6 +343,7 @@ import { resolveLiveChunkModel } from '../src/utils/transcriptionSettings';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
+import { handleAudioCaptureJournalStart } from './captureJournalStart';
 import * as db from './db';
 import {
   extractAndProcessEntities,
@@ -363,6 +382,10 @@ import type {
   InternalSignalDocument,
 } from './llm/provider';
 import {
+  getRecordingReadinessStatus,
+  prepareRecordingReadiness,
+} from './recordingReadiness';
+import {
   type TranscriptCleanupStats,
   cleanTranscriptSegments,
   shouldCleanupTranscriptOnSave,
@@ -374,8 +397,6 @@ import {
 } from './transcription';
 import { mlxPreview } from './transcription/mlxPreviewClient';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
-import { getRecordingReadinessStatus, prepareRecordingReadiness } from './recordingReadiness';
-import { handleAudioCaptureJournalStart } from './captureJournalStart';
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
@@ -502,9 +523,6 @@ app.whenReady().then(async () => {
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
 
-  const parakeetExecutablePath = app.isPackaged
-    ? path.join(process.resourcesPath, 'bin', 'parakeet-runtime')
-    : path.join(process.env.APP_ROOT, 'resources', 'bin', 'parakeet-runtime');
   const parakeetModelRoot = path.join(
     app.getPath('userData'),
     'models',
@@ -513,7 +531,7 @@ app.whenReady().then(async () => {
   );
   fs.mkdirSync(parakeetModelRoot, { recursive: true });
   const parakeetPaths = {
-    executablePath: parakeetExecutablePath,
+    executablePath: getParakeetRuntimePath,
     modelRoot: parakeetModelRoot,
     audioRoot: getMeetingArtifactsRootDir(),
   };
@@ -1092,8 +1110,6 @@ app.whenReady().then(async () => {
     devServerUrl: VITE_DEV_SERVER_URL,
     rendererDist: RENDERER_DIST,
   });
-
-
 
   const runAudioProbe = async ({
     durationMs = 1500,

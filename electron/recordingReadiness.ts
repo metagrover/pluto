@@ -1,5 +1,8 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import { systemPreferences } from 'electron';
+import https from 'node:https';
+import path from 'node:path';
+import { app, systemPreferences } from 'electron';
 import { mlxPreview } from './transcription/mlxPreviewClient';
 import type { ParakeetFinalClient } from './transcription/parakeetFinalClient';
 
@@ -63,13 +66,13 @@ export async function getRecordingReadinessStatus(options: {
   } catch (e) {
     // Ignore
   }
-  
+
   if (process.arch === 'arm64' && !details.mlxAvailable) {
-     // For Apple Silicon, we expect MLX to be available
-     blockers.push('mlx_unavailable');
+    // For Apple Silicon, we expect MLX to be available
+    blockers.push('mlx_unavailable');
   } else if (process.arch !== 'arm64') {
-     // For Intel, it's properly unavailable, so it shouldn't block recording
-     details.mlxAvailable = true;
+    // For Intel, it's properly unavailable, so it shouldn't block recording
+    details.mlxAvailable = true;
   }
 
   // Audiocap
@@ -121,6 +124,12 @@ export async function prepareRecordingReadiness(options: {
   parakeetModelRoot: string;
   audiocapPath: string;
 }): Promise<ReadinessStatus> {
+  try {
+    await downloadNativeExecutables();
+  } catch (e) {
+    console.error('[Readiness] Native executables download failed:', e);
+  }
+
   if (options.parakeetFinalClient) {
     try {
       await options.parakeetFinalClient.prepare();
@@ -128,7 +137,7 @@ export async function prepareRecordingReadiness(options: {
       console.error('[Readiness] Parakeet prepare failed:', e);
     }
   }
-  
+
   if (process.arch === 'arm64') {
     try {
       await mlxPreview.prepareDiarizationModels();
@@ -138,4 +147,60 @@ export async function prepareRecordingReadiness(options: {
   }
 
   return getRecordingReadinessStatus(options);
+}
+
+function downloadBinary(url: string, dest: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, (res) => {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          return downloadBinary(res.headers.location as string, dest)
+            .then(resolve)
+            .catch(reject);
+        }
+        if (res.statusCode !== 200) {
+          return reject(
+            new Error(`Failed to download binary: ${res.statusCode}`),
+          );
+        }
+        const file = fs.createWriteStream(dest);
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          // chmod +x
+          fs.chmodSync(dest, 0o755);
+          // strip quarantine
+          execFile('xattr', ['-d', 'com.apple.quarantine', dest], (err) => {
+            // Ignore error if attribute doesn't exist
+            resolve();
+          });
+        });
+      })
+      .on('error', (err) => {
+        fs.unlink(dest, () => reject(err));
+      });
+  });
+}
+
+export async function downloadNativeExecutables(): Promise<void> {
+  const binDir = path.join(app.getPath('userData'), 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+
+  const BASE_URL =
+    'https://github.com/metagrover/pluto/releases/latest/download';
+
+  const audiocapUrl = `${BASE_URL}/audiocap`;
+  const audiocapDest = path.join(binDir, 'audiocap');
+
+  const parakeetUrl = `${BASE_URL}/parakeet-runtime`;
+  const parakeetDest = path.join(binDir, 'parakeet-runtime');
+
+  await Promise.all([
+    downloadBinary(audiocapUrl, audiocapDest).catch((e) =>
+      console.warn('Failed to download audiocap:', e),
+    ),
+    downloadBinary(parakeetUrl, parakeetDest).catch((e) =>
+      console.warn('Failed to download parakeet-runtime:', e),
+    ),
+  ]);
 }

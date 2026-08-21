@@ -1,8 +1,13 @@
-import { captureSessionLease } from './captureSessionLease';
 import { createCaptureJournal } from './captureJournal';
-import { getRecordingReadinessStatus, type ReadinessStatus } from './recordingReadiness';
+import { captureSessionLease } from './captureSessionLease';
+import {
+  type ReadinessStatus,
+  getRecordingReadinessStatus,
+} from './recordingReadiness';
 
-type GetReadinessStatusParams = Parameters<typeof getRecordingReadinessStatus>[0];
+type GetReadinessStatusParams = Parameters<
+  typeof getRecordingReadinessStatus
+>[0];
 
 export async function handleAudioCaptureJournalStart(options: {
   meetingId?: string;
@@ -12,7 +17,10 @@ export async function handleAudioCaptureJournalStart(options: {
   sender: { id: number };
   readinessParams: GetReadinessStatusParams;
   watchCaptureOwner: (sender: any) => void;
-  knowledgeSynthesisPause: { acquire: (k: string) => void; release: (k: string) => void };
+  knowledgeSynthesisPause: {
+    acquire: (k: string) => void;
+    release: (k: string) => void;
+  };
   getMeetingArtifactsRootDir: () => string;
   startParakeetLiveRecording: (sender: any, id: string) => Promise<void>;
   checkReadiness?: typeof getRecordingReadinessStatus;
@@ -20,7 +28,10 @@ export async function handleAudioCaptureJournalStart(options: {
   const check = options.checkReadiness || getRecordingReadinessStatus;
   const readiness = await check(options.readinessParams);
   if (!readiness.ready) {
-    console.warn('[CaptureLease] rejected: recording_not_ready', readiness.blockers);
+    console.warn(
+      '[CaptureLease] rejected: recording_not_ready',
+      readiness.blockers,
+    );
     throw new Error('recording_not_ready');
   }
 
@@ -44,16 +55,18 @@ export async function handleAudioCaptureJournalStart(options: {
       options.getMeetingArtifactsRootDir(),
       {
         meetingId: normalizedMeetingId,
-        startedAtMs: typeof options.startedAtMs === 'number' ? options.startedAtMs : Date.now(),
+        startedAtMs:
+          typeof options.startedAtMs === 'number'
+            ? options.startedAtMs
+            : Date.now(),
         schemaVersion: 3,
         expectedSources: options.expectedSources,
         sourceAvailability: options.sourceAvailability,
       },
     );
-    await options.startParakeetLiveRecording(
-      options.sender,
-      normalizedMeetingId,
-    ).catch(() => console.warn('[Pluto] parakeet_shadow_start_failed'));
+    await options
+      .startParakeetLiveRecording(options.sender, normalizedMeetingId)
+      .catch(() => console.warn('[Pluto] parakeet_shadow_start_failed'));
     console.log(`[CaptureLease] ${acquisition.status}`);
     return manifest;
   } catch (error) {

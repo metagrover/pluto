@@ -14,7 +14,10 @@ describe('capture session production ownership boundary', () => {
   const audioManager = readFileSync('src/components/AudioManager.tsx', 'utf8');
 
   it('acquires before journal creation and retains ownership until seal', () => {
-    const startHandler = readFileSync('electron/captureJournalStart.ts', 'utf8');
+    const startHandler = readFileSync(
+      'electron/captureJournalStart.ts',
+      'utf8',
+    );
     const stopHandler = sliceBetween(
       main,
       "'AUDIO_CAPTURE_JOURNAL_STOP'",

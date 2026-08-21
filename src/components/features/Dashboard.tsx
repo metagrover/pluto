@@ -23,7 +23,9 @@ interface DashboardProps {
   loading: boolean;
   isRecording: boolean;
   setSelectedMeetingId: (id: string | number | null) => void;
-  setActiveTab: (tab: 'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat') => void;
+  setActiveTab: (
+    tab: 'hub' | 'people' | 'projects' | 'wiki' | 'meetings' | 'chat',
+  ) => void;
   updatingTaskIds: Set<string>;
   actionError: string | null;
   handleCompleteTask: (id: string) => Promise<void>;
@@ -272,7 +274,8 @@ export const Dashboard = ({
 }: DashboardProps) => {
   const runAction = (action: DashboardAction) => {
     if (action.target === 'ask') return setActiveTab('chat');
-    if (action.target === 'meeting') return setSelectedMeetingId(action.meetingId);
+    if (action.target === 'meeting')
+      return setSelectedMeetingId(action.meetingId);
     setActiveTab(action.target);
   };
 

@@ -33,13 +33,29 @@ describe('SetupWizard', () => {
       if (channel === 'RECORDING_READINESS_STATUS') {
         return {
           ready: true,
-          details: { parakeetClient: true, parakeetModel: true, mlxAvailable: true, audiocapExists: true, audiocapExecutable: true, micPermission: true, systemAudioPermission: true }
+          details: {
+            parakeetClient: true,
+            parakeetModel: true,
+            mlxAvailable: true,
+            audiocapExists: true,
+            audiocapExecutable: true,
+            micPermission: true,
+            systemAudioPermission: true,
+          },
         };
       }
       if (channel === 'RECORDING_READINESS_PREPARE') {
         return {
           ready: true,
-          details: { parakeetClient: true, parakeetModel: true, mlxAvailable: true, audiocapExists: true, audiocapExecutable: true, micPermission: true, systemAudioPermission: true }
+          details: {
+            parakeetClient: true,
+            parakeetModel: true,
+            mlxAvailable: true,
+            audiocapExists: true,
+            audiocapExecutable: true,
+            micPermission: true,
+            systemAudioPermission: true,
+          },
         };
       }
       if (channel === 'CHECK_MICROPHONE_PERMISSION') return 'granted';
@@ -84,7 +100,15 @@ describe('SetupWizard', () => {
       if (channel === 'RECORDING_READINESS_STATUS') {
         return {
           ready: false,
-          details: { parakeetClient: true, parakeetModel: false, mlxAvailable: true, audiocapExists: true, audiocapExecutable: true, micPermission: true, systemAudioPermission: true }
+          details: {
+            parakeetClient: true,
+            parakeetModel: false,
+            mlxAvailable: true,
+            audiocapExists: true,
+            audiocapExecutable: true,
+            micPermission: true,
+            systemAudioPermission: true,
+          },
         };
       }
       if (channel === 'CHECK_MICROPHONE_PERMISSION') return 'granted';

@@ -1,8 +1,8 @@
+import { ArrowRight } from 'lucide-react';
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ArrowRight } from 'lucide-react';
 import { Logo } from '../Brand/Logo';
 import { CitationCard, type CitationChain } from './CitationCard';
 
@@ -29,16 +29,21 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeCitationKey, setActiveCitationKey] = useState<string | null>(null);
+  const [activeCitationKey, setActiveCitationKey] = useState<string | null>(
+    null,
+  );
   const [dynamicQueries, setDynamicQueries] = useState<string[]>([]);
   const [isLoadingQueries, setIsLoadingQueries] = useState(false);
 
-  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(null);
+  const queryCacheRef = useRef<{ queries: string[]; fetchedAt: number } | null>(
+    null,
+  );
   const messageCounterRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const nextMessageId = () => `msg-${Date.now()}-${messageCounterRef.current++}`;
+  const nextMessageId = () =>
+    `msg-${Date.now()}-${messageCounterRef.current++}`;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -101,12 +106,14 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         setMessages((prev) => {
           const newMsg = [...prev];
           newMsg.pop();
-          const content = typeof response === 'string' ? response : (response.answer ?? '');
+          const content =
+            typeof response === 'string' ? response : (response.answer ?? '');
           newMsg.push({
             id: nextMessageId(),
             role: 'assistant',
             content,
-            citations: typeof response === 'string' ? undefined : response.citations,
+            citations:
+              typeof response === 'string' ? undefined : response.citations,
           });
           return newMsg;
         });
@@ -118,7 +125,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             newMsg.push({
               id: nextMessageId(),
               role: 'assistant',
-              content: 'Based on the recent standup, the **API migration** was delayed by 2 days. The engineering team decided to use GraphQL over REST for the new endpoints.',
+              content:
+                'Based on the recent standup, the **API migration** was delayed by 2 days. The engineering team decided to use GraphQL over REST for the new endpoints.',
               citations: [
                 {
                   claim: 'API Migration delayed',
@@ -126,7 +134,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   meeting_title: 'Monday Tech Sync',
                   evidence_valid: true,
                   trust_status: 'grounded',
-                  evidence_span: 'We need to push the api migration by 2 days due to integration testing issues.',
+                  evidence_span:
+                    'We need to push the api migration by 2 days due to integration testing issues.',
                 },
                 {
                   claim: 'GraphQL chosen for new endpoints',
@@ -134,7 +143,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   meeting_title: 'Architecture Review',
                   evidence_valid: false,
                   trust_status: 'needs_review',
-                  evidence_span: "I'm thinking we should probably use GraphQL for that new service.",
+                  evidence_span:
+                    "I'm thinking we should probably use GraphQL for that new service.",
                 },
               ],
             });
@@ -148,8 +158,12 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       let errorMsg = "I'm sorry, there was an error processing your request.";
       if (e instanceof Error && e.message) {
         let msg = e.message.replace(/^Error:\s*/, '');
-        if (msg.includes('SqliteError') || msg.includes('invoking remote method')) {
-          msg = 'An internal system error occurred while searching your knowledge base.';
+        if (
+          msg.includes('SqliteError') ||
+          msg.includes('invoking remote method')
+        ) {
+          msg =
+            'An internal system error occurred while searching your knowledge base.';
         }
         errorMsg += `\n\nDetails: ${msg}`;
       } else if (typeof e === 'string') {
@@ -158,7 +172,11 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       setMessages((prev) => {
         const newMsg = [...prev];
         newMsg.pop();
-        newMsg.push({ id: nextMessageId(), role: 'assistant', content: errorMsg });
+        newMsg.push({
+          id: nextMessageId(),
+          role: 'assistant',
+          content: errorMsg,
+        });
         return newMsg;
       });
     } finally {
@@ -220,7 +238,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                     <Logo size={18} variant="default" />
                   </div>
                 )}
-                <div className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div
+                  className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+                >
                   <div
                     className={`px-5 py-3.5 text-[15px] leading-relaxed relative ${
                       msg.role === 'user'
@@ -245,29 +265,38 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                     )}
                   </div>
 
-                  {msg.role === 'assistant' && !msg.isLoading && msg.citations && msg.citations.length > 0 && (
-                    <div className="w-full space-y-3 pl-1">
-                      <div className="flex items-center gap-3 text-[10px] font-medium text-pro-text-muted/50">
-                        <span>Evidence</span>
-                        <span className="h-px flex-1 bg-pro-border/30" />
-                        <span className="text-[#10B981]">{msg.citations.length} Found</span>
+                  {msg.role === 'assistant' &&
+                    !msg.isLoading &&
+                    msg.citations &&
+                    msg.citations.length > 0 && (
+                      <div className="w-full space-y-3 pl-1">
+                        <div className="flex items-center gap-3 text-[10px] font-medium text-pro-text-muted/50">
+                          <span>Evidence</span>
+                          <span className="h-px flex-1 bg-pro-border/30" />
+                          <span className="text-[#10B981]">
+                            {msg.citations.length} Found
+                          </span>
+                        </div>
+                        <div className="space-y-3">
+                          {msg.citations.map((cit) => {
+                            const citationKey = `${msg.id}-${cit.meeting_id}-${cit.claim}`;
+                            return (
+                              <CitationCard
+                                key={citationKey}
+                                citation={cit}
+                                isActive={activeCitationKey === citationKey}
+                                onClick={() =>
+                                  setActiveCitationKey(citationKey)
+                                }
+                                onNavigateToMeeting={() =>
+                                  onOpenMeeting(cit.meeting_id)
+                                }
+                              />
+                            );
+                          })}
+                        </div>
                       </div>
-                      <div className="space-y-3">
-                        {msg.citations.map((cit) => {
-                          const citationKey = `${msg.id}-${cit.meeting_id}-${cit.claim}`;
-                          return (
-                            <CitationCard
-                              key={citationKey}
-                              citation={cit}
-                              isActive={activeCitationKey === citationKey}
-                              onClick={() => setActiveCitationKey(citationKey)}
-                              onNavigateToMeeting={() => onOpenMeeting(cit.meeting_id)}
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                    )}
                 </div>
               </div>
             ))
@@ -288,14 +317,16 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               className="w-full bg-transparent min-h-[56px] py-4 pl-6 pr-14 text-[15px] text-pro-text-main outline-none placeholder:text-pro-text-muted/60 rounded-full"
               placeholder="Ask Pluto…"
               disabled={isProcessing}
-              autoFocus
             />
             <button
               type="submit"
               disabled={!query.trim() || isProcessing}
               className="absolute right-3 w-8 h-8 rounded-full bg-black dark:bg-white text-white dark:text-black flex items-center justify-center disabled:opacity-30 hover:opacity-90 transition-all active:scale-95 group/submit"
             >
-              <ArrowRight className="w-4 h-4 opacity-90 transition-transform group-hover/submit:translate-x-0.5" strokeWidth={2} />
+              <ArrowRight
+                className="w-4 h-4 opacity-90 transition-transform group-hover/submit:translate-x-0.5"
+                strokeWidth={2}
+              />
             </button>
           </form>
         </div>
@@ -303,4 +334,3 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     </div>
   );
 };
-

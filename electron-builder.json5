@@ -16,7 +16,7 @@
     {
       "from": "resources/bin",
       "to": "bin",
-      "filter": ["**/*"]
+      "filter": ["**/*", "!audiocap", "!parakeet-runtime"]
     },
     {
       "from": "resources/model-manifests",

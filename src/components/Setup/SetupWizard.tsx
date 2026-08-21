@@ -37,13 +37,27 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   );
 
   const checkReadiness = useCallback(async () => {
-    const status = await window.ipcRenderer.invoke('RECORDING_READINESS_STATUS');
+    const status = await window.ipcRenderer.invoke(
+      'RECORDING_READINESS_STATUS',
+    );
     setRequirements((current) => {
-      const isTranscriptionReady = status.details.parakeetClient && status.details.parakeetModel && status.details.mlxAvailable && status.details.audiocapExists && status.details.audiocapExecutable;
+      const isTranscriptionReady =
+        status.details.parakeetClient &&
+        status.details.parakeetModel &&
+        status.details.mlxAvailable &&
+        status.details.audiocapExists &&
+        status.details.audiocapExecutable;
       return {
-        transcription: current.transcription === 'preparing' ? 'preparing' : (isTranscriptionReady ? 'ready' : 'error'),
+        transcription:
+          current.transcription === 'preparing'
+            ? 'preparing'
+            : isTranscriptionReady
+              ? 'ready'
+              : 'error',
         microphone: status.details.micPermission ? 'granted' : 'blocked',
-        systemAudio: status.details.systemAudioPermission ? 'granted' : 'blocked',
+        systemAudio: status.details.systemAudioPermission
+          ? 'granted'
+          : 'blocked',
       };
     });
   }, []);
@@ -54,8 +68,15 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       transcription: 'preparing',
     }));
     try {
-      const status = await window.ipcRenderer.invoke('RECORDING_READINESS_PREPARE');
-      const isTranscriptionReady = status.details.parakeetClient && status.details.parakeetModel && status.details.mlxAvailable && status.details.audiocapExists && status.details.audiocapExecutable;
+      const status = await window.ipcRenderer.invoke(
+        'RECORDING_READINESS_PREPARE',
+      );
+      const isTranscriptionReady =
+        status.details.parakeetClient &&
+        status.details.parakeetModel &&
+        status.details.mlxAvailable &&
+        status.details.audiocapExists &&
+        status.details.audiocapExecutable;
       setRequirements((current) => ({
         ...current,
         transcription: isTranscriptionReady ? 'ready' : 'error',

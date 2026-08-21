@@ -739,8 +739,15 @@ function App() {
 
   useEffect(() => {
     const handleReadinessFailed = () => setSetupNeeded(true);
-    window.addEventListener('RECORDING_READINESS_FAILED' as any, handleReadinessFailed);
-    return () => window.removeEventListener('RECORDING_READINESS_FAILED' as any, handleReadinessFailed);
+    window.addEventListener(
+      'RECORDING_READINESS_FAILED' as any,
+      handleReadinessFailed,
+    );
+    return () =>
+      window.removeEventListener(
+        'RECORDING_READINESS_FAILED' as any,
+        handleReadinessFailed,
+      );
   }, []);
 
   const retryRecordingIfReady = async () => {

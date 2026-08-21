@@ -109,7 +109,7 @@ export class NativeJsonLineProcess {
 
   constructor(
     private readonly options: {
-      executablePath: string;
+      executablePath: string | (() => string);
       args: string[];
       spawn: NativeProcessSpawn;
       requestTimeoutMs: number;
@@ -120,7 +120,9 @@ export class NativeJsonLineProcess {
   start(): void {
     if (this.child) return;
     const child = this.options.spawn(
-      this.options.executablePath,
+      typeof this.options.executablePath === 'function'
+        ? this.options.executablePath()
+        : this.options.executablePath,
       this.options.args,
       { stdio: ['pipe', 'pipe', 'pipe'] },
     );

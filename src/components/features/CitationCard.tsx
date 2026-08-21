@@ -58,9 +58,7 @@ export const CitationCard: React.FC<CitationCardProps> = ({
           <h4 className="text-[13px] font-semibold text-pro-text-main truncate group-hover:text-pro-accent transition-colors">
             {citation.meeting_title}
           </h4>
-          <span className="text-[10px] text-pro-text-muted/60">
-            Source Log
-          </span>
+          <span className="text-[10px] text-pro-text-muted/60">Source Log</span>
         </div>
 
         <div
@@ -68,7 +66,9 @@ export const CitationCard: React.FC<CitationCardProps> = ({
           title={trustMeta.description}
         >
           <div className={`w-1.5 h-1.5 rounded-full ${trustDot}`} />
-          <span className="text-[9px] font-semibold uppercase tracking-wide">{trustMeta.label}</span>
+          <span className="text-[9px] font-semibold uppercase tracking-wide">
+            {trustMeta.label}
+          </span>
         </div>
       </div>
 
