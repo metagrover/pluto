@@ -273,6 +273,8 @@ describe('MeetingView transcript integrity', () => {
     expect(markup).toContain('Analysis needs another pass');
     expect(markup).toContain('Your transcript is ready.');
     expect(markup).toContain('Retry analysis');
+    expect(markup).toContain('meeting-failure-notice__marker');
+    expect(markup).toContain('meeting-failure-notice__action');
   });
 
   it('does not offer deletion for a recovery-required meeting', () => {

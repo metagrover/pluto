@@ -257,6 +257,12 @@
     color: var(--notes-ink);
     background: transparent;
   }
+  .meeting-document--transcript-collapsed {
+    @apply flex min-h-full flex-col;
+  }
+  .meeting-document--transcript-collapsed .meeting-notes-surface {
+    @apply flex-1;
+  }
   .dark .meeting-document {
     --notes-paper: oklch(18% 0.018 272);
     --notes-paper-raised: oklch(21% 0.02 272);
@@ -349,12 +355,24 @@
     @apply pt-0;
   }
   .meeting-failure-notice {
-    @apply mx-auto flex w-full max-w-[760px] items-center gap-3 border-y px-6 py-5 md:px-8;
-    border-color: var(--notes-rule);
+    @apply relative mx-auto flex w-full max-w-[760px] items-center gap-4 px-6 py-5 md:px-8;
+  }
+  .meeting-failure-notice::before,
+  .meeting-failure-notice::after {
+    content: "";
+    @apply absolute left-6 right-6 h-px md:left-8 md:right-8;
+    background: var(--notes-rule);
+  }
+  .meeting-failure-notice::before {
+    @apply top-0;
+  }
+  .meeting-failure-notice::after {
+    @apply bottom-0;
   }
   .meeting-failure-notice__marker {
-    @apply mt-0.5 h-2 w-2 shrink-0 self-start rounded-full;
-    background: var(--notes-accent);
+    @apply flex h-8 w-8 shrink-0 items-center justify-center rounded-full;
+    color: var(--notes-muted);
+    background: var(--notes-wash);
   }
   .meeting-failure-notice__copy {
     @apply min-w-0;
@@ -368,16 +386,17 @@
     color: var(--notes-muted);
   }
   .meeting-failure-notice__action {
-    @apply ml-auto inline-flex min-h-10 shrink-0 items-center gap-2 rounded-md px-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-65;
+    @apply ml-auto inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border px-3 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent disabled:cursor-wait disabled:opacity-65;
+    border-color: var(--notes-rule);
     color: var(--notes-muted);
+    background: var(--notes-paper-raised);
   }
   .meeting-failure-notice__action:hover {
     color: var(--notes-ink);
     background: var(--notes-wash);
   }
   .meeting-analysis-placeholder {
-    @apply mx-auto w-full max-w-[760px] border-b px-6 py-16 md:px-8;
-    border-color: var(--notes-rule);
+    @apply mx-auto w-full max-w-[760px] px-6 py-16 md:px-8;
   }
   .meeting-analysis-placeholder span {
     @apply text-[11px] font-semibold uppercase tracking-[0.12em];

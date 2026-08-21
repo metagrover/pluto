@@ -181,7 +181,9 @@ export const TranscriptIntegrityPanel = ({
 
   return (
     <section aria-live="polite" className="meeting-failure-notice">
-      <span className="meeting-failure-notice__marker" aria-hidden="true" />
+      <span className="meeting-failure-notice__marker" aria-hidden="true">
+        <Sparkles className="h-3.5 w-3.5" />
+      </span>
       <div className="meeting-failure-notice__copy">
         <strong>{panelCopy.title}</strong>
         <p>{panelCopy.detail}</p>
@@ -763,7 +765,9 @@ export const MeetingView = ({
     <div
       key={selectedMeeting.id}
       data-meeting-page
-      className="meeting-document w-full"
+      className={`meeting-document w-full ${
+        transcriptVisible ? '' : 'meeting-document--transcript-collapsed'
+      }`}
     >
       <header className="meeting-document-header">
         <div className="w-full min-w-0">

@@ -204,6 +204,21 @@ describe('MeetingView progressive reveal', () => {
       placeholder?.compareDocumentPosition(transcript as Node) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(
+      container
+        .querySelector('[data-meeting-page]')
+        ?.classList.contains('meeting-document--transcript-collapsed'),
+    ).toBe(true);
+  });
+
+  it('does not reserve empty-page space after the transcript is opened', async () => {
+    await act(async () => renderMeeting(analyzedMeeting, true));
+
+    expect(
+      container
+        .querySelector('[data-meeting-page]')
+        ?.classList.contains('meeting-document--transcript-collapsed'),
+    ).toBe(false);
   });
 
   it('offers the approved notes templates', async () => {
