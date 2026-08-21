@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PageHeader } from '../ui/PageHeader';
 
 interface SettingsTabProps {
@@ -97,6 +97,12 @@ export const SettingsTab = ({
   const [speakerModelsState, setSpeakerModelsState] = useState<
     'idle' | 'preparing' | 'ready' | 'error'
   >('idle');
+
+  useEffect(() => {
+    void window.ipcRenderer.invoke('RECORDING_READINESS_STATUS').then((res: any) => {
+      setSpeakerModelsState(res?.ready ? 'ready' : 'idle');
+    });
+  }, []);
 
   const persistSetting = (key: string, value: string) => {
     void window.ipcRenderer.invoke('SET_SETTING', { key, value });
@@ -233,11 +239,10 @@ export const SettingsTab = ({
             <div className="flex items-center justify-between gap-6 py-2 max-w-2xl">
               <div className="space-y-1">
                 <div className="text-[14px] font-medium text-pro-text-main">
-                  Local speaker attribution
+                  Local recording readiness
                 </div>
                 <p className={helperClass}>
-                  Prepare the verified local models before recording
-                  finalization.
+                  Prepare verified local transcription models and verify system requirements.
                 </p>
               </div>
               <button
@@ -247,9 +252,10 @@ export const SettingsTab = ({
                   setSpeakerModelsState('preparing');
                   try {
                     const result = await window.ipcRenderer.invoke(
-                      'WHISPER_PREPARE_DIARIZATION_MODELS',
+                      'RECORDING_READINESS_PREPARE',
                     );
-                    setSpeakerModelsState(result?.ready ? 'ready' : 'error');
+                    const isReady = result?.ready;
+                    setSpeakerModelsState(isReady ? 'ready' : 'error');
                   } catch {
                     setSpeakerModelsState('error');
                   }
