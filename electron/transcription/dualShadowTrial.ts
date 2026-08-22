@@ -18,11 +18,11 @@ export const resolveDualShadowTrial = (input: {
   isPackaged: boolean;
   environment: Readonly<Record<string, string | undefined>>;
 }): DualShadowTrial => {
-  if (
-    input.isPackaged ||
-    input.environment.PLUTO_DUAL_PARAKEET_SHADOW_TRIAL !== '1'
-  )
-    return { enabled: false };
+  // The receipt-bound dual-source pass is now normal guarded recording work.
+  // Keep this resolver and its evidence token so an existing persisted rollout
+  // state remains compatible, but do not make a user-visible recording depend
+  // on a development-only launch flag or the packaging mode.
+  void input;
   return {
     enabled: true,
     stage: 'dual_shadow',
@@ -30,10 +30,7 @@ export const resolveDualShadowTrial = (input: {
   };
 };
 
-/**
- * Makes the process-local dev opt-in durable before capture admission. The
- * caller decides the launch flag; this helper never enables a packaged build.
- */
+/** Makes the approved guarded shadow stage durable before capture admission. */
 export const activateDualShadowTrial = (input: {
   trial: DualShadowTrial;
   store: Pick<LiveTranscriptionRolloutStore, 'promote' | 'read'>;

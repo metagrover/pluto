@@ -30,11 +30,11 @@ afterEach(() => {
 });
 
 describe('resolveDualShadowTrial', () => {
-  it('enables only an explicit development launch', () => {
+  it('enables guarded dual-source shadow work for an ordinary development launch', () => {
     expect(
       resolveDualShadowTrial({
         isPackaged: false,
-        environment: { PLUTO_DUAL_PARAKEET_SHADOW_TRIAL: '1' },
+        environment: {},
       }),
     ).toEqual({
       enabled: true,
@@ -43,30 +43,26 @@ describe('resolveDualShadowTrial', () => {
     });
   });
 
-  it.each([
-    {
-      isPackaged: true,
-      environment: { PLUTO_DUAL_PARAKEET_SHADOW_TRIAL: '1' },
-    },
-    { isPackaged: false, environment: {} },
-    {
-      isPackaged: false,
-      environment: { PLUTO_DUAL_PARAKEET_SHADOW_TRIAL: 'true' },
-    },
-  ])('keeps ordinary and packaged launches disabled', (input) => {
-    expect(resolveDualShadowTrial(input)).toEqual({ enabled: false });
+  it('enables guarded dual-source shadow work for packaged builds without a flag', () => {
+    expect(
+      resolveDualShadowTrial({ isPackaged: true, environment: {} }),
+    ).toEqual({
+      enabled: true,
+      stage: 'dual_shadow',
+      evidenceDigest: DUAL_SHADOW_TRIAL_EVIDENCE_DIGEST,
+    });
   });
 });
 
 describe('activateDualShadowTrial', () => {
-  it('promotes only the approved dual shadow mode for an enabled dev launch', () => {
+  it('promotes only the approved dual shadow mode for a normal launch', () => {
     const store = createStore();
 
     expect(
       activateDualShadowTrial({
         trial: resolveDualShadowTrial({
           isPackaged: false,
-          environment: { PLUTO_DUAL_PARAKEET_SHADOW_TRIAL: '1' },
+          environment: {},
         }),
         store,
         ownerToken: 'process-owner',
@@ -80,16 +76,19 @@ describe('activateDualShadowTrial', () => {
     });
   });
 
-  it('fails closed to MLX without the explicit dev trial flag', () => {
+  it('does not require a development flag in packaged builds', () => {
     const store = createStore();
 
     expect(
       activateDualShadowTrial({
-        trial: resolveDualShadowTrial({ isPackaged: false, environment: {} }),
+        trial: resolveDualShadowTrial({ isPackaged: true, environment: {} }),
         store,
         ownerToken: 'process-owner',
       }),
-    ).toEqual({ enabled: false });
-    expect(store.read()).toMatchObject({ mode: 'mlx', stage: 'none' });
+    ).toEqual({ enabled: true });
+    expect(store.read()).toMatchObject({
+      mode: 'parakeet',
+      stage: 'dual_shadow',
+    });
   });
 });
