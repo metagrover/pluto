@@ -115,6 +115,46 @@ describe('transcriptTrustState', () => {
           ...envelope,
           finalTranscriptionResult: {
             ...finalTranscriptionResult,
+            reconciliation: {
+              policyVersion: 'cross_channel_skew_v1',
+              skewApplied: true,
+              estimatedOffsetMs: 1200,
+              anchorCount: 4,
+              confidence: 0.8,
+              droppedMicWordCount: 35,
+              collapsedSequenceCount: 6,
+            },
+          },
+        }),
+        validatedProjections,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(
+      parseTranscriptTrustEnvelope(
+        JSON.stringify({
+          ...envelope,
+          finalTranscriptionResult: {
+            ...finalTranscriptionResult,
+            reconciliation: {
+              policyVersion: 'cross_channel_skew_v1',
+              skewApplied: true,
+              estimatedOffsetMs: 1200,
+              anchorCount: 4,
+              confidence: 2,
+              droppedMicWordCount: 35,
+              collapsedSequenceCount: 6,
+            },
+          },
+        }),
+        validatedProjections,
+      ),
+    ).toMatchObject({ ok: false, failure: 'invalid_shape' });
+    expect(
+      parseTranscriptTrustEnvelope(
+        JSON.stringify({
+          ...envelope,
+          finalTranscriptionResult: {
+            ...finalTranscriptionResult,
             transcript: 'private content',
           },
         }),

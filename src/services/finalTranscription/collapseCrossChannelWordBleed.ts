@@ -62,9 +62,7 @@ export const collapseCrossChannelWordBleed = (input: {
     systemSegments: input.systemSegments,
     directToleranceSeconds: timingToleranceSeconds,
   });
-  const alignmentOffsets = skewEstimate
-    ? [0, skewEstimate.offsetSeconds]
-    : [0];
+  const alignmentOffsets = skewEstimate ? [0, skewEstimate.offsetSeconds] : [0];
   const systemStartsByToken = new Map<string, number[]>();
   systemWords.forEach((word, index) => {
     const starts = systemStartsByToken.get(word.token) || [];

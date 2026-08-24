@@ -10,6 +10,7 @@ import type {
   TranscriptionRequest,
   TranscriptionResult,
 } from '../transcription/contracts.ts';
+import type { CrossChannelReconciliationMetadata } from './crossChannelSkew.ts';
 import type { FinalTranscriptionAdmission } from './finalTranscriptionAdmission.ts';
 import {
   type FinalTranscriptionFailure,
@@ -71,6 +72,7 @@ export type FinalTranscriptionMetadata = {
   modelBundleVersions: string[];
   vocabularyPolicyVersion?: string;
   vocabularyCount: number;
+  reconciliation: CrossChannelReconciliationMetadata;
 };
 
 export type FinalTranscriptionDependencies<TTranscript = unknown> = {
@@ -246,6 +248,7 @@ export const runFinalTranscription = async <TTranscript>(
         0,
         ...observedResults.map((result) => result.meta.vocabularyCount ?? 0),
       ),
+      reconciliation: validation.reconciliation,
     };
     lease = advanceFinalTranscriptionLease(lease, 'reviewing_integrity');
     await dependencies.updateLease?.(lease);

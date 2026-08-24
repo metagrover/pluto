@@ -48,6 +48,15 @@ describe('runRecordingTranscriptValidation', () => {
     expect(probeDuration).not.toHaveBeenCalled();
     expect(result.status).toBe('validated');
     expect(result.segments).toHaveLength(2);
+    expect(result.reconciliation).toEqual({
+      policyVersion: 'cross_channel_skew_v1',
+      skewApplied: false,
+      estimatedOffsetMs: 0,
+      anchorCount: 0,
+      confidence: 0,
+      droppedMicWordCount: 0,
+      collapsedSequenceCount: 0,
+    });
   });
 
   it('validates checkpoint source coverage after canonical duplicate arbitration', async () => {
@@ -134,6 +143,11 @@ describe('runRecordingTranscriptValidation', () => {
     expect(transcribe).toHaveBeenCalledTimes(3);
     expect(result.status).toBe('validated');
     expect(result.segments.map((item) => item.speaker)).toEqual(['Me', 'Them']);
+    expect(result.reconciliation).toMatchObject({
+      policyVersion: 'cross_channel_skew_v1',
+      skewApplied: false,
+      droppedMicWordCount: 0,
+    });
   });
 
   it('returns needs_attention when a required source fails twice', async () => {

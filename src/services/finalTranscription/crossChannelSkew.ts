@@ -46,7 +46,11 @@ const uniqueAnchors = (
 
   segments.forEach((segment, segmentIndex) => {
     const words = segment.words ?? [];
-    for (let startIndex = 0; startIndex <= words.length - anchorWords; startIndex++) {
+    for (
+      let startIndex = 0;
+      startIndex <= words.length - anchorWords;
+      startIndex++
+    ) {
       const slice = words.slice(startIndex, startIndex + anchorWords);
       const tokens = slice.map((word) => normalizeToken(word.word));
       if (tokens.some((token) => token.length === 0)) continue;

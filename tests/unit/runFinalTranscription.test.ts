@@ -124,6 +124,15 @@ describe('runFinalTranscription', () => {
       warnings: [],
       providerVersions: ['FluidAudio-0.15.5'],
       modelBundleVersions: ['bundle-v1'],
+      reconciliation: {
+        policyVersion: 'cross_channel_skew_v1',
+        skewApplied: false,
+        estimatedOffsetMs: 0,
+        anchorCount: 0,
+        confidence: 0,
+        droppedMicWordCount: 0,
+        collapsedSequenceCount: 0,
+      },
       sourceDetails: {
         mic: expect.objectContaining({
           outcome: 'speech',

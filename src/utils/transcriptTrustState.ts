@@ -100,6 +100,15 @@ export type TranscriptTrustEnvelopeV2 = {
     modelBundleVersions: string[];
     vocabularyPolicyVersion?: string;
     vocabularyCount: number;
+    reconciliation?: {
+      policyVersion: 'cross_channel_skew_v1';
+      skewApplied: boolean;
+      estimatedOffsetMs: number;
+      anchorCount: number;
+      confidence: number;
+      droppedMicWordCount: number;
+      collapsedSequenceCount: number;
+    };
   };
   recovery?: {
     source: 'capture_journal';
@@ -364,6 +373,45 @@ const validFinalTranscriptionResult = (
       source.wordCount >= 0
     );
   };
+  const validReconciliation = (reconciliation: unknown): boolean => {
+    if (
+      !reconciliation ||
+      typeof reconciliation !== 'object' ||
+      Array.isArray(reconciliation)
+    ) {
+      return false;
+    }
+    const value = reconciliation as Record<string, unknown>;
+    return (
+      exactKeys(value, [
+        'policyVersion',
+        'skewApplied',
+        'estimatedOffsetMs',
+        'anchorCount',
+        'confidence',
+        'droppedMicWordCount',
+        'collapsedSequenceCount',
+      ]) &&
+      value.policyVersion === 'cross_channel_skew_v1' &&
+      typeof value.skewApplied === 'boolean' &&
+      typeof value.estimatedOffsetMs === 'number' &&
+      Number.isInteger(value.estimatedOffsetMs) &&
+      Math.abs(value.estimatedOffsetMs) <= 2_500 &&
+      typeof value.anchorCount === 'number' &&
+      Number.isInteger(value.anchorCount) &&
+      value.anchorCount >= 0 &&
+      typeof value.confidence === 'number' &&
+      Number.isFinite(value.confidence) &&
+      value.confidence >= 0 &&
+      value.confidence <= 1 &&
+      typeof value.droppedMicWordCount === 'number' &&
+      Number.isInteger(value.droppedMicWordCount) &&
+      value.droppedMicWordCount >= 0 &&
+      typeof value.collapsedSequenceCount === 'number' &&
+      Number.isInteger(value.collapsedSequenceCount) &&
+      value.collapsedSequenceCount >= 0
+    );
+  };
   return (
     exactKeys(
       result,
@@ -382,7 +430,7 @@ const validFinalTranscriptionResult = (
         'modelBundleVersions',
         'vocabularyCount',
       ],
-      ['vocabularyPolicyVersion'],
+      ['vocabularyPolicyVersion', 'reconciliation'],
     ) &&
     result.policy === 'parakeet_final_v1' &&
     result.engine === 'parakeet_coreml' &&
@@ -411,6 +459,8 @@ const validFinalTranscriptionResult = (
     typeof result.vocabularyCount === 'number' &&
     Number.isInteger(result.vocabularyCount) &&
     result.vocabularyCount >= 0 &&
+    (result.reconciliation === undefined ||
+      validReconciliation(result.reconciliation)) &&
     (result.vocabularyPolicyVersion === undefined ||
       typeof result.vocabularyPolicyVersion === 'string')
   );

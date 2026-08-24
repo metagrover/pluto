@@ -86,9 +86,7 @@ describe('estimateCrossChannelSkew', () => {
   });
 
   it('rejects offsets outside the bounded calibration range', () => {
-    expect(
-      estimateCrossChannelSkew(pairedSegments([3, 3, 3, 3])),
-    ).toBeNull();
+    expect(estimateCrossChannelSkew(pairedSegments([3, 3, 3, 3]))).toBeNull();
   });
 
   it('leaves offsets within the direct matcher tolerance uncalibrated', () => {

@@ -9,6 +9,10 @@ import {
   validateTranscriptIntegrity,
 } from '../utils/transcriptIntegrity.ts';
 import { collapseCrossChannelWordBleed } from './finalTranscription/collapseCrossChannelWordBleed.ts';
+import {
+  CROSS_CHANNEL_SKEW_POLICY_VERSION,
+  type CrossChannelReconciliationMetadata,
+} from './finalTranscription/crossChannelSkew.ts';
 
 type RawWhisperSegment = {
   start: number;
@@ -195,7 +199,19 @@ export type RecordingTranscriptValidationResult = {
     CanonicalSource,
     'speech' | 'no_speech' | 'failed' | 'unknown'
   >;
+  reconciliation: CrossChannelReconciliationMetadata;
 };
+
+const emptyCrossChannelReconciliation =
+  (): CrossChannelReconciliationMetadata => ({
+    policyVersion: CROSS_CHANNEL_SKEW_POLICY_VERSION,
+    skewApplied: false,
+    estimatedOffsetMs: 0,
+    anchorCount: 0,
+    confidence: 0,
+    droppedMicWordCount: 0,
+    collapsedSequenceCount: 0,
+  });
 
 const sourceOutcome = (
   source: SourceResult,
@@ -293,6 +309,7 @@ export const runRecordingTranscriptValidation = async (input: {
           ? 'speech'
           : 'unknown',
       },
+      reconciliation: emptyCrossChannelReconciliation(),
     };
   }
   let mic: SourceResult;
@@ -352,6 +369,7 @@ export const runRecordingTranscriptValidation = async (input: {
       : {
           micSegments: rawMicSegments,
           systemSegments: rawSystemSegments,
+          reconciliation: emptyCrossChannelReconciliation(),
         };
   const micSegments = collapsedChannels.micSegments;
   const systemSegments = collapsedChannels.systemSegments;
@@ -497,5 +515,6 @@ export const runRecordingTranscriptValidation = async (input: {
       mix: sourceOutcome(mix, mixedSegments),
       system: sourceOutcome(system, systemSegments),
     },
+    reconciliation: collapsedChannels.reconciliation,
   };
 };
