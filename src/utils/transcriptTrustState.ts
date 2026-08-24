@@ -108,6 +108,8 @@ export type TranscriptTrustEnvelopeV2 = {
       confidence: number;
       droppedMicWordCount: number;
       collapsedSequenceCount: number;
+      droppedExactDuplicateSegmentCount?: number;
+      droppedEmbeddedMicFragmentCount?: number;
     };
   };
   recovery?: {
@@ -382,16 +384,23 @@ const validFinalTranscriptionResult = (
       return false;
     }
     const value = reconciliation as Record<string, unknown>;
+    const legacyKeys = [
+      'policyVersion',
+      'skewApplied',
+      'estimatedOffsetMs',
+      'anchorCount',
+      'confidence',
+      'droppedMicWordCount',
+      'collapsedSequenceCount',
+    ];
+    const currentKeys = [
+      ...legacyKeys,
+      'droppedExactDuplicateSegmentCount',
+      'droppedEmbeddedMicFragmentCount',
+    ];
+    const hasCurrentCounts = exactKeys(value, currentKeys);
     return (
-      exactKeys(value, [
-        'policyVersion',
-        'skewApplied',
-        'estimatedOffsetMs',
-        'anchorCount',
-        'confidence',
-        'droppedMicWordCount',
-        'collapsedSequenceCount',
-      ]) &&
+      (exactKeys(value, legacyKeys) || hasCurrentCounts) &&
       value.policyVersion === 'cross_channel_skew_v1' &&
       typeof value.skewApplied === 'boolean' &&
       typeof value.estimatedOffsetMs === 'number' &&
@@ -409,7 +418,14 @@ const validFinalTranscriptionResult = (
       value.droppedMicWordCount >= 0 &&
       typeof value.collapsedSequenceCount === 'number' &&
       Number.isInteger(value.collapsedSequenceCount) &&
-      value.collapsedSequenceCount >= 0
+      value.collapsedSequenceCount >= 0 &&
+      (!hasCurrentCounts ||
+        (typeof value.droppedExactDuplicateSegmentCount === 'number' &&
+          Number.isInteger(value.droppedExactDuplicateSegmentCount) &&
+          value.droppedExactDuplicateSegmentCount >= 0 &&
+          typeof value.droppedEmbeddedMicFragmentCount === 'number' &&
+          Number.isInteger(value.droppedEmbeddedMicFragmentCount) &&
+          value.droppedEmbeddedMicFragmentCount >= 0))
     );
   };
   return (

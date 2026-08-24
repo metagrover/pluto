@@ -1,4 +1,5 @@
 import type { Meeting } from '../types.ts';
+import { buildAnalysisTranscriptFromJson } from '../utils/transcript.ts';
 import {
   type ValidatedDownstreamProcessingLease,
   advanceDownstreamProcessingLease,
@@ -43,26 +44,6 @@ const throwIfAnalysisFallback = (analysis: unknown): void => {
   }
 };
 
-const transcriptForAnalysis = (transcriptJson: string | null | undefined) => {
-  try {
-    const parsed = JSON.parse(transcriptJson || '{}') as {
-      segments?: Array<{ speaker?: unknown; text?: unknown }>;
-    };
-    if (!Array.isArray(parsed.segments)) return '';
-    return parsed.segments
-      .filter(
-        (segment) =>
-          typeof segment?.text === 'string' && Boolean(segment.text.trim()),
-      )
-      .map(
-        (segment) => `${String(segment.speaker || 'Unknown')}: ${segment.text}`,
-      )
-      .join('\n');
-  } catch {
-    return '';
-  }
-};
-
 export const processValidatedMeetingDownstream = async (
   meetingId: string | number,
   invoke: Invoke,
@@ -80,7 +61,7 @@ export const processValidatedMeetingDownstream = async (
   ) {
     return { status: 'superseded' };
   }
-  const transcript = transcriptForAnalysis(meeting.transcript_json);
+  const transcript = buildAnalysisTranscriptFromJson(meeting.transcript_json);
   if (!transcript) return { status: 'failed' };
 
   const validatedAt = meeting.transcript_validated_at;

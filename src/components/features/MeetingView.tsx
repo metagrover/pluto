@@ -34,6 +34,7 @@ import {
   createAnalysisSnapshot,
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
+import { buildReadableTranscriptSegments } from '../../utils/readableTranscript';
 import {
   buildAnalysisTranscriptFromJson,
   getTranscriptSegmentStartTime,
@@ -536,8 +537,11 @@ export const MeetingView = ({
   } catch (error) {
     console.error('Failed to parse transcript', error);
   }
+  const readableTranscriptSegments = buildReadableTranscriptSegments(
+    transcriptSegments,
+  ).segments as TranscriptSegment[];
   const mergedTranscriptSegments: TranscriptSegment[] = [];
-  for (const segment of transcriptSegments) {
+  for (const segment of readableTranscriptSegments) {
     const previous = mergedTranscriptSegments.at(-1);
     if (previous && String(previous.speaker) === String(segment.speaker)) {
       previous.text += ` ${segment.text}`;

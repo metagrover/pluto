@@ -380,7 +380,7 @@ describe('retryMeetingTranscriptValidation', () => {
       transcript_validated_at: '2026-08-04T00:00:00.000Z',
       transcript_json: JSON.stringify({
         lifecycleStatus: 'validated',
-        segments: [{ speaker: 'Me', text: 'Synthetic statement.' }],
+        segments: [{ speaker: 'Me', text: 'Um Synthetic uh statement.' }],
       }),
       analysis_json: JSON.stringify({ analysis_schema_version: 3 }),
       mid_json: JSON.stringify({ mid_version: 1 }),

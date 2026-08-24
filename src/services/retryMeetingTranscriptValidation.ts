@@ -1,10 +1,12 @@
 import type { Meeting } from '../types.ts';
 import { parseLiveTranscriptResponsivenessSummary } from '../utils/liveTranscriptResponsiveness.ts';
+import { formatReadableTranscriptForAnalysis } from '../utils/readableTranscript.ts';
 import type {
   AttributionSegment,
   SpeakerActivityWindow,
 } from '../utils/speakerAttribution.ts';
 import { parseStopToValidatedLatencySummary } from '../utils/stopToValidatedLatency.ts';
+import { buildAnalysisTranscriptFromJson } from '../utils/transcript.ts';
 import {
   type TranscriptActivityEvidenceFallbackSource,
   buildStoredTranscriptActivityEvidence,
@@ -428,9 +430,7 @@ export const retryMeetingTranscriptValidation = async (
     meetingTitleNeedsGeneration(meeting.title) &&
     hasTranscriptText(meeting.transcript_json)
   ) {
-    const transcript = parseSegments(meeting.transcript_json)
-      .map((segment) => `${segment.speaker}: ${segment.text}`)
-      .join('\n');
+    const transcript = buildAnalysisTranscriptFromJson(meeting.transcript_json);
     const generatedTitle = (await invoke('GENERATE_TITLE', {
       transcript,
     })) as string;
@@ -501,9 +501,7 @@ export const retryMeetingTranscriptValidation = async (
     );
     if (claimed !== true) return { status: 'superseded' };
 
-    const transcript = parseSegments(meeting.transcript_json)
-      .map((segment) => `${segment.speaker}: ${segment.text}`)
-      .join('\n');
+    const transcript = buildAnalysisTranscriptFromJson(meeting.transcript_json);
     let downstreamStage = resumeStage;
     const analysisRequestId = `${downstreamLease.runId}:analysis`;
     try {
@@ -988,9 +986,7 @@ export const retryMeetingTranscriptValidation = async (
   const current = (await invoke('GET_MEETING', meetingId)) as Meeting;
   if (readRunId(current) !== runId) return { status: 'superseded' };
 
-  const transcript = validation.segments
-    .map((segment) => `${segment.speaker}: ${segment.text}`)
-    .join('\n');
+  const transcript = formatReadableTranscriptForAnalysis(validation.segments);
   const validatedAt = new Date().toISOString();
   const downstreamRunId = crypto.randomUUID();
   const downstreamLease = buildDownstreamProcessingLease({

@@ -106,6 +106,37 @@ describe('transcriptSchema', () => {
     expect(payload).not.toHaveProperty('stopToValidatedLatency');
   });
 
+  it('persists content-free readability diagnostics without rewriting segments', () => {
+    const segments = [
+      {
+        speaker: 'Me',
+        startTime: 1,
+        endTime: 2,
+        text: 'Um ship it',
+      },
+      {
+        speaker: 'Me',
+        startTime: 1,
+        endTime: 2,
+        text: 'Um ship it',
+      },
+    ];
+    const payload = buildTranscriptJsonPayload(segments, {
+      canonicalSource: 'recovered_channels',
+      postHydrationBleedPass: false,
+    });
+
+    expect(payload.readability).toEqual({
+      schemaVersion: 1,
+      canonicalSegmentCount: 2,
+      fillerTokenCount: 2,
+      totalTokenCount: 6,
+      exactDuplicateSegmentCount: 1,
+      embeddedFragmentCount: 0,
+    });
+    expect(payload.segments).toEqual(segments);
+  });
+
   it('records diarization-backed speaker attribution trust metadata', () => {
     const attribution = buildTranscriptSpeakerAttribution({
       diarizationEnabled: true,

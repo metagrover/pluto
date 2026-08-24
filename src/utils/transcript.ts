@@ -1,3 +1,5 @@
+import { formatReadableTranscriptForAnalysis } from './readableTranscript.ts';
+
 interface TranscriptSegmentLike {
   text?: unknown;
   speaker?: unknown;
@@ -49,19 +51,5 @@ export const buildAnalysisTranscriptFromJson = (
   transcriptJson?: string | null,
 ): string => {
   const segments = parseTranscriptSegments(transcriptJson);
-  return segments
-    .map((segment) => {
-      const text = typeof segment?.text === 'string' ? segment.text.trim() : '';
-      if (!text) {
-        return '';
-      }
-      const speaker =
-        typeof segment?.speaker === 'string' ||
-        typeof segment?.speaker === 'number'
-          ? String(segment.speaker).trim()
-          : '';
-      return speaker ? `${speaker}: ${text}` : text;
-    })
-    .filter(Boolean)
-    .join('\n');
+  return formatReadableTranscriptForAnalysis(segments);
 };

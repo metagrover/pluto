@@ -6,6 +6,10 @@
 export const TRANSCRIPT_JSON_SCHEMA_VERSION = 2;
 
 import type { LiveTranscriptResponsivenessSummary } from './liveTranscriptResponsiveness.ts';
+import {
+  type ReadableTranscriptSegment,
+  buildReadableTranscriptSegments,
+} from './readableTranscript.ts';
 import type { StopToValidatedLatencySummary } from './stopToValidatedLatency.ts';
 /** Bump when attribution / merge / ASR routing logic changes materially. */
 import type {
@@ -104,6 +108,14 @@ export type StoredTranscriptV2 = {
   stopToValidatedLatency?: StopToValidatedLatencySummary;
   lifecycleStatus?: TranscriptLifecycleStatus;
   integrity?: StoredTranscriptIntegrity;
+  readability?: {
+    schemaVersion: 1;
+    canonicalSegmentCount: number;
+    fillerTokenCount: number;
+    totalTokenCount: number;
+    exactDuplicateSegmentCount: number;
+    embeddedFragmentCount: number;
+  };
   segments: unknown[];
 };
 
@@ -223,6 +235,9 @@ export function buildTranscriptJsonPayload(
     integrity?: StoredTranscriptIntegrity;
   },
 ): StoredTranscriptV2 {
+  const readabilityStats = buildReadableTranscriptSegments(
+    segments as ReadableTranscriptSegment[],
+  ).stats;
   return {
     schemaVersion: TRANSCRIPT_JSON_SCHEMA_VERSION,
     pipelineVersion: TRANSCRIPT_PIPELINE_VERSION,
@@ -245,6 +260,14 @@ export function buildTranscriptJsonPayload(
       : {}),
     lifecycleStatus: options.lifecycleStatus,
     integrity: options.integrity,
+    readability: {
+      schemaVersion: 1,
+      canonicalSegmentCount: segments.length,
+      fillerTokenCount: readabilityStats.fillerTokenCount,
+      totalTokenCount: readabilityStats.totalTokenCount,
+      exactDuplicateSegmentCount: readabilityStats.exactDuplicateSegmentCount,
+      embeddedFragmentCount: readabilityStats.embeddedFragmentCount,
+    },
     segments,
   };
 }

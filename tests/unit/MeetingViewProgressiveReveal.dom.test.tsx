@@ -176,6 +176,35 @@ describe('MeetingView progressive reveal', () => {
     ).toBe('1:15');
   });
 
+  it('renders the readable transcript while preserving canonical timestamps', async () => {
+    await act(async () =>
+      renderMeeting(
+        {
+          ...analyzedMeeting,
+          transcript_json: JSON.stringify({
+            lifecycleStatus: 'validated',
+            segments: [
+              {
+                speaker: 'Them',
+                text: 'Um the rollout is uh ready',
+                startTime: 75,
+                endTime: 80,
+              },
+            ],
+          }),
+        },
+        true,
+      ),
+    );
+
+    const transcript = container.querySelector(
+      '[data-meeting-artifact="transcript"]',
+    );
+    expect(transcript?.textContent).toContain('the rollout is ready');
+    expect(transcript?.textContent).not.toContain('Um the rollout');
+    expect(transcript?.querySelector('time')?.textContent).toBe('1:15');
+  });
+
   it('keeps the saved transcript at the end when analysis is unavailable', async () => {
     await act(async () =>
       renderMeeting({

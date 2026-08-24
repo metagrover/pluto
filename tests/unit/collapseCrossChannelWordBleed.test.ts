@@ -139,4 +139,35 @@ describe('collapseCrossChannelWordBleed', () => {
       droppedMicWordCount: 0,
     });
   });
+
+  it('removes exact same-source duplicates before reconciliation', () => {
+    const duplicate = segment('Me', [{ word: 's', start: 2, end: 2.1 }]);
+
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [duplicate, { ...duplicate, id: 'duplicate-copy' }],
+      systemSegments: [],
+    });
+
+    expect(result.micSegments).toHaveLength(1);
+    expect(result.reconciliation.droppedExactDuplicateSegmentCount).toBe(1);
+  });
+
+  it('removes only a strict one-letter mic artifact embedded in remote speech', () => {
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [
+        segment('Me', [{ word: 's', start: 2, end: 2.1 }]),
+        segment('Me', [{ word: 'Okay', start: 5, end: 5.3 }]),
+      ],
+      systemSegments: [
+        segment('Them', [
+          { word: 'the', start: 1, end: 1.4 },
+          { word: 'rollout', start: 1.5, end: 2.4 },
+          { word: 'continues', start: 2.5, end: 3.2 },
+        ]),
+      ],
+    });
+
+    expect(result.micSegments.map((entry) => entry.text)).toEqual(['Okay']);
+    expect(result.reconciliation.droppedEmbeddedMicFragmentCount).toBe(1);
+  });
 });

@@ -56,6 +56,8 @@ describe('runRecordingTranscriptValidation', () => {
       confidence: 0,
       droppedMicWordCount: 0,
       collapsedSequenceCount: 0,
+      droppedExactDuplicateSegmentCount: 0,
+      droppedEmbeddedMicFragmentCount: 0,
     });
   });
 

@@ -15,8 +15,8 @@ describe('processValidatedMeetingDownstream', () => {
       transcript_json: JSON.stringify({
         pipelineMode: 'parakeet_final_v1',
         segments: [
-          { speaker: 'Me', text: 'first committed sentence' },
-          { speaker: 'Them', text: 'second committed sentence' },
+          { speaker: 'Me', text: 'um first committed sentence' },
+          { speaker: 'Them', text: 'second uh committed sentence' },
         ],
       }),
       transcript_integrity_json: '{}',

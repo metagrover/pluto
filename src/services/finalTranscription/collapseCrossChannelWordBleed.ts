@@ -47,6 +47,51 @@ const renderWords = (
   return text;
 };
 
+const segmentText = (segment: AttributionSegment): string =>
+  segment.text
+    .toLocaleLowerCase('en')
+    .replace(/[^\p{L}\p{N}']+/gu, ' ')
+    .trim();
+
+const dedupeExactSegments = (segments: AttributionSegment[]) => {
+  const seen = new Set<string>();
+  let dropped = 0;
+  const retained = segments.filter((segment) => {
+    const key = `${segment.startTime}|${segment.endTime}|${segmentText(segment)}`;
+    if (seen.has(key)) {
+      dropped += 1;
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+  return { segments: retained, dropped };
+};
+
+const removeEmbeddedMicLetterArtifacts = (
+  micSegments: AttributionSegment[],
+  systemSegments: AttributionSegment[],
+) => {
+  let dropped = 0;
+  const segments = micSegments.filter((mic) => {
+    const normalized = segmentText(mic);
+    const duration = mic.endTime - mic.startTime;
+    if (!/^\p{L}$/u.test(normalized) || duration < 0 || duration > 0.25) {
+      return true;
+    }
+    const embedded = systemSegments.some(
+      (system) =>
+        system.endTime - system.startTime >= 2 &&
+        (system.words?.length ?? 0) >= 3 &&
+        mic.startTime >= system.startTime &&
+        mic.endTime <= system.endTime,
+    );
+    if (embedded) dropped += 1;
+    return !embedded;
+  });
+  return { segments, dropped };
+};
+
 export const collapseCrossChannelWordBleed = (input: {
   micSegments: AttributionSegment[];
   systemSegments: AttributionSegment[];
@@ -55,11 +100,19 @@ export const collapseCrossChannelWordBleed = (input: {
 }) => {
   const minimumSequenceWords = input.minimumSequenceWords ?? 3;
   const timingToleranceSeconds = input.timingToleranceSeconds ?? 0.75;
-  const micWords = flattenWords(input.micSegments);
-  const systemWords = flattenWords(input.systemSegments);
+  const dedupedMic = dedupeExactSegments(input.micSegments);
+  const dedupedSystem = dedupeExactSegments(input.systemSegments);
+  const filteredMic = removeEmbeddedMicLetterArtifacts(
+    dedupedMic.segments,
+    dedupedSystem.segments,
+  );
+  const micSourceSegments = filteredMic.segments;
+  const systemSourceSegments = dedupedSystem.segments;
+  const micWords = flattenWords(micSourceSegments);
+  const systemWords = flattenWords(systemSourceSegments);
   const skewEstimate = estimateCrossChannelSkew({
-    micSegments: input.micSegments,
-    systemSegments: input.systemSegments,
+    micSegments: micSourceSegments,
+    systemSegments: systemSourceSegments,
     directToleranceSeconds: timingToleranceSeconds,
   });
   const alignmentOffsets = skewEstimate ? [0, skewEstimate.offsetSeconds] : [0];
@@ -118,7 +171,7 @@ export const collapseCrossChannelWordBleed = (input: {
     }
   }
 
-  const micSegments = input.micSegments.flatMap((segment, segmentIndex) => {
+  const micSegments = micSourceSegments.flatMap((segment, segmentIndex) => {
     if (!segment.words?.length) return [segment];
     const words = segment.words.filter(
       (_word, wordIndex) =>
@@ -147,11 +200,14 @@ export const collapseCrossChannelWordBleed = (input: {
     confidence: skewEstimate?.confidence ?? 0,
     droppedMicWordCount: droppedMicWords.size,
     collapsedSequenceCount,
+    droppedExactDuplicateSegmentCount:
+      dedupedMic.dropped + dedupedSystem.dropped,
+    droppedEmbeddedMicFragmentCount: filteredMic.dropped,
   };
 
   return {
     micSegments,
-    systemSegments: input.systemSegments,
+    systemSegments: systemSourceSegments,
     droppedMicWordCount: droppedMicWords.size,
     collapsedSequenceCount,
     reconciliation,

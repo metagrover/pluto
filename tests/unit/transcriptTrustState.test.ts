@@ -123,6 +123,8 @@ describe('transcriptTrustState', () => {
               confidence: 0.8,
               droppedMicWordCount: 35,
               collapsedSequenceCount: 6,
+              droppedExactDuplicateSegmentCount: 2,
+              droppedEmbeddedMicFragmentCount: 3,
             },
           },
         }),

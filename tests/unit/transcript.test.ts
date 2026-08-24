@@ -40,4 +40,56 @@ describe('buildAnalysisTranscriptFromJson', () => {
     expect(buildAnalysisTranscriptFromJson('{invalid json')).toBe('');
     expect(buildAnalysisTranscriptFromJson()).toBe('');
   });
+
+  it('builds analysis from a readable projection without rewriting evidence', () => {
+    const sourceSegments = [
+      {
+        id: 'remote-turn',
+        speaker: 'Them',
+        startTime: 10,
+        endTime: 14,
+        text: 'Um the rollout is uh ready',
+      },
+      {
+        id: 'letter-artifact',
+        speaker: 'Me',
+        startTime: 11,
+        endTime: 11.1,
+        text: 's',
+      },
+      {
+        id: 'letter-artifact-with-filler',
+        speaker: 'Me',
+        startTime: 12,
+        endTime: 12.1,
+        text: 'm uh',
+      },
+      {
+        id: 'duplicate',
+        speaker: 'Them',
+        startTime: 10,
+        endTime: 14,
+        text: 'Um the rollout is uh ready',
+      },
+      {
+        id: 'acknowledgement',
+        speaker: 'Me',
+        startTime: 15,
+        endTime: 15.4,
+        text: 'Okay',
+      },
+    ];
+    const transcriptJson = JSON.stringify({ segments: sourceSegments });
+
+    expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
+      'Them: the rollout is ready\nMe: Okay',
+    );
+    expect(sourceSegments.map((segment) => segment.text)).toEqual([
+      'Um the rollout is uh ready',
+      's',
+      'm uh',
+      'Um the rollout is uh ready',
+      'Okay',
+    ]);
+  });
 });
