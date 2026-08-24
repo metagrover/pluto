@@ -328,3 +328,11 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** Pluto follows a Granola-like document model: the scratchpad is primary while recording, completed meetings open on Notes, and Transcript is a secondary tab. Generated notes use a small number of adaptive document sections with decisions, actions, edits, templates, and evidence in context instead of parallel dashboard cards.
 - **Rationale:** A transcript-first recording layout and card-heavy analysis made it difficult to capture intent or read the meeting afterward. Long analysis could also expose housekeeping, spelling variants, and an inventory of dozens of topics instead of a useful document.
 - **Consequences:** User notes remain autosaved meeting evidence and guide generation; template selection changes emphasis without selecting another model; transcript trust and entity context remain available outside the main reading path; source quotes are disclosed where grounded evidence exists.
+
+## 2026-08-24 - Bound meeting coaching to private, evidence-grounded reflection
+
+- **Status:** Proposed
+- **Source:** [Issue #654](https://github.com/metagrover/pluto/issues/654), `docs/superpowers/specs/2026-08-24-evidence-grounded-meeting-coaching-design.md`
+- **Decision:** Pluto may offer on-demand coaching through Ask Pluto, meeting-scoped chat, and a Recent Win source moment. Successful responses use a fixed strengths, improvement, evidence, impact, and next-experiment contract. Behavioral and leadership claims require reliable meeting evidence and user attribution; coaching must not infer personality or intent, manufacture praise, score or compare participants, or become employer-facing evaluation.
+- **Rationale:** Meeting memory can reduce the effort of useful self-reflection, but unsupported praise and people evaluation would undermine Pluto's trust model and create a surveillance product instead of a private second brain.
+- **Consequences:** #62 and #614 remain the retrieval, citation, correction, and conversation foundations. Weak evidence produces constrained coaching rather than generic advice presented as meeting analysis. Longitudinal growth tracking, scoring, and organization-facing analytics remain outside the outcome and require separate consent and quality decisions.
