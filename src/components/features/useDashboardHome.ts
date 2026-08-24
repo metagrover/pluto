@@ -26,9 +26,25 @@ import {
 export interface DashboardHomeState {
   model: DashboardHomeModel;
   loading: boolean;
+  refreshing: boolean;
   error: Error | null;
   refresh: () => Promise<void>;
 }
+
+interface DashboardRefreshContext {
+  hasResolvedData: boolean;
+}
+
+export const transitionDashboardRefreshState = (
+  event: 'start' | 'settle',
+  context: DashboardRefreshContext,
+): Pick<DashboardHomeState, 'loading' | 'refreshing'> =>
+  event === 'start'
+    ? {
+        loading: !context.hasResolvedData,
+        refreshing: context.hasResolvedData,
+      }
+    : { loading: false, refreshing: false };
 
 interface DashboardHomeData {
   overdueActions: Entity[];
@@ -177,9 +193,13 @@ export const useDashboardHome = ({
   isRecording,
   meetings,
 }: UseDashboardHomeParams): DashboardHomeState => {
-  const [state, setState] = useState<DashboardHomeState>(() => ({
+  const [state, setState] = useState<
+    DashboardHomeState & { hasResolvedData: boolean }
+  >(() => ({
     model: buildEmptyDashboardHomeModel({ isRecording, meetings }),
     loading: true,
+    refreshing: false,
+    hasResolvedData: false,
     error: null,
     refresh: async () => {},
   }));
@@ -189,7 +209,7 @@ export const useDashboardHome = ({
     const refresh = createDashboardRefreshCoordinator(async () => {
       setState((previous) => ({
         ...previous,
-        loading: true,
+        ...transitionDashboardRefreshState('start', previous),
         error: null,
         refresh,
       }));
@@ -214,6 +234,8 @@ export const useDashboardHome = ({
             ...data,
           }),
           loading: false,
+          refreshing: false,
+          hasResolvedData: true,
           error: null,
           refresh,
         });
@@ -223,7 +245,7 @@ export const useDashboardHome = ({
         if (!cancelled) {
           setState((previous) => ({
             ...previous,
-            loading: false,
+            ...transitionDashboardRefreshState('settle', previous),
             error: loadError,
             refresh,
           }));
@@ -232,13 +254,6 @@ export const useDashboardHome = ({
       }
     });
 
-    setState((previous) => ({
-      model: previous.model,
-      loading: true,
-      error: null,
-      refresh,
-    }));
-
     void refresh().catch(() => {});
 
     return () => {
@@ -246,5 +261,11 @@ export const useDashboardHome = ({
     };
   }, [isRecording, meetings]);
 
-  return state;
+  return {
+    model: state.model,
+    loading: state.loading,
+    refreshing: state.refreshing,
+    error: state.error,
+    refresh: state.refresh,
+  };
 };
