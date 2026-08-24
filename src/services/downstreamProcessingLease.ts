@@ -11,6 +11,7 @@ export type ValidatedDownstreamProcessingLease = {
   startedAt: string;
   deadlineAt: string;
   stage: DownstreamProcessingStage;
+  attempt: number;
 };
 
 export type PartialCaptureGapSourceProof = {
@@ -28,6 +29,7 @@ export type PartialCaptureGapProcessingLease = {
   startedAt: string;
   deadlineAt: string;
   stage: DownstreamProcessingStage;
+  attempt: number;
 };
 
 export type DownstreamProcessingLease =
@@ -46,13 +48,14 @@ export type DownstreamProcessingComplete =
       source: PartialCaptureGapSourceProof;
     };
 
-const DOWNSTREAM_LEASE_MS = 30 * 60_000;
+const DOWNSTREAM_LEASE_MS = 60 * 60_000;
 
 export const buildDownstreamProcessingLease = (input: {
   runId: string;
   transcriptValidatedAt: string;
   now?: number;
   stage: DownstreamProcessingStage;
+  attempt?: number;
 }): ValidatedDownstreamProcessingLease => {
   const now = input.now ?? Date.now();
   return {
@@ -63,6 +66,7 @@ export const buildDownstreamProcessingLease = (input: {
     startedAt: new Date(now).toISOString(),
     deadlineAt: new Date(now + DOWNSTREAM_LEASE_MS).toISOString(),
     stage: input.stage,
+    attempt: input.attempt ?? 1,
   };
 };
 
@@ -83,6 +87,7 @@ export const buildPartialCaptureGapProcessingLease = async (input: {
   captureJournalGeneration: string;
   now?: number;
   stage: DownstreamProcessingStage;
+  attempt?: number;
 }): Promise<PartialCaptureGapProcessingLease> => {
   const now = input.now ?? Date.now();
   return {
@@ -98,6 +103,7 @@ export const buildPartialCaptureGapProcessingLease = async (input: {
     startedAt: new Date(now).toISOString(),
     deadlineAt: new Date(now + DOWNSTREAM_LEASE_MS).toISOString(),
     stage: input.stage,
+    attempt: input.attempt ?? 1,
   };
 };
 

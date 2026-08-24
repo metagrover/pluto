@@ -111,6 +111,7 @@ export interface LLMProvider {
     transcript: string,
     userNotes?: string,
     template?: import('./prompts').MeetingNotesTemplate,
+    options?: { signal?: AbortSignal },
   ): Promise<import('./analysisTypes').AnalysisDocumentV3>;
   /** @deprecated Use generateStructuredAnalysis for v3 pipeline */
   generateSummary(transcript: string, userNotes?: string): Promise<string>;
@@ -131,6 +132,7 @@ export interface LLMProvider {
   extractValueSignals(
     transcript: string,
     summary?: string,
+    options?: { signal?: AbortSignal },
   ): Promise<InternalSignalDocument>;
   extractSpeakerIdentity(transcript: string): Promise<string | null>;
   generateTitle(transcript: string): Promise<string>;

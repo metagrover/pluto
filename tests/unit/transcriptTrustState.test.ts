@@ -141,6 +141,26 @@ describe('transcriptTrustState', () => {
     ).toMatchObject({ ok: false, failure: 'invalid_shape' });
   });
 
+  it('accepts content-free integrity reasons and rejects non-string values', () => {
+    const envelope = {
+      schemaVersion: 2,
+      state: 'needs_attention',
+      causes: [{ code: 'recovered_awaiting_validation' }],
+      evidenceProvenance: { kind: 'missing' },
+      reasons: ['required_source_failed'],
+    };
+
+    expect(
+      parseTranscriptTrustEnvelope(JSON.stringify(envelope), projections),
+    ).toMatchObject({ ok: true });
+    expect(
+      parseTranscriptTrustEnvelope(
+        JSON.stringify({ ...envelope, reasons: [{ transcript: 'private' }] }),
+        projections,
+      ),
+    ).toMatchObject({ ok: false, failure: 'invalid_shape' });
+  });
+
   it.each([
     [
       'validated without proof',

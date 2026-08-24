@@ -336,3 +336,19 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** Pluto may offer on-demand coaching through Ask Pluto, meeting-scoped chat, and a Recent Win source moment. Successful responses use a fixed strengths, improvement, evidence, impact, and next-experiment contract. Behavioral and leadership claims require reliable meeting evidence and user attribution; coaching must not infer personality or intent, manufacture praise, score or compare participants, or become employer-facing evaluation.
 - **Rationale:** Meeting memory can reduce the effort of useful self-reflection, but unsupported praise and people evaluation would undermine Pluto's trust model and create a surveillance product instead of a private second brain.
 - **Consequences:** #62 and #614 remain the retrieval, citation, correction, and conversation foundations. Weak evidence produces constrained coaching rather than generic advice presented as meeting analysis. Longitudinal growth tracking, scoring, and organization-facing analytics remain outside the outcome and require separate consent and quality decisions.
+
+## 2026-08-24 - Bound analysis retries at the provider cancellation boundary
+
+- **Status:** Accepted
+- **Source:** [Issue #647](https://github.com/metagrover/pluto/issues/647)
+- **Decision:** Every automatic analysis run carries a durable attempt number and a request identity shared by the renderer and Electron main process. Pluto permits at most two automatic analysis attempts for the same downstream failure state. When the analysis-stage deadline expires, the renderer requests cancellation, Electron aborts the active provider request, waits for it to settle, and only then persists a content-free terminal failure. A manual retry starts one new bounded attempt.
+- **Rationale:** A renderer-only timeout left the Ollama request running behind the serialized generation gate, while the persisted failed state immediately became eligible for another automatic run. Longer timeouts delayed the collision but did not repair ownership or convergence.
+- **Consequences:** Analysis can no longer create an unbounded automatic retry loop or leave an orphaned local generation competing with its replacement. Per-request Ollama timeouts remain bounded, later knowledge stages retain their own deadlines, and Meeting View continues to offer a deliberate retry without exposing transcript content in lifecycle metadata.
+
+## 2026-08-24 - Prefer concise synthesis without weakening evidence safeguards
+
+- **Status:** Accepted
+- **Source:** [Issue #656](https://github.com/metagrover/pluto/issues/656)
+- **Decision:** Local analysis may use smaller overlapping windows, a non-reasoning coverage check, and a four-key-point cap to reduce repetition. The existing settled-decision, committed-action, unresolved-question, lexical-precision, and exact-evidence rules remain mandatory. The global editorial pass may compress local material but cannot erase grounded local facts or settled items.
+- **Rationale:** The preserved experiment identified useful ways to make notes more concise, but its shortened classification policy and removal of local merge safeguards reduced trust and broke the established analysis contract.
+- **Consequences:** Coverage-check fields are discarded during parsing and never persisted or rendered. Editorial output remains concise, grounded local material is restored when omitted, foreground LLM work pauses background knowledge synthesis, and generated titles tolerate common model preambles without accepting conversational filler.

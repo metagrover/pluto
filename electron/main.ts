@@ -46,7 +46,6 @@ import {
   canReuseRunningCaptureForProbe,
   waitForNativeAudioSpawn,
 } from './nativeAudioCapture';
-import { createPauseReasonCoordinator } from './pauseReasonCoordinator';
 import { createPostMeetingBackgroundActivity } from './postMeetingBackgroundActivity';
 import {
   normalizeCheckpointWords,
@@ -373,6 +372,10 @@ import {
   setKnowledgeDocSynthesisPaused,
   synthesizeEntitySummary,
 } from './knowledgeSynthesis';
+import {
+  configureKnowledgeSynthesisPause,
+  knowledgeSynthesisPause,
+} from './knowledgeSynthesisPause';
 import type { AnalysisDocumentV3 } from './llm/analysisTypes';
 import { getAllSettings, getProvider } from './llm/factory';
 import type {
@@ -399,14 +402,17 @@ import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
 
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
+const activeAnalysisGenerations = new Map<
+  string,
+  { controller: AbortController; settled: Promise<void> }
+>();
 let activeTranscriptionCount = 0;
 const activeTranscriptionMeetings = new Map<string, number>();
-const knowledgeSynthesisPause = createPauseReasonCoordinator(
-  setKnowledgeDocSynthesisPaused,
-);
 let parakeetFinalClient: ParakeetFinalClient | null = null;
 let parakeetRuntimeHost: ParakeetRuntimeHost | null = null;
 let parakeetShadowCoordinator: ParakeetLiveMeetingCoordinator | null = null;
+
+configureKnowledgeSynthesisPause(setKnowledgeDocSynthesisPaused);
 
 const startParakeetLiveRecording = async (
   _sender: WebContents,
@@ -2508,8 +2514,13 @@ app.whenReady().then(async () => {
 
   ipcMain.handle(
     'GENERATE_ANALYSIS_V2',
-    async (_event, { transcript, userNotes, template }) => {
-      try {
+    async (_event, { transcript, userNotes, template, requestId }) => {
+      const normalizedRequestId =
+        typeof requestId === 'string' && requestId.trim()
+          ? requestId.trim()
+          : null;
+      const controller = new AbortController();
+      const generation = (async () => {
         if (!transcript || !transcript.trim()) {
           return {
             analysis: fallbackAnalysisV3(),
@@ -2525,24 +2536,62 @@ app.whenReady().then(async () => {
           transcript,
           userNotes,
           template,
+          { signal: controller.signal },
         );
+        if (normalizedRequestId && analysis.quality.fallback_used) {
+          throw new Error('analysis_generation_failed');
+        }
         const signals = await provider.extractValueSignals(
           transcript,
           analysis.overview,
+          { signal: controller.signal },
         );
         return {
           analysis,
           signals: normalizeValueSignals(signals),
         };
+      })();
+      const settled = generation.then(
+        () => undefined,
+        () => undefined,
+      );
+      if (normalizedRequestId) {
+        activeAnalysisGenerations.set(normalizedRequestId, {
+          controller,
+          settled,
+        });
+      }
+      try {
+        return await generation;
       } catch (error) {
+        if (controller.signal.aborted || normalizedRequestId) throw error;
         console.error('[LLM] v3 analysis generation failed:', error);
         return {
           analysis: fallbackAnalysisV3(),
           signals: emptyValueSignals(),
         };
+      } finally {
+        if (
+          normalizedRequestId &&
+          activeAnalysisGenerations.get(normalizedRequestId)?.controller ===
+            controller
+        ) {
+          activeAnalysisGenerations.delete(normalizedRequestId);
+        }
       }
     },
   );
+
+  ipcMain.handle('CANCEL_ANALYSIS_GENERATION', async (_event, requestId) => {
+    if (typeof requestId !== 'string') return { cancelled: false };
+    const active = activeAnalysisGenerations.get(requestId);
+    if (!active) return { cancelled: false };
+    active.controller.abort(
+      new DOMException('Analysis generation cancelled', 'AbortError'),
+    );
+    await active.settled;
+    return { cancelled: true };
+  });
 
   ipcMain.handle('EXTRACT_SPEAKER_IDENTITY', async (_event, { transcript }) => {
     try {

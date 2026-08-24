@@ -216,13 +216,18 @@ export type MeetingDownstreamProcessingV1 = {
   runId?: string;
   startedAt?: string;
   deadlineAt?: string;
+  attempt?: number;
   stage?:
     | 'analysis'
     | 'value_signals'
     | 'knowledge_extraction'
     | 'knowledge_synthesis'
     | 'final_save';
-  failure?: 'generation_failed' | 'save_failed' | 'interrupted';
+  failure?:
+    | 'generation_failed'
+    | 'save_failed'
+    | 'interrupted'
+    | 'stage_timeout';
 };
 
 const STATES = new Set<TranscriptLifecycleStatus>([
@@ -507,11 +512,15 @@ export const parseTranscriptTrustEnvelope = (
         'finalTranscriptionResult',
         'recovery',
         'restorationProof',
+        'reasons',
       ],
     ) ||
     !STATES.has(raw.state as TranscriptLifecycleStatus) ||
     !Array.isArray(raw.causes) ||
     !raw.causes.every(validCause) ||
+    (raw.reasons !== undefined &&
+      (!Array.isArray(raw.reasons) ||
+        !raw.reasons.every((reason) => typeof reason === 'string'))) ||
     !raw.evidenceProvenance ||
     typeof raw.evidenceProvenance !== 'object' ||
     (raw.finalTranscriptionResult !== undefined &&
@@ -883,7 +892,7 @@ export const parseMeetingDownstreamProcessing = (
     !exactKeys(
       raw,
       ['schemaVersion', 'state', 'transcriptValidatedAt'],
-      ['runId', 'startedAt', 'deadlineAt', 'stage', 'failure'],
+      ['runId', 'startedAt', 'deadlineAt', 'stage', 'failure', 'attempt'],
     ) ||
     raw.schemaVersion !== 1 ||
     !['not_started', 'processing', 'complete', 'failed'].includes(
@@ -909,7 +918,13 @@ export const parseMeetingDownstreamProcessing = (
     'generation_failed',
     'save_failed',
     'interrupted',
+    'stage_timeout',
   ].includes(String(raw.failure));
+  const hasValidAttempt =
+    raw.attempt === undefined ||
+    (typeof raw.attempt === 'number' &&
+      Number.isSafeInteger(raw.attempt) &&
+      raw.attempt >= 1);
   const hasLeaseWindow =
     (raw.startedAt === undefined && raw.deadlineAt === undefined) ||
     (isoTimestamp(raw.startedAt) &&
@@ -924,6 +939,7 @@ export const parseMeetingDownstreamProcessing = (
       hasRunId &&
       hasLeaseWindow &&
       hasStage &&
+      hasValidAttempt &&
       raw.failure === undefined) ||
     (raw.state === 'complete' &&
       raw.runId === undefined &&
@@ -932,6 +948,7 @@ export const parseMeetingDownstreamProcessing = (
     (raw.state === 'failed' &&
       raw.runId === undefined &&
       hasStage &&
+      hasValidAttempt &&
       hasFailure);
   return validByState
     ? { ok: true, state: raw as MeetingDownstreamProcessingV1 }

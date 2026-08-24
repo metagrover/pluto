@@ -1,4 +1,8 @@
-export type PauseReason = 'capture' | 'transcription' | 'downstream';
+export type PauseReason =
+  | 'capture'
+  | 'transcription'
+  | 'downstream'
+  | 'llm_active';
 
 export const createPauseReasonCoordinator = (
   onPausedChange: (paused: boolean) => void,

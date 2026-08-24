@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { knowledgeSynthesisPause } from '../knowledgeSynthesisPause';
 import { createSerializedTaskGate } from '../serializedTaskGate';
 import {
   analysisDocumentToMarkdown,
@@ -48,7 +49,7 @@ import type {
 } from './provider';
 
 const OLLAMA_TIMEOUT_MS = 90_000;
-const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 900_000; // 15 minutes (CPU generation can be slow)
+const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 15 * 60_000;
 const OLLAMA_DEFAULT_MODEL = 'qwen3.5:9b';
 const SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS = 8;
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
@@ -156,18 +157,18 @@ const mergeEditorialWithGroundedLocal = (
     if (mergedDecisions.restoredCount > 0 || mergedActions.restoredCount > 0) {
       repairedSettledOmission = true;
     }
+    target.decisions = mergedDecisions.items;
+    target.action_items = mergedActions.items;
     target.key_points = mergeUniqueByKey(
       target.key_points,
       localTopic.key_points,
       (item) => normalizeTranscriptEvidence(item.text),
     );
-    target.decisions = mergedDecisions.items;
-    target.action_items = mergedActions.items;
     target.key_points = mergeUniqueByKey(
       target.key_points,
       localTopic.summary ? [{ text: localTopic.summary }] : [],
       (item) => normalizeTranscriptEvidence(item.text),
-    );
+    ).slice(0, 4);
   }
 
   return {
@@ -393,6 +394,7 @@ interface TextGenerationOptions {
   prompt: string;
   task: LLMTask;
   jsonMode?: boolean;
+  signal?: AbortSignal;
 }
 
 export class UnifiedLLMProvider implements LLMProvider {
@@ -443,18 +445,21 @@ export class UnifiedLLMProvider implements LLMProvider {
     transcript: string,
     userNotes?: string,
     template: MeetingNotesTemplate = 'auto',
+    options: { signal?: AbortSignal } = {},
   ): Promise<AnalysisDocumentV3> {
     if (this.providerType === 'ollama') {
       return this.generateStructuredAnalysisMultiPass(
         transcript,
         userNotes,
         template,
+        options.signal,
       );
     }
     return this.generateStructuredAnalysisSinglePass(
       transcript,
       userNotes,
       template,
+      options.signal,
     );
   }
 
@@ -462,6 +467,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     transcript: string,
     userNotes?: string,
     template: MeetingNotesTemplate = 'auto',
+    signal?: AbortSignal,
   ): Promise<AnalysisDocumentV3> {
     const errorCategories: AnalysisErrorCategory[] = [];
 
@@ -470,6 +476,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         prompt: getStructuredAnalysisPrompt(transcript, userNotes, template),
         task: 'structuredAnalysis',
         jsonMode: true,
+        signal,
       });
 
       let retryCount = 0;
@@ -487,6 +494,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             ),
             task: 'structuredAnalysis',
             jsonMode: true,
+            signal,
           });
           parsed = parseAnalysisDocumentV3(this.cleanJsonText(repaired));
           this.pushErrorCategory(
@@ -518,6 +526,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         errorCategories,
       });
     } catch (e) {
+      if (isAbortError(e)) throw e;
       console.error(`[${this.name}] Structured analysis failed:`, e);
       return fallbackAnalysisDocumentV3(1, [
         `Analysis generation failed: ${String(e)}`,
@@ -529,9 +538,10 @@ export class UnifiedLLMProvider implements LLMProvider {
     transcript: string,
     userNotes?: string,
     template: MeetingNotesTemplate = 'auto',
+    signal?: AbortSignal,
   ): Promise<AnalysisDocumentV3> {
     const errorCategories: AnalysisErrorCategory[] = [];
-    const windows = sliceTranscriptWindows(transcript, 120, 15);
+    const windows = sliceTranscriptWindows(transcript, 60, 10);
     const topics: TopicSection[] = [];
     const rawActionItems: ActionItemV3[] = [];
     const rawDecisions: DecisionV3[] = [];
@@ -562,6 +572,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             prompt: segmentationPrompt,
             task: 'topicSegmentation',
             jsonMode: true,
+            signal,
           });
           const segParsed = JSON.parse(this.cleanJsonText(segRaw)) as Record<
             string,
@@ -662,6 +673,7 @@ export class UnifiedLLMProvider implements LLMProvider {
             prompt: topicPrompt,
             task: 'topicAnalysis',
             jsonMode: true,
+            signal,
           });
           const topicParsed = JSON.parse(
             this.cleanJsonText(topicRaw),
@@ -687,6 +699,7 @@ export class UnifiedLLMProvider implements LLMProvider {
                     p.from_user_notes === true ? true : undefined,
                 }))
                 .filter((p) => p.text.length > 0)
+                .slice(0, 4)
             : [];
 
           const decisions = Array.isArray(topicParsed.decisions)
@@ -821,7 +834,10 @@ export class UnifiedLLMProvider implements LLMProvider {
             .join(' ')
             .slice(0, 600);
         } else {
-          const edited = await this.generateEditorialDocument(editorialPrompt);
+          const edited = await this.generateEditorialDocument(
+            editorialPrompt,
+            signal,
+          );
           if (edited) {
             const merged = mergeEditorialWithGroundedLocal(
               localDraft,
@@ -840,6 +856,7 @@ export class UnifiedLLMProvider implements LLMProvider {
           }
         }
       } catch (error) {
+        if (signal?.aborted) throw error;
         console.warn('[Analysis] Global editorial synthesis failed:', error);
         this.pushErrorCategory(errorCategories, 'editorial_failed');
       }
@@ -857,11 +874,13 @@ export class UnifiedLLMProvider implements LLMProvider {
 
   private async generateEditorialDocument(
     prompt: string,
+    signal?: AbortSignal,
   ): Promise<AnalysisDocumentV3 | null> {
     const raw = await this.generateText({
       prompt,
       task: 'analysisEditorial',
       jsonMode: true,
+      signal,
     });
     const edited = parseAnalysisDocumentV3(this.cleanJsonText(raw));
     if (
@@ -1015,6 +1034,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractInternalSignals(
     transcript: string,
     summary?: string,
+    options: { signal?: AbortSignal } = {},
   ): Promise<InternalSignalDocument> {
     const prompt = getValueSignalsPrompt(transcript, summary);
 
@@ -1023,6 +1043,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         prompt,
         task: 'valueSignals',
         jsonMode: true,
+        signal: options.signal,
       });
       const parsed = JSON.parse(
         this.cleanJsonText(raw),
@@ -1035,6 +1056,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         extra_tags: this.normalizeTags(parsed.extra_tags),
       };
     } catch (e) {
+      if (isAbortError(e)) throw e;
       console.error(`[${this.name}] Failed to extract internal signals:`, e);
       return this.emptyInternalSignals();
     }
@@ -1043,8 +1065,9 @@ export class UnifiedLLMProvider implements LLMProvider {
   async extractValueSignals(
     transcript: string,
     summary?: string,
+    options: { signal?: AbortSignal } = {},
   ): Promise<InternalSignalDocument> {
-    return this.extractInternalSignals(transcript, summary);
+    return this.extractInternalSignals(transcript, summary, options);
   }
 
   async generateAnalysisArtifacts(
@@ -1123,11 +1146,24 @@ export class UnifiedLLMProvider implements LLMProvider {
     const prompt = getTitlePrompt(transcript);
 
     try {
-      const title = (await this.generateText({ prompt, task: 'title' }))
-        .trim()
-        .replace(/["']/g, '')
-        .replace(/^title\s*:\s*/i, '')
-        .trim();
+      const generated = await this.generateText({ prompt, task: 'title' });
+      const title = generated
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) =>
+          line
+            .replace(/["'*]/g, '')
+            .replace(/^(?:title|subject|meeting title)\s*:\s*/i, '')
+            .replace(/^#+\s+/, '')
+            .trim(),
+        )
+        .find(
+          (line) =>
+            line.length > 0 &&
+            !line.match(/^(here is|sure|i can help|the title|below is)/i),
+        );
+
       if (title && title.length < 100) {
         return title;
       }
@@ -1207,25 +1243,44 @@ export class UnifiedLLMProvider implements LLMProvider {
   }
 
   private async generateText(options: TextGenerationOptions): Promise<string> {
-    switch (this.providerType) {
-      case 'openai':
-        return this.generateWithOpenAI(options);
-      case 'claude':
-        return this.generateWithClaude(options);
-      case 'gemini':
-        return this.generateWithGemini(options);
-      case 'ollama':
-        return runWithOllamaGenerationGate(
-          Symbol(options.task),
-          async () => this.generateWithOllama(options),
-          options.task === 'knowledgeDoc'
-            ? 0
-            : options.task === 'askPluto'
-              ? 20
-              : 10,
-        );
-      default:
-        throw new Error(`Unsupported provider: ${this.providerType}`);
+    const isBackground = options.task === 'knowledgeDoc';
+    if (!isBackground) {
+      knowledgeSynthesisPause.acquire('llm_active');
+    }
+
+    try {
+      options.signal?.throwIfAborted();
+      let result: string;
+      switch (this.providerType) {
+        case 'openai':
+          result = await this.generateWithOpenAI(options);
+          break;
+        case 'claude':
+          result = await this.generateWithClaude(options);
+          break;
+        case 'gemini':
+          result = await this.generateWithGemini(options);
+          break;
+        case 'ollama':
+          result = await runWithOllamaGenerationGate(
+            Symbol(options.task),
+            async () => this.generateWithOllama(options),
+            options.task === 'knowledgeDoc'
+              ? 0
+              : options.task === 'askPluto'
+                ? 20
+                : 10,
+          );
+          break;
+        default:
+          throw new Error(`Unsupported provider: ${this.providerType}`);
+      }
+      options.signal?.throwIfAborted();
+      return result;
+    } finally {
+      if (!isBackground) {
+        knowledgeSynthesisPause.release('llm_active');
+      }
     }
   }
 
@@ -1233,6 +1288,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     prompt,
     task,
     jsonMode,
+    signal,
   }: TextGenerationOptions): Promise<string> {
     if (!this.settings.openai_api_key) {
       throw new Error('OpenAI API key not configured');
@@ -1258,6 +1314,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         Authorization: `Bearer ${this.settings.openai_api_key}`,
       },
       body: JSON.stringify(body),
+      signal,
     });
 
     if (!response.ok) {
@@ -1271,6 +1328,7 @@ export class UnifiedLLMProvider implements LLMProvider {
   private async generateWithClaude({
     prompt,
     task,
+    signal,
   }: TextGenerationOptions): Promise<string> {
     if (!this.settings.claude_api_key) {
       throw new Error('Claude API key not configured');
@@ -1288,6 +1346,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         max_tokens: this.getClaudeMaxTokens(task),
         messages: [{ role: 'user', content: prompt }],
       }),
+      signal,
     });
 
     if (!response.ok) {
@@ -1323,6 +1382,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     prompt,
     task,
     jsonMode,
+    signal,
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel();
     const { num_ctx, num_predict } = calculateOllamaContextBudget(prompt, task);
@@ -1366,6 +1426,7 @@ export class UnifiedLLMProvider implements LLMProvider {
         body: JSON.stringify(requestBody),
       },
       getOllamaTimeoutMs(task),
+      signal,
     );
 
     if (!response.ok) {
@@ -1461,9 +1522,15 @@ export class UnifiedLLMProvider implements LLMProvider {
     path: string,
     options?: RequestInit,
     timeoutMs = OLLAMA_TIMEOUT_MS,
+    externalSignal?: AbortSignal,
   ): Promise<Response> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const abortFromExternal = () => controller.abort(externalSignal?.reason);
+    externalSignal?.addEventListener('abort', abortFromExternal, {
+      once: true,
+    });
+    if (externalSignal?.aborted) abortFromExternal();
 
     try {
       // Keep long-lived localhost generations out of Electron's network
@@ -1475,6 +1542,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       });
     } finally {
       clearTimeout(timeoutId);
+      externalSignal?.removeEventListener('abort', abortFromExternal);
     }
   }
 
@@ -1504,7 +1572,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       return 'You are a strict formatting assistant. Return only corrected markdown.';
     }
     if (task === 'title') {
-      return 'You are a helpful assistant that generates concise meeting titles.';
+      return 'You are a strict assistant that generates concise meeting titles. Return ONLY the title itself, with no conversational filler, no quotes, and no markdown formatting.';
     }
     if (task === 'speaker') {
       return 'You are a helpful assistant that extracts speaker information.';

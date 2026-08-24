@@ -41,10 +41,35 @@ import {
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
 const DEFAULT_DOWNSTREAM_STAGE_TIMEOUT_MS = {
-  analysis: 5 * 60_000,
+  analysis: 15 * 60_000,
   knowledge_extraction: 5 * 60_000,
   knowledge_synthesis: 15 * 60_000,
 } as const;
+
+const MAX_AUTOMATIC_ANALYSIS_ATTEMPTS = 2;
+
+const readDownstreamAttempt = (value: string | null | undefined): number => {
+  try {
+    const attempt = (JSON.parse(value || '{}') as { attempt?: unknown })
+      .attempt;
+    return typeof attempt === 'number' && Number.isSafeInteger(attempt)
+      ? Math.max(0, attempt)
+      : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const throwIfAnalysisFallback = (analysis: unknown): void => {
+  if (
+    analysis &&
+    typeof analysis === 'object' &&
+    (analysis as { quality?: { fallback_used?: unknown } }).quality
+      ?.fallback_used === true
+  ) {
+    throw new Error('analysis_generation_failed');
+  }
+};
 
 const GENERIC_MEETING_TITLES = new Set([
   '',
@@ -85,11 +110,20 @@ export const shouldAutoProcessMeetingAnalysis = (
   meeting: Partial<Meeting> | null | undefined,
 ) => {
   let downstreamState: unknown = null;
+  let downstreamStage: unknown = null;
+  let downstreamAttempt = 0;
   let pendingParakeetFinal = false;
   try {
-    downstreamState = JSON.parse(
+    const downstream = JSON.parse(
       meeting?.downstream_processing_json || '{}',
-    ).state;
+    ) as { state?: unknown; stage?: unknown; attempt?: unknown };
+    downstreamState = downstream.state;
+    downstreamStage = downstream.stage;
+    downstreamAttempt =
+      typeof downstream.attempt === 'number' &&
+      Number.isSafeInteger(downstream.attempt)
+        ? downstream.attempt
+        : 0;
   } catch {
     downstreamState = null;
   }
@@ -112,6 +146,9 @@ export const shouldAutoProcessMeetingAnalysis = (
   if (
     !meeting ||
     pendingParakeetFinal ||
+    (downstreamState === 'failed' &&
+      downstreamStage === 'analysis' &&
+      downstreamAttempt >= MAX_AUTOMATIC_ANALYSIS_ATTEMPTS) ||
     (meeting.transcript_status !== 'needs_attention' &&
       meeting.transcript_status !== 'validated') ||
     meeting.finalization_status === 'recovery_required' ||
@@ -446,12 +483,16 @@ export const retryMeetingTranscriptValidation = async (
           captureJournalGeneration: meeting.capture_journal_generation || '',
           now: options.now?.(),
           stage: resumeStage,
+          attempt:
+            readDownstreamAttempt(meeting.downstream_processing_json) + 1,
         })
       : buildDownstreamProcessingLease({
           runId: crypto.randomUUID(),
           transcriptValidatedAt: meeting.transcript_validated_at || '',
           now: options.now?.(),
           stage: resumeStage,
+          attempt:
+            readDownstreamAttempt(meeting.downstream_processing_json) + 1,
         });
     const claimed = await invoke(
       'CLAIM_DOWNSTREAM_PROCESSING',
@@ -464,6 +505,7 @@ export const retryMeetingTranscriptValidation = async (
       .map((segment) => `${segment.speaker}: ${segment.text}`)
       .join('\n');
     let downstreamStage = resumeStage;
+    const analysisRequestId = `${downstreamLease.runId}:analysis`;
     try {
       let current = meeting;
       if (resumeStage === 'analysis') {
@@ -479,8 +521,10 @@ export const retryMeetingTranscriptValidation = async (
           const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
             transcript,
             userNotes: analysisMeeting.user_notes || '',
+            requestId: analysisRequestId,
           })) as { markdown?: string; analysis?: unknown; signals?: unknown };
           throwIfDownstreamStageAborted(signal);
+          throwIfAnalysisFallback(artifacts.analysis);
           return {
             ...analysisMeeting,
             enhanced_notes: artifacts.markdown || '',
@@ -579,6 +623,14 @@ export const retryMeetingTranscriptValidation = async (
       );
     } catch (error) {
       console.error('[Pluto] Downstream intelligence resume failed', error);
+      if (
+        downstreamStage === 'analysis' &&
+        error instanceof DownstreamStageTimeoutError
+      ) {
+        await invoke('CANCEL_ANALYSIS_GENERATION', analysisRequestId).catch(
+          () => null,
+        );
+      }
       const failure =
         error instanceof DownstreamStageTimeoutError
           ? 'stage_timeout'
@@ -596,6 +648,7 @@ export const retryMeetingTranscriptValidation = async (
                   source: downstreamLease.source,
                   stage: downstreamStage,
                   failure,
+                  attempt: downstreamLease.attempt,
                 }
               : {
                   schemaVersion: 1,
@@ -603,6 +656,7 @@ export const retryMeetingTranscriptValidation = async (
                   transcriptValidatedAt: downstreamLease.transcriptValidatedAt,
                   stage: downstreamStage,
                   failure,
+                  attempt: downstreamLease.attempt,
                 },
           ),
         },
@@ -943,6 +997,7 @@ export const retryMeetingTranscriptValidation = async (
     runId: downstreamRunId,
     transcriptValidatedAt: validatedAt,
     stage: 'analysis',
+    attempt: 1,
   });
   const validatedIntegrity = usesV2Trust
     ? {
@@ -1027,6 +1082,7 @@ export const retryMeetingTranscriptValidation = async (
     | 'analysis'
     | 'knowledge_extraction'
     | 'knowledge_synthesis' = 'analysis';
+  const analysisRequestId = `${downstreamRunId}:analysis`;
   try {
     const { generatedTitle, artifacts } = await runDownstreamStage(
       'analysis',
@@ -1038,8 +1094,10 @@ export const retryMeetingTranscriptValidation = async (
         const generatedArtifacts = (await invoke('GENERATE_ANALYSIS_V2', {
           transcript,
           userNotes: current.user_notes || '',
+          requestId: analysisRequestId,
         })) as { markdown?: string; analysis?: unknown; signals?: unknown };
         throwIfDownstreamStageAborted(signal);
+        throwIfAnalysisFallback(generatedArtifacts.analysis);
         return { generatedTitle: title, artifacts: generatedArtifacts };
       },
     );
@@ -1143,6 +1201,14 @@ export const retryMeetingTranscriptValidation = async (
     );
   } catch (error) {
     console.error('[Pluto] Post-validation intelligence failed', error);
+    if (
+      downstreamStage === 'analysis' &&
+      error instanceof DownstreamStageTimeoutError
+    ) {
+      await invoke('CANCEL_ANALYSIS_GENERATION', analysisRequestId).catch(
+        () => null,
+      );
+    }
     const failure =
       error instanceof DownstreamStageTimeoutError
         ? 'stage_timeout'
@@ -1170,6 +1236,7 @@ export const retryMeetingTranscriptValidation = async (
             transcriptValidatedAt: validatedAt,
             stage: downstreamStage,
             failure,
+            attempt: downstreamLease.attempt,
           }),
         },
         {

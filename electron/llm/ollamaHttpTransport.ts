@@ -42,12 +42,12 @@ export const ollamaHttpFetch = (
           chunks.push(chunk);
         });
         response.on('aborted', () =>
-          reject(new Error('Ollama response ended before completion')),
+          reject(new Error('Ollama response aborted before completion')),
         );
         response.on('error', reject);
         response.on('end', () => {
           if (!response.complete) {
-            reject(new Error('Ollama response ended before completion'));
+            reject(new Error('Ollama response aborted before completion'));
             return;
           }
           resolve(

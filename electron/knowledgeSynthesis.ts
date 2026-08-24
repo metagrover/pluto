@@ -2035,7 +2035,7 @@ export const initializeKnowledgeDocs = async (): Promise<void> => {
   // one at a time rather than flooding Ollama simultaneously.
   const STAGGER_MS = 3000;
   needsWork.forEach((doc, index) => {
-    queueKnowledgeDocRefresh(doc.id, 1000 + index * STAGGER_MS);
+    queueKnowledgeDocRefresh(doc.id, 15000 + index * STAGGER_MS);
   });
 };
 

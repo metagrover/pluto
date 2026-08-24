@@ -52,6 +52,20 @@ export const getDownstreamProcessingPresentation = (
   // analysis lease is still writing, which previously left the notes surface
   // blank with no visible preparation state.
   if (meeting.analysis_json) {
+    try {
+      const parsed = JSON.parse(meeting.analysis_json) as {
+        quality?: { fallback_used?: boolean };
+      };
+      if (parsed?.quality?.fallback_used) {
+        return {
+          state: 'failed',
+          title: 'Analysis needs another pass',
+          detail: 'Your transcript is ready.',
+        };
+      }
+    } catch {
+      // ignore
+    }
     return { state: 'ready' };
   }
 

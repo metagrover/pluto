@@ -1565,4 +1565,19 @@ describe('shouldAutoProcessMeetingAnalysis', () => {
       }),
     ).toBe(false);
   });
+
+  it('stops automatic analysis after the durable attempt budget is exhausted', () => {
+    expect(
+      shouldAutoProcessMeetingAnalysis({
+        ...meeting,
+        downstream_processing_json: JSON.stringify({
+          schemaVersion: 1,
+          state: 'failed',
+          stage: 'analysis',
+          failure: 'stage_timeout',
+          attempt: 2,
+        }),
+      }),
+    ).toBe(false);
+  });
 });

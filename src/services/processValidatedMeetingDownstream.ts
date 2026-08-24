@@ -15,10 +15,33 @@ import { meetingTitleNeedsGeneration } from './retryMeetingTranscriptValidation.
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
 const DEFAULT_STAGE_TIMEOUT_MS = {
-  analysis: 5 * 60_000,
+  analysis: 15 * 60_000,
   knowledge_extraction: 5 * 60_000,
   knowledge_synthesis: 15 * 60_000,
 } as const;
+
+const readDownstreamAttempt = (value: string | null | undefined): number => {
+  try {
+    const attempt = (JSON.parse(value || '{}') as { attempt?: unknown })
+      .attempt;
+    return typeof attempt === 'number' && Number.isSafeInteger(attempt)
+      ? Math.max(0, attempt)
+      : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const throwIfAnalysisFallback = (analysis: unknown): void => {
+  if (
+    analysis &&
+    typeof analysis === 'object' &&
+    (analysis as { quality?: { fallback_used?: unknown } }).quality
+      ?.fallback_used === true
+  ) {
+    throw new Error('analysis_generation_failed');
+  }
+};
 
 const transcriptForAnalysis = (transcriptJson: string | null | undefined) => {
   try {
@@ -66,6 +89,7 @@ export const processValidatedMeetingDownstream = async (
     runId,
     transcriptValidatedAt: validatedAt,
     stage: 'analysis',
+    attempt: readDownstreamAttempt(meeting.downstream_processing_json) + 1,
   });
   const claimed = await invoke('CLAIM_DOWNSTREAM_PROCESSING', meetingId, lease);
   if (claimed !== true) return { status: 'superseded' };
@@ -80,19 +104,30 @@ export const processValidatedMeetingDownstream = async (
       options.stageTimeoutMs?.[stage] ?? DEFAULT_STAGE_TIMEOUT_MS[stage],
     );
   let stage: keyof typeof DEFAULT_STAGE_TIMEOUT_MS = 'analysis';
+  const analysisRequestId = `${runId}:analysis`;
   try {
     const { generatedTitle, artifacts } = await runStage(
       'analysis',
       async (signal) => {
-        const title = meetingTitleNeedsGeneration(meeting.title)
-          ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
-          : meeting.title;
-        throwIfDownstreamStageAborted(signal);
         const generatedArtifacts = (await invoke('GENERATE_ANALYSIS_V2', {
           transcript,
           userNotes: meeting.user_notes || '',
+          requestId: analysisRequestId,
         })) as { markdown?: string; analysis?: unknown; signals?: unknown };
         throwIfDownstreamStageAborted(signal);
+        throwIfAnalysisFallback(generatedArtifacts.analysis);
+
+        const summaryForTitle = generatedArtifacts.markdown?.trim()
+          ? generatedArtifacts.markdown
+          : transcript;
+
+        const title = meetingTitleNeedsGeneration(meeting.title)
+          ? ((await invoke('GENERATE_TITLE', {
+              transcript: summaryForTitle,
+            })) as string)
+          : meeting.title;
+        throwIfDownstreamStageAborted(signal);
+
         return { generatedTitle: title, artifacts: generatedArtifacts };
       },
     );
@@ -182,6 +217,11 @@ export const processValidatedMeetingDownstream = async (
     return { status: 'complete' };
   } catch (error) {
     console.error('[Pluto] Post-validation intelligence failed', error);
+    if (stage === 'analysis' && error instanceof DownstreamStageTimeoutError) {
+      await invoke('CANCEL_ANALYSIS_GENERATION', analysisRequestId).catch(
+        () => null,
+      );
+    }
     const latest = (await invoke('GET_MEETING', meetingId)) as Meeting;
     if (latest.transcript_validated_at === validatedAt) {
       await invoke(
@@ -193,6 +233,7 @@ export const processValidatedMeetingDownstream = async (
             state: 'failed',
             transcriptValidatedAt: validatedAt,
             stage,
+            attempt: lease.attempt,
             failure:
               error instanceof DownstreamStageTimeoutError
                 ? 'stage_timeout'

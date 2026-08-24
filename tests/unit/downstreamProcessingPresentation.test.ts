@@ -106,4 +106,20 @@ describe('downstream processing presentation', () => {
       })?.state,
     ).toBe('ready');
   });
+
+  it('surfaces a fallback analysis as retryable instead of ready', () => {
+    expect(
+      getDownstreamProcessingPresentation({
+        transcript_status: 'validated',
+        analysis_json: JSON.stringify({
+          analysis_schema_version: 3,
+          quality: { fallback_used: true },
+        }),
+      }),
+    ).toEqual({
+      state: 'failed',
+      title: 'Analysis needs another pass',
+      detail: 'Your transcript is ready.',
+    });
+  });
 });

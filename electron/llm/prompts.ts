@@ -177,7 +177,7 @@ export const buildRepresentativeTitleTranscript = (
 };
 
 export const getTitlePrompt = (transcript: string): string => {
-  return `Analyze this conversation transcript and generate a concise, descriptive meeting title (max 5-7 words).
+  return `Analyze the following meeting text (which may be a raw transcript or a markdown summary) and generate a concise, descriptive meeting title (max 5-7 words).
 
 The title should:
 - Capture the main topic or purpose
@@ -187,9 +187,9 @@ The title should:
 - Not include quotes or special characters
 - Be in title case
 
-Respond with ONLY the title, nothing else.
+Only output the title and nothing else.
 
-Transcript:
+Text:
 ${buildRepresentativeTitleTranscript(transcript)}`;
 };
 
@@ -518,7 +518,7 @@ export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 - Phrase user-facing fields with the lightest useful compression. Preserve distinctive transcript vocabulary and word order instead of substituting synonyms or abstract business language.
 - In the overview, topic title, and topic summary, name the distinctive system, program, or subject and state the concrete primary outcome. Do not replace a named outcome with abstractions such as "the approach", "the order", or "the plan".
 - Write decision and action text as a bare verb phrase without conversational framing such as "we decided to", "the team will", or "I will". Keep deadlines in the due field rather than repeating them in action text.
-- Remove conversational framing from key points. When a key point comes from one identifiable transcript turn, set speaker to that turn's exact speaker label; use null only for a synthesis across turns or genuinely unclear attribution.
+- Remove conversational framing from key points. Keep at most 4 unique, critical key points per topic. When a key point comes from one identifiable transcript turn, set speaker to that turn's exact speaker label; use null only for a synthesis across turns or genuinely unclear attribution.
 - Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. Quote enough adjacent transcript lines to support the full claim when its subject and resolution are split across turns. If no exact evidence slice exists, omit the settled item.
 - Assignee, decider, due date, and rationale fields must be null unless the same evidence slice directly supports them.`;
 
@@ -562,6 +562,12 @@ export const getStructuredAnalysisPrompt = (
 
   return `**Role:** You are a Chief of Staff specializing in executive meeting synthesis. Your goal is to distill raw transcripts into concise, high-signal intelligence that focuses strictly on outcomes, facts, and commitments.
 
+CRITICAL INSTRUCTIONS:
+1. ALWAYS output a \`_coverage_check\` string first listing only distinct topic labels and duplicate candidates. Do not include reasoning or transcript quotes.
+2. NEVER repeat the same point multiple times. Each key point MUST be unique.
+3. DO NOT quote the transcript verbatim as a key point. Synthesize the meaning.
+4. A topic should have at most 4 key points. If there are fewer than 4 distinct points, just output those. Do not pad.
+
 ${STRUCTURED_EXTRACTION_POLICY}
 
 ${getTemplateGuidance(template)}
@@ -569,13 +575,14 @@ ${getTemplateGuidance(template)}
 Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON object with this exact schema:
 
 {
+  "_coverage_check": "Distinct topic labels and duplicate candidates only; no reasoning or transcript quotes.",
   "overview": "A 3-sentence executive summary stating the meeting's purpose and primary outcome. Must be factual and objective.",
   "topics": [
     {
       "title": "Short descriptive title for this discussion topic",
       "summary": "A 1-sentence factual TLDR of the outcome. No filler.",
       "key_points": [
-        { "text": "High-signal bullet point. Answer: what mattered, why it mattered, what constraint emerged. No fluff.", "speaker": "Name or null", "from_user_notes": false }
+        { "text": "High-signal bullet point. Answer: what mattered, why it mattered, what constraint emerged. No fluff. MAX 4 UNIQUE POINTS.", "speaker": "Name or null", "from_user_notes": false }
       ],
       "decisions": [
         { "text": "what was decided", "decided_by": "Name or null", "rationale": "why, if stated or null", "evidence": "required short verbatim quote from transcript" }
@@ -659,6 +666,12 @@ export const getStructuredAnalysisEditorialPrompt = (
 
   return `You are Pluto's global meeting-notes editor.
 
+CRITICAL INSTRUCTIONS:
+1. ALWAYS output a \`_coverage_check\` string first listing only distinct topic labels and duplicate candidates. Do not include reasoning or transcript quotes.
+2. NEVER repeat the same point multiple times. Each key point MUST be unique.
+3. DO NOT quote the transcript verbatim as a key point. Synthesize the meaning.
+4. A topic should have at most 4 key points. If there are fewer than 4 distinct points, just output those. Do not pad.
+
 ${STRUCTURED_EXTRACTION_POLICY}
 
 ${getTemplateGuidance(template)}
@@ -666,13 +679,14 @@ ${getTemplateGuidance(template)}
 Revise the draft local analysis into one coherent JSON object with this exact schema:
 
 {
+  "_coverage_check": "Distinct topic labels and duplicate candidates only; no reasoning or transcript quotes.",
   "overview": "A factual 3-sentence executive summary of purpose, outcomes, commitments, risks, and unresolved blockers.",
   "topics": [
     {
       "title": "Short descriptive outcome-level title",
       "summary": "A concise factual digest of the final state and material constraints.",
       "key_points": [
-        { "text": "High-signal fact or constraint", "speaker": "Name or null", "from_user_notes": false }
+        { "text": "High-signal fact or constraint. MAX 4 UNIQUE POINTS.", "speaker": "Name or null", "from_user_notes": false }
       ],
       "decisions": [
         { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from raw transcript" }
@@ -752,6 +766,12 @@ export const getTopicAnalysisPrompt = (
 
   return `**Role:** You are a Chief of Staff specializing in executive meeting synthesis. Your goal is to distill raw transcripts into concise, high-signal intelligence that focuses strictly on outcomes, facts, and commitments.
   
+CRITICAL INSTRUCTIONS:
+1. ALWAYS output a \`_coverage_check\` string first listing only distinct point labels and duplicate candidates. Do not include reasoning or transcript quotes.
+2. NEVER repeat the same point multiple times. Each key point MUST be unique.
+3. DO NOT quote the transcript verbatim as a key point. Synthesize the meaning.
+4. Output at most 4 key points. If there are fewer than 4 distinct points, just output those. Do not pad.
+
 Analyze this transcript slice for the topic "${topicTitle}".
 
 ${STRUCTURED_EXTRACTION_POLICY}
@@ -760,10 +780,11 @@ ${getTemplateGuidance(template)}
 
 Return valid JSON only in this exact shape:
 {
+  "_coverage_check": "Distinct point labels and duplicate candidates only; no reasoning or transcript quotes.",
   "title": "Short outcome-level topic title",
   "summary": "A 1-sentence factual TLDR of the outcome. No filler.",
   "key_points": [
-    { "text": "High-signal bullet point. Answer: what mattered, why it mattered, what constraint emerged. No fluff.", "speaker": "Name or null", "from_user_notes": false }
+    { "text": "High-signal bullet point. Answer: what mattered, why it mattered, what constraint emerged. No fluff. MAX 4 UNIQUE POINTS.", "speaker": "Name or null", "from_user_notes": false }
   ],
   "decisions": [
     { "text": "what was decided", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from transcript" }

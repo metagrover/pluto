@@ -1023,6 +1023,36 @@ describe('UnifiedLLMProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('propagates caller cancellation to the active Ollama request', async () => {
+    let requestSignal: AbortSignal | null = null;
+    installFetchMock((_url, init) => {
+      requestSignal = init?.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        requestSignal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('cancelled', 'AbortError')),
+          { once: true },
+        );
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'phi4-mini:3.8b',
+    });
+    const controller = new AbortController();
+
+    const generation = provider.generateStructuredAnalysis(
+      'Me: status update',
+      undefined,
+      'auto',
+      { signal: controller.signal },
+    );
+    await vi.waitFor(() => expect(requestSignal).not.toBeNull());
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+
+    await expect(generation).rejects.toMatchObject({ name: 'AbortError' });
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
   it('routes openai user-analysis generation through chat completions', async () => {
     let usedModel = '';
     installFetchMock((url, init) => {
