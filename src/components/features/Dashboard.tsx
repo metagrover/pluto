@@ -898,20 +898,14 @@ export const Dashboard = ({
                       className="inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                     >
                       Open moment{' '}
-                      <ArrowRight
-                        className="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />
+                      <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
                     <button
                       type="button"
                       onClick={startCelebration}
                       className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-[12px] font-bold text-pro-text-muted hover:bg-pro-success/10 hover:text-pro-success focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                     >
-                      <PartyPopper
-                        className="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />{' '}
+                      <PartyPopper className="h-3.5 w-3.5" aria-hidden="true" />{' '}
                       Celebrate
                     </button>
                   </div>
@@ -943,10 +937,7 @@ export const Dashboard = ({
                     className="mt-3 inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                   >
                     Open meeting{' '}
-                    <ArrowRight
-                      className="h-3.5 w-3.5"
-                      aria-hidden="true"
-                    />
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 </div>
               </section>
@@ -970,10 +961,7 @@ export const Dashboard = ({
                   className="mt-3 inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                 >
                   Open knowledge{' '}
-                  <ArrowRight
-                    className="h-3.5 w-3.5"
-                    aria-hidden="true"
-                  />
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               </section>
             ) : null}
