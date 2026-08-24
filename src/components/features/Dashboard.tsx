@@ -76,7 +76,8 @@ const getActionInsightPrimaryAriaLabel = (item: DashboardActionInsightItem) =>
     : `Mark ${item.title} complete`;
 
 interface DashboardReviewAction {
-  label: 'Review source' | 'Confirm task' | 'Not a task';
+  label: 'Review source' | 'Add to commitments' | 'Dismiss';
+  kind: 'source' | 'primary' | 'secondary';
   ariaLabel: string;
   onClick: () => void | Promise<void>;
 }
@@ -95,22 +96,99 @@ export const getDashboardReviewActions = (
     ? [
         {
           label: 'Review source' as const,
+          kind: 'source' as const,
           ariaLabel: `Review source for ${item.title}`,
           onClick: () => handlers.setSelectedMeetingId(item.sourceMeetingId),
         },
       ]
     : []),
   {
-    label: 'Confirm task',
-    ariaLabel: `Confirm task: ${item.title}`,
+    label: 'Add to commitments',
+    kind: 'primary',
+    ariaLabel: `Add ${item.title} to commitments`,
     onClick: () => handlers.handleReviewCommitment(item.id, 'confirmed'),
   },
   {
-    label: 'Not a task',
-    ariaLabel: `Not a task: ${item.title}`,
+    label: 'Dismiss',
+    kind: 'secondary',
+    ariaLabel: `Dismiss suggestion: ${item.title}`,
     onClick: () => handlers.handleReviewCommitment(item.id, 'rejected'),
   },
 ];
+
+const DashboardSuggestionReview = ({
+  item,
+  isUpdating,
+  setSelectedMeetingId,
+  handleReviewCommitment,
+}: {
+  item: DashboardActionInsightItem;
+  isUpdating: boolean;
+  setSelectedMeetingId: (id: string | number | null) => void;
+  handleReviewCommitment: (
+    id: string,
+    state: 'confirmed' | 'rejected',
+  ) => Promise<void>;
+}) => {
+  const actions = getDashboardReviewActions(item, {
+    setSelectedMeetingId,
+    handleReviewCommitment,
+  });
+  const sourceAction = actions.find((action) => action.kind === 'source');
+  const decisionActions = actions.filter((action) => action.kind !== 'source');
+
+  return (
+    <details
+      data-testid="dashboard-suggestion-review"
+      className="group/review mt-2"
+    >
+      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1 rounded-md bg-pro-accent px-3 py-1 text-[11px] font-bold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent group-open/review:bg-transparent group-open/review:text-pro-text-muted group-open/review:hover:text-pro-text-main [&::-webkit-details-marker]:hidden">
+        Review suggestion
+        <ChevronRight
+          className="h-3.5 w-3.5 transition-transform duration-200 ease-out group-open/review:rotate-90 motion-reduce:transition-none"
+          aria-hidden="true"
+        />
+      </summary>
+      <div className="mb-2 rounded-lg bg-pro-surface/55 px-3 py-3">
+        {sourceAction ? (
+          <button
+            type="button"
+            aria-label={sourceAction.ariaLabel}
+            disabled={isUpdating}
+            onClick={sourceAction.onClick}
+            className="inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+          >
+            {sourceAction.label}
+            <ArrowRight className="h-3 w-3" aria-hidden="true" />
+          </button>
+        ) : (
+          <p className="max-w-md text-[11px] font-medium leading-5 text-pro-text-muted">
+            No source meeting is available. Review the wording before adding
+            this to your commitments.
+          </p>
+        )}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {decisionActions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              aria-label={action.ariaLabel}
+              disabled={isUpdating}
+              onClick={action.onClick}
+              className={
+                action.kind === 'primary'
+                  ? 'inline-flex min-h-9 items-center rounded-md bg-pro-accent px-3 text-[11px] font-bold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
+                  : 'inline-flex min-h-9 items-center rounded-md px-3 text-[11px] font-semibold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
+              }
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </details>
+  );
+};
 
 const formatMeetingDate = (value: string): string => {
   const date = new Date(value);
@@ -350,10 +428,6 @@ export const Dashboard = ({
         )
       : 0;
   const confettiPieces = buildDashboardConfettiPieces();
-  const hasSupportingContext =
-    recentWin.state === 'populated' ||
-    latestMeeting.state === 'populated' ||
-    model.knowledgeDocuments.state === 'populated';
 
   if (loading) {
     return (
@@ -492,21 +566,6 @@ export const Dashboard = ({
                     No blockers or confirmed commitments need attention right
                     now.
                   </p>
-                  {model.commitments.needsConfirmation.length > 0 ? (
-                    <a
-                      href="#suggested-commitments"
-                      className="mt-3 inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-                    >
-                      Review {model.commitments.needsConfirmation.length}{' '}
-                      {model.commitments.needsConfirmation.length === 1
-                        ? 'suggestion'
-                        : 'suggestions'}
-                      <ChevronRight
-                        className="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />
-                    </a>
-                  ) : null}
                 </div>
               </div>
             </div>
@@ -514,13 +573,7 @@ export const Dashboard = ({
         </div>
       </section>
 
-      <div
-        className={`grid gap-8 pt-7 ${
-          hasSupportingContext
-            ? 'lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)] lg:gap-10'
-            : ''
-        }`}
-      >
+      <div className="grid gap-8 pt-7 lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)] lg:gap-10">
         <section aria-labelledby="commitments-title" className="min-w-0">
           <div className="flex items-end justify-between gap-4 border-b border-pro-border/70 pb-3">
             <div>
@@ -537,7 +590,7 @@ export const Dashboard = ({
             <button
               type="button"
               onClick={() => setAddingCommitment((value) => !value)}
-              className="inline-flex min-h-8 items-center gap-2 rounded-md px-3 text-[11px] font-bold text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              className="inline-flex min-h-8 items-center gap-2 rounded-md px-3 text-[11px] font-bold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
               <CalendarPlus className="h-4 w-4" /> Add commitment
             </button>
@@ -587,10 +640,6 @@ export const Dashboard = ({
                   );
                 const primaryLabel = getActionInsightPrimaryLabel(item);
                 const primaryAriaLabel = getActionInsightPrimaryAriaLabel(item);
-                const reviewActions = getDashboardReviewActions(item, {
-                  setSelectedMeetingId,
-                  handleReviewCommitment,
-                });
                 return (
                   <article
                     key={item.id}
@@ -645,32 +694,12 @@ export const Dashboard = ({
                               {primaryLabel}
                             </button>
                           ) : (
-                            <>
-                              {!item.sourceMeetingId ? (
-                                <details className="min-h-8 rounded-lg px-2 text-pro-accent">
-                                  <summary className="cursor-pointer py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent">
-                                    Review task
-                                  </summary>
-                                  <p className="max-w-md pb-2 font-medium leading-5 text-pro-text-muted">
-                                    No source meeting is available. Review the
-                                    wording above, then confirm it or mark it
-                                    not a task.
-                                  </p>
-                                </details>
-                              ) : null}
-                              {reviewActions.map((action) => (
-                                <button
-                                  key={action.label}
-                                  type="button"
-                                  aria-label={action.ariaLabel}
-                                  disabled={isUpdating}
-                                  onClick={action.onClick}
-                                  className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
-                                >
-                                  {action.label}
-                                </button>
-                              ))}
-                            </>
+                            <DashboardSuggestionReview
+                              item={item}
+                              isUpdating={isUpdating}
+                              setSelectedMeetingId={setSelectedMeetingId}
+                              handleReviewCommitment={handleReviewCommitment}
+                            />
                           )}
                           {item.canComplete &&
                           item.attentionItemId &&
@@ -733,7 +762,7 @@ export const Dashboard = ({
                 </p>
               </div>
               <div className="divide-y divide-pro-border/60">
-                {model.commitments.needsConfirmation.map((item) => {
+                {model.commitments.needsConfirmation.slice(0, 1).map((item) => {
                   const isUpdating = updatingTaskIds.has(item.id);
                   return (
                     <article
@@ -754,38 +783,25 @@ export const Dashboard = ({
                           {item.statusLabel}
                         </span>
                       </div>
-                      {!item.sourceMeetingId ? (
-                        <details className="mt-2 min-h-8 text-pro-accent">
-                          <summary className="cursor-pointer py-2 text-[11px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent">
-                            Review task
-                          </summary>
-                          <p className="max-w-md pb-2 text-[11px] font-medium leading-5 text-pro-text-muted">
-                            No source meeting is available. Review the wording
-                            above, then confirm it or mark it not a task.
-                          </p>
-                        </details>
-                      ) : null}
-                      <div className="mt-2 flex flex-wrap items-center gap-1">
-                        {getDashboardReviewActions(item, {
-                          setSelectedMeetingId,
-                          handleReviewCommitment,
-                        }).map((action) => (
-                          <button
-                            key={action.label}
-                            type="button"
-                            aria-label={action.ariaLabel}
-                            disabled={isUpdating}
-                            onClick={action.onClick}
-                            className="min-h-8 rounded-md px-2 text-[11px] font-bold text-pro-accent hover:bg-pro-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
-                          >
-                            {action.label}
-                          </button>
-                        ))}
-                      </div>
+                      <DashboardSuggestionReview
+                        item={item}
+                        isUpdating={isUpdating}
+                        setSelectedMeetingId={setSelectedMeetingId}
+                        handleReviewCommitment={handleReviewCommitment}
+                      />
                     </article>
                   );
                 })}
               </div>
+              {model.commitments.needsConfirmation.length > 1 ? (
+                <p className="mt-3 text-[11px] font-medium text-pro-text-muted/70">
+                  {model.commitments.needsConfirmation.length - 1} more{' '}
+                  {model.commitments.needsConfirmation.length - 1 === 1
+                    ? 'suggestion'
+                    : 'suggestions'}{' '}
+                  waiting
+                </p>
+              ) : null}
             </div>
           ) : (
             <div className="py-7">
@@ -834,33 +850,12 @@ export const Dashboard = ({
                     <p className="mt-1 text-[11px] font-medium text-pro-text-muted/70">
                       {item.basisLabel}
                     </p>
-                    {!item.sourceMeetingId ? (
-                      <details className="mt-2 min-h-8 text-pro-accent">
-                        <summary className="cursor-pointer py-2 text-[11px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent">
-                          Review task
-                        </summary>
-                        <p className="max-w-md pb-2 text-[11px] font-medium leading-5 text-pro-text-muted">
-                          No source meeting is available. Review the wording
-                          above, then confirm it or mark it not a task.
-                        </p>
-                      </details>
-                    ) : null}
-                    <div className="mt-1 flex flex-wrap items-center gap-1">
-                      {getDashboardReviewActions(item, {
-                        setSelectedMeetingId,
-                        handleReviewCommitment,
-                      }).map((action) => (
-                        <button
-                          key={action.label}
-                          type="button"
-                          aria-label={action.ariaLabel}
-                          onClick={action.onClick}
-                          className="min-h-8 rounded-md px-2 text-[11px] font-bold text-pro-accent hover:bg-pro-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-                        >
-                          {action.label}
-                        </button>
-                      ))}
-                    </div>
+                    <DashboardSuggestionReview
+                      item={item}
+                      isUpdating={updatingTaskIds.has(item.id)}
+                      setSelectedMeetingId={setSelectedMeetingId}
+                      handleReviewCommitment={handleReviewCommitment}
+                    />
                   </div>
                 ))}
               </div>
@@ -868,20 +863,20 @@ export const Dashboard = ({
           ) : null}
         </section>
 
-        {hasSupportingContext ? (
-          <aside className="min-w-0">
-            {recentWin.state === 'populated' ? (
-              <section aria-labelledby="recent-win-title">
-                <p className="text-[10px] font-semibold text-pro-text-muted/60">
-                  Evidence-backed
-                </p>
-                <h2
-                  id="recent-win-title"
-                  className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
-                >
-                  Recent win
-                </h2>
-                <div className="mt-4 border-t border-pro-border/70 pt-4">
+        <aside className="min-w-0 space-y-8">
+          <section aria-labelledby="recent-win-title">
+            <p className="text-[10px] font-semibold text-pro-text-muted/60">
+              {recentWin.state === 'populated' ? 'Evidence-backed' : 'Momentum'}
+            </p>
+            <h2
+              id="recent-win-title"
+              className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
+            >
+              Recent win
+            </h2>
+            <div className="mt-4 border-t border-pro-border/70 pt-4">
+              {recentWin.state === 'populated' ? (
+                <>
                   <h3 className="text-[15px] font-semibold leading-6 text-pro-text-main">
                     {recentWin.title}
                   </h3>
@@ -909,64 +904,83 @@ export const Dashboard = ({
                       Celebrate
                     </button>
                   </div>
+                </>
+              ) : (
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-warning/10 text-pro-warning">
+                    <PartyPopper className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <div>
+                    <h3 className="text-[14px] font-semibold leading-5 text-pro-text-main">
+                      Your wins will show up here
+                    </h3>
+                    <p className="mt-1 text-[12px] font-medium leading-5 text-pro-text-muted">
+                      Pluto will surface meaningful outcomes here when your
+                      meetings support them.
+                    </p>
+                  </div>
                 </div>
-              </section>
-            ) : latestMeeting.state === 'populated' ? (
-              <section aria-labelledby="continue-title">
-                <p className="text-[10px] font-semibold text-pro-text-muted/60">
-                  Recent context · {formatMeetingDate(latestMeeting.occurredAt)}
-                </p>
-                <h2
-                  id="continue-title"
-                  className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
-                >
-                  Continue where you left off
-                </h2>
-                <div className="mt-4 border-t border-pro-border/70 pt-4">
-                  <h3 className="text-[15px] font-semibold text-pro-text-main">
-                    {latestMeeting.title}
-                  </h3>
-                  <p className="mt-2 line-clamp-3 text-[13px] font-medium leading-[1.55] text-pro-text-muted">
-                    {latestMeeting.detail}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSelectedMeetingId(latestMeeting.meetingId)
-                    }
-                    className="mt-3 inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-                  >
-                    Open meeting{' '}
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                </div>
-              </section>
-            ) : model.knowledgeDocuments.state === 'populated' ? (
-              <section aria-labelledby="knowledge-reentry-title">
-                <p className="text-[10px] font-semibold text-pro-text-muted/60">
-                  Working memory
-                </p>
-                <h2
-                  id="knowledge-reentry-title"
-                  className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
-                >
-                  Return to your current read
-                </h2>
-                <p className="mt-4 border-t border-pro-border/70 pt-4 text-[13px] font-medium leading-[1.55] text-pro-text-muted">
-                  {model.knowledgeDocuments.cards[0].title}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('wiki')}
-                  className="mt-3 inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-                >
-                  Open knowledge{' '}
-                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              </section>
-            ) : null}
-          </aside>
-        ) : null}
+              )}
+            </div>
+          </section>
+
+          {latestMeeting.state === 'populated' ? (
+            <section
+              aria-labelledby="continue-title"
+              className="border-t border-pro-border/70 pt-6"
+            >
+              <p className="text-[10px] font-semibold text-pro-text-muted/60">
+                Recent context · {formatMeetingDate(latestMeeting.occurredAt)}
+              </p>
+              <h2
+                id="continue-title"
+                className="mt-1 text-[16px] font-semibold leading-6 text-pro-text-main"
+              >
+                Continue where you left off
+              </h2>
+              <h3 className="mt-3 text-[13px] font-semibold text-pro-text-main">
+                {latestMeeting.title}
+              </h3>
+              <p className="mt-1 line-clamp-2 text-[12px] font-medium leading-5 text-pro-text-muted">
+                {latestMeeting.detail}
+              </p>
+              <button
+                type="button"
+                onClick={() => setSelectedMeetingId(latestMeeting.meetingId)}
+                className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              >
+                Open meeting{' '}
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </section>
+          ) : model.knowledgeDocuments.state === 'populated' ? (
+            <section
+              aria-labelledby="knowledge-reentry-title"
+              className="border-t border-pro-border/70 pt-6"
+            >
+              <p className="text-[10px] font-semibold text-pro-text-muted/60">
+                Working memory
+              </p>
+              <h2
+                id="knowledge-reentry-title"
+                className="mt-1 text-[16px] font-semibold leading-6 text-pro-text-main"
+              >
+                Return to your current read
+              </h2>
+              <p className="mt-3 text-[12px] font-medium leading-5 text-pro-text-muted">
+                {model.knowledgeDocuments.cards[0].title}
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('wiki')}
+                className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              >
+                Open knowledge{' '}
+                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            </section>
+          ) : null}
+        </aside>
       </div>
     </main>
   );
