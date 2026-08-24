@@ -21,9 +21,11 @@ import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/Recordin
 import { ZenMode } from './components/features/ZenMode';
 import {
   DASHBOARD_ACTION_COMPLETION_ERROR,
+  DASHBOARD_COMMITMENT_CREATION_ERROR,
   DashboardRefreshAfterMutationError,
   persistDashboardActionCompletion,
   persistDashboardAttentionStatus,
+  persistDashboardCommitmentCreation,
   persistDashboardCommitmentReview,
 } from './components/features/dashboardActionCompletion';
 import type {
@@ -50,6 +52,7 @@ import {
   searchEntities,
   updateActionCommitmentState,
   updateEntityStatus,
+  upsertEntity,
 } from './api/knowledgeGraph';
 // Knowledge Graph
 import { KnowledgeTab } from './components/KnowledgeGraph/KnowledgeTab';
@@ -261,6 +264,27 @@ function App() {
         next.delete(taskId);
         return next;
       });
+    }
+  };
+
+  const handleCreateDashboardCommitment = async (
+    text: string,
+    dueDate: string | null,
+  ) => {
+    setDashboardActionError(null);
+
+    try {
+      await persistDashboardCommitmentCreation(
+        { text, dueDate },
+        {
+          upsertEntity,
+          refreshDashboard: dashboardHome.refresh,
+        },
+      );
+    } catch (error) {
+      console.error('Failed to add dashboard commitment', error);
+      setDashboardActionError(DASHBOARD_COMMITMENT_CREATION_ERROR);
+      throw error;
     }
   };
 
@@ -869,7 +893,7 @@ function App() {
           recordingStartedAtMs={recordingStartedAtMs}
         />
       ) : (
-        <main
+                <main
           className={`flex-1 flex flex-col bg-pro-bg h-full relative z-10 overflow-hidden content-shift ${
             selectedMeetingId
               ? 'meeting-app-shell'
@@ -939,6 +963,7 @@ function App() {
                 actionError={dashboardActionError}
                 handleCompleteTask={handleCompleteTask}
                 handleReviewCommitment={handleReviewDashboardCommitment}
+                handleCreateCommitment={handleCreateDashboardCommitment}
                 handleUpdateAttentionStatus={
                   handleUpdateDashboardAttentionStatus
                 }

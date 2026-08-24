@@ -1494,3 +1494,17 @@
   left: -26px;
   font-weight: 500;
 }
+
+@keyframes dashboard-confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -16px, 0) rotate(0deg);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(24px, 105vh, 0) rotate(520deg);
+  }
+}

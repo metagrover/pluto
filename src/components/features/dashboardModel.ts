@@ -87,6 +87,29 @@ export interface DashboardActionInsightItem {
   snoozeLabel: 'Snooze' | 'Snooze blocker' | 'Reopen' | null;
 }
 
+export interface DashboardTopOfMindItem {
+  id: string;
+  read: string;
+  whyNow: string;
+  consequence: string | null;
+  suggestedMove: string;
+  evidenceLabel: string;
+  action: DashboardAction;
+  trustState: 'directly supported' | 'inferred' | 'weak' | 'stale';
+}
+
+export type DashboardTopOfMind =
+  | {
+      state: 'empty';
+      summary: string;
+      items: [];
+    }
+  | {
+      state: 'populated';
+      summary: string;
+      items: DashboardTopOfMindItem[];
+    };
+
 export type DashboardActionInsights =
   | {
       state: 'empty';
@@ -107,6 +130,20 @@ export type DashboardActionInsights =
       confirmedCount: number;
       summary: string;
       items: DashboardActionInsightItem[];
+    };
+
+export type DashboardCommitments =
+  | {
+      state: 'empty';
+      summary: string;
+      items: [];
+      needsConfirmation: DashboardActionInsightItem[];
+    }
+  | {
+      state: 'populated';
+      summary: string;
+      items: DashboardActionInsightItem[];
+      needsConfirmation: DashboardActionInsightItem[];
     };
 
 export interface DashboardKnowledgeDocumentCard {
@@ -141,6 +178,20 @@ export interface DashboardSpotlight {
   target: DashboardTarget;
 }
 
+export type DashboardRecentWin =
+  | {
+      state: 'empty';
+      title: string;
+      detail: string;
+    }
+  | {
+      state: 'populated';
+      title: string;
+      whyItCounts: string;
+      sourceLabel: string;
+      meetingId: Meeting['id'];
+    };
+
 export type DashboardBriefingFocusKind =
   | 'attention'
   | 'latest_meeting'
@@ -169,6 +220,9 @@ export interface DashboardHomeModelInput {
 
 export interface DashboardHomeModel {
   hero: DashboardHero;
+  topOfMind: DashboardTopOfMind;
+  commitments: DashboardCommitments;
+  recentWin: DashboardRecentWin;
   briefingFocus: DashboardBriefingFocus;
   latestMeeting: DashboardLatestMeeting;
   actionInsights: DashboardActionInsights;
@@ -193,6 +247,7 @@ interface KnowledgeDocStructuredSummary {
 
 const MAX_MEETING_DETAIL_LENGTH = 180;
 const MAX_ACTION_INSIGHT_ITEMS = 5;
+const MAX_DASHBOARD_BRIEFING_ITEMS = 3;
 
 const sortByNewestTimestamp = <T>(
   items: T[],
@@ -796,6 +851,170 @@ const buildActionInsights = (
     confirmedCount,
     summary,
     items,
+  };
+};
+
+const getActionTrustState = (
+  item: DashboardActionInsightItem,
+): DashboardTopOfMindItem['trustState'] => {
+  if (item.commitmentState === 'possible') return 'weak';
+  if (item.status === 'stale') return 'stale';
+  if (item.attentionReason) return 'directly supported';
+  return 'inferred';
+};
+
+const buildActionConsequence = (
+  item: DashboardActionInsightItem,
+): string | null => {
+  if (item.attentionLabel === 'Blocker') {
+    return item.attentionReason ?? 'The linked work may stay blocked.';
+  }
+  return null;
+};
+
+const buildTopOfMind = (
+  actionInsights: DashboardActionInsights,
+): DashboardTopOfMind => {
+  const actionItems =
+    actionInsights.state === 'populated'
+      ? actionInsights.items
+          .filter(
+            (item) =>
+              item.commitmentState === 'confirmed' &&
+              (item.status !== 'active' ||
+                item.attentionLabel === 'Blocker' ||
+                Boolean(item.attentionReason)),
+          )
+          .slice(0, MAX_DASHBOARD_BRIEFING_ITEMS)
+          .map((item) => ({
+            id: item.id,
+            read:
+              item.attentionLabel === 'Blocker'
+                ? `${item.title} is blocked.`
+                : item.status === 'overdue'
+                  ? `${item.title} is overdue.`
+                  : item.status === 'stale'
+                    ? `${item.title} has gone quiet.`
+                    : `${item.title} may need attention.`,
+            whyNow: item.attentionReason ?? item.basisLabel,
+            consequence: buildActionConsequence(item),
+            suggestedMove:
+              item.attentionLabel === 'Blocker'
+                ? 'Review blocker'
+                : item.canComplete
+                  ? 'Complete or update'
+                  : 'Confirm whether this is real',
+            evidenceLabel: item.sourceMeetingId
+              ? `Source: ${item.sourceLabel}`
+              : item.sourceLabel,
+            action: item.sourceMeetingId
+              ? {
+                  label: 'Open moment',
+                  target: 'meeting' as const,
+                  meetingId: item.sourceMeetingId,
+                }
+              : { label: 'Open projects', target: 'projects' as const },
+            trustState: getActionTrustState(item),
+          }))
+      : [];
+
+  if (actionItems.length === 0) {
+    return {
+      state: 'empty',
+      summary: 'Nothing needs your attention',
+      items: [],
+    };
+  }
+
+  return {
+    state: 'populated',
+    summary: `${pluralize(actionItems.length, 'item')} surfaced`,
+    items: actionItems,
+  };
+};
+
+const buildDashboardCommitments = (
+  actionInsights: DashboardActionInsights,
+): DashboardCommitments => {
+  const items =
+    actionInsights.state === 'populated'
+      ? actionInsights.items
+          .filter((item) => item.commitmentState === 'confirmed')
+          .slice(0, MAX_DASHBOARD_BRIEFING_ITEMS)
+      : [];
+  const needsConfirmation =
+    actionInsights.state === 'populated'
+      ? actionInsights.items
+          .filter((item) => item.commitmentState === 'possible')
+          .slice(0, MAX_DASHBOARD_BRIEFING_ITEMS)
+      : [];
+
+  if (items.length === 0) {
+    return {
+      state: 'empty',
+      summary: 'No confirmed commitments need attention',
+      items: [],
+      needsConfirmation,
+    };
+  }
+
+  return {
+    state: 'populated',
+    summary: `${pluralize(items.length, 'commitment')} shown`,
+    items,
+    needsConfirmation,
+  };
+};
+
+interface MeetingAnalysisRecentWin {
+  recent_win?: unknown;
+}
+
+interface MeetingRecentWinPayload {
+  win?: unknown;
+  why_it_counts?: unknown;
+  source?: unknown;
+}
+
+const buildRecentWin = (meetings: Meeting[]): DashboardRecentWin => {
+  for (const meeting of sortByNewestTimestamp(meetings, getMeetingTimestamp)) {
+    const analysis = parseJsonObject<MeetingAnalysisRecentWin>(
+      meeting.analysis_json,
+    );
+    const recentWin = analysis?.recent_win;
+    if (
+      !recentWin ||
+      typeof recentWin !== 'object' ||
+      Array.isArray(recentWin)
+    ) {
+      continue;
+    }
+
+    const payload = recentWin as MeetingRecentWinPayload;
+    const title = typeof payload.win === 'string' ? payload.win.trim() : '';
+    const whyItCounts =
+      typeof payload.why_it_counts === 'string'
+        ? payload.why_it_counts.trim()
+        : '';
+    if (!title || !whyItCounts) continue;
+
+    return {
+      state: 'populated',
+      title,
+      whyItCounts,
+      sourceLabel:
+        typeof payload.source === 'string' && payload.source.trim()
+          ? payload.source.trim()
+          : meeting.title || 'Recent meeting',
+      meetingId: meeting.id,
+    };
+  }
+
+  return {
+    state: 'empty',
+    title: 'No recent win surfaced yet',
+    detail:
+      'Pluto will only show a win when the meeting record supports the moment.',
   };
 };
 
@@ -1423,6 +1642,9 @@ export const buildDashboardHomeModel = (
     activeActions,
     attentionAlerts,
   );
+  const topOfMind = buildTopOfMind(actionInsights);
+  const commitments = buildDashboardCommitments(actionInsights);
+  const recentWin = buildRecentWin(input.meetings);
   const knowledgeDocuments = buildKnowledgeDocuments(
     input.workspace,
     workingMemorySnapshots,
@@ -1451,6 +1673,9 @@ export const buildDashboardHomeModel = (
 
   return {
     hero,
+    topOfMind,
+    commitments,
+    recentWin,
     briefingFocus,
     latestMeeting,
     actionInsights,

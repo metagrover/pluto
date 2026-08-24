@@ -4,6 +4,7 @@ import {
   DashboardRefreshAfterMutationError,
   persistDashboardActionCompletion,
   persistDashboardAttentionStatus,
+  persistDashboardCommitmentCreation,
   persistDashboardCommitmentReview,
 } from '../../src/components/features/dashboardActionCompletion';
 
@@ -69,6 +70,65 @@ describe('persistDashboardCommitmentReview', () => {
       'action-3',
       'confirmed',
     );
+  });
+});
+
+describe('persistDashboardCommitmentCreation', () => {
+  it('creates a confirmed user-authored action item before refreshing', async () => {
+    const calls: string[] = [];
+    const upsertEntity = vi.fn(async () => {
+      calls.push('upsert');
+      return { id: 'new-action' };
+    });
+    const refreshDashboard = vi.fn(async () => {
+      calls.push('refresh');
+    });
+
+    await persistDashboardCommitmentCreation(
+      {
+        text: ' Send launch recap ',
+        dueDate: '2026-04-30',
+      },
+      {
+        upsertEntity: upsertEntity as never,
+        refreshDashboard,
+      },
+    );
+
+    expect(upsertEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'action_item',
+        name: 'Send launch recap',
+        status: 'active',
+        due_date: '2026-04-30',
+        dedupe_by_name: false,
+        metadata: expect.objectContaining({
+          commitment_state: 'confirmed',
+          origin: 'user',
+          created_from: 'dashboard',
+        }),
+      }),
+    );
+    expect(refreshDashboard).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['upsert', 'refresh']);
+  });
+
+  it('rejects blank commitment text without writing', async () => {
+    const upsertEntity = vi.fn();
+    const refreshDashboard = vi.fn();
+
+    await expect(
+      persistDashboardCommitmentCreation(
+        { text: '   ', dueDate: null },
+        {
+          upsertEntity: upsertEntity as never,
+          refreshDashboard,
+        },
+      ),
+    ).rejects.toThrow('Commitment text is required');
+
+    expect(upsertEntity).not.toHaveBeenCalled();
+    expect(refreshDashboard).not.toHaveBeenCalled();
   });
 });
 

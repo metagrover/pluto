@@ -11,9 +11,11 @@ import type {
 import {
   CurrentReadClaimView,
   Dashboard,
+  buildDashboardConfettiPieces,
   getDashboardReviewActions,
   isCurrentReadClaimClipped,
   reduceCurrentReadClaimState,
+  shouldUseReducedDashboardMotion,
 } from '../../src/components/features/Dashboard';
 import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
 import type { Meeting } from '../../src/types';
@@ -205,7 +207,12 @@ describe('Dashboard', () => {
     });
   });
 
-  it('renders the exact current read as safely wrapping text in a stable collapsed region', () => {
+  it('builds bounded confetti pieces and defaults to full motion without a browser preference', () => {
+    expect(buildDashboardConfettiPieces()).toHaveLength(28);
+    expect(shouldUseReducedDashboardMotion()).toBe(false);
+  });
+
+  it('moves exact current-read copy out of the first dashboard viewport', () => {
     const exactClaim = `<review>${'unbroken'.repeat(30)}</review> & keep this exact`;
     const doc = makeDoc();
     const structured = JSON.parse(doc.structured_json ?? '{}');
@@ -238,17 +245,16 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('id="dashboard-current-read-claim"');
-    expect(markup).toContain('line-clamp-3');
-    expect(markup).toContain('break-words');
-    expect(markup).toContain('text-[24px]');
-    expect(markup).toContain('&lt;review&gt;unbrokenunbrokenunbrokenunbroken');
-    expect(markup).toContain('&lt;/review&gt; &amp; keep this exact');
+    expect(markup).toContain('Top of mind');
+    expect(markup).not.toContain('id="dashboard-current-read-claim"');
+    expect(markup).not.toContain(
+      '&lt;review&gt;unbrokenunbrokenunbrokenunbroken',
+    );
     expect(markup).not.toContain('Show full current read');
     expect(markup).not.toContain('Collapse current read');
   });
 
-  it('renders one living memory brief with evidence and a deliberately small attention lane', () => {
+  it('renders the approved first viewport with capped top-of-mind and commitments', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -280,23 +286,21 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup.match(/Current read/g) ?? []).toHaveLength(1);
-    expect(markup).toContain(
-      'Search indexing is converging around the rollout plan.',
-    );
-    expect(markup).toContain('Synthesized from 4 sources in Indexing Rollout.');
-    expect(markup).toContain('Open knowledge');
+    expect(markup).toContain('Daily briefing');
+    expect(markup).toContain('Top of mind');
+    expect(markup).toContain('My commitments');
+    expect(markup).toContain('Recent win');
     expect(markup).toContain('Ask Pluto');
-    expect(markup).not.toContain('1 blocker · 2 dependencies</p>');
-    expect(markup).not.toContain('Ask what changed');
-    expect(markup).toContain('Why Pluto believes this');
-    expect(markup).toContain('4 sources');
-    expect(markup).toContain('Attention');
     expect(
-      markup.match(/data-testid="dashboard-attention-row"/g) ?? [],
+      markup.match(/data-testid="dashboard-top-of-mind-item"/g) ?? [],
+    ).toHaveLength(3);
+    expect(
+      markup.match(/data-testid="dashboard-commitment-row"/g) ?? [],
     ).toHaveLength(3);
     expect(markup).toContain('Review 1 more');
-    expect(markup).not.toContain('Focus now');
+    expect(markup).toContain('No recent win surfaced yet');
+    expect(markup).not.toContain('Current read');
+    expect(markup).not.toContain('Memory in motion');
   });
 
   it('renders a blocker-specific homepage hero badge for blocker-backed follow-ups', () => {
@@ -338,10 +342,11 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('>Blocked<');
+    expect(markup).toContain('directly supported');
+    expect(markup).toContain('is blocked.');
     expect(markup).toContain('Finalize launch checklist');
     expect(markup).not.toContain('1 overdue item');
-    expect(markup).toContain('Review blockers');
+    expect(markup).toContain('Review blocker');
   });
 
   it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
@@ -538,7 +543,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Due Apr 26 · Work');
   });
 
-  it('renders a blocker-specific spotlight badge when the spotlight project is blocked', () => {
+  it('moves blocked project spotlight clutter out of the first viewport', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -563,11 +568,12 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Blocked');
-    expect(markup).not.toContain('>Projects<');
+    expect(markup).toContain('Nothing needs your attention.');
+    expect(markup).not.toContain('Blocked project signal');
+    expect(markup).not.toContain('1 blocker · 2 dependencies');
   });
 
-  it('renders a blocker-specific spotlight section label when the spotlight project is blocked', () => {
+  it('does not promote project-signal labels ahead of the briefing sections', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -592,7 +598,9 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Blocked project signal');
+    expect(markup).toContain('Top of mind');
+    expect(markup).toContain('My commitments');
+    expect(markup).not.toContain('Blocked project signal');
     expect(markup).not.toContain('>Project signal<');
   });
 
@@ -630,11 +638,12 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Project signal');
+    expect(markup).toContain('Nothing needs your attention.');
     expect(markup).not.toContain('Blocked project signal');
+    expect(markup).not.toContain('>Project signal<');
   });
 
-  it('renders a blocker-specific spotlight quick action', () => {
+  it('keeps project blocker quick actions out of the first dashboard slice', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [],
@@ -667,7 +676,8 @@ describe('Dashboard', () => {
         handleCompleteTask={vi.fn(async () => {})}
       />,
     );
-    expect(markup).toContain('Review blockers');
+    expect(markup).not.toContain('Review blockers');
+    expect(markup).toContain('Top of mind');
   });
 
   it('keeps completion-oriented labels for overdue and stale follow-up cards', () => {
@@ -907,7 +917,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Snooze blocker');
   });
 
-  it('renders the model-generated action insight summary', () => {
+  it('renders the model-generated top-of-mind summary', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [],
@@ -932,7 +942,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('1 confirmed commitment needs attention.');
+    expect(markup).toContain('1 item surfaced');
     expect(markup).not.toContain('Only the highest-value signals');
   });
 

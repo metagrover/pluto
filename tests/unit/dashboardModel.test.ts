@@ -185,6 +185,125 @@ const makeWorkingMemorySnapshot = (
 });
 
 describe('buildDashboardHomeModel', () => {
+  it('caps top of mind and confirmed commitments at three items', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({ id: 'action-1', name: 'Ship privacy review' }),
+        makeAction({ id: 'action-2', name: 'Confirm launch owner' }),
+        makeAction({ id: 'action-3', name: 'Close privacy review' }),
+        makeAction({ id: 'action-4', name: 'Publish launch notes' }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: makeWorkspace(),
+      graphStats: null,
+    });
+
+    expect(model.topOfMind.state).toBe('populated');
+    expect(model.topOfMind.items).toHaveLength(3);
+    expect(model.commitments.state).toBe('populated');
+    expect(model.commitments.items).toHaveLength(3);
+  });
+
+  it('uses calm empty states when no attention item, commitment, or supported win exists', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          analysis_json: JSON.stringify({
+            overview: 'A normal sync happened.',
+          }),
+        }),
+      ],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.topOfMind).toEqual({
+      state: 'empty',
+      summary: 'Nothing needs your attention',
+      items: [],
+    });
+    expect(model.commitments).toMatchObject({
+      state: 'empty',
+      summary: 'No confirmed commitments need attention',
+      items: [],
+    });
+    expect(model.recentWin).toMatchObject({
+      state: 'empty',
+      title: 'No recent win surfaced yet',
+    });
+  });
+
+  it('separates possible follow-ups from confirmed commitments', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          id: 'possible-action',
+          name: 'Maybe send a launch note',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.commitments.state).toBe('empty');
+    expect(model.commitments.items).toHaveLength(0);
+    expect(model.commitments.needsConfirmation).toHaveLength(1);
+    expect(model.commitments.needsConfirmation[0].title).toBe(
+      'Maybe send a launch note',
+    );
+    expect(model.topOfMind.state).toBe('empty');
+  });
+
+  it('only surfaces a recent win when meeting analysis carries a supported win', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          id: 'meeting-win',
+          title: 'Customer Launch Review',
+          analysis_json: JSON.stringify({
+            recent_win: {
+              win: 'The launch blocker was resolved in the room.',
+              why_it_counts:
+                'The notes record the decision and the owner accepted the next step.',
+              source: 'Customer Launch Review',
+            },
+          }),
+        }),
+      ],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.recentWin).toEqual({
+      state: 'populated',
+      title: 'The launch blocker was resolved in the room.',
+      whyItCounts:
+        'The notes record the decision and the owner accepted the next step.',
+      sourceLabel: 'Customer Launch Review',
+      meetingId: 'meeting-win',
+    });
+  });
+
   it('exposes reviewed dashboard navigation targets from real model output', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
