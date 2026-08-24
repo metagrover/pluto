@@ -4,7 +4,7 @@
 
 **Goal:** Make Pluto's empty homepage compact and useful while preventing background dashboard refreshes from flashing visible status copy.
 
-**Architecture:** Preserve `dashboardModel.ts` as the source of truth and change only the refresh lifecycle and renderer composition. `useDashboardHome` will distinguish initial loading from background refreshing while retaining the last resolved model; `Dashboard.tsx` will render one caught-up state, expose suggested commitments when they are the best next action, and select the strongest available supporting context without reserving empty regions.
+**Architecture:** Preserve `dashboardModel.ts` as the source of truth and change only the refresh lifecycle and renderer composition. `useDashboardHome` distinguishes initial loading from background refreshing while retaining the last resolved model; `Dashboard.tsx` renders one caught-up state, advances one suggested commitment at a time, preserves Recent Win as a truthful engagement surface, and places re-entry context beneath it.
 
 **Tech Stack:** React 18, TypeScript, Tailwind CSS, Vitest, React server rendering tests, Electron
 
@@ -14,8 +14,8 @@
 
 - Modify `src/components/features/useDashboardHome.ts`: represent initial loading and background refreshing separately while preserving concurrent refresh coordination.
 - Modify `tests/unit/useDashboardHome.test.ts`: prove refresh phase transitions and resolved-model preservation through pure state transitions.
-- Modify `src/components/features/Dashboard.tsx`: implement the revised hierarchy, caught-up state, visible suggestion queue, conditional supporting context, and initial skeleton.
-- Modify `tests/unit/Dashboard.test.tsx`: lock the visible empty, suggestion, win, latest-meeting fallback, initial-loading, and background-refresh behavior.
+- Modify `src/components/features/Dashboard.tsx`: implement the revised hierarchy, caught-up state, sequential suggestion queue, stable Recent Win region, quiet re-entry context, and initial skeleton.
+- Modify `tests/unit/Dashboard.test.tsx`: lock the visible empty, suggestion disclosure, win preview, latest-meeting context, initial-loading, and background-refresh behavior.
 - Modify `docs/decisions.md`: record the durable product and lifecycle decision.
 - Create `docs/changelog/entries/2026-08-24-658-useful-empty-dashboard.md`: record what shipped and why.
 
@@ -233,15 +233,16 @@ it('renders one caught-up state and promotes suggested commitments', () => {
 
   expect(markup).toContain("You're caught up");
   expect(markup).toContain('No blockers or confirmed commitments need attention right now.');
-  expect(markup).toContain('Review 1 suggestion');
   expect(markup).toContain('Suggested commitments');
   expect(markup).toContain('Send the revised launch brief');
-  expect(markup).toContain('Confirm task');
+  expect(markup).toContain('Review suggestion');
+  expect(markup).toContain('Add to commitments');
+  expect(markup).toContain('Dismiss');
   expect(markup).not.toContain('Nothing needs your attention.');
   expect(markup).not.toContain('No recent win surfaced yet');
 });
 
-it('uses the latest meeting when no recent win is supported', () => {
+it('keeps Recent Win visible and places the latest meeting beneath it', () => {
   const model = buildDashboardHomeModel({
     isRecording: false,
     meetings: [makeMeeting({ title: 'Launch Review' })],
@@ -255,12 +256,13 @@ it('uses the latest meeting when no recent win is supported', () => {
 
   const markup = renderDashboard(model);
 
+  expect(markup).toContain('Recent win');
+  expect(markup).toContain('Your wins will show up here');
   expect(markup).toContain('Continue where you left off');
   expect(markup).toContain('Launch Review');
-  expect(markup).not.toContain('Recent win');
 });
 
-it('keeps a supported recent win instead of the latest-meeting fallback', () => {
+it('keeps a supported recent win above quiet latest-meeting context', () => {
   const model = buildDashboardHomeModel({
     isRecording: false,
     meetings: [makeMeetingWithSupportedWin()],
@@ -275,7 +277,7 @@ it('keeps a supported recent win instead of the latest-meeting fallback', () => 
   const markup = renderDashboard(model);
 
   expect(markup).toContain('Recent win');
-  expect(markup).not.toContain('Continue where you left off');
+  expect(markup).toContain('Continue where you left off');
 });
 
 it('renders stable skeleton geometry only for initial loading', () => {
@@ -304,7 +306,7 @@ Run:
 pnpm exec vitest run tests/unit/Dashboard.test.tsx
 ```
 
-Expected: FAIL on the new caught-up copy, visible suggestion heading, conditional supporting context, and initial-loading skeleton.
+Expected: FAIL on the new caught-up copy, sequential suggestion disclosure, stable Recent Win region, and initial-loading skeleton.
 
 - [ ] **Step 3: Implement the initial loading surface**
 
@@ -375,13 +377,13 @@ Set the page width to `max-w-[1080px]` and remove the detached summary chip. Kee
 
 This is the only caught-up message on the page.
 
-- [ ] **Step 5: Promote suggestions and conditionally render support**
+- [ ] **Step 5: Promote suggestions and preserve the Recent Win promise**
 
-When `commitmentItems.length === 0` and `needsConfirmation.length > 0`, render the existing review rows directly under a heading with `id="suggested-commitments"` instead of rendering the empty commitment paragraph plus collapsed `details`. Keep the same `getDashboardReviewActions` wiring, no-source disclosure, status label, disabled state, focus styling, and exact action IDs.
+When `commitmentItems.length === 0` and `needsConfirmation.length > 0`, render review rows directly under `Suggested commitments`. Each row rests with one `Review suggestion` disclosure. Inside the disclosure, preserve source review when available, explain missing source truthfully, and expose `Add to commitments` as the primary decision plus `Dismiss` as the quiet secondary decision. Remove the duplicate caught-up anchor and demote section-level and re-entry controls from accent blue.
 
 When confirmed commitments exist, retain the collapsed suggestion disclosure below them.
 
-Replace the fixed empty Recent win panel with this fallback order. Keep the existing supported-win markup inline for the first branch, including `Open moment`, `Celebrate`, source copy, reduced-motion celebration behavior, and focus styles:
+Keep Recent Win as a permanent right-rail section. Preserve the supported-win markup, including `Open moment`, `Celebrate`, source copy, reduced-motion celebration behavior, and focus styles. When unsupported, render a truthful preview that says wins will appear after Pluto captures a meaningful outcome. Render latest-meeting or Knowledge re-entry beneath the section as quiet secondary context rather than replacing it. The first-pass conditional pseudocode below is retained as implementation history; the revised spec and this paragraph supersede its fallback branches.
 
 ```tsx
 {recentWin.state === 'populated' ? (
@@ -466,7 +468,7 @@ Replace the fixed empty Recent win panel with this fallback order. Keep the exis
 ) : null}
 ```
 
-Do not add a new model, IPC call, or decorative card grid. Omit the aside entirely when no supported context exists and switch the working grid to one column.
+Do not add a new model, IPC call, or decorative card grid. The right rail remains present because Recent Win is part of the dashboard's engagement contract, but it must never fabricate progress.
 
 - [ ] **Step 6: Run component and model regression tests**
 
@@ -476,7 +478,7 @@ Run:
 pnpm exec vitest run tests/unit/Dashboard.test.tsx tests/unit/dashboardModel.test.ts
 ```
 
-Expected: PASS. Update older assertions that intentionally expected `Nothing needs your attention.` or an unsupported Recent win placeholder; do not weaken blocker, evidence, commitment-state, action-label, or item-cap assertions.
+Expected: PASS. Update older assertions that intentionally expected `Nothing needs your attention.`, adjacent suggestion decisions, or omission of unsupported Recent Win; do not weaken blocker, evidence, commitment-state, action-label, or item-cap assertions.
 
 - [ ] **Step 7: Commit the dashboard composition**
 

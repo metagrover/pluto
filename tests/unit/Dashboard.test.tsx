@@ -364,6 +364,16 @@ describe('Dashboard', () => {
             source_meeting_id: 'meeting-1',
           }),
         }),
+        makeAction({
+          id: 'suggestion-2',
+          name: 'Schedule the privacy review',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
+        makeAction({
+          id: 'suggestion-3',
+          name: 'Draft the launch checklist',
+          metadata: JSON.stringify({ commitment_state: 'possible' }),
+        }),
       ],
       attentionAlerts: [],
       workspace: null,
@@ -376,15 +386,30 @@ describe('Dashboard', () => {
     expect(markup).toContain(
       'No blockers or confirmed commitments need attention right now.',
     );
-    expect(markup).toContain('Review 1 suggestion');
     expect(markup).toContain('Suggested commitments');
-    expect(markup).toContain('Send the revised launch brief');
-    expect(markup).toContain('Confirm task');
+    expect(markup).toContain('Draft the launch checklist');
+    expect(markup).toContain('Review suggestion');
+    expect(markup).toContain('Add to commitments');
+    expect(markup).toContain('Dismiss');
+    expect(markup).toContain('data-testid="dashboard-suggestion-review"');
+    expect(markup).toMatch(
+      /<summary class="[^"]*bg-pro-accent[^"]*group-open\/review:bg-transparent[^"]*">Review suggestion/,
+    );
+    expect(
+      markup.match(/data-testid="dashboard-suggestion-review"/g) ?? [],
+    ).toHaveLength(1);
+    expect(markup).toContain('2 more suggestions waiting');
+    expect(markup).not.toContain('Schedule the privacy review');
+    expect(markup).not.toContain('Send the revised launch brief');
+    expect(markup).not.toContain('Review 1 suggestion');
+    expect(markup).not.toContain('Confirm task');
+    expect(markup).not.toContain('Not a task');
     expect(markup).not.toContain('Nothing needs your attention.');
-    expect(markup).not.toContain('No recent win surfaced yet');
+    expect(markup).toContain('Recent win');
+    expect(markup).toContain('Your wins will show up here');
   });
 
-  it('uses the latest meeting when no recent win is supported', () => {
+  it('keeps Recent Win visible and places the latest meeting beneath it', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting({ title: 'Launch Review' })],
@@ -398,12 +423,13 @@ describe('Dashboard', () => {
 
     const markup = renderDashboard(model);
 
+    expect(markup).toContain('Recent win');
+    expect(markup).toContain('Your wins will show up here');
     expect(markup).toContain('Continue where you left off');
     expect(markup).toContain('Launch Review');
-    expect(markup).not.toContain('Recent win');
   });
 
-  it('keeps a supported recent win instead of the latest-meeting fallback', () => {
+  it('keeps a supported recent win above quiet latest-meeting context', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeetingWithSupportedWin()],
@@ -419,7 +445,18 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('Recent win');
     expect(markup).toContain('Privacy review is ready to close');
-    expect(markup).not.toContain('Continue where you left off');
+    expect(markup).toContain('Continue where you left off');
+    expect(markup).not.toContain('Your wins will show up here');
+  });
+
+  it('renders a truthful Recent Win preview when no supporting context exists', () => {
+    const markup = renderDashboard(makeEmptyDashboardModel());
+
+    expect(markup).toContain('Recent win');
+    expect(markup).toContain('Your wins will show up here');
+    expect(markup).toContain(
+      'Pluto will surface meaningful outcomes here when your meetings support them.',
+    );
   });
 
   it('renders stable skeleton geometry only for initial loading', () => {
@@ -891,18 +928,21 @@ describe('Dashboard', () => {
     expect(markup).toContain(
       'Possible follow-up · From Launch Review · Apr 27, 2026',
     );
+    expect(markup).toContain('Review suggestion');
     expect(markup).toContain('Review source');
-    expect(markup).toContain('Confirm task');
-    expect(markup).toContain('Not a task');
+    expect(markup).toContain('Add to commitments');
+    expect(markup).toContain('Dismiss');
     expect(markup).toMatch(
       /aria-label="Review source for Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
     );
     expect(markup).toMatch(
-      /aria-label="Confirm task: Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
+      /aria-label="Add Check whether privacy review is assigned to commitments"[^>]+focus-visible:outline-pro-accent/,
     );
     expect(markup).toMatch(
-      /aria-label="Not a task: Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
+      /aria-label="Dismiss suggestion: Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
     );
+    expect(markup).not.toContain('Confirm task');
+    expect(markup).not.toContain('Not a task');
     expect(markup).not.toContain('Mark complete');
     expect(markup).not.toContain('Resolve blocker');
     expect(markup).not.toContain(
@@ -910,7 +950,7 @@ describe('Dashboard', () => {
     );
   });
 
-  it('renders a truthful Review task affordance when possible evidence has no source meeting', () => {
+  it('keeps source-less suggestion decisions inside one review disclosure', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [],
@@ -940,11 +980,15 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Review task');
-    expect(markup).toContain('<details');
+    expect(markup).toContain('Review suggestion');
     expect(markup).toContain(
-      'No source meeting is available. Review the wording above, then confirm it or mark it not a task.',
+      '<details data-testid="dashboard-suggestion-review"',
     );
+    expect(markup).toContain(
+      'No source meeting is available. Review the wording before adding this to your commitments.',
+    );
+    expect(markup).toContain('Add to commitments');
+    expect(markup).toContain('Dismiss');
     expect(markup).not.toContain('Review source');
   });
 
@@ -969,8 +1013,8 @@ describe('Dashboard', () => {
     });
 
     expect(actions.map((action) => action.label)).toEqual([
-      'Confirm task',
-      'Not a task',
+      'Add to commitments',
+      'Dismiss',
     ]);
   });
 
