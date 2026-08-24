@@ -169,7 +169,7 @@ git commit -m "fix(transcription): collapse skewed Parakeet bleed (#657)"
 
 - [ ] **Step 1: Write failing boundary tests**
 
-Assert `runRecordingTranscriptValidation` exposes the reconciliation result, `runFinalTranscription` passes it into `commitCanonical.metadata`, and trust parsing accepts this exact valid shape while rejecting `confidence: 2`:
+Assert `runRecordingTranscriptValidation` exposes the reconciliation result, `runFinalTranscription` passes it into `commitCanonical.metadata`, and trust parsing accepts this exact valid shape while rejecting `confidence: 2`. Retain a fixture proving a legacy Parakeet result without `reconciliation` still parses:
 
 ```ts
 type CrossChannelReconciliationMetadata = {
@@ -193,7 +193,7 @@ Expected: FAIL because reconciliation metadata does not cross these boundaries.
 
 - [ ] **Step 3: Thread the exact typed metadata through production**
 
-Recovered-channel validation uses `collapsedChannels.reconciliation`. Checkpointed/full-mix paths emit the same policy with zero counters and `skewApplied: false`. Make `reconciliation` required in final metadata. Update the trust exact-key validator to require all seven fields, an integer offset within plus or minus 2500 milliseconds, non-negative integer counts, and confidence from 0 through 1.
+Recovered-channel validation uses `collapsedChannels.reconciliation`. Checkpointed/full-mix paths emit the same policy with zero counters and `skewApplied: false`. Make `reconciliation` required in newly produced `FinalTranscriptionMetadata`, but optional in the persisted `TranscriptTrustEnvelopeV2` type for backward compatibility. Add `reconciliation` to the trust result's optional exact keys; when present, require all seven fields, an integer offset within plus or minus 2500 milliseconds, non-negative integer counts, and confidence from 0 through 1.
 
 - [ ] **Step 4: Run boundary and adjacent suites**
 

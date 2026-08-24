@@ -76,7 +76,7 @@ Canonical Parakeet metadata records a versioned reconciliation policy and conten
 - accepted anchor count;
 - dropped microphone word count.
 
-The transcript trust parser must validate these fields without weakening existing exact-shape checks. No transcript text, audio path, identity, or anchor digest is added.
+New finalizations always write these fields. The transcript trust parser accepts their absence on legacy persisted Parakeet rows, but strictly validates the exact object whenever it is present. No transcript text, audio path, identity, or anchor digest is added.
 
 ### Failure behavior
 
