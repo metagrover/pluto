@@ -68,11 +68,12 @@ Recent Win always reserves a compact right-rail region because it communicates a
 Render a compact status row rather than a large empty block:
 
 - Calm success icon
-- Headline: `You're caught up`
-- Supporting line: `No blockers or confirmed commitments need attention right now.`
+- When suggestions remain, headline: `Nothing urgent`
+- When suggestions remain, supporting line: `No blockers need attention. Review the next suggested commitment to stay ahead.`
+- When neither supported attention items nor suggestions remain, use `You're caught up` with `No blockers or confirmed commitments need attention right now.`
 - No duplicate action when the next section already presents the suggestion review path
 
-The state must not imply that Pluto has no data. It means only that no supported item currently meets the attention threshold.
+The state must not imply that Pluto has no data. It means only that no supported item currently meets the attention threshold. `You're caught up` is reserved for a genuinely empty review queue so it never contradicts visible proactive work.
 
 ### Commitments
 

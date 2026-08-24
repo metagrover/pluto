@@ -416,6 +416,8 @@ export const Dashboard = ({
     model.topOfMind.state === 'populated' ? model.topOfMind.items : [];
   const recentWin = model.recentWin;
   const latestMeeting = model.latestMeeting;
+  const hasSuggestedCommitments =
+    model.commitments.needsConfirmation.length > 0;
   const commitmentItems =
     model.commitments.state === 'populated' ? model.commitments.items : [];
   const hiddenCommitmentCount =
@@ -560,11 +562,14 @@ export const Dashboard = ({
                 </span>
                 <div className="min-w-0">
                   <h2 className="text-[17px] font-semibold leading-6 text-pro-text-main">
-                    You're caught up
+                    {hasSuggestedCommitments
+                      ? 'Nothing urgent'
+                      : "You're caught up"}
                   </h2>
                   <p className="mt-1 max-w-[64ch] text-[13px] font-medium leading-[1.6] text-pro-text-muted">
-                    No blockers or confirmed commitments need attention right
-                    now.
+                    {hasSuggestedCommitments
+                      ? 'No blockers need attention. Review the next suggested commitment to stay ahead.'
+                      : 'No blockers or confirmed commitments need attention right now.'}
                   </p>
                 </div>
               </div>

@@ -349,7 +349,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Memory in motion');
   });
 
-  it('renders one caught-up state and promotes suggested commitments', () => {
+  it('distinguishes nothing urgent from caught up when suggestions remain', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -382,10 +382,11 @@ describe('Dashboard', () => {
 
     const markup = renderDashboard(model);
 
-    expect(markup).toContain('You&#x27;re caught up');
+    expect(markup).toContain('Nothing urgent');
     expect(markup).toContain(
-      'No blockers or confirmed commitments need attention right now.',
+      'No blockers need attention. Review the next suggested commitment to stay ahead.',
     );
+    expect(markup).not.toContain('You&#x27;re caught up');
     expect(markup).toContain('Suggested commitments');
     expect(markup).toContain('Draft the launch checklist');
     expect(markup).toContain('Review suggestion');
