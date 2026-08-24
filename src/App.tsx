@@ -893,7 +893,7 @@ function App() {
           recordingStartedAtMs={recordingStartedAtMs}
         />
       ) : (
-                <main
+        <main
           className={`flex-1 flex flex-col bg-pro-bg h-full relative z-10 overflow-hidden content-shift ${
             selectedMeetingId
               ? 'meeting-app-shell'

@@ -262,7 +262,9 @@ export const Sidebar = ({
             {safeMeetings.slice(0, 5).map((m) => {
               const date = new Date(m.started_at || m.created_at);
               const now = new Date();
-              const timeString = date.toLocaleTimeString(undefined, { timeStyle: 'short' });
+              const timeString = date.toLocaleTimeString(undefined, {
+                timeStyle: 'short',
+              });
 
               let dateLabel = '';
               if (date.toDateString() === now.toDateString()) {
@@ -273,11 +275,17 @@ export const Sidebar = ({
                 if (date.toDateString() === yesterday.toDateString()) {
                   dateLabel = 'Yesterday';
                 } else {
-                  const daysDiff = (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
+                  const daysDiff =
+                    (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
                   if (daysDiff < 7) {
-                    dateLabel = date.toLocaleDateString(undefined, { weekday: 'short' });
+                    dateLabel = date.toLocaleDateString(undefined, {
+                      weekday: 'short',
+                    });
                   } else {
-                    dateLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                    dateLabel = date.toLocaleDateString(undefined, {
+                      month: 'short',
+                      day: 'numeric',
+                    });
                   }
                 }
               }
@@ -299,10 +307,14 @@ export const Sidebar = ({
                                           }
                                       `}
                   >
-                    <span className={`text-[14px] truncate w-full leading-tight ${selectedMeetingId === m.id ? 'text-pro-text-main font-medium' : 'text-pro-text-main/90 hover:text-pro-text-main font-medium'}`}>
+                    <span
+                      className={`text-[14px] truncate w-full leading-tight ${selectedMeetingId === m.id ? 'text-pro-text-main font-medium' : 'text-pro-text-main/90 hover:text-pro-text-main font-medium'}`}
+                    >
                       {m.title || 'Untitled'}
                     </span>
-                    <span className={`text-[12px] truncate w-full leading-tight ${selectedMeetingId === m.id ? 'text-pro-text-main/70' : 'text-pro-text-muted/80'}`}>
+                    <span
+                      className={`text-[12px] truncate w-full leading-tight ${selectedMeetingId === m.id ? 'text-pro-text-main/70' : 'text-pro-text-muted/80'}`}
+                    >
                       {dateLabel}, {timeString}
                     </span>
                   </button>

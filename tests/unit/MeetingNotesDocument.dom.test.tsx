@@ -531,13 +531,17 @@ describe('MeetingNotesDocument', () => {
     );
 
     expect(container.querySelectorAll('.meeting-note-block')).toHaveLength(2);
-    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(2);
+    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(
+      2,
+    );
     const continuation = container.querySelectorAll('.meeting-note-block')[1];
     expect(continuation.textContent).toContain('Follow up with QA.');
     expect(continuation.querySelector('ul')).toBeNull();
 
     await act(async () =>
-      continuation.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click(),
+      continuation
+        .querySelector<HTMLInputElement>('input[type="checkbox"]')
+        ?.click(),
     );
     expect(invoke).toHaveBeenCalledWith('SAVE_USER_EDIT', {
       meetingId: meeting.id,
@@ -575,7 +579,10 @@ describe('MeetingNotesDocument', () => {
               authorship: 'human',
               edited: true,
               blockType: 'decision',
-              nativeContinuation: { parentPath: 'all_decisions:0', id: 'empty' },
+              nativeContinuation: {
+                parentPath: 'all_decisions:0',
+                id: 'empty',
+              },
               nativeContinuations: [{ id: 'empty', text: '' }],
             },
           ],

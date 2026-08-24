@@ -136,7 +136,10 @@ const expandNativeContinuations = (
   blocks.flatMap((block) => {
     const continuations = parseNativeContinuations(block.path, editsMap);
     if (continuations.length === 0) return [block];
-    const blockWithContinuations = { ...block, nativeContinuations: continuations };
+    const blockWithContinuations = {
+      ...block,
+      nativeContinuations: continuations,
+    };
     return [
       blockWithContinuations,
       ...continuations.map((continuation) => ({

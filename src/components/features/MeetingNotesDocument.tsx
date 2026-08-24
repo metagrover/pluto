@@ -510,13 +510,20 @@ const InlineEditableText = ({
             const trailingText = val.slice(pos);
             const atBlockEnd =
               trailingText.length === 0 || /^\s*$/.test(trailingText);
-            if (onCreateNativeContinuation && pos === target.selectionEnd && atBlockEnd) {
+            if (
+              onCreateNativeContinuation &&
+              pos === target.selectionEnd &&
+              atBlockEnd
+            ) {
               event.preventDefault();
               setSaving(true);
               setError(null);
               void onCreateNativeContinuation()
                 .catch((cause) => {
-                  console.error('Failed to create native meeting note continuation', cause);
+                  console.error(
+                    'Failed to create native meeting note continuation',
+                    cause,
+                  );
                   setError('A new item was not created. Try again.');
                 })
                 .finally(() => setSaving(false));
@@ -632,7 +639,9 @@ const NoteBlock = ({
             className="sr-only"
             type="checkbox"
             checked={Boolean(block.completed)}
-            disabled={(!block.path && !block.nativeContinuation) || completionPending}
+            disabled={
+              (!block.path && !block.nativeContinuation) || completionPending
+            }
             aria-label={`${block.completed ? 'Mark incomplete' : 'Mark complete'}: ${block.text}`}
             onChange={() => void toggleCompleted()}
           />
@@ -809,7 +818,8 @@ export const MeetingNotesDocument = ({
   const createNativeContinuation = async (block: MeetingNotesBlock) => {
     const parentPath = block.nativeContinuation?.parentPath || block.path;
     if (!parentPath) return;
-    const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    const id =
+      globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     await saveNativeContinuations(parentPath, [
       ...(block.nativeContinuations || []),
       { id, text: '' },
@@ -881,7 +891,8 @@ export const MeetingNotesDocument = ({
                         }
                         onUpdateNativeContinuation={
                           block.nativeContinuation
-                            ? (update) => updateNativeContinuation(block, update)
+                            ? (update) =>
+                                updateNativeContinuation(block, update)
                             : undefined
                         }
                         autoFocus={
