@@ -9,7 +9,9 @@ import type {
   MeetingNotesBlock,
   MeetingNotesDocumentModel,
   MeetingNotesSection,
+  NativeMeetingNoteContinuation,
 } from '../../utils/meetingNotesDocument';
+import { nativeContinuationEditPath } from '../../utils/meetingNotesDocument';
 import { getTranscriptSegmentStartTime } from '../../utils/transcript';
 
 interface MeetingNotesDocumentProps {
@@ -191,6 +193,9 @@ const InlineEditableText = ({
   originalText,
   text,
   asHeading = false,
+  onCreateNativeContinuation,
+  onSaveNativeContinuation,
+  autoFocus = false,
   onSaved,
 }: {
   meetingId: string | number;
@@ -198,24 +203,61 @@ const InlineEditableText = ({
   originalText: string;
   text: string;
   asHeading?: boolean;
+  onCreateNativeContinuation?: () => Promise<void>;
+  onSaveNativeContinuation?: (text: string) => Promise<void>;
+  autoFocus?: boolean;
   onSaved: () => void;
 }) => {
   const [draft, setDraft] = useState(text);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(asHeading);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingCaretRef = useRef<number | null>(null);
 
   useEffect(() => {
     setDraft(text);
     setEditing(asHeading);
   }, [asHeading, text]);
 
+  useEffect(() => {
+    if (editing && !asHeading) {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      if (pendingCaretRef.current !== null) {
+        const pos = pendingCaretRef.current;
+        pendingCaretRef.current = null;
+        ta.setSelectionRange(pos, pos);
+      }
+    }
+  }, [editing, asHeading]);
+
+  useEffect(() => {
+    if (autoFocus && !asHeading) setEditing(true);
+  }, [autoFocus, asHeading]);
+
   const className = asHeading
-    ? 'w-full resize-none overflow-hidden bg-transparent outline-none text-[30px] font-semibold leading-[1.3] m-0 p-0 block'
-    : 'w-full resize-none overflow-hidden bg-transparent outline-none text-[16px] leading-[1.55] m-0 p-0 block';
+    ? 'meeting-editable-heading w-full resize-none overflow-hidden bg-transparent outline-none block'
+    : 'w-full resize-none overflow-hidden bg-transparent outline-none font-sans text-[16px] leading-[1.5] m-0 p-0 block';
 
   const save = async (newValue: string) => {
     const next = newValue.trim();
+    if (onSaveNativeContinuation) {
+      setSaving(true);
+      setError(null);
+      try {
+        await onSaveNativeContinuation(next);
+        onSaved();
+      } catch (cause) {
+        console.error('Failed to save native meeting note continuation', cause);
+        setError('This edit was not saved. Try again.');
+        setDraft(text);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (!next || next === text) {
       setDraft(text);
       return;
@@ -278,7 +320,7 @@ const InlineEditableText = ({
     );
   };
 
-  if (!path) {
+  if (!path && !onSaveNativeContinuation) {
     return asHeading ? (
       <h2 className={className}>{text}</h2>
     ) : (
@@ -290,7 +332,99 @@ const InlineEditableText = ({
     return (
       <div
         className="meeting-markdown-preview"
-        onClick={() => setEditing(true)}
+        onMouseDown={(e) => {
+          // Prevent the mousedown from blurring the currently-focused textarea
+          // before we've had a chance to set editing=true. This way a single
+          // click moves focus directly from one block to the next.
+          e.preventDefault();
+
+          // Resolve the click coordinates to a character offset in the
+          // rendered HTML text, then map it into the raw markdown string.
+          try {
+            let clickedNode: Node | null = null;
+            let offsetInNode = 0;
+
+            // Standard (Firefox) API
+            if ('caretPositionFromPoint' in document) {
+              const pos = (
+                document as Document & {
+                  caretPositionFromPoint: (
+                    x: number,
+                    y: number,
+                  ) => { offsetNode: Node; offset: number } | null;
+                }
+              ).caretPositionFromPoint(e.clientX, e.clientY);
+              if (pos) {
+                clickedNode = pos.offsetNode;
+                offsetInNode = pos.offset;
+              }
+            } else if ('caretRangeFromPoint' in document) {
+              // WebKit/Blink (Electron/Chrome) API
+              const range = (
+                document as Document & {
+                  caretRangeFromPoint: (x: number, y: number) => Range | null;
+                }
+              ).caretRangeFromPoint(e.clientX, e.clientY);
+              if (range) {
+                clickedNode = range.startContainer;
+                offsetInNode = range.startOffset;
+              }
+            }
+
+            if (clickedNode) {
+              // Walk all text nodes inside the preview to get an absolute
+              // character offset within the element's full text content.
+              const previewEl = e.currentTarget;
+              const walker = document.createTreeWalker(
+                previewEl,
+                NodeFilter.SHOW_TEXT,
+              );
+              let absoluteOffset = 0;
+              let found = false;
+              let node: Node | null = walker.nextNode();
+              while (node) {
+                if (node === clickedNode) {
+                  absoluteOffset += offsetInNode;
+                  found = true;
+                  break;
+                }
+                absoluteOffset += (node.textContent ?? '').length;
+                node = walker.nextNode();
+              }
+
+              if (found) {
+                // Map the visible-text offset into the raw markdown by finding
+                // the first position in draft where the surrounding text matches.
+                // We search for a snippet of visible text around the click.
+                const visibleText = previewEl.textContent ?? '';
+                const snippet = visibleText.slice(
+                  Math.max(0, absoluteOffset - 12),
+                  absoluteOffset + 12,
+                );
+                const snippetPre = visibleText.slice(
+                  Math.max(0, absoluteOffset - 12),
+                  absoluteOffset,
+                );
+                const mdIdx = draft.indexOf(snippet);
+                if (mdIdx !== -1) {
+                  pendingCaretRef.current = mdIdx + snippetPre.length;
+                } else {
+                  // Fallback: proportional mapping
+                  const ratio =
+                    visibleText.length > 0
+                      ? absoluteOffset / visibleText.length
+                      : 1;
+                  pendingCaretRef.current = Math.round(ratio * draft.length);
+                }
+              }
+            }
+          } catch {
+            // If anything goes wrong, just open at end
+            pendingCaretRef.current = draft.length;
+          }
+
+          setEditing(true);
+        }}
       >
         {renderMarkdown()}
       </div>
@@ -300,7 +434,8 @@ const InlineEditableText = ({
   return (
     <div className="meeting-inline-editable relative group w-full">
       <TextareaAutosize
-        className={className}
+        ref={textareaRef}
+        className={`${className} overflow-hidden`}
         style={{ color: 'var(--notes-ink)' }}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
@@ -334,7 +469,94 @@ const InlineEditableText = ({
               navigateToAdjacentTextarea(target, 'up');
             }
           }
-          // We remove the Enter -> blur logic so users can press Enter to add new lines like a real text editor
+          if (event.key === 'Enter') {
+            const target = event.currentTarget;
+            const pos = target.selectionStart;
+            const val = target.value;
+            // Find the start of the current line
+            const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+            const currentLine = val.slice(lineStart, pos);
+            // Match list prefix: optional indent, then bullet (- * +) or numbered (1.) with optional checkbox
+            const listMatch = currentLine.match(
+              /^(\s*)([-*+]|\d+\.)\s+(\[[ x]\]\s+)?/,
+            );
+            if (listMatch) {
+              event.preventDefault();
+              const [fullPrefix, indent, marker] = listMatch;
+              const lineContent = currentLine.slice(fullPrefix.length);
+              if (lineContent.trim() === '') {
+                // Empty list item → remove the prefix (exit the list or dedent)
+                const newVal = `${val.slice(0, lineStart)}\n${val.slice(pos)}`;
+                setDraft(newVal);
+                const newPos = lineStart + 1;
+                requestAnimationFrame(() => {
+                  target.setSelectionRange(newPos, newPos);
+                });
+              } else {
+                // Continue the list with same indent + same marker style
+                const nextMarker = /^\d+\./.test(marker)
+                  ? `${Number.parseInt(marker) + 1}.`
+                  : marker;
+                const insertion = `\n${indent}${nextMarker} `;
+                const newVal = val.slice(0, pos) + insertion + val.slice(pos);
+                setDraft(newVal);
+                const newPos = pos + insertion.length;
+                requestAnimationFrame(() => {
+                  target.setSelectionRange(newPos, newPos);
+                });
+              }
+              return;
+            }
+            const trailingText = val.slice(pos);
+            const atBlockEnd =
+              trailingText.length === 0 || /^\s*$/.test(trailingText);
+            if (onCreateNativeContinuation && pos === target.selectionEnd && atBlockEnd) {
+              event.preventDefault();
+              setSaving(true);
+              setError(null);
+              void onCreateNativeContinuation()
+                .catch((cause) => {
+                  console.error('Failed to create native meeting note continuation', cause);
+                  setError('A new item was not created. Try again.');
+                })
+                .finally(() => setSaving(false));
+              return;
+            }
+          }
+          if (event.key === 'Tab') {
+            const target = event.currentTarget;
+            const pos = target.selectionStart;
+            const val = target.value;
+            const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+            const currentLine = val.slice(lineStart, pos);
+            const isList = /^(\s*)([-*+]|\d+\.)\s/.test(currentLine);
+            if (isList) {
+              event.preventDefault();
+              if (event.shiftKey) {
+                // Dedent: remove up to 2 leading spaces
+                const dedented = currentLine.replace(/^ {1,2}/, '');
+                const removed = currentLine.length - dedented.length;
+                const newVal = `${val.slice(
+                  0,
+                  lineStart,
+                )}${dedented}${val.slice(lineStart + currentLine.length)}`;
+                setDraft(newVal);
+                const newPos = Math.max(lineStart, pos - removed);
+                requestAnimationFrame(() => {
+                  target.setSelectionRange(newPos, newPos);
+                });
+              } else {
+                // Indent: add 2 spaces
+                const newVal = `${val.slice(0, lineStart)}  ${val.slice(lineStart)}`;
+                setDraft(newVal);
+                const newPos = pos + 2;
+                requestAnimationFrame(() => {
+                  target.setSelectionRange(newPos, newPos);
+                });
+              }
+              return;
+            }
+          }
         }}
         disabled={saving}
         spellCheck={false}
@@ -349,12 +571,20 @@ const NoteBlock = ({
   section,
   meetingId,
   onSaved,
+  onCreateNativeContinuation,
+  onUpdateNativeContinuation,
+  autoFocus,
   selected,
 }: {
   block: MeetingNotesBlock;
   section: MeetingNotesSection;
   meetingId: string | number;
   onSaved: () => void;
+  onCreateNativeContinuation?: () => Promise<void>;
+  onUpdateNativeContinuation?: (
+    update: Partial<NativeMeetingNoteContinuation>,
+  ) => Promise<void>;
+  autoFocus: boolean;
   selected: boolean;
 }) => {
   const [completionPending, setCompletionPending] = useState(false);
@@ -363,17 +593,21 @@ const NoteBlock = ({
   const isCheckable = isAction || block.blockType === 'decision';
 
   const toggleCompleted = async () => {
-    if (!block.path || completionPending) return;
+    if ((!block.path && !block.nativeContinuation) || completionPending) return;
     const next = !block.completed;
     setCompletionPending(true);
     setCompletionError(null);
     try {
-      await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
-        meetingId,
-        path: `completion:${block.path}`,
-        original: 'false',
-        edited: String(next),
-      });
+      if (block.nativeContinuation && onUpdateNativeContinuation) {
+        await onUpdateNativeContinuation({ completed: next });
+      } else {
+        await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
+          meetingId,
+          path: `completion:${block.path}`,
+          original: 'false',
+          edited: String(next),
+        });
+      }
       onSaved();
     } catch (cause) {
       console.error('Failed to update next step', cause);
@@ -385,7 +619,7 @@ const NoteBlock = ({
 
   return (
     <div
-      className={`meeting-note-block meeting-note-block--${section.kind} ${selected ? 'is-source-selected' : ''}`}
+      className={`meeting-note-block meeting-note-block--${section.kind} ${block.blockType === 'paragraph' ? 'meeting-note-block--paragraph' : ''} ${selected ? 'is-source-selected' : ''}`}
       data-authorship={block.authorship}
     >
       {isCheckable ? (
@@ -398,7 +632,7 @@ const NoteBlock = ({
             className="sr-only"
             type="checkbox"
             checked={Boolean(block.completed)}
-            disabled={!block.path || completionPending}
+            disabled={(!block.path && !block.nativeContinuation) || completionPending}
             aria-label={`${block.completed ? 'Mark incomplete' : 'Mark complete'}: ${block.text}`}
             onChange={() => void toggleCompleted()}
           />
@@ -406,15 +640,22 @@ const NoteBlock = ({
             <Check size={13} />
           </span>
         </label>
-      ) : (
+      ) : block.blockType !== 'paragraph' ? (
         <span className="meeting-note-block__marker" aria-hidden="true" />
-      )}
+      ) : null}
       <div className="meeting-note-block__body">
         <InlineEditableText
           meetingId={meetingId}
           path={block.path}
           originalText={block.originalText}
           text={block.text}
+          onCreateNativeContinuation={onCreateNativeContinuation}
+          onSaveNativeContinuation={
+            block.nativeContinuation
+              ? async (text) => onUpdateNativeContinuation?.({ text })
+              : undefined
+          }
+          autoFocus={autoFocus}
           onSaved={onSaved}
         />
         <div className="meeting-note-block__meta">
@@ -535,6 +776,8 @@ export const MeetingNotesDocument = ({
   header,
 }: MeetingNotesDocumentProps) => {
   const [saveState, setSaveState] = useState<SaveState>('saved');
+  const [pendingNativeContinuationId, setPendingNativeContinuationId] =
+    useState<string | null>(null);
   const [sourceSelection, setSourceSelection] =
     useState<SourceSelection | null>(() => previewSourceSelection(model));
   const meetingRef = useRef(meeting);
@@ -550,6 +793,53 @@ export const MeetingNotesDocument = ({
     setSaveState('saved');
     setSourceSelection(previewSourceSelection(model));
   }, [meeting.id, meeting.user_notes, model]);
+
+  const saveNativeContinuations = async (
+    parentPath: string,
+    continuations: NativeMeetingNoteContinuation[],
+  ) => {
+    await window.ipcRenderer.invoke('SAVE_USER_EDIT', {
+      meetingId: meeting.id,
+      path: nativeContinuationEditPath(parentPath),
+      original: '[]',
+      edited: JSON.stringify(continuations),
+    });
+  };
+
+  const createNativeContinuation = async (block: MeetingNotesBlock) => {
+    const parentPath = block.nativeContinuation?.parentPath || block.path;
+    if (!parentPath) return;
+    const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+    await saveNativeContinuations(parentPath, [
+      ...(block.nativeContinuations || []),
+      { id, text: '' },
+    ]);
+    setPendingNativeContinuationId(id);
+    onDocumentChanged();
+  };
+
+  const updateNativeContinuation = async (
+    block: MeetingNotesBlock,
+    update: Partial<NativeMeetingNoteContinuation>,
+  ) => {
+    const parentPath = block.nativeContinuation?.parentPath;
+    if (!parentPath || !block.nativeContinuation) return;
+    const continuations = (block.nativeContinuations || [])
+      .map((continuation) =>
+        continuation.id === block.nativeContinuation?.id
+          ? { ...continuation, ...update }
+          : continuation,
+      )
+      .filter((continuation) => continuation.text.trim());
+    await saveNativeContinuations(parentPath, continuations);
+  };
+
+  const canContinueAsNativeRow = (block: MeetingNotesBlock) =>
+    block.blockType === 'note' ||
+    block.blockType === 'action' ||
+    block.blockType === 'decision' ||
+    (Boolean(block.path) && block.blockType !== 'paragraph');
+
   return (
     <div className="meeting-document-workspace">
       <article className="meeting-notes-document" aria-label="Meeting notes">
@@ -584,6 +874,20 @@ export const MeetingNotesDocument = ({
                         section={section}
                         meetingId={meeting.id}
                         onSaved={onDocumentChanged}
+                        onCreateNativeContinuation={
+                          canContinueAsNativeRow(block)
+                            ? () => createNativeContinuation(block)
+                            : undefined
+                        }
+                        onUpdateNativeContinuation={
+                          block.nativeContinuation
+                            ? (update) => updateNativeContinuation(block, update)
+                            : undefined
+                        }
+                        autoFocus={
+                          block.nativeContinuation?.id ===
+                          pendingNativeContinuationId
+                        }
                         selected={sourceSelection?.label === block.text}
                       />
                     ))}

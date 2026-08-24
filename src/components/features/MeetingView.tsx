@@ -7,8 +7,10 @@ import {
   Loader2,
   MoreHorizontal,
   Sparkles,
+  Undo2,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
+import TextareaAutosize from 'react-textarea-autosize';
 import {
   type ValueGainSignals,
   extractAndProcessEntities,
@@ -590,14 +592,16 @@ export const MeetingView = ({
 
     setIsRegeneratingNotes(true);
     try {
-      const artifacts = (await window.ipcRenderer.invoke(
-        'GENERATE_ANALYSIS_V2',
-        {
+      const [artifacts, newTitle] = await Promise.all([
+        window.ipcRenderer.invoke('GENERATE_ANALYSIS_V2', {
           transcript,
           userNotes: selectedMeeting.user_notes || '',
           template: notesTemplate,
-        },
-      )) as { markdown?: unknown; analysis?: unknown; signals?: unknown };
+        }) as Promise<{ markdown?: unknown; analysis?: unknown; signals?: unknown }>,
+        window.ipcRenderer.invoke('GENERATE_TITLE', {
+          transcript,
+        }).catch(() => null) as Promise<string | null>,
+      ]);
 
       let normalizedAnalysis: AnalysisDocument | AnalysisDocumentV3 | null =
         null;
@@ -679,6 +683,10 @@ export const MeetingView = ({
 
       await window.ipcRenderer.invoke('SAVE_MEETING', {
         ...selectedMeeting,
+        title:
+          newTitle && newTitle !== 'Meeting' && newTitle !== 'New Meeting'
+            ? newTitle
+            : selectedMeeting.title,
         enhanced_notes: enhancedNotes,
         analysis_json: JSON.stringify(normalizedAnalysis),
         analysis_schema_version:
@@ -769,214 +777,159 @@ export const MeetingView = ({
         transcriptVisible ? '' : 'meeting-document--transcript-collapsed'
       }`}
     >
-      <header className="meeting-document-header">
-        <div className="w-full min-w-0">
-          {editingTitle ? (
-            <input
-              type="text"
-              value={titleValue}
-              onChange={(e) => setTitleValue(e.target.value)}
-              onBlur={async () => {
-                setEditingTitle(false);
-                if (
-                  titleValue.trim() &&
-                  selectedMeeting &&
-                  titleValue !== selectedMeeting.title
-                ) {
-                  // Save to database
-                  await window.ipcRenderer.invoke('SAVE_MEETING', {
-                    ...selectedMeeting,
-                    title: titleValue.trim(),
-                  });
-                  // Refresh meetings list
-                  fetchMeetings();
-                } else if (!titleValue.trim()) {
-                  setTitleValue(selectedMeeting?.title || 'Untitled Session');
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.currentTarget.blur();
-                }
-                if (e.key === 'Escape') {
-                  setTitleValue(selectedMeeting?.title || 'Untitled Session');
-                  setEditingTitle(false);
-                }
-              }}
-              className="meeting-document-title w-full border-b border-pro-accent bg-transparent outline-none"
-            />
-          ) : (
-            <h1 className="meeting-document-title">
+      <div className="meeting-notes-surface" aria-label="Notes">
+        <header className="meeting-document-header">
+          <TextareaAutosize
+            value={editingTitle ? titleValue : (selectedMeeting?.title || 'Untitled Session')}
+            onFocus={() => {
+              setEditingTitle(true);
+              setTitleValue(selectedMeeting?.title || 'Untitled Session');
+            }}
+            onChange={(e) => setTitleValue(e.target.value)}
+            onBlur={async () => {
+              setEditingTitle(false);
+              if (
+                titleValue.trim() &&
+                selectedMeeting &&
+                titleValue !== selectedMeeting.title
+              ) {
+                // Save to database
+                await window.ipcRenderer.invoke('SAVE_MEETING', {
+                  ...selectedMeeting,
+                  title: titleValue.trim(),
+                });
+                // Refresh meetings list
+                fetchMeetings();
+              } else if (!titleValue.trim()) {
+                setTitleValue(selectedMeeting?.title || 'Untitled Session');
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === 'Escape') {
+                setTitleValue(selectedMeeting?.title || 'Untitled Session');
+                e.currentTarget.blur();
+              }
+            }}
+            className="meeting-document-title w-full bg-transparent outline-none resize-none mb-0 p-0 block overflow-hidden"
+            spellCheck={false}
+            aria-label="Meeting title"
+          />
+          <div className="flex w-full min-w-0 items-center justify-between gap-4">
+            <div className="meeting-document-meta min-w-0">
+              <span>
+                {new Date(
+                  selectedMeeting?.created_at ||
+                    selectedMeeting?.started_at ||
+                    Date.now(),
+                ).toLocaleString([], {
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </span>
+              {participantCount > 0 ? (
+                <span>
+                  {participantCount}{' '}
+                  {participantCount === 1 ? 'participant' : 'participants'}
+                </span>
+              ) : selectedMeeting.duration_seconds ? (
+                <span>
+                  {Math.floor(selectedMeeting.duration_seconds / 60)} min
+                </span>
+              ) : null}
+            </div>
+          <div className="meeting-document-actions">
+            {editsMap[ANALYSIS_SNAPSHOT_PATH] ? (
               <button
                 type="button"
-                aria-label="Edit meeting title"
-                onClick={() => {
-                  setEditingTitle(true);
-                  setTitleValue(selectedMeeting?.title || 'Untitled Session');
-                }}
-                className="cursor-text text-left transition-colors hover:text-pro-accent/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                onClick={() => void restorePreviousGeneratedNotes()}
+                disabled={isRestoringNotes}
+                className="meeting-toolbar-button meeting-toolbar-button--undo"
+                aria-label="Restore previous generated notes"
               >
-                {selectedMeeting?.title || 'Untitled Session'}
+                {isRestoringNotes ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                ) : (
+                  <Undo2 className="h-4 w-4 opacity-70 mr-1.5" />
+                )}
+                <span>{isRestoringNotes ? 'Restoring…' : 'Undo rewrite'}</span>
               </button>
-            </h1>
-          )}
-          <div className="meeting-document-meta">
-            <span>
-              {new Date(
-                selectedMeeting?.created_at ||
-                  selectedMeeting?.started_at ||
-                  Date.now(),
-              ).toLocaleString([], {
-                month: 'long',
-                day: 'numeric',
-                year: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-              })}
-            </span>
-            {participantCount > 0 ? (
-              <span>
-                {participantCount}{' '}
-                {participantCount === 1 ? 'participant' : 'participants'}
-              </span>
-            ) : selectedMeeting.duration_seconds ? (
-              <span>
-                {Math.floor(selectedMeeting.duration_seconds / 60)} min
-              </span>
             ) : null}
-          </div>
-        </div>
-        <div className="meeting-document-actions">
-          {editsMap[ANALYSIS_SNAPSHOT_PATH] ? (
-            <button
-              type="button"
-              onClick={() => void restorePreviousGeneratedNotes()}
-              disabled={isRestoringNotes}
-              className="meeting-toolbar-button meeting-toolbar-button--undo"
-              aria-label="Restore previous generated notes"
-            >
-              {isRestoringNotes ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <span aria-hidden="true">↶</span>
-              )}
-              <span>{isRestoringNotes ? 'Restoring…' : 'Undo rewrite'}</span>
-            </button>
-          ) : null}
-          <details className="meeting-document-menu">
-            <summary aria-label="Meeting note actions">
-              <MoreHorizontal aria-hidden="true" size={18} />
-            </summary>
-            <div className="meeting-document-menu__panel">
-              <div className="meeting-document-menu__section">
-                <label className="meeting-template-picker">
-                  <span className="meeting-template-picker__label">
-                    Notes template
-                  </span>
-                  <select
-                    value={notesTemplate}
-                    onChange={(event) =>
-                      setNotesTemplate(
-                        event.target.value as MeetingNotesTemplate,
-                      )
-                    }
-                    aria-label="Notes template"
-                  >
-                    <option value="auto">Auto</option>
-                    <option value="one_on_one">1:1</option>
-                    <option value="team_sync">Team sync</option>
-                    <option value="customer_call">Customer call</option>
-                    <option value="interview">Interview</option>
-                    <option value="project_kickoff">Project kickoff</option>
-                  </select>
-                </label>
-              </div>
-              <div className="meeting-document-menu__section">
-                {downstreamPresentation.state === 'ready' &&
-                canRegenerateMeetingIntelligence ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={regenerateEnhancedNotes}
-                      disabled={isRegeneratingNotes}
-                      className={`meeting-toolbar-button ${
-                        isRegeneratingNotes
-                          ? 'bg-pro-bg border-pro-border/40 text-pro-text-muted cursor-not-allowed'
-                          : 'bg-pro-bg border-pro-border/40 hover:bg-pro-surface text-pro-text-main hover:scale-105'
-                      }`}
-                      aria-label={
-                        isRegeneratingNotes
-                          ? 'Generating Enhanced Notes...'
-                          : 'Regenerate Enhanced Notes'
+            {downstreamPresentation.state === 'ready' && canRegenerateMeetingIntelligence ? (
+              <button
+                type="button"
+                onClick={regenerateEnhancedNotes}
+                disabled={isRegeneratingNotes}
+                className={`meeting-toolbar-button ${
+                  isRegeneratingNotes ? 'opacity-50 cursor-not-allowed' : 'meeting-toolbar-button--primary'
+                } px-3 mr-1 h-9`}
+                aria-label={
+                  isRegeneratingNotes
+                    ? 'Generating Enhanced Notes...'
+                    : 'Regenerate Enhanced Notes'
+                }
+              >
+                {isRegeneratingNotes ? (
+                  <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+                ) : (
+                  <Sparkles className="w-4 h-4 opacity-70 mr-1.5" />
+                )}
+                <span className="font-medium text-sm">
+                  {isRegeneratingNotes ? 'Writing…' : 'Regenerate'}
+                </span>
+              </button>
+            ) : null}
+            <details className="meeting-document-menu">
+              <summary aria-label="Meeting note actions">
+                <MoreHorizontal aria-hidden="true" size={18} />
+              </summary>
+              <div className="meeting-document-menu__panel">
+                <div className="meeting-document-menu__section">
+                  <label className="meeting-template-picker">
+                    <span className="meeting-template-picker__label">
+                      Notes template
+                    </span>
+                    <select
+                      value={notesTemplate}
+                      onChange={(event) =>
+                        setNotesTemplate(
+                          event.target.value as MeetingNotesTemplate,
+                        )
                       }
+                      aria-label="Notes template"
                     >
-                      {isRegeneratingNotes ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="w-4 h-4 opacity-70" />
-                      )}
-                      <span>
-                        {isRegeneratingNotes ? 'Writing…' : 'Regenerate'}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopySummary(canonicalAnalysisMarkdown)
-                      }
-                      className={`meeting-toolbar-button ${copySuccess ? 'text-green-700' : ''}`}
-                      aria-label="Copy notes"
-                    >
-                      {copySuccess ? (
-                        <Check className="w-4 h-4" />
-                      ) : (
-                        <Copy className="w-4 h-4 opacity-60" />
-                      )}
-                      <span>{copySuccess ? 'Copied' : 'Copy'}</span>
-                    </button>
-                  </>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (selectedMeeting) {
-                      const summaryText = canonicalAnalysisMarkdown;
-                      const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${summaryText}\n\nTranscript:\n${selectedMeeting.transcript_json}`;
-                      const blob = new Blob([content], { type: 'text/plain' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `pluto-session-${selectedMeeting.id}.txt`;
-                      a.click();
-                    }
-                  }}
-                  className="meeting-toolbar-button"
-                  aria-label="Export meeting"
-                >
-                  <svg
-                    aria-hidden="true"
-                    className="w-4 h-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                    />
-                  </svg>
-                  <span>Export meeting</span>
-                </button>
-              </div>
-              {selectedMeeting.finalization_status !== 'recovery_required' ? (
-                <div className="meeting-document-menu__section meeting-document-menu__section--danger">
+                      <option value="auto">Auto</option>
+                      <option value="one_on_one">1:1</option>
+                      <option value="team_sync">Team sync</option>
+                      <option value="customer_call">Customer call</option>
+                      <option value="interview">Interview</option>
+                      <option value="project_kickoff">Project kickoff</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="meeting-document-menu__section">
                   <button
                     type="button"
-                    onClick={() => handleDeleteMeeting(selectedMeeting.id)}
-                    className="meeting-toolbar-button meeting-toolbar-button--danger"
-                    aria-label="Delete meeting"
+                    onClick={() => {
+                      if (selectedMeeting) {
+                        const summaryText = canonicalAnalysisMarkdown;
+                        const content = `Session: ${selectedMeeting.title}\nDate: ${selectedMeeting.created_at}\n\nSummary:\n${summaryText}\n\nTranscript:\n${selectedMeeting.transcript_json}`;
+                        const blob = new Blob([content], { type: 'text/plain' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `pluto-session-${selectedMeeting.id}.txt`;
+                        a.click();
+                      }
+                    }}
+                    className="meeting-toolbar-button"
+                    aria-label="Export meeting"
                   >
                     <svg
                       aria-hidden="true"
@@ -989,45 +942,70 @@ export const MeetingView = ({
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
                       />
                     </svg>
-                    <span>Delete meeting</span>
+                    <span>Export meeting</span>
                   </button>
                 </div>
-              ) : null}
-            </div>
-          </details>
+                {selectedMeeting.finalization_status !== 'recovery_required' ? (
+                  <div className="meeting-document-menu__section meeting-document-menu__section--danger">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMeeting(selectedMeeting.id)}
+                      className="meeting-toolbar-button meeting-toolbar-button--danger"
+                      aria-label="Delete meeting"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        className="w-4 h-4"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                      </svg>
+                      <span>Delete meeting</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </details>
+          </div>
         </div>
       </header>
-      <TranscriptIntegrityPanel
-        status={selectedMeeting.transcript_status}
-        finalizationStatus={selectedMeeting.finalization_status}
-        integrityJson={selectedMeeting.transcript_integrity_json}
-        transcriptJson={selectedMeeting.transcript_json}
-        transcriptValidatedAt={selectedMeeting.transcript_validated_at}
-        audioPath={selectedMeeting.audio_path}
-        systemAudioPath={selectedMeeting.system_audio_path}
-        mixedAudioPath={selectedMeeting.mixed_audio_path}
-        activityEvidenceAvailable={Boolean(
-          selectedMeeting.transcript_integrity_json?.includes(
-            '"activityEvidence"',
-          ),
-        )}
-        hasExistingAnalysis={Boolean(
-          selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
-        )}
-        downstreamFailed={downstreamPresentation.state === 'failed'}
-        onRetry={onRetryTranscriptValidation}
-        retrying={transcriptValidationRetrying}
-      />
-      {regenerateNotesError ? (
-        <p className="-mt-4 text-xs font-semibold text-red-600">
-          {regenerateNotesError}
-        </p>
-      ) : null}
+        <TranscriptIntegrityPanel
+          status={selectedMeeting.transcript_status}
+          finalizationStatus={selectedMeeting.finalization_status}
+          integrityJson={selectedMeeting.transcript_integrity_json}
+          transcriptJson={selectedMeeting.transcript_json}
+          transcriptValidatedAt={selectedMeeting.transcript_validated_at}
+          audioPath={selectedMeeting.audio_path}
+          systemAudioPath={selectedMeeting.system_audio_path}
+          mixedAudioPath={selectedMeeting.mixed_audio_path}
+          activityEvidenceAvailable={Boolean(
+            selectedMeeting.transcript_integrity_json?.includes(
+              '"activityEvidence"',
+            ),
+          )}
+          hasExistingAnalysis={Boolean(
+            selectedMeeting.analysis_json || selectedMeeting.enhanced_notes,
+          )}
+          downstreamFailed={downstreamPresentation.state === 'failed'}
+          onRetry={onRetryTranscriptValidation}
+          retrying={transcriptValidationRetrying}
+        />
+        {regenerateNotesError ? (
+          <p className="-mt-4 text-xs font-semibold text-red-600">
+            {regenerateNotesError}
+          </p>
+        ) : null}
 
-      <div className="meeting-notes-surface" aria-label="Notes">
         {downstreamPresentation.state === 'loading' &&
         !notesDocument.hasAnalysis ? (
           <MeetingAnalysisSkeleton />

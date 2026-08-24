@@ -876,6 +876,7 @@ function App() {
               : 'rounded-l-[2.5rem] border-l border-pro-border/10'
           }`}
         >
+          <div className="h-10 w-full shrink-0 drag-region bg-transparent z-50 pointer-events-auto" />
           <div
             ref={contentScrollRef}
             className={`flex-1 flex flex-col scroll-smooth relative ${

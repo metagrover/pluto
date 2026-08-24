@@ -56,6 +56,7 @@ describe('buildMeetingNotesDocument', () => {
     expect(document.sections.map((section) => section.kind)).toEqual([
       'outcomes',
       'current_read',
+      'discussion',
       'open_questions',
       'scratchpad',
     ]);
@@ -94,10 +95,14 @@ describe('buildMeetingNotesDocument', () => {
     expect(document.sections.map((section) => section.kind)).toEqual([
       'outcomes',
       'current_read',
+      'discussion',
       'scratchpad',
     ]);
     expect(document.sections[0].blocks[0].path).toBe('v2:decision:0');
-    expect(document.sections.at(-2)?.title).toBe('What changed');
+    expect(
+      document.sections.find((section) => section.kind === 'current_read')
+        ?.title,
+    ).toBe('What was discussed');
   });
 
   it('applies saved edits to every generated block type', () => {
@@ -169,17 +174,17 @@ describe('buildMeetingNotesDocument', () => {
       userNotes: '',
       editsMap: {},
     });
-    const whatChanged = document.sections.find(
-      (section) => section.kind === 'current_read',
+    const discussion = document.sections.find(
+      (section) => section.kind === 'discussion',
     );
 
-    expect(whatChanged?.blocks.map((block) => block.text)).toEqual([
-      'The architecture was reviewed.',
+    expect(discussion?.title).toBe('API architecture');
+    expect(discussion?.blocks.map((block) => block.text)).toEqual([
       'The service boundaries were agreed.',
       'Keep the gateway thin.',
       'Move validation into services.',
     ]);
-    expect(whatChanged?.blocks.at(-1)?.path).toBe('topic:1:point:1');
+    expect(discussion?.blocks.at(-1)?.path).toBe('topic:1:point:1');
   });
 
   it('keeps legacy completion state on actions rather than decisions', () => {
@@ -207,5 +212,53 @@ describe('buildMeetingNotesDocument', () => {
 
     expect(document.sections[0].blocks[0].completed).toBe(false);
     expect(document.sections[0].blocks[1].completed).toBe(true);
+  });
+
+  it('restores persisted native continuation rows beside their parent block', () => {
+    const v3: AnalysisDocumentV3 = {
+      analysis_schema_version: 3,
+      overview: 'Original overview',
+      topics: [],
+      all_action_items: [],
+      all_decisions: [
+        {
+          text: 'Keep the existing API.',
+          evidence: 'The team agreed to keep the existing API.',
+        },
+      ],
+      meeting_type: 'general',
+      quality,
+    };
+
+    const document = buildMeetingNotesDocument({
+      v2: null,
+      v3,
+      userNotes: '',
+      editsMap: {
+        'native_continuations:all_decisions:0': {
+          original: '[]',
+          edited: JSON.stringify([
+            { id: 'follow-up', text: 'Document the compatibility guarantee.' },
+          ]),
+          edited_at: '2026-08-22T18:00:00.000Z',
+        },
+      },
+    });
+
+    expect(document.sections[0].blocks).toMatchObject([
+      {
+        path: 'all_decisions:0',
+        blockType: 'decision',
+      },
+      {
+        id: 'decision-0:continuation:follow-up',
+        text: 'Document the compatibility guarantee.',
+        blockType: 'decision',
+        nativeContinuation: {
+          parentPath: 'all_decisions:0',
+          id: 'follow-up',
+        },
+      },
+    ]);
   });
 });

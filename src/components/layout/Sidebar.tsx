@@ -259,43 +259,69 @@ export const Sidebar = ({
             />
           </div>
           <div className="space-y-0.5">
-            {safeMeetings.slice(0, 3).map((m) => (
-              <div key={m.id} className="relative group">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedMeetingId(m.id);
-                    setActiveTab('hub');
-                  }}
-                  className={`
-                                        w-full flex items-center gap-2 text-left px-3 py-[7px] rounded-md transition-colors
-                                        ${
-                                          selectedMeetingId === m.id
-                                            ? 'bg-black/5 dark:bg-white/10 text-pro-text-main font-medium'
-                                            : 'text-pro-text-main/70 hover:text-pro-text-main hover:bg-black/5 dark:hover:bg-white/10 font-medium'
-                                        }
-                                    `}
-                >
-                  <Clock size={16} className="shrink-0 opacity-70" />
-                  <span className="text-[14px] truncate flex-1 leading-5">
-                    {m.title || 'Untitled'}
-                  </span>
-                </button>
-                {canDeleteMeeting(m.finalization_status) ? (
+            {safeMeetings.slice(0, 5).map((m) => {
+              const date = new Date(m.started_at || m.created_at);
+              const now = new Date();
+              const timeString = date.toLocaleTimeString(undefined, { timeStyle: 'short' });
+
+              let dateLabel = '';
+              if (date.toDateString() === now.toDateString()) {
+                dateLabel = 'Today';
+              } else {
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                if (date.toDateString() === yesterday.toDateString()) {
+                  dateLabel = 'Yesterday';
+                } else {
+                  const daysDiff = (now.getTime() - date.getTime()) / (1000 * 3600 * 24);
+                  if (daysDiff < 7) {
+                    dateLabel = date.toLocaleDateString(undefined, { weekday: 'short' });
+                  } else {
+                    dateLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                  }
+                }
+              }
+
+              return (
+                <div key={m.id} className="relative group">
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteMeeting(m.id);
+                    onClick={() => {
+                      setSelectedMeetingId(m.id);
+                      setActiveTab('hub');
                     }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-pro-text-muted opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center z-30"
-                    title="Delete Session"
+                    className={`
+                                          w-full flex flex-col items-start gap-0.5 text-left px-3 py-2 rounded-md transition-colors
+                                          ${
+                                            selectedMeetingId === m.id
+                                              ? 'bg-black/5 dark:bg-white/10'
+                                              : 'hover:bg-black/5 dark:hover:bg-white/10'
+                                          }
+                                      `}
                   >
-                    <Trash2 size={13} />
+                    <span className={`text-[14px] truncate w-full leading-tight ${selectedMeetingId === m.id ? 'text-pro-text-main font-medium' : 'text-pro-text-main/90 hover:text-pro-text-main font-medium'}`}>
+                      {m.title || 'Untitled'}
+                    </span>
+                    <span className={`text-[12px] truncate w-full leading-tight ${selectedMeetingId === m.id ? 'text-pro-text-main/70' : 'text-pro-text-muted/80'}`}>
+                      {dateLabel}, {timeString}
+                    </span>
                   </button>
-                ) : null}
-              </div>
-            ))}
+                  {canDeleteMeeting(m.finalization_status) ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteMeeting(m.id);
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-black/10 dark:hover:bg-white/10 text-pro-text-muted opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center z-30"
+                      title="Delete Session"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

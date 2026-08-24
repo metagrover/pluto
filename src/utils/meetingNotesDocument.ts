@@ -28,8 +28,22 @@ export interface MeetingNotesBlock {
   evidence?: string;
   transcriptRange?: [number, number];
   completed?: boolean;
-  blockType?: 'decision' | 'action' | 'note';
+  blockType?: 'decision' | 'action' | 'note' | 'paragraph';
+  nativeContinuation?: {
+    parentPath: string;
+    id: string;
+  };
+  nativeContinuations?: NativeMeetingNoteContinuation[];
 }
+
+export interface NativeMeetingNoteContinuation {
+  id: string;
+  text: string;
+  completed?: boolean;
+}
+
+export const nativeContinuationEditPath = (parentPath: string): string =>
+  `native_continuations:${parentPath}`;
 
 export interface MeetingNotesSection {
   id: string;
@@ -72,7 +86,7 @@ const toBlock = ({
   evidence?: string;
   transcriptRange?: [number, number];
   completed?: boolean;
-  blockType?: 'decision' | 'action' | 'note';
+  blockType?: 'decision' | 'action' | 'note' | 'paragraph';
 }): MeetingNotesBlock => ({
   id,
   path,
@@ -92,6 +106,55 @@ const uniqueBlocks = (blocks: MeetingNotesBlock[]): MeetingNotesBlock[] => {
     return true;
   });
 };
+
+const parseNativeContinuations = (
+  parentPath: string | undefined,
+  editsMap: UserEditsMap,
+): NativeMeetingNoteContinuation[] => {
+  if (!parentPath) return [];
+  const saved = editsMap[nativeContinuationEditPath(parentPath)]?.edited;
+  if (!saved) return [];
+  try {
+    const parsed = JSON.parse(saved) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is NativeMeetingNoteContinuation =>
+        Boolean(item) &&
+        typeof item === 'object' &&
+        typeof (item as NativeMeetingNoteContinuation).id === 'string' &&
+        typeof (item as NativeMeetingNoteContinuation).text === 'string',
+    );
+  } catch {
+    return [];
+  }
+};
+
+const expandNativeContinuations = (
+  blocks: MeetingNotesBlock[],
+  editsMap: UserEditsMap,
+): MeetingNotesBlock[] =>
+  blocks.flatMap((block) => {
+    const continuations = parseNativeContinuations(block.path, editsMap);
+    if (continuations.length === 0) return [block];
+    const blockWithContinuations = { ...block, nativeContinuations: continuations };
+    return [
+      blockWithContinuations,
+      ...continuations.map((continuation) => ({
+        ...blockWithContinuations,
+        id: `${block.id}:continuation:${continuation.id}`,
+        path: undefined,
+        text: continuation.text,
+        originalText: continuation.text,
+        authorship: 'human' as const,
+        edited: true,
+        completed: continuation.completed,
+        nativeContinuation: {
+          parentPath: block.path!,
+          id: continuation.id,
+        },
+      })),
+    ];
+  });
 
 interface TopicGroup {
   title: string;
@@ -186,20 +249,20 @@ const buildV3Sections = (
     sections.push({
       id: 'current-read',
       kind: 'current_read',
-      title: 'What changed',
+      title: 'Overview',
       blocks: [
         toBlock({
           id: 'overview',
           path: 'overview',
           text: doc.overview,
           editsMap,
+          blockType: 'paragraph',
         }),
       ],
     });
   }
 
   const openQuestionBlocks: MeetingNotesBlock[] = [];
-  const allDiscussionBlocks: MeetingNotesBlock[] = [];
   for (const group of groupTopics(doc.topics)) {
     const discussionBlocks = uniqueBlocks(
       group.entries.flatMap(({ topic, index }) => [
@@ -228,7 +291,17 @@ const buildV3Sections = (
       ]),
     );
 
-    allDiscussionBlocks.push(...discussionBlocks);
+    if (discussionBlocks.length > 0) {
+      const firstEntry = group.entries[0];
+      sections.push({
+        id: `topic-${firstEntry.index}`,
+        kind: 'discussion',
+        title: group.title,
+        titleOriginal: firstEntry.topic.title,
+        titlePath: `topic:${firstEntry.index}:title`,
+        blocks: discussionBlocks,
+      });
+    }
 
     group.entries.forEach(({ topic, index }) => {
       topic.open_questions.forEach((question, questionIndex) => {
@@ -242,16 +315,6 @@ const buildV3Sections = (
           }),
         );
       });
-    });
-  }
-
-  const uniqueDiscussion = uniqueBlocks(allDiscussionBlocks);
-  if (uniqueDiscussion.length > 0) {
-    sections.push({
-      id: 'discussion',
-      kind: 'discussion',
-      title: 'Discussion notes',
-      blocks: uniqueDiscussion,
     });
   }
 
@@ -316,7 +379,7 @@ const buildV2Sections = (
     sections.push({
       id: 'current-read',
       kind: 'current_read',
-      title: 'What changed',
+      title: 'What was discussed',
       blocks: doc.summary.map((text, index) =>
         toBlock({
           id: `v2-summary-${index}`,
@@ -368,21 +431,6 @@ export const buildMeetingNotesDocument = ({
             blocks: [],
           },
         ];
-  const currentRead = sections.find(
-    (section) => section.kind === 'current_read',
-  );
-  const discussion = sections.find((section) => section.kind === 'discussion');
-  if (currentRead && discussion) {
-    currentRead.blocks = uniqueBlocks([
-      ...currentRead.blocks,
-      ...discussion.blocks,
-    ]);
-    sections.splice(sections.indexOf(discussion), 1);
-  } else if (discussion) {
-    discussion.id = 'current-read';
-    discussion.kind = 'current_read';
-    discussion.title = 'What changed';
-  }
   const scratchpad = sections.find((section) => section.kind === 'scratchpad');
   if (scratchpad && userNotes.trim()) {
     scratchpad.blocks = [
@@ -399,5 +447,11 @@ export const buildMeetingNotesDocument = ({
     sections.push(scratchpad);
   }
 
-  return { sections, hasAnalysis: Boolean(v2 || v3) };
+  return {
+    sections: sections.map((section) => ({
+      ...section,
+      blocks: expandNativeContinuations(section.blocks, editsMap),
+    })),
+    hasAnalysis: Boolean(v2 || v3),
+  };
 };
