@@ -2,6 +2,7 @@ import {
   ArrowRight,
   CalendarPlus,
   Check,
+  CheckCircle2,
   ChevronRight,
   CircleDot,
   Loader2,
@@ -110,17 +111,6 @@ export const getDashboardReviewActions = (
     onClick: () => handlers.handleReviewCommitment(item.id, 'rejected'),
   },
 ];
-
-const getHeroTone = (
-  severity: DashboardHomeModel['hero']['severity'],
-  loading: boolean,
-) => {
-  if (loading) return 'border-pro-border text-pro-text-muted';
-  if (severity === 'urgent') return 'border-pro-urgent/25 text-pro-urgent';
-  if (severity === 'watch') return 'border-pro-warning/25 text-pro-warning';
-  if (severity === 'live') return 'border-pro-success/25 text-pro-success';
-  return 'border-pro-accent/25 text-pro-accent';
-};
 
 const formatMeetingDate = (value: string): string => {
   const date = new Date(value);
@@ -360,9 +350,38 @@ export const Dashboard = ({
         )
       : 0;
   const confettiPieces = buildDashboardConfettiPieces();
+  const hasSupportingContext =
+    recentWin.state === 'populated' ||
+    latestMeeting.state === 'populated' ||
+    model.knowledgeDocuments.state === 'populated';
+
+  if (loading) {
+    return (
+      <main
+        data-testid="dashboard-initial-loading"
+        aria-busy="true"
+        aria-label="Loading daily briefing"
+        className="relative mx-auto w-full max-w-[1080px] pb-16"
+      >
+        <section className="border-b border-pro-border/70 pb-6">
+          <div className="h-3 w-24 rounded bg-pro-surface" />
+          <div className="mt-3 h-8 w-48 rounded bg-pro-surface" />
+          <div className="mt-7 h-20 rounded-xl bg-pro-surface/70 motion-reduce:animate-none" />
+        </section>
+        <div className="grid gap-8 pt-7 lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)]">
+          <div className="space-y-3">
+            <div className="h-7 w-44 rounded bg-pro-surface" />
+            <div className="h-16 rounded-lg bg-pro-surface/70" />
+            <div className="h-16 rounded-lg bg-pro-surface/70" />
+          </div>
+          <div className="h-44 rounded-xl bg-pro-surface/70" />
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="relative mx-auto w-full max-w-[1180px] animate-in pb-20">
+    <main className="relative mx-auto w-full max-w-[1080px] animate-in pb-16">
       {celebration === 'confetti' ? (
         <div
           aria-hidden="true"
@@ -393,7 +412,7 @@ export const Dashboard = ({
         </output>
       ) : null}
 
-      <section className="border-b border-pro-border/70 pb-7">
+      <section className="border-b border-pro-border/70 pb-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-[11px] font-semibold text-pro-accent/80">
@@ -404,11 +423,13 @@ export const Dashboard = ({
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <span
-              className={`rounded border px-2.5 py-1 text-[9px] font-semibold ${getHeroTone(model.hero.severity, loading)}`}
+            <button
+              type="button"
+              onClick={() => setActiveTab('chat')}
+              className="inline-flex min-h-8 items-center gap-2 rounded-md px-3 text-[12px] font-bold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
-              {loading ? 'Refreshing' : model.topOfMind.summary}
-            </span>
+              <Sparkles className="h-4 w-4" aria-hidden="true" /> Ask Pluto
+            </button>
             {isRecording ? (
               <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-pro-success">
                 <CircleDot className="h-3 w-3" /> Recording
@@ -458,20 +479,48 @@ export const Dashboard = ({
               </article>
             ))
           ) : (
-            <div className="lg:col-span-3 border-t border-pro-border/70 py-10">
-              <p className="text-[16px] font-semibold text-pro-text-main">
-                Nothing needs your attention.
-              </p>
-              <p className="mt-2 max-w-[58ch] text-[13px] font-medium leading-6 text-pro-text-muted">
-                Pluto will surface blockers, aging commitments, and meaningful
-                changes here when the underlying records support them.
-              </p>
+            <div className="border-t border-pro-border/70 py-6 lg:col-span-3">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-success/10 text-pro-success">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="text-[17px] font-semibold leading-6 text-pro-text-main">
+                    You're caught up
+                  </h2>
+                  <p className="mt-1 max-w-[64ch] text-[13px] font-medium leading-[1.6] text-pro-text-muted">
+                    No blockers or confirmed commitments need attention right
+                    now.
+                  </p>
+                  {model.commitments.needsConfirmation.length > 0 ? (
+                    <a
+                      href="#suggested-commitments"
+                      className="mt-3 inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                    >
+                      Review {model.commitments.needsConfirmation.length}{' '}
+                      {model.commitments.needsConfirmation.length === 1
+                        ? 'suggestion'
+                        : 'suggestions'}
+                      <ChevronRight
+                        className="h-3.5 w-3.5"
+                        aria-hidden="true"
+                      />
+                    </a>
+                  ) : null}
+                </div>
+              </div>
             </div>
           )}
         </div>
       </section>
 
-      <div className="grid gap-10 pt-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)] lg:gap-12">
+      <div
+        className={`grid gap-8 pt-7 ${
+          hasSupportingContext
+            ? 'lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)] lg:gap-10'
+            : ''
+        }`}
+      >
         <section aria-labelledby="commitments-title" className="min-w-0">
           <div className="flex items-end justify-between gap-4 border-b border-pro-border/70 pb-3">
             <div>
@@ -670,14 +719,79 @@ export const Dashboard = ({
                 );
               })}
             </div>
+          ) : model.commitments.needsConfirmation.length > 0 ? (
+            <div
+              id="suggested-commitments"
+              className="scroll-mt-6 border-b border-pro-border/60 py-5"
+            >
+              <div className="mb-4">
+                <h3 className="text-[15px] font-semibold text-pro-text-main">
+                  Suggested commitments
+                </h3>
+                <p className="mt-1 text-[12px] font-medium leading-5 text-pro-text-muted">
+                  Review what Pluto heard before adding it to your commitments.
+                </p>
+              </div>
+              <div className="divide-y divide-pro-border/60">
+                {model.commitments.needsConfirmation.map((item) => {
+                  const isUpdating = updatingTaskIds.has(item.id);
+                  return (
+                    <article
+                      key={item.id}
+                      aria-busy={isUpdating}
+                      className="py-3 first:pt-0 last:pb-0"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-[13px] font-semibold leading-5 text-pro-text-main">
+                            {item.title}
+                          </h4>
+                          <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
+                            {item.basisLabel}
+                          </p>
+                        </div>
+                        <span className="rounded bg-pro-warning/10 px-2 py-1 text-[9px] font-semibold text-pro-warning">
+                          {item.statusLabel}
+                        </span>
+                      </div>
+                      {!item.sourceMeetingId ? (
+                        <details className="mt-2 min-h-8 text-pro-accent">
+                          <summary className="cursor-pointer py-2 text-[11px] font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent">
+                            Review task
+                          </summary>
+                          <p className="max-w-md pb-2 text-[11px] font-medium leading-5 text-pro-text-muted">
+                            No source meeting is available. Review the wording
+                            above, then confirm it or mark it not a task.
+                          </p>
+                        </details>
+                      ) : null}
+                      <div className="mt-2 flex flex-wrap items-center gap-1">
+                        {getDashboardReviewActions(item, {
+                          setSelectedMeetingId,
+                          handleReviewCommitment,
+                        }).map((action) => (
+                          <button
+                            key={action.label}
+                            type="button"
+                            aria-label={action.ariaLabel}
+                            disabled={isUpdating}
+                            onClick={action.onClick}
+                            className="min-h-8 rounded-md px-2 text-[11px] font-bold text-pro-accent hover:bg-pro-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
           ) : (
             <div className="py-7">
-              <p className="text-[14px] font-bold text-pro-text-main">
-                No confirmed commitments need attention.
-              </p>
-              <p className="mt-1 text-[12px] font-medium text-pro-text-muted">
-                Add one here or let Pluto surface user-owned commitments from
-                meetings.
+              <p className="max-w-[58ch] text-[13px] font-medium leading-6 text-pro-text-muted">
+                Add a commitment here, or let Pluto surface one from a future
+                meeting.
               </p>
             </div>
           )}
@@ -699,7 +813,8 @@ export const Dashboard = ({
               <ChevronRight className="h-3.5 w-3.5" />
             </button>
           ) : null}
-          {model.commitments.needsConfirmation.length ? (
+          {commitmentItems.length > 0 &&
+          model.commitments.needsConfirmation.length ? (
             <details className="mt-4 border-t border-pro-border/70 pt-4">
               <summary className="cursor-pointer text-[11px] font-bold text-pro-text-muted hover:text-pro-text-main">
                 Needs confirmation ({model.commitments.needsConfirmation.length}
@@ -753,88 +868,105 @@ export const Dashboard = ({
           ) : null}
         </section>
 
-        <aside className="min-w-0">
-          <section aria-labelledby="recent-win-title">
-            <div className="border-b border-pro-border/70 pb-3">
-              <p className="text-[10px] font-semibold text-pro-text-muted/55">
-                Evidence-backed
-              </p>
-              <h2
-                id="recent-win-title"
-                className="mt-1 text-[22px] font-serif font-medium text-pro-text-main"
-              >
-                Recent win
-              </h2>
-            </div>
+        {hasSupportingContext ? (
+          <aside className="min-w-0">
             {recentWin.state === 'populated' ? (
-              <div className="border-t border-pro-border/70 pt-4">
-                <h3 className="text-[16px] font-semibold leading-6 text-pro-text-main">
-                  {recentWin.title}
-                </h3>
-                <p className="mt-2 text-[12px] font-medium leading-5 text-pro-text-muted">
-                  {recentWin.whyItCounts}
+              <section aria-labelledby="recent-win-title">
+                <p className="text-[10px] font-semibold text-pro-text-muted/60">
+                  Evidence-backed
                 </p>
-                <p className="mt-3 text-[10px] font-semibold text-pro-text-muted/65">
-                  Source: {recentWin.sourceLabel}
+                <h2
+                  id="recent-win-title"
+                  className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
+                >
+                  Recent win
+                </h2>
+                <div className="mt-4 border-t border-pro-border/70 pt-4">
+                  <h3 className="text-[15px] font-semibold leading-6 text-pro-text-main">
+                    {recentWin.title}
+                  </h3>
+                  <p className="mt-2 text-[13px] font-medium leading-[1.55] text-pro-text-muted">
+                    {recentWin.whyItCounts}
+                  </p>
+                  <p className="mt-3 text-[10px] font-semibold text-pro-text-muted/65">
+                    Source: {recentWin.sourceLabel}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMeetingId(recentWin.meetingId)}
+                      className="inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                    >
+                      Open moment{' '}
+                      <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={startCelebration}
+                      className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-[12px] font-bold text-pro-text-muted hover:bg-pro-success/10 hover:text-pro-success focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                    >
+                      <PartyPopper className="h-3.5 w-3.5" aria-hidden="true" />{' '}
+                      Celebrate
+                    </button>
+                  </div>
+                </div>
+              </section>
+            ) : latestMeeting.state === 'populated' ? (
+              <section aria-labelledby="continue-title">
+                <p className="text-[10px] font-semibold text-pro-text-muted/60">
+                  Recent context · {formatMeetingDate(latestMeeting.occurredAt)}
                 </p>
-                <div className="mt-4 flex flex-wrap items-center gap-2">
+                <h2
+                  id="continue-title"
+                  className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
+                >
+                  Continue where you left off
+                </h2>
+                <div className="mt-4 border-t border-pro-border/70 pt-4">
+                  <h3 className="text-[15px] font-semibold text-pro-text-main">
+                    {latestMeeting.title}
+                  </h3>
+                  <p className="mt-2 line-clamp-3 text-[13px] font-medium leading-[1.55] text-pro-text-muted">
+                    {latestMeeting.detail}
+                  </p>
                   <button
                     type="button"
-                    onClick={() => setSelectedMeetingId(recentWin.meetingId)}
-                    className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-[11px] font-bold text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                    onClick={() =>
+                      setSelectedMeetingId(latestMeeting.meetingId)
+                    }
+                    className="mt-3 inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                   >
-                    Open moment <ArrowRight className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={startCelebration}
-                    className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-[11px] font-bold text-pro-text-muted hover:bg-pro-success/10 hover:text-pro-success focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-                  >
-                    <PartyPopper className="h-3.5 w-3.5" /> Celebrate
+                    Open meeting{' '}
+                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>
                 </div>
-              </div>
-            ) : (
-              <div className="border-t border-pro-border/70 py-7">
-                <p className="text-[14px] font-bold text-pro-text-main">
-                  {recentWin.title}
+              </section>
+            ) : model.knowledgeDocuments.state === 'populated' ? (
+              <section aria-labelledby="knowledge-reentry-title">
+                <p className="text-[10px] font-semibold text-pro-text-muted/60">
+                  Working memory
                 </p>
-                <p className="mt-1 text-[12px] font-medium leading-5 text-pro-text-muted">
-                  {recentWin.detail}
+                <h2
+                  id="knowledge-reentry-title"
+                  className="mt-1 text-[20px] font-serif font-medium text-pro-text-main"
+                >
+                  Return to your current read
+                </h2>
+                <p className="mt-4 border-t border-pro-border/70 pt-4 text-[13px] font-medium leading-[1.55] text-pro-text-muted">
+                  {model.knowledgeDocuments.cards[0].title}
                 </p>
-              </div>
-            )}
-          </section>
-
-          <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-pro-border/70 pt-4">
-            <button
-              type="button"
-              onClick={() => setActiveTab('chat')}
-              className="inline-flex min-h-8 items-center gap-2 rounded-md px-3 text-[12px] font-bold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-            >
-              <Sparkles className="h-4 w-4" /> Ask Pluto
-            </button>
-            {latestMeeting.state === 'populated' ? (
-              <button
-                type="button"
-                onClick={() => setSelectedMeetingId(latestMeeting.meetingId)}
-                className="inline-flex min-h-8 items-center gap-1 rounded-md px-3 text-[12px] font-bold text-pro-text-muted hover:bg-pro-surface hover:text-pro-text-main"
-              >
-                Latest meeting · {formatMeetingDate(latestMeeting.occurredAt)}{' '}
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('wiki')}
+                  className="mt-3 inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                >
+                  Open knowledge{' '}
+                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </section>
             ) : null}
-            {model.knowledgeDocuments.state === 'populated' ? (
-              <button
-                type="button"
-                onClick={() => setActiveTab('wiki')}
-                className="inline-flex min-h-8 items-center gap-1 rounded-md px-3 text-[12px] font-bold text-pro-text-muted hover:bg-pro-surface hover:text-pro-text-main"
-              >
-                Open knowledge <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
-          </div>
-        </aside>
+          </aside>
+        ) : null}
       </div>
     </main>
   );

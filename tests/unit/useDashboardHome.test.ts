@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createDashboardRefreshCoordinator,
   loadDashboardHomeData,
+  transitionDashboardRefreshState,
 } from '../../src/components/features/useDashboardHome';
 
 const deferred = <T>() => {
@@ -23,6 +24,29 @@ const makeLoaders = () => ({
   getKnowledgeWorkspace: vi.fn(async () => null),
   listWorkingMemorySnapshots: vi.fn(async () => []),
   getKnowledgeGraphStats: vi.fn(async () => null),
+});
+
+describe('transitionDashboardRefreshState', () => {
+  it('uses blocking loading only before the first resolved model', () => {
+    expect(
+      transitionDashboardRefreshState('start', {
+        hasResolvedData: false,
+      }),
+    ).toEqual({ loading: true, refreshing: false });
+  });
+
+  it('keeps resolved content visible during background refreshes', () => {
+    expect(
+      transitionDashboardRefreshState('start', {
+        hasResolvedData: true,
+      }),
+    ).toEqual({ loading: false, refreshing: true });
+    expect(
+      transitionDashboardRefreshState('settle', {
+        hasResolvedData: true,
+      }),
+    ).toEqual({ loading: false, refreshing: false });
+  });
 });
 
 describe('createDashboardRefreshCoordinator', () => {

@@ -360,3 +360,11 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** Parakeet finalization may align microphone and System word clocks only when at least three independent, unique four-word anchors form a 75% dominant offset cluster and the absolute offset is no greater than 2.5 seconds. The existing exact consecutive-word collapse then runs first at the original timestamps and, when calibration passes, at the estimated offset. System words are never removed.
 - **Rationale:** Real dual-source capture can contain the same playback speech on both channels with a stable delay just outside the direct matcher's tolerance. A larger fixed tolerance would erase legitimate nearby speech, while generic save-time cleanup would mutate canonical evidence without source-clock proof. AEC reduces future acoustic bleed but cannot reliably repair already sealed recordings.
 - **Consequences:** Strongly evidenced skewed duplicates are removed during canonical reconciliation, ambiguous overlap remains intact, and content-free calibration provenance is persisted with new final transcripts. Historical Parakeet trust records without this optional provenance remain readable.
+
+## 2026-08-24 - Preserve useful context on an empty daily briefing
+
+- **Status:** Accepted
+- **Source:** [Issue #658](https://github.com/metagrover/pluto/issues/658), `docs/superpowers/specs/2026-08-24-useful-empty-dashboard-design.md`
+- **Decision:** When no supported item needs attention, Pluto states that once and composes the rest of the homepage from the strongest available real context: suggested commitments, a supported recent win, the latest meeting, or Knowledge. Initial loading may reserve layout with skeletons; background refreshes preserve the resolved model and do not replace stable status copy.
+- **Rationale:** Repeating empty messages across fixed regions made a data-bearing dashboard appear vacant, while a shared loading flag caused routine background meeting updates to flash a global refresh label.
+- **Consequences:** Unsupported sections no longer reserve space, suggested commitments remain visibly distinct from confirmed work, and refresh feedback belongs to initial load or the control that initiated a mutation rather than the whole dashboard.

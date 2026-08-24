@@ -17,7 +17,10 @@ import {
   reduceCurrentReadClaimState,
   shouldUseReducedDashboardMotion,
 } from '../../src/components/features/Dashboard';
-import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
+import {
+  type DashboardHomeModel,
+  buildDashboardHomeModel,
+} from '../../src/components/features/dashboardModel';
 import type { Meeting } from '../../src/types';
 
 const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
@@ -143,6 +146,49 @@ const makeWorkspace = (
   project_cards: [makeProjectCard()],
   ...overrides,
 });
+
+const renderDashboard = (
+  model: DashboardHomeModel,
+  options: { loading?: boolean } = {},
+) =>
+  renderToStaticMarkup(
+    <Dashboard
+      model={model}
+      loading={options.loading ?? false}
+      isRecording={false}
+      setSelectedMeetingId={vi.fn()}
+      setActiveTab={vi.fn()}
+      updatingTaskIds={new Set()}
+      actionError={null}
+      handleCompleteTask={vi.fn(async () => {})}
+      handleReviewCommitment={vi.fn(async () => {})}
+      handleUpdateAttentionStatus={vi.fn(async () => {})}
+    />,
+  );
+
+const makeEmptyDashboardModel = () =>
+  buildDashboardHomeModel({
+    isRecording: false,
+    meetings: [],
+    overdueActions: [],
+    staleActions: [],
+    activeActions: [],
+    attentionAlerts: [],
+    workspace: null,
+    graphStats: null,
+  });
+
+const makeMeetingWithSupportedWin = (): Meeting =>
+  makeMeeting({
+    analysis_json: JSON.stringify({
+      overview: 'The launch review closed a meaningful open question.',
+      recent_win: {
+        win: 'Privacy review is ready to close',
+        why_it_counts: 'The team resolved the final approval question.',
+        source: 'Launch Review',
+      },
+    }),
+  });
 
 describe('Dashboard', () => {
   it('detects current-read overflow from measured geometry', () => {
@@ -289,7 +335,7 @@ describe('Dashboard', () => {
     expect(markup).toContain('Daily briefing');
     expect(markup).toContain('Top of mind');
     expect(markup).toContain('My commitments');
-    expect(markup).toContain('Recent win');
+    expect(markup).toContain('Continue where you left off');
     expect(markup).toContain('Ask Pluto');
     expect(
       markup.match(/data-testid="dashboard-top-of-mind-item"/g) ?? [],
@@ -298,9 +344,99 @@ describe('Dashboard', () => {
       markup.match(/data-testid="dashboard-commitment-row"/g) ?? [],
     ).toHaveLength(3);
     expect(markup).toContain('Review 1 more');
-    expect(markup).toContain('No recent win surfaced yet');
+    expect(markup).not.toContain('No recent win surfaced yet');
     expect(markup).not.toContain('Current read');
     expect(markup).not.toContain('Memory in motion');
+  });
+
+  it('renders one caught-up state and promotes suggested commitments', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'suggestion-1',
+          name: 'Send the revised launch brief',
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            source_meeting_id: 'meeting-1',
+          }),
+        }),
+      ],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderDashboard(model);
+
+    expect(markup).toContain('You&#x27;re caught up');
+    expect(markup).toContain(
+      'No blockers or confirmed commitments need attention right now.',
+    );
+    expect(markup).toContain('Review 1 suggestion');
+    expect(markup).toContain('Suggested commitments');
+    expect(markup).toContain('Send the revised launch brief');
+    expect(markup).toContain('Confirm task');
+    expect(markup).not.toContain('Nothing needs your attention.');
+    expect(markup).not.toContain('No recent win surfaced yet');
+  });
+
+  it('uses the latest meeting when no recent win is supported', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting({ title: 'Launch Review' })],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderDashboard(model);
+
+    expect(markup).toContain('Continue where you left off');
+    expect(markup).toContain('Launch Review');
+    expect(markup).not.toContain('Recent win');
+  });
+
+  it('keeps a supported recent win instead of the latest-meeting fallback', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeetingWithSupportedWin()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    const markup = renderDashboard(model);
+
+    expect(markup).toContain('Recent win');
+    expect(markup).toContain('Privacy review is ready to close');
+    expect(markup).not.toContain('Continue where you left off');
+  });
+
+  it('renders stable skeleton geometry only for initial loading', () => {
+    const markup = renderDashboard(makeEmptyDashboardModel(), {
+      loading: true,
+    });
+
+    expect(markup).toContain('data-testid="dashboard-initial-loading"');
+    expect(markup).not.toContain('Refreshing');
+    expect(markup).not.toContain('You&#x27;re caught up');
+  });
+
+  it('never replaces resolved attention copy with a refresh label', () => {
+    const markup = renderDashboard(makeEmptyDashboardModel());
+
+    expect(markup).toContain('You&#x27;re caught up');
+    expect(markup).not.toContain('Refreshing');
   });
 
   it('renders a blocker-specific homepage hero badge for blocker-backed follow-ups', () => {
@@ -568,7 +704,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Nothing needs your attention.');
+    expect(markup).toContain('You&#x27;re caught up');
     expect(markup).not.toContain('Blocked project signal');
     expect(markup).not.toContain('1 blocker · 2 dependencies');
   });
@@ -638,7 +774,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Nothing needs your attention.');
+    expect(markup).toContain('You&#x27;re caught up');
     expect(markup).not.toContain('Blocked project signal');
     expect(markup).not.toContain('>Project signal<');
   });
@@ -917,7 +1053,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Snooze blocker');
   });
 
-  it('renders the model-generated top-of-mind summary', () => {
+  it('renders top-of-mind items without a detached summary chip', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [],
@@ -942,7 +1078,8 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('1 item surfaced');
+    expect(markup).toContain('Ship privacy review is overdue.');
+    expect(markup).not.toContain('1 item surfaced');
     expect(markup).not.toContain('Only the highest-value signals');
   });
 
