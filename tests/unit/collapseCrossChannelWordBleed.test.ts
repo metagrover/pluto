@@ -14,6 +14,13 @@ const segment = (
   words,
 });
 
+const timedWords = (text: string, start: number) =>
+  text.split(' ').map((word, index) => ({
+    word,
+    start: start + index * 0.2,
+    end: start + index * 0.2 + 0.16,
+  }));
+
 describe('collapseCrossChannelWordBleed', () => {
   it('removes an exact time-aligned phrase from mic while retaining system', () => {
     const shared = [
@@ -81,5 +88,55 @@ describe('collapseCrossChannelWordBleed', () => {
       systemSegments: [segment('Them', delayed)],
     });
     expect(result.droppedMicWordCount).toBe(0);
+  });
+
+  it('collapses duplicate phrases after calibrating stable System delay', () => {
+    const phrases = [
+      ['alpha beta gamma delta', 10],
+      ['north south east west', 30],
+      ['spring summer autumn winter', 50],
+      ['remove this echo', 70],
+    ] as const;
+    const result = collapseCrossChannelWordBleed({
+      micSegments: phrases.map(([text, start]) =>
+        segment('Me', timedWords(text, start)),
+      ),
+      systemSegments: phrases.map(([text, start]) =>
+        segment('Them', timedWords(text, start + 1.2)),
+      ),
+    });
+
+    expect(result.micSegments).toEqual([]);
+    expect(result.systemSegments).toHaveLength(4);
+    expect(result.reconciliation).toMatchObject({
+      policyVersion: 'cross_channel_skew_v1',
+      skewApplied: true,
+      estimatedOffsetMs: 1200,
+      anchorCount: 3,
+      confidence: 1,
+      droppedMicWordCount: 15,
+    });
+  });
+
+  it('preserves delayed repetition when only two calibration anchors exist', () => {
+    const phrases = [
+      ['alpha beta gamma delta', 10],
+      ['north south east west', 30],
+      ['yes yes yes', 50],
+    ] as const;
+    const result = collapseCrossChannelWordBleed({
+      micSegments: phrases.map(([text, start]) =>
+        segment('Me', timedWords(text, start)),
+      ),
+      systemSegments: phrases.map(([text, start]) =>
+        segment('Them', timedWords(text, start + 1.2)),
+      ),
+    });
+
+    expect(result.micSegments).toHaveLength(3);
+    expect(result.reconciliation).toMatchObject({
+      skewApplied: false,
+      droppedMicWordCount: 0,
+    });
   });
 });

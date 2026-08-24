@@ -1,4 +1,9 @@
 import type { AttributionSegment } from '../../utils/speakerAttribution.ts';
+import {
+  CROSS_CHANNEL_SKEW_POLICY_VERSION,
+  type CrossChannelReconciliationMetadata,
+  estimateCrossChannelSkew,
+} from './crossChannelSkew.ts';
 
 type WordLocation = {
   segmentIndex: number;
@@ -52,6 +57,14 @@ export const collapseCrossChannelWordBleed = (input: {
   const timingToleranceSeconds = input.timingToleranceSeconds ?? 0.75;
   const micWords = flattenWords(input.micSegments);
   const systemWords = flattenWords(input.systemSegments);
+  const skewEstimate = estimateCrossChannelSkew({
+    micSegments: input.micSegments,
+    systemSegments: input.systemSegments,
+    directToleranceSeconds: timingToleranceSeconds,
+  });
+  const alignmentOffsets = skewEstimate
+    ? [0, skewEstimate.offsetSeconds]
+    : [0];
   const systemStartsByToken = new Map<string, number[]>();
   systemWords.forEach((word, index) => {
     const starts = systemStartsByToken.get(word.token) || [];
@@ -62,38 +75,48 @@ export const collapseCrossChannelWordBleed = (input: {
   let collapsedSequenceCount = 0;
 
   for (let micStart = 0; micStart < micWords.length; micStart += 1) {
-    for (const systemStart of systemStartsByToken.get(
-      micWords[micStart].token,
-    ) || []) {
-      if (
-        Math.abs(micWords[micStart].at - systemWords[systemStart].at) >
-        timingToleranceSeconds
-      ) {
-        continue;
+    let collapsed = false;
+    for (const alignmentOffsetSeconds of alignmentOffsets) {
+      for (const systemStart of systemStartsByToken.get(
+        micWords[micStart].token,
+      ) || []) {
+        if (
+          Math.abs(
+            systemWords[systemStart].at -
+              micWords[micStart].at -
+              alignmentOffsetSeconds,
+          ) > timingToleranceSeconds
+        ) {
+          continue;
+        }
+        let length = 0;
+        while (
+          micStart + length < micWords.length &&
+          systemStart + length < systemWords.length &&
+          micWords[micStart + length].token ===
+            systemWords[systemStart + length].token &&
+          Math.abs(
+            systemWords[systemStart + length].at -
+              micWords[micStart + length].at -
+              alignmentOffsetSeconds,
+          ) <= timingToleranceSeconds
+        ) {
+          length += 1;
+        }
+        if (length < minimumSequenceWords) continue;
+        let added = false;
+        for (let offset = 0; offset < length; offset += 1) {
+          const word = micWords[micStart + offset];
+          const key = `${word.segmentIndex}:${word.wordIndex}`;
+          if (!droppedMicWords.has(key)) added = true;
+          droppedMicWords.add(key);
+        }
+        if (added) collapsedSequenceCount += 1;
+        micStart += length - 1;
+        collapsed = true;
+        break;
       }
-      let length = 0;
-      while (
-        micStart + length < micWords.length &&
-        systemStart + length < systemWords.length &&
-        micWords[micStart + length].token ===
-          systemWords[systemStart + length].token &&
-        Math.abs(
-          micWords[micStart + length].at - systemWords[systemStart + length].at,
-        ) <= timingToleranceSeconds
-      ) {
-        length += 1;
-      }
-      if (length < minimumSequenceWords) continue;
-      let added = false;
-      for (let offset = 0; offset < length; offset += 1) {
-        const word = micWords[micStart + offset];
-        const key = `${word.segmentIndex}:${word.wordIndex}`;
-        if (!droppedMicWords.has(key)) added = true;
-        droppedMicWords.add(key);
-      }
-      if (added) collapsedSequenceCount += 1;
-      micStart += length - 1;
-      break;
+      if (collapsed) break;
     }
   }
 
@@ -116,10 +139,23 @@ export const collapseCrossChannelWordBleed = (input: {
     ];
   });
 
+  const reconciliation: CrossChannelReconciliationMetadata = {
+    policyVersion: CROSS_CHANNEL_SKEW_POLICY_VERSION,
+    skewApplied: skewEstimate !== null,
+    estimatedOffsetMs: skewEstimate
+      ? Math.round(skewEstimate.offsetSeconds * 1_000)
+      : 0,
+    anchorCount: skewEstimate?.anchorCount ?? 0,
+    confidence: skewEstimate?.confidence ?? 0,
+    droppedMicWordCount: droppedMicWords.size,
+    collapsedSequenceCount,
+  };
+
   return {
     micSegments,
     systemSegments: input.systemSegments,
     droppedMicWordCount: droppedMicWords.size,
     collapsedSequenceCount,
+    reconciliation,
   };
 };
