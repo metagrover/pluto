@@ -1,6 +1,5 @@
 import {
   BookText,
-  Clock,
   FolderKanban,
   Home,
   Library,
