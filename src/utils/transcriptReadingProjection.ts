@@ -55,6 +55,73 @@ const MINIMUM_ALIGNMENT_OVERLAP = 0.35;
 const MINIMUM_TOKEN_SIMILARITY = 0.45;
 const MAXIMUM_BOUNDARY_DISTANCE_SECONDS = 2;
 
+const punctuateReadingSentence = (text: string): string => {
+  const normalized = text.trim().replace(/\s+/g, ' ');
+  if (!normalized) return '';
+  const capitalized = normalized.replace(/[a-z]/i, (letter) =>
+    letter.toUpperCase(),
+  );
+  if (/[.!?…]["')\]]?$/u.test(capitalized)) return capitalized;
+  const question =
+    /^(?:who|what|when|where|why|how|is|are|am|was|were|do|does|did|can|could|will|would|should|have|has|had)\b/iu.test(
+      normalized,
+    );
+  return `${capitalized}${question ? '?' : '.'}`;
+};
+
+export const assembleReadableTranscriptSentences = <
+  T extends TranscriptReadingCandidate,
+>(
+  segments: ReadonlyArray<T>,
+): Array<T & { text: string; speaker: string }> => {
+  type AssembledSegment = T & {
+    text: string;
+    speaker: string;
+    startTime?: number;
+    endTime?: number;
+    timed: boolean;
+  };
+  const assembled: AssembledSegment[] = [];
+
+  for (const segment of segments) {
+    if (typeof segment.text !== 'string' || !segment.text.trim()) continue;
+    const timing = interval(segment);
+    const speaker =
+      typeof segment.speaker === 'string' && segment.speaker.trim()
+        ? segment.speaker.trim()
+        : 'Speaker';
+    const text = String(segment.text).trim().replace(/\s+/g, ' ');
+    const previous = assembled.at(-1);
+    if (
+      timing &&
+      previous &&
+      previous.timed &&
+      previous.speaker === speaker &&
+      typeof previous.endTime === 'number' &&
+      timing.startTime - previous.endTime <= MAX_UTTERANCE_GAP_SECONDS &&
+      !/[.!?…]["')\]]?$/u.test(previous.text)
+    ) {
+      previous.text = `${previous.text} ${text}`;
+      previous.endTime = Math.max(previous.endTime, timing.endTime);
+      continue;
+    }
+    assembled.push({
+      ...segment,
+      text,
+      speaker,
+      ...(timing
+        ? { startTime: timing.startTime, endTime: timing.endTime }
+        : {}),
+      timed: timing !== null,
+    });
+  }
+
+  return assembled.map(({ timed, ...segment }) => ({
+    ...segment,
+    text: timed ? punctuateReadingSentence(segment.text) : segment.text,
+  })) as Array<T & { text: string; speaker: string }>;
+};
+
 export const toStoredLiveTranscriptCandidate = (
   segment: StoredLiveTranscriptInput,
 ): StoredLiveTranscriptCandidate => {

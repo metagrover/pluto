@@ -163,7 +163,7 @@ describe('saved transcript speaker-presentation contract', () => {
       ),
     ).toEqual([
       ['Them', 'Switch the task to Orion then.'],
-      ['Them', 'or Ryan then'],
+      ['Them', 'Or Ryan then.'],
     ]);
   });
 
@@ -192,9 +192,9 @@ describe('saved transcript speaker-presentation contract', () => {
 
     expect(
       buildTranscriptSegmentsForPresentation(transcriptJson, segments).map(
-        (segment) => segment.speaker,
+        (segment) => [segment.speaker, segment.text],
       ),
-    ).toEqual(['Them', 'Them']);
+    ).toEqual([['Them', "We don't need another don't need another retry."]]);
   });
 
   it('does not suppress matching words outside the overlap window', () => {
@@ -297,5 +297,32 @@ describe('saved transcript speaker-presentation contract', () => {
       'Them: The rollout is ready.',
     );
     expect(JSON.parse(transcriptJson)).toEqual(before);
+  });
+
+  it('assembles the same punctuated sentences for saved display and analysis', () => {
+    const segments = [
+      { speaker: 'Them', startTime: 0, endTime: 0.8, text: 'this is' },
+      { speaker: 'Them', startTime: 0.9, endTime: 1.8, text: 'one thought' },
+      { speaker: 'Me', startTime: 2, endTime: 3, text: 'can we proceed' },
+    ];
+    const transcriptJson = JSON.stringify({
+      speakerAttribution: { mappingApplied: true },
+      segments,
+    });
+
+    const presented = buildTranscriptSegmentsForPresentation(
+      transcriptJson,
+      segments,
+    );
+
+    expect(presented.map((segment) => [segment.speaker, segment.text])).toEqual(
+      [
+        ['Them', 'This is one thought.'],
+        ['Me', 'Can we proceed?'],
+      ],
+    );
+    expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
+      'Them: This is one thought.\nMe: Can we proceed?',
+    );
   });
 });

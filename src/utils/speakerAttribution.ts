@@ -21,6 +21,7 @@ export interface AttributionSegment {
   text: string;
   speaker: string;
   words?: WordTimestamp[];
+  nearEndEvidence?: boolean;
 }
 
 export interface ResolveDuplicateStats {
@@ -193,6 +194,68 @@ export const isCrossChannelDuplicatePair = (
     prefixSim >= 0.6 ||
     (tokenSim >= 0.48 && overlapRatio >= 0.6);
   return { duplicate, overlapRatio, tokenSim, prefixSim };
+};
+
+const soundex = (value: string): string => {
+  const normalized = normalizeText(value).replaceAll(' ', '');
+  if (!normalized) return '';
+  const code = (character: string): string => {
+    if ('bfpv'.includes(character)) return '1';
+    if ('cgjkqsxz'.includes(character)) return '2';
+    if ('dt'.includes(character)) return '3';
+    if (character === 'l') return '4';
+    if ('mn'.includes(character)) return '5';
+    if (character === 'r') return '6';
+    return '0';
+  };
+  let result = normalized[0].toUpperCase();
+  let previous = code(normalized[0]);
+  for (const character of normalized.slice(1)) {
+    const next = code(character);
+    if (next !== '0' && next !== previous) result += next;
+    previous = next;
+    if (result.length === 4) break;
+  }
+  return result.padEnd(4, '0');
+};
+
+const boundedTokenMatch = (left: string, right: string): boolean =>
+  left === right ||
+  (Math.min(left.length, right.length) >= 4 &&
+    (left.startsWith(right.slice(0, 4)) ||
+      right.startsWith(left.slice(0, 4)))) ||
+  (Math.min(left.length, right.length) >= 3 &&
+    soundex(left) === soundex(right));
+
+export const isBoundedPhoneticEchoPair = (
+  mic: AttributionSegment,
+  remote: AttributionSegment,
+): boolean => {
+  if (mic.nearEndEvidence === true) return false;
+  const micTokens = normalizeText(mic.text).split(' ').filter(Boolean);
+  const remoteTokens = normalizeText(remote.text).split(' ').filter(Boolean);
+  if (
+    micTokens.length < 2 ||
+    micTokens.length > 4 ||
+    remoteTokens.length <= micTokens.length
+  ) {
+    return false;
+  }
+  const micDuration = Math.max(0.01, mic.endTime - mic.startTime);
+  if (overlapSeconds(mic, remote) / micDuration < 0.8) return false;
+
+  const usedRemote = new Set<number>();
+  let matched = 0;
+  for (const micToken of micTokens) {
+    const matchIndex = remoteTokens.findIndex(
+      (remoteToken, index) =>
+        !usedRemote.has(index) && boundedTokenMatch(micToken, remoteToken),
+    );
+    if (matchIndex < 0) continue;
+    usedRemote.add(matchIndex);
+    matched += 1;
+  }
+  return matched >= Math.ceil(micTokens.length / 2);
 };
 
 const wordCount = (text: string): number =>

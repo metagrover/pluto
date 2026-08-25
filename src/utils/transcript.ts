@@ -4,6 +4,7 @@ import {
 } from './readableTranscript.ts';
 import {
   type TranscriptReadingCandidate,
+  assembleReadableTranscriptSentences,
   buildTranscriptReadingProjection,
 } from './transcriptReadingProjection.ts';
 
@@ -180,10 +181,13 @@ export const buildTranscriptSegmentsForPresentation = <
         liveSegments,
       }).segments
     : recoveredSegments;
-  return applyTranscriptSpeakerPresentation(
+  const attributed = applyTranscriptSpeakerPresentation(
     transcriptJson,
     reading,
-  ) as unknown as Array<T & { text: string }>;
+  );
+  return assembleReadableTranscriptSentences(attributed) as unknown as Array<
+    T & { text: string }
+  >;
 };
 
 export const isTranscriptJsonEffectivelyEmpty = (

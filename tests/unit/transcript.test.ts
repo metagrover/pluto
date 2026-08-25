@@ -26,7 +26,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
     });
 
     expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
-      '1: Need to close the open blocker.\nDecision is to ship on Monday.',
+      'Speaker: Need to close the open blocker.\nSpeaker: Decision is to ship on Monday.',
     );
   });
 
@@ -83,7 +83,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
       ),
     ).toEqual(['Them', 'Them', 'Me', 'Them', 'Speaker', 'Speaker']);
     expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
-      'Them: A longer remote sentence from system audio.\nThem: short echo\nMe: Do these match the original format?\nThem: This longer mic row still overlaps remote audio.\nSpeaker: Timing evidence is missing here.\nSpeaker: I agree',
+      'Them: A longer remote sentence from system audio.\nThem: Short echo.\nMe: Do these match the original format?\nThem: This longer mic row still overlaps remote audio.\nSpeaker: Timing evidence is missing here.\nSpeaker: I agree.',
     );
   });
 
@@ -155,7 +155,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
     ]);
 
     expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
-      'Valid fallback row.',
+      'Speaker: Valid fallback row.',
     );
     expect(buildAnalysisTranscriptFromJson('{invalid json')).toBe('');
     expect(buildAnalysisTranscriptFromJson()).toBe('');
@@ -202,7 +202,7 @@ describe('buildAnalysisTranscriptFromJson', () => {
     const transcriptJson = JSON.stringify({ segments: sourceSegments });
 
     expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
-      'Them: the rollout is ready\nMe: Okay',
+      'Them: The rollout is ready.\nMe: Okay.',
     );
     expect(sourceSegments.map((segment) => segment.text)).toEqual([
       'Um the rollout is uh ready',

@@ -35,6 +35,8 @@ The saved projection reuses `isCrossChannelDuplicatePair` from `src/utils/speake
 
 The matcher also evaluates the combined text of adjacent overlapping System rows. This prevents one mic echo spanning several remote row boundaries from escaping reconciliation.
 
+For the common loudspeaker case where a short mic decode is phonetically degraded, the readable projection also applies a bounded phonetic matcher. It is intentionally limited to mic rows of two to four tokens that are at least 80 percent contained by a longer System interval. At least half of the mic tokens must match by exact token, ordered prefix, or Soundex code. A row with validated near-end evidence is never removed by this fallback. These bounds suppress artifacts such as `age then` versus `Aish then` without erasing substantive double-talk.
+
 Normalization lowercases text and removes punctuation before comparison. Any change to normalization or thresholds must update this document and the executable contract suite in the same change.
 
 ## Consumer invariant
@@ -51,6 +53,8 @@ Consumers must not independently reproduce readability cleanup, echo suppression
 - raw channel provenance;
 - transcript-integrity evidence; or
 - caller-owned segment objects.
+
+After attribution, consecutive timed fragments from the same presented speaker are assembled only when they remain in source order, are separated by no more than 1.2 seconds, and the earlier fragment has no terminal punctuation. Timed sentences receive conservative capitalization and terminal punctuation; legacy rows without valid timing remain in place and are not rewritten. The same assembled text is supplied to the meeting-analysis prompt.
 
 ## Model setting versus channel-reconciliation failures
 

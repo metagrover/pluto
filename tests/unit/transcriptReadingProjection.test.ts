@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   type TranscriptReadingCandidate,
+  assembleReadableTranscriptSentences,
   buildTranscriptReadingProjection,
   toStoredLiveTranscriptCandidate,
 } from '../../src/utils/transcriptReadingProjection.ts';
@@ -14,6 +15,44 @@ const candidate = (
 ): TranscriptReadingCandidate => ({ speaker, startTime, endTime, text });
 
 describe('saved transcript reading projection', () => {
+  it('assembles adjacent fragments into a punctuated sentence', () => {
+    expect(
+      assembleReadableTranscriptSentences([
+        candidate('Them', 0, 0.8, 'this is'),
+        candidate('Them', 0.9, 1.8, 'one thought'),
+      ]),
+    ).toEqual([
+      expect.objectContaining({
+        speaker: 'Them',
+        startTime: 0,
+        endTime: 1.8,
+        text: 'This is one thought.',
+      }),
+    ]);
+  });
+
+  it('starts a new sentence after a meaningful pause or speaker change', () => {
+    expect(
+      assembleReadableTranscriptSentences([
+        candidate('Me', 0, 1, 'first point'),
+        candidate('Me', 2.3, 3, 'second point'),
+        candidate('Them', 3.1, 4, 'their answer'),
+      ]).map((segment) => [segment.speaker, segment.text]),
+    ).toEqual([
+      ['Me', 'First point.'],
+      ['Me', 'Second point.'],
+      ['Them', 'Their answer.'],
+    ]);
+  });
+
+  it('preserves contractions and acronyms while inferring a question mark', () => {
+    expect(
+      assembleReadableTranscriptSentences([
+        candidate('Me', 0, 2, "can DBX confirm it isn't stale"),
+      ])[0].text,
+    ).toBe("Can DBX confirm it isn't stale?");
+  });
+
   it('preserves native token boundaries when live rows become stored candidates', () => {
     expect(
       toStoredLiveTranscriptCandidate({

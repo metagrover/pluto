@@ -1,5 +1,6 @@
 import {
   type AttributionSegment,
+  isBoundedPhoneticEchoPair,
   isCrossChannelDuplicatePair,
 } from './speakerAttribution.ts';
 
@@ -8,6 +9,7 @@ export type ReadableTranscriptSegment = {
   speaker?: unknown;
   startTime?: unknown;
   endTime?: unknown;
+  nearEndEvidence?: unknown;
 };
 
 export type TranscriptReadabilityStats = {
@@ -64,7 +66,13 @@ const toAttributionSegment = (
     endTime > startTime &&
     text &&
     speaker
-    ? { startTime, endTime, text, speaker }
+    ? {
+        startTime,
+        endTime,
+        text,
+        speaker,
+        nearEndEvidence: segment.nearEndEvidence === true,
+      }
     : null;
 };
 
@@ -87,7 +95,9 @@ const isCrossChannelMicEcho = (
     .sort((left, right) => left.startTime - right.startTime);
   if (
     overlappingRemote.some(
-      (remote) => isCrossChannelDuplicatePair(mic, remote).duplicate,
+      (remote) =>
+        isCrossChannelDuplicatePair(mic, remote).duplicate ||
+        isBoundedPhoneticEchoPair(mic, remote),
     )
   ) {
     return true;
@@ -99,7 +109,10 @@ const isCrossChannelMicEcho = (
     endTime: overlappingRemote.at(-1)?.endTime ?? overlappingRemote[0].endTime,
     text: overlappingRemote.map((remote) => remote.text).join(' '),
   };
-  return isCrossChannelDuplicatePair(mic, combinedRemote).duplicate;
+  return (
+    isCrossChannelDuplicatePair(mic, combinedRemote).duplicate ||
+    isBoundedPhoneticEchoPair(mic, combinedRemote)
+  );
 };
 
 const tokenCoverage = (query: string[], reference: string[]): number => {
@@ -118,6 +131,7 @@ export const isEmbeddedMicFragment = (
   segments: ReadonlyArray<ReadableTranscriptSegment>,
 ): boolean => {
   if (normalizedSpeaker(segment.speaker) !== 'me') return false;
+  if (segment.nearEndEvidence === true) return false;
   const text = typeof segment.text === 'string' ? segment.text : '';
   const tokens = textTokens(text);
   if (tokens.length === 0 || tokens.length > 4) return false;

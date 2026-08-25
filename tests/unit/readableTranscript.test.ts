@@ -23,7 +23,9 @@ describe('buildReadableTranscriptSegments', () => {
     expect(result.segments.map((segment) => segment.text)).toEqual([
       'These are the entry points we are going to be running.',
     ]);
-    expect(result.stats.embeddedFragmentCount).toBe(2);
+    expect(
+      result.stats.embeddedFragmentCount + result.stats.crossChannelEchoCount,
+    ).toBe(2);
   });
 
   it('keeps a local turn that continues beyond the remote utterance', () => {
@@ -125,5 +127,73 @@ describe('buildReadableTranscriptSegments', () => {
       'Them',
       'Them',
     ]);
+  });
+
+  it.each([
+    {
+      micText: 'age then',
+      remoteText: 'Okay, switch the task to Aish then.',
+    },
+    {
+      micText: 'viewers for',
+      remoteText: 'The query created the view for the cohort.',
+    },
+  ])(
+    'suppresses time-contained phonetic mic echo: $micText',
+    ({ micText, remoteText }) => {
+      const result = buildReadableTranscriptSegments([
+        {
+          speaker: 'Them',
+          startTime: 40,
+          endTime: 45,
+          text: remoteText,
+        },
+        { speaker: 'Me', startTime: 41, endTime: 44.9, text: micText },
+      ]);
+
+      expect(result.segments.map((segment) => segment.text)).toEqual([
+        remoteText,
+      ]);
+      expect(result.stats.crossChannelEchoCount).toBe(1);
+    },
+  );
+
+  it('keeps a phonetic-looking overlap when validated near-end evidence exists', () => {
+    const result = buildReadableTranscriptSegments([
+      {
+        speaker: 'Them',
+        startTime: 50,
+        endTime: 55,
+        text: 'Okay, switch the task to Aish then.',
+      },
+      {
+        speaker: 'Me',
+        startTime: 51,
+        endTime: 54.9,
+        text: 'age then',
+        nearEndEvidence: true,
+      },
+    ]);
+
+    expect(result.segments).toHaveLength(2);
+  });
+
+  it('keeps genuine short double-talk with no phonetic agreement', () => {
+    const result = buildReadableTranscriptSegments([
+      {
+        speaker: 'Them',
+        startTime: 60,
+        endTime: 64,
+        text: 'I can walk through the implementation details.',
+      },
+      {
+        speaker: 'Me',
+        startTime: 60.5,
+        endTime: 63.8,
+        text: 'quick question',
+      },
+    ]);
+
+    expect(result.segments).toHaveLength(2);
   });
 });
