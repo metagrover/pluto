@@ -278,21 +278,21 @@ git commit -m "feat: coordinate Parakeet EOU live streams"
 - Test: `tests/unit/eouTranscriptProjection.test.ts`
 - Test: `tests/unit/eouRendererSession.test.ts`
 
-- [ ] **Step 1: Write failing chunker tests**
+- [x] **Step 1: Write failing chunker tests**
 
 At 48 kHz, three inputs of 4,096 frames must emit exactly after 15,360 accumulated frames, retain 3,072 frames, and report `[0, 0.32]`. At 44.1 kHz, emit 14,112 frames. Preserve every sample exactly across arbitrary split points. `flush()` emits the non-empty tail once with its exact fractional end; reset discards buffered samples and restarts sequence at one.
 
-- [ ] **Step 2: Write failing projection/session tests**
+- [x] **Step 2: Write failing projection/session tests**
 
 Assert committed `"hello world"` plus tentative `"again"` creates stable `Me` and tentative `Me` segments, a later tentative replacement does not change committed id/text, EOU promotion makes the tentative segment stable, System events interleave by timestamps, duplicate/stale revisions are ignored, a prefix mutation and append rejection switch once to `unavailable`, and no later update re-enables the epoch.
 
-- [ ] **Step 3: Run tests and observe failure**
+- [x] **Step 3: Run tests and observe failure**
 
 Run: `pnpm exec vitest run tests/unit/eouPcmChunker.test.ts tests/unit/eouTranscriptProjection.test.ts tests/unit/eouRendererSession.test.ts`
 
 Expected: imports fail for the new modules.
 
-- [ ] **Step 4: Implement pure chunker and projector**
+- [x] **Step 4: Implement pure chunker and projector**
 
 Expose:
 
@@ -312,17 +312,17 @@ export function createEouTranscriptProjection(): {
 
 Use deterministic ids `eou:<generation>:<source>:<committed-revision-or-tentative>`. Split committed/tentative using native token boundaries; never infer canonical status. Sort cross-source rows by start, then source, then revision.
 
-- [ ] **Step 5: Implement bounded renderer dispatch**
+- [x] **Step 5: Implement bounded renderer dispatch**
 
 `eouRendererSession` owns both chunkers, permits at most four outstanding invokes per source, forwards `PARAKEET_EOU_UPDATE` only for its meeting/generation, and calls `onUnavailable(code)` once on any append/event failure. It stops sending but does not call capture-stop.
 
-- [ ] **Step 6: Run focused tests and lint**
+- [x] **Step 6: Run focused tests and lint**
 
 Run: `pnpm exec vitest run tests/unit/eouPcmChunker.test.ts tests/unit/eouTranscriptProjection.test.ts tests/unit/eouRendererSession.test.ts && pnpm exec biome lint src/services/liveTranscription/eouPcmChunker.ts src/services/liveTranscription/eouTranscriptProjection.ts src/services/liveTranscription/eouRendererSession.ts`
 
 Expected: all tests and lint pass.
 
-- [ ] **Step 7: Commit renderer primitives**
+- [x] **Step 7: Commit renderer primitives**
 
 ```bash
 git add src/services/liveTranscription tests/unit/eouPcmChunker.test.ts tests/unit/eouTranscriptProjection.test.ts tests/unit/eouRendererSession.test.ts
