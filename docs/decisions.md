@@ -15,6 +15,14 @@ Use concise chronological entries. Link the source issue and PR whenever they ex
 - **Consequences:** What this enables, constrains, or requires later.
 ```
 
+## 2026-08-24 - Make English Parakeet EOU the only live transcription engine
+
+- **Status:** Accepted
+- **Source:** [Issue #663](https://github.com/metagrover/pluto/issues/663), [ADR](./adr/2026-08-24-parakeet-eou-live-primary.md), owner direction on 2026-08-24
+- **Decision:** Pluto uses independent English Parakeet EOU sessions for causal microphone and System PCM as its only visible live recognizer. Recording start requires EOU readiness; a mid-recording EOU failure leaves capture running and never starts MLX. Sealed Parakeet TDT finalization remains canonical until a separately evidenced decision changes it.
+- **Rationale:** The pinned native stack already supports true 320 ms streaming, Pluto is English-only, and retaining an MLX fallback would hide EOU reliability failures while preserving two transcription runtimes.
+- **Consequences:** Live input moves from five-second preview files to bounded causal PCM, EOU assets join the verified model lifecycle, recording readiness no longer depends on MLX transcription, and full MLX removal follows only after real-use verification.
+
 ## 2026-08-19 - Use one editable meeting document for notes and analysis
 
 - **Status:** Accepted
