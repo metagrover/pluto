@@ -376,3 +376,11 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** Pluto removes exact same-source duplicates and strictly evidenced embedded one-letter microphone artifacts during final canonical reconciliation. Ordinary `um` and `uh` disfluencies remain in persisted transcript evidence and are suppressed only through a pure readable projection used by Meeting View and downstream text analysis.
 - **Rationale:** Cross-channel reconciliation can prove some fragments are pipeline artifacts, but transcript text alone cannot prove whether an ordinary disfluency was spoken. Enabling generic save-time cleanup would improve appearance by silently rewriting evidence and could erase genuine meaning.
 - **Consequences:** Existing meetings become easier to read without database rewrites, new transcripts persist content-free readability counts, analysis and title generation receive the same clean projection, and canonical timestamps, word arrays, raw audio, and source provenance remain available for evidence review.
+
+## 2026-08-24 - Review suggested commitments beside persisted source synthesis
+
+- **Status:** Accepted
+- **Source:** [Issue #660](https://github.com/metagrover/pluto/issues/660)
+- **Decision:** Suggested commitments expose the source meeting's persisted overview inline. When the extracted action text exactly matches, or safely matches a truncated prefix of, a persisted analyzed action item, the review also shows that item's topic summary and evidence quote. The full meeting remains a secondary path, and every pending suggestion in the bounded dashboard queue remains individually reviewable.
+- **Rationale:** A meeting link and provenance label did not provide enough context to decide whether an uncertain extraction should become a commitment. Requiring navigation before each decision hid Pluto's existing synthesis and made the review queue feel incomplete.
+- **Consequences:** Dashboard review does not regenerate analysis or infer missing support. Malformed, missing, or unmatched analysis is described truthfully, confirmation and rejection keep their existing persistence contract, and source context appears before decision controls.

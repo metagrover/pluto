@@ -1914,9 +1914,108 @@ describe('buildDashboardHomeModel', () => {
       commitmentState: 'possible',
       sourceMeetingId: 'meeting-source',
       basisLabel: 'Possible follow-up · From Launch Decision · Apr 29, 2026',
+      sourceSynthesis: {
+        overview: 'Indexing rollout is close, with launch risk around review.',
+        topicTitle: null,
+        topicSummary: null,
+        evidence: null,
+      },
       canComplete: false,
     });
   });
+
+  it('projects the matching topic synthesis and persisted evidence into commitment review', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [
+        makeMeeting({
+          id: 'meeting-source',
+          title: 'Launch Decision',
+          analysis_json: JSON.stringify({
+            analysis_schema_version: 3,
+            overview: 'The launch plan now depends on privacy approval.',
+            topics: [
+              {
+                title: 'Privacy approval',
+                summary:
+                  'The team agreed to pair every recording interval with system evidence before launch.',
+                action_items: [
+                  {
+                    text: 'Pair microphone with system evidence for every interval',
+                    evidence:
+                      'We should pair microphone with system evidence for every interval.',
+                  },
+                ],
+              },
+            ],
+            all_action_items: [
+              {
+                text: 'Pair microphone with system evidence for every interval',
+                topic: 'Privacy approval',
+                evidence:
+                  'We should pair microphone with system evidence for every interval.',
+              },
+            ],
+          }),
+        }),
+      ],
+      overdueActions: [
+        makeAction({
+          name: 'Pair microphone with system evidence for every interval',
+          metadata: JSON.stringify({
+            commitment_state: 'possible',
+            origin: 'extraction',
+            source_meeting_id: 'meeting-source',
+            full_description:
+              'Pair microphone with system evidence for every interval',
+          }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.actionInsights.items[0].sourceSynthesis).toEqual({
+      overview: 'The launch plan now depends on privacy approval.',
+      topicTitle: 'Privacy approval',
+      topicSummary:
+        'The team agreed to pair every recording interval with system evidence before launch.',
+      evidence:
+        'We should pair microphone with system evidence for every interval.',
+    });
+  });
+
+  it.each([
+    { label: 'malformed', analysis_json: '{not valid json' },
+    { label: 'missing', analysis_json: undefined },
+  ])(
+    'keeps source navigation but omits $label source synthesis',
+    ({ analysis_json }) => {
+      const model = buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [makeMeeting({ id: 'meeting-source', analysis_json })],
+        overdueActions: [
+          makeAction({
+            metadata: JSON.stringify({
+              commitment_state: 'possible',
+              source_meeting_id: 'meeting-source',
+            }),
+          }),
+        ],
+        staleActions: [],
+        activeActions: [],
+        workspace: null,
+        graphStats: null,
+      });
+
+      expect(model.actionInsights.items[0]).toMatchObject({
+        sourceMeetingId: 'meeting-source',
+        sourceSynthesis: null,
+      });
+    },
+  );
 
   it('resolves a persisted string source id to the exact numeric meeting id', () => {
     const model = buildDashboardHomeModel({

@@ -389,7 +389,9 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('You&#x27;re caught up');
     expect(markup).toContain('Suggested commitments');
     expect(markup).toContain('Draft the launch checklist');
-    expect(markup).toContain('Review suggestion');
+    expect(markup).toContain('Schedule the privacy review');
+    expect(markup).toContain('Send the revised launch brief');
+    expect(markup.match(/Review suggestion/g) ?? []).toHaveLength(3);
     expect(markup).toContain('Add to commitments');
     expect(markup).toContain('Dismiss');
     expect(markup).toContain('data-testid="dashboard-suggestion-review"');
@@ -398,10 +400,8 @@ describe('Dashboard', () => {
     );
     expect(
       markup.match(/data-testid="dashboard-suggestion-review"/g) ?? [],
-    ).toHaveLength(1);
-    expect(markup).toContain('2 more suggestions waiting');
-    expect(markup).not.toContain('Schedule the privacy review');
-    expect(markup).not.toContain('Send the revised launch brief');
+    ).toHaveLength(3);
+    expect(markup).not.toContain('more suggestions waiting');
     expect(markup).not.toContain('Review 1 suggestion');
     expect(markup).not.toContain('Confirm task');
     expect(markup).not.toContain('Not a task');
@@ -930,11 +930,13 @@ describe('Dashboard', () => {
       'Possible follow-up · From Launch Review · Apr 27, 2026',
     );
     expect(markup).toContain('Review suggestion');
-    expect(markup).toContain('Review source');
+    expect(markup).toContain('Source synthesis');
+    expect(markup).toContain('Launch readiness now depends on privacy review.');
+    expect(markup).toContain('Open full meeting');
     expect(markup).toContain('Add to commitments');
     expect(markup).toContain('Dismiss');
     expect(markup).toMatch(
-      /aria-label="Review source for Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
+      /aria-label="Open full meeting for Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
     );
     expect(markup).toMatch(
       /aria-label="Add Check whether privacy review is assigned to commitments"[^>]+focus-visible:outline-pro-accent/,
@@ -990,7 +992,7 @@ describe('Dashboard', () => {
     );
     expect(markup).toContain('Add to commitments');
     expect(markup).toContain('Dismiss');
-    expect(markup).not.toContain('Review source');
+    expect(markup).not.toContain('Open full meeting');
   });
 
   it('keeps source-less review inline instead of exporting a navigation action', () => {

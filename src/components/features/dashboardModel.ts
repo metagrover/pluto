@@ -76,6 +76,7 @@ export interface DashboardActionInsightItem {
   statusLabel: string;
   basisLabel: string;
   sourceMeetingId: string | null;
+  sourceSynthesis: DashboardCommitmentSourceSynthesis | null;
   canComplete: boolean;
   sourceLabel: string;
   contextLabel: string | null;
@@ -85,6 +86,13 @@ export interface DashboardActionInsightItem {
   attentionStatus: AttentionItem['status'] | null;
   dismissLabel: 'Dismiss' | 'Dismiss blocker' | 'Reopen' | null;
   snoozeLabel: 'Snooze' | 'Snooze blocker' | 'Reopen' | null;
+}
+
+export interface DashboardCommitmentSourceSynthesis {
+  overview: string | null;
+  topicTitle: string | null;
+  topicSummary: string | null;
+  evidence: string | null;
 }
 
 export interface DashboardTopOfMindItem {
@@ -234,6 +242,25 @@ export interface DashboardHomeModel {
 
 interface MeetingAnalysisOverview {
   overview?: unknown;
+}
+
+interface MeetingAnalysisActionItem {
+  text?: unknown;
+  topic?: unknown;
+  evidence?: unknown;
+}
+
+interface MeetingAnalysisTopic {
+  title?: unknown;
+  summary?: unknown;
+  action_items?: unknown;
+}
+
+interface MeetingAnalysisSource {
+  overview?: unknown;
+  summary?: unknown;
+  topics?: unknown;
+  all_action_items?: unknown;
 }
 
 interface KnowledgeDocCurrentRead {
@@ -597,6 +624,112 @@ const buildLatestMeeting = (meetings: Meeting[]): DashboardLatestMeeting => {
   };
 };
 
+const getTrimmedString = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() ? value.trim() : null;
+
+const normalizeActionText = (value: string): string =>
+  value
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+const actionTextMatches = (left: string, right: string): boolean => {
+  const normalizedLeft = normalizeActionText(left);
+  const normalizedRight = normalizeActionText(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  if (normalizedLeft === normalizedRight) return true;
+
+  const [shorter, longer] =
+    normalizedLeft.length < normalizedRight.length
+      ? [normalizedLeft, normalizedRight]
+      : [normalizedRight, normalizedLeft];
+  return shorter.length >= 40 && longer.startsWith(shorter);
+};
+
+const getLegacyAnalysisSummary = (value: unknown): string | null => {
+  if (typeof value === 'string') return getTrimmedString(value);
+  if (!Array.isArray(value)) return null;
+  const paragraphs = value
+    .map(getTrimmedString)
+    .filter((paragraph): paragraph is string => Boolean(paragraph));
+  return paragraphs.length ? paragraphs.join(' ') : null;
+};
+
+const getAnalysisActionItems = (value: unknown): MeetingAnalysisActionItem[] =>
+  Array.isArray(value)
+    ? value.filter(
+        (item): item is MeetingAnalysisActionItem =>
+          Boolean(item) && typeof item === 'object' && !Array.isArray(item),
+      )
+    : [];
+
+const getAnalysisTopics = (value: unknown): MeetingAnalysisTopic[] =>
+  Array.isArray(value)
+    ? value.filter(
+        (topic): topic is MeetingAnalysisTopic =>
+          Boolean(topic) && typeof topic === 'object' && !Array.isArray(topic),
+      )
+    : [];
+
+const buildCommitmentSourceSynthesis = (
+  action: Entity,
+  sourceMeeting: Meeting | null,
+): DashboardCommitmentSourceSynthesis | null => {
+  if (!sourceMeeting) return null;
+  const analysis = parseJsonObject<MeetingAnalysisSource>(
+    sourceMeeting.analysis_json,
+  );
+  if (!analysis) return null;
+
+  const overview =
+    getTrimmedString(analysis.overview) ??
+    getLegacyAnalysisSummary(analysis.summary);
+  const metadata = parseActionMetadata(action.metadata);
+  const fullDescription = getTrimmedString(metadata.full_description);
+  const actionTexts = [fullDescription, getTrimmedString(action.name)].filter(
+    (value): value is string => Boolean(value),
+  );
+  const matchesAction = (candidate: MeetingAnalysisActionItem): boolean => {
+    const candidateText = getTrimmedString(candidate.text);
+    return Boolean(
+      candidateText &&
+        actionTexts.some((actionText) =>
+          actionTextMatches(candidateText, actionText),
+        ),
+    );
+  };
+
+  const topics = getAnalysisTopics(analysis.topics);
+  const rollupMatch = getAnalysisActionItems(analysis.all_action_items).find(
+    matchesAction,
+  );
+  const rollupTopicTitle = getTrimmedString(rollupMatch?.topic);
+  let matchedTopic = rollupTopicTitle
+    ? topics.find((topic) => getTrimmedString(topic.title) === rollupTopicTitle)
+    : undefined;
+  let topicActionMatch: MeetingAnalysisActionItem | undefined;
+
+  for (const topic of topics) {
+    const match = getAnalysisActionItems(topic.action_items).find(
+      matchesAction,
+    );
+    if (!match) continue;
+    matchedTopic ??= topic;
+    if (matchedTopic === topic) topicActionMatch = match;
+    break;
+  }
+
+  const topicTitle = getTrimmedString(matchedTopic?.title) ?? rollupTopicTitle;
+  const topicSummary = getTrimmedString(matchedTopic?.summary);
+  const evidence =
+    getTrimmedString(rollupMatch?.evidence) ??
+    getTrimmedString(topicActionMatch?.evidence);
+
+  return overview || topicTitle || topicSummary || evidence
+    ? { overview, topicTitle, topicSummary, evidence }
+    : null;
+};
+
 const actionToInsightItem = (
   action: Entity,
   status: DashboardActionInsightItem['status'],
@@ -632,6 +765,7 @@ const actionToInsightItem = (
           : 'Possible follow-up · Owner and due date not confirmed'
         : `${dueLabel} · ${contextLabel ?? sourceLabel}`,
     sourceMeetingId,
+    sourceSynthesis: buildCommitmentSourceSynthesis(action, sourceMeeting),
     canComplete: commitmentState === 'confirmed',
     sourceLabel,
     contextLabel,

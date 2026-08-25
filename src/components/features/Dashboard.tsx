@@ -76,7 +76,7 @@ const getActionInsightPrimaryAriaLabel = (item: DashboardActionInsightItem) =>
     : `Mark ${item.title} complete`;
 
 interface DashboardReviewAction {
-  label: 'Review source' | 'Add to commitments' | 'Dismiss';
+  label: 'Open full meeting' | 'Add to commitments' | 'Dismiss';
   kind: 'source' | 'primary' | 'secondary';
   ariaLabel: string;
   onClick: () => void | Promise<void>;
@@ -95,9 +95,9 @@ export const getDashboardReviewActions = (
   ...(item.sourceMeetingId
     ? [
         {
-          label: 'Review source' as const,
+          label: 'Open full meeting' as const,
           kind: 'source' as const,
-          ariaLabel: `Review source for ${item.title}`,
+          ariaLabel: `Open full meeting for ${item.title}`,
           onClick: () => handlers.setSelectedMeetingId(item.sourceMeetingId),
         },
       ]
@@ -149,25 +149,68 @@ const DashboardSuggestionReview = ({
           aria-hidden="true"
         />
       </summary>
-      <div className="mb-2 rounded-lg bg-pro-surface/55 px-3 py-3">
+      <div className="mb-2 border-y border-pro-border/60 py-3">
         {sourceAction ? (
-          <button
-            type="button"
-            aria-label={sourceAction.ariaLabel}
-            disabled={isUpdating}
-            onClick={sourceAction.onClick}
-            className="inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
-          >
-            {sourceAction.label}
-            <ArrowRight className="h-3 w-3" aria-hidden="true" />
-          </button>
+          <div>
+            <p className="text-[10px] font-semibold text-pro-text-muted/70">
+              Source synthesis
+            </p>
+            {item.sourceSynthesis ? (
+              <div className="mt-2 max-w-[68ch]">
+                {item.sourceSynthesis.overview ? (
+                  <p className="text-[12px] font-medium leading-5 text-pro-text-main/85">
+                    {item.sourceSynthesis.overview}
+                  </p>
+                ) : null}
+                {item.sourceSynthesis.topicTitle ||
+                item.sourceSynthesis.topicSummary ? (
+                  <div className="mt-3 border-t border-pro-border/50 pt-3">
+                    {item.sourceSynthesis.topicTitle ? (
+                      <p className="text-[11px] font-semibold text-pro-text-main">
+                        {item.sourceSynthesis.topicTitle}
+                      </p>
+                    ) : null}
+                    {item.sourceSynthesis.topicSummary ? (
+                      <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
+                        {item.sourceSynthesis.topicSummary}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                {item.sourceSynthesis.evidence ? (
+                  <div className="mt-3 rounded-md bg-pro-surface/70 px-3 py-2">
+                    <p className="text-[9px] font-semibold text-pro-text-muted/70">
+                      Supporting quote
+                    </p>
+                    <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-main/80">
+                      “{item.sourceSynthesis.evidence}”
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-2 max-w-md text-[11px] font-medium leading-5 text-pro-text-muted">
+                No synthesized source context is available for this meeting.
+              </p>
+            )}
+            <button
+              type="button"
+              aria-label={sourceAction.ariaLabel}
+              disabled={isUpdating}
+              onClick={sourceAction.onClick}
+              className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+            >
+              {sourceAction.label}
+              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </div>
         ) : (
           <p className="max-w-md text-[11px] font-medium leading-5 text-pro-text-muted">
             No source meeting is available. Review the wording before adding
             this to your commitments.
           </p>
         )}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-pro-border/50 pt-3">
           {decisionActions.map((action) => (
             <button
               key={action.label}
@@ -767,7 +810,7 @@ export const Dashboard = ({
                 </p>
               </div>
               <div className="divide-y divide-pro-border/60">
-                {model.commitments.needsConfirmation.slice(0, 1).map((item) => {
+                {model.commitments.needsConfirmation.map((item) => {
                   const isUpdating = updatingTaskIds.has(item.id);
                   return (
                     <article
@@ -798,15 +841,6 @@ export const Dashboard = ({
                   );
                 })}
               </div>
-              {model.commitments.needsConfirmation.length > 1 ? (
-                <p className="mt-3 text-[11px] font-medium text-pro-text-muted/70">
-                  {model.commitments.needsConfirmation.length - 1} more{' '}
-                  {model.commitments.needsConfirmation.length - 1 === 1
-                    ? 'suggestion'
-                    : 'suggestions'}{' '}
-                  waiting
-                </p>
-              ) : null}
             </div>
           ) : (
             <div className="py-7">
