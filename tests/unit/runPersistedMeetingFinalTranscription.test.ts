@@ -48,6 +48,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
         transcription: {
           language: 'en',
           vocabularyHintPolicyVersion: 'known-people-v1',
+          vocabularyTerms: ['Known Person'],
         },
         segments: [
           { text: 'preview', startTime: 0, endTime: 1, speaker: 'Me' },
@@ -63,7 +64,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
     } as Meeting;
     const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
       if (channel === 'GET_TRANSCRIPTION_VOCABULARY') {
-        return { terms: ['Known Person'] };
+        throw new Error('persisted vocabulary must survive process restart');
       }
       if (channel === 'GET_CAPTURE_COMPUTE_POLICY') {
         return {
@@ -128,6 +129,10 @@ describe('runPersistedMeetingFinalTranscription', () => {
     );
 
     expect(outcome).toEqual({ status: 'validated' });
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GET_TRANSCRIPTION_VOCABULARY',
+      expect.anything(),
+    );
     expect(mocks.processDownstream).toHaveBeenCalledWith('meeting-1', invoke);
     const commitCall = invoke.mock.calls.find(
       ([channel]) => channel === 'COMMIT_FINAL_TRANSCRIPTION',

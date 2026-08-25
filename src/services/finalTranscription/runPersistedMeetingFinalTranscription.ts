@@ -70,6 +70,18 @@ const readSealedActivityEvidence = async (
   return parsed.ok ? parsed.evidence : null;
 };
 
+const sanitizeVocabularyTerms = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? [
+        ...new Set(
+          value
+            .filter((term): term is string => typeof term === 'string')
+            .map((term) => term.trim())
+            .filter(Boolean),
+        ),
+      ].slice(0, 12)
+    : [];
+
 export const runPersistedMeetingFinalTranscription = async (
   meeting: Meeting,
   invoke: Invoke,
@@ -89,15 +101,16 @@ export const runPersistedMeetingFinalTranscription = async (
     | undefined;
   let vocabulary = readFinalTranscriptionVocabulary(meetingId);
   if (!vocabulary) {
+    vocabulary = sanitizeVocabularyTerms(
+      provisional.payload.transcription?.vocabularyTerms,
+    );
+  }
+  if (vocabulary.length === 0) {
     try {
       const selection = (await invoke('GET_TRANSCRIPTION_VOCABULARY', {
         participants: [],
       })) as { terms?: unknown };
-      vocabulary = Array.isArray(selection?.terms)
-        ? selection.terms
-            .filter((term): term is string => typeof term === 'string')
-            .slice(0, 12)
-        : [];
+      vocabulary = sanitizeVocabularyTerms(selection?.terms);
     } catch {
       vocabulary = [];
     }
@@ -166,6 +179,7 @@ export const runPersistedMeetingFinalTranscription = async (
               vocabularyHintPolicyVersion:
                 commit.metadata.vocabularyPolicyVersion,
               vocabularyHintCount: commit.metadata.vocabularyCount,
+              vocabularyTerms: vocabulary,
             },
             speakerAttribution,
             liveTranscriptResponsiveness:

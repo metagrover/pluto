@@ -31,6 +31,7 @@ describe('transcriptSchema', () => {
           computeType: 'float16',
           diarization: false,
           elapsedMs: 345,
+          vocabularyTerms: ['Known Person'],
         },
         sessionFallbackTranscription: {
           backend: 'mlx_preview',
@@ -72,6 +73,7 @@ describe('transcriptSchema', () => {
     expect(payload.postHydrationBleedDroppedMe).toBe(2);
     expect(payload.transcription?.backend).toBe('mlx_preview');
     expect(payload.transcription?.model).toBe('medium');
+    expect(payload.transcription?.vocabularyTerms).toEqual(['Known Person']);
     expect(payload.sessionFallbackTranscription?.backend).toBe('mlx_preview');
     expect(payload.sessionFallbackTranscription?.elapsedMs).toBe(1234);
     expect(payload.speakerAttribution).toEqual({

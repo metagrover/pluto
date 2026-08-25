@@ -1658,6 +1658,7 @@ export const AudioManager = ({
               vocabularyHintPolicyVersion:
                 capturedVocabulary.provenance.policyVersion,
               vocabularyHintCount: capturedVocabulary.provenance.hintCount,
+              vocabularyTerms: capturedVocabulary.terms,
             },
             speakerAttribution,
             liveTranscriptResponsiveness: capturedResponsiveness,

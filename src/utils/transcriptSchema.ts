@@ -40,6 +40,7 @@ export type TranscriptTranscriptionMeta = {
   warnings?: string[];
   vocabularyHintPolicyVersion?: string;
   vocabularyHintCount?: number;
+  vocabularyTerms?: string[];
   diarizationRuntime?: {
     engine: 'sherpa-onnx';
     engineVersion: string;
