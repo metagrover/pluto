@@ -324,7 +324,9 @@
     @apply mt-5 space-y-4;
   }
   .meeting-document-actions {
-    @apply relative flex min-h-10 items-center justify-end gap-1 z-50; -webkit-app-region: no-drag; pointer-events: auto !important;
+    @apply relative flex min-h-10 items-center justify-end gap-1 z-50;
+    -webkit-app-region: no-drag;
+    pointer-events: auto !important;
   }
   .meeting-document-menu {
     @apply relative;
@@ -441,9 +443,7 @@
     color: oklch(56% 0.09 68);
     background: oklch(94% 0.025 72);
   }
-  .dark
-    .meeting-failure-notice--regeneration
-    .meeting-failure-notice__marker {
+  .dark .meeting-failure-notice--regeneration .meeting-failure-notice__marker {
     color: oklch(76% 0.08 68);
     background: oklch(27% 0.03 68);
   }
@@ -1066,23 +1066,14 @@
   .rail-heading__status > span {
     @apply inline-flex items-center gap-1.5 text-xs font-medium text-pro-text-muted;
   }
-  .rail-meta {
-    @apply mt-6 border-t border-pro-border pt-4;
-  }
-  .rail-meta > summary {
-    @apply flex min-h-11 cursor-pointer list-none items-center rounded-lg text-xs font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
-  }
-  .rail-meta > summary::-webkit-details-marker {
-    @apply hidden;
-  }
-  .rail-meta h3 {
+  .rail-participants h3 {
     @apply mb-2 flex items-center gap-2 text-xs font-medium text-pro-text-muted;
   }
   .rail-title-input {
     @apply w-full min-w-0 border-0 bg-transparent p-0 text-[1.65rem] font-semibold tracking-tight outline-none placeholder:text-pro-text-muted focus-visible:ring-0;
   }
   .rail-participants {
-    @apply pb-2 pt-3;
+    @apply mt-6 pb-2 pt-1;
   }
   .participant-list {
     @apply mb-3 flex flex-wrap gap-2;
@@ -1107,15 +1098,6 @@
   }
   .rail-notes textarea {
     @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-[15px] leading-7 outline-none placeholder:text-pro-text-muted/65 focus-visible:ring-0;
-  }
-  .rail-diagnostics {
-    @apply border-t border-pro-border pt-4 text-xs text-pro-text-muted;
-  }
-  .rail-diagnostics summary {
-    @apply cursor-pointer font-medium;
-  }
-  .rail-diagnostics p {
-    @apply mt-2 leading-5;
   }
   .recording-finalizing-view {
     @apply mx-auto w-full max-w-[920px] pb-20 pt-5;
@@ -1447,7 +1429,6 @@
   -webkit-app-region: no-drag;
 }
 
-
 .meeting-markdown-preview h1 {
   @apply text-[40px] font-bold leading-[1.2] mb-8 text-pro-text-main;
 }
@@ -1502,8 +1483,6 @@
   @apply flex opacity-100;
 }
 
-
-
 .meeting-note-block__body {
   @apply flex-1 min-w-0;
 }
@@ -1524,7 +1503,6 @@
   padding: 0 !important;
   line-height: 1.5 !important;
 }
-
 
 .meeting-note-block__marker {
   @apply relative mt-[10px] ml-[8px] mr-[12px] h-[6px] w-[6px] shrink-0 rounded-full bg-pro-text-main;
@@ -1548,15 +1526,23 @@
 }
 
 /* Fix lists added inside note blocks so they act like siblings instead of sub-items */
-.meeting-note-block:not(.meeting-note-block--paragraph) .meeting-markdown-preview > ul {
+.meeting-note-block:not(.meeting-note-block--paragraph)
+  .meeting-markdown-preview
+  > ul {
   padding-left: 0;
   list-style: none;
 }
-.meeting-note-block:not(.meeting-note-block--paragraph) .meeting-markdown-preview > ul > li {
+.meeting-note-block:not(.meeting-note-block--paragraph)
+  .meeting-markdown-preview
+  > ul
+  > li {
   position: relative;
 }
-.meeting-note-block:not(.meeting-note-block--paragraph) .meeting-markdown-preview > ul > li:not(:has(> input[type="checkbox"]))::before {
-  content: '';
+.meeting-note-block:not(.meeting-note-block--paragraph)
+  .meeting-markdown-preview
+  > ul
+  > li:not(:has(> input[type="checkbox"]))::before {
+  content: "";
   position: absolute;
   border-radius: 50%;
   background-color: var(--pro-text-main, currentColor);
@@ -1566,20 +1552,31 @@
   width: 6px;
 }
 /* Ensure the text is aligned properly */
-.meeting-note-block:not(.meeting-note-block--paragraph) .meeting-markdown-preview > ul > li:has(> input[type="checkbox"]) {
+.meeting-note-block:not(.meeting-note-block--paragraph)
+  .meeting-markdown-preview
+  > ul
+  > li:has(> input[type="checkbox"]) {
   margin-left: -26px;
 }
 
-.meeting-note-block:not(.meeting-note-block--paragraph) .meeting-markdown-preview > ol {
+.meeting-note-block:not(.meeting-note-block--paragraph)
+  .meeting-markdown-preview
+  > ol {
   padding-left: 0;
   list-style: none;
   counter-reset: my-counter;
 }
-.meeting-note-block:not(.meeting-note-block--paragraph) .meeting-markdown-preview > ol > li {
+.meeting-note-block:not(.meeting-note-block--paragraph)
+  .meeting-markdown-preview
+  > ol
+  > li {
   position: relative;
   counter-increment: my-counter;
 }
-.meeting-note-block:not(.meeting-note-block--paragraph) .meeting-markdown-preview > ol > li::before {
+.meeting-note-block:not(.meeting-note-block--paragraph)
+  .meeting-markdown-preview
+  > ol
+  > li::before {
   content: counter(my-counter) ".";
   position: absolute;
   top: 0;

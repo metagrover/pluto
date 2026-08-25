@@ -37,6 +37,10 @@ import type {
   RecordingFinalizationPreview,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
+import type {
+  CaptureLifecycleSnapshot,
+  CaptureStartResult,
+} from './services/captureLifecycle';
 import { runPersistedMeetingFinalTranscription } from './services/finalTranscription/runPersistedMeetingFinalTranscription';
 import {
   canRetryMeetingFinalTranscription,
@@ -97,6 +101,8 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isStartingRecording, setIsStartingRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [captureLifecycle, setCaptureLifecycle] =
+    useState<CaptureLifecycleSnapshot>({ state: 'idle' });
   const [finalizingMeeting, setFinalizingMeeting] =
     useState<RecordingFinalizationPreview | null>(null);
   const [zenVisible, setZenVisible] = useState(false);
@@ -152,7 +158,9 @@ function App() {
 
   const contentScrollRef = useRef<HTMLDivElement | null>(null);
   const stopSessionRef = useRef<((endReason?: string) => void) | null>(null);
-  const startSessionRef = useRef<(() => void) | null>(null);
+  const startSessionRef = useRef<(() => Promise<CaptureStartResult>) | null>(
+    null,
+  );
   const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptSegment[]>(
     [],
   );
@@ -429,8 +437,8 @@ function App() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
         e.preventDefault();
-        if (startSessionRef.current && !isRecording) {
-          startSessionRef.current();
+        if (startSessionRef.current && captureLifecycle.state === 'idle') {
+          void startSessionRef.current();
         }
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -453,7 +461,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isRecording]);
+  }, [captureLifecycle.state]);
 
   const fetchMeetings = async () => {
     try {
@@ -804,9 +812,13 @@ function App() {
             }
             setFinalizingMeeting(null);
           }}
+          onSessionUpdated={async () => {
+            await fetchMeetings();
+          }}
           onStartingChange={handleStartingChange}
           onRecordingChange={handleRecordingChange}
           onProcessingChange={setIsProcessing}
+          onCaptureLifecycleChange={setCaptureLifecycle}
           onFinalizationStarted={handleFinalizationStarted}
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
@@ -851,19 +863,11 @@ function App() {
             safeMeetings={safeMeetings}
             onStartRecording={() => {
               if (startSessionRef.current) {
-                startSessionRef.current();
+                void startSessionRef.current();
               }
             }}
             isRecordingActive={activeRecording}
-            recordingState={
-              isStartingRecording
-                ? 'starting'
-                : isRecording
-                  ? 'recording'
-                  : isProcessing
-                    ? 'processing'
-                    : 'idle'
-            }
+            recordingState={captureLifecycle.state}
             onReturnToRecording={() => {
               if (finalizingMeeting) {
                 setZenVisible(false);
@@ -1081,7 +1085,8 @@ function App() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (startSessionRef.current) startSessionRef.current();
+                      if (startSessionRef.current)
+                        void startSessionRef.current();
                     }}
                     className="h-16 px-12 rounded-lg bg-pro-text-main dark:bg-pro-accent text-white font-semibold text-xs font-medium shadow-2xl hover:bg-pro-accent hover:scale-[1.02] transition-all "
                   >
@@ -1142,7 +1147,7 @@ function App() {
           onReopen={() => {
             dismissAutoEndToast();
             if (startSessionRef.current) {
-              startSessionRef.current();
+              void startSessionRef.current();
             }
           }}
           onDismiss={dismissAutoEndToast}

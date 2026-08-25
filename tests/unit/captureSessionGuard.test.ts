@@ -27,37 +27,29 @@ describe('capture session renderer guard', () => {
   });
 
   it('prevents unload while recording or finalization is active', () => {
-    expect(
-      shouldPreventCaptureUnload({ recording: true, processing: false }),
-    ).toBe(true);
-    expect(
-      shouldPreventCaptureUnload({ recording: false, processing: true }),
-    ).toBe(true);
-    expect(
-      shouldPreventCaptureUnload({ recording: false, processing: false }),
-    ).toBe(false);
+    expect(shouldPreventCaptureUnload({ state: 'recording' })).toBe(true);
+    expect(shouldPreventCaptureUnload({ state: 'sealing' })).toBe(true);
+    expect(shouldPreventCaptureUnload({ state: 'starting' })).toBe(true);
+    expect(shouldPreventCaptureUnload({ state: 'idle' })).toBe(false);
   });
 
   it('installs an unload guard that follows current capture state', () => {
-    let recording = false;
-    let processing = false;
+    let state = 'idle' as const | 'recording' | 'sealing';
     const target = new EventTarget();
     const detach = attachCaptureUnloadGuard(target, {
-      isRecording: () => recording,
-      isProcessing: () => processing,
+      snapshot: () => ({ state }),
     });
 
     expect(
       target.dispatchEvent(new Event('beforeunload', { cancelable: true })),
     ).toBe(true);
 
-    recording = true;
+    state = 'recording';
     expect(
       target.dispatchEvent(new Event('beforeunload', { cancelable: true })),
     ).toBe(false);
 
-    recording = false;
-    processing = true;
+    state = 'sealing';
     expect(
       target.dispatchEvent(new Event('beforeunload', { cancelable: true })),
     ).toBe(false);

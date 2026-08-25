@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import type {
+  CaptureLifecycleSnapshot,
+  CaptureStartResult,
+} from '../services/captureLifecycle';
 import {
   markStopToValidatedLatencyUnavailable,
   startStopToValidatedLatencyAfterAcceptedStop,
@@ -67,9 +71,11 @@ import {
 
 interface AudioManagerProps {
   onSessionComplete: (meetingId?: string | number) => void;
+  onSessionUpdated?: (meetingId: string | number) => void;
   onStartingChange?: (isStarting: boolean) => void;
   onRecordingChange?: (isRecording: boolean) => void;
   onProcessingChange?: (isProcessing: boolean) => void;
+  onCaptureLifecycleChange?: (snapshot: CaptureLifecycleSnapshot) => void;
   onFinalizationStarted?: (meeting: RecordingFinalizationPreview) => void;
   onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
   onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
@@ -86,7 +92,9 @@ interface AudioManagerProps {
   onStopSessionRef?: React.MutableRefObject<
     ((endReason?: string) => void) | null
   >;
-  onStartSessionRef?: React.MutableRefObject<(() => void) | null>;
+  onStartSessionRef?: React.MutableRefObject<
+    (() => Promise<CaptureStartResult>) | null
+  >;
 }
 
 interface TranscriptionSegment {
@@ -174,9 +182,11 @@ type ChunkAcceptanceDraft = {
 
 export const AudioManager = ({
   onSessionComplete,
+  onSessionUpdated,
   onStartingChange,
   onRecordingChange,
   onProcessingChange,
+  onCaptureLifecycleChange,
   onFinalizationStarted,
   userNotes = '',
   userTitle = '',
@@ -203,6 +213,19 @@ export const AudioManager = ({
     onRecordingChange?.(isRecording);
   }, [isRecording, onRecordingChange]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const captureLifecycleRef = useRef<CaptureLifecycleSnapshot>({
+    state: 'idle',
+  });
+  const publishCaptureLifecycle = (
+    snapshot: CaptureLifecycleSnapshot,
+  ): void => {
+    captureLifecycleRef.current = snapshot;
+    onCaptureLifecycleChange?.(snapshot);
+  };
+
+  useEffect(() => {
+    onCaptureLifecycleChange?.(captureLifecycleRef.current);
+  }, [onCaptureLifecycleChange]);
 
   const resolvedTranscriptionSettings = resolveTranscriptionSettings(
     transcriptionSettings,
@@ -469,17 +492,17 @@ export const AudioManager = ({
     }
   };
 
-  const startSession = async () => {
-    if (
-      startInFlightRef.current ||
-      isRecordingRef.current ||
-      isProcessingRef.current ||
-      stopInFlightRef.current
-    ) {
+  const startSession = async (): Promise<CaptureStartResult> => {
+    if (captureLifecycleRef.current.state !== 'idle') {
       console.warn('[Pluto] Ignoring duplicate start request');
-      return;
+      return {
+        admitted: false,
+        state: captureLifecycleRef.current.state,
+        reason: 'capture_not_idle',
+      };
     }
     startInFlightRef.current = true;
+    publishCaptureLifecycle({ state: 'starting' });
     onStartingChange?.(true);
 
     try {
@@ -491,7 +514,11 @@ export const AudioManager = ({
         window.dispatchEvent(
           new CustomEvent('RECORDING_READINESS_FAILED', { detail: readiness }),
         );
-        return;
+        return {
+          admitted: false,
+          state: 'starting',
+          reason: 'recording_not_ready',
+        };
       }
 
       const meetingId = crypto.randomUUID();
@@ -572,7 +599,11 @@ export const AudioManager = ({
           alert(
             'Another recording is already active. Finish it before starting a new recording.',
           );
-          return;
+          return {
+            admitted: false,
+            state: 'starting',
+            reason: 'capture_session_already_active',
+          };
         }
         console.warn(
           '[Pluto] Failed to initialize capture journal:',
@@ -588,7 +619,11 @@ export const AudioManager = ({
         isRecordingRef.current = false;
         setIsRecording(false);
         alert('Recording could not start securely. Please try again.');
-        return;
+        return {
+          admitted: false,
+          state: 'starting',
+          reason: 'capture_journal_start_failed',
+        };
       }
 
       try {
@@ -695,7 +730,11 @@ export const AudioManager = ({
         startTimeRef.current = 0;
         captureActivitySessionRef.current = null;
         alert('Live transcription could not start. Please try again.');
-        return;
+        return {
+          admitted: false,
+          state: 'starting',
+          reason: 'live_transcription_start_failed',
+        };
       }
 
       onRecordingStarted?.(startTimeRef.current);
@@ -748,7 +787,11 @@ export const AudioManager = ({
         stopInFlightRef.current = false;
         isRecordingRef.current = false;
         setIsRecording(false);
-        return;
+        return {
+          admitted: false,
+          state: 'starting',
+          reason: 'microphone_unavailable',
+        };
       }
 
       micStreamRef.current = micStream;
@@ -1107,6 +1150,8 @@ export const AudioManager = ({
       }
 
       // 6. No restart loop needed
+      publishCaptureLifecycle({ state: 'recording' });
+      return { admitted: true, meetingId };
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
       eouSessionRef.current?.cancel();
@@ -1126,9 +1171,17 @@ export const AudioManager = ({
       stopInFlightRef.current = false;
       isRecordingRef.current = false;
       setIsRecording(false);
+      return {
+        admitted: false,
+        state: 'starting',
+        reason: 'capture_start_failed',
+      };
     } finally {
       startInFlightRef.current = false;
       onStartingChange?.(false);
+      if (!isRecordingRef.current) {
+        publishCaptureLifecycle({ state: 'idle' });
+      }
     }
   };
 
@@ -1363,6 +1416,7 @@ export const AudioManager = ({
     });
 
     stopInFlightRef.current = true;
+    publishCaptureLifecycle({ state: 'sealing' });
     recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
     isProcessingRef.current = true;
     console.log(
@@ -1395,6 +1449,8 @@ export const AudioManager = ({
     let rebuiltSystemAudioPath = '';
     let sealedActivityEvidence: CaptureActivityEvidence | null = null;
     let provisionalMeetingPersisted = false;
+    let captureOwnershipReleased = false;
+    const micFormatAtStop = getMicFormat();
 
     try {
       // Helper to stop a recorder and get its blob
@@ -1566,74 +1622,20 @@ export const AudioManager = ({
       const sealedActivityHandoff = createSealedCaptureActivityHandoff(
         journalSealOutcome.activityEvidence,
       );
-
-      if (!currentMeetingIdRef.current) return; // Session aborted or never started
-
-      // Materialize both channels against the sealed meeting clock. The
-      // browser mic blob is only a fallback because concatenating its chunks
-      // can compress startup gaps and shift mic words ahead of System words.
-      try {
-        const rebuiltMicPath = await window.ipcRenderer.invoke(
-          'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
-          {
-            meetingId: stopSnapshot.meetingId,
-            source: 'mic',
-            outputTag: 'session-mic-rebuilt',
-          },
-        );
-        if (rebuiltMicPath) primaryAudioPath = rebuiltMicPath;
-      } catch (e) {
-        console.warn('[Pluto] Sealed mic audio materialization failed:', e);
-      }
-      if (!primaryAudioPath && micBlob && micBlob.size > 0) {
-        try {
-          const buffer = await micBlob.arrayBuffer();
-          const maybePath = await window.ipcRenderer.invoke(
-            'AUDIO_SAVE_AND_CONVERT',
-            buffer,
-            getMicFormat(),
-            'session-mic',
-          );
-          if (maybePath) primaryAudioPath = maybePath;
-        } catch (e) {
-          console.warn('[Pluto] Save failed:', e);
-        }
-      }
-      try {
-        const rebuiltSystemPath = await window.ipcRenderer.invoke(
-          'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
-          {
-            meetingId: stopSnapshot.meetingId,
-            source: 'system',
-            outputTag: 'session-system-rebuilt',
-          },
-        );
-        if (rebuiltSystemPath) {
-          rebuiltSystemAudioPath = rebuiltSystemPath;
-          systemAudioPath = rebuiltSystemPath;
-          console.log(
-            '[Pluto] Materialized session-system from sealed capture',
-          );
-        }
-      } catch (e) {
-        console.warn('[Pluto] Sealed system audio materialization failed:', e);
-      }
-      if (primaryAudioPath && systemAudioPath) {
-        try {
-          const maybeMixed = await window.ipcRenderer.invoke('AUDIO_MIX_WAV', {
-            inputPaths: [primaryAudioPath, systemAudioPath],
-            outputTag: 'session-mix',
-          });
-          if (maybeMixed) mixedAudioPath = maybeMixed;
-        } catch (e) {
-          console.warn('[Pluto] Mixed audio build failed:', e);
-        }
-      }
-      const newTranscription = mergeConsecutiveSpeakerSegments(
+      const capturedSegments = mergeConsecutiveSpeakerSegments(
         [...processedMicSegmentsRef.current].sort(
           (left, right) => left.startTime - right.startTime,
         ),
       );
+      const capturedVocabulary = {
+        terms: [...transcriptionVocabularyRef.current.terms],
+        provenance: { ...transcriptionVocabularyRef.current.provenance },
+      };
+      const capturedResponsiveness =
+        frozenLiveTranscriptResponsivenessRef.current ?? undefined;
+      const captureGeneration =
+        captureJournalStateRef.current?.generation ?? '';
+      const meetingTiming = buildMeetingTiming(stopSnapshot);
       const pipelineMode: TranscriptPipelineMode = 'canonical_session_v2';
       const speakerAttribution: StoredTranscriptSpeakerAttribution =
         buildTranscriptSpeakerAttribution({
@@ -1641,52 +1643,42 @@ export const AudioManager = ({
           diarizationAttempted: false,
           fallbackReason: 'diarization_disabled',
         });
-
-      const meetingTiming = buildMeetingTiming(stopSnapshot);
-      if (!stopSnapshot || !sealedActivityEvidence) {
-        throw new Error('final_transcription_evidence_unavailable');
-      }
-      const finalStopSnapshot = stopSnapshot;
-      const finalSealedActivityEvidence = sealedActivityEvidence;
-      const captureGeneration =
-        captureJournalStateRef.current?.generation ?? '';
-      const provisionalTranscriptJson = JSON.stringify(
-        buildTranscriptJsonPayload(newTranscription, {
-          pipelineMode,
-          canonicalSource: mixedAudioPath ? 'mix' : 'mic',
-          postHydrationBleedPass: false,
-          transcription: {
-            backend: String(resolvedTranscriptionSettings.liveEngine),
-            preset: String(resolvedTranscriptionSettings.preset),
-            model: 'parakeet-tdt-0.6b-v3',
-            device: 'coreml',
-            computeType: String(resolvedTranscriptionSettings.computeType),
-            diarization: false,
-            elapsedMs: 0,
-            vocabularyHintPolicyVersion:
-              transcriptionVocabularyRef.current.provenance.policyVersion,
-            vocabularyHintCount:
-              transcriptionVocabularyRef.current.provenance.hintCount,
-          },
-          speakerAttribution,
-          liveTranscriptResponsiveness:
-            frozenLiveTranscriptResponsivenessRef.current ?? undefined,
-          lifecycleStatus: 'provisional',
-        }),
-      );
+      const buildProvisionalTranscriptJson = (canonicalSource: 'mic' | 'mix') =>
+        JSON.stringify(
+          buildTranscriptJsonPayload(capturedSegments, {
+            pipelineMode,
+            canonicalSource,
+            postHydrationBleedPass: false,
+            transcription: {
+              backend: String(resolvedTranscriptionSettings.liveEngine),
+              preset: String(resolvedTranscriptionSettings.preset),
+              model: 'parakeet-tdt-0.6b-v3',
+              device: 'coreml',
+              computeType: String(resolvedTranscriptionSettings.computeType),
+              diarization: false,
+              elapsedMs: 0,
+              vocabularyHintPolicyVersion:
+                capturedVocabulary.provenance.policyVersion,
+              vocabularyHintCount: capturedVocabulary.provenance.hintCount,
+            },
+            speakerAttribution,
+            liveTranscriptResponsiveness: capturedResponsiveness,
+            lifecycleStatus: 'provisional',
+          }),
+        );
       const provisionalMeeting = {
-        id: finalStopSnapshot.meetingId,
+        id: stopSnapshot.meetingId,
         title: userTitle || 'Meeting',
         meeting_type: 'Recording',
         started_at: meetingTiming.startedAtIso,
         ended_at: meetingTiming.endedAtIso,
         duration_seconds: meetingTiming.durationSeconds,
-        audio_path: primaryAudioPath || null,
-        system_audio_path: systemAudioPath || null,
-        mixed_audio_path: mixedAudioPath || null,
+        audio_path: null,
+        system_audio_path: null,
+        mixed_audio_path: null,
         transcript_status: 'provisional',
         transcript_validated_at: null,
-        transcript_json: provisionalTranscriptJson,
+        transcript_json: buildProvisionalTranscriptJson('mic'),
         user_notes: userNotes,
         enhanced_notes: null,
         analysis_json: null,
@@ -1705,9 +1697,9 @@ export const AudioManager = ({
         causes: [],
         evidenceProvenance: {
           kind: 'sealed_capture_activity_v2',
-          digestSha256: finalSealedActivityEvidence.digestSha256,
+          digestSha256: sealedActivityEvidence.digestSha256,
         },
-        activityEvidence: finalSealedActivityEvidence,
+        activityEvidence: sealedActivityEvidence,
       };
       const insertedProvisional = await sealedActivityHandoff.persistMeeting(
         provisionalMeeting,
@@ -1716,21 +1708,115 @@ export const AudioManager = ({
           await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
       );
       if (insertedProvisional === false) {
-        onSessionComplete?.(finalStopSnapshot.meetingId);
+        onSessionComplete?.(stopSnapshot.meetingId);
         return;
       }
       provisionalMeetingPersisted = true;
       registerFinalTranscriptionVocabulary(
-        finalStopSnapshot.meetingId,
-        transcriptionVocabularyRef.current.terms,
+        stopSnapshot.meetingId,
+        capturedVocabulary.terms,
       );
-      onSessionComplete?.(finalStopSnapshot.meetingId);
+      onSessionComplete?.(stopSnapshot.meetingId);
+
+      // The sealed journal and provisional row are the durable handoff. Capture
+      // ownership is now free even though audio materialization and downstream
+      // processing for this meeting continue in the background.
+      if (currentMeetingIdRef.current === stopSnapshot.meetingId) {
+        currentMeetingIdRef.current = null;
+        stopInFlightRef.current = false;
+        isProcessingRef.current = false;
+        setIsProcessing(false);
+        startTimeRef.current = 0;
+        recordingEndedAtRef.current = 0;
+        captureOwnershipReleased = true;
+        publishCaptureLifecycle({ state: 'idle' });
+      }
+
+      // Materialize both channels against the sealed meeting clock. The
+      // browser mic blob is only a fallback because concatenating its chunks
+      // can compress startup gaps and shift mic words ahead of System words.
+      try {
+        const rebuiltMicPath = await window.ipcRenderer.invoke(
+          'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
+          {
+            meetingId: stopSnapshot.meetingId,
+            source: 'mic',
+            outputTag: `${stopSnapshot.meetingId}-session-mic-rebuilt`,
+          },
+        );
+        if (rebuiltMicPath) primaryAudioPath = rebuiltMicPath;
+      } catch (e) {
+        console.warn('[Pluto] Sealed mic audio materialization failed:', e);
+      }
+      if (!primaryAudioPath && micBlob && micBlob.size > 0) {
+        try {
+          const buffer = await micBlob.arrayBuffer();
+          const maybePath = await window.ipcRenderer.invoke(
+            'AUDIO_SAVE_AND_CONVERT',
+            buffer,
+            micFormatAtStop,
+            `${stopSnapshot.meetingId}-session-mic`,
+          );
+          if (maybePath) primaryAudioPath = maybePath;
+        } catch (e) {
+          console.warn('[Pluto] Save failed:', e);
+        }
+      }
+      try {
+        const rebuiltSystemPath = await window.ipcRenderer.invoke(
+          'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
+          {
+            meetingId: stopSnapshot.meetingId,
+            source: 'system',
+            outputTag: `${stopSnapshot.meetingId}-session-system-rebuilt`,
+          },
+        );
+        if (rebuiltSystemPath) {
+          rebuiltSystemAudioPath = rebuiltSystemPath;
+          systemAudioPath = rebuiltSystemPath;
+          console.log(
+            '[Pluto] Materialized session-system from sealed capture',
+          );
+        }
+      } catch (e) {
+        console.warn('[Pluto] Sealed system audio materialization failed:', e);
+      }
+      if (primaryAudioPath && systemAudioPath) {
+        try {
+          const maybeMixed = await window.ipcRenderer.invoke('AUDIO_MIX_WAV', {
+            inputPaths: [primaryAudioPath, systemAudioPath],
+            outputTag: `${stopSnapshot.meetingId}-session-mix`,
+          });
+          if (maybeMixed) mixedAudioPath = maybeMixed;
+        } catch (e) {
+          console.warn('[Pluto] Mixed audio build failed:', e);
+        }
+      }
+      if (!primaryAudioPath && !systemAudioPath && !mixedAudioPath) {
+        throw new Error('sealed_audio_materialization_failed');
+      }
+      const materializedMeeting = {
+        ...provisionalMeeting,
+        audio_path: primaryAudioPath || null,
+        system_audio_path: systemAudioPath || null,
+        mixed_audio_path: mixedAudioPath || null,
+        transcript_json: buildProvisionalTranscriptJson(
+          mixedAudioPath ? 'mix' : 'mic',
+        ),
+      };
+      await sealedActivityHandoff.persistMeeting(
+        materializedMeeting,
+        provisionalIntegrity,
+        async (meeting) =>
+          await window.ipcRenderer.invoke('SAVE_MEETING', meeting),
+      );
+      onSessionUpdated?.(stopSnapshot.meetingId);
       return;
     } catch (e) {
       console.error('[Pluto] Processing failed:', e);
       eouSessionAtStop?.cancel();
       if (provisionalMeetingPersisted) {
-        onSessionComplete?.(stopSnapshot.meetingId);
+        onSessionUpdated?.(stopSnapshot.meetingId);
       } else if (
         currentMeetingIdRef.current &&
         (primaryAudioPath || systemAudioPath || mixedAudioPath)
@@ -1799,25 +1885,31 @@ export const AudioManager = ({
           console.error('[Pluto] Failed to save recoverable recording state');
         }
       }
-      alert(`Failed to process recording: ${(e as Error).message}`);
+      if (!captureOwnershipReleased) {
+        alert(`Failed to process recording: ${(e as Error).message}`);
+      }
       isRecordingRef.current = false;
       setIsRecording(false);
     } finally {
-      stopInFlightRef.current = false;
-      stopToValidatedLatencyRef.current =
-        createStopToValidatedLatencyAccumulator();
-      startTimeRef.current = 0;
-      recordingEndedAtRef.current = 0;
-      isProcessingRef.current = false;
-      setIsProcessing(false);
-      currentMeetingIdRef.current = null;
+      if (!captureOwnershipReleased) {
+        stopInFlightRef.current = false;
+        stopToValidatedLatencyRef.current =
+          createStopToValidatedLatencyAccumulator();
+        startTimeRef.current = 0;
+        recordingEndedAtRef.current = 0;
+        isProcessingRef.current = false;
+        setIsProcessing(false);
+        if (currentMeetingIdRef.current === stopSnapshot.meetingId) {
+          currentMeetingIdRef.current = null;
+        }
+        publishCaptureLifecycle({ state: 'idle' });
+      }
     }
   };
 
   useEffect(() => {
     return attachCaptureUnloadGuard(window, {
-      isRecording: () => isRecordingRef.current,
-      isProcessing: () => isProcessingRef.current,
+      snapshot: () => captureLifecycleRef.current,
     });
   }, []);
 

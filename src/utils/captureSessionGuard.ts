@@ -1,28 +1,20 @@
+import type { CaptureLifecycleSnapshot } from '../services/captureLifecycle.ts';
+
 export const isCaptureSessionAlreadyActiveError = (error: unknown) =>
   String(error).includes('capture_session_already_active');
 
 export const shouldPreventCaptureUnload = ({
-  recording,
-  processing,
-}: {
-  recording: boolean;
-  processing: boolean;
-}) => recording || processing;
+  state,
+}: CaptureLifecycleSnapshot) => state !== 'idle';
 
 export const attachCaptureUnloadGuard = (
   target: EventTarget,
   state: {
-    isRecording: () => boolean;
-    isProcessing: () => boolean;
+    snapshot: () => CaptureLifecycleSnapshot;
   },
 ) => {
   const handleBeforeUnload = (event: Event) => {
-    if (
-      !shouldPreventCaptureUnload({
-        recording: state.isRecording(),
-        processing: state.isProcessing(),
-      })
-    ) {
+    if (!shouldPreventCaptureUnload(state.snapshot())) {
       return;
     }
     event.preventDefault();

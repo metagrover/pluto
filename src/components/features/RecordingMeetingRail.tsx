@@ -98,58 +98,54 @@ export const RecordingMeetingRail = forwardRef<HTMLElement, Props>(
               placeholder="Start typing. Pluto will preserve your words and enrich them after the meeting."
             />
           </section>
-          <details className="rail-meta">
-            <summary>Meeting details</summary>
-            <div className="rail-participants">
-              <h3 id="participants-heading">
-                <UserRound aria-hidden="true" size={15} /> Participants
-              </h3>
-              <div className="participant-list">
-                {participants.map((participant, index) => (
-                  <span
-                    className="participant-chip"
-                    key={`${participant}-${index}`}
-                  >
-                    {participant}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${participant}`}
-                      onClick={() => onRemoveParticipant(index)}
-                    >
-                      <X aria-hidden="true" size={12} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-              <div className="participant-add">
-                <label className="sr-only" htmlFor="recording-participant">
-                  Add participant
-                </label>
-                <input
-                  id="recording-participant"
-                  value={participantInput}
-                  onChange={(event) =>
-                    onParticipantInputChange(event.target.value)
-                  }
-                  onKeyDown={(event) =>
-                    event.key === 'Enter' && onAddParticipant()
-                  }
-                  placeholder="Add a person"
-                />
-                <button
-                  type="button"
-                  onClick={onAddParticipant}
-                  aria-label="Add participant"
+          <section
+            className="rail-participants"
+            aria-labelledby="participants-heading"
+          >
+            <h3 id="participants-heading">
+              <UserRound aria-hidden="true" size={15} /> Participants
+            </h3>
+            <div className="participant-list">
+              {participants.map((participant, index) => (
+                <span
+                  className="participant-chip"
+                  key={`${participant}-${index}`}
                 >
-                  <Plus aria-hidden="true" size={15} />
-                </button>
-              </div>
+                  {participant}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${participant}`}
+                    onClick={() => onRemoveParticipant(index)}
+                  >
+                    <X aria-hidden="true" size={12} />
+                  </button>
+                </span>
+              ))}
             </div>
-          </details>
-          <details className="rail-diagnostics">
-            <summary>Capture diagnostics</summary>
-            <p>Input details appear here when capture needs attention.</p>
-          </details>
+            <div className="participant-add">
+              <label className="sr-only" htmlFor="recording-participant">
+                Add participant
+              </label>
+              <input
+                id="recording-participant"
+                value={participantInput}
+                onChange={(event) =>
+                  onParticipantInputChange(event.target.value)
+                }
+                onKeyDown={(event) =>
+                  event.key === 'Enter' && onAddParticipant()
+                }
+                placeholder="Add a person"
+              />
+              <button
+                type="button"
+                onClick={onAddParticipant}
+                aria-label="Add participant"
+              >
+                <Plus aria-hidden="true" size={15} />
+              </button>
+            </div>
+          </section>
         </div>
       </aside>
     );

@@ -212,11 +212,12 @@ describe('recording workspace components', () => {
     expect(html).toContain('Saved locally');
     expect(html).toContain('Meeting title');
     expect(html).toContain('value="Launch review"');
-    expect(html.indexOf('id="recording-notes"')).toBeLessThan(
-      html.indexOf('Meeting details'),
-    );
     expect(html).toContain('Remove Avery');
-    expect(html).toContain('Meeting details');
+    expect(html).toContain('Participants');
+    expect(html).toContain('Add a person');
+    expect(html).not.toContain('Meeting details');
+    expect(html).not.toContain('Capture diagnostics');
+    expect(html).not.toContain('<details');
   });
 
   it('saves live scratchpad text locally after typing pauses', async () => {

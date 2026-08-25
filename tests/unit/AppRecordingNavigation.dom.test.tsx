@@ -12,6 +12,7 @@ let recordingCompleted = false;
 let holdRecordingStart = false;
 let completePendingStart: (() => void) | null = null;
 let completePendingStop: (() => void) | null = null;
+let startAdmissionCount = 0;
 
 vi.mock('../../src/components/AudioManager', () => ({
   AudioManager: ({
@@ -25,6 +26,7 @@ vi.mock('../../src/components/AudioManager', () => ({
     onSessionComplete,
     onCaptureHealthChange,
     onLiveTranscriptIntegrityChange,
+    onCaptureLifecycleChange,
   }: {
     onStartSessionRef?: React.MutableRefObject<(() => void) | null>;
     onStopSessionRef?: React.MutableRefObject<(() => void) | null>;
@@ -47,10 +49,15 @@ vi.mock('../../src/components/AudioManager', () => ({
       captureDurability: 'healthy';
     }) => void;
     onLiveTranscriptIntegrityChange?: (state: 'healthy') => void;
+    onCaptureLifecycleChange?: (snapshot: {
+      state: 'idle' | 'starting' | 'recording' | 'sealing';
+    }) => void;
   }) => {
     useEffect(() => {
       if (onStartSessionRef) {
         onStartSessionRef.current = () => {
+          startAdmissionCount += 1;
+          onCaptureLifecycleChange?.({ state: 'starting' });
           onStartingChange?.(true);
           const complete = () => {
             onRecordingStarted?.(Date.now());
@@ -63,6 +70,7 @@ vi.mock('../../src/components/AudioManager', () => ({
             onProcessingChange?.(false);
             onRecordingChange?.(true);
             onStartingChange?.(false);
+            onCaptureLifecycleChange?.({ state: 'recording' });
           };
           if (holdRecordingStart) completePendingStart = complete;
           else complete();
@@ -70,6 +78,7 @@ vi.mock('../../src/components/AudioManager', () => ({
       }
       if (onStopSessionRef) {
         onStopSessionRef.current = () => {
+          onCaptureLifecycleChange?.({ state: 'sealing' });
           onRecordingChange?.(false);
           onProcessingChange?.(true);
           onFinalizationStarted?.({
@@ -82,7 +91,7 @@ vi.mock('../../src/components/AudioManager', () => ({
           });
           completePendingStop = () => {
             recordingCompleted = true;
-            onProcessingChange?.(false);
+            onCaptureLifecycleChange?.({ state: 'idle' });
             void onSessionComplete?.('meeting-just-stopped');
           };
         };
@@ -102,6 +111,7 @@ vi.mock('../../src/components/AudioManager', () => ({
       onSessionComplete,
       onCaptureHealthChange,
       onLiveTranscriptIntegrityChange,
+      onCaptureLifecycleChange,
     ]);
     return null;
   },
@@ -121,6 +131,7 @@ describe('App recording navigation', () => {
     holdRecordingStart = false;
     completePendingStart = null;
     completePendingStop = null;
+    startAdmissionCount = 0;
     container = document.createElement('div');
     document.body.append(container);
     window.__PLUTO_BROWSER_PREVIEW__ = false;
@@ -296,7 +307,7 @@ describe('App recording navigation', () => {
     });
 
     expect(container.textContent).toContain('Preparing your meeting');
-    expect(container.textContent).toContain('Preparing meeting');
+    expect(container.textContent).toContain('Finishing meeting');
     expect(container.textContent).toContain(
       'Transcript and notes will appear here as they become ready.',
     );
@@ -312,6 +323,8 @@ describe('App recording navigation', () => {
     });
 
     expect(container.textContent).toContain('Just stopped meeting');
+    expect(container.textContent).toContain('New meeting');
+    expect(container.textContent).not.toContain('Preparing meeting');
     expect(container.textContent).toContain('< 1 min');
     expect(container.textContent).not.toContain('0 min');
     expect(container.textContent).toContain(
@@ -349,6 +362,14 @@ describe('App recording navigation', () => {
     expect(container.textContent).toContain(
       'Visible as soon as recording stops.',
     );
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'n', metaKey: true }),
+      );
+      await flushPromises();
+    });
+    expect(startAdmissionCount).toBe(2);
 
     await act(async () => root.unmount());
   });

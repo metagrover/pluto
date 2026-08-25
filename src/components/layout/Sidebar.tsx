@@ -14,6 +14,10 @@ import {
   Trash2,
   Users,
 } from 'lucide-react';
+import {
+  type CaptureLifecycleState,
+  resolveCaptureAction,
+} from '../../services/captureLifecycle';
 import type { Meeting } from '../../types';
 import { sortMeetingsByStartTime } from '../../utils/meetingOrdering';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
@@ -37,7 +41,7 @@ interface SidebarProps {
   safeMeetings: Meeting[];
   onStartRecording: () => void;
   isRecordingActive?: boolean;
-  recordingState?: 'idle' | 'starting' | 'recording' | 'processing';
+  recordingState?: CaptureLifecycleState;
   onReturnToRecording?: () => void;
   onOpenSearch: () => void;
   handleDeleteMeeting: (id: string | number) => void;
@@ -63,15 +67,8 @@ export const Sidebar = ({
 }: SidebarProps) => {
   const resolvedRecordingState =
     recordingState ?? (isRecordingActive ? 'recording' : 'idle');
-  const recordingBusy = resolvedRecordingState !== 'idle';
-  const recordingLabel =
-    resolvedRecordingState === 'starting'
-      ? 'Starting meeting'
-      : resolvedRecordingState === 'processing'
-        ? 'Preparing meeting'
-        : resolvedRecordingState === 'recording'
-          ? 'Return to recording'
-          : 'New meeting';
+  const captureAction = resolveCaptureAction({ state: resolvedRecordingState });
+  const recordingBusy = captureAction.command !== 'start';
   return (
     <aside
       className={`
@@ -101,17 +98,20 @@ export const Sidebar = ({
         <button
           type="button"
           onClick={
-            recordingBusy
-              ? (onReturnToRecording ?? onStartRecording)
-              : onStartRecording
+            captureAction.command === 'start'
+              ? onStartRecording
+              : captureAction.command === 'return'
+                ? (onReturnToRecording ?? onStartRecording)
+                : undefined
           }
+          disabled={!captureAction.enabled}
           className="flex min-h-[34px] w-full items-center gap-2 rounded-lg px-3 border border-black/5 dark:border-white/10 bg-white dark:bg-white/10 hover:border-black/15 dark:hover:border-white/20 hover:shadow-[0_0_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_0_12px_rgba(255,255,255,0.08)] text-pro-text-main transition-all duration-300 focus-visible:outline-none group shadow-[0_1px_2px_rgba(0,0,0,0.04)] mt-1"
         >
           {recordingBusy ? (
             <span
               aria-hidden="true"
               className={`h-2 w-2 shrink-0 rounded-full ${
-                resolvedRecordingState === 'processing'
+                resolvedRecordingState === 'sealing'
                   ? 'bg-pro-warning shadow-[0_0_0_3px_hsl(var(--pro-warning)/0.14)]'
                   : resolvedRecordingState === 'starting'
                     ? 'animate-pulse bg-pro-accent shadow-[0_0_0_3px_hsl(var(--pro-accent)/0.14)]'
@@ -126,7 +126,7 @@ export const Sidebar = ({
             />
           )}
           <span className="flex-1 text-left text-[13px] font-medium">
-            {recordingLabel}
+            {captureAction.label}
           </span>
           {!recordingBusy && (
             <kbd className="font-sans text-[11px] font-medium text-pro-text-muted/60 opacity-0 group-hover:opacity-100 transition-opacity">
