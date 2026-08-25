@@ -1,6 +1,9 @@
 export type TranscriptionPolicyRole = 'live_preview' | 'final_validation';
 
-export type TranscriptionEngine = 'mlx_whisper' | 'parakeet_coreml';
+export type TranscriptionEngine =
+  | 'mlx_whisper'
+  | 'parakeet_eou_320ms'
+  | 'parakeet_coreml';
 
 export type TranscriptionModel = 'base' | 'parakeet-tdt-0.6b-v3';
 
@@ -70,6 +73,8 @@ export type TranscriptionResult = {
 export type TranscriptionRuntimeHealth = {
   ready: boolean;
   engine: TranscriptionEngine;
+  liveEngine?: 'parakeet_eou_320ms';
+  modelVersion?: string;
   providerVersion?: string;
   modelBundleVersion?: string;
   reason?: string;

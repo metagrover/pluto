@@ -123,6 +123,8 @@ export class ParakeetFinalClient {
           return {
             ready: true,
             engine: 'parakeet_coreml' as const,
+            liveEngine: 'parakeet_eou_320ms' as const,
+            modelVersion,
             providerVersion: 'FluidAudio-0.15.5',
             modelBundleVersion: modelVersion,
           };

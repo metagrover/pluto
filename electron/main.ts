@@ -338,8 +338,6 @@ app.on('activate', () => {
   }
 });
 
-import { resolveBackendOptions } from '../src/utils/transcriptionBackendConfig';
-import { resolveLiveChunkModel } from '../src/utils/transcriptionSettings';
 import { selectTranscriptionVocabulary } from '../src/utils/transcriptionVocabulary';
 // Module imports
 import { handleActionCommitmentReview } from './actionCommitmentReviewIpc';
@@ -394,12 +392,6 @@ import {
   cleanTranscriptSegments,
   shouldCleanupTranscriptOnSave,
 } from './transcriptCleanup';
-import {
-  getTranscriptionBackendStatus,
-  listTranscriptionBackends,
-  transcribeWithBackend,
-} from './transcription';
-import { mlxPreview } from './transcription/mlxPreviewClient';
 import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
 
 // Background task management for cancellation
@@ -522,7 +514,6 @@ app.on('before-quit', async () => {
   parakeetShadowCoordinator = null;
   parakeetRuntimeHost?.shutdown();
   parakeetRuntimeHost = null;
-  await mlxPreview.stop();
 });
 
 app.whenReady().then(async () => {
@@ -575,25 +566,6 @@ app.whenReady().then(async () => {
     trial: dualShadowTrial,
     store: rolloutStore,
     ownerToken: rolloutOwnerToken,
-  });
-
-  // Local transcription handlers. IPC names remain stable for compatibility.
-  ipcMain.handle('MLX_PREVIEW_CHECK_PYTHON', async () => {
-    return await mlxPreview.checkPython();
-  });
-
-  ipcMain.handle('MLX_PREVIEW_START', async () => {
-    await mlxPreview.start();
-    return { success: true };
-  });
-
-  ipcMain.handle('MLX_PREVIEW_STOP', async () => {
-    await mlxPreview.stop();
-    return { success: true };
-  });
-
-  ipcMain.handle('MLX_PREVIEW_HEALTH', async () => {
-    return await mlxPreview.health();
   });
 
   ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', async () => ({
@@ -666,112 +638,10 @@ app.whenReady().then(async () => {
       }),
   );
 
-  ipcMain.handle('CANCEL_MEETING_TRANSCRIPTION', async (_event, meetingId) => {
-    const normalizedMeetingId = String(meetingId);
-    abortMeetingTasks(normalizedMeetingId);
-    const meetingWorkCount =
-      activeTranscriptionMeetings.get(normalizedMeetingId) || 0;
-    const sidecarTerminated = await mlxPreview.recycleOwnedProcessIf(
-      () =>
-        activeTranscriptionCount > 0 &&
-        activeTranscriptionCount === meetingWorkCount,
-    );
-    return { cancelled: true, sidecarTerminated };
+  ipcMain.handle('CANCEL_MEETING_TRANSCRIPTION', (_event, meetingId) => {
+    abortMeetingTasks(String(meetingId));
+    return { cancelled: true };
   });
-
-  ipcMain.handle(
-    'MLX_PREVIEW_TRANSCRIBE',
-    async (_event, { audioPath, options }) => {
-      beginTranscriptionWork();
-      try {
-        const signal = options?.meetingId
-          ? getAbortSignalForMeeting(options.meetingId)
-          : undefined;
-        return await mlxPreview.transcribe(audioPath, { ...options, signal });
-      } finally {
-        endTranscriptionWork();
-      }
-    },
-  );
-
-  ipcMain.handle('MLX_PREVIEW_LIST_MODELS', async () => {
-    return await mlxPreview.listModels();
-  });
-
-  ipcMain.handle('WHISPER_DIARIZATION_MODEL_STATUS', async () => {
-    return await mlxPreview.getDiarizationModelReadiness();
-  });
-
-  ipcMain.handle('WHISPER_PREPARE_DIARIZATION_MODELS', async () => {
-    return await mlxPreview.prepareDiarizationModels();
-  });
-
-  ipcMain.handle('WHISPER_ROLLBACK_DIARIZATION_MODELS', async () => {
-    return await mlxPreview.rollbackDiarizationModels();
-  });
-
-  ipcMain.handle(
-    'WHISPER_ALIGNED_ENERGY',
-    async (_event, micAudioPath, systemAudioPath) => {
-      return await mlxPreview.getAlignedEnergy(micAudioPath, systemAudioPath);
-    },
-  );
-
-  ipcMain.handle('WHISPER_LIST_BACKENDS', async () => {
-    return listTranscriptionBackends();
-  });
-
-  ipcMain.handle('WHISPER_BACKEND_HEALTH', async (_event, backend) => {
-    return await getTranscriptionBackendStatus(backend);
-  });
-
-  ipcMain.handle(
-    'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
-    async (_event, audioPath, options = {}) => {
-      const meetingId = options.meetingId ? String(options.meetingId) : null;
-      console.log('[Pluto] Transcription request started');
-
-      const start = Date.now();
-      beginTranscriptionWork();
-      beginMeetingTranscription(meetingId);
-      try {
-        const signal = meetingId
-          ? getAbortSignalForMeeting(meetingId)
-          : undefined;
-        const result = await transcribeWithBackend(audioPath, {
-          ...options,
-          signal,
-        });
-        const durationMs = Date.now() - start;
-        console.log(`[Pluto] Transcription completed in ${durationMs}ms`);
-        return result;
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          console.log('[Pluto] Transcription request aborted');
-          return {
-            segments: [],
-            language: 'en',
-            duration: 0,
-            meta: {
-              backend: 'mlx_preview',
-              preset: options.preset || 'balanced',
-              model: options.model || 'small',
-              device: 'mlx',
-              computeType: 'float16',
-              canonicalSource: options.canonicalSource,
-              diarization: Boolean(options.diarize),
-              elapsedMs: Date.now() - start,
-              providerLabel: 'Aborted',
-            },
-          };
-        }
-        throw err;
-      } finally {
-        endMeetingTranscription(meetingId);
-        endTranscriptionWork();
-      }
-    },
-  );
 
   // Audio recording handlers
   let recorderProcess: ChildProcess | null = null;
@@ -3161,31 +3031,6 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  try {
-    await mlxPreview.start();
-    const health = await mlxPreview.health();
-    await mlxPreview.setConfig({
-      model: 'base',
-      device: 'mlx',
-      computeType: 'float16',
-      language: db.getSetting('transcription_language') || 'en',
-    });
-    const activeHealth = await mlxPreview.health();
-    if (
-      health.mlx_available !== true ||
-      activeHealth.engine !== 'mlx_whisper'
-    ) {
-      throw new Error('MLX Whisper did not become the active engine');
-    }
-    console.log(
-      `[Pluto] Live preview engine ready: ${activeHealth.engine ?? 'unknown'}`,
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn('[Pluto] Transcription engine failed to start:', message);
-    console.log('[Pluto] Transcription engine will retry on first request');
-  }
-
   const interruptedDownstreamRuns = db.expireInterruptedDownstreamProcessing();
   if (interruptedDownstreamRuns > 0) {
     console.log(
@@ -3224,12 +3069,6 @@ app.whenReady().then(async () => {
   }
 
   try {
-    const resolvedRecoveryTranscription = resolveBackendOptions({
-      backend: 'mlx_preview',
-      preset: 'balanced',
-      model: 'base',
-      language: db.getSetting('transcription_language') || 'en',
-    });
     const recovery = await recoverInterruptedCaptureJournals(
       getMeetingArtifactsRootDir(),
       {
@@ -3262,19 +3101,11 @@ app.whenReady().then(async () => {
             fs.unlinkSync(outputPath);
           }
         },
-        transcribeChunk: async (inputPath, config, journalDurationSeconds) => {
-          const options = {
-            backend: config.backend,
-            preset: config.preset,
-            model: config.model,
-            device: config.device,
-            computeType: config.computeType,
-            language:
-              config.languageMode === 'fixed'
-                ? (config.requestedLanguage ?? undefined)
-                : undefined,
-            diarize: false,
-          } as Parameters<typeof transcribeWithBackend>[1];
+        transcribeChunk: async (inputPath, _config, journalDurationSeconds) => {
+          if (!parakeetFinalClient) {
+            throw new Error('parakeet_runtime_unavailable');
+          }
+          const recoveryFinalClient = parakeetFinalClient;
           const result = await transcribeJournalAlignedAudio(
             inputPath,
             journalDurationSeconds,
@@ -3282,7 +3113,7 @@ app.whenReady().then(async () => {
               probeDuration: probeAudioDuration,
               createTemporaryPath: () =>
                 path.join(
-                  app.getPath('temp'),
+                  getMeetingArtifactsRootDir(),
                   `capture-transcript-${randomUUID()}.wav`,
                 ),
               trimLeadingOverflow: async ({
@@ -3307,14 +3138,17 @@ app.whenReady().then(async () => {
               },
             },
             async (alignedPath) =>
-              await transcribeWithBackend(alignedPath, options),
+              await recoveryFinalClient.transcribe({
+                meetingId: 'capture-journal-recovery',
+                role: 'final_validation',
+                source: 'mix',
+                audioPath: alignedPath,
+                language: 'en',
+              }),
           );
           return {
             detectedLanguage: result.language ?? null,
-            providerLabel:
-              typeof result.meta?.providerLabel === 'string'
-                ? result.meta.providerLabel
-                : 'local',
+            providerLabel: 'Parakeet (FluidAudio)',
             segments: Array.isArray(result.segments)
               ? normalizeCheckpointWords(
                   result.segments.map((segment) => ({
@@ -3329,16 +3163,13 @@ app.whenReady().then(async () => {
           };
         },
         transcriptionConfig: {
-          backend: resolvedRecoveryTranscription.backend,
-          preset: resolvedRecoveryTranscription.preset,
-          model: resolveLiveChunkModel(resolvedRecoveryTranscription.model),
-          device: 'mlx',
+          backend: 'parakeet',
+          preset: 'balanced',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
           computeType: 'float16',
-          languageMode: resolvedRecoveryTranscription.language
-            ? 'fixed'
-            : 'detected',
-          requestedLanguage:
-            resolvedRecoveryTranscription.language?.toLowerCase() || null,
+          languageMode: 'fixed',
+          requestedLanguage: 'en',
           pipelineVersion: 'live_chunk_v1',
         },
       },

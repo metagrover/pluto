@@ -10,7 +10,7 @@ export type WhisperDevice = 'mlx';
 
 export type WhisperComputeType = 'float16';
 
-export type TranscriptionBackend = 'mlx_preview';
+export type TranscriptionBackend = 'parakeet' | 'mlx_preview';
 
 export type TranscriptionPreset = 'balanced' | 'accuracy_first';
 
@@ -24,27 +24,32 @@ export interface TranscriptionSettings {
 }
 
 export interface ResolvedTranscriptionSettings {
-  backend: TranscriptionBackend;
-  preset: TranscriptionPreset;
-  model: WhisperModel;
-  device: WhisperDevice;
-  computeType: WhisperComputeType;
-  language: string;
+  backend: 'parakeet';
+  preset: 'balanced';
+  model: 'parakeet-tdt-0.6b-v3';
+  device: 'coreml';
+  computeType: 'float16';
+  language: 'en';
+  liveEngine: 'parakeet_eou_320ms';
+  finalEngine: 'parakeet_coreml';
 }
 
 export const DEFAULT_TRANSCRIPTION_SETTINGS: ResolvedTranscriptionSettings = {
-  backend: 'mlx_preview',
+  backend: 'parakeet',
   preset: 'balanced',
-  model: 'base',
-  device: 'mlx',
+  model: 'parakeet-tdt-0.6b-v3',
+  device: 'coreml',
   computeType: 'float16',
   language: 'en',
+  liveEngine: 'parakeet_eou_320ms',
+  finalEngine: 'parakeet_coreml',
 };
 
 export const TRANSCRIPTION_BACKEND_LABELS: Record<
   TranscriptionBackend,
   string
 > = {
+  parakeet: 'Parakeet live and final',
   mlx_preview: 'MLX live preview',
 };
 
@@ -54,22 +59,18 @@ export const TRANSCRIPTION_PRESET_LABELS: Record<TranscriptionPreset, string> =
     accuracy_first: 'Accuracy First',
   };
 
-export const resolveTranscriptionLanguage = (
-  language?: string | null,
-): string => {
-  const trimmed = typeof language === 'string' ? language.trim() : '';
-  return trimmed.length > 0 ? trimmed : DEFAULT_TRANSCRIPTION_SETTINGS.language;
-};
+export const resolveTranscriptionLanguage = (_language?: string | null): 'en' =>
+  'en';
 
 export const resolveTranscriptionBackend = (
   _backend?: string | null,
-): TranscriptionBackend => {
-  return 'mlx_preview';
+): 'parakeet' => {
+  return 'parakeet';
 };
 
 export const resolveTranscriptionPreset = (
   _preset?: string | null,
-): TranscriptionPreset => 'balanced';
+): 'balanced' => 'balanced';
 
 export const resolveTranscriptionSettings = (
   settings?: TranscriptionSettings | null,
@@ -81,6 +82,8 @@ export const resolveTranscriptionSettings = (
     device: DEFAULT_TRANSCRIPTION_SETTINGS.device,
     computeType: DEFAULT_TRANSCRIPTION_SETTINGS.computeType,
     language: resolveTranscriptionLanguage(settings?.language),
+    liveEngine: 'parakeet_eou_320ms',
+    finalEngine: 'parakeet_coreml',
   };
 };
 

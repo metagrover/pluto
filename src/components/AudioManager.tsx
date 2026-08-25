@@ -1646,10 +1646,10 @@ export const AudioManager = ({
           canonicalSource: mixedAudioPath ? 'mix' : 'mic',
           postHydrationBleedPass: false,
           transcription: {
-            backend: String(resolvedTranscriptionSettings.backend),
+            backend: String(resolvedTranscriptionSettings.liveEngine),
             preset: String(resolvedTranscriptionSettings.preset),
-            model: String(resolvedTranscriptionSettings.model),
-            device: String(resolvedTranscriptionSettings.device),
+            model: 'parakeet-tdt-0.6b-v3',
+            device: 'coreml',
             computeType: String(resolvedTranscriptionSettings.computeType),
             diarization: false,
             elapsedMs: 0,

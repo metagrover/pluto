@@ -5,276 +5,131 @@ import {
   getRecordingReadinessStatus,
   prepareRecordingReadiness,
 } from '../../electron/recordingReadiness';
-import { mlxPreview } from '../../electron/transcription/mlxPreviewClient';
 import type { ParakeetFinalClient } from '../../electron/transcription/parakeetFinalClient';
 
 vi.mock('node:fs');
 vi.mock('node:https', () => ({
   default: {
-    get: vi.fn((url, cb) => {
-      return {
-        on: (event: string, handler: any) => {
-          if (event === 'error') handler(new Error('mock'));
-        },
-      };
-    }),
+    get: vi.fn(() => ({
+      on: (event: string, handler: (error: Error) => void) => {
+        if (event === 'error') handler(new Error('mock'));
+      },
+    })),
   },
 }));
 vi.mock('node:child_process', () => ({
-  execFile: vi.fn((cmd, args, cb) => cb(null)),
+  execFile: vi.fn((_cmd, _args, cb) => cb(null)),
 }));
 vi.mock('electron', () => ({
-  systemPreferences: {
-    getMediaAccessStatus: vi.fn(),
-  },
-  app: {
-    isPackaged: false,
-    getPath: vi.fn(() => '/mock/userData'),
-  },
-}));
-vi.mock('../../electron/transcription/mlxPreviewClient', () => ({
-  mlxPreview: {
-    health: vi.fn(),
-    prepareDiarizationModels: vi.fn(),
-  },
+  systemPreferences: { getMediaAccessStatus: vi.fn() },
+  app: { isPackaged: false, getPath: vi.fn(() => '/mock/userData') },
 }));
 
+const READY_CAPABILITY = {
+  ready: true,
+  engine: 'parakeet_coreml',
+  liveEngine: 'parakeet_eou_320ms',
+  modelVersion: 'test-model-v1',
+} as const;
+
 describe('recordingReadiness', () => {
-  let mockParakeetClient: any;
+  let mockParakeetClient: ParakeetFinalClient;
   const parakeetModelRoot = '/mock/parakeet/model/root';
   const audiocapPath = '/mock/audiocap';
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockParakeetClient = {
-      prepare: vi.fn().mockResolvedValue(true),
+      prepare: vi.fn().mockResolvedValue(READY_CAPABILITY),
     } as unknown as ParakeetFinalClient;
-
-    // Default to fully ready state
     vi.mocked(fs.existsSync).mockReturnValue(true);
-    vi.mocked(fs.readdirSync).mockReturnValue(['model.bin'] as any);
-    vi.mocked(fs.accessSync).mockImplementation(() => {});
-    vi.mocked(fs.unlink).mockImplementation((path, cb) => cb(null));
+    vi.mocked(fs.accessSync).mockImplementation(() => undefined);
+    vi.mocked(fs.unlink).mockImplementation((_path, cb) => cb(null));
     vi.mocked(systemPreferences.getMediaAccessStatus).mockReturnValue(
       'granted',
     );
-    vi.mocked(mlxPreview.health).mockResolvedValue({
-      engine: 'mlx_whisper',
-      mlx_available: true,
-    } as any);
-
-    // Mock platform/arch to avoid issues
-    Object.defineProperty(process, 'arch', {
-      value: 'arm64',
-      configurable: true,
-    });
     Object.defineProperty(process, 'platform', {
       value: 'darwin',
       configurable: true,
     });
   });
 
-  describe('getRecordingReadinessStatus', () => {
-    it('returns ready when all checks pass', async () => {
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
+  const status = () =>
+    getRecordingReadinessStatus({
+      parakeetFinalClient: mockParakeetClient,
+      parakeetModelRoot,
+      audiocapPath,
+    });
 
-      expect(status.ready).toBe(true);
-      expect(status.blockers).toHaveLength(0);
-      expect(status.details).toEqual({
+  it('is ready only when verified Parakeet final and EOU capability is present', async () => {
+    expect(await status()).toEqual({
+      ready: true,
+      blockers: [],
+      details: {
         parakeetClient: true,
         parakeetModel: true,
-        mlxAvailable: true,
+        parakeetEouReady: true,
         audiocapExists: true,
         audiocapExecutable: true,
         micPermission: true,
         systemAudioPermission: true,
-      });
+      },
     });
-
-    it('returns parakeet_client_missing blocker when client is null', async () => {
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: null,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(false);
-      expect(status.blockers).toContain('parakeet_client_missing');
-      expect(status.details.parakeetClient).toBe(false);
-    });
-
-    it('returns parakeet_model_missing blocker when model directory is empty', async () => {
-      vi.mocked(fs.readdirSync).mockReturnValue([] as any);
-
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(false);
-      expect(status.blockers).toContain('parakeet_model_missing');
-      expect(status.details.parakeetModel).toBe(false);
-    });
-
-    it('returns mlx_unavailable blocker when on arm64 and mlx is missing', async () => {
-      vi.mocked(mlxPreview.health).mockResolvedValue({
-        engine: 'unavailable',
-        mlx_available: false,
-      } as any);
-
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(false);
-      expect(status.blockers).toContain('mlx_unavailable');
-      expect(status.details.mlxAvailable).toBe(false);
-    });
-
-    it('ignores mlx availability on non-arm64 architecture', async () => {
-      Object.defineProperty(process, 'arch', {
-        value: 'x64',
-        configurable: true,
-      });
-      vi.mocked(mlxPreview.health).mockResolvedValue({
-        engine: 'unavailable',
-        mlx_available: false,
-      } as any);
-
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(true);
-      expect(status.blockers).not.toContain('mlx_unavailable');
-      expect(status.details.mlxAvailable).toBe(true);
-    });
-
-    it('returns audiocap_missing blocker when audiocap does not exist', async () => {
-      vi.mocked(fs.existsSync).mockImplementation(
-        (path) => path !== audiocapPath,
-      );
-
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(false);
-      expect(status.blockers).toContain('audiocap_missing');
-      expect(status.details.audiocapExists).toBe(false);
-    });
-
-    it('returns audiocap_not_executable blocker when audiocap is not executable', async () => {
-      vi.mocked(fs.accessSync).mockImplementation((path) => {
-        if (path === audiocapPath) throw new Error('EACCES');
-      });
-
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(false);
-      expect(status.blockers).toContain('audiocap_not_executable');
-      expect(status.details.audiocapExecutable).toBe(false);
-    });
-
-    it('returns mic_permission_missing blocker when microphone is not granted', async () => {
-      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(
-        (mediaType) => {
-          if (mediaType === 'microphone') return 'denied';
-          return 'granted';
-        },
-      );
-
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(false);
-      expect(status.blockers).toContain('mic_permission_missing');
-      expect(status.details.micPermission).toBe(false);
-    });
-
-    it('returns system_audio_permission_missing blocker when screen is not granted on darwin', async () => {
-      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(
-        (mediaType) => {
-          if (mediaType === 'screen') return 'denied';
-          return 'granted';
-        },
-      );
-
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(false);
-      expect(status.blockers).toContain('system_audio_permission_missing');
-      expect(status.details.systemAudioPermission).toBe(false);
-    });
-
-    it('ignores system audio permission on non-darwin platform', async () => {
-      Object.defineProperty(process, 'platform', {
-        value: 'win32',
-        configurable: true,
-      });
-      vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(
-        () => 'denied',
-      );
-
-      const status = await getRecordingReadinessStatus({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.blockers).not.toContain('system_audio_permission_missing');
-      expect(status.details.systemAudioPermission).toBe(true);
-    });
+    await status();
+    expect(mockParakeetClient.prepare).toHaveBeenCalledTimes(1);
   });
 
-  describe('prepareRecordingReadiness', () => {
-    it('calls prepare on parakeet and mlx, and returns new status', async () => {
-      const status = await prepareRecordingReadiness({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(mockParakeetClient.prepare).toHaveBeenCalled();
-      expect(mlxPreview.prepareDiarizationModels).toHaveBeenCalled();
-      expect(status.ready).toBe(true);
+  it('fails closed when the client is missing', async () => {
+    const result = await getRecordingReadinessStatus({
+      parakeetFinalClient: null,
+      parakeetModelRoot,
+      audiocapPath,
     });
+    expect(result.blockers).toContain('parakeet_client_missing');
+    expect(result.blockers).toContain('parakeet_eou_unavailable');
+  });
 
-    it('tolerates prepare failures and still returns status', async () => {
-      mockParakeetClient.prepare.mockRejectedValue(new Error('Network error'));
-      vi.mocked(mlxPreview.prepareDiarizationModels).mockRejectedValue(
-        new Error('Disk error'),
-      );
-
-      const status = await prepareRecordingReadiness({
-        parakeetFinalClient: mockParakeetClient,
-        parakeetModelRoot,
-        audiocapPath,
-      });
-
-      expect(status.ready).toBe(true); // Status is evaluated again, based on disk state which is mocked to true
+  it('fails closed when prepare lacks the EOU capability', async () => {
+    vi.mocked(mockParakeetClient.prepare).mockResolvedValue({
+      ready: true,
+      engine: 'parakeet_coreml',
+      modelBundleVersion: 'legacy-final-only',
     });
+    const result = await status();
+    expect(result.ready).toBe(false);
+    expect(result.blockers).toContain('parakeet_eou_unavailable');
+    expect(result.details.parakeetEouReady).toBe(false);
+  });
+
+  it('uses verified prepare rather than directory non-emptiness', async () => {
+    vi.mocked(mockParakeetClient.prepare).mockRejectedValue(
+      new Error('parakeet_model_bundle_invalid'),
+    );
+    const result = await status();
+    expect(result.blockers).toContain('parakeet_model_missing');
+    expect(result.blockers).toContain('parakeet_eou_unavailable');
+    expect(fs.readdirSync).not.toHaveBeenCalled();
+  });
+
+  it('preserves AudioCap and permission blockers', async () => {
+    vi.mocked(fs.existsSync).mockImplementation(
+      (value) => value !== audiocapPath,
+    );
+    vi.mocked(systemPreferences.getMediaAccessStatus).mockImplementation(
+      (kind) => (kind === 'microphone' ? 'denied' : 'granted'),
+    );
+    const result = await status();
+    expect(result.blockers).toContain('audiocap_missing');
+    expect(result.blockers).toContain('mic_permission_missing');
+  });
+
+  it('prepares the verified Parakeet bundle exactly once', async () => {
+    const result = await prepareRecordingReadiness({
+      parakeetFinalClient: mockParakeetClient,
+      parakeetModelRoot,
+      audiocapPath,
+    });
+    expect(result.ready).toBe(true);
+    expect(mockParakeetClient.prepare).toHaveBeenCalledTimes(1);
   });
 });

@@ -74,6 +74,9 @@ describe('ParakeetFinalClient', () => {
 
     await expect(first).resolves.toMatchObject({
       ready: true,
+      engine: 'parakeet_coreml',
+      liveEngine: 'parakeet_eou_320ms',
+      modelVersion: 'test-model-v1',
       modelBundleVersion: 'test-model-v1',
     });
     await expect(second).resolves.toEqual(await first);

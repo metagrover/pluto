@@ -391,31 +391,31 @@ git commit -m "feat: make Parakeet EOU the live recording engine"
 - Test: `tests/unit/transcriptionSettingsSurface.test.ts`
 - Test: `tests/unit/transcriptionArchitectureCleanup.test.ts`
 
-- [ ] **Step 1: Change tests first**
+- [x] **Step 1: Change tests first**
 
 Replace `mlxAvailable` with `parakeetEouReady`. A prepared final client without EOU capability must return blocker `parakeet_eou_unavailable`. Preparing readiness calls Parakeet prepare/capability exactly once and never calls `mlxPreview.health`, `start`, `transcribe`, or `prepareDiarizationModels`. Setup displays an English Parakeet live requirement. Settings resolve one English policy and expose no live backend/model/language selector.
 
 Add a source-boundary test that active recording/readiness/final transcription modules do not import `mlxPreviewClient`, while allowing MLX files to remain elsewhere for the later deletion phase.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `pnpm exec vitest run tests/unit/recordingReadiness.test.ts tests/unit/SetupWizard.dom.test.tsx tests/unit/transcriptionSettings.test.ts tests/unit/transcriptionSettingsSurface.test.ts tests/unit/transcriptionArchitectureCleanup.test.ts`
 
 Expected: old MLX readiness expectations and `mlx_preview` settings fail.
 
-- [ ] **Step 3: Implement English EOU readiness**
+- [x] **Step 3: Implement English EOU readiness**
 
 Have Parakeet `prepare()` return `{ ready: true, engine: 'parakeet_coreml', liveEngine: 'parakeet_eou_320ms', modelVersion }` only after the atomic bundle verifies. `getRecordingReadinessStatus` consumes that capability instead of checking directory non-emptiness. Remove all MLX calls from readiness. Preserve AudioCap and permission blockers unchanged.
 
 Collapse transcription settings to English-only product intent while retaining tolerant parsing for legacy persisted values. Runtime resolution always returns `language: 'en'`, live engine `parakeet_eou_320ms`, and final engine `parakeet_coreml`.
 
-- [ ] **Step 4: Run focused tests and lint**
+- [x] **Step 4: Run focused tests and lint**
 
 Run: `pnpm exec vitest run tests/unit/recordingReadiness.test.ts tests/unit/SetupWizard.dom.test.tsx tests/unit/transcriptionSettings.test.ts tests/unit/transcriptionSettingsSurface.test.ts tests/unit/transcriptionArchitectureCleanup.test.ts && pnpm exec biome lint electron/recordingReadiness.ts src/components/Setup/SetupWizard.tsx src/utils/transcriptionSettings.ts src/services/transcription/policy.ts`
 
 Expected: all tests and lint pass.
 
-- [ ] **Step 5: Commit readiness policy**
+- [x] **Step 5: Commit readiness policy**
 
 ```bash
 git add electron/recordingReadiness.ts electron/main.ts src/components/Setup/SetupWizard.tsx src/utils/transcriptionSettings.ts src/services/transcription/policy.ts tests/unit

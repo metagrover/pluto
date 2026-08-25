@@ -2,10 +2,7 @@ import {
   type CaptureActivityEvidence,
   verifyCaptureActivityEvidence,
 } from './transcriptActivityEvidence.ts';
-import {
-  type ResolvedBackendOptions,
-  resolveBackendOptions,
-} from './transcriptionBackendConfig.ts';
+import type { ResolvedBackendOptions } from './transcriptionBackendConfig.ts';
 import type { ResolvedTranscriptionSettings } from './transcriptionSettings.ts';
 
 export type RecordingStopSnapshot = {
@@ -31,27 +28,10 @@ export type SpeakerAttributionRetryPlan = {
   strongerOptions: ResolvedBackendOptions | null;
 };
 
-const STRONGEST_ATTRIBUTION_POLICY = resolveBackendOptions({
-  backend: 'mlx_preview',
-  preset: 'accuracy_first',
-});
-
 export const getStrongerSpeakerAttributionPolicy = (
-  settings: ResolvedTranscriptionSettings,
+  _settings: ResolvedTranscriptionSettings,
 ): ResolvedBackendOptions | null => {
-  const current = resolveBackendOptions(settings);
-
-  if (
-    current.backend === STRONGEST_ATTRIBUTION_POLICY.backend &&
-    current.preset === STRONGEST_ATTRIBUTION_POLICY.preset &&
-    current.model === STRONGEST_ATTRIBUTION_POLICY.model &&
-    current.device === STRONGEST_ATTRIBUTION_POLICY.device &&
-    current.computeType === STRONGEST_ATTRIBUTION_POLICY.computeType
-  ) {
-    return null;
-  }
-
-  return STRONGEST_ATTRIBUTION_POLICY;
+  return null;
 };
 
 export const buildSpeakerAttributionRetryPlan = ({

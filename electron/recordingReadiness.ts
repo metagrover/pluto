@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import https from 'node:https';
 import path from 'node:path';
 import { app, systemPreferences } from 'electron';
-import { mlxPreview } from './transcription/mlxPreviewClient';
+import type { TranscriptionRuntimeHealth } from '../src/services/transcription/contracts';
 import type { ParakeetFinalClient } from './transcription/parakeetFinalClient';
 
 export interface ReadinessStatus {
@@ -12,7 +12,7 @@ export interface ReadinessStatus {
   details: {
     parakeetClient: boolean;
     parakeetModel: boolean;
-    mlxAvailable: boolean;
+    parakeetEouReady: boolean;
     audiocapExists: boolean;
     audiocapExecutable: boolean;
     micPermission: boolean;
@@ -20,15 +20,31 @@ export interface ReadinessStatus {
   };
 }
 
-export async function getRecordingReadinessStatus(options: {
+type ReadinessOptions = {
   parakeetFinalClient: ParakeetFinalClient | null;
   parakeetModelRoot: string;
   audiocapPath: string;
-}): Promise<ReadinessStatus> {
+};
+
+const verifiedCapabilities = new WeakMap<
+  ParakeetFinalClient,
+  Promise<TranscriptionRuntimeHealth>
+>();
+
+const evaluateRecordingReadiness = (
+  options: ReadinessOptions,
+  capability: TranscriptionRuntimeHealth | null,
+): ReadinessStatus => {
   const details = {
-    parakeetClient: false,
-    parakeetModel: false,
-    mlxAvailable: false,
+    parakeetClient: options.parakeetFinalClient !== null,
+    parakeetModel:
+      capability?.ready === true &&
+      capability.engine === 'parakeet_coreml' &&
+      typeof capability.modelVersion === 'string' &&
+      capability.modelVersion.length > 0,
+    parakeetEouReady:
+      capability?.ready === true &&
+      capability.liveEngine === 'parakeet_eou_320ms',
     audiocapExists: false,
     audiocapExecutable: false,
     micPermission: false,
@@ -36,44 +52,13 @@ export async function getRecordingReadinessStatus(options: {
   };
   const blockers: string[] = [];
 
-  // Parakeet client
-  details.parakeetClient = options.parakeetFinalClient !== null;
   if (!details.parakeetClient) {
     blockers.push('parakeet_client_missing');
-  }
-
-  // Parakeet model probe
-  try {
-    if (fs.existsSync(options.parakeetModelRoot)) {
-      const files = fs.readdirSync(options.parakeetModelRoot);
-      if (files.length > 0) {
-        details.parakeetModel = true;
-      }
-    }
-  } catch (e) {
-    // Ignore
   }
   if (!details.parakeetModel) {
     blockers.push('parakeet_model_missing');
   }
-
-  // MLX availability probe
-  try {
-    const health = await mlxPreview.health();
-    if (health.engine !== 'unavailable') {
-      details.mlxAvailable = true;
-    }
-  } catch (e) {
-    // Ignore
-  }
-
-  if (process.arch === 'arm64' && !details.mlxAvailable) {
-    // For Apple Silicon, we expect MLX to be available
-    blockers.push('mlx_unavailable');
-  } else if (process.arch !== 'arm64') {
-    // For Intel, it's properly unavailable, so it shouldn't block recording
-    details.mlxAvailable = true;
-  }
+  if (!details.parakeetEouReady) blockers.push('parakeet_eou_unavailable');
 
   // Audiocap
   try {
@@ -112,41 +97,53 @@ export async function getRecordingReadinessStatus(options: {
     }
   }
 
+  void options.parakeetModelRoot;
   return {
     ready: blockers.length === 0,
     blockers,
     details,
   };
+};
+
+const prepareParakeetCapability = async (
+  client: ParakeetFinalClient | null,
+): Promise<TranscriptionRuntimeHealth | null> => {
+  if (!client) return null;
+  const existing = verifiedCapabilities.get(client);
+  if (existing) return await existing;
+  const preparation = client.prepare();
+  verifiedCapabilities.set(client, preparation);
+  try {
+    return await preparation;
+  } catch (error) {
+    verifiedCapabilities.delete(client);
+    console.error('[Readiness] Parakeet prepare failed:', error);
+    return null;
+  }
+};
+
+export async function getRecordingReadinessStatus(
+  options: ReadinessOptions,
+): Promise<ReadinessStatus> {
+  return evaluateRecordingReadiness(
+    options,
+    await prepareParakeetCapability(options.parakeetFinalClient),
+  );
 }
 
-export async function prepareRecordingReadiness(options: {
-  parakeetFinalClient: ParakeetFinalClient | null;
-  parakeetModelRoot: string;
-  audiocapPath: string;
-}): Promise<ReadinessStatus> {
+export async function prepareRecordingReadiness(
+  options: ReadinessOptions,
+): Promise<ReadinessStatus> {
   try {
     await downloadNativeExecutables();
   } catch (e) {
     console.error('[Readiness] Native executables download failed:', e);
   }
 
-  if (options.parakeetFinalClient) {
-    try {
-      await options.parakeetFinalClient.prepare();
-    } catch (e) {
-      console.error('[Readiness] Parakeet prepare failed:', e);
-    }
-  }
-
-  if (process.arch === 'arm64') {
-    try {
-      await mlxPreview.prepareDiarizationModels();
-    } catch (e) {
-      console.error('[Readiness] MLX prepare failed:', e);
-    }
-  }
-
-  return getRecordingReadinessStatus(options);
+  const capability = await prepareParakeetCapability(
+    options.parakeetFinalClient,
+  );
+  return evaluateRecordingReadiness(options, capability);
 }
 
 function downloadBinary(url: string, dest: string): Promise<void> {

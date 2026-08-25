@@ -46,4 +46,19 @@ describe('transcription architecture cleanup', () => {
     expect(existsSync('electron/transcription/mlxPreviewClient.ts')).toBe(true);
     expect(existsSync('python/mlx_transcription_server.py')).toBe(true);
   });
+
+  it('keeps MLX unreachable from active recording and readiness modules', () => {
+    const activeModules = [
+      'electron/main.ts',
+      'electron/recordingReadiness.ts',
+      'src/App.tsx',
+      'src/components/AudioManager.tsx',
+      'src/services/finalTranscription/runPersistedMeetingFinalTranscription.ts',
+    ]
+      .map(read)
+      .join('\n');
+    expect(activeModules).not.toContain('mlxPreviewClient');
+    expect(activeModules).not.toContain('MLX_PREVIEW_');
+    expect(activeModules).not.toContain('mlxPreview.');
+  });
 });

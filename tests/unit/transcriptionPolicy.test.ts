@@ -6,11 +6,11 @@ import {
 } from '../../src/services/transcription/policy.ts';
 
 describe('transcription policy roles', () => {
-  it('keeps responsive MLX base recognition on the live preview role', () => {
+  it('uses English Parakeet EOU recognition on the live preview role', () => {
     expect(resolveTranscriptionPolicy('live_preview')).toEqual({
       role: 'live_preview',
-      engine: 'mlx_whisper',
-      model: 'base',
+      engine: 'parakeet_eou_320ms',
+      model: 'parakeet-tdt-0.6b-v3',
       languageMode: 'explicit',
       maxConcurrency: 1,
       wholeSession: false,

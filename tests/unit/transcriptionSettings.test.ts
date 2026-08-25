@@ -2,24 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_TRANSCRIPTION_SETTINGS,
-  resolveLiveChunkComputeType,
-  resolveLiveChunkModel,
   resolveTranscriptionBackend,
   resolveTranscriptionLanguage,
   resolveTranscriptionPreset,
   resolveTranscriptionSettings,
 } from '../../src/utils/transcriptionSettings';
-
-describe('live chunk transcription settings', () => {
-  it('uses the low-latency base model for live chunks without changing final transcription settings', () => {
-    expect(resolveLiveChunkModel('large-v3')).toBe('base');
-    expect(resolveLiveChunkModel('medium')).toBe('base');
-    expect(resolveLiveChunkModel('small')).toBe('base');
-    expect(resolveLiveChunkModel('base')).toBe('base');
-    expect(resolveLiveChunkModel('tiny')).toBe('tiny');
-    expect(resolveLiveChunkComputeType('float16')).toBe('float16');
-  });
-});
 
 describe('transcription settings', () => {
   it('defaults language to English when unset', () => {
@@ -28,9 +15,9 @@ describe('transcription settings', () => {
     expect(resolveTranscriptionLanguage('  ')).toBe('en');
   });
 
-  it('keeps explicit language overrides', () => {
-    expect(resolveTranscriptionLanguage('es')).toBe('es');
-    expect(resolveTranscriptionLanguage(' fr ')).toBe('fr');
+  it('normalizes every legacy language value to English', () => {
+    expect(resolveTranscriptionLanguage('es')).toBe('en');
+    expect(resolveTranscriptionLanguage(' fr ')).toBe('en');
   });
 
   it('resolves transcription settings with defaults', () => {
@@ -43,10 +30,15 @@ describe('transcription settings', () => {
       DEFAULT_TRANSCRIPTION_SETTINGS.computeType,
     );
     expect(resolved.language).toBe('en');
+    expect(resolved.model).toBe('parakeet-tdt-0.6b-v3');
+    expect(resolved.device).toBe('coreml');
+    expect(resolved.liveEngine).toBe('parakeet_eou_320ms');
+    expect(resolved.finalEngine).toBe('parakeet_coreml');
   });
 
   it('normalizes backend and preset values', () => {
-    expect(resolveTranscriptionBackend('obsolete')).toBe('mlx_preview');
+    expect(resolveTranscriptionBackend('mlx_preview')).toBe('parakeet');
+    expect(resolveTranscriptionBackend('obsolete')).toBe('parakeet');
     expect(resolveTranscriptionBackend('unknown')).toBe(
       DEFAULT_TRANSCRIPTION_SETTINGS.backend,
     );

@@ -78,6 +78,7 @@ export const TRANSCRIPTION_BACKEND_LABELS: Record<
   TranscriptionBackend,
   string
 > = {
+  parakeet: 'Parakeet local transcription',
   mlx_preview: 'MLX live preview',
 };
 

@@ -80,7 +80,6 @@ const meetingPreviewEnabled =
 
 function App() {
   const [setupNeeded, setSetupNeeded] = useState<boolean | null>(null);
-  const [isServerReady, setIsServerReady] = useState(false);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [transcriptValidationRetrying, setTranscriptValidationRetrying] =
     useState(false);
@@ -130,7 +129,6 @@ function App() {
   const [claudeApiKey, setClaudeApiKey] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
-  const [whisperLanguage, setWhisperLanguage] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
   const [updatingDashboardTaskIds, setUpdatingDashboardTaskIds] = useState<
@@ -418,26 +416,6 @@ function App() {
     window.ipcRenderer.invoke('GET_SETTING', 'theme').then((val) => {
       if (val) setTheme(val as 'light' | 'dark' | 'system');
     });
-    window.ipcRenderer
-      .invoke('GET_SETTING', 'transcription_language')
-      .then((val) => {
-        if (val !== null && val !== undefined) setWhisperLanguage(String(val));
-      });
-
-    const checkServer = async () => {
-      try {
-        const health = await window.ipcRenderer.invoke('MLX_PREVIEW_HEALTH');
-        if (health.status === 'ok') {
-          setIsServerReady(true);
-        } else {
-          setTimeout(checkServer, 1000);
-        }
-      } catch (e) {
-        setTimeout(checkServer, 1000);
-      }
-    };
-    checkServer();
-
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
         e.preventDefault();
@@ -778,7 +756,7 @@ function App() {
     await window.ipcRenderer.invoke('APP_RELAUNCH');
   };
 
-  if (setupNeeded === null || (!setupNeeded && !isServerReady))
+  if (setupNeeded === null)
     return (
       <div className="app-init-drag h-screen w-screen bg-pro-bg flex flex-col gap-4 items-center justify-center text-pro-text-muted/40 font-medium animate-pulse text-xs">
         <div className="w-8 h-8 rounded-full border-2 border-pro-accent border-t-transparent animate-spin mb-4" />
@@ -805,12 +783,7 @@ function App() {
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
           transcriptionSettings={{
-            backend: 'mlx_preview',
-            preset: 'balanced',
-            model: 'base',
-            device: 'mlx',
-            computeType: 'float16',
-            language: whisperLanguage,
+            language: 'en',
           }}
           onStopSessionRef={stopSessionRef}
           onStartSessionRef={startSessionRef}
@@ -1015,8 +988,6 @@ function App() {
                 setClaudeApiKey={setClaudeApiKey}
                 ollamaModel={ollamaModel}
                 setOllamaModel={setOllamaModel}
-                whisperLanguage={whisperLanguage}
-                setWhisperLanguage={setWhisperLanguage}
                 autoEndEnabled={autoEndEnabled}
                 setAutoEndEnabled={setAutoEndEnabled}
                 fetchMeetings={fetchMeetings}

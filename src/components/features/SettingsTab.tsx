@@ -24,8 +24,6 @@ interface SettingsTabProps {
   setClaudeApiKey: (val: string) => void;
   ollamaModel: string;
   setOllamaModel: (val: string) => void;
-  whisperLanguage: string;
-  setWhisperLanguage: (val: string) => void;
   autoEndEnabled: boolean;
   setAutoEndEnabled: (val: boolean) => void;
   fetchMeetings: () => void;
@@ -136,8 +134,6 @@ export const SettingsTab = ({
   setClaudeApiKey,
   ollamaModel,
   setOllamaModel,
-  whisperLanguage,
-  setWhisperLanguage,
   autoEndEnabled,
   setAutoEndEnabled,
   fetchMeetings,
@@ -156,7 +152,7 @@ export const SettingsTab = ({
         const isTranscriptionReady =
           res?.details?.parakeetClient &&
           res?.details?.parakeetModel &&
-          res?.details?.mlxAvailable &&
+          res?.details?.parakeetEouReady &&
           res?.details?.audiocapExists &&
           res?.details?.audiocapExecutable;
         setSpeakerModelsState(isTranscriptionReady ? 'ready' : 'idle');
@@ -263,26 +259,8 @@ export const SettingsTab = ({
 
         <Section title="Recording">
           <SettingsRow
-            htmlFor="whisper-language"
-            label="Spoken Language"
-            helper="ISO code (e.g., en, es, fr). Leave blank for English."
-          >
-            <Input
-              id="whisper-language"
-              type="text"
-              value={whisperLanguage}
-              placeholder="en"
-              onChange={(event) => {
-                const value = event.target.value;
-                setWhisperLanguage(value);
-                persistSetting('transcription_language', value);
-              }}
-            />
-          </SettingsRow>
-
-          <SettingsRow
             label="Parakeet local transcription"
-            helper="Prepare the verified models and local stack for offline recording."
+            helper="English-only live and final transcription, fully local on this Mac."
             actionControl
           >
             <button
@@ -297,7 +275,7 @@ export const SettingsTab = ({
                   const isTranscriptionReady =
                     result?.details?.parakeetClient &&
                     result?.details?.parakeetModel &&
-                    result?.details?.mlxAvailable &&
+                    result?.details?.parakeetEouReady &&
                     result?.details?.audiocapExists &&
                     result?.details?.audiocapExecutable;
                   setSpeakerModelsState(

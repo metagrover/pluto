@@ -41,7 +41,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       const isTranscriptionReady =
         status.details.parakeetClient &&
         status.details.parakeetModel &&
-        status.details.mlxAvailable &&
+        status.details.parakeetEouReady &&
         status.details.audiocapExists &&
         status.details.audiocapExecutable;
       return {
@@ -71,7 +71,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
       const isTranscriptionReady =
         status.details.parakeetClient &&
         status.details.parakeetModel &&
-        status.details.mlxAvailable &&
+        status.details.parakeetEouReady &&
         status.details.audiocapExists &&
         status.details.audiocapExecutable;
       setRequirements((current) => ({
@@ -202,9 +202,9 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 title="Local transcription"
                 detail={
                   requirements.transcription === 'preparing'
-                    ? 'Downloading and verifying Parakeet and speaker models'
+                    ? 'Downloading and verifying English Parakeet live transcription'
                     : requirements.transcription === 'ready'
-                      ? 'Downloaded and verified'
+                      ? 'English Parakeet live transcription is verified'
                       : requirements.transcription === 'error'
                         ? 'Could not prepare transcription'
                         : 'Checking local models'

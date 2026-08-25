@@ -36,7 +36,7 @@ describe('SetupWizard', () => {
           details: {
             parakeetClient: true,
             parakeetModel: true,
-            mlxAvailable: true,
+            parakeetEouReady: true,
             audiocapExists: true,
             audiocapExecutable: true,
             micPermission: true,
@@ -50,7 +50,7 @@ describe('SetupWizard', () => {
           details: {
             parakeetClient: true,
             parakeetModel: true,
-            mlxAvailable: true,
+            parakeetEouReady: true,
             audiocapExists: true,
             audiocapExecutable: true,
             micPermission: true,
@@ -89,6 +89,9 @@ describe('SetupWizard', () => {
     expect(container.textContent).not.toContain(
       'Choose your reasoning provider',
     );
+    expect(container.textContent).toContain(
+      'English Parakeet live transcription',
+    );
   });
 
   it('offers a retry when local model preparation fails', async () => {
@@ -103,7 +106,7 @@ describe('SetupWizard', () => {
           details: {
             parakeetClient: true,
             parakeetModel: false,
-            mlxAvailable: true,
+            parakeetEouReady: true,
             audiocapExists: true,
             audiocapExecutable: true,
             micPermission: true,
