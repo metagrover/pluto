@@ -17,6 +17,7 @@ export type LiveTranscriptSegment = {
 export type RecordingWorkspaceInput = {
   startedAtMs: number | null;
   nowMs: number;
+  isStarting: boolean;
   isProcessing: boolean;
   microphone: CaptureHealth;
   systemAudio: CaptureHealth;
@@ -67,9 +68,11 @@ export const buildRecordingWorkspaceModel = (
   const durabilityWarning = input.captureDurability !== 'healthy';
   const transcriptWarning = input.liveTranscriptIntegrity === 'lagging';
   return {
-    status: input.isProcessing
-      ? ('processing' as const)
-      : ('recording' as const),
+    status: input.isStarting
+      ? ('starting' as const)
+      : input.isProcessing
+        ? ('processing' as const)
+        : ('recording' as const),
     elapsedLabel: formatElapsed(
       input.startedAtMs ? input.nowMs - input.startedAtMs : 0,
     ),
@@ -89,10 +92,21 @@ export const buildRecordingWorkspaceModel = (
           ? 'Audio may still be recording, but crash recovery is no longer guaranteed'
           : transcriptWarning
             ? 'Your audio is recording, but live transcription is falling behind'
-            : input.isProcessing
-              ? 'Finalizing notes. Keep Pluto open.'
-              : 'Capture is healthy',
+            : input.isStarting
+              ? 'Preparing local capture'
+              : input.isProcessing
+                ? 'Finalizing notes. Keep Pluto open.'
+                : 'Capture is healthy',
     transcript: input.segments.filter((segment) => segment.text.trim()),
     interimText: input.interimText.trim(),
   };
+};
+
+export type RecordingFinalizationPreview = {
+  id: string;
+  title: string;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  userNotes: string;
 };

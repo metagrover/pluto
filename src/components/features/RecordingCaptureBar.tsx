@@ -5,7 +5,7 @@ import type {
 } from './recordingWorkspaceModel';
 
 type Props = {
-  status: 'recording' | 'processing';
+  status: 'starting' | 'recording' | 'processing';
   elapsedLabel: string;
   statusMessage: string;
   microphone: CaptureHealth;
@@ -57,7 +57,11 @@ export const RecordingCaptureBar = ({
         aria-hidden="true"
       />
       <strong>
-        {status === 'processing' ? 'Preparing meeting' : 'Recording'}
+        {status === 'starting'
+          ? 'Starting recording'
+          : status === 'processing'
+            ? 'Preparing meeting'
+            : 'Recording'}
       </strong>
       <time>{elapsedLabel}</time>
       <span className="recording-status-message">{statusMessage}</span>
@@ -70,10 +74,14 @@ export const RecordingCaptureBar = ({
         type="button"
         className="recording-finish"
         onClick={onFinish}
-        disabled={status === 'processing'}
+        disabled={status !== 'recording'}
       >
         <CircleStop aria-hidden="true" size={16} />
-        {status === 'processing' ? 'Processing' : 'Finish recording'}
+        {status === 'starting'
+          ? 'Starting'
+          : status === 'processing'
+            ? 'Processing'
+            : 'Finish recording'}
       </button>
     </div>
   </header>

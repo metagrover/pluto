@@ -10,6 +10,7 @@ import {
 } from './recordingWorkspaceModel';
 
 interface ZenModeProps {
+  isStarting: boolean;
   isProcessing: boolean;
   onEndMeeting: () => void;
   onBackHome: () => void;
@@ -31,6 +32,7 @@ interface ZenModeProps {
 }
 
 export const ZenMode = ({
+  isStarting,
   isProcessing,
   onEndMeeting,
   onBackHome,
@@ -58,6 +60,7 @@ export const ZenMode = ({
       buildRecordingWorkspaceModel({
         startedAtMs: recordingStartedAtMs,
         nowMs,
+        isStarting,
         isProcessing,
         microphone: captureHealth.microphone,
         systemAudio: captureHealth.systemAudio,
@@ -69,6 +72,7 @@ export const ZenMode = ({
     [
       captureHealth,
       interimText,
+      isStarting,
       isProcessing,
       liveTranscript,
       liveTranscriptIntegrity,

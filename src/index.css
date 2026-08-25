@@ -914,7 +914,7 @@
     @apply flex h-10 shrink-0 items-center gap-2 rounded-full border border-pro-border/70 bg-pro-bg px-3 text-xs font-semibold text-pro-text-muted shadow-sm transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
   }
   .recording-capture-bar {
-    @apply grid min-h-[92px] shrink-0 grid-cols-[1fr_minmax(220px,0.75fr)_1fr] items-center gap-5 border-b border-pro-border bg-pro-surface pb-3 pl-6 pr-6 pt-6;
+    @apply grid min-h-[76px] shrink-0 grid-cols-[1fr_minmax(120px,0.45fr)_1fr] items-center gap-5 border-b border-pro-border/70 bg-pro-surface px-6 pb-3 pt-5;
   }
   .recording-status,
   .recording-actions,
@@ -938,6 +938,9 @@
   .recording-dot--processing {
     @apply animate-pulse bg-pro-warning;
   }
+  .recording-dot--starting {
+    @apply animate-pulse bg-pro-accent;
+  }
   .recording-actions {
     @apply justify-end gap-3;
   }
@@ -949,26 +952,26 @@
     @apply text-pro-warning;
   }
   .recording-finish {
-    @apply min-h-11 gap-2 rounded-xl bg-pro-accent px-4 text-xs font-semibold text-pro-bg transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-surface disabled:cursor-wait disabled:opacity-50;
+    @apply min-h-10 gap-2 rounded-lg bg-pro-accent px-4 text-xs font-semibold text-pro-bg transition-colors hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-surface disabled:cursor-wait disabled:opacity-50;
   }
   .recording-workspace-grid {
-    @apply grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px];
+    @apply grid min-h-0 flex-1 grid-cols-[minmax(340px,0.82fr)_minmax(460px,1.18fr)];
   }
   .live-transcript {
-    @apply relative min-h-0 min-w-0 overflow-hidden;
+    @apply relative min-h-0 min-w-0 overflow-hidden bg-pro-bg;
   }
   .live-transcript-scroll {
-    @apply h-full overscroll-contain overflow-y-auto px-8 pb-20 pt-8;
+    @apply h-full overscroll-contain overflow-y-auto px-8 pb-20 pt-6 lg:px-12;
   }
   .live-transcript-heading,
   .live-transcript-body {
     @apply mx-auto w-full max-w-[820px];
   }
   .live-transcript-heading {
-    @apply flex flex-col gap-6 border-b border-pro-border/30 pb-8 mb-8 mt-4 md:flex-row md:items-start md:justify-between;
+    @apply mb-5 flex flex-col gap-3 border-b border-pro-border/40 pb-5 md:flex-row md:items-end md:justify-between;
   }
   .live-transcript-heading h1 {
-    @apply mt-2 text-[40px] font-bold leading-[1.2] tracking-[-0.02em] text-pro-text-main;
+    @apply mt-1 text-2xl font-semibold leading-tight tracking-[-0.015em] text-pro-text-main;
   }
   .live-transcript-heading > span {
     @apply text-xs text-pro-text-muted;
@@ -980,7 +983,7 @@
     @apply flex flex-col;
   }
   .transcript-turn {
-    @apply grid grid-cols-[96px_minmax(0,1fr)] gap-5 border-b border-pro-border py-5;
+    @apply grid grid-cols-[82px_minmax(0,1fr)] gap-5 border-b border-pro-border/60 py-4;
   }
   .transcript-speaker {
     @apply flex flex-col gap-1 text-xs;
@@ -989,7 +992,7 @@
     @apply font-mono text-[10px] text-pro-text-muted;
   }
   .transcript-turn p {
-    @apply text-[15px] leading-7 text-pro-text-main;
+    @apply max-w-[70ch] text-[15px] leading-[1.7] text-pro-text-main;
   }
   .live-transcript-follow-control {
     @apply pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-4;
@@ -1002,7 +1005,7 @@
     animation: transcript-caret 900ms steps(2, jump-none) infinite;
   }
   .transcript-interim {
-    @apply ml-[116px] py-5 text-[15px] leading-7 text-pro-text-muted opacity-70;
+    @apply ml-[102px] max-w-[70ch] border-b border-pro-border/50 py-4 text-[15px] leading-[1.7] text-pro-text-muted;
   }
   .transcript-waiting {
     @apply py-24 text-center;
@@ -1014,10 +1017,10 @@
     @apply mt-2 block text-sm text-pro-text-muted;
   }
   .recording-rail {
-    @apply relative min-h-0 min-w-0 border-r border-pro-border bg-pro-surface;
+    @apply relative min-h-0 min-w-0 border-r border-pro-border/70 bg-pro-surface;
   }
   .recording-rail-content {
-    @apply mx-auto flex h-full w-full max-w-[760px] flex-col overscroll-contain overflow-y-auto px-8 pb-8 pt-10;
+    @apply mx-auto flex h-full w-full max-w-[620px] flex-col overscroll-contain overflow-y-auto px-8 pb-8 pt-8 lg:px-10;
   }
   .rail-heading__status {
     @apply mb-4 flex items-center justify-between gap-4;
@@ -1038,7 +1041,7 @@
     @apply mb-2 flex items-center gap-2 text-xs font-medium text-pro-text-muted;
   }
   .rail-title-input {
-    @apply w-full min-w-0 border-0 bg-transparent p-0 text-2xl font-semibold tracking-tight outline-none placeholder:text-pro-text-muted focus-visible:ring-0;
+    @apply w-full min-w-0 border-0 bg-transparent p-0 text-[1.65rem] font-semibold tracking-tight outline-none placeholder:text-pro-text-muted focus-visible:ring-0;
   }
   .rail-participants {
     @apply pb-2 pt-3;
@@ -1062,10 +1065,10 @@
     @apply flex h-8 w-8 items-center justify-center text-pro-text-muted;
   }
   .rail-notes {
-    @apply mt-6 flex min-h-0 flex-1 flex-col border-y border-pro-border py-6;
+    @apply mt-5 flex min-h-0 flex-1 flex-col border-y border-pro-border/70 py-5;
   }
   .rail-notes textarea {
-    @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-base leading-7 outline-none placeholder:text-pro-text-muted/70 focus-visible:ring-0;
+    @apply min-h-60 flex-1 resize-none border-0 bg-transparent p-0 text-[15px] leading-7 outline-none placeholder:text-pro-text-muted/65 focus-visible:ring-0;
   }
   .rail-diagnostics {
     @apply border-t border-pro-border pt-4 text-xs text-pro-text-muted;
@@ -1075,6 +1078,57 @@
   }
   .rail-diagnostics p {
     @apply mt-2 leading-5;
+  }
+  .recording-finalizing-view {
+    @apply mx-auto w-full max-w-[920px] pb-20 pt-5;
+  }
+  .recording-finalizing-header {
+    @apply border-b border-pro-border/70 pb-8 pt-3;
+  }
+  .recording-finalizing-header h1 {
+    @apply mt-3 text-[2rem] font-semibold leading-tight tracking-[-0.02em] text-pro-text-main;
+  }
+  .recording-finalizing-meta {
+    @apply mt-3 flex items-center gap-4 text-xs text-pro-text-muted;
+  }
+  .recording-finalizing-meta span {
+    @apply inline-flex items-center gap-1.5;
+  }
+  .recording-finalizing-status {
+    @apply flex max-w-[680px] items-start gap-3 border-b border-pro-border/70 py-7;
+  }
+  .recording-finalizing-icon {
+    @apply mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-accent/10 text-pro-accent;
+  }
+  .recording-finalizing-icon svg {
+    animation: spin 1.2s linear infinite;
+  }
+  .recording-finalizing-status h2 {
+    @apply text-base font-semibold text-pro-text-main;
+  }
+  .recording-finalizing-status p {
+    @apply mt-1 max-w-[58ch] text-sm leading-6 text-pro-text-muted;
+  }
+  .recording-finalizing-document {
+    @apply grid max-w-[760px] gap-10 py-9 md:grid-cols-[minmax(0,1fr)_220px];
+  }
+  .recording-finalizing-note {
+    @apply mt-3 whitespace-pre-wrap text-[15px] leading-7 text-pro-text-main;
+  }
+  .recording-finalizing-note--empty {
+    @apply text-pro-text-muted;
+  }
+  .recording-finalizing-skeleton {
+    @apply flex flex-col gap-3 pt-1;
+  }
+  .recording-finalizing-skeleton span {
+    @apply h-3 animate-pulse rounded bg-pro-text-muted/10;
+  }
+  .recording-finalizing-skeleton span:nth-child(2) {
+    @apply w-4/5;
+  }
+  .recording-finalizing-skeleton span:nth-child(3) {
+    @apply w-3/5;
   }
   @media (max-width: 980px) {
     .recording-capture-bar {
