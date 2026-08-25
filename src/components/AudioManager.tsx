@@ -1197,6 +1197,7 @@ export const AudioManager = ({
   ) => {
     captureActivitySessionRef.current?.transitionSpeaker(nextSpeaker, nowTime);
     if (nextSpeaker) {
+      liveTranscriptResponsivenessRef.current.detectSpeech();
       if (activeSpeakerWindowRef.current?.speaker !== nextSpeaker) {
         activeSpeakerWindowRef.current = {
           speaker: nextSpeaker,

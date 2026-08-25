@@ -2,6 +2,7 @@ export type LiveTranscriptResponsivenessInvalidReason =
   | 'event_before_start'
   | 'non_monotonic_time'
   | 'duplicate_stop'
+  | 'speech_after_stop'
   | 'publication_after_stop';
 
 type LiveTranscriptResponsivenessBase = {
@@ -15,6 +16,7 @@ export type LiveTranscriptResponsivenessSummary =
   | (LiveTranscriptResponsivenessBase & {
       status: 'available';
       firstTextLatencyMs: number;
+      firstSpeechToTextLatencyMs?: number;
     })
   | (LiveTranscriptResponsivenessBase & {
       status: 'unavailable';
@@ -27,6 +29,7 @@ export type LiveTranscriptResponsivenessSummary =
 
 export type LiveTranscriptResponsivenessAccumulator = {
   start(atMs: number): void;
+  detectSpeech(atMs: number): void;
   publish(atMs: number, acceptedSegmentCount: number): void;
   stop(atMs: number): LiveTranscriptResponsivenessSummary;
   discard(): void;
@@ -81,12 +84,17 @@ export const parseLiveTranscriptResponsivenessSummary = (
   if (
     value.status === 'available' &&
     value.acceptedPublicationCount > 0 &&
-    isNonNegativeFinite(value.firstTextLatencyMs)
+    isNonNegativeFinite(value.firstTextLatencyMs) &&
+    (value.firstSpeechToTextLatencyMs === undefined ||
+      isNonNegativeFinite(value.firstSpeechToTextLatencyMs))
   ) {
     return {
       ...base,
       status: 'available',
       firstTextLatencyMs: value.firstTextLatencyMs,
+      ...(value.firstSpeechToTextLatencyMs === undefined
+        ? {}
+        : { firstSpeechToTextLatencyMs: value.firstSpeechToTextLatencyMs }),
     };
   }
   if (
@@ -100,6 +108,7 @@ export const parseLiveTranscriptResponsivenessSummary = (
     'event_before_start',
     'non_monotonic_time',
     'duplicate_stop',
+    'speech_after_stop',
     'publication_after_stop',
   ];
   if (
@@ -121,6 +130,7 @@ export const createLiveTranscriptResponsivenessAccumulator =
   (): LiveTranscriptResponsivenessAccumulator => {
     let startedAtMs: number | null = null;
     let publicationTimesMs: number[] = [];
+    let firstSpeechAtMs: number | null = null;
     let lastEventAtMs: number | null = null;
     let stopped = false;
     let summary: LiveTranscriptResponsivenessSummary | null = null;
@@ -155,9 +165,38 @@ export const createLiveTranscriptResponsivenessAccumulator =
       }
       startedAtMs = atMs;
       publicationTimesMs = [];
+      firstSpeechAtMs = null;
       lastEventAtMs = atMs;
       stopped = false;
       summary = null;
+    };
+
+    const detectSpeech = (atMs: number) => {
+      if (
+        summary?.status === 'invalid' ||
+        firstSpeechAtMs !== null ||
+        publicationTimesMs.length > 0
+      ) {
+        return;
+      }
+      if (invalidTime(atMs)) {
+        invalidate('non_monotonic_time');
+        return;
+      }
+      if (startedAtMs === null) {
+        invalidate('event_before_start');
+        return;
+      }
+      if (stopped) {
+        invalidate('speech_after_stop');
+        return;
+      }
+      if (lastEventAtMs !== null && atMs < lastEventAtMs) {
+        invalidate('non_monotonic_time');
+        return;
+      }
+      firstSpeechAtMs = atMs;
+      lastEventAtMs = atMs;
     };
 
     const publish = (atMs: number, acceptedSegmentCount: number) => {
@@ -224,6 +263,12 @@ export const createLiveTranscriptResponsivenessAccumulator =
         schemaVersion: 1,
         status: 'available',
         firstTextLatencyMs: publicationTimesMs[0] - startedAtMs,
+        ...(firstSpeechAtMs === null
+          ? {}
+          : {
+              firstSpeechToTextLatencyMs:
+                publicationTimesMs[0] - firstSpeechAtMs,
+            }),
         ...cadence(),
       };
       return summary;
@@ -231,11 +276,13 @@ export const createLiveTranscriptResponsivenessAccumulator =
 
     return {
       start,
+      detectSpeech,
       publish,
       stop,
       discard: () => {
         startedAtMs = null;
         publicationTimesMs = [];
+        firstSpeechAtMs = null;
         lastEventAtMs = null;
         stopped = false;
         summary = null;
@@ -253,6 +300,7 @@ export const createLiveTranscriptResponsivenessRuntime = ({
 
   return {
     acceptStart: () => accumulator.start(now()),
+    detectSpeech: () => accumulator.detectSpeech(now()),
     publishAcceptedSegments: <T extends { text: string }>(
       acceptedSegments: T[],
       publish: () => void,

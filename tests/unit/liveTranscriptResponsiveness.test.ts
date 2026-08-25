@@ -22,6 +22,20 @@ describe('live transcript responsiveness accumulator', () => {
     });
   });
 
+  it('separates capture startup from first-speech-to-text latency', () => {
+    const accumulator = createLiveTranscriptResponsivenessAccumulator();
+
+    accumulator.start(100);
+    accumulator.detectSpeech(200);
+    accumulator.detectSpeech(240);
+    accumulator.publish(350, 1);
+
+    expect(accumulator.stop(400)).toMatchObject({
+      firstTextLatencyMs: 250,
+      firstSpeechToTextLatencyMs: 150,
+    });
+  });
+
   it('ignores empty publications and leaves one publication without a gap', () => {
     const accumulator = createLiveTranscriptResponsivenessAccumulator();
 
@@ -142,6 +156,7 @@ describe('live transcript responsiveness accumulator', () => {
         schemaVersion: 1,
         status: 'available',
         firstTextLatencyMs: 250,
+        firstSpeechToTextLatencyMs: 150,
         acceptedPublicationCount: 3,
         cadenceSampleCount: 2,
         maximumUpdateGapMs: 450,
@@ -151,6 +166,7 @@ describe('live transcript responsiveness accumulator', () => {
       schemaVersion: 1,
       status: 'available',
       firstTextLatencyMs: 250,
+      firstSpeechToTextLatencyMs: 150,
       acceptedPublicationCount: 3,
       cadenceSampleCount: 2,
       maximumUpdateGapMs: 450,

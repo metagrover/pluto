@@ -59,4 +59,20 @@ describe('live transcript responsiveness runtime wiring', () => {
       firstTextLatencyMs: 250,
     });
   });
+
+  it('records the first detected speech boundary on the shared monotonic clock', () => {
+    const times = [100, 200, 350, 500];
+    const runtime = createLiveTranscriptResponsivenessRuntime({
+      now: () => times.shift() ?? Number.NaN,
+    });
+
+    runtime.acceptStart();
+    runtime.detectSpeech();
+    runtime.publishAcceptedSegments([{ text: 'hello' }], () => {});
+
+    expect(runtime.freezeBeforeFinalization()).toMatchObject({
+      firstTextLatencyMs: 250,
+      firstSpeechToTextLatencyMs: 150,
+    });
+  });
 });
