@@ -141,7 +141,7 @@ git commit -m "feat: add bounded Parakeet EOU protocol"
 - Test: `native/parakeet-runtime/Tests/ParakeetRuntimeEngineTests/ParakeetServiceTests.swift`
 - Test: `native/parakeet-runtime/Tests/ParakeetRuntimeEngineTests/RuntimeJSONLineRouterTests.swift`
 
-- [ ] **Step 1: Write failing actor tests with a fake manager**
+- [x] **Step 1: Write failing actor tests with a fake manager**
 
 Define a fake implementing:
 
@@ -155,13 +155,13 @@ protocol ParakeetEouManaging: Sendable {
 
 Test two simultaneous sources receive different manager identities, exact sequence order, contiguous watermarks, accumulated partial `"hello wor"`, EOU commit `"hello world"`, later partial `"hello world again"`, silence, padded short-tail finish, cancellation, reset to a higher generation, stale callbacks, prefix mutation, manager failure, and shutdown cleanup. A committed prefix mutation must emit one terminal `prefix_mutated` failure and no rewritten update.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `cd native/parakeet-runtime && swift test --filter 'ParakeetEouSessionTests|FluidAudioEouAdapterTests|ParakeetServiceTests|RuntimeJSONLineRouterTests'`
 
 Expected: compilation fails because the EOU session and driver do not exist.
 
-- [ ] **Step 3: Implement the session actor and FluidAudio adapter**
+- [x] **Step 3: Implement the session actor and FluidAudio adapter**
 
 Create a session actor with at most one state per source:
 
@@ -181,17 +181,17 @@ private struct State {
 
 Load `StreamingEouAsrManager(chunkSize: .ms320)` from the verified EOU directory. Convert accepted samples to an `AVAudioPCMBuffer` with the declared rate and mono format. Register partial and EOU callbacks before the first append; funnel callbacks back through the owning actor; normalize whitespace only at projection boundaries. `finish()` emits the final state once and destroys the manager.
 
-- [ ] **Step 4: Route methods and events**
+- [x] **Step 4: Route methods and events**
 
 `ParakeetService.handleEou` requires a prepared active bundle, delegates to the EOU session, and maps finite failures without text. `RuntimeJSONLineRouter` identifies EOU methods, emits all returned `eou_update`/`eou_failed` events through the serialized writer, then emits exactly one response with the original request id.
 
-- [ ] **Step 5: Run focused and full native tests**
+- [x] **Step 5: Run focused and full native tests**
 
 Run: `cd native/parakeet-runtime && swift test`
 
 Expected: all native tests pass, including the pre-existing 110 tests; no test output contains transcript fixture text from failure paths.
 
-- [ ] **Step 6: Commit native EOU inference**
+- [x] **Step 6: Commit native EOU inference**
 
 ```bash
 git add native/parakeet-runtime/Sources native/parakeet-runtime/Tests

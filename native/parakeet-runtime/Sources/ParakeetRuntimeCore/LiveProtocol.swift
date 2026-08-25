@@ -2,7 +2,7 @@ import Foundation
 
 let maximumJSONSafeInteger = 9_007_199_254_740_991
 
-public enum LiveSource: String, Codable, Equatable, Sendable {
+public enum LiveSource: String, Codable, Equatable, Hashable, Sendable {
     case mic
     case system
 }
@@ -40,6 +40,8 @@ public enum RuntimeEventName: String, Codable, Equatable, Sendable {
     case streamUpdate = "stream_update"
     case streamDegraded = "stream_degraded"
     case streamFailed = "stream_failed"
+    case eouUpdate = "eou_update"
+    case eouFailed = "eou_failed"
 }
 
 public enum LiveDegradationReason: String, Codable, Equatable, Sendable {
@@ -182,6 +184,8 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
     case streamUpdate(LiveStreamUpdate)
     case streamDegraded(LiveStreamDegraded)
     case streamFailed(LiveStreamFailed)
+    case eouUpdate(EouUpdate)
+    case eouFailed(EouStreamFailed)
 
     public var kind: RuntimeEnvelopeKind { .event }
 
@@ -195,6 +199,10 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
         case .streamFailed(let failed):
             return
                 "RuntimeEvent.streamFailed(streamId: <redacted>, source: \(failed.source.rawValue), generation: \(failed.generation), revision: \(failed.revision), reason: \(failed.reason.rawValue))"
+        case .eouUpdate(let update):
+            return "RuntimeEvent.eouUpdate(\(update))"
+        case .eouFailed(let failed):
+            return "RuntimeEvent.eouFailed(\(failed))"
         }
     }
 
@@ -218,6 +226,10 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
         case affectedSequence
         case chunkStartSeconds
         case chunkEndSeconds
+        case processedAudioSeconds
+        case committedText
+        case tentativeText
+        case tokens
     }
 
     public init(from decoder: Decoder) throws {
@@ -294,6 +306,28 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
                     revision: revision,
                     reason: try container.decode(LiveFailureReason.self, forKey: .reason)
                 ))
+        case .eouUpdate:
+            let update = EouUpdate(
+                streamId: streamId,
+                source: source,
+                generation: generation,
+                revision: revision,
+                processedAudioSeconds: try container.decode(
+                    Double.self, forKey: .processedAudioSeconds),
+                committedText: try container.decode(String.self, forKey: .committedText),
+                tentativeText: try container.decode(String.self, forKey: .tentativeText),
+                tokens: try container.decode([EouToken].self, forKey: .tokens)
+            )
+            try update.validate()
+            self = .eouUpdate(update)
+        case .eouFailed:
+            self = .eouFailed(EouStreamFailed(
+                streamId: streamId,
+                source: source,
+                generation: generation,
+                revision: revision,
+                reason: try container.decode(EouFailureReason.self, forKey: .reason)
+            ))
         }
     }
 
@@ -336,6 +370,36 @@ public enum RuntimeEvent: Codable, Equatable, Sendable, CustomStringConvertible,
                 sequenceKey: CodingKeys.revision
             )
             try encodeIdentity(failed, name: .streamFailed, into: &container)
+            try container.encode(failed.reason, forKey: .reason)
+        case .eouUpdate(let update):
+            try update.validate()
+            try encodeIdentity(
+                streamId: update.streamId,
+                source: update.source,
+                generation: update.generation,
+                revision: update.revision,
+                name: .eouUpdate,
+                into: &container
+            )
+            try container.encode(update.processedAudioSeconds, forKey: .processedAudioSeconds)
+            try container.encode(update.committedText, forKey: .committedText)
+            try container.encode(update.tentativeText, forKey: .tentativeText)
+            try container.encode(update.tokens, forKey: .tokens)
+        case .eouFailed(let failed):
+            try validateLiveIdentity(
+                streamId: failed.streamId,
+                generation: failed.generation,
+                sequence: failed.revision,
+                sequenceKey: CodingKeys.revision
+            )
+            try encodeIdentity(
+                streamId: failed.streamId,
+                source: failed.source,
+                generation: failed.generation,
+                revision: failed.revision,
+                name: .eouFailed,
+                into: &container
+            )
             try container.encode(failed.reason, forKey: .reason)
         }
     }

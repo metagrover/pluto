@@ -8,9 +8,11 @@ public actor ParakeetService {
     private let modelStore: ModelStore
     private let transcriber: ParakeetTranscriber
     private let liveDriver: any ParakeetLiveDriving
+    private let eouDriver: any ParakeetEouDriving
     private let liveConfigurationID: ParakeetLiveConfigurationID
     private var activeModelURL: URL?
     private var liveSession: ParakeetLiveSession?
+    private var eouSession: ParakeetEouSession?
 
     public init(
         modelRoot: URL,
@@ -19,6 +21,7 @@ public actor ParakeetService {
         installer: any ModelInstalling = FluidAudioModelInstaller(),
         inferenceDriver: any ParakeetInferenceDriving = FluidAudioInferenceDriver(),
         liveDriver: any ParakeetLiveDriving = FluidAudioLiveDriver(),
+        eouDriver: any ParakeetEouDriving = FluidAudioEouDriver(),
         liveConfigurationID: ParakeetLiveConfigurationID = .pinnedDefault
     ) {
         self.modelRoot = modelRoot.standardizedFileURL
@@ -27,10 +30,14 @@ public actor ParakeetService {
         self.modelStore = ModelStore(root: self.modelRoot, installer: installer)
         self.transcriber = ParakeetTranscriber(driver: inferenceDriver)
         self.liveDriver = liveDriver
+        self.eouDriver = eouDriver
         self.liveConfigurationID = liveConfigurationID
     }
 
     public func handleLive(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
+        if request.eou != nil {
+            return await handleEou(request)
+        }
         guard
             request.schemaVersion == 1,
             !request.id.isEmpty,
@@ -139,6 +146,10 @@ public actor ParakeetService {
             await liveSession.shutdown()
             self.liveSession = nil
         }
+        if let eouSession {
+            await eouSession.shutdown()
+            self.eouSession = nil
+        }
     }
 
     public func handle(_ request: RuntimeRequest) async -> RuntimeResponse {
@@ -165,6 +176,10 @@ public actor ParakeetService {
             if let liveSession {
                 await liveSession.shutdown()
                 self.liveSession = nil
+            }
+            if let eouSession {
+                await eouSession.shutdown()
+                self.eouSession = nil
             }
             activeModelURL = try await modelStore.prepare(manifest: manifest)
             return .prepared(
@@ -218,6 +233,140 @@ public actor ParakeetService {
             let key = term.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             guard seen.insert(key).inserted else { return nil }
             return term
+        }
+    }
+
+    private func handleEou(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
+        guard
+            request.schemaVersion == 1,
+            !request.id.isEmpty,
+            let metadata = request.eou,
+            let activeModelURL
+        else { return .failure(id: request.id, code: .invalidRequest) }
+
+        let session: ParakeetEouSession
+        if let existing = eouSession {
+            session = existing
+        } else {
+            let created = ParakeetEouSession(
+                driver: eouDriver,
+                activeModelURL: activeModelURL
+            )
+            eouSession = created
+            session = created
+        }
+
+        do {
+            let events: [RuntimeEvent]
+            switch request.method {
+            case .eouOpen:
+                try await session.open(
+                    streamId: metadata.streamId,
+                    source: metadata.source,
+                    generation: metadata.generation
+                )
+                events = []
+            case .eouAppend:
+                guard let sequence = metadata.sequence, let frame = metadata.frame else {
+                    return .failure(id: request.id, code: .invalidRequest)
+                }
+                events = try await session.append(
+                    streamId: metadata.streamId,
+                    source: metadata.source,
+                    generation: metadata.generation,
+                    sequence: sequence,
+                    frame: frame
+                )
+            case .eouFinish:
+                events = try await session.finish(
+                    streamId: metadata.streamId,
+                    source: metadata.source,
+                    generation: metadata.generation
+                )
+            case .eouCancel:
+                try await session.cancel(
+                    streamId: metadata.streamId,
+                    source: metadata.source,
+                    generation: metadata.generation
+                )
+                events = []
+            case .eouReset:
+                try await session.reset(
+                    streamId: metadata.streamId,
+                    source: metadata.source,
+                    generation: metadata.generation
+                )
+                events = []
+            case .prepare, .transcribe, .cancel, .shutdown, .streamOpen, .streamAppend,
+                .streamFlush, .streamCancel, .streamReset:
+                return .failure(id: request.id, code: .invalidRequest)
+            }
+            return .success(id: request.id, events: events)
+        } catch let terminal as EouSessionTerminalFailure {
+            return .failure(
+                id: request.id,
+                code: runtimeFailure(for: terminal.failure),
+                events: [terminal.event]
+            )
+        } catch let failure as EouSessionFailure {
+            return .failure(
+                id: request.id,
+                code: runtimeFailure(for: failure),
+                events: terminalEouEvents(for: failure, metadata: metadata)
+            )
+        } catch {
+            return .failure(id: request.id, code: .transcriptionFailed)
+        }
+    }
+
+    private func terminalEouEvents(
+        for failure: EouSessionFailure,
+        metadata: EouRequestMetadata
+    ) -> [RuntimeEvent] {
+        guard failure == .modelUnavailable || failure == .inferenceFailed
+            || failure == .prefixMutated || failure == .cancelled
+        else { return [] }
+        return [.eouFailed(EouStreamFailed(
+            streamId: metadata.streamId,
+            source: metadata.source,
+            generation: metadata.generation,
+            revision: 1,
+            reason: eouFailureReason(for: failure)
+        ))]
+    }
+
+    private func eouFailureReason(for failure: EouSessionFailure) -> EouFailureReason {
+        switch failure {
+        case .streamCapacity, .sequenceOutOfOrder, .audioDiscontinuity:
+            return .sequenceOutOfOrder
+        case .streamNotFound:
+            return .streamNotFound
+        case .generationMismatch:
+            return .generationMismatch
+        case .sourceMismatch:
+            return .sourceMismatch
+        case .modelUnavailable:
+            return .modelUnavailable
+        case .inferenceFailed:
+            return .inferenceFailed
+        case .prefixMutated:
+            return .prefixMutated
+        case .cancelled:
+            return .cancelled
+        }
+    }
+
+    private func runtimeFailure(for failure: EouSessionFailure) -> RuntimeFailure {
+        switch failure {
+        case .modelUnavailable:
+            return .modelPreparationFailed
+        case .inferenceFailed, .prefixMutated:
+            return .transcriptionFailed
+        case .cancelled:
+            return .cancelled
+        case .streamCapacity, .streamNotFound, .generationMismatch, .sourceMismatch,
+            .sequenceOutOfOrder, .audioDiscontinuity:
+            return .invalidRequest
         }
     }
 

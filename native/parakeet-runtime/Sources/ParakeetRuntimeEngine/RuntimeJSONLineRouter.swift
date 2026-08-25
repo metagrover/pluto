@@ -25,7 +25,7 @@ public struct RuntimeJSONLineOutput: Sendable {
 }
 
 public actor RuntimeJSONLineRouter {
-    public static let maximumLineBytes = 1024 * 1024
+    public static let maximumLineBytes = 3 * 1024 * 1024
 
     private let service: any ParakeetRuntimeServing
     private let decoder = JSONDecoder()
@@ -53,7 +53,8 @@ public actor RuntimeJSONLineRouter {
 
     public func route(_ request: RuntimeRequest) async -> RuntimeJSONLineOutput {
         switch request.method {
-        case .streamOpen, .streamAppend, .streamFlush, .streamCancel, .streamReset:
+        case .streamOpen, .streamAppend, .streamFlush, .streamCancel, .streamReset,
+            .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
             let result = await service.handleLive(request)
             return RuntimeJSONLineOutput(events: result.events, response: result.response)
         case .shutdown:
@@ -66,11 +67,6 @@ public actor RuntimeJSONLineRouter {
             return RuntimeJSONLineOutput(
                 events: [],
                 response: await service.handle(request)
-            )
-        case .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
-            return RuntimeJSONLineOutput(
-                events: [],
-                response: .failure(id: request.id, code: .invalidRequest)
             )
         }
     }

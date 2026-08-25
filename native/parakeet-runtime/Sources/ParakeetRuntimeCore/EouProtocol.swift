@@ -135,7 +135,7 @@ public struct EouToken: Codable, Equatable, Sendable {
         try container.encode(committed, forKey: .committed)
     }
 
-    private func validate() throws {
+    func validate() throws {
         guard
             !text.isEmpty,
             text.utf8.count <= 4_096,
@@ -222,7 +222,7 @@ public struct EouUpdate: Codable, Equatable, Sendable, CustomStringConvertible,
         try container.encode(tokens, forKey: .tokens)
     }
 
-    private func validate() throws {
+    func validate() throws {
         guard
             isValidOpaqueStreamId(streamId),
             isPositiveSafeInteger(generation),

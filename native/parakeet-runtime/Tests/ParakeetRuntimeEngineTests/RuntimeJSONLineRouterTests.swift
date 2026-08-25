@@ -15,6 +15,21 @@ private actor RoutingService: ParakeetRuntimeServing {
 
     func handleLive(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
         liveCalls += 1
+        if request.method == .eouAppend {
+            return .success(
+                id: request.id,
+                events: [.eouUpdate(EouUpdate(
+                    streamId: "mic-eou",
+                    source: .mic,
+                    generation: 1,
+                    revision: 1,
+                    processedAudioSeconds: 0.32,
+                    committedText: "",
+                    tentativeText: "synthetic",
+                    tokens: []
+                ))]
+            )
+        }
         return .success(
             id: request.id,
             events: [
@@ -75,6 +90,68 @@ private actor BlockingLiveRoutingService: ParakeetRuntimeServing {
 }
 
 final class RuntimeJSONLineRouterTests: XCTestCase {
+    func testRoutesEouEventBeforeOneCorrelatedResponse() async throws {
+        let samples = [Float](repeating: 0, count: 2_560)
+        let request = RuntimeRequest(
+            id: "eou-append-1",
+            method: .eouAppend,
+            eou: EouRequestMetadata(
+                streamId: "mic-eou",
+                source: .mic,
+                generation: 1,
+                sequence: 1,
+                frame: try EouPcmFrame(
+                    sampleRate: 8_000,
+                    channelCount: 1,
+                    frameCount: samples.count,
+                    audioStartSeconds: 0,
+                    audioEndSeconds: 0.32,
+                    pcmData: samples.withUnsafeBytes { Data($0) }
+                )
+            )
+        )
+        let output = await RuntimeJSONLineRouter(service: RoutingService()).route(request)
+        let lines = try output.encodedLines()
+        let event = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: lines[0]) as? [String: Any]
+        )
+        let response = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: lines[1]) as? [String: Any]
+        )
+
+        XCTAssertEqual(event["event"] as? String, "eou_update")
+        XCTAssertEqual(event["tentativeText"] as? String, "synthetic")
+        XCTAssertEqual(response["id"] as? String, "eou-append-1")
+        XCTAssertEqual(response["ok"] as? Bool, true)
+    }
+
+    func testMaximumProtocolFrameFitsWithinJsonLineLimit() async throws {
+        let samples = [Float](repeating: 0, count: 192_000 * 2)
+        let request = RuntimeRequest(
+            id: "maximum-eou-append",
+            method: .eouAppend,
+            eou: EouRequestMetadata(
+                streamId: "mic-eou",
+                source: .mic,
+                generation: 1,
+                sequence: 1,
+                frame: try EouPcmFrame(
+                    sampleRate: 192_000,
+                    channelCount: 1,
+                    frameCount: samples.count,
+                    audioStartSeconds: 0,
+                    audioEndSeconds: 2,
+                    pcmData: samples.withUnsafeBytes { Data($0) }
+                )
+            )
+        )
+        let line = try XCTUnwrap(String(data: JSONEncoder().encode(request), encoding: .utf8))
+
+        XCTAssertLessThanOrEqual(line.utf8.count, RuntimeJSONLineRouter.maximumLineBytes)
+        let decoded = await RuntimeJSONLineRouter(service: RoutingService()).decode(line: line)
+        XCTAssertNotNil(decoded)
+    }
+
     func testDebugExecutableRoutesLiveJSONLinesThroughInjectedFixtureService() throws {
         let open = RuntimeRequest(
             id: "open-process-1", method: .streamOpen,

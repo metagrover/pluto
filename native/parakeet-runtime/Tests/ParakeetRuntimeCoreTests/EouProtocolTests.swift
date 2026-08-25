@@ -98,6 +98,39 @@ final class EouProtocolTests: XCTestCase {
         }
     }
 
+    func testEouEventEnvelopesRoundTripWithoutFailureContent() throws {
+        let events: [RuntimeEvent] = [
+            .eouUpdate(EouUpdate(
+                streamId: "s",
+                source: .system,
+                generation: 2,
+                revision: 3,
+                processedAudioSeconds: 1,
+                committedText: "synthetic committed",
+                tentativeText: "synthetic tentative",
+                tokens: []
+            )),
+            .eouFailed(EouStreamFailed(
+                streamId: "s",
+                source: .system,
+                generation: 2,
+                revision: 4,
+                reason: .inferenceFailed
+            )),
+        ]
+
+        for event in events {
+            let data = try encoder.encode(event)
+            XCTAssertEqual(try decoder.decode(RuntimeEvent.self, from: data), event)
+            let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+            if case .eouFailed = event {
+                XCTAssertFalse(json.contains("synthetic"))
+                XCTAssertFalse(json.contains("message"))
+                XCTAssertFalse(json.contains("detail"))
+            }
+        }
+    }
+
     private func makeAppendJSON(pcmBase64: String = "AAAAAA==") -> String {
         #"{"schemaVersion":1,"id":"a","method":"eou_append","streamId":"s","source":"system","generation":1,"sequence":1,"sampleRate":8000,"channelCount":1,"frameCount":1,"audioStartSeconds":0,"audioEndSeconds":0.000125,"pcmBase64":"\#(pcmBase64)"}"#
     }

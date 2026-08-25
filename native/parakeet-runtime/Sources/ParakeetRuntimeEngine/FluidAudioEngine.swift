@@ -350,6 +350,177 @@ public actor FluidAudioLiveDriver: ParakeetLiveDriving {
     }
 }
 
+protocol FluidAudioEouBackend: Sendable {
+    func setPartialCallback(_ callback: @escaping @Sendable (String) -> Void) async
+    func setEouCallback(_ callback: @escaping @Sendable (String) -> Void) async
+    func process(audioBuffer: sending AVAudioPCMBuffer) async throws -> String
+    func finish() async throws -> String
+    func getTokenTimestampsMs() async -> [Int]
+    func getRawTokenStrings() async -> [String]
+    func getEouTimestampsMs() async -> [Int]
+    func cleanup() async
+}
+
+extension StreamingEouAsrManager: FluidAudioEouBackend {
+    func setPartialCallback(_ callback: @escaping @Sendable (String) -> Void) {
+        setPartialTranscriptCallback(callback)
+    }
+}
+
+private final class FluidAudioEouCallbackCollector: @unchecked Sendable {
+    private struct Callback {
+        let kind: ParakeetEouSnapshotKind
+        let transcript: String
+    }
+
+    private let lock = NSLock()
+    private var callbacks: [Callback] = []
+
+    func append(kind: ParakeetEouSnapshotKind, transcript: String) {
+        lock.lock()
+        callbacks.append(Callback(kind: kind, transcript: transcript))
+        lock.unlock()
+    }
+
+    func drain() -> [(ParakeetEouSnapshotKind, String)] {
+        lock.lock()
+        let drained = callbacks.map { ($0.kind, $0.transcript) }
+        callbacks.removeAll(keepingCapacity: true)
+        lock.unlock()
+        return drained
+    }
+}
+
+actor FluidAudioEouManager: ParakeetEouManaging {
+    private let backend: any FluidAudioEouBackend
+    private let collector: FluidAudioEouCallbackCollector
+    private var closed = false
+
+    init(backend: any FluidAudioEouBackend) async {
+        let collector = FluidAudioEouCallbackCollector()
+        self.backend = backend
+        self.collector = collector
+        await backend.setPartialCallback { transcript in
+            collector.append(kind: .partial, transcript: transcript)
+        }
+        await backend.setEouCallback { transcript in
+            collector.append(kind: .eou, transcript: transcript)
+        }
+    }
+
+    func append(_ frame: EouPcmFrame) async throws -> [ParakeetEouManagerSnapshot] {
+        guard !closed else { throw EouSessionFailure.cancelled }
+        guard
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: Double(frame.sampleRate),
+                channels: 1,
+                interleaved: false
+            ),
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(frame.frameCount)
+            ),
+            let channel = buffer.floatChannelData?[0]
+        else { throw EouSessionFailure.inferenceFailed }
+
+        let samples = frame.samples
+        samples.withUnsafeBufferPointer { source in
+            guard let base = source.baseAddress else { return }
+            channel.update(from: base, count: samples.count)
+        }
+        buffer.frameLength = AVAudioFrameCount(frame.frameCount)
+        _ = try await backend.process(audioBuffer: buffer)
+        return await snapshots(from: collector.drain())
+    }
+
+    func finish() async throws -> [ParakeetEouManagerSnapshot] {
+        guard !closed else { throw EouSessionFailure.cancelled }
+        closed = true
+        let tokens = await currentTokens()
+        let transcript: String
+        do {
+            transcript = try await backend.finish()
+        } catch {
+            await backend.cleanup()
+            throw error
+        }
+        var snapshots = collector.drain().map { callback in
+            ParakeetEouManagerSnapshot(
+                kind: callback.0,
+                transcript: callback.1,
+                tokens: tokens
+            )
+        }
+        if !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            snapshots.append(.final(transcript, tokens: tokens))
+        }
+        await backend.cleanup()
+        return snapshots
+    }
+
+    func cancel() async {
+        guard !closed else { return }
+        closed = true
+        _ = collector.drain()
+        await backend.cleanup()
+    }
+
+    private func snapshots(
+        from callbacks: [(ParakeetEouSnapshotKind, String)]
+    ) async -> [ParakeetEouManagerSnapshot] {
+        let tokens = await currentTokens()
+        return callbacks.map { callback in
+            ParakeetEouManagerSnapshot(
+                kind: callback.0,
+                transcript: callback.1,
+                tokens: tokens
+            )
+        }
+    }
+
+    private func currentTokens() async -> [ParakeetEouManagerToken] {
+        let timestamps = await backend.getTokenTimestampsMs()
+        let rawTokens = await backend.getRawTokenStrings()
+        return rawTokens.enumerated().compactMap { index, text in
+            guard timestamps.indices.contains(index) else { return nil }
+            let start = Double(timestamps[index]) / 1_000
+            let next = timestamps.indices.contains(index + 1)
+                ? Double(timestamps[index + 1]) / 1_000
+                : start + 0.08
+            return ParakeetEouManagerToken(
+                text: text,
+                startSeconds: start,
+                endSeconds: max(start, next)
+            )
+        }
+    }
+}
+
+public actor FluidAudioEouDriver: ParakeetEouDriving {
+    public init() {
+        AppLogger.setProcessLogging(.disabled)
+    }
+
+    public func makeManager(request: ParakeetEouManagerRequest) async throws
+        -> any ParakeetEouManaging
+    {
+        AppLogger.setProcessLogging(.disabled)
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .cpuAndNeuralEngine
+        let backend = StreamingEouAsrManager(
+            configuration: configuration,
+            chunkSize: .ms320,
+            debugFeatures: false
+        )
+        try await backend.loadModels(from: request.activeModelURL.appendingPathComponent(
+            FluidAudioModelLayout.eouDirectoryName,
+            isDirectory: true
+        ))
+        return await FluidAudioEouManager(backend: backend)
+    }
+}
+
 protocol FluidAudioAcknowledgedLiveBackend: Sendable {
     func ingestAudio(
         _ buffer: sending AVAudioPCMBuffer,

@@ -100,6 +100,33 @@ private struct FailingServiceLiveDriver: ParakeetLiveDriving {
     func capabilities() async -> ParakeetLiveDriverCapabilities { .required }
 }
 
+private actor ServiceEouManager: ParakeetEouManaging {
+    func append(_ frame: EouPcmFrame) async throws -> [ParakeetEouManagerSnapshot] {
+        [.partial("EOU preview")]
+    }
+
+    func finish() async throws -> [ParakeetEouManagerSnapshot] {
+        [.final("EOU final")]
+    }
+
+    func cancel() async {}
+}
+
+private struct ServiceEouDriver: ParakeetEouDriving {
+    func makeManager(request: ParakeetEouManagerRequest) async throws
+        -> any ParakeetEouManaging
+    {
+        ServiceEouManager()
+    }
+}
+
+private extension RuntimeEvent {
+    var eouUpdate: EouUpdate? {
+        guard case .eouUpdate(let update) = self else { return nil }
+        return update
+    }
+}
+
 final class ParakeetServiceTests: XCTestCase {
     private func makeDirectory(_ name: String) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
@@ -142,6 +169,50 @@ final class ParakeetServiceTests: XCTestCase {
         XCTAssertEqual(transcribed.result?.vocabularyCount, 2)
         let vocabulary = await driver.vocabulary
         XCTAssertEqual(vocabulary, ["Pluto", "FluidAudio"])
+    }
+
+    func testRoutesEouPcmAndEventsThroughPreparedService() async throws {
+        let modelRoot = try makeDirectory("service-eou-models")
+        let audioRoot = try makeDirectory("service-eou-audio")
+        let service = ParakeetService(
+            modelRoot: modelRoot,
+            audioRoot: audioRoot,
+            manifest: .fixture,
+            installer: ServiceModelInstaller(),
+            inferenceDriver: ServiceInferenceDriver(),
+            eouDriver: ServiceEouDriver()
+        )
+        _ = await service.handle(RuntimeRequest(id: "prepare", method: .prepare))
+        let identity = EouRequestMetadata(
+            streamId: "mic-eou", source: .mic, generation: 1
+        )
+        let open = await service.handleLive(RuntimeRequest(
+            id: "open", method: .eouOpen, eou: identity
+        ))
+        let samples = [Float](repeating: 0, count: 2_560)
+        let frame = try EouPcmFrame(
+            sampleRate: 8_000,
+            channelCount: 1,
+            frameCount: samples.count,
+            audioStartSeconds: 0,
+            audioEndSeconds: 0.32,
+            pcmData: samples.withUnsafeBytes { Data($0) }
+        )
+        let append = await service.handleLive(RuntimeRequest(
+            id: "append",
+            method: .eouAppend,
+            eou: EouRequestMetadata(
+                streamId: "mic-eou", source: .mic, generation: 1,
+                sequence: 1, frame: frame
+            )
+        ))
+        let finish = await service.handleLive(RuntimeRequest(
+            id: "finish", method: .eouFinish, eou: identity
+        ))
+
+        XCTAssertTrue(open.response.ok)
+        XCTAssertEqual(append.events.compactMap(\.eouUpdate).first?.tentativeText, "EOU preview")
+        XCTAssertEqual(finish.events.compactMap(\.eouUpdate).last?.committedText, "EOU final")
     }
 
     func testReportsAndUsesOneSelectedLowLatencyConfiguration() async throws {
