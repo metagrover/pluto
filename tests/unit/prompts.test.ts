@@ -303,6 +303,25 @@ describe('knowledge document prompts', () => {
     expect(prompt).toContain('Never use a raw source summary as the headline');
   });
 
+  it('uses shared claim corrections to suppress contradicted memory without treating them as evidence', () => {
+    const prompt = getKnowledgeDocumentPrompt({
+      scopeType: 'global',
+      scopeTitle: 'Global Knowledge Context',
+      sourceMeetings: [],
+      previousStructuredJson: null,
+      claimCorrections: [
+        {
+          originalClaim: 'Sam owns pricing approval.',
+          correctedText: 'Alex owns pricing approval.',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('User correction constraints');
+    expect(prompt).toContain('Alex owns pricing approval.');
+    expect(prompt).toContain('cannot be used as a citation');
+  });
+
   it('builds a merge prompt from chunk documents instead of raw meeting evidence', () => {
     const prompt = getKnowledgeDocumentMergePrompt({
       scopeType: 'global',

@@ -426,6 +426,7 @@ interface TextGenerationOptions {
   task: LLMTask;
   jsonMode?: boolean;
   signal?: AbortSignal;
+  onStart?: () => void;
   onToken?: (delta: string) => void;
 }
 
@@ -1223,6 +1224,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     options: {
       signal?: AbortSignal;
       mode?: 'fast' | 'deep';
+      onStart?: () => void;
       onToken?: (delta: string) => void;
     } = {},
   ): Promise<string> {
@@ -1230,6 +1232,7 @@ export class UnifiedLLMProvider implements LLMProvider {
       prompt,
       task: options.mode === 'deep' ? 'askPlutoDeep' : 'askPluto',
       signal: options.signal,
+      onStart: options.onStart,
       onToken: options.onToken,
     });
   }
@@ -1302,30 +1305,38 @@ export class UnifiedLLMProvider implements LLMProvider {
       let result: string;
       switch (this.providerType) {
         case 'openai':
+          options.onStart?.();
           result = await this.generateWithOpenAI(options);
           break;
         case 'claude':
+          options.onStart?.();
           result = await this.generateWithClaude(options);
           break;
         case 'gemini':
+          options.onStart?.();
           result = await this.generateWithGemini(options);
           break;
         case 'ollama':
           result = await runWithOllamaGenerationGate(
             Symbol(options.task),
-            async (gateSignal) =>
-              this.generateWithOllama({
+            async (gateSignal) => {
+              options.onStart?.();
+              return this.generateWithOllama({
                 ...options,
                 signal: options.signal
                   ? AbortSignal.any([options.signal, gateSignal])
                   : gateSignal,
-              }),
+              });
+            },
             options.task === 'knowledgeDoc'
               ? 0
               : options.task === 'askPluto' || options.task === 'askPlutoDeep'
                 ? 20
                 : 10,
-            { preemptible: options.task === 'knowledgeDoc' },
+            {
+              preemptible:
+                options.task === 'knowledgeDoc' || options.task === 'title',
+            },
           );
           break;
         default:
@@ -1463,8 +1474,14 @@ export class UnifiedLLMProvider implements LLMProvider {
       requestBody.format = 'json';
       requestBody.think = this.settings.ollama_structured_thinking ?? false;
     }
+    if (task === 'queryClassification') requestBody.think = false;
     if (task === 'askPluto') requestBody.think = false;
-    if (task === 'askPlutoDeep') requestBody.think = true;
+    if (task === 'askPlutoDeep') {
+      requestBody.think = false;
+      const options = requestBody.options as Record<string, unknown>;
+      options.top_k = 40;
+      options.top_p = 1;
+    }
     if (Number.isSafeInteger(this.settings.ollama_seed)) {
       (requestBody.options as Record<string, unknown>).seed =
         this.settings.ollama_seed;
@@ -1852,17 +1869,19 @@ export function calculateOllamaContextBudget(
   task: string,
 ): { num_ctx: number; num_predict: number } {
   const outputTokenBudget =
-    task === 'askPluto'
-      ? 1024
-      : task === 'askPlutoDeep'
-        ? 2048
-        : task === 'analysisEditorial'
-          ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
-          : task === 'knowledgeDoc' ||
-              task === 'structuredAnalysis' ||
-              task === 'summary'
-            ? 4096
-            : 2500;
+    task === 'queryClassification'
+      ? 128
+      : task === 'askPluto'
+        ? 1024
+        : task === 'askPlutoDeep'
+          ? 2048
+          : task === 'analysisEditorial'
+            ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
+            : task === 'knowledgeDoc' ||
+                task === 'structuredAnalysis' ||
+                task === 'summary'
+              ? 4096
+              : 2500;
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =
@@ -1874,7 +1893,11 @@ export function calculateOllamaContextBudget(
           ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
           : 16384;
   const minimumContext =
-    task === 'askPluto' ? 8192 : task === 'askPlutoDeep' ? 16384 : 4096;
+    task === 'askPluto' || task === 'title'
+      ? 8192
+      : task === 'askPlutoDeep'
+        ? 16384
+        : 4096;
   const num_ctx = Math.min(
     maxCap,
     Math.max(minimumContext, Math.ceil(totalNeeded / 1024) * 1024),

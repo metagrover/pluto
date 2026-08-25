@@ -318,9 +318,18 @@ export const getKnowledgeDocumentPrompt = (params: {
   scopeTitle: string;
   sourceMeetings: KnowledgePromptSourceMeeting[];
   previousStructuredJson?: string | null;
+  claimCorrections?: Array<{
+    originalClaim: string;
+    correctedText: string;
+  }>;
 }): string => {
-  const { scopeType, scopeTitle, sourceMeetings, previousStructuredJson } =
-    params;
+  const {
+    scopeType,
+    scopeTitle,
+    sourceMeetings,
+    previousStructuredJson,
+    claimCorrections = [],
+  } = params;
 
   const sourcesBlock = sourceMeetings
     .map((meeting) => {
@@ -330,6 +339,15 @@ export const getKnowledgeDocumentPrompt = (params: {
     .join('\n');
 
   const scopeGuidance = getScopeGuidance(scopeType);
+  const correctionBlock = claimCorrections.length
+    ? claimCorrections
+        .slice(0, 12)
+        .map(
+          (correction, index) =>
+            `${index + 1}. Do not repeat "${correction.originalClaim}"; the user corrected it to "${correction.correctedText}".`,
+        )
+        .join('\n')
+    : '(none)';
 
   return `You are an expert at producing strict, citation-grounded knowledge documents for Pluto.
 
@@ -345,6 +363,10 @@ You are generating a structured knowledge document for this scope:
 ${scopeGuidance ? `\n${scopeGuidance}\n` : ''}
 Available meeting evidence (newest first):
 ${sourcesBlock || '(none)'}
+
+User correction constraints:
+${correctionBlock}
+Corrections suppress contradicted claims, but are not meeting evidence and cannot be used as a citation or to create a new uncited item.
 
 ${
   previousStructuredJson?.trim()
@@ -410,9 +432,18 @@ export const getKnowledgeDocumentMergePrompt = (params: {
   scopeTitle: string;
   chunkDocuments: Array<{ label: string; structuredJson: string }>;
   previousStructuredJson?: string | null;
+  claimCorrections?: Array<{
+    originalClaim: string;
+    correctedText: string;
+  }>;
 }): string => {
-  const { scopeType, scopeTitle, chunkDocuments, previousStructuredJson } =
-    params;
+  const {
+    scopeType,
+    scopeTitle,
+    chunkDocuments,
+    previousStructuredJson,
+    claimCorrections = [],
+  } = params;
   const chunksBlock = chunkDocuments
     .map(
       (chunk) =>
@@ -437,6 +468,20 @@ You are generating a structured knowledge document for this scope:
 
 Chunk documents:
 ${chunksBlock || '(none)'}
+
+User correction constraints:
+${
+  claimCorrections.length
+    ? claimCorrections
+        .slice(0, 12)
+        .map(
+          (correction, index) =>
+            `${index + 1}. Do not repeat "${correction.originalClaim}"; the user corrected it to "${correction.correctedText}".`,
+        )
+        .join('\n')
+    : '(none)'
+}
+Corrections suppress contradicted claims, but are not meeting evidence and cannot be used as a citation or to create a new uncited item.
 
 ${
   previousStructuredJson?.trim()

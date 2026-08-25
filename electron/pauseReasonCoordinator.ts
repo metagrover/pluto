@@ -2,6 +2,7 @@ export type PauseReason =
   | 'capture'
   | 'transcription'
   | 'downstream'
+  | 'ask_pluto_session'
   | 'llm_active';
 
 export const createPauseReasonCoordinator = (

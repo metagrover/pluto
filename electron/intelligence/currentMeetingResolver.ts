@@ -9,6 +9,26 @@ export type ResolvedCurrentMeeting =
   | { kind: 'persisted'; meetingId: string }
   | { kind: 'none'; meetingId: null };
 
+export const resolvePersistedMeetingEvidenceState = ({
+  finalizationStatus,
+  downstreamProcessingJson,
+}: {
+  finalizationStatus?: string | null;
+  downstreamProcessingJson?: string | null;
+}): 'processing' | 'failed' | 'completed' => {
+  if (finalizationStatus === 'recovery_required') return 'failed';
+  try {
+    const downstream = JSON.parse(downstreamProcessingJson || '{}') as {
+      state?: unknown;
+    };
+    if (downstream.state === 'processing') return 'processing';
+    if (downstream.state === 'failed') return 'failed';
+  } catch {
+    // Missing or malformed downstream state does not erase usable evidence.
+  }
+  return 'completed';
+};
+
 export const queryReferencesCurrentMeeting = (query: string): boolean =>
   /\b(current|latest|this)\s+meeting\b|\bcurrent recording\b|\blatest one\b/i.test(
     query,

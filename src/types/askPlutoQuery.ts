@@ -2,11 +2,32 @@ export type AskPlutoQueryPhase =
   | 'scope_resolved'
   | 'retrieving'
   | 'generating'
-  | 'cancelling';
+  | 'citations_ready'
+  | 'completed'
+  | 'cancelling'
+  | 'cancelled'
+  | 'unavailable'
+  | 'failed';
+
+export type AskPlutoEvidenceState =
+  | 'provisional'
+  | 'processing'
+  | 'failed'
+  | 'completed';
 
 export type AskPlutoCurrentMeeting =
-  | { kind: 'active_recording'; meetingId: string; title?: string }
-  | { kind: 'persisted'; meetingId: string; title?: string }
+  | {
+      kind: 'active_recording';
+      meetingId: string;
+      title?: string;
+      evidenceState: 'provisional';
+    }
+  | {
+      kind: 'persisted';
+      meetingId: string;
+      title?: string;
+      evidenceState: Exclude<AskPlutoEvidenceState, 'provisional'>;
+    }
   | { kind: 'none'; meetingId: null };
 
 export interface AskPlutoQueryRequest {
@@ -58,4 +79,6 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
   citations: Citation[];
   currentMeeting?: AskPlutoCurrentMeeting;
   failureReason?: 'timeout' | 'provider_unavailable';
+  trustStatus?: 'grounded' | 'inferred' | 'needs_review';
+  unsupportedClaimCount?: number;
 }

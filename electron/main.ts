@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -21,6 +21,7 @@ import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
 import type {
+  AskPlutoCurrentMeeting,
   AskPlutoQueryRequest,
   AskPlutoQueryStatus,
 } from '../src/types/askPlutoQuery';
@@ -353,19 +354,30 @@ import {
   processExtractedEntities,
 } from './entityPipeline';
 import {
+  detectExplicitAskPlutoCorrection,
+  formatAskPlutoCorrectionsForPrompt,
+  parseAskPlutoCorrectionRecords,
+  selectRelevantAskPlutoCorrections,
+} from './intelligence/askPlutoCorrections';
+import {
   type AskPlutoReasoningMode,
   getCrossMeetingCandidateLimit,
   queryReferencesPriorTurn,
   resolveAskPlutoReasoningMode,
+  shouldRestrictToCurrentMeetingEvidence,
+  shouldRestrictToPinnedCurrentComparison,
+  shouldRestrictToPriorConversationEvidence,
 } from './intelligence/askPlutoReasoning';
 import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
 import {
+  auditAnswerGrounding,
   auditCitations,
   buildCitationChain,
 } from './intelligence/citationEngine';
 import {
   queryReferencesCurrentMeeting,
   resolveCurrentMeeting,
+  resolvePersistedMeetingEvidenceState,
 } from './intelligence/currentMeetingResolver';
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
@@ -386,6 +398,7 @@ import { generateSuggestedQueries } from './intelligence/suggestedQueries';
 import {
   initializeKnowledgeDocs,
   queueAllKnowledgeDocsRefresh,
+  queueKnowledgeDocRefresh,
   queueKnowledgeDocsRefreshForMeeting,
   refreshKnowledgeDocNow,
   refreshKnowledgeDocsForMeetingNow,
@@ -424,6 +437,7 @@ const activeAskPlutoQueries = new Map<
   string,
   { controller: AbortController; settled: Promise<void> }
 >();
+const activeAskPlutoSessionOwners = new Set<number>();
 let activeTranscriptionCount = 0;
 const activeTranscriptionMeetings = new Map<string, number>();
 let parakeetFinalClient: ParakeetFinalClient | null = null;
@@ -2932,6 +2946,28 @@ app.whenReady().then(async () => {
   // INTELLIGENCE QUERY HANDLERS (Phase 2)
   // =============================================
   ipcMain.handle(
+    'intelligence:query:session-active',
+    (event, active: boolean) => {
+      const ownerId = event.sender.id;
+      if (active === true && !activeAskPlutoSessionOwners.has(ownerId)) {
+        activeAskPlutoSessionOwners.add(ownerId);
+        knowledgeSynthesisPause.acquire('ask_pluto_session');
+        event.sender.once('destroyed', () => {
+          if (activeAskPlutoSessionOwners.delete(ownerId)) {
+            knowledgeSynthesisPause.release('ask_pluto_session');
+          }
+        });
+      } else if (
+        active !== true &&
+        activeAskPlutoSessionOwners.delete(ownerId)
+      ) {
+        knowledgeSynthesisPause.release('ask_pluto_session');
+      }
+      return { active: activeAskPlutoSessionOwners.has(ownerId) };
+    },
+  );
+
+  ipcMain.handle(
     'intelligence:query',
     async (event, input: string | AskPlutoQueryRequest) => {
       const startTime = Date.now();
@@ -2958,12 +2994,36 @@ app.whenReady().then(async () => {
             | db.PersistedMeeting
             | undefined)
         : undefined;
-      const currentMeetingStatus = {
-        ...currentMeeting,
-        ...(currentMeetingRow?.title ? { title: currentMeetingRow.title } : {}),
-      };
+      const currentMeetingStatus: AskPlutoCurrentMeeting =
+        currentMeeting.kind === 'active_recording'
+          ? {
+              ...currentMeeting,
+              evidenceState: 'provisional',
+              ...(currentMeetingRow?.title
+                ? { title: currentMeetingRow.title }
+                : {}),
+            }
+          : currentMeeting.kind === 'persisted'
+            ? {
+                ...currentMeeting,
+                evidenceState: resolvePersistedMeetingEvidenceState({
+                  finalizationStatus: currentMeetingRow?.finalization_status,
+                  downstreamProcessingJson:
+                    currentMeetingRow?.downstream_processing_json,
+                }),
+                ...(currentMeetingRow?.title
+                  ? { title: currentMeetingRow.title }
+                  : {}),
+              }
+            : currentMeeting;
       let reasoningMode: AskPlutoReasoningMode | undefined;
       let comparisonMeetingCount = 0;
+      let retrievalStartedAt: number | undefined;
+      let retrievalCompletedAt: number | undefined;
+      let providerRequestedAt: number | undefined;
+      let providerStartedAt: number | undefined;
+      let firstTokenAt: number | undefined;
+      let generationCompletedAt: number | undefined;
       const sendStatus = (phase: AskPlutoQueryStatus['phase']) => {
         if (event.sender.isDestroyed()) return;
         event.sender.send('intelligence:query:status', {
@@ -2993,6 +3053,7 @@ app.whenReady().then(async () => {
 
         const parsed = await parseQuery(queryText, {
           signal: controller.signal,
+          useModelClassification: false,
         });
         const requestedMode =
           typeof input !== 'string' &&
@@ -3037,6 +3098,59 @@ app.whenReady().then(async () => {
                         .slice(0, 8)
                     : [],
                 }));
+        const globalKnowledgeDoc = db.ensureGlobalKnowledgeDoc();
+        const storedCorrections = parseAskPlutoCorrectionRecords(
+          db.getKnowledgeCorrections(globalKnowledgeDoc.id),
+        );
+        const explicitCorrection = detectExplicitAskPlutoCorrection(
+          queryText,
+          priorTurns,
+        );
+        if (
+          explicitCorrection &&
+          !storedCorrections.some(
+            (correction) =>
+              correction.originalClaim === explicitCorrection.originalClaim &&
+              correction.correctedText === explicitCorrection.correctedText,
+          )
+        ) {
+          const targetId = `ask-pluto:${createHash('sha256')
+            .update(explicitCorrection.originalClaim)
+            .digest('hex')
+            .slice(0, 20)}`;
+          db.saveKnowledgeCorrection({
+            doc_id: globalKnowledgeDoc.id,
+            target_kind: 'claim',
+            target_id: targetId,
+            action: 'correct_claim',
+            payload: {
+              source: 'ask_pluto',
+              original_claim: explicitCorrection.originalClaim,
+              corrected_text: explicitCorrection.correctedText,
+              meeting_ids: explicitCorrection.meetingIds,
+            },
+          });
+          storedCorrections.unshift(explicitCorrection);
+          queueKnowledgeDocRefresh(globalKnowledgeDoc.id);
+        }
+        const correctionContext = [
+          queryText,
+          ...priorTurns.map((turn) => turn.content),
+        ].join('\n');
+        const relevantCorrections = selectRelevantAskPlutoCorrections(
+          correctionContext,
+          storedCorrections,
+        );
+        if (
+          explicitCorrection &&
+          !relevantCorrections.some(
+            (correction) =>
+              correction.originalClaim === explicitCorrection.originalClaim &&
+              correction.correctedText === explicitCorrection.correctedText,
+          )
+        ) {
+          relevantCorrections.unshift(explicitCorrection);
+        }
         const activeSnapshot =
           typeof input !== 'string' &&
           activeRecording?.meetingId === input.activeMeetingSnapshot?.meetingId
@@ -3130,7 +3244,34 @@ app.whenReady().then(async () => {
               ),
           ),
         ];
-        const context = await retrieveContext(parsed, { pinnedResults });
+        retrievalStartedAt = Date.now();
+        const restrictToCurrentMeeting = shouldRestrictToCurrentMeetingEvidence(
+          {
+            currentMeetingRequested,
+            historicalCandidateLimit,
+            priorPinnedCount: priorPinnedResults.length,
+          },
+        );
+        const restrictToPriorConversation =
+          shouldRestrictToPriorConversationEvidence({
+            currentMeetingRequested,
+            intent: parsed.intent,
+            priorPinnedCount: priorPinnedResults.length,
+          });
+        const restrictToPinnedCurrentComparison =
+          shouldRestrictToPinnedCurrentComparison({
+            currentMeetingRequested,
+            historicalCandidateLimit,
+          });
+        const context =
+          restrictToCurrentMeeting && currentPinnedResult
+            ? [currentPinnedResult]
+            : restrictToPinnedCurrentComparison
+              ? pinnedResults
+              : restrictToPriorConversation
+                ? priorPinnedResults
+                : await retrieveContext(parsed, { pinnedResults });
+        retrievalCompletedAt = Date.now();
         controller.signal.throwIfAborted();
 
         console.log(
@@ -3144,25 +3285,33 @@ app.whenReady().then(async () => {
           context,
           parsed.intent,
           priorTurns,
+          formatAskPlutoCorrectionsForPrompt(relevantCorrections),
         );
         sendStatus('generating');
         console.log(
           `[Pluto] Generating answer via provider: ${provider.name} ...`,
         );
+        providerRequestedAt = Date.now();
         const answerRaw = await provider.answerAskPluto(prompt, {
           signal: controller.signal,
           mode: reasoningMode,
+          onStart: () => {
+            providerStartedAt ??= Date.now();
+          },
           onToken: (delta) => {
             if (controller.signal.aborted || event.sender.isDestroyed()) return;
+            firstTokenAt ??= Date.now();
             event.sender.send('intelligence:query:delta', {
               requestId,
               delta,
             });
           },
         });
+        generationCompletedAt = Date.now();
 
         const rawCitations = buildCitationChain(answerRaw, context);
-        const auditedCitations = auditCitations(rawCitations);
+        const auditedCitations = auditCitations(rawCitations, context);
+        const grounding = auditAnswerGrounding(answerRaw, auditedCitations);
         const cleanAnswer = answerRaw
           .replace(/\[Source\s+\d+\]/gi, '')
           .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
@@ -3177,6 +3326,7 @@ app.whenReady().then(async () => {
           answer: cleanAnswer,
           citations: auditedCitations,
           currentMeeting: currentMeetingStatus,
+          ...grounding,
         };
       })();
       const settled = generation.then(
@@ -3186,12 +3336,20 @@ app.whenReady().then(async () => {
       activeAskPlutoQueries.set(requestId, { controller, settled });
 
       try {
-        return await generation;
+        const response = await generation;
+        if (response.status === 'answered') {
+          sendStatus('citations_ready');
+          sendStatus('completed');
+        } else if (response.status === 'unavailable') {
+          sendStatus('unavailable');
+        }
+        return response;
       } catch (error) {
         if (controller.signal.aborted) {
           console.log(
             `[Pluto] intelligence:query cancelled after ${Date.now() - startTime}ms [request_id=${requestId}]`,
           );
+          sendStatus('cancelled');
           return {
             status: 'cancelled' as const,
             answer: '',
@@ -3207,6 +3365,7 @@ app.whenReady().then(async () => {
           `[Pluto] intelligence:query failed after ${Date.now() - startTime}ms:`,
           error,
         );
+        sendStatus('failed');
         return {
           status: 'unavailable' as const,
           answer: timedOut
@@ -3219,6 +3378,27 @@ app.whenReady().then(async () => {
             : ('provider_unavailable' as const),
         };
       } finally {
+        const finishedAt = Date.now();
+        console.log(
+          '[Pluto] intelligence:query timings',
+          JSON.stringify({
+            request_id: requestId,
+            queue_ms:
+              providerRequestedAt && providerStartedAt
+                ? providerStartedAt - providerRequestedAt
+                : null,
+            retrieval_ms:
+              retrievalStartedAt && retrievalCompletedAt
+                ? retrievalCompletedAt - retrievalStartedAt
+                : null,
+            first_token_ms: firstTokenAt ? firstTokenAt - startTime : null,
+            generation_ms:
+              providerStartedAt && generationCompletedAt
+                ? generationCompletedAt - providerStartedAt
+                : null,
+            total_ms: finishedAt - startTime,
+          }),
+        );
         if (activeAskPlutoQueries.get(requestId)?.controller === controller) {
           activeAskPlutoQueries.delete(requestId);
         }
@@ -3230,10 +3410,14 @@ app.whenReady().then(async () => {
     if (typeof requestId !== 'string') return { cancelled: false };
     const active = activeAskPlutoQueries.get(requestId);
     if (!active) return { cancelled: false };
+    const cancellationStartedAt = Date.now();
     active.controller.abort(
       new DOMException('Ask Pluto request cancelled', 'AbortError'),
     );
     await active.settled;
+    console.log(
+      `[Pluto] intelligence:query cancellation settled in ${Date.now() - cancellationStartedAt}ms [request_id=${requestId}]`,
+    );
     return { cancelled: true };
   });
 

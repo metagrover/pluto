@@ -423,9 +423,9 @@ const initDb = () => {
       CREATE TABLE IF NOT EXISTS knowledge_corrections (
         id TEXT PRIMARY KEY,
         doc_id TEXT NOT NULL,
-        target_kind TEXT NOT NULL CHECK(target_kind IN ('source', 'stream', 'item')),
+        target_kind TEXT NOT NULL CHECK(target_kind IN ('source', 'stream', 'item', 'claim')),
         target_id TEXT NOT NULL,
-        action TEXT NOT NULL CHECK(action IN ('exclude_source', 'rename_stream', 'merge_stream', 'split_stream', 'pin_stream', 'promote_item', 'demote_item', 'correct_classification')),
+        action TEXT NOT NULL CHECK(action IN ('exclude_source', 'rename_stream', 'merge_stream', 'split_stream', 'pin_stream', 'promote_item', 'demote_item', 'correct_classification', 'correct_claim')),
         payload_json TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
@@ -792,9 +792,9 @@ const initDb = () => {
       CREATE TABLE IF NOT EXISTS knowledge_corrections (
         id TEXT PRIMARY KEY,
         doc_id TEXT NOT NULL,
-        target_kind TEXT NOT NULL CHECK(target_kind IN ('source', 'stream', 'item')),
+        target_kind TEXT NOT NULL CHECK(target_kind IN ('source', 'stream', 'item', 'claim')),
         target_id TEXT NOT NULL,
-        action TEXT NOT NULL CHECK(action IN ('exclude_source', 'rename_stream', 'merge_stream', 'split_stream', 'pin_stream', 'promote_item', 'demote_item', 'correct_classification')),
+        action TEXT NOT NULL CHECK(action IN ('exclude_source', 'rename_stream', 'merge_stream', 'split_stream', 'pin_stream', 'promote_item', 'demote_item', 'correct_classification', 'correct_claim')),
         payload_json TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
@@ -802,6 +802,43 @@ const initDb = () => {
       CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_doc ON knowledge_corrections(doc_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_knowledge_corrections_target ON knowledge_corrections(doc_id, target_kind, target_id);
     `);
+
+    const correctionTable = db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'knowledge_corrections'",
+      )
+      .get() as { sql?: string } | undefined;
+    if (
+      correctionTable?.sql &&
+      (!correctionTable.sql.includes("'claim'") ||
+        !correctionTable.sql.includes("'correct_claim'"))
+    ) {
+      const migrateKnowledgeCorrections = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE knowledge_corrections_new (
+            id TEXT PRIMARY KEY,
+            doc_id TEXT NOT NULL,
+            target_kind TEXT NOT NULL CHECK(target_kind IN ('source', 'stream', 'item', 'claim')),
+            target_id TEXT NOT NULL,
+            action TEXT NOT NULL CHECK(action IN ('exclude_source', 'rename_stream', 'merge_stream', 'split_stream', 'pin_stream', 'promote_item', 'demote_item', 'correct_classification', 'correct_claim')),
+            payload_json TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (doc_id) REFERENCES knowledge_docs(id) ON DELETE CASCADE
+          );
+          INSERT INTO knowledge_corrections_new (
+            id, doc_id, target_kind, target_id, action, payload_json, created_at
+          )
+          SELECT id, doc_id, target_kind, target_id, action, payload_json, created_at
+          FROM knowledge_corrections;
+          DROP TABLE knowledge_corrections;
+          ALTER TABLE knowledge_corrections_new RENAME TO knowledge_corrections;
+          CREATE INDEX idx_knowledge_corrections_doc ON knowledge_corrections(doc_id, created_at DESC);
+          CREATE INDEX idx_knowledge_corrections_target ON knowledge_corrections(doc_id, target_kind, target_id);
+        `);
+      });
+      migrateKnowledgeCorrections();
+      console.log('[DB] Expanded knowledge corrections for claim corrections');
+    }
   } catch (e) {
     console.warn('[DB] knowledge_corrections migration failed:', e);
   }
@@ -2725,7 +2762,11 @@ export interface KnowledgeDocVersion {
   source_count: number;
 }
 
-export type KnowledgeCorrectionTargetKind = 'source' | 'stream' | 'item';
+export type KnowledgeCorrectionTargetKind =
+  | 'source'
+  | 'stream'
+  | 'item'
+  | 'claim';
 export type KnowledgeCorrectionAction =
   | 'exclude_source'
   | 'rename_stream'
@@ -2734,7 +2775,8 @@ export type KnowledgeCorrectionAction =
   | 'pin_stream'
   | 'promote_item'
   | 'demote_item'
-  | 'correct_classification';
+  | 'correct_classification'
+  | 'correct_claim';
 
 export interface KnowledgeCorrection {
   id: string;

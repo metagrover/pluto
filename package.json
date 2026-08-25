@@ -40,6 +40,7 @@
     "benchmark:speaker-attribution": "node --experimental-strip-types scripts/run_local_speaker_attribution_benchmark.ts",
     "benchmark:production-speaker-attribution": "node --experimental-strip-types scripts/run_production_speaker_attribution_acceptance.ts",
     "benchmark:meeting-notes-quality": "RUN_MEETING_NOTES_PROVIDER_BENCHMARK=1 vitest run --config vitest.benchmark.config.ts --reporter=verbose",
+    "benchmark:ask-pluto": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/run_ask_pluto_benchmark.ts",
     "benchmark:meeting-notes-quality:score-fixtures": "node scripts/evaluate_meeting_notes_quality.js",
     "changelog:check": "node scripts/changelog.mjs check",
     "changelog:build": "node scripts/changelog.mjs build",

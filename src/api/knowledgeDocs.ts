@@ -58,7 +58,11 @@ export interface KnowledgeDocUserEdit {
   edited_by: string;
 }
 
-export type KnowledgeCorrectionTargetKind = 'source' | 'stream' | 'item';
+export type KnowledgeCorrectionTargetKind =
+  | 'source'
+  | 'stream'
+  | 'item'
+  | 'claim';
 export type KnowledgeCorrectionAction =
   | 'exclude_source'
   | 'rename_stream'
@@ -67,7 +71,8 @@ export type KnowledgeCorrectionAction =
   | 'pin_stream'
   | 'promote_item'
   | 'demote_item'
-  | 'correct_classification';
+  | 'correct_classification'
+  | 'correct_claim';
 
 export interface KnowledgeCorrection {
   id: string;

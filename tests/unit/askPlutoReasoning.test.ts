@@ -4,6 +4,9 @@ import {
   getCrossMeetingCandidateLimit,
   queryReferencesPriorTurn,
   resolveAskPlutoReasoningMode,
+  shouldRestrictToCurrentMeetingEvidence,
+  shouldRestrictToPinnedCurrentComparison,
+  shouldRestrictToPriorConversationEvidence,
 } from '../../electron/intelligence/askPlutoReasoning';
 
 describe('resolveAskPlutoReasoningMode', () => {
@@ -74,5 +77,54 @@ describe('resolveAskPlutoReasoningMode', () => {
     expect(getCrossMeetingCandidateLimit('What was decided?', 'factual')).toBe(
       0,
     );
+  });
+
+  it('keeps a direct current-meeting lookup scoped to that meeting', () => {
+    expect(
+      shouldRestrictToCurrentMeetingEvidence({
+        currentMeetingRequested: true,
+        historicalCandidateLimit: 0,
+        priorPinnedCount: 0,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRestrictToCurrentMeetingEvidence({
+        currentMeetingRequested: true,
+        historicalCandidateLimit: 1,
+        priorPinnedCount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps a factual follow-up scoped to its cited meetings', () => {
+    expect(
+      shouldRestrictToPriorConversationEvidence({
+        currentMeetingRequested: false,
+        intent: 'factual',
+        priorPinnedCount: 1,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRestrictToPriorConversationEvidence({
+        currentMeetingRequested: false,
+        intent: 'comparative',
+        priorPinnedCount: 1,
+      }),
+    ).toBe(false);
+  });
+
+  it('uses only the frozen pair for current-versus-previous comparisons', () => {
+    expect(
+      shouldRestrictToPinnedCurrentComparison({
+        currentMeetingRequested: true,
+        historicalCandidateLimit: 1,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRestrictToPinnedCurrentComparison({
+        currentMeetingRequested: true,
+        historicalCandidateLimit: 3,
+      }),
+    ).toBe(false);
   });
 });

@@ -182,7 +182,7 @@ describe('UnifiedLLMProvider', () => {
     }
   });
 
-  it('selects Ollama thinking explicitly for fast and deep Ask Pluto requests', async () => {
+  it('keeps synchronous Ask Pluto visible while preserving the larger Deep budget', async () => {
     const requestBodies: Array<Record<string, unknown>> = [];
     installFetchMock((_url, init) => {
       requestBodies.push(parseRequestBody(init));
@@ -200,11 +200,42 @@ describe('UnifiedLLMProvider', () => {
       num_ctx: 8192,
       num_predict: 1024,
     });
-    expect(requestBodies[1]).toMatchObject({ think: true });
+    expect(requestBodies[1]).toMatchObject({ think: false });
     expect(requestBodies[1].options).toMatchObject({
       num_ctx: 16384,
       num_predict: 2048,
+      top_k: 40,
+      top_p: 1,
     });
+  });
+
+  it('reports when an Ask Pluto request is admitted to the provider', async () => {
+    installFetchMock(() => jsonResponse({ response: 'Grounded answer' }));
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const onStart = vi.fn();
+
+    await provider.answerAskPluto('Who owns this?', { onStart });
+
+    expect(onStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Ask Pluto intent classification non-thinking even when structured thinking is enabled', async () => {
+    let requestBody: Record<string, unknown> = {};
+    installFetchMock((_url, init) => {
+      requestBody = parseRequestBody(init);
+      return jsonResponse({ response: '{"intent":"factual"}' });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+      ollama_structured_thinking: true,
+    });
+
+    await provider.classifyQueryIntent('Classify this query.');
+
+    expect(requestBody).toMatchObject({ think: false, format: 'json' });
+    expect(requestBody.options).toMatchObject({ num_predict: 128 });
   });
 
   it('propagates Ask Pluto cancellation to the active Ollama transport', async () => {
@@ -266,6 +297,36 @@ describe('UnifiedLLMProvider', () => {
     const second = secondProvider.generateUserAnalysisMarkdown('analysis');
     await firstOutcome;
     await expect(second).resolves.toBe(validAnalysisMarkdown);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('preempts background title generation for Ask Pluto', async () => {
+    let generationCalls = 0;
+    const fetchMock = installFetchMock((_url, init) => {
+      generationCalls += 1;
+      if (generationCalls > 1) {
+        return jsonResponse({
+          response: 'The current meeting is about pricing.',
+        });
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(init.signal?.reason),
+          { once: true },
+        );
+      });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+
+    const title = provider.generateTitle('A meeting transcript');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const answer = provider.answerAskPluto('What is this meeting about?');
+
+    await expect(title).resolves.toBe('Meeting');
+    await expect(answer).resolves.toBe('The current meeting is about pricing.');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -1515,6 +1576,10 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
   });
 
   it('uses separate bounded budgets for fast and deep Ask Pluto answers', () => {
+    expect(calculateOllamaContextBudget('transcript', 'title')).toEqual({
+      num_ctx: 8192,
+      num_predict: 2500,
+    });
     expect(calculateOllamaContextBudget('question', 'askPluto')).toEqual({
       num_ctx: 8192,
       num_predict: 1024,

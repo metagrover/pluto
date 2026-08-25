@@ -19,6 +19,41 @@ export const getCrossMeetingCandidateLimit = (
   return /\b(last|previous)\s+(one|meeting)\b/i.test(query) ? 1 : 3;
 };
 
+export const shouldRestrictToCurrentMeetingEvidence = ({
+  currentMeetingRequested,
+  historicalCandidateLimit,
+  priorPinnedCount,
+}: {
+  currentMeetingRequested: boolean;
+  historicalCandidateLimit: number;
+  priorPinnedCount: number;
+}): boolean =>
+  currentMeetingRequested &&
+  historicalCandidateLimit === 0 &&
+  priorPinnedCount === 0;
+
+export const shouldRestrictToPriorConversationEvidence = ({
+  currentMeetingRequested,
+  intent,
+  priorPinnedCount,
+}: {
+  currentMeetingRequested: boolean;
+  intent: ParsedQuery['intent'];
+  priorPinnedCount: number;
+}): boolean =>
+  !currentMeetingRequested &&
+  priorPinnedCount > 0 &&
+  intent !== 'comparative' &&
+  intent !== 'exploratory';
+
+export const shouldRestrictToPinnedCurrentComparison = ({
+  currentMeetingRequested,
+  historicalCandidateLimit,
+}: {
+  currentMeetingRequested: boolean;
+  historicalCandidateLimit: number;
+}): boolean => currentMeetingRequested && historicalCandidateLimit === 1;
+
 export const resolveAskPlutoReasoningMode = ({
   query,
   intent,

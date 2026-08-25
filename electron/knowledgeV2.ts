@@ -142,7 +142,7 @@ export interface KnowledgeV2SourceMeeting {
 }
 
 export interface KnowledgeV2Correction {
-  target_kind: 'source' | 'stream' | 'item';
+  target_kind: 'source' | 'stream' | 'item' | 'claim';
   target_id: string;
   action:
     | 'exclude_source'
@@ -152,7 +152,8 @@ export interface KnowledgeV2Correction {
     | 'pin_stream'
     | 'promote_item'
     | 'demote_item'
-    | 'correct_classification';
+    | 'correct_classification'
+    | 'correct_claim';
   payload_json: string | null;
   created_at: string;
 }
@@ -678,6 +679,28 @@ type KnowledgeV2OverlayItemState = {
   item: KnowledgeV2Item;
   originalIndex: number;
   forceAttention: boolean | null;
+  suppressed: boolean;
+};
+
+const claimCorrectionMatches = (claim: string, candidate: string): boolean => {
+  const ignored = new Set([
+    'and',
+    'for',
+    'from',
+    'that',
+    'the',
+    'this',
+    'with',
+  ]);
+  const tokens = (value: string) =>
+    (normalizeText(value).match(/[a-z0-9]+/g) || []).filter(
+      (token) => token.length > 2 && !ignored.has(token),
+    );
+  const claimTokens = [...new Set(tokens(claim))];
+  if (claimTokens.length < 2) return false;
+  const candidateTokens = new Set(tokens(candidate));
+  const matched = claimTokens.filter((token) => candidateTokens.has(token));
+  return matched.length / claimTokens.length >= 0.6;
 };
 
 export const applyKnowledgeCorrectionsToDocument = (
@@ -691,16 +714,19 @@ export const applyKnowledgeCorrectionsToDocument = (
     item: { ...item },
     originalIndex: index,
     forceAttention: null,
+    suppressed: false,
   }));
   const riskItems = doc.risks_and_unknowns.map((item, index) => ({
     item: { ...item },
     originalIndex: doc.patterns.length + index,
     forceAttention: null,
+    suppressed: false,
   }));
   const attentionItems = doc.needs_attention.map((item, index) => ({
     item: { ...item },
     originalIndex: doc.patterns.length + doc.risks_and_unknowns.length + index,
     forceAttention: null,
+    suppressed: false,
   }));
 
   const itemStates = new Map<string, KnowledgeV2OverlayItemState>();
@@ -716,8 +742,44 @@ export const applyKnowledgeCorrectionsToDocument = (
   const orderedCorrections = [...corrections].sort((left, right) =>
     left.created_at.localeCompare(right.created_at),
   );
+  const suppressedStreamIds = new Set<string>();
+  let headline = doc.current_read.headline;
 
   for (const correction of orderedCorrections) {
+    if (
+      correction.target_kind === 'claim' &&
+      correction.action === 'correct_claim'
+    ) {
+      const payload = parseCorrectionPayload(correction.payload_json);
+      const originalClaim = payload?.original_claim;
+      if (typeof originalClaim !== 'string' || !originalClaim.trim()) continue;
+      for (const state of itemStates.values()) {
+        if (
+          claimCorrectionMatches(
+            originalClaim,
+            `${state.item.title} ${state.item.summary} ${state.item.why_now}`,
+          )
+        ) {
+          state.suppressed = true;
+        }
+      }
+      for (const stream of activeStreams) {
+        if (
+          claimCorrectionMatches(
+            originalClaim,
+            `${stream.title} ${stream.current_read}`,
+          )
+        ) {
+          suppressedStreamIds.add(stream.id);
+        }
+      }
+      if (claimCorrectionMatches(originalClaim, headline)) {
+        headline =
+          'A prior read was corrected; refresh meeting evidence before relying on it.';
+      }
+      continue;
+    }
+
     if (correction.target_kind === 'stream') {
       const stream = activeStreams.find(
         (item) => item.id === correction.target_id,
@@ -773,12 +835,13 @@ export const applyKnowledgeCorrectionsToDocument = (
 
   const overlayItems = Array.from(itemStates.values());
   const promotedAttention = overlayItems
-    .filter((state) => state.forceAttention === true)
+    .filter((state) => !state.suppressed && state.forceAttention === true)
     .sort((left, right) => left.originalIndex - right.originalIndex)
     .map((state) => state.item);
   const defaultAttention = overlayItems
     .filter(
       (state) =>
+        !state.suppressed &&
         state.forceAttention !== false &&
         state.forceAttention !== true &&
         ATTENTION_ITEM_KINDS.has(state.item.kind),
@@ -786,20 +849,23 @@ export const applyKnowledgeCorrectionsToDocument = (
     .sort((left, right) => left.originalIndex - right.originalIndex)
     .map((state) => state.item);
 
-  const activeStreamsSorted = [...activeStreams].sort((left, right) => {
-    if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
-    if (right.source_count !== left.source_count) {
-      return right.source_count - left.source_count;
-    }
-    return (right.last_touched_at || '').localeCompare(
-      left.last_touched_at || '',
-    );
-  });
+  const activeStreamsSorted = activeStreams
+    .filter((stream) => !suppressedStreamIds.has(stream.id))
+    .sort((left, right) => {
+      if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+      if (right.source_count !== left.source_count) {
+        return right.source_count - left.source_count;
+      }
+      return (right.last_touched_at || '').localeCompare(
+        left.last_touched_at || '',
+      );
+    });
 
   return {
     ...doc,
     current_read: {
       ...doc.current_read,
+      headline,
       supporting_bullets: activeStreamsSorted
         .slice(0, 3)
         .map((stream) => `${stream.title}: ${stream.current_read}`),
@@ -810,13 +876,15 @@ export const applyKnowledgeCorrectionsToDocument = (
       (item) => item.id,
     ).slice(0, 12),
     patterns: overlayItems
-      .filter((state) => state.item.kind === 'pattern')
+      .filter((state) => !state.suppressed && state.item.kind === 'pattern')
       .sort((left, right) => left.originalIndex - right.originalIndex)
       .map((state) => state.item)
       .slice(0, 12),
     risks_and_unknowns: overlayItems
       .filter(
-        (state) => state.item.kind === 'risk' || state.item.kind === 'blocker',
+        (state) =>
+          !state.suppressed &&
+          (state.item.kind === 'risk' || state.item.kind === 'blocker'),
       )
       .sort((left, right) => left.originalIndex - right.originalIndex)
       .map((state) => state.item)

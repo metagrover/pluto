@@ -100,18 +100,24 @@ evidence packet. Retrieval ranking cannot remove the anchor.
 
 ## Adaptive reasoning
 
-Thinking is selected per request, not globally.
+Reasoning depth is selected per request, not globally. On the target local
+Qwen 3.5 9B runtime, synchronous Ask Pluto keeps hidden thinking disabled:
+benchmarking showed that a 2,048-token thinking budget could finish without a
+visible answer, while a 4,096-token trial took 124,297 ms to emit its first
+visible token. Deep mode therefore means deeper evidence assembly, a larger
+context, stricter comparison prompting, and a larger answer budget—not an
+unbounded hidden chain of thought.
 
-| Request | Mode | Thinking |
+| Request | Mode | Execution |
 | --- | --- | --- |
 | Greeting or product guidance | Deterministic | No model where possible |
 | Simple fact, quote, owner, date, or status | Fast | Off |
 | Summary of one completed meeting | Fast | Off by default |
 | Live "What was just said?" | Live Quick | Off; frozen snapshot where possible |
-| Cross-meeting comparison | Deep | On |
-| Change, conflict, trend, rationale, or risk analysis | Deep | On |
-| Advice grounded in several meetings | Deep | On |
-| Explicit "Analyze deeply" request | Deep | On |
+| Cross-meeting comparison | Deep | 16K evidence-structured synthesis |
+| Change, conflict, trend, rationale, or risk analysis | Deep | 16K evidence-structured synthesis |
+| Advice grounded in several meetings | Deep | 16K evidence-structured synthesis |
+| Explicit "Analyze deeply" request | Deep | 16K evidence-structured synthesis |
 
 Thinking never compensates for missing evidence. If retrieval cannot establish
 the necessary sources, Pluto constrains the answer and states what is missing.
@@ -122,14 +128,14 @@ Initial Qwen 3.5 9B budgets on the target 16 GB M1 Pro:
 
 | Mode | Context | Output | Thinking |
 | --- | ---: | ---: | --- |
-| Classification | Small schema input | 128 tokens | Off |
+| Classification | Deterministic | None | Off |
 | Fast answer | Up to 8K | 768-1,024 tokens | Off |
-| Deep answer | Up to 16K | Up to 2,048 tokens | On |
+| Deep answer | Up to 16K | Up to 2,048 tokens | Off |
 | Live Quick | Frozen recent snapshot | Short bounded answer | Off |
 
-These are initial limits and must be confirmed by local latency and quality
-benchmarks. Pluto keeps Qwen 3.5 9B resident rather than routinely swapping
-models.
+Pluto keeps Qwen 3.5 9B resident rather than routinely swapping models. The
+local benchmark records visible-first-token latency and required grounded
+content for both Fast and Deep modes.
 
 ## Conversation contract
 
@@ -166,6 +172,11 @@ Ask Pluto is foreground work:
 3. Wait for the background request to settle.
 4. Retrieve evidence and generate the answer.
 5. Resume background work later from a safe boundary.
+
+The chat session holds a background-synthesis pause for its visible lifetime so
+a completed answer cannot immediately lose the local model to maintenance work
+before a follow-up. Background title generation is also preemptible; its context
+matches Fast mode to avoid an unnecessary runner resize during admission.
 
 Only one Ask Pluto request runs per conversation. The active request always has
 a Cancel action, and abort propagates renderer -> IPC -> provider -> Ollama.

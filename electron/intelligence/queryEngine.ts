@@ -146,12 +146,44 @@ export const buildLiveMeetingRetrievalResult = (
   };
 };
 
+const classifyQueryHeuristically = (
+  lowerText: string,
+): ParsedQuery['intent'] => {
+  if (
+    /\b(compare|comparison|versus|vs|difference|different|changed?|across meetings)\b/.test(
+      lowerText,
+    )
+  ) {
+    return 'comparative';
+  }
+  if (
+    lowerText.includes('when') ||
+    lowerText.includes('date') ||
+    lowerText.match(
+      /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})\b/,
+    )
+  ) {
+    return 'temporal';
+  }
+  if (
+    /\b(why|risk|rationale|recommend|advice|trend|pattern|conflict|contradict)\b/.test(
+      lowerText,
+    )
+  ) {
+    return 'exploratory';
+  }
+  return 'factual';
+};
+
 /**
  * Parses a query string to extract intent, entities and semantic bounds.
  */
 export const parseQuery = async (
   text: string,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    signal?: AbortSignal;
+    useModelClassification?: boolean;
+  } = {},
 ): Promise<ParsedQuery> => {
   options.signal?.throwIfAborted();
   const lowerText = text.toLowerCase();
@@ -285,49 +317,41 @@ export const parseQuery = async (
   let intent: ParsedQuery['intent'] = 'factual';
   let expanded_keywords: string[] = [];
 
-  try {
-    const settings = await getAllSettings(dbModule);
-    const provider = await getProvider(settings);
-    const prompt = getIntentClassificationPrompt(text);
+  if (options.useModelClassification === false) {
+    intent = classifyQueryHeuristically(lowerText);
+  } else {
+    try {
+      const settings = await getAllSettings(dbModule);
+      const provider = await getProvider(settings);
+      const prompt = getIntentClassificationPrompt(text);
 
-    console.log('[QueryEngine] Classifying intent via LLM...');
-    const response = await provider.classifyQueryIntent(prompt, options);
-    options.signal?.throwIfAborted();
+      console.log('[QueryEngine] Classifying intent via LLM...');
+      const response = await provider.classifyQueryIntent(prompt, options);
+      options.signal?.throwIfAborted();
 
-    // Parse JSON with cleaning to handle model-generated markdown wrappers.
-    const cleanedResponse =
-      typeof response === 'string' ? cleanJsonText(response) : response;
-    const parsed =
-      typeof cleanedResponse === 'string'
-        ? JSON.parse(cleanedResponse)
-        : cleanedResponse;
-    if (parsed.intent) {
-      intent = parsed.intent as ParsedQuery['intent'];
-    }
-    if (Array.isArray(parsed.expanded_keywords)) {
-      expanded_keywords = parsed.expanded_keywords;
-    }
-    console.log(
-      `[QueryEngine] LLM Classification: ${intent}, Keywords: ${expanded_keywords.join(', ')}`,
-    );
-  } catch (err) {
-    if (options.signal?.aborted) throw err;
-    console.warn(
-      '[QueryEngine] Failed to classify intent via LLM, falling back to heuristics:',
-      err,
-    );
-    if (
-      lowerText.includes('when') ||
-      lowerText.includes('date') ||
-      lowerText.match(
-        /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d{4})\b/,
-      )
-    ) {
-      intent = 'temporal';
-    } else if (lowerText.includes('compare') || lowerText.includes('vs')) {
-      intent = 'comparative';
-    } else {
-      intent = 'factual';
+      // Parse JSON with cleaning to handle model-generated markdown wrappers.
+      const cleanedResponse =
+        typeof response === 'string' ? cleanJsonText(response) : response;
+      const parsed =
+        typeof cleanedResponse === 'string'
+          ? JSON.parse(cleanedResponse)
+          : cleanedResponse;
+      if (parsed.intent) {
+        intent = parsed.intent as ParsedQuery['intent'];
+      }
+      if (Array.isArray(parsed.expanded_keywords)) {
+        expanded_keywords = parsed.expanded_keywords;
+      }
+      console.log(
+        `[QueryEngine] LLM Classification: ${intent}, Keywords: ${expanded_keywords.join(', ')}`,
+      );
+    } catch (err) {
+      if (options.signal?.aborted) throw err;
+      console.warn(
+        '[QueryEngine] Failed to classify intent via LLM, falling back to heuristics:',
+        err,
+      );
+      intent = classifyQueryHeuristically(lowerText);
     }
   }
 

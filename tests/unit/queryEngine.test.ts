@@ -144,6 +144,26 @@ describe('Query Engine', () => {
       const result = await parseQuery('when is the meeting');
       expect(result.intent).toBe('temporal'); // Fallback logic
     });
+
+    it('uses deterministic intent routing for synchronous Ask Pluto queries', async () => {
+      vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([]);
+
+      const result = await parseQuery(
+        'Compare the current meeting with the previous one',
+        { useModelClassification: false },
+      );
+
+      expect(result.intent).toBe('comparative');
+      expect(factoryModule.getProvider).not.toHaveBeenCalled();
+    });
+
+    it('routes date-bearing comparisons as comparative before temporal lookup', async () => {
+      await expect(
+        parseQuery('Compare the current meeting with the January plan', {
+          useModelClassification: false,
+        }),
+      ).resolves.toMatchObject({ intent: 'comparative' });
+    });
   });
 
   describe('retrieveContext', () => {

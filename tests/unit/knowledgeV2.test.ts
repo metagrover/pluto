@@ -507,6 +507,46 @@ describe('knowledge V2 utilities', () => {
     });
   });
 
+  it('suppresses contradicted synthesized claims without promoting the correction to evidence', () => {
+    const base = buildDeterministicKnowledgeV2Document(
+      { type: 'global', title: 'Global Knowledge' },
+      [makeSource()],
+    );
+    const contradicted = {
+      ...base.needs_attention[0],
+      id: 'pricing-owner',
+      title: 'Sam owns pricing approval',
+      summary: 'Sam owns pricing approval for the launch.',
+    };
+    const doc = {
+      ...base,
+      current_read: {
+        ...base.current_read,
+        headline: 'Sam owns pricing approval for the launch.',
+      },
+      needs_attention: [contradicted],
+      patterns: [],
+      risks_and_unknowns: [],
+    };
+
+    const corrected = applyKnowledgeCorrectionsToDocument(doc, [
+      makeCorrection({
+        target_kind: 'claim',
+        target_id: 'ask-pluto:pricing-owner',
+        action: 'correct_claim',
+        payload_json: JSON.stringify({
+          source: 'ask_pluto',
+          original_claim: 'Sam owns pricing approval for the launch.',
+          corrected_text: 'Alex owns pricing approval for the launch.',
+        }),
+      }),
+    ]);
+
+    expect(corrected.needs_attention).toEqual([]);
+    expect(corrected.current_read.headline).not.toContain('Sam');
+    expect(JSON.stringify(corrected)).not.toContain('Alex owns pricing');
+  });
+
   it('repairs weak LLM headlines and person/pronoun streams before rendering', () => {
     const fallback = buildDeterministicKnowledgeV2Document(
       { type: 'global', title: 'Global Knowledge' },

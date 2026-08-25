@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
 import * as db from './db';
+import {
+  type AskPlutoClaimCorrection,
+  parseAskPlutoCorrectionRecords,
+} from './intelligence/askPlutoCorrections';
 import { syncGlobalKnowledgeAttentionQueue } from './intelligence/attentionSync';
 import {
   type KnowledgeSourceChunk,
@@ -1072,6 +1076,7 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
   doc: db.KnowledgeDoc;
   chunk: KnowledgeSourceChunk;
   sourceEvidenceByMeeting: Map<string, string>;
+  claimCorrections: AskPlutoClaimCorrection[];
 }): Promise<KnowledgeCompiledDocument[]> => {
   try {
     const prompt = getKnowledgeDocumentPrompt({
@@ -1079,6 +1084,7 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
       scopeTitle: `${params.doc.title} - ${params.chunk.label}`,
       sourceMeetings: params.chunk.sourceMeetings,
       previousStructuredJson: null,
+      claimCorrections: params.claimCorrections,
     });
     const structured = await synthesizeStructuredFromPrompt({
       provider: params.provider,
@@ -1120,6 +1126,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
   doc: db.KnowledgeDoc;
   sourceMeetings: SynthSourceMeeting[];
   sourceEvidenceByMeeting: Map<string, string>;
+  claimCorrections: AskPlutoClaimCorrection[];
   onChunkProgress?: (partial: KnowledgeCompiledDocument) => void;
 }): Promise<KnowledgeCompiledDocument> => {
   const chunks = buildKnowledgeSourceChunks(
@@ -1144,6 +1151,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
       doc: params.doc,
       chunk,
       sourceEvidenceByMeeting: params.sourceEvidenceByMeeting,
+      claimCorrections: params.claimCorrections,
     });
     for (const [index, structured] of structuredDocs.entries()) {
       chunkDocs.push({
@@ -1258,6 +1266,7 @@ const synthesizeStructuredKnowledgeDoc = async (params: {
         structuredJson: JSON.stringify(chunk.structured),
       })),
       previousStructuredJson: params.doc.structured_json,
+      claimCorrections: params.claimCorrections,
     });
     const merged = await synthesizeStructuredFromPrompt({
       provider: params.provider,
@@ -1617,6 +1626,7 @@ const synthesizeKnowledgeDocNowInternal = async (
   if (!currentDoc) return undefined;
   const doc = request.doc;
   const knowledgeCorrections = request.corrections;
+  const claimCorrections = parseAskPlutoCorrectionRecords(knowledgeCorrections);
   const applyCorrections = (structured: KnowledgeCompiledDocument) =>
     isKnowledgeV2Document(structured)
       ? applyKnowledgeCorrectionsToDocument(structured, knowledgeCorrections)
@@ -1727,6 +1737,7 @@ const synthesizeKnowledgeDocNowInternal = async (
       doc,
       sourceMeetings,
       sourceEvidenceByMeeting,
+      claimCorrections,
       // Flush partial content to DB after each chunk so the UI can render
       // real content progressively instead of waiting for the full merge.
       onChunkProgress: (partial) => {

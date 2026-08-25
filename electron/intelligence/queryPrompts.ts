@@ -26,6 +26,7 @@ export const getAskPlutoPrompt = (
   context: RetrievalResult[],
   intent: string,
   priorTurns: Array<{ role: 'user' | 'assistant'; content: string }> = [],
+  correctionGuidance = 'None',
 ): string => {
   const contextStr =
     context.length === 0
@@ -34,14 +35,26 @@ export const getAskPlutoPrompt = (
           .map((c, i) => {
             const title = c.meeting_title || c.mid?.title || 'Unknown Meeting';
             const topicNames =
-              c.mid?.topics?.map((t) => t.name).join(', ') || 'None';
+              c.mid?.topics
+                ?.map((t) => t.name)
+                .join(', ')
+                .slice(0, 600) || 'None';
             const decisions =
-              c.mid?.decisions?.map((d) => d.description).join('; ') || 'None';
+              c.mid?.decisions
+                ?.map((d) => d.description)
+                .join('; ')
+                .slice(0, 900) || 'None';
             const actions =
-              c.mid?.action_items?.map((a) => a.description).join('; ') ||
-              'None';
+              c.mid?.action_items
+                ?.map((a) => a.description)
+                .join('; ')
+                .slice(0, 900) || 'None';
+            const evidence = c.evidence_text.slice(
+              0,
+              context.length === 1 ? 3600 : 2400,
+            );
             return `[Source ${i + 1}] Meeting: "${title}" (ID: ${c.meeting_id})
-Evidence: ${c.evidence_text}
+Evidence: ${evidence}
 Topics: ${topicNames}
 Decisions: ${decisions}
 Action Items: ${actions}`;
@@ -66,16 +79,20 @@ Action Items: ${actions}`;
   let prompt = `You are Pluto, an AI meeting intelligence assistant.
 
 RULES:
-1. Answer using ONLY information from the Context below. Never invent facts.
+1. Answer meeting-fact questions using ONLY information from the Context below. Never invent facts.
 2. ${formatGuidance}
 3. Start with the answer immediately. No preamble like "Based on the context" or "Here is what I found".
 4. Use specific details: participant names, project names, dates, numbers, exact decisions — pull these directly from the evidence.
 5. If the Context does not contain the answer, say: "I couldn't find information about that in your meetings."
+6. User corrections are authoritative constraints on what the user says is wrong. Never cite a user correction as meeting evidence, and never use one to make an otherwise unsupported meeting claim look grounded.
 
 Question: ${query}
 
 Recent conversation:
 ${conversation}
+
+User corrections:
+${correctionGuidance}
 
 Context:
 ${contextStr}`;

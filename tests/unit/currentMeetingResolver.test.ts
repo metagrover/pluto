@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   queryReferencesCurrentMeeting,
   resolveCurrentMeeting,
+  resolvePersistedMeetingEvidenceState,
 } from '../../electron/intelligence/currentMeetingResolver';
 
 describe('resolveCurrentMeeting', () => {
@@ -75,5 +76,34 @@ describe('resolveCurrentMeeting', () => {
       queryReferencesCurrentMeeting('Compare this meeting with the latest one'),
     ).toBe(true);
     expect(queryReferencesCurrentMeeting('What did Riley decide?')).toBe(false);
+  });
+});
+
+describe('resolvePersistedMeetingEvidenceState', () => {
+  it('keeps downstream processing and failure distinct from completed evidence', () => {
+    expect(
+      resolvePersistedMeetingEvidenceState({
+        finalizationStatus: 'finalized',
+        downstreamProcessingJson: JSON.stringify({ state: 'processing' }),
+      }),
+    ).toBe('processing');
+    expect(
+      resolvePersistedMeetingEvidenceState({
+        finalizationStatus: 'finalized',
+        downstreamProcessingJson: JSON.stringify({ state: 'failed' }),
+      }),
+    ).toBe('failed');
+    expect(
+      resolvePersistedMeetingEvidenceState({
+        finalizationStatus: 'recovery_required',
+        downstreamProcessingJson: JSON.stringify({ state: 'complete' }),
+      }),
+    ).toBe('failed');
+    expect(
+      resolvePersistedMeetingEvidenceState({
+        finalizationStatus: 'finalized',
+        downstreamProcessingJson: JSON.stringify({ state: 'complete' }),
+      }),
+    ).toBe('completed');
   });
 });

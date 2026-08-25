@@ -28,6 +28,10 @@ interface Message {
   content: string;
   citations?: CitationChain[];
   isLoading?: boolean;
+  trustStatus?: 'grounded' | 'inferred' | 'needs_review';
+  unsupportedClaimCount?: number;
+  retryQuery?: string;
+  evidenceState?: 'provisional' | 'processing' | 'failed' | 'completed';
 }
 
 export const AskPluto: React.FC<AskPlutoProps> = ({
@@ -61,6 +65,20 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   const nextMessageId = () =>
     `msg-${Date.now()}-${messageCounterRef.current++}`;
+
+  useEffect(() => {
+    if (!window.ipcRenderer) return;
+    void window.ipcRenderer
+      .invoke('intelligence:query:session-active', visible)
+      .catch(() => undefined);
+    return () => {
+      if (visible) {
+        void window.ipcRenderer
+          ?.invoke('intelligence:query:session-active', false)
+          .catch(() => undefined);
+      }
+    };
+  }, [visible]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -207,6 +225,22 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
             content,
             citations:
               typeof response === 'string' ? undefined : response.citations,
+            trustStatus:
+              typeof response === 'string' ? undefined : response.trustStatus,
+            unsupportedClaimCount:
+              typeof response === 'string'
+                ? undefined
+                : response.unsupportedClaimCount,
+            retryQuery:
+              typeof response !== 'string' && response.status === 'unavailable'
+                ? submitQuery.trim()
+                : undefined,
+            evidenceState:
+              typeof response === 'string' || !response.currentMeeting
+                ? undefined
+                : 'evidenceState' in response.currentMeeting
+                  ? response.currentMeeting.evidenceState
+                  : undefined,
           });
           return newMsg;
         });
@@ -250,6 +284,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           id: nextMessageId(),
           role: 'assistant',
           content: errorMsg,
+          retryQuery: cancelled ? undefined : submitQuery.trim(),
         });
         return newMsg;
       });
@@ -268,9 +303,13 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
   const resolvedScopeLabel =
     currentMeetingRequested && currentMeeting?.kind === 'active_recording'
-      ? 'Reading the current recording'
+      ? 'Reading the current recording · live evidence'
       : currentMeetingRequested && currentMeeting?.kind === 'persisted'
-        ? `Reading ${currentMeeting.title || 'the latest meeting'}`
+        ? currentMeeting.evidenceState === 'processing'
+          ? `${currentMeeting.title || 'The latest meeting'} is still processing`
+          : currentMeeting.evidenceState === 'failed'
+            ? `${currentMeeting.title || 'The latest meeting'} needs recovery`
+            : `Reading ${currentMeeting.title || 'the latest meeting'}`
         : currentMeetingRequested && currentMeeting?.kind === 'none'
           ? 'No current meeting yet'
           : 'Finding relevant meetings';
@@ -388,6 +427,42 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                       </div>
                     )}
                   </div>
+
+                  {msg.role === 'assistant' &&
+                    !msg.isLoading &&
+                    msg.trustStatus && (
+                      <div
+                        className={`px-1 text-[11px] font-medium ${
+                          msg.trustStatus === 'needs_review'
+                            ? 'text-amber-600'
+                            : msg.trustStatus === 'inferred'
+                              ? 'text-pro-accent'
+                              : 'text-emerald-600'
+                        }`}
+                      >
+                        {msg.evidenceState === 'provisional'
+                          ? 'Provisional live answer'
+                          : msg.trustStatus === 'needs_review'
+                            ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} unsupported ${msg.unsupportedClaimCount === 1 ? 'claim' : 'claims'}` : ''}`
+                            : msg.trustStatus === 'inferred'
+                              ? 'Supported synthesis'
+                              : 'Grounded answer'}
+                      </div>
+                    )}
+
+                  {msg.role === 'assistant' &&
+                    !msg.isLoading &&
+                    msg.retryQuery && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void handleSubmit(undefined, msg.retryQuery)
+                        }
+                        className="px-1 text-[12px] font-medium text-pro-accent hover:text-pro-text-main"
+                      >
+                        Retry
+                      </button>
+                    )}
 
                   {msg.role === 'assistant' &&
                     !msg.isLoading &&

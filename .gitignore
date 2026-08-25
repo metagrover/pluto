@@ -36,6 +36,9 @@ python/constraints.txt
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# Local performance evidence; curated benchmark summaries live in docs/benchmarks.
+artifacts/ask-pluto-benchmark/
 *.suo
 *.ntvs*
 *.njsproj

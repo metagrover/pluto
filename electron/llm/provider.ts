@@ -145,6 +145,7 @@ export interface LLMProvider {
     options?: {
       signal?: AbortSignal;
       mode?: 'fast' | 'deep';
+      onStart?: () => void;
       onToken?: (delta: string) => void;
     },
   ): Promise<string>;
