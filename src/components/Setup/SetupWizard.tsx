@@ -1,11 +1,13 @@
 import { Check, Download, Loader2, Mic, MonitorSpeaker } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { useModelDownloadProgress } from '../../hooks/useModelDownloadProgress';
 import {
   type SetupReadinessInput,
   deriveSetupReadiness,
 } from '../../services/setupReadiness';
 import { Logo } from '../Brand/Logo';
+import { ModelDownloadProgress } from '../ModelDownloadProgress';
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -27,6 +29,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     microphone: 'checking',
     systemAudio: 'checking',
   });
+  const modelDownloadProgress = useModelDownloadProgress();
 
   const readiness = useMemo(
     () => deriveSetupReadiness(requirements),
@@ -210,6 +213,11 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                         : 'Checking local models'
                 }
                 state={requirements.transcription}
+                loadingIndicator={
+                  requirements.transcription === 'preparing' ? (
+                    <ModelDownloadProgress progress={modelDownloadProgress} />
+                  ) : undefined
+                }
                 action={
                   requirements.transcription === 'error' ? (
                     <button
@@ -288,12 +296,14 @@ const RequirementRow = ({
   detail,
   state,
   action,
+  loadingIndicator,
 }: {
   icon: React.ReactNode;
   title: string;
-  detail: string;
+  detail: React.ReactNode;
   state: 'checking' | 'preparing' | 'ready' | 'error' | 'granted' | 'blocked';
   action?: React.ReactNode;
+  loadingIndicator?: React.ReactNode;
 }) => {
   const ready = state === 'ready' || state === 'granted';
   const blocked = state === 'error' || state === 'blocked';
@@ -308,8 +318,12 @@ const RequirementRow = ({
         <h2 className="text-sm font-bold">{title}</h2>
         <p className="mt-1 text-xs leading-5 text-pro-text-muted">{detail}</p>
         {(state === 'checking' || state === 'preparing') && (
-          <div className="mt-3 h-1.5 overflow-hidden rounded bg-pro-bg">
-            <div className="h-full w-2/3 animate-pulse rounded bg-pro-accent" />
+          <div className="mt-3">
+            {loadingIndicator ?? (
+              <div className="h-1.5 overflow-hidden rounded-full bg-pro-bg">
+                <div className="h-full w-2/3 animate-pulse rounded-full bg-pro-accent" />
+              </div>
+            )}
           </div>
         )}
       </div>

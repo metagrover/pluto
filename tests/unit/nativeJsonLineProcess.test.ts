@@ -62,6 +62,55 @@ const eouUpdate = (): NativeEvent => ({
 });
 
 describe('NativeJsonLineProcess live events', () => {
+  it('delivers strict byte progress correlated to a prepare request', async () => {
+    const child = new FakeChild();
+    const process = makeProcess(child);
+    const events: NativeEvent[] = [];
+    process.onEvent((event) => events.push(event));
+
+    const request = process.request({ schemaVersion: 1, id: 'prepare-1' });
+    const progress = {
+      schemaVersion: 1,
+      kind: 'event',
+      event: 'prepare_progress',
+      requestId: 'prepare-1',
+      phase: 'downloading',
+      downloadedBytes: 438_000_000,
+      totalBytes: 986_000_000,
+    } as const;
+    child.stdout.write(`${JSON.stringify(progress)}\n`);
+    child.stdout.write(
+      `${JSON.stringify({ schemaVersion: 1, id: 'prepare-1', ok: true, result: {} })}\n`,
+    );
+
+    await expect(request).resolves.toMatchObject({ id: 'prepare-1', ok: true });
+    expect(events).toEqual([progress]);
+  });
+
+  it.each([
+    { downloadedBytes: -1, totalBytes: 10 },
+    { downloadedBytes: 11, totalBytes: 10 },
+    { downloadedBytes: 1.5, totalBytes: 10 },
+    { downloadedBytes: 1, totalBytes: 0 },
+  ])('rejects malformed prepare byte progress %#', async (bytes) => {
+    const child = new FakeChild();
+    const process = makeProcess(child);
+    const request = process.request({ schemaVersion: 1, id: 'prepare-1' });
+
+    child.stdout.write(
+      `${JSON.stringify({
+        schemaVersion: 1,
+        kind: 'event',
+        event: 'prepare_progress',
+        requestId: 'prepare-1',
+        phase: 'downloading',
+        ...bytes,
+      })}\n`,
+    );
+
+    await expect(request).rejects.toThrow('parakeet_protocol_invalid');
+  });
+
   it('ignores a stale exit after timeout restart', async () => {
     vi.useFakeTimers();
     try {

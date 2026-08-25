@@ -73,6 +73,8 @@ final class ProgressSequenceTests: XCTestCase {
         }
         XCTAssertEqual(completed, total)
         XCTAssertEqual(events.last!.fractionCompleted, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(events.last!.completedBytes, 80)
+        XCTAssertEqual(events.last!.totalBytes, 80)
     }
 
     func testFileCountersNeverExceedTotalsAndReachTotal() async throws {
@@ -102,6 +104,27 @@ final class ProgressSequenceTests: XCTestCase {
             }
         }
         XCTAssertTrue(sawFinal, "stream must report completedFiles == totalFiles at the end")
+    }
+
+    func testRequiredDownloadSizeUsesTheSameFilteredPinnedTree() async throws {
+        let model = ModelNames.VAD.sileroVadFile
+        TreeStubURLProtocol.trees = [
+            "": [
+                ["path": model, "type": "directory"],
+                ["path": "unrelated.mlmodelc", "type": "directory"],
+            ],
+            model: [
+                ["path": "\(model)/a.bin", "type": "file", "size": 25],
+                ["path": "\(model)/b.bin", "type": "file", "size": 75],
+            ],
+        ]
+
+        let bytes = try await ModelHub.requiredDownloadSize(
+            .vad,
+            configuration: stubConfiguration
+        )
+
+        XCTAssertEqual(bytes, 100)
     }
 }
 

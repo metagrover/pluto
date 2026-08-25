@@ -19,11 +19,13 @@ describe('SetupWizard', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
   let invoke: ReturnType<typeof vi.fn>;
+  let listeners: Map<string, (event: unknown, payload: unknown) => void>;
 
   beforeEach(() => {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
+    listeners = new Map();
     invoke = vi.fn(async (channel: string, key?: string) => {
       if (channel === 'GET_SETTING') {
         if (key === 'setup_complete') return null;
@@ -62,12 +64,21 @@ describe('SetupWizard', () => {
       if (channel === 'CHECK_SYSTEM_AUDIO_PERMISSION') return 'granted';
       return true;
     });
-    Object.assign(window, { ipcRenderer: { invoke } });
+    Object.assign(window, {
+      ipcRenderer: {
+        invoke,
+        on: vi.fn((channel: string, listener) => {
+          listeners.set(channel, listener);
+          return () => listeners.delete(channel);
+        }),
+      },
+    });
   });
 
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.restoreAllMocks();
   });
 
   it('prepares local recording requirements without Python or provider setup', async () => {
@@ -124,5 +135,80 @@ describe('SetupWizard', () => {
 
     expect(container.textContent).toContain('Could not prepare transcription');
     expect(container.textContent).toContain('Try again');
+  });
+
+  it('shows model size, downloaded bytes, speed, and determinate progress', async () => {
+    let finishPreparation: (value: unknown) => void = () => undefined;
+    invoke.mockImplementation((channel: string, key?: string) => {
+      if (channel === 'GET_SETTING') {
+        return Promise.resolve(key === 'setup_step' ? '2' : null);
+      }
+      if (channel === 'RECORDING_READINESS_STATUS') {
+        return Promise.resolve({
+          ready: false,
+          details: {
+            parakeetClient: true,
+            parakeetModel: false,
+            parakeetEouReady: false,
+            audiocapExists: true,
+            audiocapExecutable: true,
+            micPermission: true,
+            systemAudioPermission: true,
+          },
+        });
+      }
+      if (channel === 'RECORDING_READINESS_PREPARE') {
+        return new Promise((resolve) => {
+          finishPreparation = resolve;
+        });
+      }
+      return Promise.resolve(true);
+    });
+
+    act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
+    await flush();
+    vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValueOnce(1_000);
+    act(() => {
+      listeners.get('RECORDING_READINESS_PROGRESS')?.(undefined, {
+        phase: 'downloading',
+        downloadedBytes: 419_600_000,
+        totalBytes: 986_000_000,
+      });
+      listeners.get('RECORDING_READINESS_PROGRESS')?.(undefined, {
+        phase: 'downloading',
+        downloadedBytes: 438_000_000,
+        totalBytes: 986_000_000,
+      });
+    });
+
+    expect(container.textContent).toContain('438 MB of 986 MB');
+    expect(container.textContent).toContain('18.4 MB/s');
+    const progressbar = container.querySelector('[role="progressbar"]');
+    expect(progressbar?.getAttribute('aria-valuenow')).toBe('44');
+
+    act(() => {
+      listeners.get('RECORDING_READINESS_PROGRESS')?.(undefined, {
+        phase: 'loading',
+        downloadedBytes: 835_000_000,
+        totalBytes: 986_000_000,
+      });
+    });
+    expect(container.textContent).toContain('Loading models');
+    expect(container.textContent).not.toContain('MB/s');
+
+    await act(async () =>
+      finishPreparation({
+        ready: true,
+        details: {
+          parakeetClient: true,
+          parakeetModel: true,
+          parakeetEouReady: true,
+          audiocapExists: true,
+          audiocapExecutable: true,
+          micPermission: true,
+          systemAudioPermission: true,
+        },
+      }),
+    );
   });
 });

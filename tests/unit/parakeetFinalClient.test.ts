@@ -57,6 +57,42 @@ const prepared = (id: string) => ({
 });
 
 describe('ParakeetFinalClient', () => {
+  it('forwards only progress correlated to its active prepare request', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const progress = vi.fn();
+    const ready = client.prepare(progress);
+    const requestId = String(child.writes[0].id);
+
+    child.respond({
+      schemaVersion: 1,
+      kind: 'event',
+      event: 'prepare_progress',
+      requestId: 'prepare-stale',
+      phase: 'downloading',
+      downloadedBytes: 1,
+      totalBytes: 10,
+    });
+    child.respond({
+      schemaVersion: 1,
+      kind: 'event',
+      event: 'prepare_progress',
+      requestId,
+      phase: 'downloading',
+      downloadedBytes: 4,
+      totalBytes: 10,
+    });
+    child.respond(prepared(requestId));
+
+    await ready;
+    expect(progress).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledWith({
+      phase: 'downloading',
+      downloadedBytes: 4,
+      totalBytes: 10,
+    });
+  });
+
   it('starts one shared child and correlates preparation', async () => {
     const child = new FakeChild();
     const spawn = vi.fn(() => child);

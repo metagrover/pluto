@@ -135,4 +135,33 @@ describe('recordingReadiness', () => {
     expect(mockParakeetClient.prepare).toHaveBeenCalledTimes(1);
     expect(https.get).not.toHaveBeenCalled();
   });
+
+  it('forwards byte progress from the verified prepare path', async () => {
+    const onProgress = vi.fn();
+    vi.mocked(mockParakeetClient.prepare).mockImplementation(
+      async (listener) => {
+        listener?.({
+          phase: 'downloading',
+          downloadedBytes: 4,
+          totalBytes: 10,
+        });
+        return READY_CAPABILITY;
+      },
+    );
+
+    await prepareRecordingReadiness(
+      {
+        parakeetFinalClient: mockParakeetClient,
+        parakeetModelRoot,
+        audiocapPath,
+      },
+      onProgress,
+    );
+
+    expect(onProgress).toHaveBeenCalledWith({
+      phase: 'downloading',
+      downloadedBytes: 4,
+      totalBytes: 10,
+    });
+  });
 });

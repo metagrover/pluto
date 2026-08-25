@@ -4,7 +4,11 @@ import XCTest
 @testable import ParakeetRuntimeEngine
 
 private struct ServiceModelInstaller: ModelInstalling {
-    func install(manifest _: ModelManifest, into stagingDirectory: URL) async throws {
+    func install(
+        manifest _: ModelManifest,
+        into stagingDirectory: URL,
+        progressHandler _: ModelPreparationProgressHandler?
+    ) async throws {
         let model = stagingDirectory.appendingPathComponent("model", isDirectory: true)
         try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
         try Data("ready".utf8).write(to: model.appendingPathComponent("marker"))

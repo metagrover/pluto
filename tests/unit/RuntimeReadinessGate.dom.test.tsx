@@ -26,13 +26,23 @@ describe('RuntimeReadinessGate', () => {
   let container: HTMLDivElement;
   let root: ReturnType<typeof createRoot>;
   let invoke: ReturnType<typeof vi.fn>;
+  let listeners: Map<string, (event: unknown, payload: unknown) => void>;
 
   beforeEach(() => {
     container = document.createElement('div');
     document.body.append(container);
     root = createRoot(container);
     invoke = vi.fn();
-    Object.assign(window, { ipcRenderer: { invoke } });
+    listeners = new Map();
+    Object.assign(window, {
+      ipcRenderer: {
+        invoke,
+        on: vi.fn((channel: string, listener) => {
+          listeners.set(channel, listener);
+          return () => listeners.delete(channel);
+        }),
+      },
+    });
   });
 
   afterEach(() => {
@@ -83,6 +93,20 @@ describe('RuntimeReadinessGate', () => {
     expect(container.textContent).toContain('Preparing local transcription');
     expect(container.textContent).not.toContain('Pluto workspace');
     expect(invoke).toHaveBeenCalledWith('RECORDING_READINESS_PREPARE');
+
+    act(() => {
+      listeners.get('RECORDING_READINESS_PROGRESS')?.(undefined, {
+        phase: 'downloading',
+        downloadedBytes: 438_000_000,
+        totalBytes: 986_000_000,
+      });
+    });
+    expect(container.textContent).toContain('438 MB of 986 MB');
+    expect(
+      container
+        .querySelector('[role="progressbar"]')
+        ?.getAttribute('aria-valuenow'),
+    ).toBe('44');
 
     await act(async () => finishPreparation(readiness(true)));
 

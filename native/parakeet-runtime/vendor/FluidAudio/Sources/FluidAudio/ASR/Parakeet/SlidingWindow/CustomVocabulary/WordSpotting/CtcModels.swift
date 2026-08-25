@@ -144,7 +144,8 @@ extension CtcModels {
     /// - Returns: Loaded `CtcModels` instance.
     public static func load(
         from directory: URL,
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CtcModels {
         logger.info("Loading CTC models (\(variant.displayName)) from: \(directory.path)")
 
@@ -162,7 +163,8 @@ extension CtcModels {
             variant.repo,
             modelNames: modelNames,
             directory: parentDirectory,
-            computeUnits: config.computeUnits
+            computeUnits: config.computeUnits,
+            progressHandler: progressHandler
         )
 
         guard
@@ -196,7 +198,8 @@ extension CtcModels {
     public static func download(
         to directory: URL? = nil,
         variant: CtcModelVariant = .ctc110m,
-        force: Bool = false
+        force: Bool = false,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory(for: variant)
         logger.info("Preparing CTC models (\(variant.displayName)) at: \(targetDir.path)")
@@ -224,7 +227,8 @@ extension CtcModels {
             _ = try await ModelHub.loadModels(
                 variant.repo,
                 modelNames: [name],
-                directory: parentDir
+                directory: parentDir,
+                progressHandler: progressHandler
             )
         }
 
@@ -240,10 +244,19 @@ extension CtcModels {
     /// - Returns: Loaded `CtcModels` instance.
     public static func downloadAndLoad(
         to directory: URL? = nil,
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CtcModels {
-        let targetDir = try await download(to: directory, variant: variant)
-        return try await load(from: targetDir, variant: variant)
+        let targetDir = try await download(
+            to: directory,
+            variant: variant,
+            progressHandler: progressHandler
+        )
+        return try await load(
+            from: targetDir,
+            variant: variant,
+            progressHandler: progressHandler
+        )
     }
 
     /// Default CoreML configuration for CTC inference.

@@ -96,10 +96,19 @@ public actor RuntimeJSONLineWriter {
             lines = [encoded]
         }
         for line in lines {
-            var framed = line
-            framed.append(0x0A)
-            sink(framed)
+            writeFramed(line)
         }
+    }
+
+    public func write(_ event: RuntimePreparationProgressEvent) {
+        guard let encoded = try? JSONEncoder().encode(event) else { return }
+        writeFramed(encoded)
+    }
+
+    private func writeFramed(_ data: Data) {
+        var framed = data
+        framed.append(0x0A)
+        sink(framed)
     }
 }
 

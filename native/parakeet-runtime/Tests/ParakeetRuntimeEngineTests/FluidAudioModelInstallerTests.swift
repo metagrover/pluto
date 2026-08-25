@@ -3,6 +3,7 @@ import FluidAudio
 import ParakeetRuntimeCore
 @testable import ParakeetRuntimeEngine
 import XCTest
+import os
 
 private actor FakeRevisionChecker: RepositoryRevisionChecking {
     private(set) var requests: [(String, String)] = []
@@ -15,7 +16,16 @@ private actor FakeRevisionChecker: RepositoryRevisionChecking {
 private struct FakeBundleDownloader: FluidAudioModelBundleDownloading {
     let includeEou: Bool
 
-    func download(into stagingDirectory: URL, manifest _: ModelManifest) async throws {
+    func download(
+        into stagingDirectory: URL,
+        manifest _: ModelManifest,
+        progressHandler: ModelPreparationProgressHandler?
+    ) async throws {
+        progressHandler?(ModelPreparationProgress(
+            phase: .downloading,
+            downloadedBytes: 4,
+            totalBytes: 10
+        ))
         try Self.write("asr", to: stagingDirectory.appendingPathComponent(
             FluidAudioModelLayout.installedAsrDirectoryName,
             isDirectory: true
@@ -39,6 +49,43 @@ private struct FakeBundleDownloader: FluidAudioModelBundleDownloading {
 }
 
 final class FluidAudioModelInstallerTests: XCTestCase {
+    func testBundleProgressAggregatesBytesAndSeparatesLocalLoading() {
+        XCTAssertEqual(
+            aggregatedModelPreparationProgress(
+                DownloadProgress(
+                    fractionCompleted: 0.2,
+                    phase: .downloading(completedFiles: 1, totalFiles: 2),
+                    completedBytes: 4,
+                    totalBytes: 10
+                ),
+                completedBefore: 10,
+                componentBytes: 10,
+                totalBytes: 30
+            ),
+            ModelPreparationProgress(
+                phase: .downloading,
+                downloadedBytes: 14,
+                totalBytes: 30
+            )
+        )
+        XCTAssertEqual(
+            aggregatedModelPreparationProgress(
+                DownloadProgress(
+                    fractionCompleted: 0.8,
+                    phase: .compiling(modelName: "Encoder.mlmodelc")
+                ),
+                completedBefore: 10,
+                componentBytes: 10,
+                totalBytes: 30
+            ),
+            ModelPreparationProgress(
+                phase: .loading,
+                downloadedBytes: 20,
+                totalBytes: 30
+            )
+        )
+    }
+
     func testPinnedRevisionCheckTargetsTheImmutableRevisionEndpoint() throws {
         let url = try XCTUnwrap(huggingFaceRevisionMetadataURL(
             repository: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
@@ -100,6 +147,28 @@ final class FluidAudioModelInstallerTests: XCTestCase {
         }
     }
 
+    func testInstallerForwardsRealBundleByteProgress() async throws {
+        let root = try makeRoot()
+        let digests = try fixtureDigests(at: root.appendingPathComponent("reference"))
+        let recorder = PreparationProgressRecorder()
+        let installer = FluidAudioModelInstaller(
+            revisionChecker: FakeRevisionChecker(),
+            downloader: FakeBundleDownloader(includeEou: true)
+        )
+
+        try await installer.install(
+            manifest: manifest(digests: digests),
+            into: root.appendingPathComponent("staging"),
+            progressHandler: { recorder.append($0) }
+        )
+
+        XCTAssertEqual(recorder.snapshot(), [ModelPreparationProgress(
+            phase: .downloading,
+            downloadedBytes: 4,
+            totalBytes: 10
+        )])
+    }
+
     private func makeRoot() throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("parakeet-installer-\(UUID().uuidString)", isDirectory: true)
@@ -138,6 +207,18 @@ final class FluidAudioModelInstallerTests: XCTestCase {
             eouArtifactSHA256: digests.2,
             encoderPrecision: "int8"
         )
+    }
+}
+
+private final class PreparationProgressRecorder: Sendable {
+    private let values = OSAllocatedUnfairLock<[ModelPreparationProgress]>(initialState: [])
+
+    func append(_ progress: ModelPreparationProgress) {
+        values.withLock { $0.append(progress) }
+    }
+
+    func snapshot() -> [ModelPreparationProgress] {
+        values.withLock { $0 }
     }
 }
 

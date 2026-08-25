@@ -73,10 +73,21 @@ public struct DownloadProgress: Sendable {
     public let fractionCompleted: Double
     /// Current phase of the operation.
     public let phase: DownloadPhase
+    /// Bytes completed within the current repository download phase.
+    public let completedBytes: Int64
+    /// Total bytes selected from the pinned repository tree when known.
+    public let totalBytes: Int64
 
-    public init(fractionCompleted: Double, phase: DownloadPhase) {
+    public init(
+        fractionCompleted: Double,
+        phase: DownloadPhase,
+        completedBytes: Int64 = 0,
+        totalBytes: Int64 = 0
+    ) {
         self.fractionCompleted = fractionCompleted
         self.phase = phase
+        self.completedBytes = completedBytes
+        self.totalBytes = totalBytes
     }
 }
 

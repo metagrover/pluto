@@ -10,6 +10,8 @@ public actor ParakeetService {
     private let liveDriver: any ParakeetLiveDriving
     private let eouDriver: any ParakeetEouDriving
     private let liveConfigurationID: ParakeetLiveConfigurationID
+    private let preparationProgressSink:
+        (@Sendable (String, ModelPreparationProgress) -> Void)?
     private var activeModelURL: URL?
     private var liveSession: ParakeetLiveSession?
     private var eouSession: ParakeetEouSession?
@@ -22,7 +24,9 @@ public actor ParakeetService {
         inferenceDriver: any ParakeetInferenceDriving = FluidAudioInferenceDriver(),
         liveDriver: any ParakeetLiveDriving = FluidAudioLiveDriver(),
         eouDriver: any ParakeetEouDriving = FluidAudioEouDriver(),
-        liveConfigurationID: ParakeetLiveConfigurationID = .pinnedDefault
+        liveConfigurationID: ParakeetLiveConfigurationID = .pinnedDefault,
+        preparationProgressSink:
+            (@Sendable (String, ModelPreparationProgress) -> Void)? = nil
     ) {
         self.modelRoot = modelRoot.standardizedFileURL
         self.audioRoot = audioRoot.standardizedFileURL
@@ -32,6 +36,7 @@ public actor ParakeetService {
         self.liveDriver = liveDriver
         self.eouDriver = eouDriver
         self.liveConfigurationID = liveConfigurationID
+        self.preparationProgressSink = preparationProgressSink
     }
 
     public func handleLive(_ request: RuntimeRequest) async -> ParakeetLiveServiceResult {
@@ -181,7 +186,14 @@ public actor ParakeetService {
                 await eouSession.shutdown()
                 self.eouSession = nil
             }
-            activeModelURL = try await modelStore.prepare(manifest: manifest)
+            let requestId = request.id
+            let progressSink = preparationProgressSink
+            activeModelURL = try await modelStore.prepare(
+                manifest: manifest,
+                progressHandler: { progress in
+                    progressSink?(requestId, progress)
+                }
+            )
             return .prepared(
                 id: request.id,
                 modelVersion: manifest.version,

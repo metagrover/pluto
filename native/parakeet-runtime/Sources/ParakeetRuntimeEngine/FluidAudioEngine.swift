@@ -34,7 +34,36 @@ protocol RepositoryRevisionChecking: Sendable {
 }
 
 protocol FluidAudioModelBundleDownloading: Sendable {
-    func download(into stagingDirectory: URL, manifest: ModelManifest) async throws
+    func download(
+        into stagingDirectory: URL,
+        manifest: ModelManifest,
+        progressHandler: ModelPreparationProgressHandler?
+    ) async throws
+}
+
+func aggregatedModelPreparationProgress(
+    _ progress: DownloadProgress,
+    completedBefore: Int64,
+    componentBytes: Int64,
+    totalBytes: Int64
+) -> ModelPreparationProgress? {
+    switch progress.phase {
+    case .downloading:
+        guard progress.totalBytes > 0 else { return nil }
+        return ModelPreparationProgress(
+            phase: .downloading,
+            downloadedBytes: completedBefore + min(progress.completedBytes, componentBytes),
+            totalBytes: totalBytes
+        )
+    case .compiling:
+        return ModelPreparationProgress(
+            phase: .loading,
+            downloadedBytes: completedBefore + componentBytes,
+            totalBytes: totalBytes
+        )
+    case .listing:
+        return nil
+    }
 }
 
 func huggingFaceRevisionMetadataURL(repository: String, revision: String) -> URL? {
@@ -73,7 +102,11 @@ private struct HuggingFaceRepositoryRevisionChecker: RepositoryRevisionChecking 
 }
 
 private struct FluidAudioProductionBundleDownloader: FluidAudioModelBundleDownloading {
-    func download(into stagingDirectory: URL, manifest: ModelManifest) async throws {
+    func download(
+        into stagingDirectory: URL,
+        manifest: ModelManifest,
+        progressHandler: ModelPreparationProgressHandler?
+    ) async throws {
         ModelRegistry.setPinnedRevision(manifest.repositoryRevision, for: manifest.repository)
         ModelRegistry.setPinnedRevision(
             manifest.auxiliaryRepositoryRevision,
@@ -89,6 +122,29 @@ private struct FluidAudioProductionBundleDownloader: FluidAudioModelBundleDownlo
             ModelRegistry.setPinnedRevision(nil, for: manifest.eouRepository)
         }
 
+        progressHandler?(ModelPreparationProgress(
+            phase: .sizing,
+            downloadedBytes: 0,
+            totalBytes: 0
+        ))
+        let asrBytes = try await ModelHub.requiredDownloadSize(.parakeetV3, variant: "int8")
+        let ctcBytes = try await ModelHub.requiredDownloadSize(.parakeetCtc110m)
+        let eouBytes = try await ModelHub.requiredDownloadSize(.parakeetEou320)
+        let totalBytes = asrBytes + ctcBytes + eouBytes
+        guard totalBytes > 0 else { throw RuntimeFailure.modelPreparationFailed }
+        progressHandler?(ModelPreparationProgress(
+            phase: .downloading,
+            downloadedBytes: 0,
+            totalBytes: totalBytes
+        ))
+
+        let asrProgress = aggregateProgress(
+            completedBefore: 0,
+            componentBytes: asrBytes,
+            totalBytes: totalBytes,
+            progressHandler: progressHandler
+        )
+
         let asrDirectory = stagingDirectory.appendingPathComponent(
             FluidAudioModelLayout.asrDirectoryName,
             isDirectory: true
@@ -97,15 +153,60 @@ private struct FluidAudioProductionBundleDownloader: FluidAudioModelBundleDownlo
             to: asrDirectory,
             version: .v3,
             encoderPrecision: .int8,
-            encoderComputeUnits: .cpuAndNeuralEngine
+            encoderComputeUnits: .cpuAndNeuralEngine,
+            progressHandler: asrProgress
+        )
+
+        let ctcProgress = aggregateProgress(
+            completedBefore: asrBytes,
+            componentBytes: ctcBytes,
+            totalBytes: totalBytes,
+            progressHandler: progressHandler
         )
 
         let ctcDirectory = stagingDirectory.appendingPathComponent(
             FluidAudioModelLayout.ctcDirectoryName,
             isDirectory: true
         )
-        _ = try await CtcModels.downloadAndLoad(to: ctcDirectory, variant: .ctc110m)
-        try await ModelHub.download(.parakeetEou320, to: stagingDirectory)
+        _ = try await CtcModels.downloadAndLoad(
+            to: ctcDirectory,
+            variant: .ctc110m,
+            progressHandler: ctcProgress
+        )
+        let eouProgress = aggregateProgress(
+            completedBefore: asrBytes + ctcBytes,
+            componentBytes: eouBytes,
+            totalBytes: totalBytes,
+            progressHandler: progressHandler
+        )
+        try await ModelHub.download(
+            .parakeetEou320,
+            to: stagingDirectory,
+            progressHandler: eouProgress
+        )
+        progressHandler?(ModelPreparationProgress(
+            phase: .verifying,
+            downloadedBytes: totalBytes,
+            totalBytes: totalBytes
+        ))
+    }
+
+    private func aggregateProgress(
+        completedBefore: Int64,
+        componentBytes: Int64,
+        totalBytes: Int64,
+        progressHandler: ModelPreparationProgressHandler?
+    ) -> ProgressHandler? {
+        guard let progressHandler else { return nil }
+        return { progress in
+            guard let aggregated = aggregatedModelPreparationProgress(
+                progress,
+                completedBefore: completedBefore,
+                componentBytes: componentBytes,
+                totalBytes: totalBytes
+            ) else { return }
+            progressHandler(aggregated)
+        }
     }
 }
 
@@ -126,7 +227,11 @@ public struct FluidAudioModelInstaller: ModelInstalling {
         self.downloader = downloader
     }
 
-    public func install(manifest: ModelManifest, into stagingDirectory: URL) async throws {
+    public func install(
+        manifest: ModelManifest,
+        into stagingDirectory: URL,
+        progressHandler: ModelPreparationProgressHandler? = nil
+    ) async throws {
         try await revisionChecker.require(
             repository: manifest.repository,
             revision: manifest.repositoryRevision
@@ -139,7 +244,11 @@ public struct FluidAudioModelInstaller: ModelInstalling {
             repository: manifest.eouRepository,
             revision: manifest.eouRepositoryRevision
         )
-        try await downloader.download(into: stagingDirectory, manifest: manifest)
+        try await downloader.download(
+            into: stagingDirectory,
+            manifest: manifest,
+            progressHandler: progressHandler
+        )
         let ctcDirectory = stagingDirectory.appendingPathComponent(
             FluidAudioModelLayout.ctcDirectoryName,
             isDirectory: true

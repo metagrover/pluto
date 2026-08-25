@@ -114,12 +114,23 @@ export type NativeEouFailedEvent = NativeEventIdentity & {
     | 'cancelled';
 };
 
+export type NativePreparationProgressEvent = {
+  schemaVersion: 1;
+  kind: 'event';
+  event: 'prepare_progress';
+  requestId: string;
+  phase: 'sizing' | 'downloading' | 'loading' | 'verifying';
+  downloadedBytes: number;
+  totalBytes: number;
+};
+
 export type NativeEvent =
   | NativeStreamUpdateEvent
   | NativeStreamDegradedEvent
   | NativeStreamFailedEvent
   | NativeEouUpdateEvent
-  | NativeEouFailedEvent;
+  | NativeEouFailedEvent
+  | NativePreparationProgressEvent;
 
 export interface NativeJsonLineTransport {
   request(payload: Record<string, unknown>): Promise<NativeResponse>;
@@ -401,6 +412,43 @@ function hasOnlyKeys(
 }
 
 function parseNativeEvent(value: Record<string, unknown>): NativeEvent | null {
+  if (value.event === 'prepare_progress') {
+    if (
+      !hasOnlyKeys(value, [
+        'schemaVersion',
+        'kind',
+        'event',
+        'requestId',
+        'phase',
+        'downloadedBytes',
+        'totalBytes',
+      ]) ||
+      value.schemaVersion !== 1 ||
+      value.kind !== 'event' ||
+      typeof value.requestId !== 'string' ||
+      !STREAM_ID_PATTERN.test(value.requestId) ||
+      value.requestId.includes('..') ||
+      (value.phase !== 'sizing' &&
+        value.phase !== 'downloading' &&
+        value.phase !== 'loading' &&
+        value.phase !== 'verifying') ||
+      !isNonnegativeSafeInteger(value.downloadedBytes) ||
+      !isNonnegativeSafeInteger(value.totalBytes)
+    ) {
+      return null;
+    }
+    if (value.phase === 'sizing') {
+      if (value.downloadedBytes !== 0 || value.totalBytes !== 0) return null;
+    } else if (
+      value.totalBytes === 0 ||
+      value.downloadedBytes > value.totalBytes ||
+      (value.phase === 'verifying' &&
+        value.downloadedBytes !== value.totalBytes)
+    ) {
+      return null;
+    }
+    return value as NativePreparationProgressEvent;
+  }
   if (!hasValidIdentity(value)) return null;
   const identityKeys = [
     'schemaVersion',
