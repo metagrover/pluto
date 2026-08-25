@@ -61,6 +61,7 @@ scripts/replay.local-fixtures.json
 scripts/replay.local-expected.json
 scripts/recording-quality/private-*.json
 tmp/private-speaker-attribution-*.json
+.private/
 
 # Worktrees
 .worktrees/

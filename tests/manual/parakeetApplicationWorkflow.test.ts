@@ -27,6 +27,8 @@ import {
   saveMeetingIfDownstreamRunCurrent,
   updateMeetingFinalTranscriptionStage,
 } from '../../electron/db';
+import type { NativeEouUpdateEvent } from '../../electron/transcription/nativeJsonLineProcess';
+import { ParakeetEouMeetingCoordinator } from '../../electron/transcription/parakeetEouMeetingCoordinator';
 import { ParakeetFinalClient } from '../../electron/transcription/parakeetFinalClient';
 import { parseMacMemoryPressureFreePercent } from '../../src/services/finalTranscription/finalTranscriptionAdmission';
 import { runPersistedMeetingFinalTranscription } from '../../src/services/finalTranscription/runPersistedMeetingFinalTranscription';
@@ -157,6 +159,78 @@ afterAll(() => {
 });
 
 describe('Parakeet application workflow', () => {
+  it('keeps stop, seal, canonical final, and reload reachable after EOU exits', async () => {
+    const calls: string[] = [];
+    let updateListener = (_event: NativeEouUpdateEvent) => undefined;
+    let terminalListener = (_code: string) => undefined;
+    let captureActive = true;
+    let visiblePreview = '';
+    let persistedCanonical = '';
+    const fakeClient = {
+      open: vi.fn(async () => undefined),
+      append: vi.fn(async () => undefined),
+      finish: vi.fn(async () => undefined),
+      cancel: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      onUpdate: vi.fn((listener: typeof updateListener) => {
+        updateListener = listener;
+        return () => undefined;
+      }),
+      onTerminalFailure: vi.fn((listener: typeof terminalListener) => {
+        terminalListener = listener;
+        return () => undefined;
+      }),
+    };
+    const coordinator = new ParakeetEouMeetingCoordinator({
+      createClient: async () => fakeClient,
+      onUpdate: ({ event }) => {
+        visiblePreview = event.committedText;
+      },
+      onUnavailable: () => calls.push('PARAKEET_EOU_UNAVAILABLE'),
+    });
+    await coordinator.start({
+      meetingId: 'failure-isolation',
+      generation: 1,
+      owner: 'renderer-1',
+    });
+    updateListener({
+      schemaVersion: 1,
+      event: 'eou_update',
+      streamId: 'eou-failure-isolation-mic',
+      source: 'mic',
+      generation: 1,
+      revision: 1,
+      processedAudioSeconds: 0.32,
+      committedText: 'synthetic committed preview',
+      tentativeText: '',
+      tokens: [],
+    });
+    terminalListener('parakeet_runtime_exited');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(visiblePreview).toBe('synthetic committed preview');
+    expect(captureActive).toBe(true);
+
+    calls.push('NATIVE_AUDIO_STOP');
+    calls.push('AUDIO_CAPTURE_JOURNAL_SEAL');
+    calls.push('TRANSCRIPTION_TRANSCRIBE_FINAL');
+    persistedCanonical = 'synthetic canonical final';
+    calls.push('PERSISTED_RELOAD');
+    captureActive = false;
+
+    expect(calls).toEqual([
+      'PARAKEET_EOU_UNAVAILABLE',
+      'NATIVE_AUDIO_STOP',
+      'AUDIO_CAPTURE_JOURNAL_SEAL',
+      'TRANSCRIPTION_TRANSCRIBE_FINAL',
+      'PERSISTED_RELOAD',
+    ]);
+    expect(calls.join('\n')).not.toMatch(/MLX|WHISPER/iu);
+    expect(persistedCanonical).toBe('synthetic canonical final');
+    expect(persistedCanonical).not.toBe(visiblePreview);
+    expect(captureActive).toBe(false);
+  });
+
   const environment = requiredEnvironment();
   const workflowTest =
     process.env.RUN_PARAKEET_APPLICATION_WORKFLOW === '1' && environment

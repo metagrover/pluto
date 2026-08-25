@@ -432,37 +432,43 @@ git commit -m "feat: require English Parakeet EOU readiness"
 - Test: `tests/unit/privateParakeetEouManifest.test.ts`
 - Test: `tests/manual/parakeetApplicationWorkflow.test.ts`
 
-- [ ] **Step 1: Write failing private-manifest tests**
+- [x] **Step 1: Write failing private-manifest tests**
 
 Require an ignored manifest containing absolute mic/System WAV paths, SHA-256 digests, expected duration, and no transcript content. Validate both files are regular, within an explicitly approved private root, mono-convertible, and unchanged before replay. Reject symlinks, `/`, home/workspace roots, missing sources, bad digests, and public fixture paths.
 
-- [ ] **Step 2: Run and observe failure**
+- [x] **Step 2: Run and observe failure**
 
 Run: `pnpm exec vitest run tests/unit/privateParakeetEouManifest.test.ts`
 
 Expected: replay validator does not exist.
 
-- [ ] **Step 3: Implement real-time-order replay**
+- [x] **Step 3: Implement real-time-order replay**
 
 Decode each private WAV to Float32, chunk it through the production 320 ms chunker, interleave sources by audio watermark, and pace appends using an injectable clock. The real mode uses the packaged native runtime and verified model bundle. Report content-free first-partial, first-EOU, p50/p95 update latency, maximum queue depth, source coverage, tail coverage, native RSS, thermal states, cancellations, and failures. Never print paths, text, PCM, tokens, meeting ids, or file hashes.
 
-- [ ] **Step 4: Add runtime failure workflow**
+- [x] **Step 4: Add runtime failure workflow**
 
 Extend the application workflow fake so a native EOU exit after committed text leaves `NATIVE_AUDIO_STOP`, journal seal, batch Parakeet finalization, and persisted reload reachable. Assert no MLX IPC or process start occurs and the committed preview is not saved as canonical.
 
-- [ ] **Step 5: Run deterministic replay tests**
+- [x] **Step 5: Run deterministic replay tests**
 
 Run: `pnpm exec vitest run tests/unit/privateParakeetEouManifest.test.ts tests/manual/parakeetApplicationWorkflow.test.ts`
 
 Expected: deterministic fake-clock and failure-isolation cases pass.
 
-- [ ] **Step 6: Run the private causal replay**
+- [x] **Step 6: Run the private causal replay**
 
 Run: `RUN_PARAKEET_EOU_CAUSAL_REPLAY=1 PLUTO_PRIVATE_PARAKEET_EOU_MANIFEST="$PWD/.private/parakeet-eou/manifest.json" pnpm exec vitest run tests/manual/parakeetEouCausalReplay.test.ts`
 
 Expected: both sources emit ordered updates, tail coverage reaches each input duration, queue depth stays within four, the runtime exits cleanly, and the report contains no private content.
 
-- [ ] **Step 7: Commit replay tooling**
+Observed: both sources reached full tail coverage with first partial at 1.696 s,
+p95 update latency 463 ms, maximum queue depth 1, 92.6 MB peak native RSS,
+nominal thermal state, and zero cancellations or failures. The ignored fixture was
+selected from persisted dual-speaker English evidence and the report remained
+content-free.
+
+- [x] **Step 7: Commit replay tooling**
 
 ```bash
 git add tests/manual/parakeetEouCausalReplay.test.ts scripts/run_private_parakeet_eou_replay.ts scripts/validate_private_parakeet_eou_manifest.ts tests/unit/privateParakeetEouManifest.test.ts tests/manual/parakeetApplicationWorkflow.test.ts package.json
