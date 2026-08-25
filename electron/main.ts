@@ -20,6 +20,10 @@ import ffmpegStatic from 'ffmpeg-static';
 import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
+import type {
+  AskPlutoQueryRequest,
+  AskPlutoQueryStatus,
+} from '../src/types/askPlutoQuery';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
   appendCaptureJournalChunk,
@@ -348,11 +352,21 @@ import {
   extractAndProcessEntities,
   processExtractedEntities,
 } from './entityPipeline';
+import {
+  type AskPlutoReasoningMode,
+  getCrossMeetingCandidateLimit,
+  queryReferencesPriorTurn,
+  resolveAskPlutoReasoningMode,
+} from './intelligence/askPlutoReasoning';
 import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
 import {
   auditCitations,
   buildCitationChain,
 } from './intelligence/citationEngine';
+import {
+  queryReferencesCurrentMeeting,
+  resolveCurrentMeeting,
+} from './intelligence/currentMeetingResolver';
 import { generateMid } from './intelligence/midGenerator';
 import { renderMidToMarkdown } from './intelligence/midRenderer';
 import {
@@ -361,7 +375,12 @@ import {
   runPostMeetingTriggers,
   updateAlertStatus,
 } from './intelligence/proactiveEngine';
-import { parseQuery, retrieveContext } from './intelligence/queryEngine';
+import {
+  buildLiveMeetingRetrievalResult,
+  buildMeetingRetrievalResult,
+  parseQuery,
+  retrieveContext,
+} from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
 import { generateSuggestedQueries } from './intelligence/suggestedQueries';
 import {
@@ -398,6 +417,10 @@ import { mapValueSignalsToPriorityHints } from './valueSignalMapping';
 // Background task management for cancellation
 const activeMeetingTasks = new Map<string, AbortController>();
 const activeAnalysisGenerations = new Map<
+  string,
+  { controller: AbortController; settled: Promise<void> }
+>();
+const activeAskPlutoQueries = new Map<
   string,
   { controller: AbortController; settled: Promise<void> }
 >();
@@ -2908,65 +2931,310 @@ app.whenReady().then(async () => {
   // =============================================
   // INTELLIGENCE QUERY HANDLERS (Phase 2)
   // =============================================
-  ipcMain.handle('intelligence:query', async (_event, queryText: string) => {
-    const startTime = Date.now();
-    try {
-      if (!queryText || !queryText.trim()) return { answer: '', citations: [] };
-
-      console.log(
-        `[Pluto] intelligence:query start [query_length=${queryText.trim().length}]`,
+  ipcMain.handle(
+    'intelligence:query',
+    async (event, input: string | AskPlutoQueryRequest) => {
+      const startTime = Date.now();
+      const queryText = typeof input === 'string' ? input : input?.query;
+      const requestId =
+        typeof input === 'string' || !input?.requestId
+          ? `ask-pluto-${randomUUID()}`
+          : input.requestId;
+      const controller = new AbortController();
+      const persistedMeetings = db.getMeetings() as db.PersistedMeeting[];
+      const activeRecording = captureSessionLease.recordingForOwner(
+        event.sender.id,
       );
-
-      const parsed = await parseQuery(queryText);
-
-      // Fast-path: return canned response for conversational greetings
-      if (parsed.cannedResponse) {
-        console.log('[Pluto] intelligence:query canned response');
-        return {
-          answer: parsed.cannedResponse,
-          citations: [],
-        };
-      }
-
-      const context = await retrieveContext(parsed);
-
-      console.log(
-        `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
-      );
-
-      const settings = await getAllSettings(db);
-      const provider = await getProvider(settings);
-
-      const prompt = getAskPlutoPrompt(queryText, context, parsed.intent);
-      console.log(
-        `[Pluto] Generating answer via provider: ${provider.name} ...`,
-      );
-      const answerRaw = await provider.answerAskPluto(prompt);
-
-      const rawCitations = buildCitationChain(answerRaw, context);
-      const auditedCitations = auditCitations(rawCitations);
-
-      // Strip source references and any remaining legacy cite tags from display text
-      const cleanAnswer = answerRaw
-        .replace(/\[Source\s+\d+\]/gi, '')
-        .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
-        .trim();
-
-      console.log(
-        `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
-      );
-
-      return {
-        answer: cleanAnswer,
-        citations: auditedCitations,
+      const currentMeeting = resolveCurrentMeeting({
+        activeRecordingMeetingId: activeRecording?.meetingId,
+        meetings: persistedMeetings.map((meeting) => ({
+          id: meeting.id,
+          started_at: meeting.started_at,
+          created_at: meeting.created_at,
+        })),
+      });
+      const currentMeetingRow = currentMeeting.meetingId
+        ? (db.getMeeting(currentMeeting.meetingId) as
+            | db.PersistedMeeting
+            | undefined)
+        : undefined;
+      const currentMeetingStatus = {
+        ...currentMeeting,
+        ...(currentMeetingRow?.title ? { title: currentMeetingRow.title } : {}),
       };
-    } catch (e) {
-      console.error(
-        `[Pluto] intelligence:query failed after ${Date.now() - startTime}ms:`,
-        e,
+      let reasoningMode: AskPlutoReasoningMode | undefined;
+      let comparisonMeetingCount = 0;
+      const sendStatus = (phase: AskPlutoQueryStatus['phase']) => {
+        if (event.sender.isDestroyed()) return;
+        event.sender.send('intelligence:query:status', {
+          requestId,
+          phase,
+          currentMeeting: currentMeetingStatus,
+          ...(reasoningMode ? { reasoningMode } : {}),
+          ...(comparisonMeetingCount > 0 ? { comparisonMeetingCount } : {}),
+        });
+      };
+
+      const generation = (async () => {
+        if (!queryText || !queryText.trim()) {
+          return {
+            status: 'answered' as const,
+            answer: '',
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+          };
+        }
+
+        console.log(
+          `[Pluto] intelligence:query start [request_id=${requestId}, query_length=${queryText.trim().length}]`,
+        );
+        sendStatus('scope_resolved');
+        sendStatus('retrieving');
+
+        const parsed = await parseQuery(queryText, {
+          signal: controller.signal,
+        });
+        const requestedMode =
+          typeof input !== 'string' &&
+          (input.modeOverride === 'fast' || input.modeOverride === 'deep')
+            ? input.modeOverride
+            : 'auto';
+        reasoningMode = resolveAskPlutoReasoningMode({
+          query: queryText,
+          intent: parsed.intent,
+          override: requestedMode,
+        });
+
+        if (parsed.cannedResponse) {
+          console.log('[Pluto] intelligence:query canned response');
+          return {
+            status: 'answered' as const,
+            answer: parsed.cannedResponse,
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+          };
+        }
+
+        const currentMeetingRequested =
+          queryReferencesCurrentMeeting(queryText);
+        const priorTurns =
+          typeof input === 'string' || !Array.isArray(input.priorTurns)
+            ? []
+            : input.priorTurns
+                .filter(
+                  (turn) =>
+                    (turn.role === 'user' || turn.role === 'assistant') &&
+                    typeof turn.content === 'string' &&
+                    turn.content.trim(),
+                )
+                .slice(-6)
+                .map((turn) => ({
+                  role: turn.role,
+                  content: turn.content.trim().slice(0, 1200),
+                  meetingIds: Array.isArray(turn.meetingIds)
+                    ? turn.meetingIds
+                        .filter((id): id is string => typeof id === 'string')
+                        .slice(0, 8)
+                    : [],
+                }));
+        const activeSnapshot =
+          typeof input !== 'string' &&
+          activeRecording?.meetingId === input.activeMeetingSnapshot?.meetingId
+            ? input.activeMeetingSnapshot
+            : undefined;
+        if (currentMeetingRequested && currentMeeting.kind === 'none') {
+          return {
+            status: 'unavailable' as const,
+            answer:
+              "There isn't a current meeting yet. Start or record a meeting, then ask me again.",
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+          };
+        }
+        if (
+          currentMeetingRequested &&
+          currentMeeting.kind === 'active_recording' &&
+          (!activeSnapshot ||
+            (!activeSnapshot.notes.trim() &&
+              !activeSnapshot.interimText.trim() &&
+              activeSnapshot.transcript.length === 0))
+        ) {
+          return {
+            status: 'unavailable' as const,
+            answer:
+              'The current recording has not produced enough transcript or notes to answer that yet.',
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+          };
+        }
+        if (
+          currentMeetingRequested &&
+          currentMeeting.kind === 'persisted' &&
+          currentMeetingRow &&
+          !currentMeetingRow.transcript_json &&
+          !currentMeetingRow.analysis_json &&
+          !currentMeetingRow.enhanced_notes &&
+          !currentMeetingRow.user_notes
+        ) {
+          return {
+            status: 'unavailable' as const,
+            answer: `${currentMeetingRow.title || 'The latest meeting'} is still being prepared and does not have usable transcript or notes yet.`,
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+          };
+        }
+        const currentPinnedResult = currentMeetingRequested
+          ? currentMeeting.kind === 'active_recording' && activeSnapshot
+            ? buildLiveMeetingRetrievalResult(activeSnapshot)
+            : currentMeeting.kind === 'persisted' && currentMeetingRow
+              ? buildMeetingRetrievalResult(currentMeetingRow)
+              : undefined
+          : undefined;
+        const priorPinnedResults = queryReferencesPriorTurn(queryText)
+          ? [
+              ...new Set(
+                priorTurns
+                  .filter((turn) => turn.role === 'assistant')
+                  .flatMap((turn) => turn.meetingIds),
+              ),
+            ]
+              .map(
+                (meetingId) =>
+                  db.getMeeting(meetingId) as db.PersistedMeeting | undefined,
+              )
+              .filter((meeting): meeting is db.PersistedMeeting =>
+                Boolean(meeting),
+              )
+              .map((meeting) =>
+                buildMeetingRetrievalResult(meeting, 'Prior cited meeting'),
+              )
+          : [];
+        const historicalCandidateLimit = currentMeetingRequested
+          ? getCrossMeetingCandidateLimit(queryText, parsed.intent)
+          : 0;
+        const historicalPinnedResults = persistedMeetings
+          .filter((meeting) => String(meeting.id) !== currentMeeting.meetingId)
+          .slice(0, historicalCandidateLimit)
+          .map((meeting) =>
+            buildMeetingRetrievalResult(meeting, 'Earlier meeting'),
+          );
+        comparisonMeetingCount = historicalPinnedResults.length;
+        const pinnedResults = [
+          ...(currentPinnedResult ? [currentPinnedResult] : []),
+          ...historicalPinnedResults,
+          ...priorPinnedResults.filter(
+            (result) =>
+              result.meeting_id !== currentPinnedResult?.meeting_id &&
+              !historicalPinnedResults.some(
+                (historical) => historical.meeting_id === result.meeting_id,
+              ),
+          ),
+        ];
+        const context = await retrieveContext(parsed, { pinnedResults });
+        controller.signal.throwIfAborted();
+
+        console.log(
+          `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
+        );
+
+        const settings = await getAllSettings(db);
+        const provider = await getProvider(settings);
+        const prompt = getAskPlutoPrompt(
+          queryText,
+          context,
+          parsed.intent,
+          priorTurns,
+        );
+        sendStatus('generating');
+        console.log(
+          `[Pluto] Generating answer via provider: ${provider.name} ...`,
+        );
+        const answerRaw = await provider.answerAskPluto(prompt, {
+          signal: controller.signal,
+          mode: reasoningMode,
+          onToken: (delta) => {
+            if (controller.signal.aborted || event.sender.isDestroyed()) return;
+            event.sender.send('intelligence:query:delta', {
+              requestId,
+              delta,
+            });
+          },
+        });
+
+        const rawCitations = buildCitationChain(answerRaw, context);
+        const auditedCitations = auditCitations(rawCitations);
+        const cleanAnswer = answerRaw
+          .replace(/\[Source\s+\d+\]/gi, '')
+          .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
+          .trim();
+
+        console.log(
+          `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
+        );
+
+        return {
+          status: 'answered' as const,
+          answer: cleanAnswer,
+          citations: auditedCitations,
+          currentMeeting: currentMeetingStatus,
+        };
+      })();
+      const settled = generation.then(
+        () => undefined,
+        () => undefined,
       );
-      throw e;
-    }
+      activeAskPlutoQueries.set(requestId, { controller, settled });
+
+      try {
+        return await generation;
+      } catch (error) {
+        if (controller.signal.aborted) {
+          console.log(
+            `[Pluto] intelligence:query cancelled after ${Date.now() - startTime}ms [request_id=${requestId}]`,
+          );
+          return {
+            status: 'cancelled' as const,
+            answer: '',
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+          };
+        }
+        const timedOut =
+          error instanceof Error &&
+          (error.name === 'TimeoutError' ||
+            /timed?\s*out|operation was aborted/i.test(error.message));
+        console.error(
+          `[Pluto] intelligence:query failed after ${Date.now() - startTime}ms:`,
+          error,
+        );
+        return {
+          status: 'unavailable' as const,
+          answer: timedOut
+            ? 'Local analysis took too long. Your question is still here, so you can retry or use Fast mode.'
+            : "Pluto couldn't reach the configured answer model. Your meeting evidence is unchanged, and you can retry when the model is available.",
+          citations: [],
+          currentMeeting: currentMeetingStatus,
+          failureReason: timedOut
+            ? ('timeout' as const)
+            : ('provider_unavailable' as const),
+        };
+      } finally {
+        if (activeAskPlutoQueries.get(requestId)?.controller === controller) {
+          activeAskPlutoQueries.delete(requestId);
+        }
+      }
+    },
+  );
+
+  ipcMain.handle('intelligence:query:cancel', async (_event, requestId) => {
+    if (typeof requestId !== 'string') return { cancelled: false };
+    const active = activeAskPlutoQueries.get(requestId);
+    if (!active) return { cancelled: false };
+    active.controller.abort(
+      new DOMException('Ask Pluto request cancelled', 'AbortError'),
+    );
+    await active.settled;
+    return { cancelled: true };
   });
 
   ipcMain.handle(

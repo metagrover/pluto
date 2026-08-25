@@ -111,6 +111,7 @@ export interface ScoreBreakdown {
 
 export interface RetrievalResult {
   meeting_id: string;
+  meeting_title?: string;
   mid: MidFrontmatter | null;
   evidence_text: string;
   score: number;

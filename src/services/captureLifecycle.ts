@@ -6,6 +6,7 @@ export type CaptureLifecycleState =
 
 export type CaptureLifecycleSnapshot = {
   state: CaptureLifecycleState;
+  meetingId?: string;
 };
 
 export type CaptureStartResult =

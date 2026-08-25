@@ -25,13 +25,14 @@ export const getAskPlutoPrompt = (
   query: string,
   context: RetrievalResult[],
   intent: string,
+  priorTurns: Array<{ role: 'user' | 'assistant'; content: string }> = [],
 ): string => {
   const contextStr =
     context.length === 0
       ? 'None'
       : context
           .map((c, i) => {
-            const title = c.mid?.title || 'Unknown Meeting';
+            const title = c.meeting_title || c.mid?.title || 'Unknown Meeting';
             const topicNames =
               c.mid?.topics?.map((t) => t.name).join(', ') || 'None';
             const decisions =
@@ -52,6 +53,16 @@ Action Items: ${actions}`;
       ? 'Answer directly and specifically. Use exact names, numbers, and dates from the evidence.'
       : 'Use markdown bullet points to list key items. Be specific — include participant names, decisions, and action items from the evidence.';
 
+  const conversation = priorTurns.length
+    ? priorTurns
+        .slice(-6)
+        .map(
+          (turn) =>
+            `${turn.role === 'user' ? 'User' : 'Pluto'}: ${turn.content.slice(0, 1200)}`,
+        )
+        .join('\n')
+    : 'None';
+
   let prompt = `You are Pluto, an AI meeting intelligence assistant.
 
 RULES:
@@ -62,6 +73,9 @@ RULES:
 5. If the Context does not contain the answer, say: "I couldn't find information about that in your meetings."
 
 Question: ${query}
+
+Recent conversation:
+${conversation}
 
 Context:
 ${contextStr}`;

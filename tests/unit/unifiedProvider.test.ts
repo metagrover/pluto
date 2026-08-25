@@ -181,6 +181,59 @@ describe('UnifiedLLMProvider', () => {
     }
   });
 
+  it('selects Ollama thinking explicitly for fast and deep Ask Pluto requests', async () => {
+    const requestBodies: Array<Record<string, unknown>> = [];
+    installFetchMock((_url, init) => {
+      requestBodies.push(parseRequestBody(init));
+      return jsonResponse({ response: 'Grounded answer' });
+    });
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+
+    await provider.answerAskPluto('Who owns this?', { mode: 'fast' });
+    await provider.answerAskPluto('Compare these meetings', { mode: 'deep' });
+
+    expect(requestBodies[0]).toMatchObject({ think: false });
+    expect(requestBodies[0].options).toMatchObject({
+      num_ctx: 8192,
+      num_predict: 1024,
+    });
+    expect(requestBodies[1]).toMatchObject({ think: true });
+    expect(requestBodies[1].options).toMatchObject({
+      num_ctx: 16384,
+      num_predict: 2048,
+    });
+  });
+
+  it('propagates Ask Pluto cancellation to the active Ollama transport', async () => {
+    installFetchMock(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          if (init?.signal?.aborted) {
+            reject(init.signal.reason);
+            return;
+          }
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        }),
+    );
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const controller = new AbortController();
+    const answer = provider.answerAskPluto('Compare these meetings', {
+      mode: 'deep',
+      signal: controller.signal,
+    });
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+
+    await expect(answer).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('preempts active knowledge generation for meeting analysis', async () => {
     let generationCalls = 0;
     const fetchMock = installFetchMock((_url, init) => {
@@ -1453,6 +1506,17 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
 
     expect(budget.num_ctx).toBeGreaterThanOrEqual(12288);
     expect(budget.num_predict).toBe(2048);
+  });
+
+  it('uses separate bounded budgets for fast and deep Ask Pluto answers', () => {
+    expect(calculateOllamaContextBudget('question', 'askPluto')).toEqual({
+      num_ctx: 8192,
+      num_predict: 1024,
+    });
+    expect(calculateOllamaContextBudget('question', 'askPlutoDeep')).toEqual({
+      num_ctx: 16384,
+      num_predict: 2048,
+    });
   });
 
   it('sliceTranscriptWindows slices transcript into overlapping windows when line count exceeds maxLinesPerWindow', () => {

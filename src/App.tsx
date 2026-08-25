@@ -1026,6 +1026,20 @@ function App() {
                   visible={true}
                   onClose={() => setActiveTab('hub')}
                   onOpenMeeting={(meetingId) => setSelectedMeetingId(meetingId)}
+                  activeMeetingSnapshot={
+                    captureLifecycle.state === 'recording' &&
+                    captureLifecycle.meetingId
+                      ? {
+                          meetingId: captureLifecycle.meetingId,
+                          title: meetingTitle.trim() || 'Meeting',
+                          participants: meetingParticipants,
+                          notes: currentNotes,
+                          transcript: liveTranscript,
+                          interimText: interimTranscript,
+                          capturedAt: new Date().toISOString(),
+                        }
+                      : undefined
+                  }
                 />
               </div>
             ) : activeTab === 'settings' ? (

@@ -70,7 +70,8 @@ export const buildCitationChain = (
       citations.push({
         claim,
         meeting_id: source.meeting_id,
-        meeting_title: source.mid?.title || 'Unknown Meeting',
+        meeting_title:
+          source.meeting_title || source.mid?.title || 'Unknown Meeting',
         evidence_span: getFirstEvidenceSpan(source),
         evidence_valid: false, // set by auditCitations
         trust_status: 'needs_review',
@@ -89,7 +90,8 @@ export const buildCitationChain = (
       const claim = legacyMatch[4].trim();
 
       const source = sources.find((s) => s.meeting_id === meeting_id);
-      const meetingTitle = source?.mid?.title || 'Unknown Meeting';
+      const meetingTitle =
+        source?.meeting_title || source?.mid?.title || 'Unknown Meeting';
 
       citations.push({
         claim,

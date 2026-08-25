@@ -22,7 +22,7 @@ import type {
   DecisionV3,
   TopicSection,
 } from './analysisTypes';
-import { ollamaHttpFetch } from './ollamaHttpTransport';
+import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
 import {
   getEntitiesPrompt,
   getSpeakerIdentityPrompt,
@@ -372,6 +372,7 @@ type LLMTask =
   | 'valueSignals'
   | 'knowledgeDoc'
   | 'askPluto'
+  | 'askPlutoDeep'
   | 'queryClassification';
 
 const isAbortError = (error: unknown): boolean =>
@@ -403,6 +404,7 @@ interface TextGenerationOptions {
   task: LLMTask;
   jsonMode?: boolean;
   signal?: AbortSignal;
+  onToken?: (delta: string) => void;
 }
 
 export class UnifiedLLMProvider implements LLMProvider {
@@ -1194,18 +1196,31 @@ export class UnifiedLLMProvider implements LLMProvider {
     });
   }
 
-  async answerAskPluto(prompt: string): Promise<string> {
+  async answerAskPluto(
+    prompt: string,
+    options: {
+      signal?: AbortSignal;
+      mode?: 'fast' | 'deep';
+      onToken?: (delta: string) => void;
+    } = {},
+  ): Promise<string> {
     return this.generateText({
       prompt,
-      task: 'askPluto',
+      task: options.mode === 'deep' ? 'askPlutoDeep' : 'askPluto',
+      signal: options.signal,
+      onToken: options.onToken,
     });
   }
 
-  async classifyQueryIntent(prompt: string): Promise<string> {
+  async classifyQueryIntent(
+    prompt: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string> {
     return this.generateText({
       prompt,
       task: 'queryClassification',
       jsonMode: true,
+      signal: options.signal,
     });
   }
 
@@ -1285,7 +1300,7 @@ export class UnifiedLLMProvider implements LLMProvider {
               }),
             options.task === 'knowledgeDoc'
               ? 0
-              : options.task === 'askPluto'
+              : options.task === 'askPluto' || options.task === 'askPlutoDeep'
                 ? 20
                 : 10,
             { preemptible: options.task === 'knowledgeDoc' },
@@ -1402,6 +1417,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     task,
     jsonMode,
     signal,
+    onToken,
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel();
     const { num_ctx, num_predict } = calculateOllamaContextBudget(prompt, task);
@@ -1409,7 +1425,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     const requestBody: Record<string, unknown> = {
       model,
       prompt,
-      stream: false,
+      stream: Boolean(onToken),
       options: {
         num_ctx,
         num_predict,
@@ -1423,6 +1439,8 @@ export class UnifiedLLMProvider implements LLMProvider {
       requestBody.format = 'json';
       requestBody.think = this.settings.ollama_structured_thinking ?? false;
     }
+    if (task === 'askPluto') requestBody.think = false;
+    if (task === 'askPlutoDeep') requestBody.think = true;
     if (Number.isSafeInteger(this.settings.ollama_seed)) {
       (requestBody.options as Record<string, unknown>).seed =
         this.settings.ollama_seed;
@@ -1435,6 +1453,42 @@ export class UnifiedLLMProvider implements LLMProvider {
       );
     } catch (_ioErr) {
       // stdout may be closed in packaged Electron — ignore write errors
+    }
+
+    if (onToken) {
+      let pending = '';
+      let answer = '';
+      const timeoutSignal = AbortSignal.timeout(getOllamaTimeoutMs(task));
+      const combinedSignal = signal
+        ? AbortSignal.any([signal, timeoutSignal])
+        : timeoutSignal;
+      const consumeChunk = (chunk: string) => {
+        pending += chunk;
+        const lines = pending.split('\n');
+        pending = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const packet = JSON.parse(line) as { response?: unknown };
+          if (typeof packet.response !== 'string' || !packet.response) continue;
+          answer += packet.response;
+          onToken(packet.response);
+        }
+      };
+      const response = await ollamaHttpStream(
+        `${this.ollamaBaseUrl}/api/generate`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+          signal: combinedSignal,
+        },
+        consumeChunk,
+      );
+      if (pending.trim()) consumeChunk(`${pending}\n`);
+      if (!response.ok) {
+        throw new Error(`Ollama API error: ${response.statusText}`);
+      }
+      return answer;
     }
 
     const response = await this.ollamaFetch(
@@ -1596,7 +1650,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'speaker') {
       return 'You are a helpful assistant that extracts speaker information.';
     }
-    if (task === 'askPluto') {
+    if (task === 'askPluto' || task === 'askPlutoDeep') {
       return 'You are an intelligent meeting assistant.';
     }
     if (task === 'queryClassification') {
@@ -1615,7 +1669,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'valueSignals') return 0.2;
     if (task === 'knowledgeDoc') return 0.2;
     if (task === 'title') return 0.5;
-    if (task === 'askPluto') return 0.4;
+    if (task === 'askPluto' || task === 'askPlutoDeep') return 0.4;
     if (task === 'queryClassification') return 0.1;
     return 0.3;
   }
@@ -1630,7 +1684,8 @@ export class UnifiedLLMProvider implements LLMProvider {
     if (task === 'entities') return 2048;
     if (task === 'valueSignals') return 512;
     if (task === 'knowledgeDoc') return 4096;
-    if (task === 'askPluto') return 2048;
+    if (task === 'askPluto') return 1024;
+    if (task === 'askPlutoDeep') return 2048;
     if (task === 'queryClassification') return 128;
     return 50;
   }
@@ -1722,22 +1777,32 @@ export function calculateOllamaContextBudget(
   task: string,
 ): { num_ctx: number; num_predict: number } {
   const outputTokenBudget =
-    task === 'analysisEditorial'
-      ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
-      : task === 'knowledgeDoc' ||
-          task === 'structuredAnalysis' ||
-          task === 'summary'
-        ? 4096
-        : 2500;
+    task === 'askPluto'
+      ? 1024
+      : task === 'askPlutoDeep'
+        ? 2048
+        : task === 'analysisEditorial'
+          ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
+          : task === 'knowledgeDoc' ||
+              task === 'structuredAnalysis' ||
+              task === 'summary'
+            ? 4096
+            : 2500;
   const estimatedInputTokens = Math.ceil(prompt.length / 3);
   const totalNeeded = estimatedInputTokens + outputTokenBudget;
   const maxCap =
-    task === 'knowledgeDoc' || task === 'analysisEditorial'
-      ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
-      : 16384;
+    task === 'askPluto'
+      ? 8192
+      : task === 'askPlutoDeep'
+        ? 16384
+        : task === 'knowledgeDoc' || task === 'analysisEditorial'
+          ? OLLAMA_EDITORIAL_CONTEXT_TOKENS
+          : 16384;
+  const minimumContext =
+    task === 'askPluto' ? 8192 : task === 'askPlutoDeep' ? 16384 : 4096;
   const num_ctx = Math.min(
     maxCap,
-    Math.max(4096, Math.ceil(totalNeeded / 1024) * 1024),
+    Math.max(minimumContext, Math.ceil(totalNeeded / 1024) * 1024),
   );
   return { num_ctx, num_predict: outputTokenBudget };
 }

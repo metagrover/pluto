@@ -140,8 +140,18 @@ export interface LLMProvider {
     prompt: string,
     options?: { signal?: AbortSignal },
   ): Promise<string>;
-  answerAskPluto(prompt: string): Promise<string>;
-  classifyQueryIntent(prompt: string): Promise<string>;
+  answerAskPluto(
+    prompt: string,
+    options?: {
+      signal?: AbortSignal;
+      mode?: 'fast' | 'deep';
+      onToken?: (delta: string) => void;
+    },
+  ): Promise<string>;
+  classifyQueryIntent(
+    prompt: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string>;
   extractEntities(
     transcript: string,
     context?: EntityExtractionContext,

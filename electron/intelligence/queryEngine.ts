@@ -1,3 +1,4 @@
+import type { AskPlutoActiveMeetingSnapshot } from '../../src/types/askPlutoQuery';
 import { searchMeetingsFts, walkEntityGraph } from '../db';
 
 import type {
@@ -28,10 +29,131 @@ interface V3AnalysisDocument {
   summary?: string;
 }
 
+const parseMid = (value: unknown): MidFrontmatter | null => {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    return JSON.parse(value) as MidFrontmatter;
+  } catch {
+    return null;
+  }
+};
+
+export const buildMeetingRetrievalResult = (
+  meeting: dbModule.PersistedMeeting,
+  label = 'Current meeting',
+): RetrievalResult => {
+  const evidence: string[] = [
+    `[${label}]: ${meeting.title || 'Untitled meeting'}`,
+  ];
+  if (typeof meeting.analysis_json === 'string') {
+    try {
+      const analysis = JSON.parse(meeting.analysis_json) as V3AnalysisDocument;
+      const analysisText =
+        analysis.overview ||
+        analysis.summary ||
+        analysis.topics
+          ?.map((topic) => `${topic.title || ''}: ${topic.summary || ''}`)
+          .filter(Boolean)
+          .join('\n');
+      if (analysisText)
+        evidence.push(`[Analysis]: ${analysisText.slice(0, 1800)}`);
+    } catch {
+      // Other evidence remains usable.
+    }
+  }
+  const notes = meeting.enhanced_notes || meeting.user_notes;
+  if (typeof notes === 'string' && notes.trim()) {
+    evidence.push(`[Notes]: ${notes.trim().slice(0, 1200)}`);
+  }
+  if (typeof meeting.transcript_json === 'string') {
+    try {
+      const transcript = JSON.parse(meeting.transcript_json) as {
+        segments?: Array<{ speaker?: unknown; text?: unknown }>;
+      };
+      const transcriptText = transcript.segments
+        ?.slice(-24)
+        .map((segment) => {
+          const text =
+            typeof segment.text === 'string' ? segment.text.trim() : '';
+          const speaker =
+            typeof segment.speaker === 'string' ? segment.speaker : 'Speaker';
+          return text ? `${speaker}: ${text}` : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+      if (transcriptText) {
+        evidence.push(`[Transcript]:\n${transcriptText.slice(0, 2400)}`);
+      }
+    } catch {
+      // Other evidence remains usable.
+    }
+  }
+
+  return {
+    meeting_id: String(meeting.id),
+    meeting_title: meeting.title || 'Untitled meeting',
+    mid: parseMid(meeting.mid_json),
+    evidence_text: evidence.join('\n'),
+    score: 0,
+    score_breakdown: {
+      fts_rank: 0,
+      graph_proximity: 0,
+      recency_decay: calculateRecencyDecay(meeting.started_at),
+      mention_weight: 0,
+    },
+  };
+};
+
+export const buildLiveMeetingRetrievalResult = (
+  snapshot: AskPlutoActiveMeetingSnapshot,
+): RetrievalResult => {
+  const evidence = [
+    `[Current recording - provisional]: ${snapshot.title || 'Meeting'}`,
+  ];
+  if (snapshot.participants.length > 0) {
+    evidence.push(
+      `[Participants]: ${snapshot.participants.slice(0, 8).join(', ')}`,
+    );
+  }
+  if (snapshot.notes.trim()) {
+    evidence.push(`[Live notes]: ${snapshot.notes.trim().slice(0, 1200)}`);
+  }
+  const transcript = snapshot.transcript
+    .slice(-24)
+    .map((segment) => `${segment.speaker || 'Speaker'}: ${segment.text.trim()}`)
+    .filter((line) => !line.endsWith(': '))
+    .join('\n');
+  if (transcript)
+    evidence.push(`[Live transcript - provisional]:\n${transcript}`);
+  if (snapshot.interimText.trim()) {
+    evidence.push(
+      `[Interim transcript - unconfirmed]: ${snapshot.interimText.trim().slice(0, 700)}`,
+    );
+  }
+
+  return {
+    meeting_id: snapshot.meetingId,
+    meeting_title: snapshot.title || 'Meeting',
+    mid: null,
+    evidence_text: evidence.join('\n').slice(0, 4800),
+    score: 0,
+    score_breakdown: {
+      fts_rank: 0,
+      graph_proximity: 0,
+      recency_decay: 1,
+      mention_weight: 0,
+    },
+  };
+};
+
 /**
  * Parses a query string to extract intent, entities and semantic bounds.
  */
-export const parseQuery = async (text: string): Promise<ParsedQuery> => {
+export const parseQuery = async (
+  text: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ParsedQuery> => {
+  options.signal?.throwIfAborted();
   const lowerText = text.toLowerCase();
 
   // Basic tokenization
@@ -169,7 +291,8 @@ export const parseQuery = async (text: string): Promise<ParsedQuery> => {
     const prompt = getIntentClassificationPrompt(text);
 
     console.log('[QueryEngine] Classifying intent via LLM...');
-    const response = await provider.classifyQueryIntent(prompt);
+    const response = await provider.classifyQueryIntent(prompt, options);
+    options.signal?.throwIfAborted();
 
     // Parse JSON with cleaning to handle model-generated markdown wrappers.
     const cleanedResponse =
@@ -188,6 +311,7 @@ export const parseQuery = async (text: string): Promise<ParsedQuery> => {
       `[QueryEngine] LLM Classification: ${intent}, Keywords: ${expanded_keywords.join(', ')}`,
     );
   } catch (err) {
+    if (options.signal?.aborted) throw err;
     console.warn(
       '[QueryEngine] Failed to classify intent via LLM, falling back to heuristics:',
       err,
@@ -240,6 +364,7 @@ const calculateRecencyDecay = (dateStr: string | null | undefined): number => {
  */
 export const retrieveContext = async (
   parsed: ParsedQuery,
+  options: { pinnedResults?: RetrievalResult[] } = {},
 ): Promise<RetrievalResult[]> => {
   if (parsed.intent === 'conversational') {
     return [];
@@ -325,6 +450,7 @@ export const retrieveContext = async (
 
       resultsMap[m.id as string] = {
         meeting_id: m.id as string,
+        meeting_title: m.title || 'Untitled meeting',
         mid,
         evidence_text,
         score: fts_rank * 0.4,
@@ -406,6 +532,7 @@ export const retrieveContext = async (
 
       resultsMap[mId] = {
         meeting_id: mId,
+        meeting_title: m.title || 'Untitled meeting',
         mid,
         evidence_text:
           m.title +
@@ -424,6 +551,10 @@ export const retrieveContext = async (
   // 5. Time filter processing
   // (Range logic can be added here if temporal_range is set)
 
+  for (const pinnedResult of options.pinnedResults || []) {
+    resultsMap[pinnedResult.meeting_id] = pinnedResult;
+  }
+
   // 6. Result Fusion & Final Scoring
   const finalResults = Object.values(resultsMap).map((res) => {
     // Composite weights from design spec:
@@ -441,5 +572,12 @@ export const retrieveContext = async (
   const filteredResults = finalResults.filter((res) => res.score > 0.05);
   filteredResults.sort((a, b) => b.score - a.score);
 
-  return filteredResults.slice(0, 6);
+  if (!options.pinnedResults?.length) return filteredResults.slice(0, 6);
+  const pinnedIds = new Set(
+    options.pinnedResults.map((result) => result.meeting_id),
+  );
+  return [
+    ...options.pinnedResults,
+    ...filteredResults.filter((result) => !pinnedIds.has(result.meeting_id)),
+  ].slice(0, 6);
 };

@@ -1,6 +1,9 @@
 import { createServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ollamaHttpFetch } from '../../electron/llm/ollamaHttpTransport';
+import {
+  ollamaHttpFetch,
+  ollamaHttpStream,
+} from '../../electron/llm/ollamaHttpTransport';
 
 describe('ollamaHttpFetch', () => {
   const servers: ReturnType<typeof createServer>[] = [];
@@ -104,5 +107,32 @@ describe('ollamaHttpFetch', () => {
     await expect(
       ollamaHttpFetch(`http://127.0.0.1:${address.port}/api/generate`, {}, 16),
     ).rejects.toThrow('response exceeded');
+  });
+
+  it('delivers streaming UTF-8 chunks before the response completes', async () => {
+    const packet = Buffer.from('{"response":"Pluto ✓"}\n', 'utf8');
+    const splitAt = packet.indexOf(Buffer.from('✓')) + 1;
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { 'content-type': 'application/x-ndjson' });
+      response.write(packet.subarray(0, splitAt));
+      setImmediate(() => response.end(packet.subarray(splitAt)));
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('no address');
+    const chunks: string[] = [];
+
+    const response = await ollamaHttpStream(
+      `http://127.0.0.1:${address.port}/api/generate`,
+      { method: 'POST', body: '{}' },
+      (chunk) => chunks.push(chunk),
+    );
+
+    expect(response.ok).toBe(true);
+    expect(chunks.join('')).toBe(packet.toString('utf8'));
+    expect(chunks.length).toBeGreaterThan(1);
   });
 });

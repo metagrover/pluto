@@ -1149,7 +1149,7 @@ export const AudioManager = ({
       }
 
       // 6. No restart loop needed
-      publishCaptureLifecycle({ state: 'recording' });
+      publishCaptureLifecycle({ state: 'recording', meetingId });
       return { admitted: true, meetingId };
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
@@ -1415,7 +1415,10 @@ export const AudioManager = ({
     });
 
     stopInFlightRef.current = true;
-    publishCaptureLifecycle({ state: 'sealing' });
+    publishCaptureLifecycle({
+      state: 'sealing',
+      meetingId: stopSnapshot.meetingId,
+    });
     recordingEndedAtRef.current = stopSnapshot.recordingEndedAtMs;
     isProcessingRef.current = true;
     console.log(

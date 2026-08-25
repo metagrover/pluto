@@ -1,8 +1,17 @@
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Brain, Square } from 'lucide-react';
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type {
+  AskPlutoActiveMeetingSnapshot,
+  AskPlutoAnswerDelta,
+  AskPlutoConversationTurn,
+  AskPlutoCurrentMeeting,
+  AskPlutoQueryPhase,
+  AskPlutoQueryResponse,
+  AskPlutoQueryStatus,
+} from '../../types/askPlutoQuery';
 import { Logo } from '../Brand/Logo';
 import { CitationCard, type CitationChain } from './CitationCard';
 
@@ -10,6 +19,7 @@ interface AskPlutoProps {
   onOpenMeeting: (id: string) => void;
   visible: boolean;
   onClose: () => void;
+  activeMeetingSnapshot?: AskPlutoActiveMeetingSnapshot;
 }
 
 interface Message {
@@ -23,11 +33,18 @@ interface Message {
 export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenMeeting,
   visible,
+  activeMeetingSnapshot,
 }) => {
-  if (!visible) return null;
   const [query, setQuery] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [requestPhase, setRequestPhase] =
+    useState<AskPlutoQueryPhase>('retrieving');
+  const [currentMeeting, setCurrentMeeting] =
+    useState<AskPlutoCurrentMeeting | null>(null);
+  const [currentMeetingRequested, setCurrentMeetingRequested] = useState(false);
+  const [comparisonMeetingCount, setComparisonMeetingCount] = useState(0);
+  const [modeOverride, setModeOverride] = useState<'auto' | 'deep'>('auto');
   const [activeCitationKey, setActiveCitationKey] = useState<string | null>(
     null,
   );
@@ -38,6 +55,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     null,
   );
   const messageCounterRef = useRef(0);
+  const activeRequestIdRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -47,6 +65,43 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   });
+
+  useEffect(() => {
+    if (!window.ipcRenderer) return;
+    return window.ipcRenderer.on(
+      'intelligence:query:status',
+      (_event, status: AskPlutoQueryStatus) => {
+        if (status.requestId === activeRequestIdRef.current) {
+          setRequestPhase(status.phase);
+          if (status.currentMeeting) setCurrentMeeting(status.currentMeeting);
+          setComparisonMeetingCount(status.comparisonMeetingCount || 0);
+        }
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!window.ipcRenderer) return;
+    return window.ipcRenderer.on(
+      'intelligence:query:delta',
+      (_event, packet: AskPlutoAnswerDelta) => {
+        if (packet.requestId !== activeRequestIdRef.current || !packet.delta) {
+          return;
+        }
+        setMessages((current) => {
+          const next = [...current];
+          const pending = next.at(-1);
+          if (!pending?.isLoading || pending.role !== 'assistant')
+            return current;
+          next[next.length - 1] = {
+            ...pending,
+            content: `${pending.content}${packet.delta}`,
+          };
+          return next;
+        });
+      },
+    );
+  }, []);
 
   // Restore focus whenever the input becomes enabled (after send) or on mount
   useEffect(() => {
@@ -90,6 +145,14 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
       { id: nextMessageId(), role: 'user', content: submitQuery.trim() },
     ]);
     setIsProcessing(true);
+    setRequestPhase('retrieving');
+    setCurrentMeeting(null);
+    setComparisonMeetingCount(0);
+    setCurrentMeetingRequested(
+      /\b(current|latest|this)\s+meeting\b|\bcurrent recording\b|\blatest one\b/i.test(
+        submitQuery,
+      ),
+    );
     setActiveCitationKey(null);
     setMessages((prev) => [
       ...prev,
@@ -98,13 +161,44 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
 
     try {
       if (window.ipcRenderer) {
+        const requestId = `ask-pluto-${Date.now()}-${messageCounterRef.current}`;
+        activeRequestIdRef.current = requestId;
+        const priorTurns: AskPlutoConversationTurn[] = messages
+          .slice(-6)
+          .map((message) => ({
+            role: message.role,
+            content: message.content.slice(0, 1200),
+            ...(message.citations?.length
+              ? {
+                  meetingIds: [
+                    ...new Set(
+                      message.citations.map((citation) => citation.meeting_id),
+                    ),
+                  ].slice(0, 8),
+                }
+              : {}),
+          }));
         const response = await window.ipcRenderer.invoke<
-          string | { answer?: string; citations?: CitationChain[] }
-        >('intelligence:query', submitQuery.trim());
+          string | AskPlutoQueryResponse<CitationChain>
+        >('intelligence:query', {
+          requestId,
+          query: submitQuery.trim(),
+          modeOverride,
+          priorTurns,
+          ...(activeMeetingSnapshot ? { activeMeetingSnapshot } : {}),
+        });
 
         setMessages((prev) => {
           const newMsg = [...prev];
           newMsg.pop();
+          if (typeof response !== 'string' && response.status === 'cancelled') {
+            newMsg.push({
+              id: nextMessageId(),
+              role: 'assistant',
+              content: 'Stopped.',
+            });
+            return newMsg;
+          }
           const content =
             typeof response === 'string' ? response : (response.answer ?? '');
           newMsg.push({
@@ -117,44 +211,25 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           return newMsg;
         });
       } else {
-        setTimeout(() => {
-          setMessages((prev) => {
-            const newMsg = [...prev];
-            newMsg.pop();
-            newMsg.push({
-              id: nextMessageId(),
-              role: 'assistant',
-              content:
-                'Based on the recent standup, the **API migration** was delayed by 2 days. The engineering team decided to use GraphQL over REST for the new endpoints.',
-              citations: [
-                {
-                  claim: 'API Migration delayed',
-                  meeting_id: '1',
-                  meeting_title: 'Monday Tech Sync',
-                  evidence_valid: true,
-                  trust_status: 'grounded',
-                  evidence_span:
-                    'We need to push the api migration by 2 days due to integration testing issues.',
-                },
-                {
-                  claim: 'GraphQL chosen for new endpoints',
-                  meeting_id: '2',
-                  meeting_title: 'Architecture Review',
-                  evidence_valid: false,
-                  trust_status: 'needs_review',
-                  evidence_span:
-                    "I'm thinking we should probably use GraphQL for that new service.",
-                },
-              ],
-            });
-            return newMsg;
+        setMessages((prev) => {
+          const newMsg = [...prev];
+          newMsg.pop();
+          newMsg.push({
+            id: nextMessageId(),
+            role: 'assistant',
+            content:
+              'Ask Pluto is unavailable because the desktop connection is not active. Your question was not sent.',
           });
-          setIsProcessing(false);
-        }, 2000);
+          return newMsg;
+        });
       }
     } catch (e: unknown) {
       console.error('Ask Pluto error:', e);
+      const cancelled =
+        (e instanceof Error && e.name === 'AbortError') ||
+        (e instanceof Error && /cancelled|aborted/i.test(e.message));
       let errorMsg = "I'm sorry, there was an error processing your request.";
+      if (cancelled) errorMsg = 'Stopped.';
       if (e instanceof Error && e.message) {
         let msg = e.message.replace(/^Error:\s*/, '');
         if (
@@ -164,7 +239,7 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           msg =
             'An internal system error occurred while searching your knowledge base.';
         }
-        errorMsg += `\n\nDetails: ${msg}`;
+        if (!cancelled) errorMsg += `\n\nDetails: ${msg}`;
       } else if (typeof e === 'string') {
         errorMsg += `\n\nDetails: ${e}`;
       }
@@ -179,9 +254,36 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
         return newMsg;
       });
     } finally {
+      activeRequestIdRef.current = null;
       setIsProcessing(false);
     }
   };
+
+  const handleCancel = async () => {
+    const requestId = activeRequestIdRef.current;
+    if (!requestId || !window.ipcRenderer) return;
+    setRequestPhase('cancelling');
+    await window.ipcRenderer.invoke('intelligence:query:cancel', requestId);
+  };
+
+  const resolvedScopeLabel =
+    currentMeetingRequested && currentMeeting?.kind === 'active_recording'
+      ? 'Reading the current recording'
+      : currentMeetingRequested && currentMeeting?.kind === 'persisted'
+        ? `Reading ${currentMeeting.title || 'the latest meeting'}`
+        : currentMeetingRequested && currentMeeting?.kind === 'none'
+          ? 'No current meeting yet'
+          : 'Finding relevant meetings';
+  const requestPhaseLabel =
+    requestPhase === 'generating'
+      ? comparisonMeetingCount > 0
+        ? `Comparing with ${comparisonMeetingCount} earlier ${comparisonMeetingCount === 1 ? 'meeting' : 'meetings'}`
+        : 'Analyzing evidence'
+      : requestPhase === 'cancelling'
+        ? 'Stopping'
+        : resolvedScopeLabel;
+
+  if (!visible) return null;
 
   return (
     <div className="flex flex-col flex-1 w-full relative animate-in fade-in duration-300 bg-pro-bg">
@@ -248,11 +350,34 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                     }`}
                   >
                     {msg.isLoading ? (
-                      <div className="flex items-center gap-2 h-[22px] px-1">
-                        <div className="flex gap-1.5 opacity-60">
-                          <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce" />
-                          <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.2s]" />
-                          <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.4s]" />
+                      <div className="space-y-3 px-1">
+                        {msg.content ? (
+                          <div className="prose prose-invert prose-sm max-w-none [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {msg.content.replace(/\[Source\s+\d+\]/gi, '')}
+                            </ReactMarkdown>
+                          </div>
+                        ) : null}
+                        <div className="flex items-center gap-3 min-h-[22px]">
+                          {!msg.content ? (
+                            <div className="flex gap-1.5 opacity-60">
+                              <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce" />
+                              <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.2s]" />
+                              <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.4s]" />
+                            </div>
+                          ) : null}
+                          <span className="text-[13px] text-pro-text-muted">
+                            {requestPhaseLabel}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void handleCancel()}
+                            disabled={requestPhase === 'cancelling'}
+                            className="inline-flex items-center gap-1 text-[12px] text-pro-text-muted hover:text-pro-text-main disabled:opacity-50"
+                          >
+                            <Square className="h-2.5 w-2.5 fill-current" />
+                            Stop
+                          </button>
                         </div>
                       </div>
                     ) : (
@@ -313,10 +438,29 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full bg-transparent min-h-[56px] py-4 pl-6 pr-14 text-[15px] text-pro-text-main outline-none placeholder:text-pro-text-muted/60 rounded-full"
+              className="w-full bg-transparent min-h-[56px] py-4 pl-6 pr-28 text-[15px] text-pro-text-main outline-none placeholder:text-pro-text-muted/60 rounded-full"
               placeholder="Ask Pluto…"
-              disabled={isProcessing}
             />
+            <button
+              type="button"
+              aria-label="Analyze deeply"
+              aria-pressed={modeOverride === 'deep'}
+              title="Use deeper reasoning for the next question"
+              disabled={isProcessing}
+              onClick={() =>
+                setModeOverride((current) =>
+                  current === 'deep' ? 'auto' : 'deep',
+                )
+              }
+              className={`absolute right-12 inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                modeOverride === 'deep'
+                  ? 'bg-pro-accent/10 text-pro-accent'
+                  : 'text-pro-text-muted hover:bg-black/5 hover:text-pro-text-main dark:hover:bg-white/5'
+              }`}
+            >
+              <Brain className="h-3.5 w-3.5" />
+              Deep
+            </button>
             <button
               type="submit"
               disabled={!query.trim() || isProcessing}
