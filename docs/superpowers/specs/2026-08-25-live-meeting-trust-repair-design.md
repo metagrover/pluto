@@ -104,11 +104,15 @@ The provider combines the caller signal with the gate admission signal and passe
 
 ### Truthful progress and deadlines
 
-Persist content-free foreground progress as `waiting_for_model` before admission and `analysis` after admission. The Meeting View presents these as `Waiting for the local model` and `Preparing meeting notes` respectively.
+There are two admission boundaries: admission to Pluto's in-process priority gate and actual admission to Ollama's model executor. Another Pluto runtime or another local client can occupy Ollama after Pluto's own gate is free. Do not equate the two.
 
-The active analysis deadline starts when the foreground task is admitted, not when it enters the queue. Background cancellation must settle within five seconds. If it does not, analysis ends in a retryable scheduler failure rather than claiming that generation is active.
+Use Ollama's streaming response mode so the provider can observe the first response chunk. Persist content-free foreground progress as `waiting_for_model` until that first chunk and `analysis` afterward. The Meeting View presents these as `Waiting for the local model` and `Preparing meeting notes` respectively.
 
-The configured Ollama request deadline must be capable of producing its configured output budget. For ordinary analysis tasks, calculate the deadline as 30 seconds of prompt overhead plus the output-token budget at a conservative 10 tokens per second, with a 90-second minimum and an eight-minute maximum. Keep the existing longer knowledge-document ceiling. The admitted multi-pass analysis workflow has a 30-minute overall deadline and records progress at each completed pass so one slow request cannot erase completed topic work.
+Background cancellation inside Pluto must settle within five seconds. The Ollama capacity and prompt-evaluation wait before first response has a separate five-minute bound. If either bound expires, analysis ends in a retryable `local_model_busy` scheduler failure rather than claiming that generation is active.
+
+The active generation deadline starts with the first response chunk. For ordinary analysis tasks, calculate it as 60 seconds plus the configured output-token budget at a conservative five tokens per second, with a three-minute minimum and a 15-minute maximum. Also fail if an admitted stream produces no chunk for 30 seconds. Keep the existing longer knowledge-document ceiling. The admitted multi-pass analysis workflow has a 30-minute overall active-generation budget and records progress at each completed pass so one slow request cannot erase completed topic work.
+
+Cancellation must destroy the active HTTP response and socket, not only abort the caller promise. Acceptance requires the server to observe the disconnect and a following foreground probe to begin within five seconds. A request owned by another local client is never killed or mislabeled as Pluto generation; Pluto waits within the capacity bound, then reports local-model busy.
 
 Manual retry creates one new foreground request only after the prior request and any preempted background request have settled. Existing attempt caps and terminal failure persistence remain in force.
 
@@ -134,7 +138,9 @@ Manual retry creates one new foreground request only after the prior request and
 - Sidebar processing state returns to New meeting once capture reaches `idle`, even when the selected meeting remains in transcript or analysis processing.
 - A second meeting can start while the first meeting has an active downstream lease.
 - The serialized gate cancels and settles active background work, removes cancelled queued work, admits foreground analysis next, and resumes background work afterward.
-- Progress and deadlines distinguish waiting, admitted generation, timeout, cancellation, and retry.
+- Streaming Ollama transport distinguishes Pluto-gate admission, Ollama capacity wait, first response, active generation, idle stream, cancellation, and retry.
+- Cancelling an active response closes the server connection and permits the next request within five seconds.
+- A simulated externally occupied Ollama slot remains `waiting_for_model` and ends as `local_model_busy`, never as generation failure.
 
 ### Runtime acceptance
 
