@@ -83,10 +83,43 @@ export type NativeStreamFailedEvent = NativeEventIdentity & {
     | 'cancelled';
 };
 
+export type NativeEouToken = {
+  text: string;
+  startSeconds: number;
+  endSeconds: number;
+  committed: boolean;
+};
+
+export type NativeEouUpdateEvent = NativeEventIdentity & {
+  event: 'eou_update';
+  processedAudioSeconds: number;
+  committedText: string;
+  tentativeText: string;
+  tokens: NativeEouToken[];
+};
+
+export type NativeEouFailedEvent = NativeEventIdentity & {
+  event: 'eou_failed';
+  reason:
+    | 'invalid_request'
+    | 'stream_not_found'
+    | 'generation_mismatch'
+    | 'source_mismatch'
+    | 'sequence_out_of_order'
+    | 'backpressure'
+    | 'audio_decode_failed'
+    | 'model_unavailable'
+    | 'inference_failed'
+    | 'prefix_mutated'
+    | 'cancelled';
+};
+
 export type NativeEvent =
   | NativeStreamUpdateEvent
   | NativeStreamDegradedEvent
-  | NativeStreamFailedEvent;
+  | NativeStreamFailedEvent
+  | NativeEouUpdateEvent
+  | NativeEouFailedEvent;
 
 export interface NativeJsonLineTransport {
   request(payload: Record<string, unknown>): Promise<NativeResponse>;
@@ -467,7 +500,78 @@ function parseNativeEvent(value: Record<string, unknown>): NativeEvent | null {
     }
     return value as NativeStreamFailedEvent;
   }
+
+  if (value.event === 'eou_update') {
+    if (
+      !hasOnlyKeys(value, [
+        ...identityKeys,
+        'processedAudioSeconds',
+        'committedText',
+        'tentativeText',
+        'tokens',
+      ]) ||
+      typeof value.processedAudioSeconds !== 'number' ||
+      !Number.isFinite(value.processedAudioSeconds) ||
+      value.processedAudioSeconds < 0 ||
+      typeof value.committedText !== 'string' ||
+      typeof value.tentativeText !== 'string' ||
+      !Array.isArray(value.tokens) ||
+      !value.tokens.every((token) =>
+        isNativeEouToken(token, value.processedAudioSeconds as number),
+      )
+    ) {
+      return null;
+    }
+    return value as NativeEouUpdateEvent;
+  }
+
+  if (value.event === 'eou_failed') {
+    const reasons = new Set([
+      'invalid_request',
+      'stream_not_found',
+      'generation_mismatch',
+      'source_mismatch',
+      'sequence_out_of_order',
+      'backpressure',
+      'audio_decode_failed',
+      'model_unavailable',
+      'inference_failed',
+      'prefix_mutated',
+      'cancelled',
+    ]);
+    if (
+      !hasOnlyKeys(value, [...identityKeys, 'reason']) ||
+      typeof value.reason !== 'string' ||
+      !reasons.has(value.reason)
+    ) {
+      return null;
+    }
+    return value as NativeEouFailedEvent;
+  }
   return null;
+}
+
+function isNativeEouToken(
+  value: unknown,
+  processedAudioSeconds: number,
+): value is NativeEouToken {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ['text', 'startSeconds', 'endSeconds', 'committed']) ||
+    typeof value.text !== 'string' ||
+    value.text.length === 0 ||
+    typeof value.startSeconds !== 'number' ||
+    !Number.isFinite(value.startSeconds) ||
+    value.startSeconds < 0 ||
+    typeof value.endSeconds !== 'number' ||
+    !Number.isFinite(value.endSeconds) ||
+    value.endSeconds < value.startSeconds ||
+    value.endSeconds > processedAudioSeconds ||
+    typeof value.committed !== 'boolean'
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function isNonnegativeSafeInteger(value: unknown): value is number {

@@ -40,6 +40,27 @@ const update = (): NativeEvent => ({
   audioEndSeconds: 1,
 });
 
+const eouUpdate = (): NativeEvent => ({
+  schemaVersion: 1,
+  kind: 'event',
+  event: 'eou_update',
+  streamId: 'mic-eou',
+  source: 'mic',
+  generation: 1,
+  revision: 1,
+  processedAudioSeconds: 0.32,
+  committedText: 'hello',
+  tentativeText: 'world',
+  tokens: [
+    {
+      text: 'hello',
+      startSeconds: 0.08,
+      endSeconds: 0.16,
+      committed: true,
+    },
+  ],
+});
+
 describe('NativeJsonLineProcess live events', () => {
   it('ignores a stale exit after timeout restart', async () => {
     vi.useFakeTimers();
@@ -93,6 +114,59 @@ describe('NativeJsonLineProcess live events', () => {
 
     await expect(request).resolves.toMatchObject({ id: 'open-1', ok: true });
     expect(events).toEqual([update()]);
+  });
+
+  it('parses strict EOU update and terminal failure events', async () => {
+    const child = new FakeChild();
+    const process = makeProcess(child);
+    const events: NativeEvent[] = [];
+    process.onEvent((event) => events.push(event));
+    const request = process.request({ schemaVersion: 1, id: 'append-1' });
+    const failed: NativeEvent = {
+      schemaVersion: 1,
+      kind: 'event',
+      event: 'eou_failed',
+      streamId: 'mic-eou',
+      source: 'mic',
+      generation: 1,
+      revision: 2,
+      reason: 'prefix_mutated',
+    };
+
+    child.stdout.write(`${JSON.stringify(eouUpdate())}\n`);
+    child.stdout.write(`${JSON.stringify(failed)}\n`);
+    child.stdout.write(
+      `${JSON.stringify({ schemaVersion: 1, id: 'append-1', ok: true, result: {} })}\n`,
+    );
+
+    await expect(request).resolves.toMatchObject({ ok: true });
+    expect(events).toEqual([eouUpdate(), failed]);
+  });
+
+  it.each([
+    { ...eouUpdate(), processedAudioSeconds: -1 },
+    { ...eouUpdate(), committedText: 3 },
+    { ...eouUpdate(), tokens: {} },
+    {
+      ...eouUpdate(),
+      tokens: [
+        { text: 'x', startSeconds: 0.2, endSeconds: 0.1, committed: true },
+      ],
+    },
+    {
+      ...eouUpdate(),
+      tokens: [
+        { text: 'x', startSeconds: 0, endSeconds: 0.4, committed: true },
+      ],
+    },
+  ])('rejects malformed EOU update %#', async (event) => {
+    const child = new FakeChild();
+    const process = makeProcess(child);
+    const request = process.request({ schemaVersion: 1, id: 'append-1' });
+
+    child.stdout.write(`${JSON.stringify(event)}\n`);
+
+    await expect(request).rejects.toThrow('parakeet_protocol_invalid');
   });
 
   it.each([
@@ -207,5 +281,18 @@ describe('NativeJsonLineProcess live events', () => {
     const pending = second.request({ schemaVersion: 1, id: 'open-2' });
     second.terminate();
     await expect(pending).rejects.toThrow('parakeet_process_terminated');
+  });
+
+  it('terminates when native responds with an uncorrelated request id', async () => {
+    const child = new FakeChild();
+    const process = makeProcess(child);
+    const request = process.request({ schemaVersion: 1, id: 'eou-open-1' });
+
+    child.stdout.write(
+      `${JSON.stringify({ schemaVersion: 1, id: 'eou-open-other', ok: true, result: {} })}\n`,
+    );
+
+    await expect(request).rejects.toThrow('parakeet_protocol_invalid');
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM');
   });
 });

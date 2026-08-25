@@ -209,19 +209,19 @@ git commit -m "feat: run dual-source Parakeet EOU sessions"
 - Test: `tests/unit/parakeetEouClient.test.ts`
 - Test: `tests/unit/parakeetEouMeetingCoordinator.test.ts`
 
-- [ ] **Step 1: Write failing parser and client tests**
+- [x] **Step 1: Write failing parser and client tests**
 
 Use the existing fake JSON transport. Assert that a `Float32Array(15_360)` at 48 kHz becomes one append with `frameCount: 15360`, `audioEndSeconds: 0.32`, and base64 decoding back to identical bytes. Reject detached/empty/oversized arrays, NaN/Infinity, invalid rates, source reuse, a third stream, sequence gaps, queue overflow, and mismatched response ids.
 
 Assert the client acquires one `live` runtime lease, opens mic and System independently, serializes each source while permitting the other source to progress, fences stale generation/revision events, drains before finish, cancels both streams once on either terminal failure, and releases its lease after finish/cancel.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `pnpm exec vitest run tests/unit/eouPcmContract.test.ts tests/unit/parakeetEouClient.test.ts tests/unit/parakeetEouMeetingCoordinator.test.ts`
 
 Expected: import failures for the three new modules.
 
-- [ ] **Step 3: Implement strict transport and client**
+- [x] **Step 3: Implement strict transport and client**
 
 Expose these public types:
 
@@ -251,17 +251,17 @@ export type ParakeetEouUpdate = {
 
 Use a per-source FIFO capped at four outstanding 320 ms frames. Queue admission increments sequence only after validation. Any terminal error closes the meeting epoch and rejects all outstanding promises with its stable code.
 
-- [ ] **Step 4: Implement the meeting coordinator**
+- [x] **Step 4: Implement the meeting coordinator**
 
 `start({meetingId, generation, owner})` opens both sources or rolls both back. `append` requires the active identity and forwards updates only to the owner. `finish` drains mic and System, releases the lease, and ignores later events. `fail` is idempotent, sends one content-free unavailable notification, and cancels both sessions without touching capture APIs.
 
-- [ ] **Step 5: Run focused tests**
+- [x] **Step 5: Run focused tests**
 
 Run: `pnpm exec vitest run tests/unit/eouPcmContract.test.ts tests/unit/parakeetEouClient.test.ts tests/unit/parakeetEouMeetingCoordinator.test.ts tests/unit/parakeetRuntimeHost.test.ts`
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit Electron transport**
+- [x] **Step 6: Commit Electron transport**
 
 ```bash
 git add electron/transcription tests/unit/eouPcmContract.test.ts tests/unit/parakeetEouClient.test.ts tests/unit/parakeetEouMeetingCoordinator.test.ts
