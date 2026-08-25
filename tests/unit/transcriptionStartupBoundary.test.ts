@@ -25,12 +25,32 @@ describe('transcription startup boundary', () => {
     expect(main).not.toContain('await mlxPreview.health()');
   });
 
-  it('builds the native Parakeet runtime before starting development', () => {
+  it('ensures a current native Parakeet runtime before starting development', () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
       scripts?: Record<string, string>;
     };
+    const ensureScript = readFileSync(
+      'scripts/ensure_parakeet_runtime.sh',
+      'utf8',
+    );
 
-    expect(packageJson.scripts?.predev).toBe('pnpm run build:parakeet');
+    expect(packageJson.scripts?.predev).toBe('pnpm run ensure:parakeet');
+    expect(packageJson.scripts?.['ensure:parakeet']).toBe(
+      './scripts/ensure_parakeet_runtime.sh',
+    );
+    expect(ensureScript).toContain('-newer "${output}"');
+    expect(ensureScript).toContain('exec "${SCRIPT_DIR}/build_parakeet.sh"');
+  });
+
+  it('excludes FluidAudio benchmark notes from Swift source discovery', () => {
+    const manifest = readFileSync(
+      'native/parakeet-runtime/vendor/FluidAudio/Package.swift',
+      'utf8',
+    );
+
+    expect(manifest).toContain(
+      'exclude: ["ASR/Parakeet/Unified/benchmark.md"]',
+    );
   });
 
   it('keeps transcription runtime diagnostics generic and content-free', () => {
