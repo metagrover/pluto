@@ -29,9 +29,7 @@ const fiveSecondReceipts = (start = 0): ShadowReceipt[] =>
     }),
   );
 
-const driftingReceiptEnds = [
-  6.191, 11.232, 16.279, 21.319, 26.359, 31.36,
-];
+const driftingReceiptEnds = [6.191, 11.232, 16.279, 21.319, 26.359, 31.36];
 
 const driftingReceipts = (): ShadowReceipt[] =>
   driftingReceiptEnds.map((endSec, index) =>
