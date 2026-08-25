@@ -12,6 +12,7 @@ import type {
   NativeMeetingNoteContinuation,
 } from '../../utils/meetingNotesDocument';
 import { nativeContinuationEditPath } from '../../utils/meetingNotesDocument';
+import { meetingTimestamp } from '../../utils/meetingOrdering';
 import { getTranscriptSegmentStartTime } from '../../utils/transcript';
 
 interface MeetingNotesDocumentProps {
@@ -917,7 +918,7 @@ export const MeetingNotesDocument = ({
                 transcriptSegments={transcriptSegments}
                 onClose={() => setSourceSelection(null)}
                 onShowTranscript={onShowTranscript}
-                meetingDate={meeting.created_at || meeting.started_at}
+                meetingDate={new Date(meetingTimestamp(meeting)).toISOString()}
               />
             );
             return createPortal(pane, document.body);

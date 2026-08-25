@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveMeetingFailurePresentation } from '../../src/components/features/meetingFailurePresentation';
+import {
+  resolveMeetingFailurePresentation,
+  resolveMeetingRegenerationFailurePresentation,
+} from '../../src/components/features/meetingFailurePresentation';
 
 describe('meeting failure presentation', () => {
   it('offers the only recovery action for a retryable final transcription', () => {
@@ -63,6 +66,51 @@ describe('meeting failure presentation', () => {
       title: 'Analysis needs another pass',
       detail: 'Your transcript is ready.',
       actionLabel: 'Retry analysis',
+    });
+  });
+});
+
+describe('meeting regeneration failure presentation', () => {
+  it('explains a failed local generation without blaming provider settings', () => {
+    expect(
+      resolveMeetingRegenerationFailurePresentation({
+        kind: 'generation_failed',
+        issues: ['All per-topic analysis passes failed'],
+        hasExistingNotes: true,
+      }),
+    ).toEqual({
+      title: "Notes weren't regenerated",
+      detail:
+        "The local model didn't finish this pass. Your current notes are unchanged.",
+      canRetry: true,
+    });
+  });
+
+  it('names configuration only when the provider reports configuration evidence', () => {
+    expect(
+      resolveMeetingRegenerationFailurePresentation({
+        kind: 'generation_failed',
+        issues: ['OpenAI API key not configured'],
+        hasExistingNotes: true,
+      }),
+    ).toEqual({
+      title: "Pluto couldn't reach the configured model",
+      detail:
+        'Check your model settings, then try again. Your current notes are unchanged.',
+      canRetry: true,
+    });
+  });
+
+  it('gives invalid model output a clear retryable explanation', () => {
+    expect(
+      resolveMeetingRegenerationFailurePresentation({
+        kind: 'invalid_response',
+        hasExistingNotes: false,
+      }),
+    ).toEqual({
+      title: "Notes weren't generated",
+      detail: "The model returned a response Pluto couldn't use.",
+      canRetry: true,
     });
   });
 });

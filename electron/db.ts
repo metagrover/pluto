@@ -2418,7 +2418,11 @@ export const recoverExpiredTranscriptValidationRetries = (nowMs = Date.now()) =>
 
 export const getMeetings = () => {
   recoverExpiredTranscriptValidationRetries();
-  return db.prepare('SELECT * FROM meetings ORDER BY created_at DESC').all();
+  return db
+    .prepare(
+      'SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC',
+    )
+    .all();
 };
 
 export const getMeeting = (id: string | number) => {

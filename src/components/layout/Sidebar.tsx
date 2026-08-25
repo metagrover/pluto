@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import type { Meeting } from '../../types';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
+import { sortMeetingsByStartTime } from '../../utils/meetingOrdering';
 import { Logo } from '../Brand/Logo';
 
 type ActiveTab =
@@ -277,7 +278,7 @@ export const Sidebar = ({
             />
           </div>
           <div className="space-y-0.5">
-            {safeMeetings.slice(0, 5).map((m) => {
+            {sortMeetingsByStartTime(safeMeetings).slice(0, 5).map((m) => {
               const date = new Date(m.started_at || m.created_at);
               const now = new Date();
               const timeString = date.toLocaleTimeString(undefined, {

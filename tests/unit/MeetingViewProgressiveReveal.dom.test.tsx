@@ -281,4 +281,84 @@ describe('MeetingView progressive reveal', () => {
       'Project kickoff',
     ]);
   });
+
+  it('keeps existing notes visible and offers recovery when regeneration fails', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'GENERATE_ANALYSIS_V2') {
+        return {
+          analysis: {
+            analysis_schema_version: 3,
+            overview: 'Fallback analysis',
+            topics: [],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'general',
+            quality: {
+              format_pass: false,
+              retry_count: 1,
+              fallback_used: true,
+              issues: ['All per-topic analysis passes failed'],
+            },
+          },
+          signals: {},
+        };
+      }
+      return null;
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke },
+    });
+
+    await act(async () =>
+      renderMeeting({
+        ...analyzedMeeting,
+        transcript_integrity_json: JSON.stringify({
+          schemaVersion: 2,
+          state: 'validated',
+          causes: [],
+          evidenceProvenance: { kind: 'stored_capture_activity_v1' },
+          validationProof: {
+            gateVersion: 'canonical_integrity_v1',
+            validatedAt: analyzedMeeting.transcript_validated_at,
+          },
+        }),
+        transcript_json: JSON.stringify({
+          lifecycleStatus: 'validated',
+          segments: [
+            {
+              speaker: 'Me',
+              text: 'The transcript is ready for regeneration.',
+              startTime: 0,
+              endTime: 2,
+            },
+          ],
+        }),
+      }),
+    );
+    const regenerate = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Regenerate Enhanced Notes"]',
+    );
+    expect(regenerate).not.toBeNull();
+
+    await act(async () => regenerate?.click());
+
+    const notice = container.querySelector('[role="alert"]');
+    expect(notice?.textContent).toContain("Notes weren't regenerated");
+    expect(notice?.textContent).toContain(
+      'Your current notes are unchanged.',
+    );
+    expect(notice?.textContent).toContain('Try again');
+    expect(notice?.textContent).not.toContain('Verify LLM provider');
+    expect(container.textContent).toContain('The analysis arrived in place.');
+
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Dismiss regeneration error"]',
+        )
+        ?.click(),
+    );
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
 });

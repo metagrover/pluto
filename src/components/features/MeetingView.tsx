@@ -2,11 +2,13 @@ import {
   Check,
   ChevronRight,
   ChevronUp,
+  CircleAlert,
   FileText,
   Loader2,
   MoreHorizontal,
   Sparkles,
   Undo2,
+  X,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import TextareaAutosize from 'react-textarea-autosize';
@@ -47,8 +49,13 @@ import {
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
-import { resolveMeetingFailurePresentation } from './meetingFailurePresentation';
+import {
+  type MeetingRegenerationFailurePresentation,
+  resolveMeetingFailurePresentation,
+  resolveMeetingRegenerationFailurePresentation,
+} from './meetingFailurePresentation';
 import { buildMeetingTranscriptTurns } from './meetingTranscriptPresentation';
+import { meetingTimestamp } from '../../utils/meetingOrdering';
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
@@ -511,9 +518,8 @@ export const MeetingView = ({
   const [isRestoringNotes, setIsRestoringNotes] = useState(false);
   const [notesTemplate, setNotesTemplate] =
     useState<MeetingNotesTemplate>('auto');
-  const [regenerateNotesError, setRegenerateNotesError] = useState<
-    string | null
-  >(null);
+  const [regenerateNotesError, setRegenerateNotesError] =
+    useState<MeetingRegenerationFailurePresentation | null>(null);
 
   useEffect(() => {
     setIsRegeneratingNotes(false);
@@ -570,7 +576,10 @@ export const MeetingView = ({
     if (isRegeneratingNotes) return;
     if (!canGenerateMeetingIntelligence(selectedMeeting)) {
       setRegenerateNotesError(
-        'This transcript is still being prepared. Try again when it is ready.',
+        resolveMeetingRegenerationFailurePresentation({
+          kind: 'transcript_not_ready',
+          hasExistingNotes: notesDocument.hasAnalysis,
+        }),
       );
       return;
     }
@@ -581,7 +590,10 @@ export const MeetingView = ({
     );
     if (!transcript.trim()) {
       setRegenerateNotesError(
-        'No transcript is available for enhanced note generation.',
+        resolveMeetingRegenerationFailurePresentation({
+          kind: 'missing_transcript',
+          hasExistingNotes: notesDocument.hasAnalysis,
+        }),
       );
       return;
     }
@@ -616,13 +628,20 @@ export const MeetingView = ({
 
       if (!normalizedAnalysis) {
         setRegenerateNotesError(
-          'Enhanced note generation returned an invalid response. Check LLM settings and try again.',
+          resolveMeetingRegenerationFailurePresentation({
+            kind: 'invalid_response',
+            hasExistingNotes: notesDocument.hasAnalysis,
+          }),
         );
         return;
       }
       if (normalizedAnalysis.quality.fallback_used) {
         setRegenerateNotesError(
-          'Enhanced note generation failed. Verify LLM provider/API settings, then retry.',
+          resolveMeetingRegenerationFailurePresentation({
+            kind: 'generation_failed',
+            issues: normalizedAnalysis.quality.issues,
+            hasExistingNotes: notesDocument.hasAnalysis,
+          }),
         );
         return;
       }
@@ -744,7 +763,11 @@ export const MeetingView = ({
     } catch (error) {
       console.error('Failed to regenerate enhanced notes:', error);
       setRegenerateNotesError(
-        'Could not regenerate enhanced notes. Please try again.',
+        resolveMeetingRegenerationFailurePresentation({
+          kind: 'request_failed',
+          error,
+          hasExistingNotes: notesDocument.hasAnalysis,
+        }),
       );
     } finally {
       setIsRegeneratingNotes(false);
@@ -763,9 +786,11 @@ export const MeetingView = ({
       await fetchMeetings();
     } catch (error) {
       console.error('Failed to restore previous generated notes:', error);
-      setRegenerateNotesError(
-        'The previous version could not be restored. Your current notes are unchanged.',
-      );
+      setRegenerateNotesError({
+        title: "Previous notes weren't restored",
+        detail: 'Your current notes are unchanged.',
+        canRetry: false,
+      });
     } finally {
       setIsRestoringNotes(false);
     }
@@ -828,9 +853,9 @@ export const MeetingView = ({
             <div className="meeting-document-meta min-w-0">
               <span>
                 {new Date(
-                  selectedMeeting?.created_at ||
-                    selectedMeeting?.started_at ||
-                    Date.now(),
+                  selectedMeeting
+                    ? meetingTimestamp(selectedMeeting)
+                    : Date.now(),
                 ).toLocaleString([], {
                   month: 'long',
                   day: 'numeric',
@@ -1017,9 +1042,37 @@ export const MeetingView = ({
           retrying={transcriptValidationRetrying}
         />
         {regenerateNotesError ? (
-          <p className="-mt-4 text-xs font-semibold text-red-600">
-            {regenerateNotesError}
-          </p>
+          <section
+            className="meeting-failure-notice meeting-failure-notice--regeneration"
+            role="alert"
+            aria-live="polite"
+          >
+            <span className="meeting-failure-notice__marker" aria-hidden="true">
+              <CircleAlert className="h-3.5 w-3.5" />
+            </span>
+            <div className="meeting-failure-notice__copy">
+              <strong>{regenerateNotesError.title}</strong>
+              <p>{regenerateNotesError.detail}</p>
+            </div>
+            {regenerateNotesError.canRetry ? (
+              <button
+                type="button"
+                className="meeting-failure-notice__action"
+                onClick={() => void regenerateEnhancedNotes()}
+                disabled={isRegeneratingNotes}
+              >
+                {isRegeneratingNotes ? 'Trying again…' : 'Try again'}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="meeting-failure-notice__dismiss"
+              aria-label="Dismiss regeneration error"
+              onClick={() => setRegenerateNotesError(null)}
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </button>
+          </section>
         ) : null}
 
         {pendingUserNotes ? (

@@ -434,6 +434,30 @@
     color: var(--notes-ink);
     background: var(--notes-wash);
   }
+  .meeting-failure-notice--regeneration {
+    @apply flex-wrap;
+  }
+  .meeting-failure-notice--regeneration .meeting-failure-notice__marker {
+    color: oklch(56% 0.09 68);
+    background: oklch(94% 0.025 72);
+  }
+  .dark
+    .meeting-failure-notice--regeneration
+    .meeting-failure-notice__marker {
+    color: oklch(76% 0.08 68);
+    background: oklch(27% 0.03 68);
+  }
+  .meeting-failure-notice--regeneration .meeting-failure-notice__copy {
+    flex: 1 1 220px;
+  }
+  .meeting-failure-notice__dismiss {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent;
+    color: var(--notes-muted);
+  }
+  .meeting-failure-notice__dismiss:hover {
+    color: var(--notes-ink);
+    background: var(--notes-wash);
+  }
   .meeting-analysis-placeholder {
     @apply mx-auto w-full max-w-[760px] px-6 py-16 md:px-8;
   }
@@ -857,20 +881,6 @@
   .meeting-transcript-toggle:hover .meeting-transcript-toggle__action svg {
     transform: translateX(2px);
   }
-  .meeting-analysis-error {
-    @apply mx-auto mb-6 max-w-[720px] rounded-xl border p-4 text-sm;
-    border-color: oklch(75% 0.08 75);
-    background: oklch(96% 0.025 75);
-  }
-  .dark .meeting-analysis-error {
-    border-color: oklch(45% 0.07 75);
-    background: oklch(23% 0.025 75);
-  }
-  .meeting-analysis-error p {
-    @apply mt-1 leading-6;
-    color: var(--notes-muted);
-  }
-
   @media (max-width: 520px) {
     .meeting-app-toolbar {
       @apply px-3;

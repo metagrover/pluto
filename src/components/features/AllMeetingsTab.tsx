@@ -10,6 +10,10 @@ import {
 import { useMemo, useState } from 'react';
 import type { Meeting } from '../../types';
 import { canDeleteMeeting } from '../../utils/recordingFinalization';
+import {
+  meetingTimestamp,
+  sortMeetingsByStartTime,
+} from '../../utils/meetingOrdering';
 import { PageHeader } from '../ui/PageHeader';
 
 interface AllMeetingsTabProps {
@@ -34,17 +38,14 @@ export const AllMeetingsTab = ({
         (m.title || 'Untitled Meeting').toLowerCase().includes(q),
       );
     }
-    return filtered.sort((a, b) => {
-      const timeA = new Date(a.created_at).getTime();
-      const timeB = new Date(b.created_at).getTime();
-      return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
-    });
+    const sorted = sortMeetingsByStartTime(filtered);
+    return sortOrder === 'desc' ? sorted : sorted.reverse();
   }, [meetings, searchQuery, sortOrder]);
 
   const groupedMeetings = useMemo(() => {
     const groups: { label: string; items: Meeting[] }[] = [];
     processedMeetings.forEach((meeting) => {
-      const date = new Date(meeting.created_at);
+      const date = new Date(meetingTimestamp(meeting));
       const now = new Date();
       let label = date.toLocaleDateString(undefined, {
         weekday: 'long',
@@ -215,10 +216,11 @@ export const AllMeetingsTab = ({
                             </span>
                           )}
                         <span className="text-[12px] text-pro-text-muted/45 tabular-nums">
-                          {new Date(meeting.created_at).toLocaleTimeString(
-                            undefined,
-                            { timeStyle: 'short' },
-                          )}
+                          {new Date(
+                            meetingTimestamp(meeting),
+                          ).toLocaleTimeString(undefined, {
+                            timeStyle: 'short',
+                          })}
                         </span>
                         <ChevronRight
                           size={13}
