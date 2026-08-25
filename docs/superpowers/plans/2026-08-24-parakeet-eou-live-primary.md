@@ -560,6 +560,11 @@ git add docs/changelog/entries/2026-08-24-663-parakeet-eou-live-primary.md docs/
 git commit -m "docs: record Parakeet EOU live promotion"
 ```
 
-- [ ] **Step 7: Finish the branch**
+- [x] **Step 7: Finish the branch**
 
 Use `.agent/skills/finishing-a-development-branch/SKILL.md`. Re-run final verification after any hook formatting or integration, preserve the dirty root checkout, and do not push the ahead local `master` without explicit authorization.
+
+Observed: `codex/663-parakeet-eou-primary` fast-forwarded into the local active
+`master` without pulling or pushing. The five unrelated dirty UI/test files
+remain unstaged. Post-merge verification passed 18 focused tests across six
+files, focused Biome lint, TypeScript, and `git diff --check`.
