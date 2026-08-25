@@ -41,4 +41,26 @@ describe('live transcript presentation', () => {
     expect(turns).toHaveLength(2);
     expect(turns.map((turn) => turn.speaker)).toEqual(['Me', 'Them']);
   });
+
+  it('bounds a long same-speaker run without changing its segments', () => {
+    const longSegments = Array.from({ length: 12 }, (_, index) =>
+      segment(
+        `segment-${index}`,
+        'Them',
+        `Sentence ${index} contains enough words to make a sustained monologue readable.`,
+        index * 5_000,
+      ),
+    );
+
+    const turns = buildLiveTranscriptTurns(longSegments);
+
+    expect(turns.length).toBeGreaterThan(1);
+    expect(turns.flatMap((turn) => turn.segments)).toEqual(longSegments);
+    expect(
+      turns.every(
+        (turn) =>
+          turn.segments.map((item) => item.text).join(' ').length <= 420,
+      ),
+    ).toBe(true);
+  });
 });

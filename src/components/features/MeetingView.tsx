@@ -37,7 +37,6 @@ import {
 import { buildReadableTranscriptSegments } from '../../utils/readableTranscript';
 import {
   buildAnalysisTranscriptFromJson,
-  getTranscriptSegmentStartTime,
   parseTranscriptSegments,
 } from '../../utils/transcript';
 import {
@@ -49,6 +48,7 @@ import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
 import { resolveMeetingFailurePresentation } from './meetingFailurePresentation';
+import { buildMeetingTranscriptTurns } from './meetingTranscriptPresentation';
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
@@ -540,18 +540,10 @@ export const MeetingView = ({
   const readableTranscriptSegments = buildReadableTranscriptSegments(
     transcriptSegments,
   ).segments as TranscriptSegment[];
-  const mergedTranscriptSegments: TranscriptSegment[] = [];
-  for (const segment of readableTranscriptSegments) {
-    const previous = mergedTranscriptSegments.at(-1);
-    if (previous && String(previous.speaker) === String(segment.speaker)) {
-      previous.text += ` ${segment.text}`;
-    } else {
-      mergedTranscriptSegments.push({ ...segment });
-    }
-  }
-  const hasTranscriptContent = mergedTranscriptSegments.some((segment) =>
-    Boolean(segment.text?.trim()),
+  const transcriptTurns = buildMeetingTranscriptTurns(
+    readableTranscriptSegments,
   );
+  const hasTranscriptContent = transcriptTurns.length > 0;
   const participantCount = new Set(
     transcriptSegments
       .map((segment) => String(segment.speaker || '').trim())
@@ -1087,21 +1079,23 @@ export const MeetingView = ({
           </header>
           <div className="meeting-transcript-record">
             {hasTranscriptContent ? (
-              mergedTranscriptSegments.map((segment: TranscriptSegment) => {
-                const segmentKey = `${String(segment.speaker ?? 'unknown')}-${segment.start}-${segment.end}-${segment.text}`;
-                const seconds = getTranscriptSegmentStartTime(segment);
+              transcriptTurns.map((turn) => {
+                const text = turn.segments
+                  .map((segment) => segment.text)
+                  .join(' ');
+                const seconds = turn.startSeconds;
                 const timestamp = `${Math.floor(seconds / 60)}:${Math.floor(
                   seconds % 60,
                 )
                   .toString()
                   .padStart(2, '0')}`;
                 return (
-                  <div key={segmentKey} className="meeting-transcript-row">
+                  <div key={turn.id} className="meeting-transcript-row">
                     <div>
-                      <strong>{segment.speaker || 'Unknown speaker'}</strong>
+                      <strong>{turn.speaker || 'Unknown speaker'}</strong>
                       <time>{timestamp}</time>
                     </div>
-                    <p>{segment.text}</p>
+                    <p>{text}</p>
                   </div>
                 );
               })

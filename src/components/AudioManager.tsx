@@ -59,6 +59,7 @@ import {
   type CaptureHealthState,
   type LiveTranscriptIntegrity,
   type LiveTranscriptSegment,
+  type RecordingFinalizationPreview,
   resolveSystemCaptureHealth,
   scheduleSystemCaptureTimeout,
   withCaptureDurabilityWarning,
@@ -66,8 +67,10 @@ import {
 
 interface AudioManagerProps {
   onSessionComplete: (meetingId?: string | number) => void;
+  onStartingChange?: (isStarting: boolean) => void;
   onRecordingChange?: (isRecording: boolean) => void;
   onProcessingChange?: (isProcessing: boolean) => void;
+  onFinalizationStarted?: (meeting: RecordingFinalizationPreview) => void;
   onSpeakingChange?: (speaker: 'Me' | 'Them' | null) => void;
   onLiveTranscript?: (segments: LiveTranscriptSegment[]) => void;
   onInterimTranscript?: (text: string) => void;
@@ -171,8 +174,10 @@ type ChunkAcceptanceDraft = {
 
 export const AudioManager = ({
   onSessionComplete,
+  onStartingChange,
   onRecordingChange,
   onProcessingChange,
+  onFinalizationStarted,
   userNotes = '',
   userTitle = '',
   participants = [],
@@ -475,6 +480,7 @@ export const AudioManager = ({
       return;
     }
     startInFlightRef.current = true;
+    onStartingChange?.(true);
 
     try {
       const readiness = (await window.ipcRenderer.invoke(
@@ -1122,6 +1128,7 @@ export const AudioManager = ({
       setIsRecording(false);
     } finally {
       startInFlightRef.current = false;
+      onStartingChange?.(false);
     }
   };
 
@@ -1363,6 +1370,21 @@ export const AudioManager = ({
       endReason ? `(reason: ${endReason})` : '',
     );
     setIsProcessing(true);
+    onFinalizationStarted?.({
+      id: stopSnapshot.meetingId,
+      title: userTitle.trim() || 'Meeting',
+      startedAt: new Date(stopSnapshot.recordingStartedAtMs).toISOString(),
+      endedAt: new Date(stopSnapshot.recordingEndedAtMs).toISOString(),
+      durationSeconds: Math.max(
+        0,
+        Math.round(
+          (stopSnapshot.recordingEndedAtMs -
+            stopSnapshot.recordingStartedAtMs) /
+            1_000,
+        ),
+      ),
+      userNotes,
+    });
 
     const eouSessionAtStop = eouSessionRef.current;
     eouSessionRef.current = null;

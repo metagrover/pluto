@@ -144,6 +144,7 @@ describe('recording workspace components', () => {
   it('renders Zen View with an integrated back-home button and no active name popover', () => {
     const html = renderToStaticMarkup(
       <ZenMode
+        isStarting={false}
         isProcessing={false}
         onEndMeeting={() => {}}
         onBackHome={() => {}}
@@ -256,6 +257,7 @@ describe('recording workspace components', () => {
   it('places the scratchpad before the live transcript', () => {
     const html = renderToStaticMarkup(
       <ZenMode
+        isStarting={false}
         isProcessing={false}
         onEndMeeting={() => {}}
         onBackHome={() => {}}

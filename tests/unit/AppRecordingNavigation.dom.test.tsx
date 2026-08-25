@@ -9,14 +9,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let recordingCompleted = false;
+let holdRecordingStart = false;
+let completePendingStart: (() => void) | null = null;
+let completePendingStop: (() => void) | null = null;
 
 vi.mock('../../src/components/AudioManager', () => ({
   AudioManager: ({
     onStartSessionRef,
     onStopSessionRef,
     onRecordingStarted,
+    onStartingChange,
     onRecordingChange,
     onProcessingChange,
+    onFinalizationStarted,
     onSessionComplete,
     onCaptureHealthChange,
     onLiveTranscriptIntegrityChange,
@@ -24,8 +29,17 @@ vi.mock('../../src/components/AudioManager', () => ({
     onStartSessionRef?: React.MutableRefObject<(() => void) | null>;
     onStopSessionRef?: React.MutableRefObject<(() => void) | null>;
     onRecordingStarted?: (startedAtMs: number) => void;
+    onStartingChange?: (starting: boolean) => void;
     onRecordingChange?: (recording: boolean) => void;
     onProcessingChange?: (processing: boolean) => void;
+    onFinalizationStarted?: (meeting: {
+      id: string;
+      title: string;
+      startedAt: string;
+      endedAt: string;
+      durationSeconds: number;
+      userNotes: string;
+    }) => void;
     onSessionComplete?: (meetingId: string) => void | Promise<void>;
     onCaptureHealthChange?: (health: {
       microphone: 'healthy';
@@ -37,23 +51,40 @@ vi.mock('../../src/components/AudioManager', () => ({
     useEffect(() => {
       if (onStartSessionRef) {
         onStartSessionRef.current = () => {
-          onRecordingStarted?.(Date.now());
-          onCaptureHealthChange?.({
-            microphone: 'healthy',
-            systemAudio: 'healthy',
-            captureDurability: 'healthy',
-          });
-          onLiveTranscriptIntegrityChange?.('healthy');
-          onProcessingChange?.(false);
-          onRecordingChange?.(true);
+          onStartingChange?.(true);
+          const complete = () => {
+            onRecordingStarted?.(Date.now());
+            onCaptureHealthChange?.({
+              microphone: 'healthy',
+              systemAudio: 'healthy',
+              captureDurability: 'healthy',
+            });
+            onLiveTranscriptIntegrityChange?.('healthy');
+            onProcessingChange?.(false);
+            onRecordingChange?.(true);
+            onStartingChange?.(false);
+          };
+          if (holdRecordingStart) completePendingStart = complete;
+          else complete();
         };
       }
       if (onStopSessionRef) {
         onStopSessionRef.current = () => {
-          recordingCompleted = true;
           onRecordingChange?.(false);
-          onProcessingChange?.(false);
-          void onSessionComplete?.('meeting-just-stopped');
+          onProcessingChange?.(true);
+          onFinalizationStarted?.({
+            id: 'meeting-just-stopped',
+            title: 'Just stopped meeting',
+            startedAt: '2026-08-17T18:00:00.000Z',
+            endedAt: '2026-08-17T18:03:12.000Z',
+            durationSeconds: 192,
+            userNotes: 'A note captured during the meeting.',
+          });
+          completePendingStop = () => {
+            recordingCompleted = true;
+            onProcessingChange?.(false);
+            void onSessionComplete?.('meeting-just-stopped');
+          };
         };
       }
       return () => {
@@ -64,8 +95,10 @@ vi.mock('../../src/components/AudioManager', () => ({
       onStartSessionRef,
       onStopSessionRef,
       onRecordingStarted,
+      onStartingChange,
       onRecordingChange,
       onProcessingChange,
+      onFinalizationStarted,
       onSessionComplete,
       onCaptureHealthChange,
       onLiveTranscriptIntegrityChange,
@@ -85,6 +118,9 @@ describe('App recording navigation', () => {
 
   beforeEach(() => {
     recordingCompleted = false;
+    holdRecordingStart = false;
+    completePendingStart = null;
+    completePendingStop = null;
     container = document.createElement('div');
     document.body.append(container);
     window.__PLUTO_BROWSER_PREVIEW__ = false;
@@ -201,6 +237,36 @@ describe('App recording navigation', () => {
     await act(async () => root.unmount());
   });
 
+  it('shows a finite starting state before capture admission completes', async () => {
+    holdRecordingStart = true;
+    const { default: App } = await import('../../src/App');
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(<App />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'n', metaKey: true }),
+      );
+      await flushPromises();
+    });
+
+    expect(container.textContent).toContain('Starting recording');
+    expect(container.textContent).toContain('Preparing local capture');
+    expect(container.textContent).not.toContain('Finish recording');
+
+    await act(async () => {
+      completePendingStart?.();
+      await flushPromises();
+    });
+    expect(container.textContent).toContain('Finish recording');
+
+    await act(async () => root.unmount());
+  });
+
   it('opens a completed meeting on the note with Transcript secondary', async () => {
     const { default: App } = await import('../../src/App');
     const root = createRoot(container);
@@ -224,6 +290,22 @@ describe('App recording navigation', () => {
 
     await act(async () => {
       finish?.click();
+      await flushPromises();
+    });
+
+    expect(container.textContent).toContain('Preparing your meeting');
+    expect(container.textContent).toContain('Preparing meeting');
+    expect(container.textContent).toContain(
+      'Transcript and notes will appear here as they become ready.',
+    );
+    expect(container.textContent).toContain(
+      'A note captured during the meeting.',
+    );
+    expect(container.textContent).not.toContain('Live transcript');
+    expect(container.textContent).not.toContain('Finish recording');
+
+    await act(async () => {
+      completePendingStop?.();
       await flushPromises();
     });
 

@@ -7,10 +7,30 @@ import {
 } from '../../src/components/features/recordingWorkspaceModel';
 
 describe('buildRecordingWorkspaceModel', () => {
+  it('shows a finite starting state before capture begins', () => {
+    const model = buildRecordingWorkspaceModel({
+      startedAtMs: null,
+      nowMs: 2_000,
+      isStarting: true,
+      isProcessing: false,
+      microphone: 'healthy',
+      systemAudio: 'healthy',
+      captureDurability: 'healthy',
+      liveTranscriptIntegrity: 'healthy',
+      segments: [],
+      interimText: '',
+    });
+
+    expect(model.status).toBe('starting');
+    expect(model.elapsedLabel).toBe('00:00');
+    expect(model.statusMessage).toBe('Preparing local capture');
+  });
+
   it('keeps healthy capture calm while exposing transcript state', () => {
     const model = buildRecordingWorkspaceModel({
       startedAtMs: 1_000,
       nowMs: 62_000,
+      isStarting: false,
       isProcessing: false,
       microphone: 'healthy',
       systemAudio: 'healthy',
@@ -37,6 +57,7 @@ describe('buildRecordingWorkspaceModel', () => {
     const model = buildRecordingWorkspaceModel({
       startedAtMs: 1_000,
       nowMs: 2_000,
+      isStarting: false,
       isProcessing: false,
       microphone: 'warning',
       systemAudio: 'healthy',
@@ -53,6 +74,7 @@ describe('buildRecordingWorkspaceModel', () => {
     const model = buildRecordingWorkspaceModel({
       startedAtMs: 1_000,
       nowMs: 11_000,
+      isStarting: false,
       isProcessing: false,
       microphone: 'healthy',
       systemAudio: 'healthy',
@@ -72,6 +94,7 @@ describe('buildRecordingWorkspaceModel', () => {
     const model = buildRecordingWorkspaceModel({
       startedAtMs: 1_000,
       nowMs: 11_000,
+      isStarting: false,
       isProcessing: false,
       microphone: 'healthy',
       systemAudio: 'healthy',

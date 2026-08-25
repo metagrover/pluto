@@ -18,6 +18,7 @@ import { AskPluto } from './components/features/AskPluto';
 // Feature Views
 import { Dashboard } from './components/features/Dashboard';
 import { MeetingView } from './components/features/MeetingView';
+import { RecordingFinalizingView } from './components/features/RecordingFinalizingView';
 import { RECORDING_SCRATCHPAD_STORAGE_KEY } from './components/features/RecordingMeetingRail';
 import { ZenMode } from './components/features/ZenMode';
 import {
@@ -33,6 +34,7 @@ import type {
   CaptureHealthState,
   LiveTranscriptIntegrity,
   LiveTranscriptSegment,
+  RecordingFinalizationPreview,
 } from './components/features/recordingWorkspaceModel';
 import { useDashboardHome } from './components/features/useDashboardHome';
 import { runPersistedMeetingFinalTranscription } from './services/finalTranscription/runPersistedMeetingFinalTranscription';
@@ -93,7 +95,10 @@ function App() {
   const [participantInput, setParticipantInput] = useState('');
 
   const [isRecording, setIsRecording] = useState(false);
+  const [isStartingRecording, setIsStartingRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [finalizingMeeting, setFinalizingMeeting] =
+    useState<RecordingFinalizationPreview | null>(null);
   const [zenVisible, setZenVisible] = useState(false);
   const [selectedMeetingId, setSelectedMeetingId] = useState<
     string | number | null
@@ -516,6 +521,25 @@ function App() {
     }
   };
 
+  const handleStartingChange = (starting: boolean) => {
+    setIsStartingRecording(starting);
+    if (!starting) return;
+    setZenVisible(true);
+    setMeetingTitle('');
+    setMeetingParticipants([]);
+    setParticipantInput('');
+    setSelectedMeetingId(null);
+    setFinalizingMeeting(null);
+  };
+
+  const handleFinalizationStarted = (meeting: RecordingFinalizationPreview) => {
+    setFinalizingMeeting(meeting);
+    setZenVisible(false);
+    setSelectedMeetingId(null);
+    setActiveTab('hub');
+    setSidebarVisible(true);
+  };
+
   const safeMeetings = Array.isArray(meetings) ? meetings : [];
   const dashboardHome = useDashboardHome({
     isRecording,
@@ -524,7 +548,7 @@ function App() {
   const selectedMeeting = safeMeetings.find(
     (m) => String(m.id) === String(selectedMeetingId),
   );
-  const activeRecording = isRecording || isProcessing;
+  const activeRecording = isStartingRecording || isRecording;
   const showZenMode = activeRecording && zenVisible;
   const handleBackHomeFromZen = () => {
     setZenVisible(false);
@@ -778,9 +802,12 @@ function App() {
               setCurrentNotes('');
               setSelectedMeetingId(meetingId);
             }
+            setFinalizingMeeting(null);
           }}
+          onStartingChange={handleStartingChange}
           onRecordingChange={handleRecordingChange}
           onProcessingChange={setIsProcessing}
+          onFinalizationStarted={handleFinalizationStarted}
           systemAudioStatus={permissionStatus.systemAudio}
           userNotes={currentNotes}
           transcriptionSettings={{
@@ -828,7 +855,24 @@ function App() {
               }
             }}
             isRecordingActive={activeRecording}
-            onReturnToRecording={() => setZenVisible(true)}
+            recordingState={
+              isStartingRecording
+                ? 'starting'
+                : isRecording
+                  ? 'recording'
+                  : isProcessing
+                    ? 'processing'
+                    : 'idle'
+            }
+            onReturnToRecording={() => {
+              if (finalizingMeeting) {
+                setZenVisible(false);
+                setSelectedMeetingId(null);
+                setActiveTab('hub');
+                return;
+              }
+              setZenVisible(true);
+            }}
             onOpenSearch={() => setSearchVisible(true)}
             handleDeleteMeeting={handleDeleteMeeting}
             theme={theme}
@@ -845,6 +889,7 @@ function App() {
 
       {showZenMode ? (
         <ZenMode
+          isStarting={isStartingRecording}
           isProcessing={isProcessing}
           onEndMeeting={() => {
             if (stopSessionRef.current && !isProcessing) {
@@ -907,7 +952,9 @@ function App() {
               <div className="app-background-glow fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full blur-[150px] pointer-events-none z-0 opacity-40" />
             </>
 
-            {selectedMeetingId ? (
+            {finalizingMeeting ? (
+              <RecordingFinalizingView meeting={finalizingMeeting} />
+            ) : selectedMeetingId ? (
               <MeetingView
                 selectedMeeting={selectedMeeting}
                 editingTitle={editingTitle}

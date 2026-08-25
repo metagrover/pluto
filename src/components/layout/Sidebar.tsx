@@ -36,6 +36,7 @@ interface SidebarProps {
   safeMeetings: Meeting[];
   onStartRecording: () => void;
   isRecordingActive?: boolean;
+  recordingState?: 'idle' | 'starting' | 'recording' | 'processing';
   onReturnToRecording?: () => void;
   onOpenSearch: () => void;
   handleDeleteMeeting: (id: string | number) => void;
@@ -52,12 +53,24 @@ export const Sidebar = ({
   safeMeetings,
   onStartRecording,
   isRecordingActive = false,
+  recordingState,
   onReturnToRecording,
   onOpenSearch,
   handleDeleteMeeting,
   theme,
   setTheme,
 }: SidebarProps) => {
+  const resolvedRecordingState =
+    recordingState ?? (isRecordingActive ? 'recording' : 'idle');
+  const recordingBusy = resolvedRecordingState !== 'idle';
+  const recordingLabel =
+    resolvedRecordingState === 'starting'
+      ? 'Starting meeting'
+      : resolvedRecordingState === 'processing'
+        ? 'Preparing meeting'
+        : resolvedRecordingState === 'recording'
+          ? 'Return to recording'
+          : 'New meeting';
   return (
     <aside
       className={`
@@ -87,16 +100,22 @@ export const Sidebar = ({
         <button
           type="button"
           onClick={
-            isRecordingActive
+            recordingBusy
               ? (onReturnToRecording ?? onStartRecording)
               : onStartRecording
           }
           className="flex min-h-[34px] w-full items-center gap-2 rounded-lg px-3 border border-black/5 dark:border-white/10 bg-white dark:bg-white/10 hover:border-black/15 dark:hover:border-white/20 hover:shadow-[0_0_12px_rgba(0,0,0,0.06)] dark:hover:shadow-[0_0_12px_rgba(255,255,255,0.08)] text-pro-text-main transition-all duration-300 focus-visible:outline-none group shadow-[0_1px_2px_rgba(0,0,0,0.04)] mt-1"
         >
-          {isRecordingActive ? (
+          {recordingBusy ? (
             <span
               aria-hidden="true"
-              className="h-2 w-2 shrink-0 rounded-full bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.14)]"
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                resolvedRecordingState === 'processing'
+                  ? 'bg-pro-warning shadow-[0_0_0_3px_hsl(var(--pro-warning)/0.14)]'
+                  : resolvedRecordingState === 'starting'
+                    ? 'animate-pulse bg-pro-accent shadow-[0_0_0_3px_hsl(var(--pro-accent)/0.14)]'
+                    : 'bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.14)]'
+              }`}
             />
           ) : (
             <Plus
@@ -106,9 +125,9 @@ export const Sidebar = ({
             />
           )}
           <span className="flex-1 text-left text-[13px] font-medium">
-            {isRecordingActive ? 'Return to recording' : 'New meeting'}
+            {recordingLabel}
           </span>
-          {!isRecordingActive && (
+          {!recordingBusy && (
             <kbd className="font-sans text-[11px] font-medium text-pro-text-muted/60 opacity-0 group-hover:opacity-100 transition-opacity">
               ⌘N
             </kbd>

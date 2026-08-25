@@ -91,6 +91,38 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(releaseIndex).toBeGreaterThan(readinessIndex);
   });
 
+  it('publishes starting feedback before asynchronous readiness', () => {
+    const startIndex = source.indexOf('const startSession = async () => {');
+    const startingIndex = source.indexOf(
+      'onStartingChange?.(true)',
+      startIndex,
+    );
+    const readinessIndex = source.indexOf(
+      "'RECORDING_READINESS_STATUS'",
+      startIndex,
+    );
+    const stoppedStartingIndex = source.indexOf(
+      'onStartingChange?.(false)',
+      readinessIndex,
+    );
+
+    expect(startingIndex).toBeGreaterThan(startIndex);
+    expect(startingIndex).toBeLessThan(readinessIndex);
+    expect(stoppedStartingIndex).toBeGreaterThan(readinessIndex);
+  });
+
+  it('publishes the frozen meeting preview before finalization work', () => {
+    const stopIndex = source.indexOf('const stopSession = async');
+    const previewIndex = source.indexOf('onFinalizationStarted?.({', stopIndex);
+    const recorderStopIndex = source.indexOf(
+      'const micBlob = await stopRecorder',
+      stopIndex,
+    );
+
+    expect(previewIndex).toBeGreaterThan(stopIndex);
+    expect(previewIndex).toBeLessThan(recorderStopIndex);
+  });
+
   it('contains no recording-time MLX transcription machinery', () => {
     expect(source).not.toContain('LiveTranscriptionQueue');
     expect(source).not.toContain('resolveLiveChunkModel');
