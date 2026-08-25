@@ -166,11 +166,12 @@ xcode-select --install
 1. Install Xcode Command Line Tools (if missing)
 2. `pnpm install`
 3. `pnpm run setup-python`
-4. `pnpm run build-native`
-5. `pnpm run lint`
-6. `pnpm test -- --run`
-7. If MLX is unavailable: verify Apple Silicon and re-run `pnpm run setup-python`
-8. If Electron throws ABI mismatch: run `pnpm exec electron-rebuild -f -w better-sqlite3`
+4. `pnpm run dev` (builds missing or stale Parakeet and audio-capture executables)
+5. Complete the in-app model download and permission checks
+6. `pnpm run lint`
+7. `pnpm test -- --run`
+8. If MLX is unavailable: verify Apple Silicon and re-run `pnpm run setup-python`
+9. If Electron throws ABI mismatch: run `pnpm exec electron-rebuild -f -w better-sqlite3`
 
 ## Code Formatting with Biome
 

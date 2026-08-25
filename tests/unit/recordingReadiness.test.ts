@@ -42,6 +42,7 @@ describe('recordingReadiness', () => {
     vi.clearAllMocks();
     mockParakeetClient = {
       prepare: vi.fn().mockResolvedValue(READY_CAPABILITY),
+      getPreparedCapability: vi.fn().mockReturnValue(READY_CAPABILITY),
     } as unknown as ParakeetFinalClient;
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.accessSync).mockImplementation(() => undefined);
@@ -62,7 +63,7 @@ describe('recordingReadiness', () => {
       audiocapPath,
     });
 
-  it('is ready only when verified Parakeet final and EOU capability is present', async () => {
+  it('reads prepared capability without starting model preparation', async () => {
     expect(await status()).toEqual({
       ready: true,
       blockers: [],
@@ -77,7 +78,8 @@ describe('recordingReadiness', () => {
       },
     });
     await status();
-    expect(mockParakeetClient.prepare).toHaveBeenCalledTimes(1);
+    expect(mockParakeetClient.getPreparedCapability).toHaveBeenCalledTimes(2);
+    expect(mockParakeetClient.prepare).not.toHaveBeenCalled();
   });
 
   it('fails closed when the client is missing', async () => {
@@ -91,7 +93,7 @@ describe('recordingReadiness', () => {
   });
 
   it('fails closed when prepare lacks the EOU capability', async () => {
-    vi.mocked(mockParakeetClient.prepare).mockResolvedValue({
+    vi.mocked(mockParakeetClient.getPreparedCapability).mockReturnValue({
       ready: true,
       engine: 'parakeet_coreml',
       modelBundleVersion: 'legacy-final-only',
@@ -103,9 +105,7 @@ describe('recordingReadiness', () => {
   });
 
   it('uses verified prepare rather than directory non-emptiness', async () => {
-    vi.mocked(mockParakeetClient.prepare).mockRejectedValue(
-      new Error('parakeet_model_bundle_invalid'),
-    );
+    vi.mocked(mockParakeetClient.getPreparedCapability).mockReturnValue(null);
     const result = await status();
     expect(result.blockers).toContain('parakeet_model_missing');
     expect(result.blockers).toContain('parakeet_eou_unavailable');
@@ -125,6 +125,7 @@ describe('recordingReadiness', () => {
   });
 
   it('prepares the verified Parakeet bundle exactly once', async () => {
+    vi.mocked(mockParakeetClient.getPreparedCapability).mockReturnValue(null);
     const result = await prepareRecordingReadiness({
       parakeetFinalClient: mockParakeetClient,
       parakeetModelRoot,

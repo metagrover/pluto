@@ -124,7 +124,7 @@ export async function getRecordingReadinessStatus(
 ): Promise<ReadinessStatus> {
   return evaluateRecordingReadiness(
     options,
-    await prepareParakeetCapability(options.parakeetFinalClient),
+    options.parakeetFinalClient?.getPreparedCapability() ?? null,
   );
 }
 

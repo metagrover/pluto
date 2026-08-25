@@ -61,6 +61,7 @@ describe('ParakeetFinalClient', () => {
     const child = new FakeChild();
     const spawn = vi.fn(() => child);
     const client = new ParakeetFinalClient({ paths, spawn });
+    expect(client.getPreparedCapability()).toBeNull();
 
     const first = client.prepare();
     const second = client.prepare();
@@ -80,6 +81,11 @@ describe('ParakeetFinalClient', () => {
       modelBundleVersion: 'test-model-v1',
     });
     await expect(second).resolves.toEqual(await first);
+    expect(client.getPreparedCapability()).toMatchObject({
+      ready: true,
+      liveEngine: 'parakeet_eou_320ms',
+      modelVersion: 'test-model-v1',
+    });
   });
 
   it('reprepares a new runtime after idle unload before final transcription', async () => {
@@ -101,6 +107,7 @@ describe('ParakeetFinalClient', () => {
     await ready;
     await vi.advanceTimersByTimeAsync(1);
     expect(firstChild.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(client.getPreparedCapability()).toBeNull();
 
     const transcription = client.transcribe({
       meetingId: 'after-idle-unload',

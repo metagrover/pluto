@@ -400,3 +400,11 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 - **Decision:** Recording startup publishes a finite `starting` state before asynchronous local admission. Accepted stop freezes the visible meeting clock and immediately replaces the live workspace with a local document-shaped pending view; persisted Meeting View replaces it when provisional save completes. Live and saved transcript presentation may split long same-speaker runs at bounded time and character limits, but cannot rewrite canonical segments, words, timestamps, or speaker evidence.
 - **Rationale:** A click without feedback resembles failure, a live timer after stop falsely implies capture continues, and unbounded same-speaker merging hides otherwise available punctuation and turns in walls of text.
 - **Consequences:** Startup, recording, and finalization are honest user-visible phases. Users can leave finalization running without remaining trapped in capture UI, while canonical audio, transcript integrity, and downstream analysis contracts remain unchanged.
+
+## 2026-08-25 - Make development startup own recording readiness
+
+- **Status:** Accepted
+- **Source:** [Issue #650](https://github.com/metagrover/pluto/issues/650)
+- **Decision:** `pnpm run dev` is the authoritative contributor startup command. Before Vite launches, it builds any missing, unsigned, or stale Parakeet runtime, resource probe, and audio-capture executable. Model acquisition remains inside Pluto: the readiness status probe is read-only, while the explicit setup preparation downloads, loads, and verifies the pinned Parakeet ASR, CTC, and EOU bundle before the workspace is revealed.
+- **Rationale:** A clean checkout could build Parakeet but omit `audiocap`, leaving setup permanently blocked. The previous status probe also performed the large model download while the UI still said it was checking, making healthy first-run work look frozen.
+- **Consequences:** Contributors no longer run `build-native` separately before development. Repeated startup skips current signed executables, packaged apps continue to bundle their native runtimes, and first-run model work remains visible and retryable in the setup surface.

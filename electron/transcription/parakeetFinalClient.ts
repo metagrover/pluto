@@ -42,6 +42,7 @@ type FinalLeaseReservation = { lease: ParakeetRuntimeLease } | { error: Error };
 export class ParakeetFinalClient {
   private readonly runtimeHost: ParakeetRuntimeHost;
   private preparePromise: Promise<TranscriptionRuntimeHealth> | null = null;
+  private preparedCapability: TranscriptionRuntimeHealth | null = null;
   private activePrepare: { id: string; settled: Promise<void> } | null = null;
   private queue: Promise<void> = Promise.resolve();
   private nextID = 0;
@@ -68,7 +69,12 @@ export class ParakeetFinalClient {
       });
     this.runtimeHost.transport.onFailure(() => {
       this.preparePromise = null;
+      this.preparedCapability = null;
     });
+  }
+
+  getPreparedCapability(): TranscriptionRuntimeHealth | null {
+    return this.preparedCapability;
   }
 
   prepare(): Promise<TranscriptionRuntimeHealth> {
@@ -120,7 +126,7 @@ export class ParakeetFinalClient {
           if (typeof modelVersion !== 'string' || modelVersion.length === 0) {
             throw new Error('parakeet_protocol_invalid');
           }
-          return {
+          const capability = {
             ready: true,
             engine: 'parakeet_coreml' as const,
             liveEngine: 'parakeet_eou_320ms' as const,
@@ -128,9 +134,12 @@ export class ParakeetFinalClient {
             providerVersion: 'FluidAudio-0.15.5',
             modelBundleVersion: modelVersion,
           };
+          this.preparedCapability = capability;
+          return capability;
         })
         .catch((error) => {
           this.preparePromise = null;
+          this.preparedCapability = null;
           throw error;
         })
         .finally(() => {
@@ -178,6 +187,7 @@ export class ParakeetFinalClient {
 
   close(): void {
     this.preparePromise = null;
+    this.preparedCapability = null;
   }
 
   private async runTranscription(
