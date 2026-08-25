@@ -36,7 +36,7 @@ const MEETING_ID_PATTERN =
 export function createEouRendererSession(options: {
   meetingId: string;
   generation: number;
-  sampleRates: Record<LiveSource, number>;
+  sampleRates: Record<LiveSource, number | (() => number)>;
   transport: EouRendererTransport;
   onSegments(segments: LiveTranscriptSegment[]): void;
   onUnavailable(code: string): void;
@@ -98,16 +98,21 @@ export function createEouRendererSession(options: {
     });
   };
 
-  const chunkers = Object.fromEntries(
-    SOURCES.map((source) => [
+  const chunkers: Partial<Record<LiveSource, EouPcmChunker>> = {};
+  const chunkerFor = (source: LiveSource): EouPcmChunker => {
+    const existing = chunkers[source];
+    if (existing) return existing;
+    const configured = options.sampleRates[source];
+    const sampleRate =
+      typeof configured === 'function' ? configured() : configured;
+    const created = createEouPcmChunker({
       source,
-      createEouPcmChunker({
-        source,
-        sampleRate: options.sampleRates[source],
-        onFrame: sendFrame,
-      }),
-    ]),
-  ) as Record<LiveSource, EouPcmChunker>;
+      sampleRate,
+      onFrame: sendFrame,
+    });
+    chunkers[source] = created;
+    return created;
+  };
 
   const unsubscribeUpdate = options.transport.onUpdate((payload) => {
     if (
@@ -156,7 +161,7 @@ export function createEouRendererSession(options: {
     append(source: LiveSource, samples: Float32Array): void {
       if (!accepting || currentStatus !== 'ready') return;
       try {
-        chunkers[source].append(samples);
+        chunkerFor(source).append(samples);
       } catch {
         fail('parakeet_request_invalid');
       }
@@ -171,7 +176,7 @@ export function createEouRendererSession(options: {
       }
       accepting = false;
       currentStatus = 'finishing';
-      for (const source of SOURCES) chunkers[source].flush();
+      for (const source of SOURCES) chunkers[source]?.flush();
       await Promise.all(SOURCES.map((source) => dispatch[source].tail));
       if (isUnavailable()) return;
       try {

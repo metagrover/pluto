@@ -60,6 +60,8 @@ import {
 import { writeDualShadowTrialReport } from './transcription/dualShadowTrialReport';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
 import { LiveTranscriptionRolloutStore } from './transcription/liveTranscriptionRolloutStore';
+import { ParakeetEouClient } from './transcription/parakeetEouClient';
+import { ParakeetEouMeetingCoordinator } from './transcription/parakeetEouMeetingCoordinator';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
 import { ParakeetLiveClient } from './transcription/parakeetLiveClient';
 import {
@@ -411,19 +413,20 @@ const activeTranscriptionMeetings = new Map<string, number>();
 let parakeetFinalClient: ParakeetFinalClient | null = null;
 let parakeetRuntimeHost: ParakeetRuntimeHost | null = null;
 let parakeetShadowCoordinator: ParakeetLiveMeetingCoordinator | null = null;
+let parakeetEouCoordinator: ParakeetEouMeetingCoordinator | null = null;
+let parakeetEouOwner: WebContents | null = null;
+let parakeetEouGeneration: number | null = null;
 
 configureKnowledgeSynthesisPause(setKnowledgeDocSynthesisPaused);
 
 const startParakeetLiveRecording = async (
   _sender: WebContents,
-  meetingId: string,
-) => {
-  await parakeetShadowCoordinator?.start(meetingId);
-};
+  _meetingId: string,
+) => undefined;
 
 const appendParakeetLiveReceipt = async (
   _sender: WebContents,
-  receipt: {
+  _receipt: {
     durable?: true;
     meetingId: string;
     generation: string;
@@ -435,13 +438,10 @@ const appendParakeetLiveReceipt = async (
     chunkEndSec: number;
     repairAudioRelativePath: string | null;
   },
-) => {
-  await parakeetShadowCoordinator?.append(receipt);
-};
+) => undefined;
 
 const stopParakeetLiveRecording = async (meetingId: string) => {
   void meetingId;
-  await parakeetShadowCoordinator?.stop();
 };
 
 function beginTranscriptionWork() {
@@ -514,6 +514,10 @@ app.on('before-quit', async () => {
   activeMeetingTasks.clear();
   parakeetFinalClient?.close();
   parakeetFinalClient = null;
+  await parakeetEouCoordinator?.fail('parakeet_app_quit');
+  parakeetEouCoordinator = null;
+  parakeetEouOwner = null;
+  parakeetEouGeneration = null;
   await parakeetShadowCoordinator?.stop();
   parakeetShadowCoordinator = null;
   parakeetRuntimeHost?.shutdown();
@@ -789,14 +793,131 @@ app.whenReady().then(async () => {
     owner.once('destroyed', () => {
       watchedCaptureOwners.delete(owner.id);
       const ownsNativeAudio = nativeAudioOwner?.id === owner.id;
+      const ownsParakeetEou = parakeetEouOwner?.id === owner.id;
       const released = captureSessionLease.releaseOwner(owner.id);
       if (ownsNativeAudio) stopNativeAudioCapture();
+      if (ownsParakeetEou) {
+        void parakeetEouCoordinator?.fail('parakeet_owner_destroyed');
+        parakeetEouOwner = null;
+        parakeetEouGeneration = null;
+      }
       if (released) {
         knowledgeSynthesisPause.release('capture');
         console.warn('[CaptureLease] released: owner_destroyed');
       }
     });
   };
+
+  const eouCoordinator = new ParakeetEouMeetingCoordinator({
+    createClient: async () => {
+      if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
+      const lease = await parakeetRuntimeHost.startRecordingLive();
+      return new ParakeetEouClient({
+        runtimeHost: parakeetRuntimeHost,
+        runtimeLease: lease,
+        maxOutstandingPerSource: 4,
+      });
+    },
+    onUpdate: ({ meetingId, owner: ownerId, event }) => {
+      const owner = parakeetEouOwner;
+      if (
+        !owner ||
+        owner.isDestroyed() ||
+        String(owner.id) !== ownerId ||
+        parakeetEouGeneration !== event.generation
+      )
+        return;
+      owner.send('PARAKEET_EOU_UPDATE', {
+        meetingId,
+        generation: event.generation,
+        event,
+      });
+    },
+    onUnavailable: ({ meetingId, owner: ownerId, code }) => {
+      const owner = parakeetEouOwner;
+      if (!owner || owner.isDestroyed() || String(owner.id) !== ownerId) return;
+      owner.send('PARAKEET_EOU_UNAVAILABLE', {
+        meetingId,
+        generation: parakeetEouGeneration,
+        code,
+      });
+    },
+  });
+  parakeetEouCoordinator = eouCoordinator;
+
+  const requireParakeetEouOwner = (sender: WebContents, meetingId: string) => {
+    captureSessionLease.requireRecordingOwner(meetingId, sender.id);
+    if (parakeetEouOwner?.id !== sender.id) {
+      throw new Error('capture_session_not_owned');
+    }
+  };
+
+  ipcMain.handle('PARAKEET_EOU_START', async (event, request = {}) => {
+    const meetingId = String(request.meetingId || '');
+    const generation = Number(request.generation);
+    captureSessionLease.requireRecordingOwner(meetingId, event.sender.id);
+    if (
+      parakeetEouOwner &&
+      (parakeetEouOwner.id !== event.sender.id ||
+        parakeetEouGeneration !== generation)
+    ) {
+      throw new Error('capture_session_not_owned');
+    }
+    if (!Number.isSafeInteger(generation) || generation <= 0) {
+      throw new Error('parakeet_request_invalid');
+    }
+    parakeetEouOwner = event.sender;
+    parakeetEouGeneration = generation;
+    try {
+      await eouCoordinator.start({
+        meetingId,
+        generation,
+        owner: String(event.sender.id),
+      });
+      return {};
+    } catch (error) {
+      if (parakeetEouOwner?.id === event.sender.id) {
+        parakeetEouOwner = null;
+        parakeetEouGeneration = null;
+      }
+      throw error;
+    }
+  });
+
+  ipcMain.handle('PARAKEET_EOU_APPEND', async (event, request = {}) => {
+    const meetingId = String(request.meetingId || '');
+    requireParakeetEouOwner(event.sender, meetingId);
+    if (!(request.samples instanceof Float32Array)) {
+      throw new Error('parakeet_request_invalid');
+    }
+    await eouCoordinator.append({
+      meetingId,
+      source: request.source,
+      sampleRate: request.sampleRate,
+      samples: request.samples,
+      audioStartSeconds: request.audioStartSeconds,
+      audioEndSeconds: request.audioEndSeconds,
+    });
+    return {};
+  });
+
+  ipcMain.handle('PARAKEET_EOU_FINISH', async (event, request = {}) => {
+    const meetingId = String(request.meetingId || '');
+    requireParakeetEouOwner(event.sender, meetingId);
+    await eouCoordinator.finish(meetingId);
+    parakeetEouOwner = null;
+    parakeetEouGeneration = null;
+    return {};
+  });
+
+  ipcMain.handle('PARAKEET_EOU_CANCEL', async (event, request = {}) => {
+    const meetingId = String(request.meetingId || '');
+    requireParakeetEouOwner(event.sender, meetingId);
+    await eouCoordinator.fail('parakeet_cancelled');
+    parakeetEouOwner = null;
+    parakeetEouGeneration = null;
+    return {};
+  });
 
   ipcMain.handle('AUDIO_RECORDER_START', async (_event) => {
     console.log('[Pluto] Request to start native recorder...');

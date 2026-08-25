@@ -4,18 +4,14 @@ import {
   startStopToValidatedLatencyAfterAcceptedStop,
 } from '../services/diarizationFirstFinalization';
 import { registerFinalTranscriptionVocabulary } from '../services/finalTranscription/finalTranscriptionVocabularyRegistry';
+import { createEouRendererSession } from '../services/liveTranscription/eouRendererSession';
 import {
   computeRms,
   createWavBlob,
   decodeFloat32PcmChunk,
-  isCaptureChunkPairReady,
   resolvePcmTimelineSampleRate,
   trimPcmLeadingOverflow,
 } from '../utils/audio';
-import {
-  BackgroundTranscriptValidationQueue,
-  type CaptureComputePolicy,
-} from '../utils/backgroundTranscriptValidation';
 import { startBoundedSampler } from '../utils/boundedSampler';
 import { createCaptureActivitySession } from '../utils/captureActivitySession';
 import { createCaptureJournalMutationCoordinator } from '../utils/captureJournalMutationCoordinator';
@@ -27,11 +23,6 @@ import {
   type LiveTranscriptResponsivenessSummary,
   createLiveTranscriptResponsivenessRuntime,
 } from '../utils/liveTranscriptResponsiveness';
-import {
-  createStableLiveSegmentId,
-  mergeValidatedTranscriptChunk,
-} from '../utils/liveTranscriptValidationMerge';
-import { LiveTranscriptionQueue } from '../utils/liveTranscriptionQueue';
 import { isGrantedStatus } from '../utils/permissions';
 import {
   beginRecordingFinalization,
@@ -45,7 +36,6 @@ import {
   type SpeakerActivityWindow,
   type WordTimestamp,
   decideNextSpeaker,
-  shouldDropBySpeakerActivity,
 } from '../utils/speakerAttribution';
 import { createStopToValidatedLatencyAccumulator } from '../utils/stopToValidatedLatency';
 import {
@@ -53,8 +43,6 @@ import {
   shouldUseSystemAudioReconstructionFallback,
 } from '../utils/systemAudioReconstruction';
 import type { CaptureActivityEvidence } from '../utils/transcriptActivityEvidence';
-import { canonicalizeTranscriptCheckpointConfig } from '../utils/transcriptCheckpointConfig';
-import { evaluateLiveTranscriptCoverage } from '../utils/transcriptIntegrity';
 import {
   type StoredTranscriptSpeakerAttribution,
   type TranscriptPipelineMode,
@@ -64,9 +52,6 @@ import {
 import { TRANSCRIPTION_TUNING } from '../utils/transcriptionConfig';
 import {
   type TranscriptionSettings,
-  resolveLiveChunkComputeType,
-  resolveLiveChunkModel,
-  resolveTranscriptionLanguage,
   resolveTranscriptionSettings,
 } from '../utils/transcriptionSettings';
 import {
@@ -221,48 +206,7 @@ export const AudioManager = ({
   const resolvedTranscriptionSettings = resolveTranscriptionSettings(
     transcriptionSettings,
   );
-  const CHUNK_SECONDS =
-    resolvedTranscriptionSettings.backend === 'mlx_preview' ? 5 : 30;
-  const resolvedLanguage = resolveTranscriptionLanguage(
-    transcriptionSettings?.language,
-  );
-  const resolvedChunkModel = resolveLiveChunkModel(
-    resolvedTranscriptionSettings.model,
-  );
-  const resolvedChunkComputeType = resolveLiveChunkComputeType(
-    resolvedTranscriptionSettings.computeType,
-  );
-  const buildTranscriptionOptions = (
-    overrides: Record<string, unknown> = {},
-  ) => {
-    const canonicalSource =
-      overrides.canonicalSource === 'mic' || overrides.canonicalSource === 'mix'
-        ? (overrides.canonicalSource as 'mic' | 'mix')
-        : null;
-    const isChunkTranscription = canonicalSource === null;
-
-    return {
-      backend: resolvedTranscriptionSettings.backend,
-      preset: resolvedTranscriptionSettings.preset,
-      model: isChunkTranscription
-        ? resolvedChunkModel
-        : resolvedTranscriptionSettings.model,
-      device: resolvedTranscriptionSettings.device,
-      computeType: isChunkTranscription
-        ? resolvedChunkComputeType
-        : resolvedTranscriptionSettings.computeType,
-      language: resolvedLanguage,
-      meetingId: currentMeetingIdRef.current,
-      wordTimestamps: !isChunkTranscription,
-      initialPrompt:
-        transcriptionVocabularyRef.current.initialPrompt ?? undefined,
-      vocabularyHintPolicyVersion:
-        transcriptionVocabularyRef.current.provenance.policyVersion,
-      vocabularyHintCount:
-        transcriptionVocabularyRef.current.provenance.hintCount,
-      ...overrides,
-    };
-  };
+  const CHUNK_SECONDS = 5;
   // Refs - Dual Recording for source-based speaker labeling
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   const micMimeTypeRef = useRef<string | null>(null);
@@ -317,27 +261,10 @@ export const AudioManager = ({
   const savedSystemChunkAudioRef = useRef<Map<number, TimedAudioChunk>>(
     new Map(),
   );
-  const processingQueueRef = useRef(
-    new LiveTranscriptionQueue({
-      onError: (error) => {
-        console.error('[Pluto] Background transcription job failed:', error);
-      },
-    }),
-  );
-  const backgroundValidationQueueRef = useRef(
-    new BackgroundTranscriptValidationQueue({
-      waitForLiveIdle: async (timeoutMs) =>
-        await processingQueueRef.current.waitForIdle(timeoutMs),
-      getPolicy: async () =>
-        (await window.ipcRenderer.invoke(
-          'GET_CAPTURE_COMPUTE_POLICY',
-        )) as CaptureComputePolicy,
-      onError: () => {
-        console.warn('[Pluto] Background transcript validation failed');
-      },
-    }),
-  );
-  const liveTranscriptionGenerationRef = useRef(0);
+  const eouGenerationRef = useRef(0);
+  const eouSessionRef = useRef<ReturnType<
+    typeof createEouRendererSession
+  > | null>(null);
   const transcriptionVocabularyRef = useRef<TranscriptionVocabularySelection>({
     initialPrompt: null,
     terms: [],
@@ -420,16 +347,6 @@ export const AudioManager = ({
 
   const journalTupleKey = (source: 'mic' | 'system', sequence: number) =>
     `${source}:${sequence}`;
-
-  const sha256Hex = async (value: string) => {
-    const digest = await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(value),
-    );
-    return Array.from(new Uint8Array(digest))
-      .map((byte) => byte.toString(16).padStart(2, '0'))
-      .join('');
-  };
 
   const refreshCaptureJournalState = async (meetingId: string) => {
     const manifest = (await window.ipcRenderer.invoke(
@@ -543,501 +460,9 @@ export const AudioManager = ({
     });
   };
 
-  const completeCaptureJournalChunkFromPath = async ({
-    meetingId,
-    source,
-    sequence,
-    repairPath,
-  }: {
-    meetingId: string;
-    source: 'mic' | 'system';
-    sequence: number;
-    repairPath: string;
-  }) => {
-    return await captureJournalMutationCoordinatorRef.current.run(async () => {
-      const tuple = journalTupleKey(source, sequence);
-      const existing = captureJournalReceiptsRef.current.get(tuple);
-      if (existing) return existing;
-      const raw = captureJournalRawChunksRef.current.get(tuple);
-      const current = await refreshCaptureJournalState(meetingId);
-      if (!raw || !current) return null;
-      const complete = (await window.ipcRenderer.invoke(
-        'AUDIO_CAPTURE_JOURNAL_CAPTURE_COMPLETE',
-        {
-          meetingId,
-          generation: current.generation,
-          expectedRevision: current.revision,
-          source,
-          sequence,
-          rawChecksumSha256: raw.checksumSha256,
-          repairPath,
-        },
-      )) as { manifest: JournalManifestState; receipt: JournalAudioReceipt };
-      captureJournalStateRef.current = complete.manifest;
-      captureJournalReceiptsRef.current.set(tuple, complete.receipt);
-      return complete.receipt;
-    });
-  };
-
-  const buildTranscriptCheckpointConfig = () => {
-    const resolved = resolveTranscriptionSettings(transcriptionSettings);
-    const language = resolveTranscriptionLanguage(resolved.language);
-    return {
-      backend: resolved.backend,
-      computeType: resolvedChunkComputeType,
-      device: resolved.device,
-      languageMode: language ? ('fixed' as const) : ('detected' as const),
-      requestedLanguage: language?.toLowerCase() || null,
-      model: resolvedChunkModel,
-      pipelineVersion: 'live_chunk_v1' as const,
-      preset: resolved.preset,
-    };
-  };
-
-  const persistTranscriptCheckpoint = async ({
-    meetingId,
-    source,
-    sequence,
-    segments,
-    backendResult,
-    disposition = 'transcribed',
-  }: {
-    meetingId: string;
-    source: 'mic' | 'system';
-    sequence: number;
-    segments: TranscriptionSegment[];
-    backendResult?: { language?: string; meta?: Record<string, unknown> };
-    disposition?:
-      | 'transcribed'
-      | 'verified_silence'
-      | 'conversion_failed'
-      | 'transcription_failed'
-      | 'cancelled';
-  }) => {
-    return await captureJournalMutationCoordinatorRef.current.run(async () => {
-      const tuple = journalTupleKey(source, sequence);
-      const receipt = captureJournalReceiptsRef.current.get(tuple);
-      if (!receipt) return null;
-      const config = buildTranscriptCheckpointConfig();
-      const configKey = await sha256Hex(
-        canonicalizeTranscriptCheckpointConfig(config),
-      );
-      const sidecar = {
-        schemaVersion: 1 as const,
-        meetingId,
-        source: source,
-        sequence,
-        chunkChecksumSha256: receipt.checksumSha256,
-        chunkStartSec: receipt.chunkStartSec,
-        chunkEndSec: receipt.chunkEndSec,
-        transcriptionConfig: config,
-        backendResult: {
-          detectedLanguage:
-            typeof backendResult?.language === 'string'
-              ? backendResult.language.toLowerCase()
-              : null,
-          providerLabel:
-            typeof backendResult?.meta?.providerLabel === 'string'
-              ? backendResult.meta.providerLabel
-              : 'local',
-        },
-        segments: segments.map((segment) => ({
-          start: Math.max(0, segment.startTime - receipt.chunkStartSec),
-          end: Math.max(0, segment.endTime - receipt.chunkStartSec),
-          text: segment.text,
-          ...(segment.words
-            ? {
-                words: segment.words.map((word) => ({
-                  word: word.word,
-                  start: Math.max(0, word.start - receipt.chunkStartSec),
-                  end: Math.max(0, word.end - receipt.chunkStartSec),
-                })),
-              }
-            : {}),
-        })),
-      };
-      const current = await refreshCaptureJournalState(meetingId);
-      if (!current) return null;
-      const saved = (await window.ipcRenderer.invoke(
-        'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_APPEND',
-        {
-          receipt,
-          expectedManifestRevision: current.revision,
-          transcriptionConfigKey: configKey,
-          sidecar,
-          disposition,
-        },
-      )) as {
-        manifest: JournalManifestState;
-        checkpoint: JournalCheckpointState;
-      };
-      captureJournalStateRef.current = saved.manifest;
-      captureJournalCheckpointsRef.current.set(tuple, saved.checkpoint);
-      return saved.checkpoint;
-    });
-  };
-
-  const persistTranscriptAcceptanceFrame = async ({
-    meetingId,
-    sequence,
-    chunkStartSec,
-    chunkEndSec,
-    micSegments,
-    systemSegments,
-    micMeanRms,
-    systemMeanRms,
-    systemExpected,
-  }: {
-    meetingId: string;
-    sequence: number;
-    chunkStartSec: number;
-    chunkEndSec: number;
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-    micMeanRms: number | null;
-    systemMeanRms: number | null;
-    systemExpected: boolean;
-  }) => {
-    const micCheckpoint = captureJournalCheckpointsRef.current.get(
-      journalTupleKey('mic', sequence),
-    );
-    const systemCheckpoint = captureJournalCheckpointsRef.current.get(
-      journalTupleKey('system', sequence),
-    );
-    if (!micCheckpoint || (systemExpected && !systemCheckpoint)) return null;
-    const activityInputs = {
-      chunkStartSec,
-      chunkEndSec,
-      micMeanRms: micMeanRms ?? 0,
-      systemMeanRms: systemMeanRms ?? 0,
-      micActivitySeconds: getSpeakerActivityCoverage(
-        chunkStartSec,
-        chunkEndSec,
-        'Me',
-      ),
-      systemActivitySeconds: getSpeakerActivityCoverage(
-        chunkStartSec,
-        chunkEndSec,
-        'Them',
-      ),
-      evidence: {
-        clock: {
-          kind: 'meeting_relative_seconds',
-          origin: 'recording_start',
-        },
-        thresholds: {
-          rms: TRANSCRIPTION_TUNING.speaking.rmsThreshold,
-          dominanceRatio: TRANSCRIPTION_TUNING.speaking.ratio,
-          minimumSwitchIntervalMs: TRANSCRIPTION_TUNING.speaking.minIntervalMs,
-        },
-        algorithmVersion: 'speaker_activity_v1',
-        serializationVersion: 1,
-        windows:
-          captureActivitySessionRef.current
-            ?.windows()
-            .filter(
-              (window) =>
-                window.endTime > chunkStartSec &&
-                window.startTime < chunkEndSec,
-            ) ?? [],
-      },
-    };
-    const activityEvidenceDigestSha256 = await sha256Hex(
-      JSON.stringify(activityInputs),
-    );
-    const sidecar = {
-      schemaVersion: 1 as const,
-      meetingId,
-      sequence,
-      arbitrationVersion: 'chunk_arbitration_v1' as const,
-      activityInputs,
-      segments: [
-        ...micSegments.map((segment) => ({
-          source: 'mic' as const,
-          start: segment.startTime + chunkStartSec,
-          end: segment.endTime + chunkStartSec,
-          text: segment.text,
-          words: segment.words,
-        })),
-        ...systemSegments.map((segment) => ({
-          source: 'system' as const,
-          start: segment.startTime + chunkStartSec,
-          end: segment.endTime + chunkStartSec,
-          text: segment.text,
-          words: segment.words,
-        })),
-      ],
-    };
-    return await captureJournalMutationCoordinatorRef.current.run(async () => {
-      const current = await refreshCaptureJournalState(meetingId);
-      if (!current) return null;
-      const saved = (await window.ipcRenderer.invoke(
-        'AUDIO_CAPTURE_JOURNAL_ACCEPTANCE_APPEND',
-        {
-          meetingId,
-          generation: current.generation,
-          expectedRevision: current.revision,
-          sequence,
-          micCheckpointChecksumSha256:
-            micCheckpoint?.transcriptChecksumSha256 ?? null,
-          systemCheckpointChecksumSha256:
-            systemCheckpoint?.transcriptChecksumSha256 ?? null,
-          activityEvidenceDigestSha256,
-          sidecar,
-        },
-      )) as {
-        manifest: JournalManifestState;
-        frame: JournalAcceptanceState;
-      };
-      captureJournalStateRef.current = saved.manifest;
-      captureJournalAcceptanceFramesRef.current.set(sequence, saved.frame);
-      chunkAcceptanceDraftsRef.current.set(sequence, {
-        activityEvidenceDigestSha256,
-        sidecar,
-      });
-      return saved;
-    });
-  };
-
-  const validateTranscriptChunkInBackground = async ({
-    meetingId,
-    generation,
-    source,
-    sequence,
-    audioPath,
-    previewSegments,
-    signal,
-  }: {
-    meetingId: string;
-    generation: number;
-    source: 'mic' | 'system';
-    sequence: number;
-    audioPath: string;
-    previewSegments: TranscriptionSegment[];
-    signal: AbortSignal;
-  }) => {
-    if (
-      signal.aborted ||
-      generation !== liveTranscriptionGenerationRef.current ||
-      currentMeetingIdRef.current !== meetingId ||
-      !isRecordingRef.current
-    ) {
-      return;
-    }
-    const tuple = journalTupleKey(source, sequence);
-    const receipt = captureJournalReceiptsRef.current.get(tuple);
-    const priorCheckpoint = captureJournalCheckpointsRef.current.get(tuple);
-    const priorFrame = captureJournalAcceptanceFramesRef.current.get(sequence);
-    const acceptanceDraft = chunkAcceptanceDraftsRef.current.get(sequence);
-    if (!receipt || !priorCheckpoint || !priorFrame || !acceptanceDraft) return;
-
-    const validationModel = 'medium' as const;
-    const result = await window.ipcRenderer.invoke(
-      'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
-      audioPath,
-      buildTranscriptionOptions({
-        diarize: false,
-        meetingId,
-        model: validationModel,
-        wordTimestamps: true,
-      }),
-    );
-    if (
-      signal.aborted ||
-      generation !== liveTranscriptionGenerationRef.current ||
-      currentMeetingIdRef.current !== meetingId ||
-      !isRecordingRef.current
-    ) {
-      return;
-    }
-    const speaker = source === 'mic' ? 'Me' : 'Them';
-    const rawSegments = Array.isArray(result?.segments) ? result.segments : [];
-    const validatedSegments: TranscriptionSegment[] = rawSegments
-      .filter((segment: { text?: unknown }) =>
-        isValidSegment(String(segment.text ?? '')),
-      )
-      .map(
-        (segment: {
-          start: number;
-          end: number;
-          text: string;
-          words?: Array<{ word: string; start: number; end: number }>;
-        }) => ({
-          id: createStableLiveSegmentId(
-            source,
-            sequence,
-            segment.start + receipt.chunkStartSec,
-            segment.end + receipt.chunkStartSec,
-          ),
-          startTime: segment.start + receipt.chunkStartSec,
-          endTime: segment.end + receipt.chunkStartSec,
-          text: segment.text.trim(),
-          speaker,
-          validationState: 'validated' as const,
-          words: segment.words?.map((word) => ({
-            word: word.word,
-            start: word.start + receipt.chunkStartSec,
-            end: word.end + receipt.chunkStartSec,
-          })),
-        }),
-      );
-    const merged = mergeValidatedTranscriptChunk({
-      preview: previewSegments,
-      validated: validatedSegments,
-      source,
-      sequence,
-      chunkStartSec: receipt.chunkStartSec,
-      chunkEndSec: receipt.chunkEndSec,
-    });
-    if (!merged) return;
-
-    const config = {
-      ...buildTranscriptCheckpointConfig(),
-      model: validationModel,
-    };
-    const configKey = await sha256Hex(
-      canonicalizeTranscriptCheckpointConfig(config),
-    );
-    const sidecar = {
-      schemaVersion: 1 as const,
-      meetingId,
-      source,
-      sequence,
-      chunkChecksumSha256: receipt.checksumSha256,
-      chunkStartSec: receipt.chunkStartSec,
-      chunkEndSec: receipt.chunkEndSec,
-      transcriptionConfig: config,
-      backendResult: {
-        detectedLanguage:
-          typeof result?.language === 'string'
-            ? result.language.toLowerCase()
-            : null,
-        providerLabel:
-          typeof result?.meta?.providerLabel === 'string'
-            ? result.meta.providerLabel
-            : 'local',
-      },
-      segments: merged.map((segment) => ({
-        start: segment.startTime - receipt.chunkStartSec,
-        end: segment.endTime - receipt.chunkStartSec,
-        text: segment.text,
-        ...(segment.words
-          ? {
-              words: segment.words.map((word) => ({
-                word: word.word,
-                start: word.start - receipt.chunkStartSec,
-                end: word.end - receipt.chunkStartSec,
-              })),
-            }
-          : {}),
-      })),
-    };
-    const acceptanceSegments = acceptanceDraft.sidecar.segments.filter(
-      (segment) => segment.source !== source,
-    );
-    acceptanceSegments.push(
-      ...sidecar.segments.map((segment) => ({
-        source,
-        start: segment.start + receipt.chunkStartSec,
-        end: segment.end + receipt.chunkStartSec,
-        text: segment.text,
-        ...(segment.words
-          ? {
-              words: segment.words.map((word) => ({
-                word: word.word,
-                start: word.start + receipt.chunkStartSec,
-                end: word.end + receipt.chunkStartSec,
-              })),
-            }
-          : {}),
-      })),
-    );
-
-    const saved = await captureJournalMutationCoordinatorRef.current.run(
-      async () => {
-        const current = await refreshCaptureJournalState(meetingId);
-        if (!current || signal.aborted) return null;
-        return (await window.ipcRenderer.invoke(
-          'AUDIO_CAPTURE_JOURNAL_CHECKPOINT_PROMOTE',
-          {
-            receipt,
-            expectedManifestRevision: current.revision,
-            expectedPriorTranscriptChecksumSha256:
-              priorCheckpoint.transcriptChecksumSha256,
-            transcriptionConfigKey: configKey,
-            sidecar,
-            expectedPriorAcceptedChecksumSha256:
-              priorFrame.acceptedChecksumSha256,
-            acceptance: {
-              sequence,
-              micCheckpointChecksumSha256:
-                source === 'mic'
-                  ? priorCheckpoint.transcriptChecksumSha256
-                  : (captureJournalCheckpointsRef.current.get(
-                      journalTupleKey('mic', sequence),
-                    )?.transcriptChecksumSha256 ?? null),
-              systemCheckpointChecksumSha256:
-                source === 'system'
-                  ? priorCheckpoint.transcriptChecksumSha256
-                  : (captureJournalCheckpointsRef.current.get(
-                      journalTupleKey('system', sequence),
-                    )?.transcriptChecksumSha256 ?? null),
-              activityEvidenceDigestSha256:
-                acceptanceDraft.activityEvidenceDigestSha256,
-              sidecar: {
-                ...acceptanceDraft.sidecar,
-                segments: acceptanceSegments.sort(
-                  (left, right) => left.start - right.start,
-                ),
-              },
-            },
-          },
-        )) as {
-          manifest: JournalManifestState;
-          checkpoint: JournalCheckpointState;
-          frame: JournalAcceptanceState;
-        };
-      },
-    );
-    if (
-      !saved ||
-      signal.aborted ||
-      generation !== liveTranscriptionGenerationRef.current ||
-      currentMeetingIdRef.current !== meetingId ||
-      !isRecordingRef.current
-    ) {
-      return;
-    }
-    captureJournalStateRef.current = saved.manifest;
-    captureJournalCheckpointsRef.current.set(tuple, saved.checkpoint);
-    captureJournalAcceptanceFramesRef.current.set(sequence, saved.frame);
-    const previewIds = new Set(previewSegments.map((segment) => segment.id));
-    processedMicSegmentsRef.current = [
-      ...processedMicSegmentsRef.current.filter(
-        (segment) => !previewIds.has(segment.id),
-      ),
-      ...merged.map((segment) => ({
-        ...segment,
-        validationState: 'validated' as const,
-      })),
-    ];
-    onLiveTranscript?.(
-      [...processedMicSegmentsRef.current]
-        .sort((left, right) => left.startTime - right.startTime)
-        .map((segment) => ({
-          id: segment.id,
-          speaker:
-            segment.speaker === 'Me' || segment.speaker === 'Them'
-              ? segment.speaker
-              : 'Unknown',
-          text: segment.text,
-          timestampMs: segment.startTime * 1_000,
-          confirmed: segment.validationState === 'validated',
-        })),
-    );
-  };
-
   const abortUnstartedCapture = async (meetingId: string) => {
+    eouSessionRef.current?.cancel();
+    eouSessionRef.current = null;
     try {
       await window.ipcRenderer.invoke('AUDIO_CAPTURE_JOURNAL_ABORT_START', {
         meetingId,
@@ -1079,25 +504,7 @@ export const AudioManager = ({
           hintCount: 0,
         },
       };
-      liveTranscriptionGenerationRef.current += 1;
-      processingQueueRef.current = new LiveTranscriptionQueue({
-        onError: (error) => {
-          console.error('[Pluto] Background transcription job failed:', error);
-        },
-      });
-      backgroundValidationQueueRef.current.close();
-      backgroundValidationQueueRef.current =
-        new BackgroundTranscriptValidationQueue({
-          waitForLiveIdle: async (timeoutMs) =>
-            await processingQueueRef.current.waitForIdle(timeoutMs),
-          getPolicy: async () =>
-            (await window.ipcRenderer.invoke(
-              'GET_CAPTURE_COMPUTE_POLICY',
-            )) as CaptureComputePolicy,
-          onError: () => {
-            console.warn('[Pluto] Background transcript validation failed');
-          },
-        });
+      eouGenerationRef.current += 1;
       startTimeRef.current = Date.now();
       stopToValidatedLatencyRef.current =
         createStopToValidatedLatencyAccumulator();
@@ -1218,6 +625,82 @@ export const AudioManager = ({
         console.warn('[Pluto] Transcription vocabulary unavailable');
       }
 
+      const eouGeneration = eouGenerationRef.current;
+      const eouSession = createEouRendererSession({
+        meetingId,
+        generation: eouGeneration,
+        sampleRates: {
+          mic: () => micPcmSampleRateRef.current,
+          system: () => systemPcmSampleRateRef.current,
+        },
+        transport: {
+          invoke: (channel, payload) =>
+            window.ipcRenderer.invoke(channel, payload),
+          onUpdate: (listener) => {
+            const handler = (_event: unknown, payload: unknown) =>
+              listener(payload);
+            window.ipcRenderer.on('PARAKEET_EOU_UPDATE', handler);
+            return () => window.ipcRenderer.off('PARAKEET_EOU_UPDATE', handler);
+          },
+          onUnavailable: (listener) => {
+            const handler = (_event: unknown, payload: unknown) =>
+              listener(payload);
+            window.ipcRenderer.on('PARAKEET_EOU_UNAVAILABLE', handler);
+            return () =>
+              window.ipcRenderer.off('PARAKEET_EOU_UNAVAILABLE', handler);
+          },
+        },
+        onSegments: (segments) => {
+          if (
+            currentMeetingIdRef.current !== meetingId ||
+            eouGenerationRef.current !== eouGeneration
+          )
+            return;
+          processedMicSegmentsRef.current = segments.map((segment) => ({
+            id: segment.id,
+            startTime: segment.timestampMs / 1_000,
+            endTime: segment.timestampMs / 1_000 + 0.01,
+            text: segment.text,
+            speaker: segment.speaker,
+            validationState: segment.confirmed ? 'validated' : 'preview',
+          }));
+          const stable = segments.filter((segment) => segment.confirmed);
+          const interim = [...segments]
+            .reverse()
+            .find((segment) => !segment.confirmed)?.text;
+          liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
+            segments,
+            () => {
+              onLiveTranscript?.(stable);
+              onInterimTranscript?.(interim ?? '');
+            },
+          );
+          onLiveTranscriptIntegrityChange?.('healthy');
+        },
+        onUnavailable: (code) => {
+          if (
+            currentMeetingIdRef.current !== meetingId ||
+            eouGenerationRef.current !== eouGeneration
+          )
+            return;
+          console.warn(`[Pluto] Live Parakeet EOU unavailable: ${code}`);
+          onLiveTranscriptIntegrityChange?.('lagging');
+        },
+      });
+      eouSessionRef.current = eouSession;
+      try {
+        await eouSession.start();
+      } catch {
+        await abortUnstartedCapture(meetingId);
+        currentMeetingIdRef.current = null;
+        liveTranscriptResponsivenessRef.current.abortStart();
+        frozenLiveTranscriptResponsivenessRef.current = null;
+        startTimeRef.current = 0;
+        captureActivitySessionRef.current = null;
+        alert('Live transcription could not start. Please try again.');
+        return;
+      }
+
       onRecordingStarted?.(startTimeRef.current);
       recordingEndedAtRef.current = 0;
       stopInFlightRef.current = false;
@@ -1304,7 +787,9 @@ export const AudioManager = ({
           processor.onaudioprocess = (evt: AudioProcessingEvent) => {
             const input = evt.inputBuffer.getChannelData(0);
             if (!input || input.length === 0) return;
-            micPcmChunksRef.current.push(new Float32Array(input));
+            const copied = new Float32Array(input);
+            micPcmChunksRef.current.push(copied);
+            eouSessionRef.current?.append('mic', copied);
           };
           micSource.connect(processor);
           processor.connect(sink);
@@ -1405,6 +890,7 @@ export const AudioManager = ({
             );
             systemPcmCarryoverBytesRef.current = decoded.carryoverBytes;
             if (decoded.samples.length === 0) return;
+            eouSessionRef.current?.append('system', decoded.samples);
             if (systemAudioHealthRef.current !== 'healthy') {
               cancelSystemAudioHealthTimeoutRef.current?.();
               cancelSystemAudioHealthTimeoutRef.current = null;
@@ -1609,37 +1095,6 @@ export const AudioManager = ({
                   });
                 }
               }
-
-              handleChunkBlob(
-                'mic',
-                index,
-                finalMicBlob,
-                micChunkFormat,
-                chunkStartSec,
-                chunkEndSec,
-                hasSystemRecorderRef.current,
-              );
-              if (systemBlob) {
-                handleChunkBlob(
-                  'system',
-                  index,
-                  systemBlob,
-                  'wav',
-                  chunkStartSec,
-                  chunkEndSec,
-                );
-                return;
-              }
-
-              const silence = new Float32Array(systemPcmSampleRateRef.current);
-              handleChunkBlob(
-                'system',
-                index,
-                createWavBlob(silence, systemPcmSampleRateRef.current, 1),
-                'wav',
-                chunkStartSec,
-                chunkEndSec,
-              );
             });
           }
         };
@@ -1656,6 +1111,8 @@ export const AudioManager = ({
       // 6. No restart loop needed
     } catch (e) {
       console.error('[Pluto] Failed to start session', e);
+      eouSessionRef.current?.cancel();
+      eouSessionRef.current = null;
       const unstartedMeetingId = currentMeetingIdRef.current;
       if (
         unstartedMeetingId &&
@@ -1709,7 +1166,6 @@ export const AudioManager = ({
     micStream: MediaStream | null,
   ) => {
     stopSpeakingMonitor();
-    backgroundValidationQueueRef.current.close();
 
     let micAnalyser: AnalyserNode | null = null;
     if (micStream && micStream.getAudioTracks().length > 0) {
@@ -1782,29 +1238,9 @@ export const AudioManager = ({
 
   // --- Helpers ---
 
-  type RmsData = { windowSec: number; rms: number[] };
-  type SpeechWindow = { startSec: number; endSec: number };
-
-  const RMS_WINDOW_SECONDS = TRANSCRIPTION_TUNING.speaking.rmsWindowSeconds;
   const SPEAKING_RMS_THRESHOLD = TRANSCRIPTION_TUNING.speaking.rmsThreshold;
   const SPEAKING_RATIO = TRANSCRIPTION_TUNING.speaking.ratio;
   const SPEAKING_MIN_INTERVAL_MS = TRANSCRIPTION_TUNING.speaking.minIntervalMs;
-  const SYSTEM_TRANSCRIBE_MIN_RMS =
-    TRANSCRIPTION_TUNING.systemTranscribe.minRms;
-  const MIC_TRANSCRIBE_MIN_RMS = TRANSCRIPTION_TUNING.micTranscribe.minRms;
-  const MIC_TRANSCRIBE_MIN_SPEAKER_COVERAGE_SECONDS =
-    TRANSCRIPTION_TUNING.micTranscribe.minSpeakerCoverageSeconds;
-  const MIC_TRANSCRIBE_MIN_SPEAKER_COVERAGE_RATIO =
-    TRANSCRIPTION_TUNING.micTranscribe.minSpeakerCoverageRatio;
-  const CHUNK_FLUSH_MIN_RMS = TRANSCRIPTION_TUNING.chunkFlush.minRms;
-  const CHUNK_FLUSH_MIN_SEGMENT_SECONDS =
-    TRANSCRIPTION_TUNING.chunkFlush.minSegmentSeconds;
-  const CHUNK_FLUSH_PAD_SECONDS = TRANSCRIPTION_TUNING.chunkFlush.padSeconds;
-  const CHUNK_FLUSH_MAX_SEGMENTS = TRANSCRIPTION_TUNING.chunkFlush.maxSegments;
-  const CHUNK_FLUSH_MAX_FULL_COVERAGE_RATIO =
-    TRANSCRIPTION_TUNING.chunkFlush.maxFullCoverageRatio;
-  const ENABLE_CHUNK_ARBITRATION = true;
-  const ENABLE_CHUNK_FLUSH = false;
   const getRecorderOptions = (): MediaRecorderOptions | undefined => {
     const candidates = [
       'audio/webm;codecs=opus',
@@ -1869,49 +1305,6 @@ export const AudioManager = ({
     return combined.buffer;
   };
 
-  const computeRmsData = async (audioBuffer: ArrayBuffer): Promise<RmsData> => {
-    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextCtor) {
-      throw new Error('Web Audio API unavailable');
-    }
-    const audioCtx = new AudioContextCtor();
-    try {
-      const decoded = await audioCtx.decodeAudioData(audioBuffer.slice(0));
-      const numChannels = decoded.numberOfChannels;
-      const channels = Array.from({ length: numChannels }, (_, i) =>
-        decoded.getChannelData(i),
-      );
-      const length = decoded.length;
-      const sampleRate = decoded.sampleRate;
-      const windowSize = Math.max(
-        1,
-        Math.floor(RMS_WINDOW_SECONDS * sampleRate),
-      );
-      const rms: number[] = [];
-
-      for (let start = 0; start < length; start += windowSize) {
-        const end = Math.min(length, start + windowSize);
-        let sumSquares = 0;
-        let count = 0;
-        for (let i = start; i < end; i++) {
-          let sample = 0;
-          for (let ch = 0; ch < numChannels; ch++) {
-            sample += channels[ch][i] || 0;
-          }
-          sample /= numChannels;
-          sumSquares += sample * sample;
-          count++;
-        }
-        const meanSquare = count > 0 ? sumSquares / count : 0;
-        rms.push(Math.sqrt(meanSquare));
-      }
-
-      return { windowSec: RMS_WINDOW_SECONDS, rms };
-    } finally {
-      audioCtx.close();
-    }
-  };
-
   const computeRmsFromAnalyser = (analyser: AnalyserNode): number => {
     const bufferLength = analyser.fftSize;
     const data = new Uint8Array(bufferLength);
@@ -1924,892 +1317,20 @@ export const AudioManager = ({
     return Math.sqrt(sumSquares / bufferLength);
   };
 
-  const meanRms = (data: RmsData | null): number | null => {
-    if (!data || !Array.isArray(data.rms) || data.rms.length === 0) return null;
-    const total = data.rms.reduce((acc, value) => acc + value, 0);
-    return total / data.rms.length;
-  };
-
-  const buildSpeechWindows = (
-    data: RmsData | null,
-    chunkDurationSec: number,
-  ): SpeechWindow[] => {
-    if (!data || data.rms.length === 0) return [];
-    if (!Number.isFinite(chunkDurationSec) || chunkDurationSec <= 0) return [];
-
-    const rawSegments: SpeechWindow[] = [];
-    let activeStart: number | null = null;
-    const windowSec = Math.max(0.01, data.windowSec);
-
-    for (let i = 0; i < data.rms.length; i++) {
-      const startSec = i * windowSec;
-      const endSec = Math.min(chunkDurationSec, (i + 1) * windowSec);
-      const isActive = data.rms[i] >= CHUNK_FLUSH_MIN_RMS;
-
-      if (isActive && activeStart === null) {
-        activeStart = startSec;
-      }
-
-      if (!isActive && activeStart !== null) {
-        rawSegments.push({ startSec: activeStart, endSec: startSec });
-        activeStart = null;
-      }
-
-      if (endSec >= chunkDurationSec) {
-        break;
-      }
-    }
-
-    if (activeStart !== null) {
-      rawSegments.push({ startSec: activeStart, endSec: chunkDurationSec });
-    }
-
-    const filtered = rawSegments.filter(
-      (segment) =>
-        segment.endSec - segment.startSec >= CHUNK_FLUSH_MIN_SEGMENT_SECONDS,
-    );
-    if (filtered.length === 0) return [];
-
-    const padded = filtered.map((segment) => ({
-      startSec: Math.max(0, segment.startSec - CHUNK_FLUSH_PAD_SECONDS),
-      endSec: Math.min(
-        chunkDurationSec,
-        segment.endSec + CHUNK_FLUSH_PAD_SECONDS,
-      ),
-    }));
-
-    padded.sort((a, b) => a.startSec - b.startSec);
-    const merged: SpeechWindow[] = [];
-    for (const segment of padded) {
-      const last = merged[merged.length - 1];
-      if (!last) {
-        merged.push({ ...segment });
-        continue;
-      }
-      if (segment.startSec <= last.endSec) {
-        last.endSec = Math.max(last.endSec, segment.endSec);
-      } else {
-        merged.push({ ...segment });
-      }
-    }
-
-    if (merged.length > CHUNK_FLUSH_MAX_SEGMENTS) return [];
-
-    if (merged.length === 1) {
-      const coverage =
-        (merged[0].endSec - merged[0].startSec) /
-        Math.max(0.01, chunkDurationSec);
-      if (coverage >= CHUNK_FLUSH_MAX_FULL_COVERAGE_RATIO) {
-        return [];
-      }
-    }
-
-    return merged;
-  };
-
-  const getSpeakerActivityCoverage = (
-    startTime: number,
-    endTime: number,
-    speaker: 'Me' | 'Them',
-  ): number => {
-    if (endTime <= startTime) return 0;
-    let total = 0;
-    for (const window of speakerTimelineRef.current) {
-      if (window.speaker !== speaker) continue;
-      const overlap = Math.max(
-        0,
-        Math.min(endTime, window.endTime) -
-          Math.max(startTime, window.startTime),
-      );
-      total += overlap;
-    }
-    const active = activeSpeakerWindowRef.current;
-    if (active && active.speaker === speaker) {
-      const activeEnd = getMeetingElapsedSeconds();
-      const overlap = Math.max(
-        0,
-        Math.min(endTime, activeEnd) - Math.max(startTime, active.startTime),
-      );
-      total += overlap;
-    }
-    return total;
-  };
-
-  const getSegmentWindowRms = (
-    data: RmsData | null,
-    startTime: number,
-    endTime: number,
-  ): number | null => {
-    if (!data || !Array.isArray(data.rms) || data.rms.length === 0) return null;
-    const windowSec = data.windowSec || RMS_WINDOW_SECONDS;
-    const safeStart = Math.max(0, startTime);
-    const safeEnd = Math.max(safeStart + 0.01, endTime);
-    const startIndex = Math.max(0, Math.floor(safeStart / windowSec));
-    const endIndex = Math.min(
-      data.rms.length - 1,
-      Math.max(startIndex, Math.ceil(safeEnd / windowSec) - 1),
-    );
-    if (endIndex < startIndex) return null;
-    let total = 0;
-    let count = 0;
-    for (let i = startIndex; i <= endIndex; i++) {
-      total += data.rms[i] || 0;
-      count++;
-    }
-    return count > 0 ? total / count : null;
-  };
-
-  const normalizeTranscriptText = (text: string): string => {
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  };
-
-  const tokenSimilarity = (left: string, right: string): number => {
-    const leftTokens = new Set(
-      normalizeTranscriptText(left).split(' ').filter(Boolean),
-    );
-    const rightTokens = new Set(
-      normalizeTranscriptText(right).split(' ').filter(Boolean),
-    );
-    if (leftTokens.size === 0 || rightTokens.size === 0) return 0;
-
-    let intersection = 0;
-    for (const token of leftTokens) {
-      if (rightTokens.has(token)) intersection++;
-    }
-    const union = new Set([...leftTokens, ...rightTokens]).size;
-    return union > 0 ? intersection / union : 0;
-  };
-
-  const tokenPrefixSimilarity = (
-    left: string,
-    right: string,
-    maxPrefixTokens = 8,
-  ): number => {
-    const leftTokens = normalizeTranscriptText(left).split(' ').filter(Boolean);
-    const rightTokens = normalizeTranscriptText(right)
-      .split(' ')
-      .filter(Boolean);
-    const sharedLength = Math.min(
-      leftTokens.length,
-      rightTokens.length,
-      maxPrefixTokens,
-    );
-    if (sharedLength === 0) return 0;
-    let matched = 0;
-    for (let i = 0; i < sharedLength; i++) {
-      if (leftTokens[i] !== rightTokens[i]) break;
-      matched++;
-    }
-    return matched / sharedLength;
-  };
-
-  const overlapSeconds = (
-    a: TranscriptionSegment,
-    b: TranscriptionSegment,
-  ): number => {
-    return Math.max(
-      0,
-      Math.min(a.endTime, b.endTime) - Math.max(a.startTime, b.startTime),
-    );
-  };
-
-  const transcriptQualityScore = (text: string): number => {
-    const tokens = normalizeTranscriptText(text).split(' ').filter(Boolean);
-    if (tokens.length === 0) return 0;
-    const freq = new Map<string, number>();
-    let maxTokenFreq = 0;
-    for (const token of tokens) {
-      const next = (freq.get(token) || 0) + 1;
-      freq.set(token, next);
-      if (next > maxTokenFreq) maxTokenFreq = next;
-    }
-    const uniqueRatio = freq.size / tokens.length;
-    const lengthBonus = Math.min(0.35, tokens.length * 0.03);
-    const repetitionPenalty = Math.max(0, maxTokenFreq - 2) * 0.15;
-    return uniqueRatio + lengthBonus - repetitionPenalty;
-  };
-
-  const pruneSegmentsByTranscriptQuality = (params: {
-    chunkIndex: number;
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-  }): {
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-  } => {
-    const { chunkIndex } = params;
-    const qualityTuning = TRANSCRIPTION_TUNING.transcriptQuality;
-    const micSegments = params.micSegments.map((segment) => ({ ...segment }));
-    const systemSegments = params.systemSegments.map((segment) => ({
-      ...segment,
-    }));
-    if (micSegments.length === 0 || systemSegments.length === 0) {
-      return { micSegments, systemSegments };
-    }
-
-    const removeMic = new Set<number>();
-    const removeSystem = new Set<number>();
-    let droppedMic = 0;
-    let droppedSystem = 0;
-
-    for (let micIndex = 0; micIndex < micSegments.length; micIndex++) {
-      if (removeMic.has(micIndex)) continue;
-      const mic = micSegments[micIndex];
-      const micWords = normalizeTranscriptText(mic.text)
-        .split(' ')
-        .filter(Boolean).length;
-      if (micWords < qualityTuning.minWords) continue;
-
-      let bestSystemIndex = -1;
-      let bestOverlapRatio = 0;
-      for (
-        let systemIndex = 0;
-        systemIndex < systemSegments.length;
-        systemIndex++
-      ) {
-        if (removeSystem.has(systemIndex)) continue;
-        const sys = systemSegments[systemIndex];
-        const overlap = overlapSeconds(mic, sys);
-        if (overlap <= 0) continue;
-        const overlapRatio =
-          overlap /
-          Math.max(
-            0.01,
-            Math.min(mic.endTime - mic.startTime, sys.endTime - sys.startTime),
-          );
-        if (overlapRatio > bestOverlapRatio) {
-          bestOverlapRatio = overlapRatio;
-          bestSystemIndex = systemIndex;
-        }
-      }
-
-      if (
-        bestSystemIndex < 0 ||
-        bestOverlapRatio < qualityTuning.minOverlapRatio
-      )
-        continue;
-      const system = systemSegments[bestSystemIndex];
-      const systemWords = normalizeTranscriptText(system.text)
-        .split(' ')
-        .filter(Boolean).length;
-      if (systemWords < qualityTuning.minWords) continue;
-
-      const micQuality = transcriptQualityScore(mic.text);
-      const systemQuality = transcriptQualityScore(system.text);
-      const qualityDelta = micQuality - systemQuality;
-      const systemLooksInformative =
-        systemWords >= qualityTuning.informativeSystemWords &&
-        systemQuality >= qualityTuning.informativeSystemScore;
-
-      if (qualityDelta >= qualityTuning.qualityDelta) {
-        const strongMicEdge =
-          qualityDelta >= qualityTuning.strongQualityDelta &&
-          micWords >= systemWords + qualityTuning.strongWordDelta;
-        const shortSystemFragment =
-          systemWords <= qualityTuning.shortSystemWords;
-        if (!systemLooksInformative || strongMicEdge || shortSystemFragment) {
-          removeSystem.add(bestSystemIndex);
-          droppedSystem++;
-        }
-      } else if (qualityDelta <= -qualityTuning.qualityDelta) {
-        removeMic.add(micIndex);
-        droppedMic++;
-      }
-    }
-
-    if (droppedMic > 0 || droppedSystem > 0) {
-      console.log(
-        `[Pluto] Chunk #${chunkIndex} quality prune: dropMe=${droppedMic}, dropThem=${droppedSystem}`,
-      );
-    }
-
-    return {
-      micSegments: micSegments.filter((_, index) => !removeMic.has(index)),
-      systemSegments: systemSegments.filter(
-        (_, index) => !removeSystem.has(index),
-      ),
-    };
-  };
-
-  const isCompetingUtterancePair = (
-    mic: TranscriptionSegment,
-    system: TranscriptionSegment,
-  ): boolean => {
-    const overlapTuning = TRANSCRIPTION_TUNING.competingUtterance;
-    const overlap = overlapSeconds(mic, system);
-    if (overlap <= 0) return false;
-    const micDur = Math.max(0.01, mic.endTime - mic.startTime);
-    const sysDur = Math.max(0.01, system.endTime - system.startTime);
-    const overlapRatio = overlap / Math.min(micDur, sysDur);
-    if (isBleedDuplicate(mic, system)) return true;
-    if (
-      overlapRatio >= overlapTuning.highOverlapRatio ||
-      overlap >= overlapTuning.highOverlapSeconds
-    )
-      return true;
-    if (overlapRatio < overlapTuning.lowOverlapRatio) return false;
-
-    const tokenSim = tokenSimilarity(mic.text, system.text);
-    const prefixSim = tokenPrefixSimilarity(mic.text, system.text);
-    return (
-      tokenSim >= overlapTuning.tokenSimilarity ||
-      prefixSim >= overlapTuning.prefixSimilarity
-    );
-  };
-
-  const selectDominantSpeakerForPair = (
-    mic: TranscriptionSegment,
-    system: TranscriptionSegment,
-    micRmsData: RmsData | null,
-    systemRmsData: RmsData | null,
-    chunkStartSec: number,
-    preferredSpeaker: 'Me' | 'Them' | null,
-  ): 'Me' | 'Them' => {
-    const dominanceTuning = TRANSCRIPTION_TUNING.dominanceSelection;
-    let meScore = 0;
-    let themScore = 0;
-
-    const overlapStart =
-      chunkStartSec + Math.min(mic.startTime, system.startTime);
-    const overlapEnd = chunkStartSec + Math.max(mic.endTime, system.endTime);
-    const meCoverage = getSpeakerActivityCoverage(
-      overlapStart,
-      overlapEnd,
-      'Me',
-    );
-    const themCoverage = getSpeakerActivityCoverage(
-      overlapStart,
-      overlapEnd,
-      'Them',
-    );
-    const micWords = normalizeTranscriptText(mic.text)
-      .split(' ')
-      .filter(Boolean).length;
-    const sysWords = normalizeTranscriptText(system.text)
-      .split(' ')
-      .filter(Boolean).length;
-
-    if (isBleedDuplicate(mic, system)) {
-      const strongMeDominance =
-        meCoverage >=
-          Math.max(
-            dominanceTuning.strongCoverage,
-            themCoverage * dominanceTuning.strongCoverageRatio,
-          ) && micWords >= sysWords + dominanceTuning.strongWordDelta;
-      return strongMeDominance ? 'Me' : 'Them';
-    }
-
-    if (
-      meCoverage >= dominanceTuning.moderateCoverage &&
-      meCoverage >= themCoverage * dominanceTuning.moderateCoverageRatio
-    )
-      meScore += 2;
-    if (
-      themCoverage >= dominanceTuning.moderateCoverage &&
-      themCoverage >= meCoverage * dominanceTuning.moderateCoverageRatio
-    )
-      themScore += 2;
-
-    const micRms = getSegmentWindowRms(micRmsData, mic.startTime, mic.endTime);
-    const sysRms = getSegmentWindowRms(
-      systemRmsData,
-      system.startTime,
-      system.endTime,
-    );
-    if (micRms !== null && sysRms !== null) {
-      if (micRms >= sysRms * dominanceTuning.rmsDominanceRatio) meScore += 2;
-      else if (sysRms >= micRms * dominanceTuning.rmsDominanceRatio)
-        themScore += 2;
-    }
-
-    if (micWords >= sysWords + dominanceTuning.wordDelta) meScore += 1;
-    else if (sysWords >= micWords + dominanceTuning.wordDelta) themScore += 1;
-    if (micWords <= 2 && sysWords >= 5) themScore += 1;
-    if (sysWords <= 2 && micWords >= 5) meScore += 1;
-
-    if (preferredSpeaker === 'Me') meScore += 0.2;
-    else if (preferredSpeaker === 'Them') themScore += 0.2;
-
-    if (meScore === themScore) {
-      if (micWords !== sysWords) return micWords > sysWords ? 'Me' : 'Them';
-      const micDur = Math.max(0.01, mic.endTime - mic.startTime);
-      const sysDur = Math.max(0.01, system.endTime - system.startTime);
-      if (Math.abs(micDur - sysDur) >= 0.3)
-        return micDur > sysDur ? 'Me' : 'Them';
-      return preferredSpeaker || 'Them';
-    }
-
-    return meScore > themScore ? 'Me' : 'Them';
-  };
-
-  const maxOverlapRatioWithSegments = (
-    segment: TranscriptionSegment,
-    others: TranscriptionSegment[],
-  ): number => {
-    const duration = Math.max(0.01, segment.endTime - segment.startTime);
-    let maxRatio = 0;
-    for (const other of others) {
-      const overlap = overlapSeconds(segment, other);
-      if (overlap <= 0) continue;
-      const ratio = overlap / duration;
-      if (ratio > maxRatio) maxRatio = ratio;
-    }
-    return maxRatio;
-  };
-
-  const pruneSegmentsBySpeakerActivity = (params: {
-    chunkIndex: number;
-    chunkStartSec: number;
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-  }): {
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-  } => {
-    const { chunkIndex, chunkStartSec } = params;
-    const micSegments = params.micSegments.map((segment) => ({ ...segment }));
-    const systemSegments = params.systemSegments.map((segment) => ({
-      ...segment,
-    }));
-    if (micSegments.length === 0 || systemSegments.length === 0) {
-      return { micSegments, systemSegments };
-    }
-
-    const keepMic: TranscriptionSegment[] = [];
-    const keepSystem: TranscriptionSegment[] = [];
-    let droppedMic = 0;
-    let droppedSystem = 0;
-
-    for (const segment of micSegments) {
-      const absStart = chunkStartSec + segment.startTime;
-      const absEnd = chunkStartSec + segment.endTime;
-      const meCoverage = getSpeakerActivityCoverage(absStart, absEnd, 'Me');
-      const themCoverage = getSpeakerActivityCoverage(absStart, absEnd, 'Them');
-      const overlapWithSystem = maxOverlapRatioWithSegments(
-        segment,
-        systemSegments,
-      );
-      const shouldDrop = shouldDropBySpeakerActivity({
-        targetSpeaker: 'Me',
-        overlapRatio: overlapWithSystem,
-        meCoverage,
-        themCoverage,
-      });
-      if (shouldDrop) {
-        droppedMic++;
-        continue;
-      }
-      keepMic.push(segment);
-    }
-
-    for (const segment of systemSegments) {
-      const absStart = chunkStartSec + segment.startTime;
-      const absEnd = chunkStartSec + segment.endTime;
-      const meCoverage = getSpeakerActivityCoverage(absStart, absEnd, 'Me');
-      const themCoverage = getSpeakerActivityCoverage(absStart, absEnd, 'Them');
-      const overlapWithMic = maxOverlapRatioWithSegments(segment, keepMic);
-      const shouldDrop = shouldDropBySpeakerActivity({
-        targetSpeaker: 'Them',
-        overlapRatio: overlapWithMic,
-        meCoverage,
-        themCoverage,
-      });
-      if (shouldDrop) {
-        droppedSystem++;
-        continue;
-      }
-      keepSystem.push(segment);
-    }
-
-    if (droppedMic > 0 || droppedSystem > 0) {
-      console.log(
-        `[Pluto] Chunk #${chunkIndex} activity prune: dropMe=${droppedMic}, dropThem=${droppedSystem}, keptMe=${keepMic.length}, keptThem=${keepSystem.length}`,
-      );
-    }
-
-    return { micSegments: keepMic, systemSegments: keepSystem };
-  };
-
-  const pruneSegmentsByEnergyDominance = (params: {
-    chunkIndex: number;
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-    micRmsData: RmsData | null;
-    systemRmsData: RmsData | null;
-  }): {
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-  } => {
-    const { chunkIndex, micRmsData, systemRmsData } = params;
-    const energyTuning = TRANSCRIPTION_TUNING.energyPrune;
-    const micSegments = params.micSegments.map((segment) => ({ ...segment }));
-    const systemSegments = params.systemSegments.map((segment) => ({
-      ...segment,
-    }));
-    if (micSegments.length === 0 || systemSegments.length === 0) {
-      return { micSegments, systemSegments };
-    }
-
-    const keepMic: TranscriptionSegment[] = [];
-    let droppedMic = 0;
-    for (const segment of micSegments) {
-      const overlapRatio = maxOverlapRatioWithSegments(segment, systemSegments);
-      if (overlapRatio < energyTuning.minOverlapRatio) {
-        keepMic.push(segment);
-        continue;
-      }
-      const micEnergy = getSegmentWindowRms(
-        micRmsData,
-        segment.startTime,
-        segment.endTime,
-      );
-      const systemEnergy = getSegmentWindowRms(
-        systemRmsData,
-        segment.startTime,
-        segment.endTime,
-      );
-      const dropForEnergy =
-        micEnergy !== null &&
-        systemEnergy !== null &&
-        systemEnergy >= micEnergy * energyTuning.dominanceRatio;
-      if (dropForEnergy) {
-        droppedMic++;
-        continue;
-      }
-      keepMic.push(segment);
-    }
-
-    const keepSystem: TranscriptionSegment[] = [];
-    let droppedSystem = 0;
-    for (const segment of systemSegments) {
-      const overlapRatio = maxOverlapRatioWithSegments(segment, keepMic);
-      if (overlapRatio < energyTuning.minOverlapRatio) {
-        keepSystem.push(segment);
-        continue;
-      }
-      const micEnergy = getSegmentWindowRms(
-        micRmsData,
-        segment.startTime,
-        segment.endTime,
-      );
-      const systemEnergy = getSegmentWindowRms(
-        systemRmsData,
-        segment.startTime,
-        segment.endTime,
-      );
-      const dropForEnergy =
-        micEnergy !== null &&
-        systemEnergy !== null &&
-        micEnergy >= systemEnergy * energyTuning.dominanceRatio;
-      if (dropForEnergy) {
-        droppedSystem++;
-        continue;
-      }
-      keepSystem.push(segment);
-    }
-
-    if (droppedMic > 0 || droppedSystem > 0) {
-      console.log(
-        `[Pluto] Chunk #${chunkIndex} energy prune: dropMe=${droppedMic}, dropThem=${droppedSystem}, keptMe=${keepMic.length}, keptThem=${keepSystem.length}`,
-      );
-    }
-
-    return { micSegments: keepMic, systemSegments: keepSystem };
-  };
-
-  const pickPreferredSpeakerForChunk = (
-    chunkStartSec: number,
-    chunkEndSec: number,
-    micMeanRms: number | null,
-    systemMeanRms: number | null,
-  ): 'Me' | 'Them' | null => {
-    const meCoverage = getSpeakerActivityCoverage(
-      chunkStartSec,
-      chunkEndSec,
-      'Me',
-    );
-    const themCoverage = getSpeakerActivityCoverage(
-      chunkStartSec,
-      chunkEndSec,
-      'Them',
-    );
-    const minCoverageSeconds =
-      TRANSCRIPTION_TUNING.chunkPreference.minCoverageSeconds;
-    const coverageRatio = TRANSCRIPTION_TUNING.chunkPreference.coverageRatio;
-
-    if (
-      meCoverage >= minCoverageSeconds &&
-      meCoverage >= themCoverage * coverageRatio
-    )
-      return 'Me';
-    if (
-      themCoverage >= minCoverageSeconds &&
-      themCoverage >= meCoverage * coverageRatio
-    )
-      return 'Them';
-
-    if (micMeanRms !== null && systemMeanRms !== null) {
-      return micMeanRms >= systemMeanRms ? 'Me' : 'Them';
-    }
-
-    return null;
-  };
-
-  const mergeSegmentText = (
-    baseText: string,
-    incomingText: string,
-    speaker: string,
-  ): string => {
-    const base = baseText.trim();
-    const incoming = incomingText.trim();
-    if (!base) return incoming;
-    if (!incoming) return base;
-
-    const baseNorm = normalizeTranscriptText(base);
-    const incomingNorm = normalizeTranscriptText(incoming);
-
-    // Recall-first: only collapse exact duplicates.
-    if (speaker === 'Them' || speaker === 'Me') {
-      if (incomingNorm === baseNorm) return base;
-    }
-
-    const sentenceMatches = base.match(/[^.!?]+[.!?]?/g);
-    const sentenceChunks = sentenceMatches
-      ? sentenceMatches.map((chunk) => chunk.trim()).filter(Boolean)
-      : [base];
-    const trailingSentence = sentenceChunks[sentenceChunks.length - 1];
-    if (trailingSentence) {
-      const trailingSimilarity = tokenSimilarity(trailingSentence, incoming);
-      if (trailingSimilarity >= 0.32) {
-        const trailingWords = normalizeTranscriptText(trailingSentence)
-          .split(' ')
-          .filter(Boolean).length;
-        const incomingWords = normalizeTranscriptText(incoming)
-          .split(' ')
-          .filter(Boolean).length;
-        const trailingQuality = transcriptQualityScore(trailingSentence);
-        const incomingQuality = transcriptQualityScore(incoming);
-        if (
-          incomingWords >= trailingWords ||
-          incomingQuality >= trailingQuality + 0.08
-        ) {
-          sentenceChunks[sentenceChunks.length - 1] = incoming;
-          return sentenceChunks.join(' ').trim();
-        }
-      }
-    }
-
-    return `${base} ${incoming}`;
-  };
-
   const mergeConsecutiveSpeakerSegments = (
     segments: TranscriptionSegment[],
-    gapSeconds = 1,
   ): TranscriptionSegment[] => {
     const merged: TranscriptionSegment[] = [];
     for (const segment of segments) {
-      const lastSegment = merged[merged.length - 1];
-      const gap =
-        lastSegment != null
-          ? segment.startTime - lastSegment.endTime
-          : Number.POSITIVE_INFINITY;
-
-      if (
-        lastSegment &&
-        lastSegment.speaker === segment.speaker &&
-        gap <= gapSeconds
-      ) {
-        lastSegment.text = mergeSegmentText(
-          lastSegment.text,
-          segment.text,
-          segment.speaker,
-        );
-        lastSegment.endTime = segment.endTime;
+      const prior = merged.at(-1);
+      if (prior?.speaker === segment.speaker) {
+        prior.text = `${prior.text.trim()} ${segment.text.trim()}`.trim();
+        prior.endTime = Math.max(prior.endTime, segment.endTime);
       } else {
         merged.push({ ...segment });
       }
     }
     return merged;
-  };
-
-  const isBleedDuplicate = (
-    mic: TranscriptionSegment,
-    system: TranscriptionSegment,
-  ): boolean => {
-    const overlap = overlapSeconds(mic, system);
-    if (overlap <= 0) return false;
-
-    const micDur = Math.max(0.01, mic.endTime - mic.startTime);
-    const sysDur = Math.max(0.01, system.endTime - system.startTime);
-    const overlapRatio = overlap / Math.min(micDur, sysDur);
-    if (overlapRatio < 0.35) return false;
-
-    const micNorm = normalizeTranscriptText(mic.text);
-    const sysNorm = normalizeTranscriptText(system.text);
-    if (!micNorm || !sysNorm) return false;
-    if (micNorm === sysNorm) return true;
-
-    const startDelta = Math.abs(mic.startTime - system.startTime);
-    const shorter = Math.min(micNorm.length, sysNorm.length);
-    const longer = Math.max(micNorm.length, sysNorm.length);
-    const containsMatch =
-      shorter >= 30 &&
-      shorter / longer >= 0.75 &&
-      (micNorm.includes(sysNorm) || sysNorm.includes(micNorm));
-    if (containsMatch) return true;
-
-    const prefixSimilarity = tokenPrefixSimilarity(micNorm, sysNorm);
-    if (startDelta <= 1.5 && overlapRatio >= 0.35 && prefixSimilarity >= 0.5)
-      return true;
-
-    if (startDelta > 4) return false;
-
-    const tokenSim = tokenSimilarity(micNorm, sysNorm);
-    if (tokenSim >= 0.66 && overlapRatio >= 0.45) return true;
-    if (tokenSim >= 0.52 && overlapRatio >= 0.35 && startDelta <= 1.2)
-      return true;
-
-    if (shorter < 24) return false;
-    return tokenSim >= 0.6;
-  };
-
-  const reconcileChunkSpeakerAttribution = (params: {
-    chunkIndex: number;
-    chunkStartSec: number;
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-    micRmsData: RmsData | null;
-    systemRmsData: RmsData | null;
-    preferredSpeaker: 'Me' | 'Them' | null;
-  }): {
-    micSegments: TranscriptionSegment[];
-    systemSegments: TranscriptionSegment[];
-  } => {
-    const {
-      chunkIndex,
-      chunkStartSec,
-      micRmsData,
-      systemRmsData,
-      preferredSpeaker,
-    } = params;
-    const micSegments = params.micSegments.map((segment) => ({ ...segment }));
-    const systemSegments = params.systemSegments.map((segment) => ({
-      ...segment,
-    }));
-    if (micSegments.length === 0 || systemSegments.length === 0) {
-      return { micSegments, systemSegments };
-    }
-
-    const removeMic = new Set<number>();
-    const removeSystem = new Set<number>();
-    const matchedSystem = new Set<number>();
-    let relabeledToMe = 0;
-    let relabeledToThem = 0;
-    let candidatePairs = 0;
-
-    for (let micIndex = 0; micIndex < micSegments.length; micIndex++) {
-      if (removeMic.has(micIndex)) continue;
-      const mic = micSegments[micIndex];
-
-      let bestSystemIndex = -1;
-      let bestPairScore = 0;
-      for (
-        let systemIndex = 0;
-        systemIndex < systemSegments.length;
-        systemIndex++
-      ) {
-        if (matchedSystem.has(systemIndex) || removeSystem.has(systemIndex))
-          continue;
-        const system = systemSegments[systemIndex];
-        if (!isCompetingUtterancePair(mic, system)) continue;
-
-        const overlap = overlapSeconds(mic, system);
-        const overlapRatio =
-          overlap /
-          Math.max(
-            0.01,
-            Math.min(
-              mic.endTime - mic.startTime,
-              system.endTime - system.startTime,
-            ),
-          );
-        const similarity = Math.max(
-          tokenSimilarity(mic.text, system.text),
-          tokenPrefixSimilarity(mic.text, system.text),
-        );
-        const pairScore = overlapRatio + similarity;
-        if (pairScore > bestPairScore) {
-          bestPairScore = pairScore;
-          bestSystemIndex = systemIndex;
-        }
-      }
-
-      if (bestSystemIndex < 0) continue;
-      candidatePairs++;
-      matchedSystem.add(bestSystemIndex);
-
-      const system = systemSegments[bestSystemIndex];
-      const winner = selectDominantSpeakerForPair(
-        mic,
-        system,
-        micRmsData,
-        systemRmsData,
-        chunkStartSec,
-        preferredSpeaker,
-      );
-
-      const micNorm = normalizeTranscriptText(mic.text);
-      const systemNorm = normalizeTranscriptText(system.text);
-      let canonicalText = winner === 'Me' ? mic.text : system.text;
-      if (micNorm.length > 0 && systemNorm.length > 0) {
-        if (micNorm.includes(systemNorm) && micNorm.length >= systemNorm.length)
-          canonicalText = mic.text;
-        else if (
-          systemNorm.includes(micNorm) &&
-          systemNorm.length >= micNorm.length
-        )
-          canonicalText = system.text;
-      }
-      const canonicalStart = Math.min(mic.startTime, system.startTime);
-      const canonicalEnd = Math.max(mic.endTime, system.endTime);
-
-      if (winner === 'Me') {
-        removeSystem.add(bestSystemIndex);
-        micSegments[micIndex] = {
-          ...mic,
-          startTime: canonicalStart,
-          endTime: canonicalEnd,
-          text: canonicalText,
-        };
-        relabeledToMe++;
-      } else {
-        removeMic.add(micIndex);
-        systemSegments[bestSystemIndex] = {
-          ...system,
-          startTime: canonicalStart,
-          endTime: canonicalEnd,
-          text: canonicalText,
-        };
-        relabeledToThem++;
-      }
-    }
-
-    if (candidatePairs > 0 || relabeledToMe > 0 || relabeledToThem > 0) {
-      console.log(
-        `[Pluto] Chunk #${chunkIndex} timestamp attribution: candidates=${candidatePairs}, toMe=${relabeledToMe}, toThem=${relabeledToThem}, preferred=${preferredSpeaker ?? 'none'}`,
-      );
-    }
-
-    return {
-      micSegments: micSegments.filter((_, index) => !removeMic.has(index)),
-      systemSegments: systemSegments.filter(
-        (_, index) => !removeSystem.has(index),
-      ),
-    };
   };
 
   const stopSpeakingMonitor = () => {
@@ -2820,898 +1341,6 @@ export const AudioManager = ({
     lastSpeakerRef.current = null;
     lastSpeakerTsRef.current = 0;
     onSpeakingChange?.(null);
-  };
-
-  const enqueueBackgroundJob = (sequence: number, job: () => Promise<void>) => {
-    const admission = processingQueueRef.current.enqueue(sequence, job);
-    if (admission === 'replaced') {
-      onLiveTranscriptIntegrityChange?.('lagging');
-    }
-  };
-
-  const handleChunkBlob = (
-    type: 'mic' | 'system',
-    chunkIndex: number,
-    chunkBlob: Blob,
-    micFormat: MicChunkFormat = 'webm',
-    chunkStartSec?: number,
-    chunkEndSec?: number,
-    systemExpected = false,
-  ) => {
-    if (type === 'mic') {
-      const fallbackStartSec = chunkIndex * CHUNK_SECONDS;
-      pendingMicChunksRef.current.set(chunkIndex, {
-        blob: chunkBlob,
-        format: micFormat,
-        chunkStartSec: chunkStartSec ?? fallbackStartSec,
-        chunkEndSec: chunkEndSec ?? fallbackStartSec + CHUNK_SECONDS,
-      });
-    } else pendingSystemChunksRef.current.set(chunkIndex, chunkBlob);
-
-    // Try to process pair
-    // Simple strategy: If we have both (or if system isn't running and we have mic), process.
-    // But 'system' might be silent/empty? No, blob is blob.
-
-    const micPending = pendingMicChunksRef.current.get(chunkIndex);
-    if (!micPending) return;
-    const micBlob = micPending?.blob;
-    const micFormatForChunk = micPending?.format ?? 'webm';
-    const systemBlob = pendingSystemChunksRef.current.get(chunkIndex);
-
-    if (
-      isCaptureChunkPairReady({
-        micReady: Boolean(micBlob),
-        systemReady: Boolean(systemBlob),
-        systemExpected,
-      })
-    ) {
-      pendingMicChunksRef.current.delete(chunkIndex);
-      if (systemBlob) pendingSystemChunksRef.current.delete(chunkIndex);
-
-      const generation = liveTranscriptionGenerationRef.current;
-      enqueueBackgroundJob(chunkIndex, () =>
-        transcribeChunkPair({
-          micBlob,
-          micFormat: micFormatForChunk,
-          systemBlob,
-          chunkIndex,
-          chunkStartSec: micPending.chunkStartSec,
-          chunkEndSec: micPending.chunkEndSec,
-          generation,
-        }),
-      );
-    }
-  };
-
-  const transcribeChunkPair = async (opts: {
-    micBlob: Blob;
-    micFormat: MicChunkFormat;
-    systemBlob?: Blob;
-    chunkIndex: number;
-    chunkStartSec?: number;
-    chunkEndSec?: number;
-    retryCount?: number;
-    generation: number;
-  }): Promise<void> => {
-    const chunkStartSec =
-      typeof opts.chunkStartSec === 'number'
-        ? opts.chunkStartSec
-        : opts.chunkIndex * CHUNK_SECONDS;
-    const chunkEndSec =
-      typeof opts.chunkEndSec === 'number'
-        ? Math.max(chunkStartSec + 0.01, opts.chunkEndSec)
-        : chunkStartSec + CHUNK_SECONDS;
-    const chunkWindowPadSec = 0.75;
-
-    const processStream = async (
-      label: 'Me' | 'Them',
-      blob?: Blob,
-      format: 'webm' | 'ogg' | 'wav' = 'webm',
-    ): Promise<{
-      segments: TranscriptionSegment[];
-      rms: RmsData | null;
-      conversionFailed: boolean;
-      audioPath?: string | null;
-      backgroundValidationEligible?: boolean;
-    }> => {
-      if (label === 'Me' && disableMicChunkTranscriptionRef.current) {
-        return {
-          segments: [],
-          rms: null as RmsData | null,
-          conversionFailed: false,
-          audioPath: null as string | null,
-        };
-      }
-      if (!blob || blob.size < 128) {
-        return {
-          segments: [],
-          rms: null as RmsData | null,
-          conversionFailed: false,
-        };
-      }
-      if (blob.size < 1024) {
-        console.log(
-          `[Pluto] ${label} chunk is small (${blob.size} bytes), attempting transcription anyway`,
-        );
-      }
-      const buffer = await blob.arrayBuffer();
-      let rms: RmsData | null = null;
-      try {
-        // Only compute RMS if we can decode (might fail for raw chunks if no header, but ours have headers)
-        // System WAV has header now. Mic WebM has header.
-        rms = await computeRmsData(buffer);
-      } catch (e) {
-        console.warn(
-          `[Pluto] Failed to compute ${label} RMS data:`,
-          e instanceof Error ? e.message : e,
-        );
-      }
-      let skipTranscription = false;
-      if (label === 'Me') {
-        const streamMeanRms = meanRms(rms);
-        if (streamMeanRms !== null && streamMeanRms < MIC_TRANSCRIBE_MIN_RMS) {
-          if (opts.chunkIndex < 3) {
-            console.log(
-              `[Pluto] Skipping low-energy Me chunk #${opts.chunkIndex}: rms=${streamMeanRms.toFixed(5)}`,
-            );
-          }
-          skipTranscription = true;
-        }
-
-        if (
-          !skipTranscription &&
-          (speakerTimelineRef.current.length > 0 ||
-            activeSpeakerWindowRef.current)
-        ) {
-          const coverageSeconds = getSpeakerActivityCoverage(
-            chunkStartSec,
-            chunkEndSec,
-            'Me',
-          );
-          const windowSeconds = Math.max(0.01, chunkEndSec - chunkStartSec);
-          const coverageRatio = coverageSeconds / windowSeconds;
-          if (
-            coverageSeconds < MIC_TRANSCRIBE_MIN_SPEAKER_COVERAGE_SECONDS &&
-            coverageRatio < MIC_TRANSCRIBE_MIN_SPEAKER_COVERAGE_RATIO
-          ) {
-            if (opts.chunkIndex < 3) {
-              console.log(
-                `[Pluto] Skipping Me chunk #${opts.chunkIndex} due to low speaker activity: ` +
-                  `coverage=${coverageSeconds.toFixed(2)}s ratio=${coverageRatio.toFixed(2)}`,
-              );
-            }
-            skipTranscription = true;
-          }
-        }
-      }
-      if (label === 'Them') {
-        const streamMeanRms = meanRms(rms);
-        if (
-          streamMeanRms !== null &&
-          streamMeanRms < SYSTEM_TRANSCRIBE_MIN_RMS
-        ) {
-          if (opts.chunkIndex < 3) {
-            console.log(
-              `[Pluto] Skipping low-energy Them chunk #${opts.chunkIndex}: rms=${streamMeanRms.toFixed(5)}`,
-            );
-          }
-          skipTranscription = true;
-        }
-      }
-
-      let wavPath: string | null = null;
-      let conversionError: unknown = null;
-      try {
-        wavPath = await window.ipcRenderer.invoke(
-          'AUDIO_SAVE_AND_CONVERT',
-          buffer,
-          format,
-          label.toLowerCase(),
-        );
-      } catch (e) {
-        conversionError = e;
-      }
-
-      if (
-        !wavPath &&
-        label === 'Me' &&
-        format === 'webm' &&
-        micWebmInitSegmentRef.current
-      ) {
-        try {
-          const repairedWebm = prependWebmInitSegment(
-            micWebmInitSegmentRef.current,
-            buffer,
-          );
-          wavPath = await window.ipcRenderer.invoke(
-            'AUDIO_SAVE_AND_CONVERT',
-            repairedWebm,
-            format,
-            label.toLowerCase(),
-          );
-          if (wavPath) {
-            console.warn(
-              `[Pluto] Recovered ${label} chunk via WebM init-segment repair`,
-            );
-          }
-        } catch (repairErr) {
-          console.warn(
-            `[Pluto] Skip ${label} chunk (convert failed after WebM repair):`,
-            (repairErr as Error).message,
-          );
-        }
-      }
-
-      if (!wavPath && label === 'Me') {
-        // Fallback: build a cumulative WebM (chunks 0..N) so ffmpeg sees a full container.
-        // Then keep only segments that overlap the current chunk window.
-        try {
-          const cumulativeBlob = new Blob(
-            micChunksRef.current.slice(0, opts.chunkIndex + 1),
-            { type: micMimeTypeRef.current || 'audio/webm;codecs=opus' },
-          );
-          const cumulativeBuffer = await cumulativeBlob.arrayBuffer();
-          const cumulativeWavPath = await window.ipcRenderer.invoke(
-            'AUDIO_SAVE_AND_CONVERT',
-            cumulativeBuffer,
-            getMicFormat(),
-            'me-cumulative',
-          );
-          if (cumulativeWavPath) {
-            const cumulativeResult = await window.ipcRenderer.invoke(
-              'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
-              cumulativeWavPath,
-              buildTranscriptionOptions({ diarize: false }),
-            );
-            const cumulativeSegments = cumulativeResult?.segments
-              ? cumulativeResult.segments
-                  .filter((s: { text: string }) => isValidSegment(s.text))
-                  .filter(
-                    (s: { start: number; end: number }) =>
-                      s.end > chunkStartSec - chunkWindowPadSec &&
-                      s.start < chunkEndSec + chunkWindowPadSec,
-                  )
-                  .map((s: { start: number; end: number; text: string }) => ({
-                    id: createStableLiveSegmentId(
-                      'mic',
-                      opts.chunkIndex,
-                      s.start,
-                      s.end,
-                    ),
-                    startTime: s.start,
-                    endTime: s.end,
-                    text: s.text.trim(),
-                    speaker: label,
-                    validationState: 'preview' as const,
-                  }))
-              : [];
-            if (cumulativeSegments.length > 0) {
-              console.warn(
-                `[Pluto] Recovered ${label} chunk via cumulative WebM fallback: chunk=${opts.chunkIndex}, segments=${cumulativeSegments.length}`,
-              );
-              return {
-                segments: cumulativeSegments,
-                rms,
-                conversionFailed: false,
-                audioPath: cumulativeWavPath,
-                backgroundValidationEligible: false,
-              };
-            }
-          }
-        } catch (cumulativeErr) {
-          console.warn(
-            `[Pluto] Cumulative fallback failed for ${label} chunk #${opts.chunkIndex}:`,
-            cumulativeErr instanceof Error
-              ? cumulativeErr.message
-              : cumulativeErr,
-          );
-        }
-      }
-
-      if (!wavPath) {
-        if (label !== 'Me') {
-          if (conversionError) {
-            console.warn(
-              `[Pluto] Skip ${label} chunk (convert failed):`,
-              (conversionError as Error).message,
-            );
-          }
-          return { segments: [], rms, conversionFailed: true };
-        }
-        if (conversionError) {
-          console.warn(
-            `[Pluto] Skip ${label} chunk (convert failed):`,
-            (conversionError as Error).message,
-          );
-        } else {
-          console.warn(`[Pluto] Skip ${label} chunk (convert returned null)`);
-        }
-        return { segments: [], rms, conversionFailed: true };
-      }
-      if (skipTranscription) {
-        return {
-          segments: [],
-          rms,
-          conversionFailed: false,
-          audioPath: wavPath,
-        };
-      }
-
-      const chunkDurationSec = Math.max(0.01, chunkEndSec - chunkStartSec);
-      const mapSegments = (
-        rawSegments: Array<{
-          start: number;
-          end: number;
-          text: string;
-          words?: Array<{ word: string; start: number; end: number }>;
-        }>,
-        timeOffsetSec: number,
-      ): TranscriptionSegment[] =>
-        rawSegments
-          .filter((s) => isValidSegment(s.text))
-          .map((s) => ({
-            id: createStableLiveSegmentId(
-              label === 'Me' ? 'mic' : 'system',
-              opts.chunkIndex,
-              s.start + timeOffsetSec,
-              s.end + timeOffsetSec,
-            ),
-            startTime: s.start + timeOffsetSec,
-            endTime: s.end + timeOffsetSec,
-            text: s.text.trim(),
-            speaker: label,
-            validationState: 'preview' as const,
-            words: s.words?.map((w) => ({
-              word: w.word,
-              start: w.start + timeOffsetSec,
-              end: w.end + timeOffsetSec,
-            })),
-          }));
-
-      if (ENABLE_CHUNK_FLUSH && rms) {
-        const speechWindows = buildSpeechWindows(rms, chunkDurationSec);
-        if (speechWindows.length > 0) {
-          const slicePaths = await window.ipcRenderer.invoke(
-            'AUDIO_SLICE_WAV',
-            {
-              inputPath: wavPath,
-              segments: speechWindows,
-              outputTag: `${label.toLowerCase()}_${opts.chunkIndex}`,
-            },
-          );
-
-          if (Array.isArray(slicePaths) && slicePaths.length > 0) {
-            const sliceSegments: TranscriptionSegment[] = [];
-            let attemptedSlices = 0;
-            for (let i = 0; i < slicePaths.length; i++) {
-              const slicePath = slicePaths[i];
-              const speechWindow = speechWindows[i];
-              if (!slicePath || !speechWindow) continue;
-              attemptedSlices += 1;
-              const sliceResult = await window.ipcRenderer.invoke(
-                'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
-                slicePath,
-                buildTranscriptionOptions({ diarize: false }),
-              );
-              if (Array.isArray(sliceResult?.segments)) {
-                sliceSegments.push(
-                  ...mapSegments(
-                    sliceResult.segments,
-                    chunkStartSec + speechWindow.startSec,
-                  ),
-                );
-              }
-            }
-
-            if (attemptedSlices > 0 && sliceSegments.length > 0) {
-              console.log(
-                `[Pluto] ${label} chunk #${opts.chunkIndex} flush slices=${attemptedSlices}, segments=${sliceSegments.length}`,
-              );
-              return {
-                segments: sliceSegments,
-                rms,
-                conversionFailed: false,
-                audioPath: wavPath,
-              };
-            }
-          }
-        }
-      }
-
-      const result = await window.ipcRenderer.invoke(
-        'TRANSCRIPTION_TRANSCRIBE_PREVIEW',
-        wavPath,
-        buildTranscriptionOptions({
-          diarize: false,
-          meetingId: currentMeetingIdRef.current,
-        }),
-      );
-      const segments = Array.isArray(result?.segments)
-        ? mapSegments(result.segments, chunkStartSec)
-        : [];
-      return { segments, rms, conversionFailed: false, audioPath: wavPath };
-    };
-
-    const [micResult, systemResult] = await Promise.all([
-      processStream('Me', opts.micBlob, opts.micFormat),
-      processStream('Them', opts.systemBlob, 'wav'),
-    ]);
-    if (opts.generation !== liveTranscriptionGenerationRef.current) return;
-    const checkpointMeetingId = currentMeetingIdRef.current;
-    const micActivitySeconds = getSpeakerActivityCoverage(
-      chunkStartSec,
-      chunkEndSec,
-      'Me',
-    );
-    const localTranscriptSeconds = micResult.segments.reduce(
-      (total: number, segment: TranscriptionSegment) =>
-        total + Math.max(0, segment.endTime - segment.startTime),
-      0,
-    );
-    const liveIntegrity = evaluateLiveTranscriptCoverage({
-      micActivitySeconds,
-      localTranscriptSeconds,
-      conversionFailed: micResult.conversionFailed,
-      priorRetries: opts.retryCount || 0,
-    });
-    onLiveTranscriptIntegrityChange?.(liveIntegrity.state);
-    if (liveIntegrity.shouldRetry) {
-      await transcribeChunkPair({
-        ...opts,
-        retryCount: (opts.retryCount || 0) + 1,
-      });
-      return;
-    }
-    if (checkpointMeetingId) {
-      if (micResult.audioPath) {
-        await completeCaptureJournalChunkFromPath({
-          meetingId: checkpointMeetingId,
-          source: 'mic',
-          sequence: opts.chunkIndex,
-          repairPath: micResult.audioPath,
-        });
-      }
-      if (systemResult.audioPath) {
-        await completeCaptureJournalChunkFromPath({
-          meetingId: checkpointMeetingId,
-          source: 'system',
-          sequence: opts.chunkIndex,
-          repairPath: systemResult.audioPath,
-        });
-      }
-      await persistTranscriptCheckpoint({
-        meetingId: checkpointMeetingId,
-        source: 'mic',
-        sequence: opts.chunkIndex,
-        segments: micResult.segments,
-        disposition: micResult.conversionFailed
-          ? 'conversion_failed'
-          : 'transcribed',
-      });
-      if (opts.systemBlob) {
-        await persistTranscriptCheckpoint({
-          meetingId: checkpointMeetingId,
-          source: 'system',
-          sequence: opts.chunkIndex,
-          segments: systemResult.segments,
-          disposition: systemResult.conversionFailed
-            ? 'conversion_failed'
-            : 'transcribed',
-        });
-      }
-    }
-    if (systemResult.audioPath) {
-      savedSystemChunkAudioRef.current.set(opts.chunkIndex, {
-        chunkIndex: opts.chunkIndex,
-        path: systemResult.audioPath,
-        startSec: chunkStartSec,
-        endSec: chunkEndSec,
-      });
-    }
-    if (micResult.conversionFailed) {
-      micChunkConversionFailuresRef.current += 1;
-      console.warn(
-        `[Pluto] Mic chunk conversion failed at chunk #${opts.chunkIndex}`,
-      );
-      if (
-        micChunkConversionFailuresRef.current >= 2 &&
-        !disableMicChunkTranscriptionRef.current
-      ) {
-        disableMicChunkTranscriptionRef.current = true;
-        console.warn(
-          '[Pluto] Disabling per-chunk Me transcription for this meeting; final validation will replace the preview',
-        );
-      }
-    }
-
-    const micSegments: TranscriptionSegment[] = micResult.segments.map(
-      (s: TranscriptionSegment) => ({
-        ...s,
-        startTime: s.startTime - chunkStartSec,
-        endTime: s.endTime - chunkStartSec,
-      }),
-    );
-
-    const systemSegments: TranscriptionSegment[] = systemResult.segments.map(
-      (s: TranscriptionSegment) => ({
-        ...s,
-        startTime: s.startTime - chunkStartSec,
-        endTime: s.endTime - chunkStartSec,
-      }),
-    );
-    let filteredMicSegments = micSegments;
-    let filteredSystemSegments = systemSegments;
-    const micMean = meanRms(micResult.rms);
-    const systemMean = meanRms(systemResult.rms);
-    const logChunkAttributionStage = (
-      reason: string,
-      beforeMe: number,
-      beforeThem: number,
-      afterMe: number,
-      afterThem: number,
-    ) => {
-      if (beforeMe === afterMe && beforeThem === afterThem) return;
-      console.log(
-        `[Pluto] Chunk #${opts.chunkIndex} attribution ${reason}: ` +
-          `Me ${beforeMe}->${afterMe}, Them ${beforeThem}->${afterThem}`,
-      );
-    };
-
-    console.log(
-      `[Pluto] Chunk #${opts.chunkIndex} attribution input: ${JSON.stringify({
-        me: micSegments.length,
-        them: systemSegments.length,
-        micRms: micMean ?? 0,
-        systemRms: systemMean ?? 0,
-        arbitration: ENABLE_CHUNK_ARBITRATION,
-      })}`,
-    );
-
-    if (
-      ENABLE_CHUNK_ARBITRATION &&
-      micSegments.length > 0 &&
-      systemSegments.length > 0
-    ) {
-      const chunkPreferredSpeaker: 'Me' | 'Them' | null =
-        pickPreferredSpeakerForChunk(
-          chunkStartSec,
-          chunkEndSec,
-          micMean,
-          systemMean,
-        );
-
-      const reconciled = reconcileChunkSpeakerAttribution({
-        chunkIndex: opts.chunkIndex,
-        chunkStartSec,
-        micSegments,
-        systemSegments,
-        micRmsData: micResult.rms,
-        systemRmsData: systemResult.rms,
-        preferredSpeaker: chunkPreferredSpeaker,
-      });
-      filteredMicSegments = reconciled.micSegments;
-      filteredSystemSegments = reconciled.systemSegments;
-      logChunkAttributionStage(
-        'reconcile',
-        micSegments.length,
-        systemSegments.length,
-        filteredMicSegments.length,
-        filteredSystemSegments.length,
-      );
-
-      // Fallback pruning for unresolved bleed when one channel is clearly dominant in this chunk.
-      if (
-        chunkPreferredSpeaker === 'Them' &&
-        filteredMicSegments.length > 0 &&
-        filteredSystemSegments.length > 0
-      ) {
-        const beforeMe = filteredMicSegments.length;
-        filteredMicSegments = filteredMicSegments.filter(
-          (mic) =>
-            !filteredSystemSegments.some((sys) => isBleedDuplicate(mic, sys)),
-        );
-        logChunkAttributionStage(
-          'preferred-them-duplicate-prune',
-          beforeMe,
-          filteredSystemSegments.length,
-          filteredMicSegments.length,
-          filteredSystemSegments.length,
-        );
-      } else if (
-        chunkPreferredSpeaker === 'Me' &&
-        filteredMicSegments.length > 0 &&
-        filteredSystemSegments.length > 0
-      ) {
-        const beforeThem = filteredSystemSegments.length;
-        filteredSystemSegments = filteredSystemSegments.filter(
-          (sys) =>
-            !filteredMicSegments.some((mic) => isBleedDuplicate(sys, mic)),
-        );
-        logChunkAttributionStage(
-          'preferred-me-duplicate-prune',
-          filteredMicSegments.length,
-          beforeThem,
-          filteredMicSegments.length,
-          filteredSystemSegments.length,
-        );
-      }
-
-      if (filteredMicSegments.length > 0 && filteredSystemSegments.length > 0) {
-        const beforeMe = filteredMicSegments.length;
-        const beforeThem = filteredSystemSegments.length;
-        const activityPruned = pruneSegmentsBySpeakerActivity({
-          chunkIndex: opts.chunkIndex,
-          chunkStartSec,
-          micSegments: filteredMicSegments,
-          systemSegments: filteredSystemSegments,
-        });
-        filteredMicSegments = activityPruned.micSegments;
-        filteredSystemSegments = activityPruned.systemSegments;
-        logChunkAttributionStage(
-          'activity-prune',
-          beforeMe,
-          beforeThem,
-          filteredMicSegments.length,
-          filteredSystemSegments.length,
-        );
-      }
-
-      if (
-        filteredMicSegments.length !== micSegments.length ||
-        filteredSystemSegments.length !== systemSegments.length
-      ) {
-        console.log(
-          `[Pluto] Chunk #${opts.chunkIndex} arbitration: preferred=${chunkPreferredSpeaker ?? 'none'}, Me ${micSegments.length}->${filteredMicSegments.length}, Them ${systemSegments.length}->${filteredSystemSegments.length}, micRms=${micMean ?? 0}, sysRms=${systemMean ?? 0}`,
-        );
-      }
-    }
-
-    if (filteredMicSegments.length > 0 && filteredSystemSegments.length > 0) {
-      const beforeMe = filteredMicSegments.length;
-      const beforeThem = filteredSystemSegments.length;
-      const energyPruned = pruneSegmentsByEnergyDominance({
-        chunkIndex: opts.chunkIndex,
-        micSegments: filteredMicSegments,
-        systemSegments: filteredSystemSegments,
-        micRmsData: micResult.rms,
-        systemRmsData: systemResult.rms,
-      });
-      filteredMicSegments = energyPruned.micSegments;
-      filteredSystemSegments = energyPruned.systemSegments;
-      logChunkAttributionStage(
-        'energy-prune',
-        beforeMe,
-        beforeThem,
-        filteredMicSegments.length,
-        filteredSystemSegments.length,
-      );
-    }
-
-    if (filteredMicSegments.length > 0 && filteredSystemSegments.length > 0) {
-      const beforeMe = filteredMicSegments.length;
-      const beforeThem = filteredSystemSegments.length;
-      const activityPruned = pruneSegmentsBySpeakerActivity({
-        chunkIndex: opts.chunkIndex,
-        chunkStartSec,
-        micSegments: filteredMicSegments,
-        systemSegments: filteredSystemSegments,
-      });
-      filteredMicSegments = activityPruned.micSegments;
-      filteredSystemSegments = activityPruned.systemSegments;
-      logChunkAttributionStage(
-        'post-energy-activity-prune',
-        beforeMe,
-        beforeThem,
-        filteredMicSegments.length,
-        filteredSystemSegments.length,
-      );
-    }
-
-    if (filteredMicSegments.length > 0 && filteredSystemSegments.length > 0) {
-      const beforeMe = filteredMicSegments.length;
-      const beforeThem = filteredSystemSegments.length;
-      const qualityPruned = pruneSegmentsByTranscriptQuality({
-        chunkIndex: opts.chunkIndex,
-        micSegments: filteredMicSegments,
-        systemSegments: filteredSystemSegments,
-      });
-      filteredMicSegments = qualityPruned.micSegments;
-      filteredSystemSegments = qualityPruned.systemSegments;
-      logChunkAttributionStage(
-        'quality-prune',
-        beforeMe,
-        beforeThem,
-        filteredMicSegments.length,
-        filteredSystemSegments.length,
-      );
-    }
-
-    console.log(
-      `[Pluto] Chunk #${opts.chunkIndex} transcript segments: ` +
-        `Me=${micSegments.length}->${filteredMicSegments.length}, ` +
-        `Them=${systemSegments.length}->${filteredSystemSegments.length}`,
-    );
-    if (micSegments.length === 0 && systemSegments.length > 0) {
-      zeroMicChunkStreakRef.current += 1;
-      if (zeroMicChunkStreakRef.current >= 2) {
-        console.warn(
-          `[Pluto] Mic transcript gap detected: ${zeroMicChunkStreakRef.current} consecutive chunks with no Me segments`,
-        );
-      }
-    } else {
-      zeroMicChunkStreakRef.current = 0;
-    }
-
-    if (checkpointMeetingId) {
-      await persistTranscriptAcceptanceFrame({
-        meetingId: checkpointMeetingId,
-        sequence: opts.chunkIndex,
-        chunkStartSec,
-        chunkEndSec,
-        micSegments: filteredMicSegments,
-        systemSegments: filteredSystemSegments,
-        micMeanRms: micMean,
-        systemMeanRms: systemMean,
-        systemExpected: Boolean(opts.systemBlob),
-      });
-    }
-
-    // Channel-first strategy: keep per-channel attribution from chunk processing.
-    processedMicSegmentsRef.current.push(
-      ...filteredMicSegments.map((s: TranscriptionSegment) => ({
-        ...s,
-        startTime: s.startTime + chunkStartSec,
-        endTime: s.endTime + chunkStartSec,
-      })),
-      ...filteredSystemSegments.map((s: TranscriptionSegment) => ({
-        ...s,
-        startTime: s.startTime + chunkStartSec,
-        endTime: s.endTime + chunkStartSec,
-      })),
-    );
-    const acceptedSegments = [
-      ...filteredMicSegments,
-      ...filteredSystemSegments,
-    ];
-    const liveTranscript: LiveTranscriptSegment[] = [
-      ...processedMicSegmentsRef.current,
-    ]
-      .sort((a, b) => a.startTime - b.startTime)
-      .map((segment) => ({
-        id: segment.id,
-        speaker:
-          segment.speaker === 'Me' || segment.speaker === 'Them'
-            ? segment.speaker
-            : 'Unknown',
-        text: segment.text,
-        timestampMs: segment.startTime * 1_000,
-        confirmed: segment.validationState === 'validated',
-      }));
-    liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
-      acceptedSegments,
-      () => {
-        onInterimTranscript?.('');
-        onLiveTranscript?.(liveTranscript);
-      },
-    );
-    if (checkpointMeetingId) {
-      const candidates =
-        opts.chunkIndex % 2 === 0
-          ? [
-              {
-                source: 'mic' as const,
-                audioPath: micResult.audioPath,
-                segments: filteredMicSegments,
-                eligible: micResult.backgroundValidationEligible !== false,
-              },
-              {
-                source: 'system' as const,
-                audioPath: systemResult.audioPath,
-                segments: filteredSystemSegments,
-                eligible: systemResult.backgroundValidationEligible !== false,
-              },
-            ]
-          : [
-              {
-                source: 'system' as const,
-                audioPath: systemResult.audioPath,
-                segments: filteredSystemSegments,
-                eligible: systemResult.backgroundValidationEligible !== false,
-              },
-              {
-                source: 'mic' as const,
-                audioPath: micResult.audioPath,
-                segments: filteredMicSegments,
-                eligible: micResult.backgroundValidationEligible !== false,
-              },
-            ];
-      const candidate = candidates.find(
-        (item) => item.eligible && item.audioPath && item.segments.length > 0,
-      );
-      if (candidate?.audioPath) {
-        const previewSegments = candidate.segments.map((segment) => ({
-          ...segment,
-          startTime: segment.startTime + chunkStartSec,
-          endTime: segment.endTime + chunkStartSec,
-        }));
-        backgroundValidationQueueRef.current.enqueue(
-          `${candidate.source}:${opts.chunkIndex}`,
-          async (signal) =>
-            await validateTranscriptChunkInBackground({
-              meetingId: checkpointMeetingId,
-              generation: opts.generation,
-              source: candidate.source,
-              sequence: opts.chunkIndex,
-              audioPath: candidate.audioPath as string,
-              previewSegments,
-              signal,
-            }),
-        );
-      }
-    }
-  };
-
-  // Common Whisper Hallucinations to filter out
-  const INVALID_PHRASES = [
-    'you',
-    'mbc',
-    'subtitles by',
-    'captioned by',
-    'watching',
-    'subscribe',
-    'copyright',
-    'all rights reserved',
-  ];
-
-  const hasRepeatedPhraseLoop = (tokens: string[]): boolean => {
-    if (tokens.length < 10) return false;
-    for (let width = 3; width <= 6; width++) {
-      if (tokens.length < width * 3) continue;
-      const phraseCounts = new Map<string, number>();
-      let maxCount = 0;
-      for (let i = 0; i <= tokens.length - width; i++) {
-        const phrase = tokens.slice(i, i + width).join(' ');
-        const next = (phraseCounts.get(phrase) || 0) + 1;
-        phraseCounts.set(phrase, next);
-        if (next > maxCount) maxCount = next;
-      }
-      if (maxCount >= 3 && (maxCount * width) / tokens.length >= 0.45) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  const hasLongTokenRun = (tokens: string[]): boolean => {
-    let longestRun = 1;
-    let run = 1;
-    for (let i = 1; i < tokens.length; i++) {
-      if (tokens[i] === tokens[i - 1]) {
-        run++;
-        if (run > longestRun) longestRun = run;
-      } else {
-        run = 1;
-      }
-    }
-    return longestRun >= 4;
-  };
-
-  const isValidSegment = (text: string): boolean => {
-    const clean = text
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .replace(/\s+/g, ' ');
-    if (clean.length < 2) return false; // Too short
-    if (INVALID_PHRASES.includes(clean)) return false;
-    const tokens = clean.split(' ').filter(Boolean);
-    if (hasLongTokenRun(tokens)) return false;
-    if (hasRepeatedPhraseLoop(tokens)) return false;
-    if (tokens.length >= 14) {
-      const uniqueRatio = new Set(tokens).size / tokens.length;
-      if (uniqueRatio < 0.3) return false;
-    }
-    return true;
   };
 
   const stopSession = async (endReason?: string) => {
@@ -3726,8 +1355,6 @@ export const AudioManager = ({
       return;
     }
     stopSpeakingMonitor();
-    frozenLiveTranscriptResponsivenessRef.current =
-      liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
     startStopToValidatedLatencyAfterAcceptedStop({
       acceptedStop: stopSnapshot,
       accumulator: stopToValidatedLatencyRef.current,
@@ -3743,7 +1370,8 @@ export const AudioManager = ({
     );
     setIsProcessing(true);
 
-    const liveQueueAtStop = processingQueueRef.current;
+    const eouSessionAtStop = eouSessionRef.current;
+    eouSessionRef.current = null;
 
     let primaryAudioPath = '';
     let systemAudioPath = '';
@@ -3842,34 +1470,13 @@ export const AudioManager = ({
       setIsRecording(false);
 
       await captureActivitySessionRef.current?.drain();
-      liveQueueAtStop.close({ drainQueued: true });
-      const finalIntervalSettled = await liveQueueAtStop.waitForIdle(2_500);
-      if (!finalIntervalSettled) {
-        const discardedLiveWork = liveQueueAtStop.close();
-        if (discardedLiveWork.discardedSequence !== null) {
-          console.warn(
-            '[Pluto] Discarded queued live transcription after stop-boundary timeout',
-          );
-        }
-      }
-      liveTranscriptionGenerationRef.current += 1;
-      await window.ipcRenderer
-        .invoke('CANCEL_MEETING_TRANSCRIPTION', stopSnapshot.meetingId)
-        .catch((error) => {
-          console.warn(
-            '[Pluto] Failed to cancel active live transcription:',
-            error,
-          );
-          return null;
-        });
+      await eouSessionAtStop?.finish();
+      frozenLiveTranscriptResponsivenessRef.current =
+        liveTranscriptResponsivenessRef.current.freezeBeforeFinalization();
+      eouGenerationRef.current += 1;
       pendingMicChunksRef.current.clear();
       pendingSystemChunksRef.current.clear();
       zeroMicChunkStreakRef.current = 0;
-      if (!finalIntervalSettled) {
-        console.warn(
-          '[Pluto] Live transcription did not settle before finalization; stale results are fenced',
-        );
-      }
 
       const journalSealOutcome = await sealCaptureJournalBeforeFinalization({
         drainAppends: async () => {
@@ -4041,9 +1648,9 @@ export const AudioManager = ({
           transcription: {
             backend: String(resolvedTranscriptionSettings.backend),
             preset: String(resolvedTranscriptionSettings.preset),
-            model: String(resolvedChunkModel),
+            model: String(resolvedTranscriptionSettings.model),
             device: String(resolvedTranscriptionSettings.device),
-            computeType: String(resolvedChunkComputeType),
+            computeType: String(resolvedTranscriptionSettings.computeType),
             diarization: false,
             elapsedMs: 0,
             vocabularyHintPolicyVersion:
@@ -4111,6 +1718,7 @@ export const AudioManager = ({
       return;
     } catch (e) {
       console.error('[Pluto] Processing failed:', e);
+      eouSessionAtStop?.cancel();
       if (provisionalMeetingPersisted) {
         onSessionComplete?.(stopSnapshot.meetingId);
       } else if (
@@ -4231,6 +1839,8 @@ export const AudioManager = ({
         // Note: we don't call stopSession because that would try to save.
         // We just reset local state. The main process handles task cancellation.
         currentMeetingIdRef.current = null;
+        eouSessionRef.current?.cancel();
+        eouSessionRef.current = null;
         liveTranscriptResponsivenessRef.current.abortStart();
         frozenLiveTranscriptResponsivenessRef.current = null;
         stopInFlightRef.current = false;
@@ -4254,6 +1864,8 @@ export const AudioManager = ({
     window.ipcRenderer.on('MEETING_DELETED', handleMeetingDeleted);
 
     return () => {
+      eouSessionRef.current?.cancel();
+      eouSessionRef.current = null;
       cancelSystemAudioHealthTimeoutRef.current?.();
       cancelSystemAudioHealthTimeoutRef.current = null;
       window.removeEventListener('STOP_RECORDING', handleStopRecording);

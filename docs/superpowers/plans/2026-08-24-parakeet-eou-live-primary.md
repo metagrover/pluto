@@ -338,39 +338,39 @@ git commit -m "feat: project causal Parakeet EOU text"
 - Test: `tests/unit/parakeetEouRecordingIpc.test.ts`
 - Test: `tests/unit/audioManagerParakeetEouWiring.test.ts`
 
-- [ ] **Step 1: Write failing architecture and lifecycle tests**
+- [x] **Step 1: Write failing architecture and lifecycle tests**
 
 Assert main registers `PARAKEET_EOU_START`, `PARAKEET_EOU_APPEND`, `PARAKEET_EOU_FINISH`, and `PARAKEET_EOU_CANCEL`; binds the coordinator to the active capture owner; rejects another renderer/meeting; cancels on owner destruction; and does not route EOU frames through receipt WAVs.
 
 Read `AudioManager.tsx` as source and assert it creates the EOU renderer session, appends microphone PCM inside `onaudioprocess`, appends decoded System PCM in `NATIVE_AUDIO_CHUNK`, flushes/finishes before canonical finalization, and contains no `LiveTranscriptionQueue`, `resolveLiveChunkModel`, `resolveLiveChunkComputeType`, or `TRANSCRIBE_AUDIO` live invocation.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `pnpm exec vitest run tests/unit/parakeetEouRecordingIpc.test.ts tests/unit/audioManagerParakeetEouWiring.test.ts`
 
 Expected: IPC channels/session wiring are absent and forbidden live MLX symbols remain.
 
-- [ ] **Step 3: Register main-process lifecycle**
+- [x] **Step 3: Register main-process lifecycle**
 
 Instantiate one coordinator from `parakeetRuntimeHost`. `START` validates the active capture lease/owner and opens `meetingId.mic` and `meetingId.system`. `APPEND` validates the sender and structured-cloned PCM before native admission. Forward updates on `PARAKEET_EOU_UPDATE` and one failure on `PARAKEET_EOU_UNAVAILABLE`. `FINISH` drains; `CANCEL` and owner destruction cancel idempotently.
 
-- [ ] **Step 4: Replace AudioManager live preview**
+- [x] **Step 4: Replace AudioManager live preview**
 
 After readiness and capture-lease admission, create the EOU session before acquiring mic/System resources. Feed copied microphone samples and decoded System samples into their chunkers in the existing callbacks. Update `onLiveTranscript`, `onInterimTranscript`, responsiveness, and live integrity from the projector. On unavailable, preserve current rows, mark the live surface unavailable, and continue recording.
 
 Remove the recording-time five-second MLX queue and chunk checkpoint transcription. Preserve raw receipt journaling, activity evidence, stop sealing, batch Parakeet finalization, speaker attribution inputs that are not transcription, and analysis sequencing.
 
-- [ ] **Step 5: Make stop and error cleanup exact**
+- [x] **Step 5: Make stop and error cleanup exact**
 
 Normal stop: detach callbacks, flush chunkers, await EOU finish, then seal/finalize. Start failure: cancel EOU and release capture lease before returning. Mid-record failure: do not call stop. Renderer unload/unmount: cancel EOU and execute existing capture-owner cleanup. Fence all async continuations by `meetingId` plus generation.
 
-- [ ] **Step 6: Run focused recording tests**
+- [x] **Step 6: Run focused recording tests**
 
 Run: `pnpm exec vitest run tests/unit/parakeetEouRecordingIpc.test.ts tests/unit/audioManagerParakeetEouWiring.test.ts tests/unit/captureSessionGuard.test.ts tests/unit/recordingFinalization.test.ts tests/unit/liveTranscriptResponsivenessWiring.test.ts`
 
 Expected: all tests pass and the architecture test proves the active recording file no longer imports the MLX live queue.
 
-- [ ] **Step 7: Commit recording wiring**
+- [x] **Step 7: Commit recording wiring**
 
 ```bash
 git add electron/main.ts electron/preload.ts src/components/AudioManager.tsx tests/unit/parakeetEouRecordingIpc.test.ts tests/unit/audioManagerParakeetEouWiring.test.ts

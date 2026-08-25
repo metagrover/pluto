@@ -107,18 +107,19 @@ describe('capture journal mutation coordinator', () => {
     await expect(checkpoint).resolves.toBe('durable-audio-receipt');
   });
 
-  it('waits for prior audio mutations before resolving checkpoint receipts', () => {
+  it('serializes raw audio mutations without recording-time transcript checkpoints', () => {
     const audioManager = readFileSync(
       'src/components/AudioManager.tsx',
       'utf8',
     );
-    const checkpointBoundary = audioManager.slice(
-      audioManager.indexOf('const persistTranscriptCheckpoint ='),
-      audioManager.indexOf('const persistTranscriptAcceptanceFrame ='),
+    const audioBoundary = audioManager.slice(
+      audioManager.indexOf('const appendCaptureJournalBlob ='),
+      audioManager.indexOf('const abortUnstartedCapture ='),
     );
 
-    expect(checkpointBoundary.indexOf('.run(async () =>')).toBeLessThan(
-      checkpointBoundary.indexOf('captureJournalReceiptsRef.current.get'),
+    expect(audioBoundary.indexOf('.run(async () =>')).toBeLessThan(
+      audioBoundary.indexOf("'AUDIO_CAPTURE_JOURNAL_RAW_APPEND'"),
     );
+    expect(audioManager).not.toContain('persistTranscriptCheckpoint');
   });
 });

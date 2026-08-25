@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const read = (path: string) => readFileSync(path, 'utf8');
 
 describe('transcription architecture cleanup', () => {
-  it('keeps MLX preview and Parakeet final validation as explicit contracts', () => {
+  it('keeps Parakeet EOU live and Parakeet final as explicit contracts', () => {
     const renderer = read('src/components/AudioManager.tsx');
     const app = read('src/App.tsx');
     const finalWorker = read(
@@ -17,7 +17,8 @@ describe('transcription architecture cleanup', () => {
     expect(`${renderer}\n${main}\n${retry}`).not.toContain(
       ['WHISPER', 'TRANSCRIBE'].join('_'),
     );
-    expect(renderer).toContain('TRANSCRIPTION_TRANSCRIBE_PREVIEW');
+    expect(renderer).toContain('createEouRendererSession');
+    expect(renderer).not.toContain('TRANSCRIPTION_TRANSCRIBE_PREVIEW');
     expect(renderer).not.toContain('TRANSCRIPTION_TRANSCRIBE_FINAL');
     expect(app).toContain('runPersistedMeetingFinalTranscription');
     expect(finalWorker).toContain('TRANSCRIPTION_TRANSCRIBE_FINAL');

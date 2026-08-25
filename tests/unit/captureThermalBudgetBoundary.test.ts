@@ -32,10 +32,9 @@ describe('capture thermal production boundary', () => {
     expect(main).not.toContain('setKnowledgeDocSynthesisPaused(false)');
   });
 
-  it('gates background transcript validation on macOS power and thermal state', () => {
-    expect(main).toContain("'GET_CAPTURE_COMPUTE_POLICY'");
-    expect(main).toContain('powerMonitor.isOnBatteryPower()');
-    expect(main).toContain('powerMonitor.getCurrentThermalState()');
-    expect(audioManager).toContain('BackgroundTranscriptValidationQueue');
+  it('uses bounded EOU dispatch without a recording-time validation worker', () => {
+    expect(audioManager).toContain('createEouRendererSession');
+    expect(audioManager).not.toContain('BackgroundTranscriptValidationQueue');
+    expect(audioManager).not.toContain('GET_CAPTURE_COMPUTE_POLICY');
   });
 });

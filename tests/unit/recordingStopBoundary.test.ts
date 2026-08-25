@@ -10,41 +10,33 @@ describe('recording stop checkpoint boundary', () => {
   );
   const stopSession = audioManager.slice(stopStart, stopEnd);
 
-  it('admits the MediaRecorder final interval before closing the live queue', () => {
+  it('admits the MediaRecorder final interval before finishing EOU', () => {
     const recorderStop = stopSession.indexOf(
       'const micBlob = await stopRecorder(',
     );
     const captureDrain = stopSession.indexOf(
       'await captureActivitySessionRef.current?.drain();',
     );
-    const queueClose = stopSession.indexOf(
-      'liveQueueAtStop.close({ drainQueued: true })',
-    );
+    const eouFinish = stopSession.indexOf('await eouSessionAtStop?.finish()');
 
     expect(recorderStop).toBeGreaterThan(-1);
     expect(captureDrain).toBeGreaterThan(recorderStop);
-    expect(queueClose).toBeGreaterThan(captureDrain);
+    expect(eouFinish).toBeGreaterThan(captureDrain);
   });
 
-  it('bounds final-interval draining before fencing and cancellation', () => {
-    const queueClose = stopSession.indexOf(
-      'liveQueueAtStop.close({ drainQueued: true })',
-    );
-    const boundedWait = stopSession.indexOf(
-      'await liveQueueAtStop.waitForIdle(2_500)',
-      queueClose,
-    );
+  it('drains EOU before fencing and sealing canonical capture', () => {
+    const eouFinish = stopSession.indexOf('await eouSessionAtStop?.finish()');
     const generationFence = stopSession.indexOf(
-      'liveTranscriptionGenerationRef.current += 1',
-      queueClose,
+      'eouGenerationRef.current += 1',
+      eouFinish,
     );
-    const cancellation = stopSession.indexOf(
-      "'CANCEL_MEETING_TRANSCRIPTION'",
-      queueClose,
+    const journalStop = stopSession.indexOf(
+      "'AUDIO_CAPTURE_JOURNAL_STOP'",
+      eouFinish,
     );
 
-    expect(boundedWait).toBeGreaterThan(queueClose);
-    expect(generationFence).toBeGreaterThan(boundedWait);
-    expect(cancellation).toBeGreaterThan(generationFence);
+    expect(eouFinish).toBeGreaterThan(-1);
+    expect(generationFence).toBeGreaterThan(eouFinish);
+    expect(journalStop).toBeGreaterThan(generationFence);
   });
 });
