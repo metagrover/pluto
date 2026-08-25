@@ -73,6 +73,7 @@ export interface DashboardActionInsightItem {
   dueLabel: string;
   status: 'overdue' | 'stale' | 'active';
   commitmentState: 'possible' | 'confirmed';
+  reviewedAt: string | null;
   statusLabel: string;
   basisLabel: string;
   sourceMeetingId: string | null;
@@ -128,6 +129,7 @@ export type DashboardActionInsights =
       confirmedCount: 0;
       summary: string;
       items: [];
+      allItems: [];
     }
   | {
       state: 'populated';
@@ -138,6 +140,7 @@ export type DashboardActionInsights =
       confirmedCount: number;
       summary: string;
       items: DashboardActionInsightItem[];
+      allItems: DashboardActionInsightItem[];
     };
 
 export type DashboardCommitments =
@@ -737,6 +740,7 @@ const actionToInsightItem = (
   linkedAttention: AttentionItem | null,
   sourceMeeting: Meeting | null,
 ): DashboardActionInsightItem => {
+  const metadata = parseActionMetadata(action.metadata);
   const commitmentState =
     getCommitmentState(action.metadata) === 'confirmed'
       ? 'confirmed'
@@ -752,6 +756,8 @@ const actionToInsightItem = (
     dueLabel,
     status,
     commitmentState,
+    reviewedAt:
+      typeof metadata.reviewed_at === 'string' ? metadata.reviewed_at : null,
     statusLabel:
       commitmentState === 'possible'
         ? 'Needs review'
@@ -973,6 +979,7 @@ const buildActionInsights = (
       confirmedCount: 0,
       summary,
       items: [],
+      allItems: [],
     };
   }
 
@@ -985,6 +992,7 @@ const buildActionInsights = (
     confirmedCount,
     summary,
     items,
+    allItems: deduplicatedItems,
   };
 };
 
@@ -1072,13 +1080,14 @@ const buildDashboardCommitments = (
 ): DashboardCommitments => {
   const items =
     actionInsights.state === 'populated'
-      ? actionInsights.items
+      ? actionInsights.allItems
           .filter((item) => item.commitmentState === 'confirmed')
+          .sort((a, b) => toTimestamp(b.reviewedAt) - toTimestamp(a.reviewedAt))
           .slice(0, MAX_DASHBOARD_BRIEFING_ITEMS)
       : [];
   const needsConfirmation =
     actionInsights.state === 'populated'
-      ? actionInsights.items
+      ? actionInsights.allItems
           .filter((item) => item.commitmentState === 'possible')
           .slice(0, MAX_DASHBOARD_BRIEFING_ITEMS)
       : [];

@@ -119,11 +119,17 @@ export const getDashboardReviewActions = (
 const DashboardSuggestionReview = ({
   item,
   isUpdating,
+  expanded,
+  onToggle,
+  onDecisionComplete,
   setSelectedMeetingId,
   handleReviewCommitment,
 }: {
   item: DashboardActionInsightItem;
   isUpdating: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+  onDecisionComplete: (state: 'confirmed' | 'rejected') => void;
   setSelectedMeetingId: (id: string | number | null) => void;
   handleReviewCommitment: (
     id: string,
@@ -136,100 +142,87 @@ const DashboardSuggestionReview = ({
   });
   const sourceAction = actions.find((action) => action.kind === 'source');
   const decisionActions = actions.filter((action) => action.kind !== 'source');
+  const panelId = `dashboard-suggestion-panel-${item.id}`;
+  const sourceExcerpt =
+    item.sourceSynthesis?.topicSummary ??
+    item.sourceSynthesis?.overview ??
+    item.sourceSynthesis?.evidence ??
+    null;
+  const basisLabel = item.basisLabel.replace(/^Possible follow-up · /, '');
 
   return (
-    <details
+    <article
       data-testid="dashboard-suggestion-review"
-      className="group/review mt-2"
+      aria-busy={isUpdating}
+      className={`-mx-3 rounded-lg px-3 transition-colors ${expanded ? 'bg-pro-surface/45' : 'hover:bg-pro-surface/25'}`}
     >
-      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-1 rounded-md bg-pro-accent px-3 py-1 text-[11px] font-bold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent group-open/review:bg-transparent group-open/review:text-pro-text-muted group-open/review:hover:text-pro-text-main [&::-webkit-details-marker]:hidden">
-        Review suggestion
+      <button
+        type="button"
+        aria-label={`Review suggestion: ${item.title}`}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={onToggle}
+        className="group flex w-full items-start gap-3 py-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-semibold leading-5 text-pro-text-main">
+            {item.title}
+          </span>
+          <span className="mt-1 block text-[11px] font-medium leading-5 text-pro-text-muted">
+            {basisLabel}
+          </span>
+        </span>
         <ChevronRight
-          className="h-3.5 w-3.5 transition-transform duration-200 ease-out group-open/review:rotate-90 motion-reduce:transition-none"
+          className={`mt-1 h-4 w-4 shrink-0 text-pro-text-muted/65 transition-transform duration-200 ease-out group-hover:text-pro-text-main motion-reduce:transition-none ${expanded ? 'rotate-90' : ''}`}
           aria-hidden="true"
         />
-      </summary>
-      <div className="mb-2 border-y border-pro-border/60 py-3">
-        {sourceAction ? (
-          <div>
-            <p className="text-[10px] font-semibold text-pro-text-muted/70">
-              Source synthesis
-            </p>
-            {item.sourceSynthesis ? (
-              <div className="mt-2 max-w-[68ch]">
-                {item.sourceSynthesis.overview ? (
-                  <p className="text-[12px] font-medium leading-5 text-pro-text-main/85">
-                    {item.sourceSynthesis.overview}
-                  </p>
-                ) : null}
-                {item.sourceSynthesis.topicTitle ||
-                item.sourceSynthesis.topicSummary ? (
-                  <div className="mt-3 border-t border-pro-border/50 pt-3">
-                    {item.sourceSynthesis.topicTitle ? (
-                      <p className="text-[11px] font-semibold text-pro-text-main">
-                        {item.sourceSynthesis.topicTitle}
-                      </p>
-                    ) : null}
-                    {item.sourceSynthesis.topicSummary ? (
-                      <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
-                        {item.sourceSynthesis.topicSummary}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-                {item.sourceSynthesis.evidence ? (
-                  <div className="mt-3 rounded-md bg-pro-surface/70 px-3 py-2">
-                    <p className="text-[9px] font-semibold text-pro-text-muted/70">
-                      Supporting quote
-                    </p>
-                    <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-main/80">
-                      “{item.sourceSynthesis.evidence}”
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <p className="mt-2 max-w-md text-[11px] font-medium leading-5 text-pro-text-muted">
-                No synthesized source context is available for this meeting.
-              </p>
-            )}
+      </button>
+      {expanded ? (
+        <div
+          id={panelId}
+          className="animate-in fade-in pb-4 duration-150 motion-reduce:animate-none"
+        >
+          {sourceAction ? (
             <button
               type="button"
-              aria-label={sourceAction.ariaLabel}
+              aria-label={`Open source meeting for ${item.title}`}
               disabled={isUpdating}
               onClick={sourceAction.onClick}
-              className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-semibold text-pro-text-muted hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+              className="line-clamp-1 w-full text-left text-[11px] font-medium leading-5 text-pro-text-muted/85 transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
             >
-              {sourceAction.label}
-              <ArrowRight className="h-3 w-3" aria-hidden="true" />
+              {sourceExcerpt ?? 'Source context is available in the meeting.'}
             </button>
+          ) : (
+            <p className="text-[11px] font-medium leading-5 text-pro-text-muted/80">
+              No source context is available for this suggestion.
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {decisionActions.map((action) => (
+              <button
+                key={action.label}
+                type="button"
+                aria-label={action.ariaLabel}
+                disabled={isUpdating}
+                onClick={async () => {
+                  await action.onClick();
+                  onDecisionComplete(
+                    action.kind === 'primary' ? 'confirmed' : 'rejected',
+                  );
+                }}
+                className={
+                  action.kind === 'primary'
+                    ? 'inline-flex min-h-8 items-center rounded-md bg-pro-accent px-3 text-[11px] font-semibold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
+                    : 'inline-flex min-h-8 items-center rounded-md px-2 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
+                }
+              >
+                {action.kind === 'primary' ? 'Add commitment' : action.label}
+              </button>
+            ))}
           </div>
-        ) : (
-          <p className="max-w-md text-[11px] font-medium leading-5 text-pro-text-muted">
-            No source meeting is available. Review the wording before adding
-            this to your commitments.
-          </p>
-        )}
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-pro-border/50 pt-3">
-          {decisionActions.map((action) => (
-            <button
-              key={action.label}
-              type="button"
-              aria-label={action.ariaLabel}
-              disabled={isUpdating}
-              onClick={action.onClick}
-              className={
-                action.kind === 'primary'
-                  ? 'inline-flex min-h-9 items-center rounded-md bg-pro-accent px-3 text-[11px] font-bold text-white transition-colors hover:bg-pro-accent/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
-                  : 'inline-flex min-h-9 items-center rounded-md px-3 text-[11px] font-semibold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50'
-              }
-            >
-              {action.label}
-            </button>
-          ))}
         </div>
-      </div>
-    </details>
+      ) : null}
+    </article>
   );
 };
 
@@ -418,6 +411,12 @@ export const Dashboard = ({
   const [commitmentText, setCommitmentText] = useState('');
   const [commitmentDueDate, setCommitmentDueDate] = useState('');
   const [isCreatingCommitment, setIsCreatingCommitment] = useState(false);
+  const [reviewingSuggestionId, setReviewingSuggestionId] = useState<
+    string | null
+  >(null);
+  const [recentlyAddedCommitmentId, setRecentlyAddedCommitmentId] = useState<
+    string | null
+  >(null);
   const [celebration, setCelebration] = useState<
     'idle' | 'confetti' | 'reduced'
   >('idle');
@@ -434,6 +433,23 @@ export const Dashboard = ({
     const timeout = window.setTimeout(() => setCelebration('idle'), 1600);
     return () => window.clearTimeout(timeout);
   }, [celebration]);
+
+  useEffect(() => {
+    if (!recentlyAddedCommitmentId) return;
+    const timeout = window.setTimeout(
+      () => setRecentlyAddedCommitmentId(null),
+      2400,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [recentlyAddedCommitmentId]);
+
+  const finishSuggestionReview = (
+    itemId: string,
+    state: 'confirmed' | 'rejected',
+  ) => {
+    setReviewingSuggestionId(null);
+    if (state === 'confirmed') setRecentlyAddedCommitmentId(itemId);
+  };
 
   const submitCommitment = async (event: FormEvent) => {
     event.preventDefault();
@@ -467,7 +483,7 @@ export const Dashboard = ({
     model.actionInsights.state === 'populated'
       ? Math.max(
           0,
-          model.actionInsights.items.filter(
+          model.actionInsights.allItems.filter(
             (item) => item.commitmentState === 'confirmed',
           ).length - commitmentItems.length,
         )
@@ -719,7 +735,9 @@ export const Dashboard = ({
                           <span
                             className={`shrink-0 rounded px-2 py-1 text-[9px] font-semibold ${getActionInsightStatusTone(item)}`}
                           >
-                            {item.statusLabel}
+                            {recentlyAddedCommitmentId === item.id
+                              ? 'Added'
+                              : item.statusLabel}
                           </span>
                         </div>
                         <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
@@ -745,6 +763,15 @@ export const Dashboard = ({
                             <DashboardSuggestionReview
                               item={item}
                               isUpdating={isUpdating}
+                              expanded={reviewingSuggestionId === item.id}
+                              onToggle={() =>
+                                setReviewingSuggestionId((current) =>
+                                  current === item.id ? null : item.id,
+                                )
+                              }
+                              onDecisionComplete={(state) =>
+                                finishSuggestionReview(item.id, state)
+                              }
                               setSelectedMeetingId={setSelectedMeetingId}
                               handleReviewCommitment={handleReviewCommitment}
                             />
@@ -803,41 +830,32 @@ export const Dashboard = ({
             >
               <div className="mb-4">
                 <h3 className="text-[15px] font-semibold text-pro-text-main">
-                  Suggested commitments
+                  Suggestions
                 </h3>
                 <p className="mt-1 text-[12px] font-medium leading-5 text-pro-text-muted">
-                  Review what Pluto heard before adding it to your commitments.
+                  Possible follow-ups from your meetings.
                 </p>
               </div>
               <div className="divide-y divide-pro-border/60">
                 {model.commitments.needsConfirmation.map((item) => {
                   const isUpdating = updatingTaskIds.has(item.id);
                   return (
-                    <article
+                    <DashboardSuggestionReview
                       key={item.id}
-                      aria-busy={isUpdating}
-                      className="py-3 first:pt-0 last:pb-0"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <h4 className="text-[13px] font-semibold leading-5 text-pro-text-main">
-                            {item.title}
-                          </h4>
-                          <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
-                            {item.basisLabel}
-                          </p>
-                        </div>
-                        <span className="rounded bg-pro-warning/10 px-2 py-1 text-[9px] font-semibold text-pro-warning">
-                          {item.statusLabel}
-                        </span>
-                      </div>
-                      <DashboardSuggestionReview
-                        item={item}
-                        isUpdating={isUpdating}
-                        setSelectedMeetingId={setSelectedMeetingId}
-                        handleReviewCommitment={handleReviewCommitment}
-                      />
-                    </article>
+                      item={item}
+                      isUpdating={isUpdating}
+                      expanded={reviewingSuggestionId === item.id}
+                      onToggle={() =>
+                        setReviewingSuggestionId((current) =>
+                          current === item.id ? null : item.id,
+                        )
+                      }
+                      onDecisionComplete={(state) =>
+                        finishSuggestionReview(item.id, state)
+                      }
+                      setSelectedMeetingId={setSelectedMeetingId}
+                      handleReviewCommitment={handleReviewCommitment}
+                    />
                   );
                 })}
               </div>
@@ -872,30 +890,26 @@ export const Dashboard = ({
           model.commitments.needsConfirmation.length ? (
             <details className="mt-4 border-t border-pro-border/70 pt-4">
               <summary className="cursor-pointer text-[11px] font-bold text-pro-text-muted hover:text-pro-text-main">
-                Needs confirmation ({model.commitments.needsConfirmation.length}
-                )
+                Suggestions ({model.commitments.needsConfirmation.length})
               </summary>
-              <div className="mt-3 space-y-2">
+              <div className="mt-3 divide-y divide-pro-border/60">
                 {model.commitments.needsConfirmation.map((item) => (
-                  <div key={item.id} className="text-[12px]">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-medium text-pro-text-muted">
-                        {item.title}
-                      </span>
-                      <span className="rounded bg-pro-warning/10 px-2 py-1 text-[9px] font-semibold text-pro-warning">
-                        {item.statusLabel}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-[11px] font-medium text-pro-text-muted/70">
-                      {item.basisLabel}
-                    </p>
-                    <DashboardSuggestionReview
-                      item={item}
-                      isUpdating={updatingTaskIds.has(item.id)}
-                      setSelectedMeetingId={setSelectedMeetingId}
-                      handleReviewCommitment={handleReviewCommitment}
-                    />
-                  </div>
+                  <DashboardSuggestionReview
+                    key={item.id}
+                    item={item}
+                    isUpdating={updatingTaskIds.has(item.id)}
+                    expanded={reviewingSuggestionId === item.id}
+                    onToggle={() =>
+                      setReviewingSuggestionId((current) =>
+                        current === item.id ? null : item.id,
+                      )
+                    }
+                    onDecisionComplete={(state) =>
+                      finishSuggestionReview(item.id, state)
+                    }
+                    setSelectedMeetingId={setSelectedMeetingId}
+                    handleReviewCommitment={handleReviewCommitment}
+                  />
                 ))}
               </div>
             </details>

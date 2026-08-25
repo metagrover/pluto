@@ -2094,6 +2094,45 @@ describe('buildDashboardHomeModel', () => {
     });
   });
 
+  it('keeps a newly reviewed commitment visible when the suggestion queue exceeds the insight cap', () => {
+    const possibleActions = Array.from({ length: 6 }, (_, index) =>
+      makeAction({
+        id: `possible-${index + 1}`,
+        name: `Possible follow-up ${index + 1}`,
+        due_date: null,
+        metadata: JSON.stringify({ commitment_state: 'possible' }),
+        updated_at: `2026-08-${String(10 + index).padStart(2, '0')}T10:00:00.000Z`,
+      }),
+    );
+    const reviewedCommitment = makeAction({
+      id: 'newly-confirmed',
+      name: 'Ship the standard meeting analysis view',
+      due_date: null,
+      metadata: JSON.stringify({
+        commitment_state: 'confirmed',
+        reviewed_at: '2026-08-24T18:39:34.000Z',
+      }),
+      updated_at: '2026-08-24T18:39:34.000Z',
+    });
+
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [...possibleActions, reviewedCommitment],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.commitments.state).toBe('populated');
+    expect(model.commitments.items[0]).toMatchObject({
+      id: 'newly-confirmed',
+      title: 'Ship the standard meeting analysis view',
+    });
+    expect(model.commitments.needsConfirmation).toHaveLength(3);
+  });
+
   it('keeps a blocker-backed possible action possible and non-completable', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,

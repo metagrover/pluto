@@ -387,17 +387,15 @@ describe('Dashboard', () => {
       'No blockers need attention. Review the next suggested commitment to stay ahead.',
     );
     expect(markup).not.toContain('You&#x27;re caught up');
-    expect(markup).toContain('Suggested commitments');
+    expect(markup).toContain('Suggestions');
+    expect(markup).toContain('Possible follow-ups from your meetings.');
     expect(markup).toContain('Draft the launch checklist');
     expect(markup).toContain('Schedule the privacy review');
     expect(markup).toContain('Send the revised launch brief');
-    expect(markup.match(/Review suggestion/g) ?? []).toHaveLength(3);
-    expect(markup).toContain('Add to commitments');
-    expect(markup).toContain('Dismiss');
-    expect(markup).toContain('data-testid="dashboard-suggestion-review"');
-    expect(markup).toMatch(
-      /<summary class="[^"]*bg-pro-accent[^"]*group-open\/review:bg-transparent[^"]*">Review suggestion/,
+    expect(markup.match(/aria-label="Review suggestion:/g) ?? []).toHaveLength(
+      3,
     );
+    expect(markup).toContain('data-testid="dashboard-suggestion-review"');
     expect(
       markup.match(/data-testid="dashboard-suggestion-review"/g) ?? [],
     ).toHaveLength(3);
@@ -925,25 +923,13 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Needs review');
-    expect(markup).toContain(
-      'Possible follow-up · From Launch Review · Apr 27, 2026',
-    );
-    expect(markup).toContain('Review suggestion');
-    expect(markup).toContain('Source synthesis');
-    expect(markup).toContain('Launch readiness now depends on privacy review.');
-    expect(markup).toContain('Open full meeting');
-    expect(markup).toContain('Add to commitments');
-    expect(markup).toContain('Dismiss');
+    expect(markup).toContain('From Launch Review · Apr 27, 2026');
     expect(markup).toMatch(
-      /aria-label="Open full meeting for Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
+      /aria-label="Review suggestion: Check whether privacy review is assigned"[^>]+aria-expanded="false"/,
     );
-    expect(markup).toMatch(
-      /aria-label="Add Check whether privacy review is assigned to commitments"[^>]+focus-visible:outline-pro-accent/,
-    );
-    expect(markup).toMatch(
-      /aria-label="Dismiss suggestion: Check whether privacy review is assigned"[^>]+focus-visible:outline-pro-accent/,
-    );
+    expect(markup).not.toContain('Needs review');
+    expect(markup).not.toContain('Open full meeting');
+    expect(markup).not.toContain('Source synthesis');
     expect(markup).not.toContain('Confirm task');
     expect(markup).not.toContain('Not a task');
     expect(markup).not.toContain('Mark complete');
@@ -983,15 +969,10 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Review suggestion');
     expect(markup).toContain(
-      '<details data-testid="dashboard-suggestion-review"',
+      'aria-label="Review suggestion: Ship privacy review"',
     );
-    expect(markup).toContain(
-      'No source meeting is available. Review the wording before adding this to your commitments.',
-    );
-    expect(markup).toContain('Add to commitments');
-    expect(markup).toContain('Dismiss');
+    expect(markup).toContain('aria-expanded="false"');
     expect(markup).not.toContain('Open full meeting');
   });
 
@@ -1094,7 +1075,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Needs review');
+    expect(markup).toContain('aria-expanded="false"');
     expect(markup).not.toContain('Resolve blocker');
     expect(markup).not.toContain('Dismiss blocker');
     expect(markup).not.toContain('Snooze blocker');
