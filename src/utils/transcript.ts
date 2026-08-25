@@ -1,9 +1,70 @@
-import { formatReadableTranscriptForAnalysis } from './readableTranscript.ts';
+import {
+  buildReadableTranscriptSegments,
+  formatReadableTranscriptForAnalysis,
+} from './readableTranscript.ts';
 
 interface TranscriptSegmentLike {
   text?: unknown;
   speaker?: unknown;
+  start?: unknown;
+  end?: unknown;
+  startTime?: unknown;
+  endTime?: unknown;
 }
+
+const MINIMUM_CONFIDENT_MIC_WORDS = 4;
+const MAXIMUM_CONFIDENT_REMOTE_OVERLAP = 0.5;
+
+const finiteTime = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+const wordCount = (value: unknown): number =>
+  typeof value === 'string'
+    ? value.trim().split(/\s+/).filter(Boolean).length
+    : 0;
+
+type TimedInterval = { start: number; end: number };
+
+const toTimedInterval = (
+  segment: TranscriptSegmentLike,
+): TimedInterval | null => {
+  const start = finiteTime(segment.startTime) ?? finiteTime(segment.start);
+  const end = finiteTime(segment.endTime) ?? finiteTime(segment.end);
+  return start !== null && end !== null && start >= 0 && end > start
+    ? { start, end }
+    : null;
+};
+
+const coveredOverlapRatio = (
+  segment: TranscriptSegmentLike,
+  candidates: ReadonlyArray<TimedInterval>,
+): number => {
+  const interval = toTimedInterval(segment);
+  if (!interval) return 0;
+
+  let covered = 0;
+  let coveredThrough = interval.start;
+  for (const candidate of candidates) {
+    if (candidate.end <= interval.start) continue;
+    if (candidate.start >= interval.end) break;
+    const overlapStart = Math.max(
+      interval.start,
+      candidate.start,
+      coveredThrough,
+    );
+    const overlapEnd = Math.min(interval.end, candidate.end);
+    if (overlapEnd > overlapStart) {
+      covered += overlapEnd - overlapStart;
+      coveredThrough = overlapEnd;
+    }
+    if (coveredThrough >= interval.end) break;
+  }
+  return covered / (interval.end - interval.start);
+};
+
+const hasValidTimeRange = (segment: TranscriptSegmentLike): boolean => {
+  return toTimedInterval(segment) !== null;
+};
 
 export const getTranscriptSegmentStartTime = (segment: {
   start?: unknown;
@@ -41,6 +102,51 @@ export const parseTranscriptSegments = (
   }
 };
 
+export const parseTranscriptSegmentsForPresentation = (
+  transcriptJson?: string | null,
+): TranscriptSegmentLike[] => {
+  const segments = parseTranscriptSegments(transcriptJson);
+  return applyTranscriptSpeakerPresentation(transcriptJson, segments);
+};
+
+export const applyTranscriptSpeakerPresentation = <
+  T extends TranscriptSegmentLike,
+>(
+  transcriptJson: string | null | undefined,
+  segments: T[],
+): T[] => {
+  if (!transcriptJson?.trim()) return segments;
+  try {
+    const parsed = JSON.parse(transcriptJson) as {
+      speakerAttribution?: { mappingApplied?: unknown };
+    };
+    if (parsed?.speakerAttribution?.mappingApplied !== false) return segments;
+    const remoteIntervals = segments
+      .filter((segment) => segment.speaker === 'Them')
+      .map(toTimedInterval)
+      .filter((interval): interval is TimedInterval => interval !== null)
+      .sort((left, right) => left.start - right.start);
+    return segments.map((segment) => {
+      if (segment.speaker === 'Them') return segment;
+      if (segment.speaker === 'Me') {
+        if (!hasValidTimeRange(segment)) {
+          return { ...segment, speaker: 'Speaker' } as T;
+        }
+        const remoteOverlap = coveredOverlapRatio(segment, remoteIntervals);
+        if (
+          wordCount(segment.text) >= MINIMUM_CONFIDENT_MIC_WORDS &&
+          remoteOverlap < MAXIMUM_CONFIDENT_REMOTE_OVERLAP
+        ) {
+          return segment;
+        }
+      }
+      return { ...segment, speaker: 'Speaker' } as T;
+    });
+  } catch {
+    return segments;
+  }
+};
+
 export const isTranscriptJsonEffectivelyEmpty = (
   transcriptJson?: string | null,
 ): boolean => {
@@ -50,6 +156,10 @@ export const isTranscriptJsonEffectivelyEmpty = (
 export const buildAnalysisTranscriptFromJson = (
   transcriptJson?: string | null,
 ): string => {
-  const segments = parseTranscriptSegments(transcriptJson);
-  return formatReadableTranscriptForAnalysis(segments);
+  const readable = buildReadableTranscriptSegments(
+    parseTranscriptSegments(transcriptJson),
+  ).segments;
+  return formatReadableTranscriptForAnalysis(
+    applyTranscriptSpeakerPresentation(transcriptJson, readable),
+  );
 };

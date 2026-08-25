@@ -1,3 +1,4 @@
+import { isEmbeddedMicFragment } from '../../utils/readableTranscript.ts';
 import type { AttributionSegment } from '../../utils/speakerAttribution.ts';
 import {
   CROSS_CHANNEL_SKEW_POLICY_VERSION,
@@ -89,24 +90,14 @@ const dedupeExactSegments = (segments: AttributionSegment[]) => {
   return { segments: retained, dropped };
 };
 
-const removeEmbeddedMicLetterArtifacts = (
+const removeEmbeddedMicFragments = (
   micSegments: AttributionSegment[],
   systemSegments: AttributionSegment[],
 ) => {
   let dropped = 0;
+  const candidates = [...micSegments, ...systemSegments];
   const segments = micSegments.filter((mic) => {
-    const normalized = segmentText(mic);
-    const duration = mic.endTime - mic.startTime;
-    if (!/^\p{L}$/u.test(normalized) || duration < 0 || duration > 0.25) {
-      return true;
-    }
-    const embedded = systemSegments.some(
-      (system) =>
-        system.endTime - system.startTime >= 2 &&
-        (system.words?.length ?? 0) >= 3 &&
-        mic.startTime >= system.startTime &&
-        mic.endTime <= system.endTime,
-    );
+    const embedded = isEmbeddedMicFragment(mic, candidates);
     if (embedded) dropped += 1;
     return !embedded;
   });
@@ -123,7 +114,7 @@ export const collapseCrossChannelWordBleed = (input: {
   const timingToleranceSeconds = input.timingToleranceSeconds ?? 0.75;
   const dedupedMic = dedupeExactSegments(input.micSegments);
   const dedupedSystem = dedupeExactSegments(input.systemSegments);
-  const filteredMic = removeEmbeddedMicLetterArtifacts(
+  const filteredMic = removeEmbeddedMicFragments(
     dedupedMic.segments,
     dedupedSystem.segments,
   );

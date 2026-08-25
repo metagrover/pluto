@@ -44,21 +44,28 @@ const normalizedSpeaker = (value: unknown): string =>
     ? String(value).trim().toLocaleLowerCase('en')
     : '';
 
-const isEmbeddedLetterArtifact = (
+const tokenCoverage = (query: string[], reference: string[]): number => {
+  const queryTokens = new Set(query);
+  const referenceTokens = new Set(reference);
+  if (queryTokens.size === 0) return 0;
+  let matches = 0;
+  for (const token of queryTokens) {
+    if (referenceTokens.has(token)) matches += 1;
+  }
+  return matches / queryTokens.size;
+};
+
+export const isEmbeddedMicFragment = (
   segment: ReadableTranscriptSegment,
   segments: ReadonlyArray<ReadableTranscriptSegment>,
 ): boolean => {
   if (normalizedSpeaker(segment.speaker) !== 'me') return false;
   const text = typeof segment.text === 'string' ? segment.text : '';
-  if (!/^\p{L}$/u.test(normalizedText(text))) return false;
+  const tokens = textTokens(text);
+  if (tokens.length === 0 || tokens.length > 4) return false;
   const startTime = finiteTime(segment.startTime);
   const endTime = finiteTime(segment.endTime);
-  if (
-    startTime === null ||
-    endTime === null ||
-    endTime < startTime ||
-    endTime - startTime > 0.25
-  ) {
+  if (startTime === null || endTime === null || endTime < startTime) {
     return false;
   }
 
@@ -68,13 +75,23 @@ const isEmbeddedLetterArtifact = (
     const candidateEnd = finiteTime(candidate.endTime);
     const candidateText =
       typeof candidate.text === 'string' ? candidate.text : '';
+    const candidateTokens = textTokens(candidateText);
+    const strictLetterArtifact =
+      tokens.length === 1 &&
+      /^\p{L}$/u.test(tokens[0]) &&
+      endTime - startTime <= 0.25 &&
+      candidateEnd !== null &&
+      candidateStart !== null &&
+      candidateEnd - candidateStart >= 2 &&
+      candidateTokens.length >= 3;
     return (
       candidateStart !== null &&
       candidateEnd !== null &&
-      candidateEnd - candidateStart >= 2 &&
-      textTokens(candidateText).length >= 3 &&
-      startTime >= candidateStart &&
-      endTime <= candidateEnd
+      (strictLetterArtifact || candidateTokens.length >= 4) &&
+      candidateTokens.length >= tokens.length + 2 &&
+      startTime >= candidateStart - 0.05 &&
+      endTime <= candidateEnd + 0.05 &&
+      (tokens.length === 1 || tokenCoverage(tokens, candidateTokens) >= 0.25)
     );
   });
 };
@@ -113,7 +130,7 @@ export const buildReadableTranscriptSegments = <
     seenExact.add(exactKey);
 
     const text = cleanReadableText(segment.text);
-    if (isEmbeddedLetterArtifact({ ...segment, text }, input)) {
+    if (isEmbeddedMicFragment({ ...segment, text }, input)) {
       embeddedFragmentCount += 1;
       return;
     }

@@ -170,4 +170,40 @@ describe('collapseCrossChannelWordBleed', () => {
     expect(result.micSegments.map((entry) => entry.text)).toEqual(['Okay']);
     expect(result.reconciliation.droppedEmbeddedMicFragmentCount).toBe(1);
   });
+
+  it('removes short mic bleed fragments fully embedded in a longer remote utterance', () => {
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [
+        segment('Me', [{ word: 'kinda', start: 2.1, end: 2.4 }]),
+        segment('Me', timedWords('run uh running uh', 5.2)),
+      ],
+      systemSegments: [
+        segment('Them', timedWords("that's kind of still ongoing", 1.6)),
+        segment(
+          'Them',
+          timedWords(
+            'these are the entry points we are going to be running',
+            4.8,
+          ),
+        ),
+      ],
+    });
+
+    expect(result.micSegments).toEqual([]);
+    expect(result.reconciliation.droppedEmbeddedMicFragmentCount).toBe(2);
+  });
+
+  it('preserves a short local turn that continues beyond remote speech', () => {
+    const result = collapseCrossChannelWordBleed({
+      micSegments: [
+        segment('Me', timedWords('Do these match the original format', 3.4)),
+      ],
+      systemSegments: [
+        segment('Them', timedWords('this should fit in as written', 1.8)),
+      ],
+    });
+
+    expect(result.micSegments).toHaveLength(1);
+    expect(result.reconciliation.droppedEmbeddedMicFragmentCount).toBe(0);
+  });
 });

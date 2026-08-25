@@ -173,6 +173,7 @@ export const runPersistedMeetingFinalTranscription = async (
             stopToValidatedLatency: provisional.payload.stopToValidatedLatency,
             lifecycleStatus: 'validated',
             integrity: { ...commit.integrity, reasons: [] },
+            liveSegments: provisional.segments,
           }),
         );
         const transcriptIntegrityJson = JSON.stringify({

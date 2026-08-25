@@ -61,7 +61,7 @@ describe('runPersistedMeetingFinalTranscription', () => {
         activityEvidence: { private: 'verified by parser' },
       }),
     } as Meeting;
-    const invoke = vi.fn(async (channel: string) => {
+    const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
       if (channel === 'GET_TRANSCRIPTION_VOCABULARY') {
         return { terms: ['Known Person'] };
       }
@@ -70,6 +70,13 @@ describe('runPersistedMeetingFinalTranscription', () => {
           thermalState: 'nominal',
           freeMemoryBytes: 8 * 1024 ** 3,
           totalMemoryBytes: 16 * 1024 ** 3,
+        };
+      }
+      if (channel === 'COMMIT_FINAL_TRANSCRIPTION') {
+        const request = args[0] as { canonicalTranscriptJson: string };
+        return {
+          committed: true,
+          transcriptJson: request.canonicalTranscriptJson,
         };
       }
       return true;
@@ -84,9 +91,32 @@ describe('runPersistedMeetingFinalTranscription', () => {
         vocabulary: ['Known Person'],
         vocabularyPolicyVersion: 'known-people-v1',
       });
+      const committed = await dependencies.commitCanonical({
+        segments: [
+          {
+            text: 'canonical',
+            startTime: 0,
+            endTime: 1,
+            speaker: 'Speaker',
+          },
+        ],
+        integrity: {},
+        metadata: {
+          engine: 'parakeet_coreml',
+          model: 'parakeet-tdt-0.6b-v3',
+          computeUnits: 'cpu_and_neural_engine',
+          computeType: 'int8',
+          language: 'en',
+          elapsedMs: 10,
+          providerVersions: ['test-provider'],
+          modelBundleVersions: [],
+          warnings: [],
+          vocabularyCount: 1,
+        },
+      });
       await dependencies.startAnalysis({
         meetingId: 'meeting-1',
-        transcript: { segments: [{ text: 'canonical' }] },
+        transcript: committed.transcript,
       });
       return { status: 'validated' };
     });
@@ -99,5 +129,15 @@ describe('runPersistedMeetingFinalTranscription', () => {
 
     expect(outcome).toEqual({ status: 'validated' });
     expect(mocks.processDownstream).toHaveBeenCalledWith('meeting-1', invoke);
+    const commitCall = invoke.mock.calls.find(
+      ([channel]) => channel === 'COMMIT_FINAL_TRANSCRIPTION',
+    );
+    const persisted = JSON.parse(
+      (commitCall?.[1] as { canonicalTranscriptJson: string })
+        .canonicalTranscriptJson,
+    );
+    expect(persisted.liveSegments).toEqual([
+      { text: 'preview', startTime: 0, endTime: 1, speaker: 'Me' },
+    ]);
   });
 });

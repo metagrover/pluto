@@ -116,6 +116,8 @@ export type StoredTranscriptV2 = {
     exactDuplicateSegmentCount: number;
     embeddedFragmentCount: number;
   };
+  /** Preserved live EOU candidate so finalization cannot erase usable text. */
+  liveSegments?: unknown[];
   segments: unknown[];
 };
 
@@ -233,6 +235,7 @@ export function buildTranscriptJsonPayload(
     stopToValidatedLatency?: StopToValidatedLatencySummary;
     lifecycleStatus?: TranscriptLifecycleStatus;
     integrity?: StoredTranscriptIntegrity;
+    liveSegments?: unknown[];
   },
 ): StoredTranscriptV2 {
   const readabilityStats = buildReadableTranscriptSegments(
@@ -260,6 +263,9 @@ export function buildTranscriptJsonPayload(
       : {}),
     lifecycleStatus: options.lifecycleStatus,
     integrity: options.integrity,
+    ...(options.liveSegments?.length
+      ? { liveSegments: options.liveSegments }
+      : {}),
     readability: {
       schemaVersion: 1,
       canonicalSegmentCount: segments.length,

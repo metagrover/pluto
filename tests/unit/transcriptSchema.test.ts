@@ -220,6 +220,22 @@ describe('transcriptSchema', () => {
     expect(segs[0].text).toBe('x');
   });
 
+  it('can retain the live EOU transcript alongside the finalized transcript', () => {
+    const liveSegments = [
+      { text: 'Accurate live sentence.', speaker: 'Speaker' },
+    ];
+    const payload = buildTranscriptJsonPayload(
+      [{ text: 'Final sentence.', speaker: 'Speaker' }],
+      {
+        canonicalSource: 'recovered_channels',
+        postHydrationBleedPass: false,
+        liveSegments,
+      },
+    );
+
+    expect(payload.liveSegments).toEqual(liveSegments);
+  });
+
   it('isTranscriptJsonEffectivelyEmpty handles v2 empty segments', () => {
     expect(
       isTranscriptJsonEffectivelyEmpty(
