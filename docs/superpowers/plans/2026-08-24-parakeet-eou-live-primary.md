@@ -479,11 +479,11 @@ git commit -m "test: verify causal Parakeet EOU replay"
 
 **Files:**
 - Modify: `package.json`
-- Modify: `electron-builder.yml`
+- Modify: `electron-builder.json5`
 - Create: `docs/changelog/entries/2026-08-24-663-parakeet-eou-live-primary.md`
 - Modify: `docs/superpowers/plans/2026-08-24-parakeet-eou-live-primary.md`
 
-- [ ] **Step 1: Write the changelog fragment**
+- [x] **Step 1: Write the changelog fragment**
 
 Record:
 
@@ -504,7 +504,7 @@ Record:
 - MLX source remains temporarily packaged for separately reviewed removal, but recording transcription cannot invoke it.
 ```
 
-- [ ] **Step 2: Verify clean packaging inputs**
+- [x] **Step 2: Verify clean packaging inputs**
 
 Build the native runtime and inspect packaged resources. Confirm the binary contains EOU protocol strings, the installer metadata contains the pinned EOU revision/digest, no model weights are bundled, and AudioCap/runtime executable permissions are preserved.
 
@@ -512,26 +512,51 @@ Run: `pnpm run build-native && pnpm exec electron-builder --dir`
 
 Expected: both commands succeed; packaged app contains `parakeet-runtime` and no `*.mlmodelc` EOU weights.
 
-- [ ] **Step 3: Run the complete automated suite**
+Observed: the optimized native build and ad-hoc signed directory package succeeded
+after compiling the Vite artifacts and retained MLX phase-2 binary. All five
+expected executables are packaged with executable permission; the Parakeet
+binary contains the EOU protocol and pinned revision/digest, and the app contains
+no bundled `*.mlmodelc` weights.
+
+- [x] **Step 3: Run the complete automated suite**
 
 Run: `pnpm exec vitest run && (cd native/parakeet-runtime && swift test) && pnpm exec biome lint electron/recordingReadiness.ts electron/transcription src/components/AudioManager.tsx src/components/Setup/SetupWizard.tsx src/services/liveTranscription src/services/transcription/policy.ts src/utils/transcriptionSettings.ts tests/unit && git diff --check`
 
 Expected: all TypeScript and Swift tests pass; focused Biome lint and diff check pass. Leave the known vendored FluidAudio `english.json` formatting mismatch untouched if whole-repo lint reports it.
 
-- [ ] **Step 4: Run a real Electron recording smoke**
+Observed: 1,918 Vitest tests and 134 native Swift tests pass. Focused Biome
+lint checked 231 files, TypeScript completed with no errors, and `git diff
+--check` is clean.
+
+- [x] **Step 4: Run a real Electron recording smoke**
 
 Start `pnpm run dev`, wait for `/health`, open the recording UI, and record audible English from mic and System. Verify visible committed/tentative rows update during speech, stop remains responsive, final processing uses Parakeet, and reopening the meeting shows the persisted canonical transcript. Terminate the native runtime during a second recording and verify capture continues, live becomes unavailable, stop seals, and no MLX process starts.
 
 Expected: both happy path and failure path satisfy issue #663 without private content in logs.
 
-- [ ] **Step 5: Update issue traceability and check off the plan**
+Observed: a real Electron recording displayed the causal tentative English row
+while speech was in progress, stopped responsively, materialized the sealed
+System WAV, and reopened with a validated canonical Parakeet final. Two
+consecutive recordings held subsequent System input at 48.2 kHz and 48.0 kHz;
+the previous second-session 96 kHz duplication did not recur. The persisted
+meeting used `explicit_participant_v1` with zero unsolicited vocabulary hints
+and retained “Pluto verifies English speech clearly” rather than changing
+“clearly” to “Carl.” Terminating the active Parakeet runtime produced a
+content-free unavailable event, kept capture active, and still allowed stop and
+journal sealing. No MLX transcription process started.
+
+- [x] **Step 5: Update issue traceability and check off the plan**
 
 Comment on issue #663 with commit ids, exact automated counts, causal replay metrics, packaging result, and Electron smoke evidence. Mark every completed checkbox in this plan; leave any unverified real-runtime gate unchecked and report it honestly.
 
-- [ ] **Step 6: Commit shipping evidence**
+Observed: issue #663 now records implementation commit `4f63416a`, the complete
+automated counts, replay metrics, package acceptance, both Electron smoke paths,
+and the publish-metadata-only installer limitation.
+
+- [x] **Step 6: Commit shipping evidence**
 
 ```bash
-git add docs/changelog/entries/2026-08-24-663-parakeet-eou-live-primary.md docs/superpowers/plans/2026-08-24-parakeet-eou-live-primary.md package.json electron-builder.yml
+git add docs/changelog/entries/2026-08-24-663-parakeet-eou-live-primary.md docs/superpowers/plans/2026-08-24-parakeet-eou-live-primary.md package.json electron-builder.json5
 git commit -m "docs: record Parakeet EOU live promotion"
 ```
 
