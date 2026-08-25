@@ -140,16 +140,19 @@ const makeSegment = (
   const token = update.tokens.find((candidate) =>
     kind === 'committed' ? candidate.committed : !candidate.committed,
   );
+  const rawText =
+    override?.text ??
+    (kind === 'committed' ? update.committedText : update.tentativeText);
   return {
     segment: {
       id:
         kind === 'committed'
           ? `eou:${update.generation}:${update.source}:committed-${update.revision}`
           : `eou:${update.generation}:${update.source}:tentative`,
-      speaker: update.source === 'mic' ? 'Me' : 'Them',
-      text:
-        override?.text ??
-        (kind === 'committed' ? update.committedText : update.tentativeText),
+      speaker: 'Speaker',
+      text: kind === 'committed' ? punctuateCommittedText(rawText) : rawText,
+      rawText,
+      source: update.source,
       timestampMs:
         (override?.startSeconds ??
           token?.startSeconds ??
@@ -159,6 +162,20 @@ const makeSegment = (
     source: update.source,
     revision: update.revision,
   };
+};
+
+const punctuateCommittedText = (text: string): string => {
+  const normalized = text.trim().replace(/\s+/g, ' ');
+  if (!normalized) return normalized;
+  const capitalized = normalized.replace(/[a-z]/i, (letter) =>
+    letter.toUpperCase(),
+  );
+  if (/[.!?…]["')\]]?$/u.test(capitalized)) return capitalized;
+  const isQuestion =
+    /^(?:who|what|when|where|why|how|is|are|am|was|were|do|does|did|can|could|will|would|should|have|has|had)\b/iu.test(
+      normalized,
+    );
+  return `${capitalized}${isQuestion ? '?' : '.'}`;
 };
 
 const validateUpdate = (update: ParakeetEouUpdate): void => {

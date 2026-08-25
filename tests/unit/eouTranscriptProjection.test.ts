@@ -24,21 +24,25 @@ const update = (
 });
 
 describe('EOU transcript projection', () => {
-  it('creates explicit stable and tentative Me rows from native boundaries', () => {
+  it('keeps attribution neutral and punctuates only committed presentation rows', () => {
     const projection = createEouTranscriptProjection();
 
     expect(projection.apply(update())).toEqual([
       {
         id: 'eou:1:mic:committed-1',
-        speaker: 'Me',
-        text: 'hello world',
+        speaker: 'Speaker',
+        text: 'Hello world.',
+        rawText: 'hello world',
+        source: 'mic',
         timestampMs: 0,
         confirmed: true,
       },
       {
         id: 'eou:1:mic:tentative',
-        speaker: 'Me',
+        speaker: 'Speaker',
         text: 'again',
+        rawText: 'again',
+        source: 'mic',
         timestampMs: 500,
         confirmed: false,
       },
@@ -88,12 +92,14 @@ describe('EOU transcript projection', () => {
     expect(promoted).toHaveLength(2);
     expect(promoted[0]).toMatchObject({
       id: 'eou:1:mic:committed-1',
-      text: 'hello world',
+      text: 'Hello world.',
+      rawText: 'hello world',
       confirmed: true,
     });
     expect(promoted[1]).toMatchObject({
       id: 'eou:1:mic:committed-2',
-      text: 'again',
+      text: 'Again.',
+      rawText: 'again',
       timestampMs: 500,
       confirmed: true,
     });
@@ -139,7 +145,11 @@ describe('EOU transcript projection', () => {
     );
     const rows = projection.apply(update());
 
-    expect(rows.map(({ speaker }) => speaker)).toEqual(['Me', 'Them', 'Me']);
+    expect(rows.map(({ speaker }) => speaker)).toEqual([
+      'Speaker',
+      'Speaker',
+      'Speaker',
+    ]);
     expect(rows.map(({ timestampMs }) => timestampMs)).toEqual([0, 100, 500]);
   });
 

@@ -136,7 +136,10 @@ export interface LLMProvider {
   ): Promise<InternalSignalDocument>;
   extractSpeakerIdentity(transcript: string): Promise<string | null>;
   generateTitle(transcript: string): Promise<string>;
-  synthesizeKnowledgeDocument(prompt: string): Promise<string>;
+  synthesizeKnowledgeDocument(
+    prompt: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<string>;
   answerAskPluto(prompt: string): Promise<string>;
   classifyQueryIntent(prompt: string): Promise<string>;
   extractEntities(

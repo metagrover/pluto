@@ -49,6 +49,7 @@ import type {
 } from './provider';
 
 const OLLAMA_TIMEOUT_MS = 90_000;
+const OLLAMA_ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 15 * 60_000;
 const OLLAMA_DEFAULT_MODEL = 'qwen3.5:9b';
 const SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS = 8;
@@ -378,7 +379,14 @@ const isAbortError = (error: unknown): boolean =>
   (error.name === 'AbortError' || /\babort(?:ed)?\b/i.test(error.message));
 
 export const getOllamaTimeoutMs = (task: string): number =>
-  task === 'knowledgeDoc' ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS : OLLAMA_TIMEOUT_MS;
+  task === 'knowledgeDoc'
+    ? OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS
+    : task === 'structuredAnalysis' ||
+        task === 'analysisEditorial' ||
+        task === 'topicSegmentation' ||
+        task === 'topicAnalysis'
+      ? OLLAMA_ANALYSIS_TIMEOUT_MS
+      : OLLAMA_TIMEOUT_MS;
 
 type PersonEntity = ExtractedEntities['people'][number];
 type TopicEntity = ExtractedEntities['topics'][number];
@@ -1174,11 +1182,15 @@ export class UnifiedLLMProvider implements LLMProvider {
     }
   }
 
-  async synthesizeKnowledgeDocument(prompt: string): Promise<string> {
+  async synthesizeKnowledgeDocument(
+    prompt: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string> {
     return this.generateText({
       prompt,
       task: 'knowledgeDoc',
       jsonMode: true,
+      signal: options.signal,
     });
   }
 
@@ -1264,12 +1276,19 @@ export class UnifiedLLMProvider implements LLMProvider {
         case 'ollama':
           result = await runWithOllamaGenerationGate(
             Symbol(options.task),
-            async () => this.generateWithOllama(options),
+            async (gateSignal) =>
+              this.generateWithOllama({
+                ...options,
+                signal: options.signal
+                  ? AbortSignal.any([options.signal, gateSignal])
+                  : gateSignal,
+              }),
             options.task === 'knowledgeDoc'
               ? 0
               : options.task === 'askPluto'
                 ? 20
                 : 10,
+            { preemptible: options.task === 'knowledgeDoc' },
           );
           break;
         default:

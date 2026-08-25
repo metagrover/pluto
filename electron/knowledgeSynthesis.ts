@@ -32,7 +32,10 @@ import {
   getKnowledgeDocumentMergePrompt,
   getKnowledgeDocumentPrompt,
 } from './llm/prompts';
-import { createSerializedTaskGate } from './serializedTaskGate';
+import {
+  createSerializedTaskGate,
+  isSerializedTaskPreemption,
+} from './serializedTaskGate';
 import {
   persistGlobalWorkingMemorySnapshot,
   persistPersonContextWorkingMemorySnapshot,
@@ -1086,6 +1089,7 @@ const synthesizeKnowledgeChunkWithRetry = async (params: {
     });
     return hasStructuredContent(structured) ? [structured] : [];
   } catch (error) {
+    if (isSerializedTaskPreemption(error)) throw error;
     if (params.chunk.sourceMeetings.length <= MIN_RETRY_CHUNK_SOURCE_MEETINGS) {
       console.warn(
         `[KnowledgeDoc] Chunk synthesis failed for ${params.doc.id} (${params.chunk.label}) at minimum retry size:`,
@@ -1827,6 +1831,17 @@ const synthesizeKnowledgeDocNowInternal = async (
       request.canCommit?.() === false
     ) {
       return db.getKnowledgeDoc(doc.id);
+    }
+    if (isSerializedTaskPreemption(error)) {
+      const deferred = db.upsertKnowledgeDoc({
+        id: doc.id,
+        scope_type: doc.scope_type,
+        scope_key: doc.scope_key,
+        title: doc.title,
+        status: 'stale',
+      });
+      queueKnowledgeDocRefresh(doc.id, 750);
+      return deferred;
     }
     console.error(`[KnowledgeDoc] Synthesis failed for doc ${doc.id}:`, error);
     return db.upsertKnowledgeDoc({

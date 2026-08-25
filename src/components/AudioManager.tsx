@@ -692,7 +692,7 @@ export const AudioManager = ({
             id: segment.id,
             startTime: segment.timestampMs / 1_000,
             endTime: segment.timestampMs / 1_000 + 0.01,
-            text: segment.text,
+            text: segment.rawText ?? segment.text,
             speaker: segment.speaker,
             validationState: segment.confirmed ? 'validated' : 'preview',
           }));

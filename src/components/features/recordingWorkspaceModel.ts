@@ -8,8 +8,10 @@ export type CaptureHealthState = {
 
 export type LiveTranscriptSegment = {
   id: string;
-  speaker: 'Me' | 'Them' | 'Unknown';
+  speaker: 'Me' | 'Them' | 'Speaker' | 'Unknown';
   text: string;
+  rawText?: string;
+  source?: 'mic' | 'system';
   timestampMs: number;
   confirmed: boolean;
 };

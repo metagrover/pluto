@@ -203,7 +203,12 @@ describe('EOU renderer session', () => {
     await session.finish();
 
     expect(onSegments).toHaveBeenCalledWith([
-      expect.objectContaining({ text: 'final tail', confirmed: true }),
+      expect.objectContaining({
+        text: 'Final tail.',
+        rawText: 'final tail',
+        speaker: 'Speaker',
+        confirmed: true,
+      }),
     ]);
   });
 

@@ -181,17 +181,20 @@ describe('UnifiedLLMProvider', () => {
     }
   });
 
-  it('waits for the local generation slot before starting another Ollama timeout', async () => {
-    let releaseFirst: ((response: Response) => void) | undefined;
-    const firstResponse = new Promise<Response>((resolve) => {
-      releaseFirst = resolve;
-    });
+  it('preempts active knowledge generation for meeting analysis', async () => {
     let generationCalls = 0;
-    const fetchMock = installFetchMock((_url, _init) => {
+    const fetchMock = installFetchMock((_url, init) => {
       generationCalls += 1;
-      return generationCalls === 1
-        ? firstResponse
-        : jsonResponse({ response: validAnalysisMarkdown });
+      if (generationCalls > 1) {
+        return jsonResponse({ response: validAnalysisMarkdown });
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(init.signal?.reason),
+          { once: true },
+        );
+      });
     });
     const firstProvider = new UnifiedLLMProvider('ollama', {
       ollama_model: 'phi4-mini:3.8b',
@@ -202,12 +205,12 @@ describe('UnifiedLLMProvider', () => {
 
     const first = firstProvider.synthesizeKnowledgeDocument('knowledge');
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const firstOutcome = expect(first).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'foreground_preempted',
+    });
     const second = secondProvider.generateUserAnalysisMarkdown('analysis');
-    await Promise.resolve();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    releaseFirst?.(jsonResponse({ response: '{}' }));
-    await expect(first).resolves.toBe('{}');
+    await firstOutcome;
     await expect(second).resolves.toBe(validAnalysisMarkdown);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -1427,8 +1430,8 @@ describe('LLM factory', () => {
 
 describe('Ollama Budgeting & Adaptive Windowing', () => {
   it('bounds meeting analysis requests while preserving the knowledge-doc budget', () => {
-    expect(getOllamaTimeoutMs('topicSegmentation')).toBe(90_000);
-    expect(getOllamaTimeoutMs('topicAnalysis')).toBe(90_000);
+    expect(getOllamaTimeoutMs('topicSegmentation')).toBe(300_000);
+    expect(getOllamaTimeoutMs('topicAnalysis')).toBe(300_000);
     expect(getOllamaTimeoutMs('knowledgeDoc')).toBe(900_000);
   });
 

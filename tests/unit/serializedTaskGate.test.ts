@@ -111,4 +111,48 @@ describe('createSerializedTaskGate', () => {
     await Promise.all([maintenance, secondPass]);
     expect(events).toEqual(['meeting-pass-1', 'meeting-pass-2', 'maintenance']);
   });
+
+  it('cooperatively preempts active maintenance before foreground work starts', async () => {
+    const events: string[] = [];
+    const run = createSerializedTaskGate<string, string>();
+    const maintenance = run(
+      'maintenance',
+      (signal) =>
+        new Promise<string>((_resolve, reject) => {
+          events.push('maintenance:start');
+          signal.addEventListener(
+            'abort',
+            () => {
+              events.push('maintenance:settled');
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        }),
+      0,
+      { preemptible: true },
+    );
+    await vi.waitFor(() => expect(events).toEqual(['maintenance:start']));
+    const maintenanceOutcome = expect(maintenance).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'foreground_preempted',
+    });
+
+    const foreground = run(
+      'foreground',
+      async () => {
+        events.push('foreground:start');
+        return 'done';
+      },
+      10,
+    );
+
+    await maintenanceOutcome;
+    await expect(foreground).resolves.toBe('done');
+    expect(events).toEqual([
+      'maintenance:start',
+      'maintenance:settled',
+      'foreground:start',
+    ]);
+  });
 });

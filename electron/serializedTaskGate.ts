@@ -1,8 +1,17 @@
+export const isSerializedTaskPreemption = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false;
+  if (error.message === 'foreground_preempted') return true;
+  return isSerializedTaskPreemption(
+    (error as Error & { cause?: unknown }).cause,
+  );
+};
+
 export const createSerializedTaskGate = <Key, Result>() => {
   type QueuedTask = {
     key: Key;
-    task: () => Promise<Result>;
+    task: (signal: AbortSignal) => Promise<Result>;
     priority: number;
+    preemptible: boolean;
     sequence: number;
     resolve: (result: Result) => void;
     reject: (error: unknown) => void;
@@ -10,6 +19,7 @@ export const createSerializedTaskGate = <Key, Result>() => {
   };
 
   let active = false;
+  let activeTask: (QueuedTask & { controller: AbortController }) | null = null;
   let sequence = 0;
   const queue: QueuedTask[] = [];
   const inFlightByKey = new Map<Key, Promise<Result>>();
@@ -29,15 +39,18 @@ export const createSerializedTaskGate = <Key, Result>() => {
       }
     }
     const [next] = queue.splice(nextIndex, 1);
+    const controller = new AbortController();
     active = true;
+    activeTask = { ...next, controller };
     void Promise.resolve()
-      .then(next.task)
+      .then(() => next.task(controller.signal))
       .then(next.resolve, next.reject)
       .then(() => {
         if (inFlightByKey.get(next.key) === next.promise) {
           inFlightByKey.delete(next.key);
         }
         active = false;
+        activeTask = null;
         // A completed multi-pass workflow resumes in a promise microtask and
         // may immediately enqueue its next high-priority pass. Give that
         // continuation one event-loop turn before starting queued maintenance.
@@ -47,8 +60,9 @@ export const createSerializedTaskGate = <Key, Result>() => {
 
   return (
     key: Key,
-    task: () => Promise<Result>,
+    task: (signal: AbortSignal) => Promise<Result>,
     priority = 0,
+    options: { preemptible?: boolean } = {},
   ): Promise<Result> => {
     const existing = inFlightByKey.get(key);
     if (existing) return existing;
@@ -64,11 +78,21 @@ export const createSerializedTaskGate = <Key, Result>() => {
       key,
       task,
       priority,
+      preemptible: options.preemptible === true,
       sequence: sequence++,
       resolve,
       reject,
       promise,
     });
+    if (
+      activeTask?.preemptible &&
+      priority > activeTask.priority &&
+      !activeTask.controller.signal.aborted
+    ) {
+      activeTask.controller.abort(
+        new DOMException('foreground_preempted', 'AbortError'),
+      );
+    }
     runNext();
     return promise;
   };
