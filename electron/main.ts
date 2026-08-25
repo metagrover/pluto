@@ -3075,6 +3075,7 @@ app.whenReady().then(async () => {
       error,
     );
   });
+  createWindow();
   await prepareFinalTranscriptionBeforeRecovery({
     shouldPrepare: db.getSetting('setup_complete') === 'true',
     prepare: async () => {
@@ -3267,6 +3268,4 @@ app.whenReady().then(async () => {
       createWindow();
     }
   });
-
-  createWindow();
 });

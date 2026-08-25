@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import https from 'node:https';
 import { systemPreferences } from 'electron';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -131,5 +132,6 @@ describe('recordingReadiness', () => {
     });
     expect(result.ready).toBe(true);
     expect(mockParakeetClient.prepare).toHaveBeenCalledTimes(1);
+    expect(https.get).not.toHaveBeenCalled();
   });
 });

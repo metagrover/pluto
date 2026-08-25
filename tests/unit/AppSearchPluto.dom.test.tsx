@@ -127,6 +127,17 @@ describe('App Search Pluto navigation', () => {
             return null;
           }
           if (channel === 'MLX_PREVIEW_HEALTH') return { status: 'ok' };
+          if (channel === 'RECORDING_READINESS_STATUS') {
+            return {
+              details: {
+                parakeetClient: true,
+                parakeetModel: true,
+                parakeetEouReady: true,
+                audiocapExists: true,
+                audiocapExecutable: true,
+              },
+            };
+          }
           if (channel === 'GET_MEETINGS') return [];
           if (channel === 'BOOT_PROBE_STATUS') return true;
           if (channel === 'DETECT_ACTIVE_CALL') return { active: false };

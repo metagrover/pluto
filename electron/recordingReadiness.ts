@@ -1,8 +1,5 @@
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import https from 'node:https';
-import path from 'node:path';
-import { app, systemPreferences } from 'electron';
+import { systemPreferences } from 'electron';
 import type { TranscriptionRuntimeHealth } from '../src/services/transcription/contracts';
 import type { ParakeetFinalClient } from './transcription/parakeetFinalClient';
 
@@ -134,70 +131,8 @@ export async function getRecordingReadinessStatus(
 export async function prepareRecordingReadiness(
   options: ReadinessOptions,
 ): Promise<ReadinessStatus> {
-  try {
-    await downloadNativeExecutables();
-  } catch (e) {
-    console.error('[Readiness] Native executables download failed:', e);
-  }
-
   const capability = await prepareParakeetCapability(
     options.parakeetFinalClient,
   );
   return evaluateRecordingReadiness(options, capability);
-}
-
-function downloadBinary(url: string, dest: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    https
-      .get(url, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          return downloadBinary(res.headers.location as string, dest)
-            .then(resolve)
-            .catch(reject);
-        }
-        if (res.statusCode !== 200) {
-          return reject(
-            new Error(`Failed to download binary: ${res.statusCode}`),
-          );
-        }
-        const file = fs.createWriteStream(dest);
-        res.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          // chmod +x
-          fs.chmodSync(dest, 0o755);
-          // strip quarantine
-          execFile('xattr', ['-d', 'com.apple.quarantine', dest], () => {
-            // Ignore error if attribute doesn't exist
-            resolve();
-          });
-        });
-      })
-      .on('error', () => {
-        fs.unlink(dest, () => reject(new Error('Failed to download binary')));
-      });
-  });
-}
-
-export async function downloadNativeExecutables(): Promise<void> {
-  const binDir = path.join(app.getPath('userData'), 'bin');
-  fs.mkdirSync(binDir, { recursive: true });
-
-  const BASE_URL =
-    'https://github.com/metagrover/pluto/releases/latest/download';
-
-  const audiocapUrl = `${BASE_URL}/audiocap`;
-  const audiocapDest = path.join(binDir, 'audiocap');
-
-  const parakeetUrl = `${BASE_URL}/parakeet-runtime`;
-  const parakeetDest = path.join(binDir, 'parakeet-runtime');
-
-  await Promise.all([
-    downloadBinary(audiocapUrl, audiocapDest).catch((e) =>
-      console.warn('Failed to download audiocap:', e),
-    ),
-    downloadBinary(parakeetUrl, parakeetDest).catch((e) =>
-      console.warn('Failed to download parakeet-runtime:', e),
-    ),
-  ]);
 }

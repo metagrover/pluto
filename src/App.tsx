@@ -3,6 +3,7 @@ import './App.css';
 
 // Core
 import { AudioManager } from './components/AudioManager';
+import { RuntimeReadinessGate } from './components/RuntimeReadinessGate';
 import { SetupWizard } from './components/Setup/SetupWizard';
 import { AutoEndToast } from './components/ui/AutoEndToast';
 import { useActiveCallMonitor } from './hooks/useActiveCallMonitor';
@@ -766,7 +767,7 @@ function App() {
   if (setupNeeded)
     return <SetupWizard onComplete={() => setSetupNeeded(false)} />;
 
-  return (
+  const workspace = (
     <div className="flex h-screen w-screen bg-pro-bg text-pro-text-main font-sans overflow-hidden hover:cursor-default selection:bg-pro-accent/20">
       <div className="hidden">
         <AudioManager
@@ -1102,6 +1103,8 @@ function App() {
       )}
     </div>
   );
+
+  return <RuntimeReadinessGate>{workspace}</RuntimeReadinessGate>;
 }
 
 export default App;

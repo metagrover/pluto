@@ -101,6 +101,17 @@ describe('App recording navigation', () => {
             return null;
           }
           if (channel === 'MLX_PREVIEW_HEALTH') return { status: 'ok' };
+          if (channel === 'RECORDING_READINESS_STATUS') {
+            return {
+              details: {
+                parakeetClient: true,
+                parakeetModel: true,
+                parakeetEouReady: true,
+                audiocapExists: true,
+                audiocapExecutable: true,
+              },
+            };
+          }
           if (channel === 'GET_MEETING_ENTITIES') return [];
           if (channel === 'intelligence:alerts') return [];
           if (channel === 'GET_MEETINGS') {
