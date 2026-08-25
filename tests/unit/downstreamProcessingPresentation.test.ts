@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getDownstreamProcessingPresentation } from '../../src/components/features/downstreamProcessingPresentation';
 
 describe('downstream processing presentation', () => {
-  it('maps ordinary analysis work to a copy-free loading state', () => {
+  it('maps persisted stages to truthful loading copy', () => {
     expect(
       getDownstreamProcessingPresentation({
         transcript_status: 'validated',
@@ -12,7 +12,11 @@ describe('downstream processing presentation', () => {
           stage: 'analysis',
         }),
       }),
-    ).toEqual({ state: 'loading' });
+    ).toEqual({
+      state: 'loading',
+      title: 'Analyzing conversation',
+      detail: 'Building grounded meeting notes.',
+    });
 
     expect(
       getDownstreamProcessingPresentation({
@@ -22,7 +26,11 @@ describe('downstream processing presentation', () => {
           segments: [{ speaker: 'Me', text: 'Ready transcript text' }],
         }),
       }),
-    ).toEqual({ state: 'loading' });
+    ).toEqual({
+      state: 'loading',
+      title: 'Preparing notes',
+      detail: 'The transcript is ready for analysis.',
+    });
   });
 
   it('keeps the preparation state visible when legacy notes exist', () => {
@@ -36,7 +44,11 @@ describe('downstream processing presentation', () => {
           stage: 'analysis',
         }),
       }),
-    ).toEqual({ state: 'loading' });
+    ).toEqual({
+      state: 'loading',
+      title: 'Analyzing conversation',
+      detail: 'Building grounded meeting notes.',
+    });
   });
 
   it('uses plain artifact language for a terminal analysis failure', () => {

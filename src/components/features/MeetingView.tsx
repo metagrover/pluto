@@ -221,7 +221,13 @@ export const TranscriptIntegrityPanel = ({
   );
 };
 
-export const MeetingAnalysisSkeleton = () => (
+export const MeetingAnalysisSkeleton = ({
+  title = 'Preparing notes',
+  detail,
+}: {
+  title?: string;
+  detail?: string;
+}) => (
   <section
     aria-label="Preparing meeting analysis"
     data-meeting-artifact="analysis"
@@ -229,7 +235,8 @@ export const MeetingAnalysisSkeleton = () => (
     data-meeting-skeleton="analysis"
     className="meeting-analysis-skeleton max-w-[760px] animate-pulse motion-reduce:animate-none"
   >
-    <p className="meeting-analysis-skeleton__label">Preparing notes</p>
+    <p className="meeting-analysis-skeleton__label">{title}</p>
+    {detail ? <p className="text-sm text-pro-text-muted">{detail}</p> : null}
     <div className="meeting-analysis-skeleton__lines">
       <div className="h-3.5 w-5/6 rounded bg-pro-text-muted/10" />
       <div className="h-3.5 w-3/5 rounded bg-pro-text-muted/10" />
@@ -571,6 +578,12 @@ export const MeetingView = ({
     : '';
   const isMeetingProcessing =
     downstreamPresentation.state === 'loading' && !notesDocument.hasAnalysis;
+
+  useEffect(() => {
+    if (!isMeetingProcessing) return;
+    const interval = window.setInterval(() => fetchMeetings(), 2_000);
+    return () => window.clearInterval(interval);
+  }, [fetchMeetings, isMeetingProcessing]);
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
@@ -1089,7 +1102,12 @@ export const MeetingView = ({
           </section>
         ) : null}
 
-        {isMeetingProcessing ? <MeetingAnalysisSkeleton /> : null}
+        {isMeetingProcessing && downstreamPresentation.state === 'loading' ? (
+          <MeetingAnalysisSkeleton
+            title={downstreamPresentation.title}
+            detail={downstreamPresentation.detail}
+          />
+        ) : null}
         {downstreamPresentation.state === 'failed' &&
         !notesDocument.hasAnalysis ? (
           <MeetingAnalysisUnavailable />

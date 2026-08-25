@@ -1,7 +1,7 @@
 import type { Meeting } from '../../types';
 
 export type DownstreamProcessingPresentation =
-  | { state: 'loading' }
+  | { state: 'loading'; title: string; detail: string }
   | {
       state: 'failed';
       title: string;
@@ -38,11 +38,14 @@ export const getDownstreamProcessingPresentation = (
   }
 
   let state: string | null = null;
+  let stage: string | null = null;
   try {
     const parsed = JSON.parse(meeting.downstream_processing_json || '{}') as {
       state?: unknown;
+      stage?: unknown;
     };
     state = typeof parsed.state === 'string' ? parsed.state : null;
+    stage = typeof parsed.stage === 'string' ? parsed.stage : null;
   } catch {
     state = null;
   }
@@ -70,7 +73,25 @@ export const getDownstreamProcessingPresentation = (
   }
 
   if (state === 'processing') {
-    return { state: 'loading' };
+    if (stage === 'analysis') {
+      return {
+        state: 'loading',
+        title: 'Analyzing conversation',
+        detail: 'Building grounded meeting notes.',
+      };
+    }
+    if (stage === 'knowledge_extraction') {
+      return {
+        state: 'loading',
+        title: 'Connecting meeting context',
+        detail: 'Notes are ready; related people and projects are updating.',
+      };
+    }
+    return {
+      state: 'loading',
+      title: 'Updating your knowledge',
+      detail: 'Notes are ready; background context is finishing.',
+    };
   }
 
   if (meeting.enhanced_notes) {
@@ -85,5 +106,9 @@ export const getDownstreamProcessingPresentation = (
     };
   }
 
-  return { state: 'loading' };
+  return {
+    state: 'loading',
+    title: 'Preparing notes',
+    detail: 'The transcript is ready for analysis.',
+  };
 };

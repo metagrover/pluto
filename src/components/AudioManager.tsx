@@ -1887,9 +1887,9 @@ export const AudioManager = ({
       }
       if (!captureOwnershipReleased) {
         alert(`Failed to process recording: ${(e as Error).message}`);
+        isRecordingRef.current = false;
+        setIsRecording(false);
       }
-      isRecordingRef.current = false;
-      setIsRecording(false);
     } finally {
       if (!captureOwnershipReleased) {
         stopInFlightRef.current = false;
