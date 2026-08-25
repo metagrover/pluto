@@ -10,6 +10,11 @@ public enum RuntimeMethod: String, Codable, Sendable {
     case streamFlush = "stream_flush"
     case streamCancel = "stream_cancel"
     case streamReset = "stream_reset"
+    case eouOpen = "eou_open"
+    case eouAppend = "eou_append"
+    case eouFinish = "eou_finish"
+    case eouCancel = "eou_cancel"
+    case eouReset = "eou_reset"
 }
 
 public struct RuntimeRequest: Codable, Equatable, Sendable {
@@ -22,6 +27,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
     public let vocabulary: [String]?
     public let targetId: String?
     public let live: LiveRequestMetadata?
+    public let eou: EouRequestMetadata?
 
     public init(
         schemaVersion: Int = 1,
@@ -32,7 +38,8 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         language: String? = nil,
         vocabulary: [String]? = nil,
         targetId: String? = nil,
-        live: LiveRequestMetadata? = nil
+        live: LiveRequestMetadata? = nil,
+        eou: EouRequestMetadata? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.id = id
@@ -43,6 +50,7 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         self.vocabulary = vocabulary
         self.targetId = targetId
         self.live = live
+        self.eou = eou
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
@@ -60,6 +68,12 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         case sequence
         case chunkStartSeconds
         case chunkEndSeconds
+        case sampleRate
+        case channelCount
+        case frameCount
+        case audioStartSeconds
+        case audioEndSeconds
+        case pcmBase64
     }
 
     public init(from decoder: Decoder) throws {
@@ -80,7 +94,9 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
         switch method {
         case .prepare, .transcribe, .cancel, .shutdown:
             live = nil
+            eou = nil
         case .streamOpen, .streamAppend, .streamFlush, .streamCancel, .streamReset:
+            eou = nil
             guard schemaVersion == 1 else {
                 throw protocolDecodingError(CodingKeys.schemaVersion, "unsupported schema version")
             }
@@ -138,6 +154,53 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                 chunkStartSeconds: chunkStartSeconds,
                 chunkEndSeconds: chunkEndSeconds
             )
+        case .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
+            live = nil
+            guard schemaVersion == 1 else {
+                throw protocolDecodingError(CodingKeys.schemaVersion, "unsupported schema version")
+            }
+            let streamId = try container.decode(String.self, forKey: .streamId)
+            let source = try container.decode(LiveSource.self, forKey: .source)
+            let generation = try container.decode(Int.self, forKey: .generation)
+            guard isValidOpaqueStreamId(streamId), isPositiveSafeInteger(generation) else {
+                throw protocolDecodingError(CodingKeys.streamId, "invalid EOU identity")
+            }
+            if method == .eouAppend {
+                let sequence = try container.decode(Int.self, forKey: .sequence)
+                guard isPositiveSafeInteger(sequence) else {
+                    throw protocolDecodingError(CodingKeys.sequence, "invalid append sequence")
+                }
+                let pcmBase64 = try container.decode(String.self, forKey: .pcmBase64)
+                guard let pcmData = Data(base64Encoded: pcmBase64) else {
+                    throw protocolDecodingError(CodingKeys.pcmBase64, "invalid PCM payload")
+                }
+                do {
+                    let frame = try EouPcmFrame(
+                        sampleRate: container.decode(Int.self, forKey: .sampleRate),
+                        channelCount: container.decode(Int.self, forKey: .channelCount),
+                        frameCount: container.decode(Int.self, forKey: .frameCount),
+                        audioStartSeconds: container.decode(
+                            Double.self, forKey: .audioStartSeconds),
+                        audioEndSeconds: container.decode(Double.self, forKey: .audioEndSeconds),
+                        pcmData: pcmData
+                    )
+                    eou = EouRequestMetadata(
+                        streamId: streamId,
+                        source: source,
+                        generation: generation,
+                        sequence: sequence,
+                        frame: frame
+                    )
+                } catch {
+                    throw protocolDecodingError(CodingKeys.pcmBase64, "invalid PCM frame")
+                }
+            } else {
+                eou = EouRequestMetadata(
+                    streamId: streamId,
+                    source: source,
+                    generation: generation
+                )
+            }
         }
     }
 
@@ -187,6 +250,33 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                     )
                 }
             }
+        case .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
+            guard schemaVersion == 1, let eou else {
+                throw EncodingError.invalidValue(
+                    method,
+                    .init(codingPath: [], debugDescription: "EOU method requires schema v1 metadata")
+                )
+            }
+            guard isValidOpaqueStreamId(eou.streamId), isPositiveSafeInteger(eou.generation) else {
+                throw EncodingError.invalidValue(
+                    eou,
+                    .init(codingPath: [], debugDescription: "invalid EOU identity")
+                )
+            }
+            if method == .eouAppend {
+                guard let sequence = eou.sequence, isPositiveSafeInteger(sequence), eou.frame != nil
+                else {
+                    throw EncodingError.invalidValue(
+                        eou,
+                        .init(codingPath: [], debugDescription: "invalid EOU append")
+                    )
+                }
+            } else if eou.sequence != nil || eou.frame != nil {
+                throw EncodingError.invalidValue(
+                    eou,
+                    .init(codingPath: [], debugDescription: "EOU append fields are not allowed")
+                )
+            }
         }
 
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -206,6 +296,20 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
             try container.encodeIfPresent(live.chunkStartSeconds, forKey: .chunkStartSeconds)
             try container.encodeIfPresent(live.chunkEndSeconds, forKey: .chunkEndSeconds)
         }
+        if let eou {
+            try container.encode(eou.streamId, forKey: .streamId)
+            try container.encode(eou.source, forKey: .source)
+            try container.encode(eou.generation, forKey: .generation)
+            try container.encodeIfPresent(eou.sequence, forKey: .sequence)
+            if let frame = eou.frame {
+                try container.encode(frame.sampleRate, forKey: .sampleRate)
+                try container.encode(frame.channelCount, forKey: .channelCount)
+                try container.encode(frame.frameCount, forKey: .frameCount)
+                try container.encode(frame.audioStartSeconds, forKey: .audioStartSeconds)
+                try container.encode(frame.audioEndSeconds, forKey: .audioEndSeconds)
+                try container.encode(frame.pcmData.base64EncodedString(), forKey: .pcmBase64)
+            }
+        }
     }
 
     private var encodedKnownKeys: Set<CodingKeys> {
@@ -220,6 +324,16 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
             if live.sequence != nil { keys.insert(.sequence) }
             if live.chunkStartSeconds != nil { keys.insert(.chunkStartSeconds) }
             if live.chunkEndSeconds != nil { keys.insert(.chunkEndSeconds) }
+        }
+        if let eou {
+            keys.formUnion([.streamId, .source, .generation])
+            if eou.sequence != nil { keys.insert(.sequence) }
+            if eou.frame != nil {
+                keys.formUnion([
+                    .sampleRate, .channelCount, .frameCount,
+                    .audioStartSeconds, .audioEndSeconds, .pcmBase64,
+                ])
+            }
         }
         return keys
     }
@@ -256,6 +370,14 @@ public struct RuntimeRequest: Codable, Equatable, Sendable {
                 .audioPath,
                 .chunkStartSeconds,
                 .chunkEndSeconds,
+            ])
+        case .eouOpen, .eouFinish, .eouCancel, .eouReset:
+            return common.union([.streamId, .source, .generation])
+        case .eouAppend:
+            return common.union([
+                .streamId, .source, .generation, .sequence,
+                .sampleRate, .channelCount, .frameCount,
+                .audioStartSeconds, .audioEndSeconds, .pcmBase64,
             ])
         }
     }

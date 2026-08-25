@@ -91,7 +91,7 @@ git commit -m "feat: verify Parakeet EOU model bundle"
 - Test: `native/parakeet-runtime/Tests/ParakeetRuntimeCoreTests/EouProtocolTests.swift`
 - Test: `native/parakeet-runtime/Tests/ParakeetRuntimeCoreTests/ProtocolTests.swift`
 
-- [ ] **Step 1: Write failing decode/encode tests**
+- [x] **Step 1: Write failing decode/encode tests**
 
 Cover `eou_open`, `eou_append`, `eou_finish`, `eou_cancel`, and `eou_reset`. A valid append contains:
 
@@ -106,23 +106,23 @@ EouAppendMetadata(
 
 Reject zero/unsafe generations or sequences, non-mono input, sample rates outside 8,000...192,000, payloads over two seconds, byte/frame mismatches, invalid base64, NaN/Infinity samples, non-contiguous intervals, append fields on non-append methods, and EOU fields on shadow/batch methods. Decoding errors must not include PCM or recognized content.
 
-- [ ] **Step 2: Run tests and observe failure**
+- [x] **Step 2: Run tests and observe failure**
 
 Run: `cd native/parakeet-runtime && swift test --filter 'EouProtocolTests|ProtocolTests'`
 
 Expected: compilation fails because EOU types and runtime methods are undefined.
 
-- [ ] **Step 3: Implement exact types and validation**
+- [x] **Step 3: Implement exact types and validation**
 
 Define `EouRequestMetadata`, `EouPcmFrame`, `EouToken`, `EouUpdate`, `EouStreamFailed`, and `EouRuntimeFailure`. Add runtime methods with raw values `eou_open`, `eou_append`, `eou_finish`, `eou_cancel`, `eou_reset`. Decode PCM through `Data(base64Encoded:)`, bind little-endian Float32 values without unaligned loads, reject non-finite values, and cap decoded bytes at `192_000 * 2 * 4`.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `cd native/parakeet-runtime && swift test --filter 'EouProtocolTests|ProtocolTests'`
 
 Expected: all tests pass and existing schema-v1 batch/shadow fixtures still round-trip byte-for-byte.
 
-- [ ] **Step 5: Commit the protocol**
+- [x] **Step 5: Commit the protocol**
 
 ```bash
 git add native/parakeet-runtime/Sources/ParakeetRuntimeCore/EouProtocol.swift native/parakeet-runtime/Sources/ParakeetRuntimeCore/Protocol.swift native/parakeet-runtime/Tests/ParakeetRuntimeCoreTests

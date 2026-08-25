@@ -67,6 +67,11 @@ public actor RuntimeJSONLineRouter {
                 events: [],
                 response: await service.handle(request)
             )
+        case .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
+            return RuntimeJSONLineOutput(
+                events: [],
+                response: .failure(id: request.id, code: .invalidRequest)
+            )
         }
     }
 

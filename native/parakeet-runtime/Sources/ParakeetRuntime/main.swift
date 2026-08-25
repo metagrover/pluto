@@ -124,7 +124,8 @@ private struct Arguments {
                 stream.revision = 1
                 streams[live.streamId] = stream
                 return .success(id: request.id)
-            case .prepare, .transcribe, .cancel, .shutdown:
+            case .prepare, .transcribe, .cancel, .shutdown, .eouOpen, .eouAppend, .eouFinish,
+                .eouCancel, .eouReset:
                 return .failure(id: request.id, code: .invalidRequest)
             }
         }

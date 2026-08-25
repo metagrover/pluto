@@ -104,7 +104,8 @@ public actor ParakeetService {
                     generation: metadata.generation
                 )
                 return .success(id: request.id)
-            case .prepare, .transcribe, .cancel, .shutdown:
+            case .prepare, .transcribe, .cancel, .shutdown, .eouOpen, .eouAppend, .eouFinish,
+                .eouCancel, .eouReset:
                 return .failure(id: request.id, code: .invalidRequest)
             }
         } catch let terminal as LiveRuntimeTerminalFailure {
@@ -151,7 +152,7 @@ public actor ParakeetService {
         case .transcribe:
             return await transcribe(request)
         case .cancel, .shutdown, .streamOpen, .streamAppend, .streamFlush, .streamCancel,
-            .streamReset:
+            .streamReset, .eouOpen, .eouAppend, .eouFinish, .eouCancel, .eouReset:
             return .failure(id: request.id, code: .invalidRequest)
         }
     }
