@@ -9,11 +9,11 @@ import {
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { Meeting } from '../../types';
-import { canDeleteMeeting } from '../../utils/recordingFinalization';
 import {
   meetingTimestamp,
   sortMeetingsByStartTime,
 } from '../../utils/meetingOrdering';
+import { canDeleteMeeting } from '../../utils/recordingFinalization';
 import { PageHeader } from '../ui/PageHeader';
 
 interface AllMeetingsTabProps {

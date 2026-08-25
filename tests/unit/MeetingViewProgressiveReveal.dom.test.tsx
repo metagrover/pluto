@@ -345,9 +345,7 @@ describe('MeetingView progressive reveal', () => {
 
     const notice = container.querySelector('[role="alert"]');
     expect(notice?.textContent).toContain("Notes weren't regenerated");
-    expect(notice?.textContent).toContain(
-      'Your current notes are unchanged.',
-    );
+    expect(notice?.textContent).toContain('Your current notes are unchanged.');
     expect(notice?.textContent).toContain('Try again');
     expect(notice?.textContent).not.toContain('Verify LLM provider');
     expect(container.textContent).toContain('The analysis arrived in place.');

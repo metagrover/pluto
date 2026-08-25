@@ -36,6 +36,7 @@ import {
   createAnalysisSnapshot,
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
+import { meetingTimestamp } from '../../utils/meetingOrdering';
 import { buildReadableTranscriptSegments } from '../../utils/readableTranscript';
 import {
   buildAnalysisTranscriptFromJson,
@@ -55,7 +56,6 @@ import {
   resolveMeetingRegenerationFailurePresentation,
 } from './meetingFailurePresentation';
 import { buildMeetingTranscriptTurns } from './meetingTranscriptPresentation';
-import { meetingTimestamp } from '../../utils/meetingOrdering';
 
 interface MeetingViewProps {
   selectedMeeting: Meeting | undefined;
