@@ -846,7 +846,9 @@ export const MeetingView = ({
                 </span>
               ) : selectedMeeting.duration_seconds ? (
                 <span>
-                  {Math.floor(selectedMeeting.duration_seconds / 60)} min
+                  {selectedMeeting.duration_seconds < 60
+                    ? '< 1 min'
+                    : `${Math.floor(selectedMeeting.duration_seconds / 60)} min`}
                 </span>
               ) : null}
             </div>

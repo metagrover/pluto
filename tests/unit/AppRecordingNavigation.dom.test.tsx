@@ -159,6 +159,7 @@ describe('App recording navigation', () => {
                     meeting_type: 'Recording',
                     created_at: '2026-08-17T18:00:00.000Z',
                     started_at: '2026-08-17T18:00:00.000Z',
+                    duration_seconds: 34,
                     transcript_status: 'validating',
                     finalization_status: 'finalized',
                     user_notes: 'A note captured during the meeting.',
@@ -166,7 +167,7 @@ describe('App recording navigation', () => {
                       lifecycleStatus: 'validating',
                       segments: [
                         {
-                          speaker: 'Me',
+                          speaker: '',
                           text: 'Visible as soon as recording stops.',
                           startTime: 0,
                           endTime: 2,
@@ -311,6 +312,8 @@ describe('App recording navigation', () => {
     });
 
     expect(container.textContent).toContain('Just stopped meeting');
+    expect(container.textContent).toContain('< 1 min');
+    expect(container.textContent).not.toContain('0 min');
     expect(container.textContent).toContain(
       'A note captured during the meeting.',
     );
