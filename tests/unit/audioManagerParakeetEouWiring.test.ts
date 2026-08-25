@@ -30,6 +30,33 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(finishIndex).toBeLessThan(captureStopIndex);
   });
 
+  it('materializes sealed system audio for canonical final transcription', () => {
+    const sealIndex = source.indexOf('sealCaptureJournalBeforeFinalization({');
+    const materializeIndex = source.indexOf(
+      "'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE'",
+    );
+    const saveIndex = source.indexOf("'SAVE_MEETING'", materializeIndex);
+    expect(materializeIndex).toBeGreaterThan(sealIndex);
+    expect(saveIndex).toBeGreaterThan(materializeIndex);
+  });
+
+  it('keeps the active EOU session across ordinary AudioManager rerenders', () => {
+    const listenerEffectStart = source.indexOf(
+      '// Set up event listeners for external control',
+    );
+    const listenerEffectEnd = source.indexOf(
+      '// Expose stopSession and startSession to parent via refs',
+      listenerEffectStart,
+    );
+    const listenerEffect = source.slice(listenerEffectStart, listenerEffectEnd);
+
+    expect(listenerEffect).toContain('startSessionActionRef.current()');
+    expect(listenerEffect).toContain('stopSessionActionRef.current()');
+    expect(listenerEffect).toMatch(
+      /return \(\) => \{[\s\S]*?\n {2}\}, \[\]\);/u,
+    );
+  });
+
   it('contains no recording-time MLX transcription machinery', () => {
     expect(source).not.toContain('LiveTranscriptionQueue');
     expect(source).not.toContain('resolveLiveChunkModel');

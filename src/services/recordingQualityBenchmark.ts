@@ -475,7 +475,7 @@ export type FinalTranscriptionPolicyFixture = {
   }>;
   expected: RecordingQualityBenchmarkExpectation & {
     policy: {
-      liveEngine: 'mlx_whisper';
+      liveEngine: 'parakeet_eou_320ms';
       finalEngine: 'parakeet_coreml';
     };
   };

@@ -116,6 +116,9 @@ export class ParakeetEouClient {
       await this.ensureRuntimeLease();
       await this.send('eou_open', identity);
     } catch (error) {
+      console.warn(
+        `[ParakeetEOU] open failed source=${identity.source} code=${this.errorCode(error)}`,
+      );
       this.remove(state);
       await this.releaseRuntimeLeaseIfIdle();
       throw error;
@@ -238,6 +241,9 @@ export class ParakeetEouClient {
     }
     state.nextRevision += 1;
     if (event.event === 'eou_failed') {
+      console.warn(
+        `[ParakeetEOU] native failure source=${event.source} reason=${event.reason}`,
+      );
       this.failAll(`parakeet_${event.reason}`, true);
       return;
     }

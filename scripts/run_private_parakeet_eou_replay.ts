@@ -337,7 +337,9 @@ export const runPrivateParakeetEouReplay = async (
       manifest.expectedDurationSeconds,
     );
     if (acceptanceFailures.length > 0) {
-      throw new Error(`replay_acceptance_failed:${acceptanceFailures.join(',')}`);
+      throw new Error(
+        `replay_acceptance_failed:${acceptanceFailures.join(',')}`,
+      );
     }
     return metrics;
   } finally {

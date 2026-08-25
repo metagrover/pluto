@@ -210,11 +210,9 @@ export const useActiveCallMonitor = ({
       window.dispatchEvent(new Event('START_RECORDING'));
     };
 
-    window.ipcRenderer.on('ACTIVE_CALL_TAKE_NOTES', handleTakeNotesFromAlert);
-    return () =>
-      window.ipcRenderer.off(
-        'ACTIVE_CALL_TAKE_NOTES',
-        handleTakeNotesFromAlert,
-      );
+    return window.ipcRenderer.on(
+      'ACTIVE_CALL_TAKE_NOTES',
+      handleTakeNotesFromAlert,
+    );
   }, [startSessionRef]);
 };

@@ -1,4 +1,4 @@
-export const KNOWN_PERSON_VOCABULARY_POLICY_VERSION = 'known_person_v1';
+export const KNOWN_PERSON_VOCABULARY_POLICY_VERSION = 'explicit_participant_v1';
 export const KNOWN_PERSON_VOCABULARY_MAX_HINTS = 12;
 export const KNOWN_PERSON_VOCABULARY_MAX_PROMPT_CHARS = 240;
 
@@ -40,65 +40,16 @@ const normalizeName = (value: unknown): string | null => {
   return normalized;
 };
 
-const recencyBucket = (value: string | null | undefined, now: number) => {
-  if (!value) return 0;
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return 0;
-  const ageDays = Math.max(0, now - timestamp) / 86_400_000;
-  if (ageDays <= 7) return 4;
-  if (ageDays <= 30) return 3;
-  if (ageDays <= 90) return 2;
-  return 1;
-};
-
-const finiteScore = (value: number | null | undefined) =>
-  typeof value === 'number' && Number.isFinite(value) ? value : 0;
-
-const compareText = (left: string, right: string) => {
-  const normalizedLeft = left.toLocaleLowerCase('en-US');
-  const normalizedRight = right.toLocaleLowerCase('en-US');
-  if (normalizedLeft < normalizedRight) return -1;
-  if (normalizedLeft > normalizedRight) return 1;
-  return 0;
-};
-
 export const selectTranscriptionVocabulary = ({
   participants,
-  candidates,
-  now = Date.now(),
 }: {
   participants: string[];
   candidates: TranscriptionPersonCandidate[];
   now?: number;
 }): TranscriptionVocabularySelection => {
-  const rankedCandidates = candidates
-    .map((candidate) => ({
-      ...candidate,
-      normalizedName: normalizeName(candidate.name),
-      recency: recencyBucket(candidate.lastMentionedAt, now),
-    }))
-    .filter(
-      (candidate): candidate is typeof candidate & { normalizedName: string } =>
-        candidate.normalizedName !== null,
-    )
-    .sort((left, right) => {
-      const saliency =
-        finiteScore(right.saliencyScore) - finiteScore(left.saliencyScore);
-      if (saliency !== 0) return saliency;
-      if (right.recency !== left.recency) return right.recency - left.recency;
-      if (right.meetingCount !== left.meetingCount) {
-        return right.meetingCount - left.meetingCount;
-      }
-      if (right.mentionCount !== left.mentionCount) {
-        return right.mentionCount - left.mentionCount;
-      }
-      return compareText(left.normalizedName, right.normalizedName);
-    });
-
-  const orderedNames = [
-    ...participants.map(normalizeName).filter((name): name is string => !!name),
-    ...rankedCandidates.map((candidate) => candidate.normalizedName),
-  ];
+  const orderedNames = participants
+    .map(normalizeName)
+    .filter((name): name is string => !!name);
   const selectedNames: string[] = [];
   const deduped = new Set<string>();
 

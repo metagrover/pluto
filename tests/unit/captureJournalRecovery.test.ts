@@ -28,6 +28,7 @@ import {
   isMlxCheckpointConfig,
   recoverInterruptedCaptureJournals,
   repairStoppingCaptureJournalTranscript,
+  stitchSealedCaptureJournalSource,
   verifySealedCaptureJournalTranscriptEvidence,
 } from '../../electron/captureJournalRecovery';
 import type { PersistedMeeting } from '../../electron/db';
@@ -68,6 +69,81 @@ describe('capture journal recovery', () => {
         algorithmVersion: 'speaker_activity_v1',
       },
     );
+
+  it('stitches a verified source directly from a sealed v3 journal', async () => {
+    const root = await makeRoot();
+    const meetingId = 'meeting-live-stop';
+    let manifest = await createCaptureJournal(root, {
+      meetingId,
+      startedAtMs: 1_000,
+      schemaVersion: 3,
+      expectedSources: ['system'],
+    });
+    if (manifest.schemaVersion !== 3) throw new Error('expected v3 journal');
+    manifest = await authorizeCaptureJournalInterval(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      sequence: 0,
+      chunkStartSec: 0,
+      chunkEndSec: 2,
+    });
+    manifest = await persistCaptureJournalRawChunk(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      source: 'system',
+      sequence: 0,
+      format: 'wav',
+      data: Buffer.from('system-raw'),
+    });
+    const raw = manifest.intervals[0].sources.system;
+    if (raw.disposition !== 'raw_durable') {
+      throw new Error('expected raw durable system tuple');
+    }
+    const completed = await completeCaptureJournalCapturedChunk(root, {
+      meetingId,
+      generation: manifest.generation,
+      expectedRevision: manifest.revision,
+      source: 'system',
+      sequence: 0,
+      rawChecksumSha256: raw.rawChecksumSha256,
+      repairData: Buffer.from('system-repair'),
+    });
+    await updateCaptureJournalActivityEvidence(root, {
+      meetingId,
+      activityEvidence: await buildEvidence(),
+    });
+    await stopCaptureJournal(root, {
+      meetingId,
+      generation: completed.manifest.generation,
+      expectedRevision: completed.manifest.revision + 1,
+    });
+    await sealCaptureJournal(root, { meetingId, endedAtMs: 3_000 });
+
+    const stitch = vi.fn(async (_segments, outputTag: string) =>
+      join(root, `${outputTag}.wav`),
+    );
+    await expect(
+      stitchSealedCaptureJournalSource(
+        root,
+        meetingId,
+        'system',
+        stitch,
+        'session-system',
+      ),
+    ).resolves.toBe(join(root, 'session-system.wav'));
+    expect(stitch).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          startSec: 0,
+          endSec: 2,
+          chunkIndex: 0,
+        }),
+      ],
+      'session-system',
+    );
+  });
 
   it('rejects checkpoint metadata outside the fixed MLX preview contract', () => {
     expect(

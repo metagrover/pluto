@@ -37,6 +37,7 @@ import {
 } from './captureJournal';
 import {
   recoverInterruptedCaptureJournals,
+  stitchSealedCaptureJournalSource,
   verifySealedCaptureJournalTranscriptEvidence,
 } from './captureJournalRecovery';
 import { createCaptureSessionLeaseRegistry } from './captureSessionLease';
@@ -681,7 +682,15 @@ app.whenReady().then(async () => {
   const eouCoordinator = new ParakeetEouMeetingCoordinator({
     createClient: async () => {
       if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
+      const before = parakeetRuntimeHost.diagnostics();
+      console.warn(
+        `[ParakeetEOU] requesting live lease state=${before.state} queued=${before.queuedLeaseCount}`,
+      );
       const lease = await parakeetRuntimeHost.startRecordingLive();
+      const after = parakeetRuntimeHost.diagnostics();
+      console.warn(
+        `[ParakeetEOU] acquired live lease state=${after.state} queued=${after.queuedLeaseCount}`,
+      );
       return new ParakeetEouClient({
         runtimeHost: parakeetRuntimeHost,
         runtimeLease: lease,
@@ -704,6 +713,7 @@ app.whenReady().then(async () => {
       });
     },
     onUnavailable: ({ meetingId, owner: ownerId, code }) => {
+      console.warn(`[ParakeetEOU] unavailable code=${code}`);
       const owner = parakeetEouOwner;
       if (!owner || owner.isDestroyed() || String(owner.id) !== ownerId) return;
       owner.send('PARAKEET_EOU_UNAVAILABLE', {
@@ -1728,6 +1738,21 @@ app.whenReady().then(async () => {
     'AUDIO_STITCH_WAV_SEGMENTS',
     async (_event, { segments, outputTag } = {}) => {
       return await stitchWavSegments({ segments, outputTag });
+    },
+  );
+
+  ipcMain.handle(
+    'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
+    async (_event, { meetingId, source, outputTag } = {}) => {
+      if (source !== 'mic' && source !== 'system') return null;
+      return await stitchSealedCaptureJournalSource(
+        getMeetingArtifactsRootDir(),
+        String(meetingId || ''),
+        source,
+        async (segments, tag) =>
+          await stitchWavSegments({ segments, outputTag: tag }),
+        String(outputTag || `session-${source}`),
+      );
     },
   );
 

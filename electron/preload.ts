@@ -15,17 +15,20 @@ const runtimePlatform = Object.freeze({
 
 contextBridge.exposeInMainWorld('plutoRuntimePlatform', runtimePlatform);
 
+type IpcListener = Parameters<typeof ipcRenderer.on>[1];
+
 // --------- Expose some API to the Renderer process ---------
 contextBridge.exposeInMainWorld('ipcRenderer', {
   on(...args: Parameters<typeof ipcRenderer.on>) {
     const [channel, listener] = args;
-    return ipcRenderer.on(channel, (event, ...args) =>
-      listener(event, ...args),
-    );
+    const wrapped: IpcListener = (event, ...eventArgs) =>
+      listener(event, ...eventArgs);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.off(channel, wrapped);
   },
   off(...args: Parameters<typeof ipcRenderer.off>) {
-    const [channel, ...omit] = args;
-    return ipcRenderer.off(channel, ...omit);
+    const [channel, listener] = args;
+    return ipcRenderer.off(channel, listener);
   },
   send(...args: Parameters<typeof ipcRenderer.send>) {
     const [channel, ...omit] = args;

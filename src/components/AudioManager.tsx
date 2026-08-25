@@ -38,10 +38,6 @@ import {
   decideNextSpeaker,
 } from '../utils/speakerAttribution';
 import { createStopToValidatedLatencyAccumulator } from '../utils/stopToValidatedLatency';
-import {
-  type TimedAudioChunk,
-  shouldUseSystemAudioReconstructionFallback,
-} from '../utils/systemAudioReconstruction';
 import type { CaptureActivityEvidence } from '../utils/transcriptActivityEvidence';
 import {
   type StoredTranscriptSpeakerAttribution,
@@ -226,13 +222,7 @@ export const AudioManager = ({
   const micPcmSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const micPcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const micPcmSinkRef = useRef<GainNode | null>(null);
-  const nativeAudioListenerRef = useRef<
-    | ((
-        event: unknown,
-        chunk: Uint8Array | ArrayBuffer | null | undefined,
-      ) => void)
-    | null
-  >(null);
+  const nativeAudioUnsubscribeRef = useRef<(() => void) | null>(null);
   const systemAudioChunkSeenRef = useRef(false);
   const systemAudioHealthRef = useRef<CaptureHealth>('warning');
   const cancelSystemAudioHealthTimeoutRef = useRef<(() => void) | null>(null);
@@ -258,13 +248,14 @@ export const AudioManager = ({
   const lastMicChunkBoundarySecRef = useRef(0);
   const systemRmsRef = useRef<number>(0);
   const systemRmsUpdatedAtRef = useRef<number>(0);
-  const savedSystemChunkAudioRef = useRef<Map<number, TimedAudioChunk>>(
-    new Map(),
-  );
   const eouGenerationRef = useRef(0);
   const eouSessionRef = useRef<ReturnType<
     typeof createEouRendererSession
   > | null>(null);
+  const startSessionActionRef = useRef<() => void>(() => undefined);
+  const stopSessionActionRef = useRef<(endReason?: string) => void>(
+    () => undefined,
+  );
   const transcriptionVocabularyRef = useRef<TranscriptionVocabularySelection>({
     initialPrompt: null,
     terms: [],
@@ -639,15 +630,12 @@ export const AudioManager = ({
           onUpdate: (listener) => {
             const handler = (_event: unknown, payload: unknown) =>
               listener(payload);
-            window.ipcRenderer.on('PARAKEET_EOU_UPDATE', handler);
-            return () => window.ipcRenderer.off('PARAKEET_EOU_UPDATE', handler);
+            return window.ipcRenderer.on('PARAKEET_EOU_UPDATE', handler);
           },
           onUnavailable: (listener) => {
             const handler = (_event: unknown, payload: unknown) =>
               listener(payload);
-            window.ipcRenderer.on('PARAKEET_EOU_UNAVAILABLE', handler);
-            return () =>
-              window.ipcRenderer.off('PARAKEET_EOU_UNAVAILABLE', handler);
+            return window.ipcRenderer.on('PARAKEET_EOU_UNAVAILABLE', handler);
           },
         },
         onSegments: (segments) => {
@@ -910,8 +898,10 @@ export const AudioManager = ({
             systemRmsUpdatedAtRef.current = performance.now();
           }
         };
-        nativeAudioListenerRef.current = handler;
-        window.ipcRenderer.on('NATIVE_AUDIO_CHUNK', handler);
+        nativeAudioUnsubscribeRef.current = window.ipcRenderer.on(
+          'NATIVE_AUDIO_CHUNK',
+          handler,
+        );
         console.log('[Pluto] Native AudioCap started & listening.');
       } catch (sysErr) {
         hasSystemRecorderRef.current = false;
@@ -939,7 +929,6 @@ export const AudioManager = ({
       systemChunkDecodeDropCountRef.current = 0;
       systemRmsRef.current = 0;
       systemRmsUpdatedAtRef.current = 0;
-      savedSystemChunkAudioRef.current = new Map();
       speakerTimelineRef.current = [];
       activeSpeakerWindowRef.current = null;
       zeroMicChunkStreakRef.current = 0;
@@ -1421,17 +1410,11 @@ export const AudioManager = ({
       cancelSystemAudioHealthTimeoutRef.current?.();
       cancelSystemAudioHealthTimeoutRef.current = null;
       await window.ipcRenderer.invoke('NATIVE_AUDIO_STOP');
-      if (nativeAudioListenerRef.current) {
-        window.ipcRenderer.off(
-          'NATIVE_AUDIO_CHUNK',
-          nativeAudioListenerRef.current,
-        );
-        nativeAudioListenerRef.current = null;
-      }
+      nativeAudioUnsubscribeRef.current?.();
+      nativeAudioUnsubscribeRef.current = null;
 
       // The capture journal owns disk-backed system chunks. Do not retain or
       // concatenate a second session-length PCM copy in the renderer.
-      const finalizedSystemDurationSec = 0;
       if (systemPcmChunksRef.current.length > 0) {
         systemPcmChunksRef.current = [];
       }
@@ -1575,38 +1558,24 @@ export const AudioManager = ({
           console.warn('[Pluto] Save failed:', e);
         }
       }
-      const meetingDurationSec = getMeetingElapsedSeconds();
-      const savedSystemChunks = Array.from(
-        savedSystemChunkAudioRef.current.values(),
-      ).sort((left, right) => left.chunkIndex - right.chunkIndex);
-      if (
-        shouldUseSystemAudioReconstructionFallback({
-          primaryDurationSec: finalizedSystemDurationSec,
-          meetingDurationSec,
-          chunks: savedSystemChunks,
-        })
-      ) {
-        try {
-          const rebuiltSystemPath = await window.ipcRenderer.invoke(
-            'AUDIO_STITCH_WAV_SEGMENTS',
-            {
-              segments: savedSystemChunks,
-              outputTag: 'session-system-rebuilt',
-            },
-          );
-          if (rebuiltSystemPath) {
-            rebuiltSystemAudioPath = rebuiltSystemPath;
-            systemAudioPath = rebuiltSystemPath;
-            console.warn(
-              `[Pluto] Reconstructed session-system from ${savedSystemChunks.length} saved system chunks`,
-            );
-          }
-        } catch (e) {
-          console.warn(
-            '[Pluto] System audio reconstruction fallback failed:',
-            e,
+      try {
+        const rebuiltSystemPath = await window.ipcRenderer.invoke(
+          'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
+          {
+            meetingId: stopSnapshot.meetingId,
+            source: 'system',
+            outputTag: 'session-system-rebuilt',
+          },
+        );
+        if (rebuiltSystemPath) {
+          rebuiltSystemAudioPath = rebuiltSystemPath;
+          systemAudioPath = rebuiltSystemPath;
+          console.log(
+            '[Pluto] Materialized session-system from sealed capture',
           );
         }
+      } catch (e) {
+        console.warn('[Pluto] Sealed system audio materialization failed:', e);
       }
       if (primaryAudioPath && systemAudioPath) {
         try {
@@ -1811,6 +1780,9 @@ export const AudioManager = ({
     });
   }, []);
 
+  startSessionActionRef.current = startSession;
+  stopSessionActionRef.current = stopSession;
+
   // Set up event listeners for external control (e.g., "End Meeting" button)
   useEffect(() => {
     const handleStopRecording = () => {
@@ -1819,13 +1791,13 @@ export const AudioManager = ({
         isRecordingRef.current,
       );
       if (isRecordingRef.current && !isProcessingRef.current) {
-        stopSession();
+        stopSessionActionRef.current();
       }
     };
     const handleStartRecording = () => {
       console.log('[Pluto] START_RECORDING event received');
       if (!isRecordingRef.current && !isProcessingRef.current) {
-        startSession();
+        startSessionActionRef.current();
       }
     };
     window.addEventListener('STOP_RECORDING', handleStopRecording);
@@ -1861,7 +1833,10 @@ export const AudioManager = ({
         window.ipcRenderer.invoke('NATIVE_AUDIO_STOP').catch(() => {});
       }
     };
-    window.ipcRenderer.on('MEETING_DELETED', handleMeetingDeleted);
+    const unsubscribeMeetingDeleted = window.ipcRenderer.on(
+      'MEETING_DELETED',
+      handleMeetingDeleted,
+    );
 
     return () => {
       eouSessionRef.current?.cancel();
@@ -1870,9 +1845,9 @@ export const AudioManager = ({
       cancelSystemAudioHealthTimeoutRef.current = null;
       window.removeEventListener('STOP_RECORDING', handleStopRecording);
       window.removeEventListener('START_RECORDING', handleStartRecording);
-      window.ipcRenderer.off('MEETING_DELETED', handleMeetingDeleted);
+      unsubscribeMeetingDeleted();
     };
-  });
+  }, []);
 
   // Expose stopSession and startSession to parent via refs
   useEffect(() => {

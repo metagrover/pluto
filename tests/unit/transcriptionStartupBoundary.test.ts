@@ -3,22 +3,22 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('transcription startup boundary', () => {
-  it('prepares the fixed MLX runtime before interrupted journal recovery', () => {
+  it('prepares the fixed Parakeet runtime before interrupted journal recovery', () => {
     const main = readFileSync('electron/main.ts', 'utf8');
-    const preparation = main.indexOf('await mlxPreview.setConfig({');
-    const mlxDevice = main.indexOf("device: 'mlx'", preparation);
-    const mlxCompute = main.indexOf("computeType: 'float16'", preparation);
-    const activeHealth = main.indexOf(
-      'const activeHealth = await mlxPreview.health()',
+    const preparation = main.indexOf(
+      'await prepareFinalTranscriptionBeforeRecovery({',
+    );
+    const parakeetPrepare = main.indexOf(
+      'await parakeetFinalClient.prepare()',
       preparation,
     );
     const recovery = main.indexOf('recoverInterruptedCaptureJournals(');
 
     expect(preparation).toBeGreaterThan(-1);
-    expect(mlxDevice).toBeGreaterThan(preparation);
-    expect(mlxCompute).toBeGreaterThan(mlxDevice);
-    expect(activeHealth).toBeGreaterThan(preparation);
-    expect(recovery).toBeGreaterThan(activeHealth);
+    expect(parakeetPrepare).toBeGreaterThan(preparation);
+    expect(recovery).toBeGreaterThan(parakeetPrepare);
+    expect(main).not.toContain('await mlxPreview.setConfig({');
+    expect(main).not.toContain('await mlxPreview.health()');
   });
 
   it('keeps transcription runtime diagnostics generic and content-free', () => {

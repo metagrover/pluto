@@ -28,7 +28,12 @@ describe('Parakeet EOU causal replay', () => {
         },
         10,
       ),
-    ).toEqual(['queue_depth', 'system_coverage', 'system_tail', 'native_failure']);
+    ).toEqual([
+      'queue_depth',
+      'system_coverage',
+      'system_tail',
+      'native_failure',
+    ]);
   });
 
   it('uses production 320 ms chunking and interleaves by audio watermark', () => {

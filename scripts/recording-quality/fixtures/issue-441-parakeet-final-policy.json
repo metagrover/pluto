@@ -242,6 +242,9 @@
   "expected": {
     "status": "validated",
     "primaryMetric": { "name": "passedScenarioCount", "value": 5 },
-    "policy": { "liveEngine": "mlx_whisper", "finalEngine": "parakeet_coreml" }
+    "policy": {
+      "liveEngine": "parakeet_eou_320ms",
+      "finalEngine": "parakeet_coreml"
+    }
   }
 }

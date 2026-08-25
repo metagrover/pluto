@@ -82,7 +82,7 @@
           "value": 5
         },
         "policy": {
-          "liveEngine": "mlx_whisper",
+          "liveEngine": "parakeet_eou_320ms",
           "finalEngine": "parakeet_coreml"
         }
       },

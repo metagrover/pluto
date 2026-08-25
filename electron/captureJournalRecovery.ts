@@ -399,6 +399,25 @@ const buildV3SourceSegments = async (
   return { segments, gaps };
 };
 
+export const stitchSealedCaptureJournalSource = async (
+  rootDir: string,
+  meetingId: string,
+  source: CaptureJournalSource,
+  stitchWavSegments: RecoveryDependencies['stitchWavSegments'],
+  outputTag: string,
+): Promise<string | null> => {
+  const manifest = await readCaptureJournalManifest(rootDir, meetingId);
+  if (manifest.schemaVersion !== 3 || manifest.lifecycleState !== 'sealed') {
+    return null;
+  }
+  const recovery = await buildV3SourceSegments(rootDir, manifest, source);
+  if (recovery.gaps.length > 0) {
+    throw new Error(`sealed_capture_${source}_artifact_gap`);
+  }
+  if (recovery.segments.length === 0) return null;
+  return await stitchWavSegments(recovery.segments, outputTag);
+};
+
 const repairV3TranscriptGaps = async (
   rootDir: string,
   initialManifest: CaptureJournalManifestV3,

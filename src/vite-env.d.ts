@@ -24,7 +24,7 @@ interface Window {
       channel: string,
 
       listener: (event: unknown, ...args: any[]) => void,
-    ) => void;
+    ) => () => void;
 
     off: (channel: string, listener: (...args: any[]) => void) => void;
   };

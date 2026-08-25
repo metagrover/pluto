@@ -8,7 +8,7 @@ import {
 const now = Date.parse('2026-08-11T12:00:00.000Z');
 
 describe('selectTranscriptionVocabulary', () => {
-  it('prioritizes explicit participants before deterministically ranked graph candidates', () => {
+  it('uses only explicit participants and never global graph candidates', () => {
     const selected = selectTranscriptionVocabulary({
       participants: ['Mira Sol', 'Theo North'],
       candidates: [
@@ -30,22 +30,15 @@ describe('selectTranscriptionVocabulary', () => {
       now,
     });
 
-    expect(selected.initialPrompt).toBe(
-      'Person names: Mira Sol, Theo North, Ari Lake, Zara Field.',
-    );
-    expect(selected.terms).toEqual([
-      'Mira Sol',
-      'Theo North',
-      'Ari Lake',
-      'Zara Field',
-    ]);
+    expect(selected.initialPrompt).toBe('Person names: Mira Sol, Theo North.');
+    expect(selected.terms).toEqual(['Mira Sol', 'Theo North']);
     expect(selected.provenance).toEqual({
       policyVersion: KNOWN_PERSON_VOCABULARY_POLICY_VERSION,
-      hintCount: 4,
+      hintCount: 2,
     });
   });
 
-  it('uses recency, meeting frequency, mention frequency, and name as stable tie-breakers', () => {
+  it('does not bias ordinary speech toward unrelated known people', () => {
     const selected = selectTranscriptionVocabulary({
       participants: [],
       candidates: [
@@ -81,9 +74,8 @@ describe('selectTranscriptionVocabulary', () => {
       now,
     });
 
-    expect(selected.initialPrompt).toBe(
-      'Person names: Noa Reed, Ava Cove, Bea Cove, Zed Pine.',
-    );
+    expect(selected.initialPrompt).toBeNull();
+    expect(selected.terms).toEqual([]);
   });
 
   it('deduplicates names, preserves safe punctuation, and rejects prompt-like input', () => {
@@ -116,14 +108,15 @@ describe('selectTranscriptionVocabulary', () => {
 
   it('bounds the selection by count and prompt length without displacing participants', () => {
     const selected = selectTranscriptionVocabulary({
-      participants: ['Primary Person'],
-      candidates: Array.from({ length: 30 }, (_, index) => ({
-        name: `Synthetic Person ${String.fromCharCode(65 + Math.floor(index / 26))}${String.fromCharCode(65 + (index % 26))}`,
-        saliencyScore: 1,
-        meetingCount: 10,
-        mentionCount: 10,
-        lastMentionedAt: '2026-08-11T10:00:00.000Z',
-      })),
+      participants: [
+        'Primary Person',
+        ...Array.from(
+          { length: 30 },
+          (_, index) =>
+            `Synthetic Person ${String.fromCharCode(65 + Math.floor(index / 26))}${String.fromCharCode(65 + (index % 26))}`,
+        ),
+      ],
+      candidates: [],
       now,
     });
 

@@ -18,7 +18,7 @@ describe('packaged runtime resources', () => {
     );
 
     expect(config).toMatch(
-      /"from": "resources\/bin"[^}]*"to": "bin"[^}]*"filter": \["\*\*\/\*", "!audiocap", "!parakeet-runtime"\]/,
+      /"from": "resources\/bin"[^}]*"to": "bin"[^}]*"filter": \["\*\*\/\*"\]/,
     );
   });
 

@@ -115,6 +115,7 @@ class AudioCapCLI {
                         }
 
                         let stdout = FileHandle.standardOutput
+                        let streamChannels = max(1, Int(desc.mChannelsPerFrame))
                         try tap.start(on: queue) { (_, inInputData, _, _, _) in
                             let mutableInputData = UnsafeMutablePointer<AudioBufferList>(mutating: inInputData)
                             let buffers = UnsafeMutableAudioBufferListPointer(mutableInputData).filter {
@@ -122,28 +123,46 @@ class AudioCapCLI {
                             }
                             guard !buffers.isEmpty else { return }
 
-                            let frameCount = buffers.map { buffer in
-                                let channels = max(1, Int(buffer.mNumberChannels))
-                                return Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / channels
-                            }.min() ?? 0
-                            guard frameCount > 0 else { return }
+                            let mono: [Float]
+                            if nonInterleaved {
+                                let frameCount = buffers.map { buffer in
+                                    let channels = max(1, Int(buffer.mNumberChannels))
+                                    return Int(buffer.mDataByteSize) / MemoryLayout<Float>.size / channels
+                                }.min() ?? 0
+                                guard frameCount > 0 else { return }
 
-                            var mono = [Float](repeating: 0, count: frameCount)
-                            var contributingChannels = 0
-                            for buffer in buffers {
-                                guard let data = buffer.mData else { continue }
-                                let channels = max(1, Int(buffer.mNumberChannels))
-                                let samples = data.assumingMemoryBound(to: Float.self)
-                                for frame in 0..<frameCount {
-                                    for channel in 0..<channels {
-                                        mono[frame] += samples[(frame * channels) + channel]
+                                var mixed = [Float](repeating: 0, count: frameCount)
+                                var contributingChannels = 0
+                                for buffer in buffers {
+                                    guard let data = buffer.mData else { continue }
+                                    let channels = max(1, Int(buffer.mNumberChannels))
+                                    let samples = data.assumingMemoryBound(to: Float.self)
+                                    for frame in 0..<frameCount {
+                                        for channel in 0..<channels {
+                                            mixed[frame] += samples[(frame * channels) + channel]
+                                        }
                                     }
+                                    contributingChannels += channels
                                 }
-                                contributingChannels += channels
+                                guard contributingChannels > 0 else { return }
+                                let scale = 1.0 / Float(contributingChannels)
+                                for frame in 0..<frameCount { mixed[frame] *= scale }
+                                mono = mixed
+                            } else {
+                                guard let buffer = buffers.first, let data = buffer.mData else { return }
+                                let availableSamples = Int(buffer.mDataByteSize) / MemoryLayout<Float>.size
+                                let frameCount = availableSamples / streamChannels
+                                guard frameCount > 0 else { return }
+                                let samples = data.assumingMemoryBound(to: Float.self)
+                                var mixed = [Float](repeating: 0, count: frameCount)
+                                for frame in 0..<frameCount {
+                                    for channel in 0..<streamChannels {
+                                        mixed[frame] += samples[(frame * streamChannels) + channel]
+                                    }
+                                    mixed[frame] /= Float(streamChannels)
+                                }
+                                mono = mixed
                             }
-                            guard contributingChannels > 0 else { return }
-                            let scale = 1.0 / Float(contributingChannels)
-                            for frame in 0..<frameCount { mono[frame] *= scale }
                             mono.withUnsafeBytes { bytes in
                                 try? stdout.write(contentsOf: Data(bytes))
                             }

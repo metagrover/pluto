@@ -515,7 +515,7 @@ export const createBrowserIpcFallback = (): IpcRendererLike => {
   return {
     invoke: createInvokeFallback(captureJournals),
     send: () => {},
-    on: () => {},
+    on: () => () => {},
     off: () => {},
   };
 };
