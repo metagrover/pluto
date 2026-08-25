@@ -40,6 +40,8 @@ For ordinary continuous English speech, the acceptance target is first visible t
 
 ### Speaker confidence
 
+This section governs live EOU presentation. Saved finalized meetings use the separate [transcript speaker-attribution contract](../../transcript-speaker-attribution.md), which can rely on complete cross-channel timing and finalized text unavailable to the live bounded-horizon reconciler.
+
 Live EOU output remains source-tagged, but source identity alone is not a displayed speaker claim.
 
 - A committed System segment is confidently `Them`.

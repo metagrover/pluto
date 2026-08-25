@@ -37,10 +37,9 @@ import {
   restoreAnalysisSnapshot,
 } from '../../utils/meetingNotesHistory';
 import { meetingTimestamp } from '../../utils/meetingOrdering';
-import { buildReadableTranscriptSegments } from '../../utils/readableTranscript';
 import {
-  applyTranscriptSpeakerPresentation,
   buildAnalysisTranscriptFromJson,
+  buildTranscriptSegmentsForPresentation,
   parseTranscriptSegments,
 } from '../../utils/transcript';
 import {
@@ -549,10 +548,9 @@ export const MeetingView = ({
   } catch (error) {
     console.error('Failed to parse transcript', error);
   }
-  const readableTranscriptSegments = applyTranscriptSpeakerPresentation(
+  const readableTranscriptSegments = buildTranscriptSegmentsForPresentation(
     selectedMeeting.transcript_json,
-    buildReadableTranscriptSegments(transcriptSegments)
-      .segments as TranscriptSegment[],
+    transcriptSegments,
   );
   const transcriptTurns = buildMeetingTranscriptTurns(
     readableTranscriptSegments,

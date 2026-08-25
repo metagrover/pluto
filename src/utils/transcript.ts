@@ -150,6 +150,17 @@ export const applyTranscriptSpeakerPresentation = <
   }
 };
 
+export const buildTranscriptSegmentsForPresentation = <
+  T extends TranscriptSegmentLike,
+>(
+  transcriptJson: string | null | undefined,
+  segments: T[],
+): Array<T & { text: string }> =>
+  applyTranscriptSpeakerPresentation(
+    transcriptJson,
+    buildReadableTranscriptSegments(segments).segments,
+  );
+
 export const isTranscriptJsonEffectivelyEmpty = (
   transcriptJson?: string | null,
 ): boolean => {
@@ -159,10 +170,10 @@ export const isTranscriptJsonEffectivelyEmpty = (
 export const buildAnalysisTranscriptFromJson = (
   transcriptJson?: string | null,
 ): string => {
-  const readable = buildReadableTranscriptSegments(
-    parseTranscriptSegments(transcriptJson),
-  ).segments;
   return formatReadableTranscriptForAnalysis(
-    applyTranscriptSpeakerPresentation(transcriptJson, readable),
+    buildTranscriptSegmentsForPresentation(
+      transcriptJson,
+      parseTranscriptSegments(transcriptJson),
+    ),
   );
 };

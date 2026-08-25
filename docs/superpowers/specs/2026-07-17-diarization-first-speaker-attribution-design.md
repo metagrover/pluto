@@ -4,6 +4,8 @@
 **Status:** Proposed for review  
 **Scope:** Completed-recording finalization only
 
+The current safe fallback and saved-reading behavior are defined in the [transcript speaker-attribution contract](../../transcript-speaker-attribution.md). This design owns the acoustic evidence required to move beyond that fallback safely.
+
 ## Outcome
 
 Pluto produces a final `Me`/`Them` transcript from canonical mixed audio without treating microphone-channel presence as speaker identity. The selected credential-free sherpa-onnx diarizer supplies speaker boundaries. Pluto assigns `Me` only when a boundary overlaps microphone-exclusive near-end evidence; system-correlated microphone energy is pass-through evidence, not local identity.
