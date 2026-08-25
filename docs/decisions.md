@@ -277,9 +277,9 @@ This keeps the user in the conversation, makes capture trust visible, and reserv
 
 - **Status:** Accepted
 - **Source:** [Issue #651](https://github.com/metagrover/pluto/issues/651)
-- **Decision:** Once recording readiness admits capture, Pluto automatically runs the existing dual-source Parakeet shadow coordinator over contiguous, non-overlapping 30-second sealed microphone and System-audio windows. A shorter sealed tail flushes on stop. Its output is provisional operational evidence only: MLX remains the visible live draft and Parakeet finalization remains the canonical transcript path.
+- **Decision:** Once recording readiness admits capture, Pluto automatically runs the existing dual-source Parakeet shadow coordinator over contiguous, non-overlapping receipt-aligned microphone and System-audio windows that seal when they reach the 30-second target. A shorter sealed tail flushes on stop. Its output is provisional operational evidence only: MLX remains the visible live draft and Parakeet finalization remains the canonical transcript path.
 - **Rationale:** A development-only launch flag meant the fully implemented background path was absent from normal recordings, making its feasibility and resource behavior impossible to observe in the actual product flow. Capture receipts bind each background request to immutable source audio without allowing inference to block capture.
-- **Consequences:** The existing resource/thermal fence, cancellation, rollback, temporary-audio cleanup, and content-free report are mandatory for every shadow run. Any shadow failure leaves the recording and its visible MLX preview intact, fences further shadow work, and cannot promote provisional output into the transcript.
+- **Consequences:** Recorder cadence may overshoot the target by one durable receipt because exact audio slicing is intentionally outside the metadata-only assembler. The existing resource/thermal fence, cancellation, rollback, temporary-audio cleanup, and content-free report are mandatory for every shadow run. Any shadow failure leaves the recording and its visible MLX preview intact, fences further shadow work, and cannot promote provisional output into the transcript.
 
 ## 2026-08-16 - Make recording readiness the first-run outcome
 
