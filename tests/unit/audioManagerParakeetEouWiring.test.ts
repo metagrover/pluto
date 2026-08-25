@@ -23,6 +23,14 @@ describe('AudioManager Parakeet EOU wiring', () => {
     );
   });
 
+  it('publishes tentative EOU text in the primary transcript immediately', () => {
+    expect(source).toContain('onLiveTranscript?.(segments)');
+    expect(source).toContain("onInterimTranscript?.('')");
+    expect(source).not.toContain(
+      'const stable = segments.filter((segment) => segment.confirmed)',
+    );
+  });
+
   it('finishes EOU before capture stop and canonical finalization', () => {
     const finishIndex = source.indexOf('await eouSessionAtStop?.finish()');
     const captureStopIndex = source.indexOf("'AUDIO_CAPTURE_JOURNAL_STOP'");

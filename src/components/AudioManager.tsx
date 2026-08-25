@@ -696,15 +696,14 @@ export const AudioManager = ({
             speaker: segment.speaker,
             validationState: segment.confirmed ? 'validated' : 'preview',
           }));
-          const stable = segments.filter((segment) => segment.confirmed);
-          const interim = [...segments]
-            .reverse()
-            .find((segment) => !segment.confirmed)?.text;
           liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
             segments,
             () => {
-              onLiveTranscript?.(stable);
-              onInterimTranscript?.(interim ?? '');
+              // Tentative native EOU rows are stable by id and are replaced in
+              // place as recognition advances. Publish them in the primary
+              // transcript instead of hiding first text in the faint footer.
+              onLiveTranscript?.(segments);
+              onInterimTranscript?.('');
             },
           );
           onLiveTranscriptIntegrityChange?.('healthy');
