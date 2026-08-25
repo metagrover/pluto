@@ -325,4 +325,40 @@ describe('saved transcript speaker-presentation contract', () => {
       'Them: This is one thought.\nMe: Can we proceed?',
     );
   });
+
+  it('does not run a second cleanup pass that drops a substantive displayed turn', () => {
+    const segments = [
+      {
+        speaker: 'Me',
+        startTime: 0,
+        endTime: 8,
+        text: 'Yes proactive alerts over time and',
+      },
+      {
+        speaker: 'Me',
+        startTime: 8,
+        endTime: 15,
+        text: 'imagine a watcher checking product news',
+      },
+      { speaker: 'Them', startTime: 10, endTime: 11, text: 'Yes.' },
+      {
+        speaker: 'Me',
+        startTime: 16,
+        endTime: 19,
+        text: 'Feeding it into a dashboard.',
+      },
+    ];
+    const transcriptJson = JSON.stringify({
+      speakerAttribution: { mappingApplied: true },
+      segments,
+    });
+    const presented = buildTranscriptSegmentsForPresentation(
+      transcriptJson,
+      segments,
+    );
+
+    expect(buildAnalysisTranscriptFromJson(transcriptJson).split('\n')).toEqual(
+      presented.map((segment) => `${String(segment.speaker)}: ${segment.text}`),
+    );
+  });
 });

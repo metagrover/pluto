@@ -1,7 +1,4 @@
-import {
-  buildReadableTranscriptSegments,
-  formatReadableTranscriptForAnalysis,
-} from './readableTranscript.ts';
+import { buildReadableTranscriptSegments } from './readableTranscript.ts';
 import {
   type TranscriptReadingCandidate,
   assembleReadableTranscriptSentences,
@@ -199,10 +196,17 @@ export const isTranscriptJsonEffectivelyEmpty = (
 export const buildAnalysisTranscriptFromJson = (
   transcriptJson?: string | null,
 ): string => {
-  return formatReadableTranscriptForAnalysis(
-    buildTranscriptSegmentsForPresentation(
-      transcriptJson,
-      parseTranscriptSegments(transcriptJson),
-    ),
-  );
+  return buildTranscriptSegmentsForPresentation(
+    transcriptJson,
+    parseTranscriptSegments(transcriptJson),
+  )
+    .map((segment) => {
+      const speaker =
+        typeof segment.speaker === 'string' ||
+        typeof segment.speaker === 'number'
+          ? String(segment.speaker).trim()
+          : '';
+      return speaker ? `${speaker}: ${segment.text}` : segment.text;
+    })
+    .join('\n');
 };
