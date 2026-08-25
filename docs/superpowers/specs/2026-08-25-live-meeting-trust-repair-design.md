@@ -68,6 +68,47 @@ The pinned Parakeet EOU vocabulary contains no punctuation tokens, so raw live o
 
 The transform must be idempotent and must not alter contractions, acronyms, numbers, internal casing, raw EOU snapshots, or the canonical final transcript. Exact-text or evidence views continue to use unmodified recognized text.
 
+## Saved transcript quality contract
+
+The finalized transcript is an evidence-backed reconciliation of two candidates, not an unconditional replacement of the live transcript.
+
+- The accepted live EOU segments remain immutable as `liveSegments`.
+- The recovered mic and System channel decode remains immutable as `segments` and remains the timing and channel-provenance authority.
+- A derived `readingSegments` projection aligns the candidates by time and normalized words, chooses wording per utterance, and records content-free reconciliation counts and quality scores.
+- Saved display and downstream analysis consume the same `readingSegments` projection. Exact evidence views continue to expose the untouched recovered-channel and live candidates.
+
+### Utterance-level wording selection
+
+Partition each candidate into bounded utterances using committed EOU boundaries, speaker/channel changes, terminal punctuation, and pauses of at least 1.2 seconds. Align live and recovered utterances only when their time intervals overlap by at least 35 percent of the shorter interval or their boundaries are within two seconds and their normalized token similarity is at least 0.45.
+
+For each aligned region, calculate a deterministic structural-quality score from word coverage, one- to three-word fragment rate, repeated-token rate, terminal-punctuation coverage, and unexplained temporal gaps. Do not use meeting-specific vocabulary, an LLM, or semantic rewriting in this score.
+
+- Keep recovered wording when it has comparable or better structural quality, adds non-duplicated words, or the live candidate does not cover the interval.
+- Keep live wording when both candidates cover the same interval and recovered wording is materially more fragmented, repetitive, or incomplete.
+- Never splice partial words. When neither utterance dominates, retain recovered wording and record the region as unresolved.
+- Preserve recovered timing and channel evidence even when live wording wins. Record the selected wording source on the derived utterance.
+- Candidate selection must be deterministic, idempotent, content-private in logs, and safe to run on reload for already-persisted meetings that contain `liveSegments`.
+
+The canonical candidates are never overwritten. A newer projection version may improve existing meetings without destroying the prior evidence.
+
+### Echo and overlap
+
+System audio remains authoritative remote evidence. Suppress a materially overlapping mic fragment when strict lexical matching succeeds or when a bounded phonetic matcher shows that the short mic fragment is a degraded decode of a longer System utterance. Phonetic matching is eligible only for a mic fragment of at most four words that is at least 80 percent time-contained by System speech and has no validated near-end evidence. At least half of its normalized tokens must either match exactly or satisfy the versioned phonetic-token distance. Genuine double-talk remains visible.
+
+Short mic speech may be labeled `Me` only from validated near-end/AEC residual evidence. RMS dominance alone is not sufficient. Without that evidence, the neutral `Speaker` label is retained, but adjacent neutral fragments may be joined into one readable turn without inventing a speaker.
+
+### Readable sentence assembly
+
+The reading projection joins adjacent same-speaker fragments inside an utterance, removes filler-only rows and exact presentation duplicates, capitalizes sentence starts, and inserts terminal punctuation at committed utterance or pause boundaries. It preserves recognized words, contractions, acronyms, numbers, and internal casing. It never inserts lexical content or changes the evidence candidates.
+
+### Scoped vocabulary
+
+Live and final recognition use the same vocabulary snapshot captured when recording starts. It contains only explicitly entered participants and explicitly configured meeting-scoped domain terms. The persisted provisional meeting carries the snapshot so background finalization and app-restart recovery cannot fall back to an empty participant list. Global contacts, inferred names, analysis-derived entities, and transcript guesses are never added automatically.
+
+### Quality gate
+
+Before the reading projection is accepted, compare it with both candidates. Reject a projection that increases temporal gaps, duplicate words, or short-fragment rate without a compensating coverage gain. Persist only content-free metrics and the projection version. A private replay corpus and the latest persisted meeting must demonstrate that the projection improves or preserves wording coverage, fragment rate, punctuation, attribution precision, and display/analysis parity.
+
 ## Recording workspace contract
 
 Replace the two disclosure rows at the bottom of the recording rail with one compact, always-visible participant section.
