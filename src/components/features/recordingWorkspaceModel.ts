@@ -13,6 +13,7 @@ export type LiveTranscriptSegment = {
   rawText?: string;
   source?: 'mic' | 'system';
   timestampMs: number;
+  endTimestampMs?: number;
   confirmed: boolean;
 };
 

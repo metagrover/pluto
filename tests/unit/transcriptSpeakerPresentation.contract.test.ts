@@ -257,4 +257,45 @@ describe('saved transcript speaker-presentation contract', () => {
     expect(segments).toEqual(before);
     expect(JSON.parse(transcriptJson).segments).toEqual(before);
   });
+
+  it('uses the preserved live candidate when final wording is materially degraded', () => {
+    const recovered = [
+      { speaker: 'Them', startTime: 10, endTime: 11, text: 'The rollout' },
+      {
+        speaker: 'Them',
+        startTime: 11.05,
+        endTime: 11.5,
+        text: 'the rollout',
+      },
+      { speaker: 'Them', startTime: 11.55, endTime: 12, text: 'is is' },
+      { speaker: 'Them', startTime: 12.05, endTime: 13, text: 'ready' },
+    ];
+    const liveSegments = [
+      {
+        speaker: 'Them',
+        startTime: 10,
+        endTime: 13,
+        text: 'The rollout is ready.',
+      },
+    ];
+    const transcriptJson = JSON.stringify({
+      speakerAttribution: { mappingApplied: false },
+      liveSegments,
+      segments: recovered,
+    });
+    const before = JSON.parse(transcriptJson);
+
+    const presented = buildTranscriptSegmentsForPresentation(
+      transcriptJson,
+      recovered,
+    );
+
+    expect(presented.map((segment) => segment.text)).toEqual([
+      'The rollout is ready.',
+    ]);
+    expect(buildAnalysisTranscriptFromJson(transcriptJson)).toBe(
+      'Them: The rollout is ready.',
+    );
+    expect(JSON.parse(transcriptJson)).toEqual(before);
+  });
 });

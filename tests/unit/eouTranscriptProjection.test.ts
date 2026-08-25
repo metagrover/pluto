@@ -35,6 +35,7 @@ describe('EOU transcript projection', () => {
         rawText: 'hello world',
         source: 'mic',
         timestampMs: 0,
+        endTimestampMs: 400,
         confirmed: true,
       },
       {
@@ -44,6 +45,7 @@ describe('EOU transcript projection', () => {
         rawText: 'again',
         source: 'mic',
         timestampMs: 500,
+        endTimestampMs: 700,
         confirmed: false,
       },
     ]);
@@ -101,6 +103,7 @@ describe('EOU transcript projection', () => {
       text: 'Again.',
       rawText: 'again',
       timestampMs: 500,
+      endTimestampMs: 700,
       confirmed: true,
     });
   });

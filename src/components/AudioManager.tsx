@@ -43,6 +43,7 @@ import {
 } from '../utils/speakerAttribution';
 import { createStopToValidatedLatencyAccumulator } from '../utils/stopToValidatedLatency';
 import type { CaptureActivityEvidence } from '../utils/transcriptActivityEvidence';
+import { toStoredLiveTranscriptCandidate } from '../utils/transcriptReadingProjection';
 import {
   type StoredTranscriptSpeakerAttribution,
   type TranscriptPipelineMode,
@@ -688,14 +689,9 @@ export const AudioManager = ({
             eouGenerationRef.current !== eouGeneration
           )
             return;
-          processedMicSegmentsRef.current = segments.map((segment) => ({
-            id: segment.id,
-            startTime: segment.timestampMs / 1_000,
-            endTime: segment.timestampMs / 1_000 + 0.01,
-            text: segment.rawText ?? segment.text,
-            speaker: segment.speaker,
-            validationState: segment.confirmed ? 'validated' : 'preview',
-          }));
+          processedMicSegmentsRef.current = segments.map(
+            toStoredLiveTranscriptCandidate,
+          );
           liveTranscriptResponsivenessRef.current.publishAcceptedSegments(
             segments,
             () => {

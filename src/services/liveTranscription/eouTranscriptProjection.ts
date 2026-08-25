@@ -74,6 +74,9 @@ export function createEouTranscriptProjection(): {
               (previous.tentative
                 ? previous.tentative.segment.timestampMs / 1_000
                 : update.processedAudioSeconds),
+            endSeconds:
+              committedTokens.at(-1)?.endSeconds ??
+              update.processedAudioSeconds,
           }),
         );
       }
@@ -135,11 +138,12 @@ const emptyProjections = (): Record<LiveSource, SourceProjection> => ({
 const makeSegment = (
   update: ParakeetEouUpdate,
   kind: 'committed' | 'tentative',
-  override?: { text: string; startSeconds: number },
+  override?: { text: string; startSeconds: number; endSeconds: number },
 ): ProjectedSegment => {
-  const token = update.tokens.find((candidate) =>
+  const selectedTokens = update.tokens.filter((candidate) =>
     kind === 'committed' ? candidate.committed : !candidate.committed,
   );
+  const token = selectedTokens[0];
   const rawText =
     override?.text ??
     (kind === 'committed' ? update.committedText : update.tentativeText);
@@ -156,6 +160,10 @@ const makeSegment = (
       timestampMs:
         (override?.startSeconds ??
           token?.startSeconds ??
+          update.processedAudioSeconds) * 1_000,
+      endTimestampMs:
+        (override?.endSeconds ??
+          selectedTokens.at(-1)?.endSeconds ??
           update.processedAudioSeconds) * 1_000,
       confirmed: kind === 'committed',
     },

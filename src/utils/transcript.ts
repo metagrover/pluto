@@ -2,6 +2,10 @@ import {
   buildReadableTranscriptSegments,
   formatReadableTranscriptForAnalysis,
 } from './readableTranscript.ts';
+import {
+  type TranscriptReadingCandidate,
+  buildTranscriptReadingProjection,
+} from './transcriptReadingProjection.ts';
 
 interface TranscriptSegmentLike {
   text?: unknown;
@@ -155,11 +159,32 @@ export const buildTranscriptSegmentsForPresentation = <
 >(
   transcriptJson: string | null | undefined,
   segments: T[],
-): Array<T & { text: string }> =>
-  applyTranscriptSpeakerPresentation(
+): Array<T & { text: string }> => {
+  const recoveredSegments = buildReadableTranscriptSegments(segments).segments;
+  let liveSegments: TranscriptReadingCandidate[] = [];
+  try {
+    const parsed = JSON.parse(transcriptJson || '{}') as {
+      liveSegments?: unknown;
+    };
+    if (Array.isArray(parsed.liveSegments)) {
+      liveSegments = buildReadableTranscriptSegments(
+        parsed.liveSegments as TranscriptReadingCandidate[],
+      ).segments;
+    }
+  } catch {
+    liveSegments = [];
+  }
+  const reading: TranscriptSegmentLike[] = liveSegments.length
+    ? buildTranscriptReadingProjection({
+        recoveredSegments,
+        liveSegments,
+      }).segments
+    : recoveredSegments;
+  return applyTranscriptSpeakerPresentation(
     transcriptJson,
-    buildReadableTranscriptSegments(segments).segments,
-  );
+    reading,
+  ) as unknown as Array<T & { text: string }>;
+};
 
 export const isTranscriptJsonEffectivelyEmpty = (
   transcriptJson?: string | null,
