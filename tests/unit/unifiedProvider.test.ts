@@ -26,6 +26,7 @@ import {
   UnifiedLLMProvider,
   calculateOllamaContextBudget,
   deduplicateExtractedItems,
+  getOllamaActiveGenerationTimeoutMs,
   getOllamaTimeoutMs,
   sliceTranscriptWindows,
 } from '../../electron/llm/unifiedProvider';
@@ -321,6 +322,7 @@ describe('UnifiedLLMProvider', () => {
 
   it('prefers promoted Qwen for structured meeting analysis', async () => {
     const selectedModels: string[] = [];
+    const streamModes: unknown[] = [];
     installFetchMock((url, init) => {
       if (url.endsWith('/api/tags')) {
         return jsonResponse({
@@ -329,6 +331,7 @@ describe('UnifiedLLMProvider', () => {
       }
       const body = parseRequestBody(init);
       selectedModels.push(String(body.model));
+      streamModes.push(body.stream);
       return jsonResponse({
         response: JSON.stringify({
           title: 'Synthetic update',
@@ -348,6 +351,7 @@ describe('UnifiedLLMProvider', () => {
 
     expect(analysis.generation_metadata?.model).toBe('qwen3.5:9b');
     expect(selectedModels).toEqual(['qwen3.5:9b']);
+    expect(streamModes).toEqual([true]);
   });
 
   it('avoids embedding-only ollama models during auto-detection', async () => {
@@ -1486,6 +1490,8 @@ describe('Ollama Budgeting & Adaptive Windowing', () => {
     expect(getOllamaTimeoutMs('topicSegmentation')).toBe(300_000);
     expect(getOllamaTimeoutMs('topicAnalysis')).toBe(300_000);
     expect(getOllamaTimeoutMs('knowledgeDoc')).toBe(900_000);
+    expect(getOllamaActiveGenerationTimeoutMs(512)).toBe(376_000);
+    expect(getOllamaActiveGenerationTimeoutMs(4_096)).toBe(1_200_000);
   });
 
   it('calculateOllamaContextBudget allocates up to 16384 context tokens for long analysis prompts', () => {

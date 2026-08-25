@@ -16,7 +16,10 @@ import { meetingTitleNeedsGeneration } from './retryMeetingTranscriptValidation.
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
 const DEFAULT_STAGE_TIMEOUT_MS = {
-  analysis: 15 * 60_000,
+  // Provider-level capacity, idle-progress, and active-generation deadlines
+  // fail stalled work earlier. This is only the catastrophic ceiling for a
+  // healthy multi-pass local analysis plus value-signal extraction.
+  analysis: 30 * 60_000,
   knowledge_extraction: 5 * 60_000,
   knowledge_synthesis: 15 * 60_000,
 } as const;

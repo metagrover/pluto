@@ -22,6 +22,7 @@ import type {
   DecisionV3,
   TopicSection,
 } from './analysisTypes';
+import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
 import { ollamaHttpFetch, ollamaHttpStream } from './ollamaHttpTransport';
 import {
   getEntitiesPrompt,
@@ -51,6 +52,9 @@ import type {
 const OLLAMA_TIMEOUT_MS = 90_000;
 const OLLAMA_ANALYSIS_TIMEOUT_MS = 5 * 60_000;
 const OLLAMA_KNOWLEDGE_DOC_TIMEOUT_MS = 15 * 60_000;
+const OLLAMA_GENERATION_IDLE_TIMEOUT_MS = 60_000;
+const OLLAMA_ACTIVE_GENERATION_MIN_TIMEOUT_MS = 6 * 60_000;
+const OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS = 20 * 60_000;
 const OLLAMA_DEFAULT_MODEL = 'qwen3.5:9b';
 const SHORT_TRANSCRIPT_SINGLE_TOPIC_MAX_SEGMENTS = 8;
 const OLLAMA_EDITORIAL_CONTEXT_TOKENS = 32_768;
@@ -388,6 +392,24 @@ export const getOllamaTimeoutMs = (task: string): number =>
         task === 'topicAnalysis'
       ? OLLAMA_ANALYSIS_TIMEOUT_MS
       : OLLAMA_TIMEOUT_MS;
+
+const usesProgressAwareOllamaDeadline = (task: LLMTask): boolean =>
+  task === 'structuredAnalysis' ||
+  task === 'analysisEditorial' ||
+  task === 'topicSegmentation' ||
+  task === 'topicAnalysis' ||
+  task === 'knowledgeDoc';
+
+export const getOllamaActiveGenerationTimeoutMs = (
+  numPredict: number,
+): number =>
+  Math.min(
+    OLLAMA_ACTIVE_GENERATION_MAX_TIMEOUT_MS,
+    Math.max(
+      OLLAMA_ACTIVE_GENERATION_MIN_TIMEOUT_MS,
+      120_000 + Math.ceil(numPredict / 2) * 1_000,
+    ),
+  );
 
 type PersonEntity = ExtractedEntities['people'][number];
 type TopicEntity = ExtractedEntities['topics'][number];
@@ -1421,11 +1443,13 @@ export class UnifiedLLMProvider implements LLMProvider {
   }: TextGenerationOptions): Promise<string> {
     const model = await this.resolveOllamaModel();
     const { num_ctx, num_predict } = calculateOllamaContextBudget(prompt, task);
+    const progressAware = usesProgressAwareOllamaDeadline(task);
+    const shouldStream = Boolean(onToken) || progressAware;
 
     const requestBody: Record<string, unknown> = {
       model,
       prompt,
-      stream: Boolean(onToken),
+      stream: shouldStream,
       options: {
         num_ctx,
         num_predict,
@@ -1455,13 +1479,24 @@ export class UnifiedLLMProvider implements LLMProvider {
       // stdout may be closed in packaged Electron — ignore write errors
     }
 
-    if (onToken) {
+    if (shouldStream) {
       let pending = '';
       let answer = '';
-      const timeoutSignal = AbortSignal.timeout(getOllamaTimeoutMs(task));
-      const combinedSignal = signal
-        ? AbortSignal.any([signal, timeoutSignal])
-        : timeoutSignal;
+      const deadline = progressAware
+        ? createOllamaGenerationDeadline({
+            capacityTimeoutMs: getOllamaTimeoutMs(task),
+            idleTimeoutMs: OLLAMA_GENERATION_IDLE_TIMEOUT_MS,
+            activeTimeoutMs: getOllamaActiveGenerationTimeoutMs(num_predict),
+            callerSignal: signal,
+          })
+        : null;
+      const timeoutSignal = deadline
+        ? deadline.signal
+        : AbortSignal.timeout(getOllamaTimeoutMs(task));
+      const combinedSignal =
+        signal && !deadline
+          ? AbortSignal.any([signal, timeoutSignal])
+          : timeoutSignal;
       const consumeChunk = (chunk: string) => {
         pending += chunk;
         const lines = pending.split('\n');
@@ -1471,24 +1506,31 @@ export class UnifiedLLMProvider implements LLMProvider {
           const packet = JSON.parse(line) as { response?: unknown };
           if (typeof packet.response !== 'string' || !packet.response) continue;
           answer += packet.response;
-          onToken(packet.response);
+          onToken?.(packet.response);
         }
       };
-      const response = await ollamaHttpStream(
-        `${this.ollamaBaseUrl}/api/generate`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-          signal: combinedSignal,
-        },
-        consumeChunk,
-      );
-      if (pending.trim()) consumeChunk(`${pending}\n`);
-      if (!response.ok) {
-        throw new Error(`Ollama API error: ${response.statusText}`);
+      try {
+        const response = await this.ollamaStream(
+          '/api/generate',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+            signal: combinedSignal,
+          },
+          (chunk) => {
+            deadline?.recordProgress();
+            consumeChunk(chunk);
+          },
+        );
+        if (pending.trim()) consumeChunk(`${pending}\n`);
+        if (!response.ok) {
+          throw new Error(`Ollama API error: ${response.statusText}`);
+        }
+        return answer;
+      } finally {
+        deadline?.dispose();
       }
-      return answer;
     }
 
     const response = await this.ollamaFetch(
@@ -1617,6 +1659,39 @@ export class UnifiedLLMProvider implements LLMProvider {
       clearTimeout(timeoutId);
       externalSignal?.removeEventListener('abort', abortFromExternal);
     }
+  }
+
+  private async ollamaStream(
+    path: string,
+    options: RequestInit,
+    onChunk: (chunk: string) => void,
+  ): Promise<{ ok: boolean; status: number; statusText: string }> {
+    if (process.versions.electron) {
+      return await ollamaHttpStream(
+        `${this.ollamaBaseUrl}${path}`,
+        options,
+        onChunk,
+      );
+    }
+    const response = await fetch(`${this.ollamaBaseUrl}${path}`, options);
+    if (!response.body) {
+      if (typeof response.text === 'function') {
+        onChunk(await response.text());
+      } else if (typeof response.json === 'function') {
+        onChunk(`${JSON.stringify(await response.json())}\n`);
+      }
+      return response;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      onChunk(decoder.decode(value, { stream: true }));
+    }
+    const tail = decoder.decode();
+    if (tail) onChunk(tail);
+    return response;
   }
 
   private getSystemInstruction(task: LLMTask): string {
