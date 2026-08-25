@@ -40,17 +40,17 @@
 - Test: `native/parakeet-runtime/Tests/ParakeetRuntimeEngineTests/ModelArtifactIntegrityTests.swift`
 - Test: `native/parakeet-runtime/Tests/ParakeetRuntimeEngineTests/FluidAudioModelInstallerTests.swift`
 
-- [ ] **Step 1: Write failing manifest and installer tests**
+- [x] **Step 1: Write failing manifest and installer tests**
 
 Add assertions that `ProductionModelManifest.current` contains repository `FluidInference/parakeet-realtime-eou-120m-coreml`, revision `40a23f4c0b333aa17ad8c0f2ea47ec2347f2f355`, EOU artifact digest `4a23a8120f0a5ae8f13bc778e28af239fd00747a406ffb6e98eb06c578437e7f`, and a version different from the prior bundle. Use an injected `RepositoryRevisionChecking` and `EouModelDownloading` fake to assert the installer checks all three revisions, installs only `.parakeetEou320`, and refuses activation when the EOU directory is absent or digest-mismatched.
 
-- [ ] **Step 2: Run the native tests and observe failure**
+- [x] **Step 2: Run the native tests and observe failure**
 
 Run: `cd native/parakeet-runtime && swift test --filter 'ModelStoreTests|ModelArtifactIntegrityTests|FluidAudioModelInstallerTests'`
 
 Expected: compilation fails because `eouRepository`, `eouRepositoryRevision`, `eouArtifactSHA256`, and installer seams do not exist.
 
-- [ ] **Step 3: Extend the model contract and installer minimally**
+- [x] **Step 3: Extend the model contract and installer minimally**
 
 Add required `String` fields to `ModelManifest`. Define:
 
@@ -70,13 +70,13 @@ protocol EouModelDownloading: Sendable {
 
 The production downloader calls `ModelHub.download(.parakeetEou320, to: stagingDirectory)` and verifies exactly `decoder.mlmodelc`, `joint_decision.mlmodelc`, `streaming_encoder.mlmodelc`, and `vocab.json`. Verify the whole `parakeet-eou-streaming/320ms` directory against `4a23a8120f0a5ae8f13bc778e28af239fd00747a406ffb6e98eb06c578437e7f` before `ModelStore` writes `active.json`.
 
-- [ ] **Step 4: Run focused tests and the existing model suite**
+- [x] **Step 4: Run focused tests and the existing model suite**
 
 Run: `cd native/parakeet-runtime && swift test --filter 'ModelStoreTests|ModelArtifactIntegrityTests|FluidAudioModelInstallerTests'`
 
 Expected: all selected tests pass; a failed EOU verification leaves no active new bundle.
 
-- [ ] **Step 5: Commit the model bundle**
+- [x] **Step 5: Commit the model bundle**
 
 ```bash
 git add native/parakeet-runtime/Sources/ParakeetRuntimeCore/ModelManifest.swift native/parakeet-runtime/Sources/ParakeetRuntimeEngine/FluidAudioEngine.swift native/parakeet-runtime/Sources/ParakeetRuntimeEngine/ModelArtifactIntegrity.swift native/parakeet-runtime/Tests

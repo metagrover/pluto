@@ -9,34 +9,60 @@ public enum FluidAudioModelLayout {
     public static let asrDirectoryName = "parakeet-tdt-0.6b-v3-coreml"
     public static let installedAsrDirectoryName = "parakeet-tdt-0.6b-v3"
     public static let ctcDirectoryName = "parakeet-ctc-110m-coreml"
+    public static let eouDirectoryName = "parakeet-eou-streaming/320ms"
 }
 
 public enum ProductionModelManifest {
     public static let current = ModelManifest(
         identifier: "parakeet-tdt-0.6b-v3",
-        version: "fluidaudio-0.15.5-asr-aed02740-ctc-accdafd8-int8-verified1",
+        version: "fluidaudio-0.15.5-asr-aed02740-ctc-accdafd8-eou-40a23f4c-int8-verified2",
         repository: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
         repositoryRevision: "aed02740059203c4a87495924f685de3722ae9ce",
         auxiliaryRepository: "FluidInference/parakeet-ctc-110m-coreml",
         auxiliaryRepositoryRevision: "accdafd8cf8a2ff1cabe3c11e54416b405d409aa",
+        eouRepository: "FluidInference/parakeet-realtime-eou-120m-coreml",
+        eouRepositoryRevision: "40a23f4c0b333aa17ad8c0f2ea47ec2347f2f355",
         recognitionArtifactSHA256: "f03b69d2d516896b78676270164b54f7c1fd2add37de4d06f9671752f88c688f",
         vocabularyArtifactSHA256: "b955323ed3f2769beb287c97f172a7dd2ccc7493218a2e6e6b930ccbc41d17d7",
+        eouArtifactSHA256: "4a23a8120f0a5ae8f13bc778e28af239fd00747a406ffb6e98eb06c578437e7f",
         encoderPrecision: "int8"
     )
 }
 
-public struct FluidAudioModelInstaller: ModelInstalling {
-    public init() {}
+protocol RepositoryRevisionChecking: Sendable {
+    func require(repository: String, revision: String) async throws
+}
 
-    public func install(manifest: ModelManifest, into stagingDirectory: URL) async throws {
-        try await verifyCurrentRevision(
-            repository: manifest.repository,
-            expected: manifest.repositoryRevision
-        )
-        try await verifyCurrentRevision(
-            repository: manifest.auxiliaryRepository,
-            expected: manifest.auxiliaryRepositoryRevision
-        )
+protocol FluidAudioModelBundleDownloading: Sendable {
+    func download(into stagingDirectory: URL) async throws
+}
+
+private struct HuggingFaceRepositoryRevisionChecker: RepositoryRevisionChecking {
+    func require(repository: String, revision: String) async throws {
+        guard !repository.isEmpty, !revision.isEmpty else {
+            throw RuntimeFailure.modelPreparationFailed
+        }
+        let encodedRepository = repository.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? ""
+        guard let url = URL(string: "https://huggingface.co/api/models/\(encodedRepository)") else {
+            throw RuntimeFailure.modelPreparationFailed
+        }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard
+            (response as? HTTPURLResponse)?.statusCode == 200,
+            let metadata = try? JSONDecoder().decode(RepositoryMetadata.self, from: data),
+            metadata.sha == revision
+        else { throw RuntimeFailure.modelPreparationFailed }
+    }
+
+    private struct RepositoryMetadata: Decodable {
+        let sha: String
+    }
+}
+
+private struct FluidAudioProductionBundleDownloader: FluidAudioModelBundleDownloading {
+    func download(into stagingDirectory: URL) async throws {
         let asrDirectory = stagingDirectory.appendingPathComponent(
             FluidAudioModelLayout.asrDirectoryName,
             isDirectory: true
@@ -53,6 +79,45 @@ public struct FluidAudioModelInstaller: ModelInstalling {
             isDirectory: true
         )
         _ = try await CtcModels.downloadAndLoad(to: ctcDirectory, variant: .ctc110m)
+        try await ModelHub.download(.parakeetEou320, to: stagingDirectory)
+    }
+}
+
+public struct FluidAudioModelInstaller: ModelInstalling {
+    private let revisionChecker: any RepositoryRevisionChecking
+    private let downloader: any FluidAudioModelBundleDownloading
+
+    public init() {
+        revisionChecker = HuggingFaceRepositoryRevisionChecker()
+        downloader = FluidAudioProductionBundleDownloader()
+    }
+
+    init(
+        revisionChecker: any RepositoryRevisionChecking,
+        downloader: any FluidAudioModelBundleDownloading
+    ) {
+        self.revisionChecker = revisionChecker
+        self.downloader = downloader
+    }
+
+    public func install(manifest: ModelManifest, into stagingDirectory: URL) async throws {
+        try await revisionChecker.require(
+            repository: manifest.repository,
+            revision: manifest.repositoryRevision
+        )
+        try await revisionChecker.require(
+            repository: manifest.auxiliaryRepository,
+            revision: manifest.auxiliaryRepositoryRevision
+        )
+        try await revisionChecker.require(
+            repository: manifest.eouRepository,
+            revision: manifest.eouRepositoryRevision
+        )
+        try await downloader.download(into: stagingDirectory)
+        let ctcDirectory = stagingDirectory.appendingPathComponent(
+            FluidAudioModelLayout.ctcDirectoryName,
+            isDirectory: true
+        )
         try ModelArtifactIntegrity.verify(
             directory: stagingDirectory.appendingPathComponent(
                 FluidAudioModelLayout.installedAsrDirectoryName,
@@ -64,28 +129,13 @@ public struct FluidAudioModelInstaller: ModelInstalling {
             directory: ctcDirectory,
             expectedSHA256: manifest.vocabularyArtifactSHA256
         )
-    }
-
-    private func verifyCurrentRevision(repository: String, expected: String) async throws {
-        guard !repository.isEmpty, !expected.isEmpty else {
-            throw RuntimeFailure.modelPreparationFailed
-        }
-        let encodedRepository = repository.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
-        ) ?? ""
-        guard let url = URL(string: "https://huggingface.co/api/models/\(encodedRepository)") else {
-            throw RuntimeFailure.modelPreparationFailed
-        }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        guard
-            (response as? HTTPURLResponse)?.statusCode == 200,
-            let metadata = try? JSONDecoder().decode(RepositoryMetadata.self, from: data),
-            metadata.sha == expected
-        else { throw RuntimeFailure.modelPreparationFailed }
-    }
-
-    private struct RepositoryMetadata: Decodable {
-        let sha: String
+        try ModelArtifactIntegrity.verify(
+            directory: stagingDirectory.appendingPathComponent(
+                FluidAudioModelLayout.eouDirectoryName,
+                isDirectory: true
+            ),
+            expectedSHA256: manifest.eouArtifactSHA256
+        )
     }
 }
 
