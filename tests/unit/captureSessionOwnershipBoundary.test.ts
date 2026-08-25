@@ -102,13 +102,13 @@ describe('capture session production ownership boundary', () => {
   it('hard-rejects lease conflicts before microphone acquisition', () => {
     const startSession = sliceBetween(
       audioManager,
-      'const startSession = async () =>',
+      'const startSession = async ()',
       'const stopSession = async (',
     );
     const conflictIndex = startSession.indexOf(
       'isCaptureSessionAlreadyActiveError(journalErr)',
     );
-    const conflictReturnIndex = startSession.indexOf('return;', conflictIndex);
+    const conflictReturnIndex = startSession.indexOf('return {', conflictIndex);
     const microphoneIndex = startSession.indexOf(
       'navigator.mediaDevices.getUserMedia',
     );
@@ -127,9 +127,8 @@ describe('capture session production ownership boundary', () => {
 
   it('prevents renderer unload while capture work is active', () => {
     expect(audioManager).toContain('attachCaptureUnloadGuard(window');
-    expect(audioManager).toContain('isRecording: () => isRecordingRef.current');
     expect(audioManager).toContain(
-      'isProcessing: () => isProcessingRef.current',
+      'snapshot: () => captureLifecycleRef.current',
     );
     expect(main).toContain("win.webContents.on('will-prevent-unload'");
   });
