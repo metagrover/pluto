@@ -13,9 +13,10 @@ public enum ModelArtifactIntegrity {
 
     public static func digest(directory: URL) throws -> String {
         let manager = FileManager.default
+        let canonicalDirectory = directory.resolvingSymlinksInPath().standardizedFileURL
         guard
             let enumerator = manager.enumerator(
-                at: directory,
+                at: canonicalDirectory,
                 includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                 options: []
             )
@@ -26,13 +27,14 @@ public enum ModelArtifactIntegrity {
             if values.isSymbolicLink == true { throw RuntimeFailure.modelPreparationFailed }
             return values.isRegularFile == true ? url : nil
         }.sorted { left, right in
-            relativePath(of: left, within: directory) < relativePath(of: right, within: directory)
+            relativePath(of: left, within: canonicalDirectory)
+                < relativePath(of: right, within: canonicalDirectory)
         }
         guard !files.isEmpty else { throw RuntimeFailure.modelPreparationFailed }
 
         var aggregate = SHA256()
         for file in files {
-            let relative = relativePath(of: file, within: directory)
+            let relative = relativePath(of: file, within: canonicalDirectory)
             aggregate.update(data: Data(relative.utf8))
             aggregate.update(data: Data([0]))
             aggregate.update(data: Data(try fileDigest(file).utf8))

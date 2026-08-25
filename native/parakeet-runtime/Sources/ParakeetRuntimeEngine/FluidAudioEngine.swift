@@ -24,7 +24,7 @@ public enum ProductionModelManifest {
         eouRepositoryRevision: "40a23f4c0b333aa17ad8c0f2ea47ec2347f2f355",
         recognitionArtifactSHA256: "f03b69d2d516896b78676270164b54f7c1fd2add37de4d06f9671752f88c688f",
         vocabularyArtifactSHA256: "b955323ed3f2769beb287c97f172a7dd2ccc7493218a2e6e6b930ccbc41d17d7",
-        eouArtifactSHA256: "4a23a8120f0a5ae8f13bc778e28af239fd00747a406ffb6e98eb06c578437e7f",
+        eouArtifactSHA256: "0ee0eb312901156faf2bd60159204ed8e05bf993d5dee79dc69b753583fa0ad6",
         encoderPrecision: "int8"
     )
 }

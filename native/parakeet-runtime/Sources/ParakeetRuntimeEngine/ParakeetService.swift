@@ -399,15 +399,18 @@ public struct ParakeetLiveServiceResult: Equatable, Sendable {
         finalPreview: String? = nil,
         degradations: [LiveStreamDegraded] = []
     ) -> ParakeetLiveServiceResult {
-        ParakeetLiveServiceResult(
+        let result = finalPreview == nil && degradations.isEmpty
+            ? RuntimeResultPayload()
+            : RuntimeResultPayload(
+                finalPreview: finalPreview,
+                degradations: degradations
+            )
+        return ParakeetLiveServiceResult(
             response: RuntimeResponse(
                 schemaVersion: 1,
                 id: id,
                 ok: true,
-                result: RuntimeResultPayload(
-                    finalPreview: finalPreview,
-                    degradations: degradations
-                ),
+                result: result,
                 error: nil
             ),
             events: events,

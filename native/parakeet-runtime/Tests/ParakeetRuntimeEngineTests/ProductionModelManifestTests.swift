@@ -16,7 +16,7 @@ final class ProductionModelManifestTests: XCTestCase {
         )
         XCTAssertEqual(
             manifest.eouArtifactSHA256,
-            "4a23a8120f0a5ae8f13bc778e28af239fd00747a406ffb6e98eb06c578437e7f"
+            "0ee0eb312901156faf2bd60159204ed8e05bf993d5dee79dc69b753583fa0ad6"
         )
         XCTAssertTrue(manifest.version.contains("eou-40a23f4c"))
     }

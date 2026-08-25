@@ -90,6 +90,14 @@ private actor BlockingLiveRoutingService: ParakeetRuntimeServing {
 }
 
 final class RuntimeJSONLineRouterTests: XCTestCase {
+    func testEventOnlySuccessEncodesAnEmptyResult() throws {
+        let response = ParakeetLiveServiceResult.success(id: "eou-open-1").response
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
+        )
+        XCTAssertEqual((object["result"] as? [String: Any])?.count, 0)
+    }
+
     func testRoutesEouEventBeforeOneCorrelatedResponse() async throws {
         let samples = [Float](repeating: 0, count: 2_560)
         let request = RuntimeRequest(
