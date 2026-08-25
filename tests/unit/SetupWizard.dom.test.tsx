@@ -86,12 +86,19 @@ describe('SetupWizard', () => {
     await flush();
 
     expect(container.textContent).toContain(
-      'Your meetings, remembered on this Mac.',
+      'Every conversation, remembered and understood.',
     );
-    expect(container.textContent).toContain('Get ready to record');
+    expect(container.textContent).toContain(
+      'notes, decisions, people, and next steps',
+    );
+    expect(container.textContent).toContain('Ready in three steps');
+    expect(container.textContent).toContain('Install local transcription');
+    expect(container.textContent).toContain('Allow microphone access');
+    expect(container.textContent).toContain('Allow system audio access');
+    expect(container.querySelector('.drag-region')).toBeTruthy();
     expect(container.querySelectorAll('ol li')).toHaveLength(3);
     const start = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Continue setup'),
+      button.textContent?.includes('Begin setup'),
     );
     expect(start).toBeTruthy();
 

@@ -1,4 +1,5 @@
 import {
+  ArrowRight,
   Check,
   Download,
   Loader2,
@@ -160,216 +161,258 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   }
 
   return (
-    <main className="fixed inset-0 z-50 overflow-y-auto bg-pro-bg text-pro-text-main selection:bg-pro-accent/20">
-      <div className="mx-auto flex min-h-full w-full max-w-5xl items-center px-6 py-10 sm:px-10 lg:px-12">
-        {step === 1 ? (
-          <section className="grid w-full items-center gap-12 lg:grid-cols-[minmax(0,0.82fr)_minmax(28rem,1.18fr)] lg:gap-16">
-            <div className="max-w-md">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-pro-border bg-pro-surface shadow-sm">
-                  <Logo size={46} />
-                </div>
-                <span className="text-sm font-semibold tracking-tight">
-                  Pluto
+    <main className="fixed inset-0 z-50 overflow-y-auto bg-[oklch(0.965_0.008_85)] text-[oklch(0.25_0.02_258)] selection:bg-[oklch(0.76_0.09_85/0.35)]">
+      <div
+        className="drag-region fixed inset-x-0 top-0 z-[60] h-9"
+        aria-hidden="true"
+      />
+      {step === 1 ? (
+        <div className="grid min-h-full lg:grid-cols-[minmax(22rem,0.78fr)_minmax(32rem,1.22fr)]">
+          <ObservatoryPanel
+            eyebrow="Your second brain for meetings"
+            title={
+              <>
+                <span className="block">Every conversation,</span>{' '}
+                <span className="mt-2 block font-serif text-[0.84em] font-medium leading-[1.04] tracking-[-0.025em]">
+                  remembered and understood.
                 </span>
-              </div>
+              </>
+            }
+            description="Pluto connects notes, decisions, people, and next steps so you can focus on the conversation. Transcription stays on this Mac."
+            footer="Your audio and transcript stay under your control."
+          />
 
-              <p className="mt-12 text-xs font-semibold uppercase tracking-[0.14em] text-pro-accent">
-                Private meeting memory
+          <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
+            <div className="w-full max-w-xl">
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[oklch(0.53_0.12_255)]">
+                First run · About three minutes
               </p>
-              <h1 className="mt-4 text-[2.5rem] font-semibold leading-[1.08] tracking-[-0.035em] sm:text-[2.75rem]">
-                Your meetings, remembered on this Mac.
-              </h1>
-              <p className="mt-6 max-w-[42ch] text-[15px] leading-7 text-pro-text-muted">
-                Pluto records and organizes conversations while keeping
-                transcription local.
+              <h2 className="mt-4 text-[2rem] font-semibold leading-tight tracking-[-0.025em] sm:text-[2.25rem]">
+                Ready in three steps
+              </h2>
+              <p className="mt-3 max-w-[46ch] text-[15px] leading-7 text-[oklch(0.53_0.018_258)]">
+                Install the local transcription model, then grant the two macOS
+                permissions Pluto needs to record.
               </p>
 
-              <div className="mt-9 flex max-w-sm items-start gap-3 border-t border-pro-border pt-5 text-xs leading-5 text-pro-text-muted">
-                <LockKeyhole
-                  size={16}
-                  className="mt-0.5 shrink-0 text-pro-accent"
-                  aria-hidden="true"
-                />
-                <p>Your audio and transcript stay under your control.</p>
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-xl border border-pro-border bg-pro-surface shadow-sm">
-              <div className="px-7 pb-5 pt-7 sm:px-8 sm:pt-8">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-pro-text-muted">
-                  About three minutes
-                </p>
-                <h2 className="mt-2 text-xl font-semibold tracking-[-0.015em]">
-                  Get ready to record
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-pro-text-muted">
-                  One local download and two macOS permissions.
-                </p>
-              </div>
-
-              <ol className="border-y border-pro-border">
+              <ol className="mt-10 border-y border-[oklch(0.86_0.012_85)]">
                 <SetupPreviewRow
-                  number="1"
-                  icon={<Download size={18} />}
-                  title="Download transcription"
-                  detail="Saved once and reused for future meetings"
+                  number="01"
+                  icon={<Download size={19} />}
+                  title="Install local transcription"
+                  detail="Downloaded once and reused for future meetings"
                 />
                 <SetupPreviewRow
-                  number="2"
-                  icon={<Mic size={18} />}
-                  title="Allow microphone"
+                  number="02"
+                  icon={<Mic size={19} />}
+                  title="Allow microphone access"
                   detail="Captures your side of the conversation"
                 />
                 <SetupPreviewRow
-                  number="3"
-                  icon={<MonitorSpeaker size={18} />}
-                  title="Allow system audio"
+                  number="03"
+                  icon={<MonitorSpeaker size={19} />}
+                  title="Allow system audio access"
                   detail="Captures everyone else in the meeting"
                 />
               </ol>
 
-              <div className="px-7 py-6 sm:px-8">
+              <div className="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
                 <button
                   type="button"
                   onClick={() => void startSetup()}
-                  className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-pro-accent px-6 text-sm font-semibold text-pro-bg shadow-sm transition-[background-color,transform] duration-200 ease-out hover:bg-pro-accent/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-surface"
+                  className="group inline-flex min-h-12 min-w-48 items-center justify-center gap-3 rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)]"
                 >
-                  Continue setup
+                  Begin setup
+                  <ArrowRight
+                    size={16}
+                    aria-hidden="true"
+                    className="transition-transform duration-200 ease-out group-hover:translate-x-0.5"
+                  />
                 </button>
-                <p className="mt-3 text-center text-[11px] leading-5 text-pro-text-muted">
-                  You can change permissions later in System Settings.
+                <p className="text-xs leading-5 text-[oklch(0.58_0.015_258)]">
+                  Permissions can be changed later.
                 </p>
               </div>
             </div>
           </section>
-        ) : (
-          <section className="grid min-w-0 w-full items-start gap-10 lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-12">
-            <div className="min-w-0 max-w-sm lg:pt-3">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-pro-border bg-pro-surface shadow-sm">
-                  <Logo size={38} />
-                </div>
-                <span className="text-sm font-semibold tracking-tight">
-                  Pluto
-                </span>
-              </div>
-              <p className="mt-10 text-xs font-semibold uppercase tracking-[0.14em] text-pro-accent">
-                Recording setup
-              </p>
-              <h1 className="mt-3 text-[1.875rem] font-semibold leading-tight tracking-[-0.025em]">
-                {readiness.status === 'ready'
-                  ? 'Ready to record'
-                  : 'Getting Pluto ready'}
-              </h1>
-              <p className="mt-4 text-sm leading-6 text-pro-text-muted">
-                The transcription model is downloaded once. Pluto will keep this
-                screen current as each requirement becomes ready.
-              </p>
-            </div>
+        </div>
+      ) : (
+        <div className="grid min-h-full lg:grid-cols-[minmax(22rem,0.78fr)_minmax(32rem,1.22fr)]">
+          <ObservatoryPanel
+            eyebrow="Recording setup"
+            title={
+              readiness.status === 'ready'
+                ? 'Ready to record.'
+                : 'Preparing your local workspace.'
+            }
+            description="Pluto keeps this screen current as each recording requirement becomes ready."
+            footer="The transcription model is downloaded once."
+          />
 
-            <div className="min-w-0">
-              <div className="overflow-hidden rounded-xl border border-pro-border bg-pro-surface shadow-sm">
-                <div className="border-b border-pro-border px-6 py-5">
-                  <h2 className="text-sm font-semibold">Setup checklist</h2>
-                  <p className="mt-1 text-xs leading-5 text-pro-text-muted">
-                    Pluto checks each item automatically.
-                  </p>
-                </div>
-                <div className="divide-y divide-pro-border">
-                  <RequirementRow
-                    icon={<Download size={20} />}
-                    title="Local transcription"
-                    detail={
-                      requirements.transcription === 'preparing'
-                        ? 'Downloading and verifying English Parakeet live transcription'
-                        : requirements.transcription === 'ready'
-                          ? 'English Parakeet live transcription is verified'
-                          : requirements.transcription === 'error'
-                            ? 'Could not prepare transcription'
-                            : 'Checking local models'
-                    }
-                    state={requirements.transcription}
-                    loadingIndicator={
-                      requirements.transcription === 'preparing' ? (
-                        <ModelDownloadProgress
-                          progress={modelDownloadProgress}
-                        />
-                      ) : undefined
-                    }
-                    action={
-                      requirements.transcription === 'error' ? (
+          <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
+            <div className="w-full max-w-2xl">
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[oklch(0.53_0.12_255)]">
+                Setup progress
+              </p>
+              <h2 className="mt-4 text-[2rem] font-semibold leading-tight tracking-[-0.025em]">
+                {readiness.status === 'ready'
+                  ? 'Everything is ready'
+                  : 'Three recording requirements'}
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-[oklch(0.53_0.018_258)]">
+                Pluto checks each item automatically.
+              </p>
+
+              <div className="mt-9 border-y border-[oklch(0.86_0.012_85)]">
+                <RequirementRow
+                  icon={<Download size={20} />}
+                  title="Local transcription"
+                  detail={
+                    requirements.transcription === 'preparing'
+                      ? 'Downloading and verifying English Parakeet live transcription'
+                      : requirements.transcription === 'ready'
+                        ? 'English Parakeet live transcription is verified'
+                        : requirements.transcription === 'error'
+                          ? 'Could not prepare transcription'
+                          : 'Checking local models'
+                  }
+                  state={requirements.transcription}
+                  loadingIndicator={
+                    requirements.transcription === 'preparing' ? (
+                      <ModelDownloadProgress progress={modelDownloadProgress} />
+                    ) : undefined
+                  }
+                  action={
+                    requirements.transcription === 'error' ? (
+                      <button
+                        type="button"
+                        onClick={() => void prepareLocalModels()}
+                        className="rounded-md border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                      >
+                        Try again
+                      </button>
+                    ) : undefined
+                  }
+                />
+                <RequirementRow
+                  icon={<Mic size={20} />}
+                  title="Microphone"
+                  detail="Captures your side of the conversation"
+                  state={requirements.microphone}
+                  action={
+                    requirements.microphone === 'blocked' ? (
+                      <button
+                        type="button"
+                        onClick={() => void requestMicrophone()}
+                        className="rounded-md border border-[oklch(0.82_0.015_85)] bg-[oklch(0.985_0.005_85)] px-4 py-2 text-xs font-semibold transition-colors hover:bg-[oklch(0.93_0.01_85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)]"
+                      >
+                        Allow microphone
+                      </button>
+                    ) : undefined
+                  }
+                />
+                <RequirementRow
+                  icon={<MonitorSpeaker size={20} />}
+                  title="System audio"
+                  detail="Captures the other people in your meeting"
+                  state={requirements.systemAudio}
+                  action={
+                    requirements.systemAudio === 'blocked' ? (
+                      <div className="flex flex-wrap justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => void prepareLocalModels()}
-                          className="rounded-md border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                          onClick={() => void openSystemAudioSettings()}
+                          className="rounded-md border border-[oklch(0.82_0.015_85)] bg-[oklch(0.985_0.005_85)] px-4 py-2 text-xs font-semibold transition-colors hover:bg-[oklch(0.93_0.01_85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)]"
                         >
-                          Try again
+                          Open Settings
                         </button>
-                      ) : undefined
-                    }
-                  />
-                  <RequirementRow
-                    icon={<Mic size={20} />}
-                    title="Microphone"
-                    detail="Captures your side of the conversation"
-                    state={requirements.microphone}
-                    action={
-                      requirements.microphone === 'blocked' ? (
                         <button
                           type="button"
-                          onClick={() => void requestMicrophone()}
-                          className="rounded-md border border-pro-border bg-pro-bg px-4 py-2 text-xs font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                          onClick={() => void checkReadiness()}
+                          className="rounded-md px-3 py-2 text-xs font-semibold text-[oklch(0.5_0.018_258)] transition-colors hover:bg-[oklch(0.93_0.01_85)] hover:text-[oklch(0.25_0.02_258)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)]"
                         >
-                          Allow microphone
+                          Check again
                         </button>
-                      ) : undefined
-                    }
-                  />
-                  <RequirementRow
-                    icon={<MonitorSpeaker size={20} />}
-                    title="System audio"
-                    detail="Captures the other people in your meeting"
-                    state={requirements.systemAudio}
-                    action={
-                      requirements.systemAudio === 'blocked' ? (
-                        <div className="flex flex-wrap justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void openSystemAudioSettings()}
-                            className="rounded-md border border-pro-border bg-pro-bg px-4 py-2 text-xs font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                          >
-                            Open Settings
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void checkReadiness()}
-                            className="rounded-md px-3 py-2 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
-                          >
-                            Check again
-                          </button>
-                        </div>
-                      ) : undefined
-                    }
-                  />
-                </div>
+                      </div>
+                    ) : undefined
+                  }
+                />
               </div>
 
               <button
                 type="button"
                 onClick={() => void finish()}
                 disabled={!readiness.canComplete || finishing}
-                className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-pro-accent px-6 text-sm font-semibold text-pro-bg shadow-sm transition-[background-color,transform,opacity] duration-200 ease-out hover:bg-pro-accent/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-bg disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-pro-accent"
+                className="mt-8 inline-flex min-h-12 min-w-52 items-center justify-center rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform,opacity] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)] disabled:cursor-not-allowed disabled:opacity-30"
               >
                 {finishing ? 'Opening Pluto…' : 'Start using Pluto'}
               </button>
             </div>
           </section>
-        )}
-      </div>
+        </div>
+      )}
     </main>
   );
 };
+
+const ObservatoryPanel = ({
+  eyebrow,
+  title,
+  description,
+  footer,
+}: {
+  eyebrow: string;
+  title: React.ReactNode;
+  description: string;
+  footer: string;
+}) => (
+  <aside className="relative isolate flex min-h-[30rem] overflow-hidden bg-[oklch(0.225_0.035_258)] px-7 py-8 text-[oklch(0.955_0.01_85)] sm:px-12 sm:py-10 lg:min-h-full lg:px-14 lg:py-12 xl:px-20">
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute -right-48 top-[8%] h-[34rem] w-[34rem] rotate-[-18deg] rounded-[50%] border border-[oklch(0.76_0.09_85/0.17)]"
+    />
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute -right-24 top-[26%] h-[19rem] w-[28rem] rotate-[20deg] rounded-[50%] border border-[oklch(0.78_0.025_258/0.11)]"
+    />
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute right-[18%] top-[34%] h-2.5 w-2.5 rounded-full bg-[oklch(0.76_0.09_85)] shadow-[0_0_0_5px_oklch(0.76_0.09_85/0.12)]"
+    />
+
+    <div className="relative z-10 flex w-full flex-col">
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[oklch(0.955_0.01_85)] shadow-sm">
+          <Logo size={42} />
+        </div>
+        <span className="font-serif text-base font-semibold tracking-[-0.01em]">
+          Pluto
+        </span>
+      </div>
+
+      <div className="my-auto max-w-md py-16 lg:py-12">
+        <p className="text-xs font-semibold uppercase tracking-[0.17em] text-[oklch(0.79_0.085_85)]">
+          {eyebrow}
+        </p>
+        <h1 className="mt-5 text-[2.6rem] font-semibold leading-[1.06] tracking-[-0.04em] sm:text-[3rem] lg:text-[3.25rem]">
+          {title}
+        </h1>
+        <p className="mt-6 max-w-[38ch] text-[15px] leading-7 text-[oklch(0.79_0.025_258)]">
+          {description}
+        </p>
+      </div>
+
+      <div className="flex max-w-sm items-start gap-3 border-t border-[oklch(0.78_0.025_258/0.17)] pt-5 text-xs leading-5 text-[oklch(0.76_0.022_258)]">
+        <LockKeyhole
+          size={16}
+          className="mt-0.5 shrink-0 text-[oklch(0.79_0.085_85)]"
+          aria-hidden="true"
+        />
+        <p>{footer}</p>
+      </div>
+    </div>
+  </aside>
+);
 
 const SetupPreviewRow = ({
   number,
@@ -382,16 +425,16 @@ const SetupPreviewRow = ({
   title: string;
   detail: string;
 }) => (
-  <li className="grid grid-cols-[2rem_2.25rem_1fr] items-center gap-3 px-7 py-4 sm:px-8">
-    <span className="font-mono text-[11px] tabular-nums text-pro-text-muted">
+  <li className="grid grid-cols-[2.25rem_2.75rem_1fr] items-center gap-3 border-b border-[oklch(0.88_0.01_85)] py-5 last:border-b-0 sm:gap-4">
+    <span className="font-mono text-[11px] font-semibold tabular-nums text-[oklch(0.61_0.035_258)]">
       {number}
     </span>
-    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-pro-bg text-pro-accent">
+    <span className="flex h-10 w-10 items-center justify-center rounded-full border border-[oklch(0.84_0.025_85)] text-[oklch(0.53_0.12_255)]">
       {icon}
     </span>
     <span className="min-w-0">
       <span className="block text-sm font-semibold">{title}</span>
-      <span className="mt-0.5 block text-xs leading-5 text-pro-text-muted">
+      <span className="mt-1 block text-xs leading-5 text-[oklch(0.56_0.018_258)]">
         {detail}
       </span>
     </span>

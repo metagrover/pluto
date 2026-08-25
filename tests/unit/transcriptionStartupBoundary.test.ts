@@ -40,7 +40,10 @@ describe('transcription startup boundary', () => {
 
     expect(packageJson.scripts?.predev).toBe('pnpm run ensure:dev-runtime');
     expect(packageJson.scripts?.['ensure:dev-runtime']).toBe(
-      'pnpm run ensure:parakeet && pnpm run ensure:audio-cap',
+      'pnpm run ensure:sqlite-abi && pnpm run ensure:parakeet && pnpm run ensure:audio-cap',
+    );
+    expect(packageJson.scripts?.['ensure:sqlite-abi']).toBe(
+      'node scripts/ensure_sqlite_abi.mjs',
     );
     expect(packageJson.scripts?.['ensure:parakeet']).toBe(
       './scripts/ensure_parakeet_runtime.sh',
