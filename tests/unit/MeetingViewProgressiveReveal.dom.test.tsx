@@ -200,7 +200,7 @@ describe('MeetingView progressive reveal', () => {
     const transcript = container.querySelector(
       '[data-meeting-artifact="transcript"]',
     );
-    expect(transcript?.textContent).toContain('the rollout is ready');
+    expect(transcript?.textContent).toContain('The rollout is ready.');
     expect(transcript?.textContent).not.toContain('Um the rollout');
     expect(transcript?.querySelector('time')?.textContent).toBe('1:15');
   });
