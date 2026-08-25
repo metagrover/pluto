@@ -83,6 +83,24 @@ const appendFullWindow = async (
   }
 };
 
+const appendDriftingWindow = async (
+  coordinator: ParakeetLiveMeetingCoordinator,
+  source: 'mic' | 'system',
+) => {
+  const ends = [6.191, 11.232, 16.279, 21.319, 26.359, 31.36];
+  for (const [sequence, endSec] of ends.entries()) {
+    await coordinator.append(
+      receipt({
+        source,
+        sequence,
+        chunkStartSec: sequence === 0 ? 0 : ends[sequence - 1]!,
+        chunkEndSec: endSec,
+        repairAudioRelativePath: `capture-journal/repair/${source}-${sequence}.wav`,
+      }),
+    );
+  }
+};
+
 describe('ParakeetLiveMeetingCoordinator', () => {
   it('counts runtime descendants rather than only direct children', () => {
     expect(
@@ -128,6 +146,37 @@ describe('ParakeetLiveMeetingCoordinator', () => {
     );
     expect(dependencies.stitchWindow).toHaveBeenCalledTimes(2);
     expect(dependencies.removeTemporaryAudio).toHaveBeenCalledTimes(2);
+  });
+
+  it('submits realistic drifting windows for both durable sources', async () => {
+    const { coordinator, client, dependencies } = makeCoordinator();
+    await coordinator.start('meeting-1');
+    await appendDriftingWindow(coordinator, 'mic');
+    await appendDriftingWindow(coordinator, 'system');
+    await coordinator.stop();
+
+    expect(client.append).toHaveBeenCalledTimes(2);
+    expect(client.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'mic',
+        chunkStartSeconds: 0,
+        chunkEndSeconds: 31.36,
+      }),
+    );
+    expect(client.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'system',
+        chunkStartSeconds: 0,
+        chunkEndSeconds: 31.36,
+      }),
+    );
+    expect(dependencies.writeReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        windowsSubmitted: { mic: 1, system: 1 },
+        windowsCompleted: { mic: 1, system: 1 },
+        failureCodes: [],
+      }),
+    );
   });
 
   it('submits both durable tails, flushes both streams, closes, then reports once', async () => {
