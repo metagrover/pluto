@@ -1,4 +1,11 @@
-import { Check, Download, Loader2, Mic, MonitorSpeaker } from 'lucide-react';
+import {
+  Check,
+  Download,
+  Loader2,
+  LockKeyhole,
+  Mic,
+  MonitorSpeaker,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useModelDownloadProgress } from '../../hooks/useModelDownloadProgress';
@@ -154,141 +161,242 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
   return (
     <main className="fixed inset-0 z-50 overflow-y-auto bg-pro-bg text-pro-text-main selection:bg-pro-accent/20">
-      <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col justify-center px-8 py-14">
+      <div className="mx-auto flex min-h-full w-full max-w-5xl items-center px-6 py-10 sm:px-10 lg:px-12">
         {step === 1 ? (
-          <section className="mx-auto w-full max-w-lg text-center">
-            <div className="mx-auto mb-8 flex h-16 w-16 items-center justify-center rounded-lg border border-pro-border bg-pro-surface shadow-sm">
-              <Logo size={62} />
+          <section className="grid w-full items-center gap-12 lg:grid-cols-[minmax(0,0.82fr)_minmax(28rem,1.18fr)] lg:gap-16">
+            <div className="max-w-md">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-pro-border bg-pro-surface shadow-sm">
+                  <Logo size={46} />
+                </div>
+                <span className="text-sm font-semibold tracking-tight">
+                  Pluto
+                </span>
+              </div>
+
+              <p className="mt-12 text-xs font-semibold uppercase tracking-[0.14em] text-pro-accent">
+                Private meeting memory
+              </p>
+              <h1 className="mt-4 text-[2.5rem] font-semibold leading-[1.08] tracking-[-0.035em] sm:text-[2.75rem]">
+                Your meetings, remembered on this Mac.
+              </h1>
+              <p className="mt-6 max-w-[42ch] text-[15px] leading-7 text-pro-text-muted">
+                Pluto records and organizes conversations while keeping
+                transcription local.
+              </p>
+
+              <div className="mt-9 flex max-w-sm items-start gap-3 border-t border-pro-border pt-5 text-xs leading-5 text-pro-text-muted">
+                <LockKeyhole
+                  size={16}
+                  className="mt-0.5 shrink-0 text-pro-accent"
+                  aria-hidden="true"
+                />
+                <p>Your audio and transcript stay under your control.</p>
+              </div>
             </div>
-            <p className="mb-4 text-xs font-bold font-medium text-pro-accent">
-              Welcome to Pluto
-            </p>
-            <h1 className="text-3xl font-semibold md:text-4xl">
-              Meetings remembered, privately
-            </h1>
-            <p className="mx-auto mt-6 max-w-md text-base leading-7 text-pro-text-muted">
-              Pluto records your meetings and turns them into useful memory.
-              Transcription stays on this Mac.
-            </p>
-            <button
-              type="button"
-              onClick={() => void startSetup()}
-              className="mt-10 h-10 w-full rounded-md bg-pro-text-main px-6 text-sm font-bold text-white shadow-sm transition-transform duration-200 hover:scale-[1.01] active:scale-[0.99] dark:bg-pro-accent dark:text-white"
-            >
-              Set up Pluto
-            </button>
-            <p className="mt-4 text-xs text-pro-text-muted/70">
-              Pluto will download local transcription models and request the two
-              permissions needed to record.
-            </p>
+
+            <div className="overflow-hidden rounded-xl border border-pro-border bg-pro-surface shadow-sm">
+              <div className="px-7 pb-5 pt-7 sm:px-8 sm:pt-8">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-pro-text-muted">
+                  About three minutes
+                </p>
+                <h2 className="mt-2 text-xl font-semibold tracking-[-0.015em]">
+                  Get ready to record
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-pro-text-muted">
+                  One local download and two macOS permissions.
+                </p>
+              </div>
+
+              <ol className="border-y border-pro-border">
+                <SetupPreviewRow
+                  number="1"
+                  icon={<Download size={18} />}
+                  title="Download transcription"
+                  detail="Saved once and reused for future meetings"
+                />
+                <SetupPreviewRow
+                  number="2"
+                  icon={<Mic size={18} />}
+                  title="Allow microphone"
+                  detail="Captures your side of the conversation"
+                />
+                <SetupPreviewRow
+                  number="3"
+                  icon={<MonitorSpeaker size={18} />}
+                  title="Allow system audio"
+                  detail="Captures everyone else in the meeting"
+                />
+              </ol>
+
+              <div className="px-7 py-6 sm:px-8">
+                <button
+                  type="button"
+                  onClick={() => void startSetup()}
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-pro-accent px-6 text-sm font-semibold text-pro-bg shadow-sm transition-[background-color,transform] duration-200 ease-out hover:bg-pro-accent/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-surface"
+                >
+                  Continue setup
+                </button>
+                <p className="mt-3 text-center text-[11px] leading-5 text-pro-text-muted">
+                  You can change permissions later in System Settings.
+                </p>
+              </div>
+            </div>
           </section>
         ) : (
-          <section className="w-full">
-            <div className="mb-9">
-              <p className="mb-3 text-xs font-bold font-medium text-pro-accent">
+          <section className="grid min-w-0 w-full items-start gap-10 lg:grid-cols-[17rem_minmax(0,1fr)] lg:gap-12">
+            <div className="min-w-0 max-w-sm lg:pt-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-pro-border bg-pro-surface shadow-sm">
+                  <Logo size={38} />
+                </div>
+                <span className="text-sm font-semibold tracking-tight">
+                  Pluto
+                </span>
+              </div>
+              <p className="mt-10 text-xs font-semibold uppercase tracking-[0.14em] text-pro-accent">
                 Recording setup
               </p>
-              <h1 className="text-3xl font-semibold md:text-3xl">
+              <h1 className="mt-3 text-[1.875rem] font-semibold leading-tight tracking-[-0.025em]">
                 {readiness.status === 'ready'
                   ? 'Ready to record'
                   : 'Getting Pluto ready'}
               </h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-pro-text-muted">
-                The local transcription download may take a few minutes. It is
-                saved once and reused for future meetings.
+              <p className="mt-4 text-sm leading-6 text-pro-text-muted">
+                The transcription model is downloaded once. Pluto will keep this
+                screen current as each requirement becomes ready.
               </p>
             </div>
 
-            <div className="divide-y divide-pro-border overflow-hidden rounded-lg border border-pro-border bg-pro-surface shadow-sm">
-              <RequirementRow
-                icon={<Download size={20} />}
-                title="Local transcription"
-                detail={
-                  requirements.transcription === 'preparing'
-                    ? 'Downloading and verifying English Parakeet live transcription'
-                    : requirements.transcription === 'ready'
-                      ? 'English Parakeet live transcription is verified'
-                      : requirements.transcription === 'error'
-                        ? 'Could not prepare transcription'
-                        : 'Checking local models'
-                }
-                state={requirements.transcription}
-                loadingIndicator={
-                  requirements.transcription === 'preparing' ? (
-                    <ModelDownloadProgress progress={modelDownloadProgress} />
-                  ) : undefined
-                }
-                action={
-                  requirements.transcription === 'error' ? (
-                    <button
-                      type="button"
-                      onClick={() => void prepareLocalModels()}
-                      className="rounded-md border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700"
-                    >
-                      Try again
-                    </button>
-                  ) : undefined
-                }
-              />
-              <RequirementRow
-                icon={<Mic size={20} />}
-                title="Microphone"
-                detail="Captures your side of the conversation"
-                state={requirements.microphone}
-                action={
-                  requirements.microphone === 'blocked' ? (
-                    <button
-                      type="button"
-                      onClick={() => void requestMicrophone()}
-                      className="rounded-md border border-pro-border px-4 py-2 text-xs font-bold"
-                    >
-                      Allow microphone
-                    </button>
-                  ) : undefined
-                }
-              />
-              <RequirementRow
-                icon={<MonitorSpeaker size={20} />}
-                title="System audio"
-                detail="Captures the other people in your meeting"
-                state={requirements.systemAudio}
-                action={
-                  requirements.systemAudio === 'blocked' ? (
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void openSystemAudioSettings()}
-                        className="rounded-md border border-pro-border px-4 py-2 text-xs font-bold"
-                      >
-                        Open Settings
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void checkReadiness()}
-                        className="rounded-md bg-pro-bg px-4 py-2 text-xs font-bold"
-                      >
-                        Check again
-                      </button>
-                    </div>
-                  ) : undefined
-                }
-              />
-            </div>
+            <div className="min-w-0">
+              <div className="overflow-hidden rounded-xl border border-pro-border bg-pro-surface shadow-sm">
+                <div className="border-b border-pro-border px-6 py-5">
+                  <h2 className="text-sm font-semibold">Setup checklist</h2>
+                  <p className="mt-1 text-xs leading-5 text-pro-text-muted">
+                    Pluto checks each item automatically.
+                  </p>
+                </div>
+                <div className="divide-y divide-pro-border">
+                  <RequirementRow
+                    icon={<Download size={20} />}
+                    title="Local transcription"
+                    detail={
+                      requirements.transcription === 'preparing'
+                        ? 'Downloading and verifying English Parakeet live transcription'
+                        : requirements.transcription === 'ready'
+                          ? 'English Parakeet live transcription is verified'
+                          : requirements.transcription === 'error'
+                            ? 'Could not prepare transcription'
+                            : 'Checking local models'
+                    }
+                    state={requirements.transcription}
+                    loadingIndicator={
+                      requirements.transcription === 'preparing' ? (
+                        <ModelDownloadProgress
+                          progress={modelDownloadProgress}
+                        />
+                      ) : undefined
+                    }
+                    action={
+                      requirements.transcription === 'error' ? (
+                        <button
+                          type="button"
+                          onClick={() => void prepareLocalModels()}
+                          className="rounded-md border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                        >
+                          Try again
+                        </button>
+                      ) : undefined
+                    }
+                  />
+                  <RequirementRow
+                    icon={<Mic size={20} />}
+                    title="Microphone"
+                    detail="Captures your side of the conversation"
+                    state={requirements.microphone}
+                    action={
+                      requirements.microphone === 'blocked' ? (
+                        <button
+                          type="button"
+                          onClick={() => void requestMicrophone()}
+                          className="rounded-md border border-pro-border bg-pro-bg px-4 py-2 text-xs font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                        >
+                          Allow microphone
+                        </button>
+                      ) : undefined
+                    }
+                  />
+                  <RequirementRow
+                    icon={<MonitorSpeaker size={20} />}
+                    title="System audio"
+                    detail="Captures the other people in your meeting"
+                    state={requirements.systemAudio}
+                    action={
+                      requirements.systemAudio === 'blocked' ? (
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void openSystemAudioSettings()}
+                            className="rounded-md border border-pro-border bg-pro-bg px-4 py-2 text-xs font-semibold transition-colors hover:bg-pro-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                          >
+                            Open Settings
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void checkReadiness()}
+                            className="rounded-md px-3 py-2 text-xs font-semibold text-pro-text-muted transition-colors hover:bg-pro-hover hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent"
+                          >
+                            Check again
+                          </button>
+                        </div>
+                      ) : undefined
+                    }
+                  />
+                </div>
+              </div>
 
-            <button
-              type="button"
-              onClick={() => void finish()}
-              disabled={!readiness.canComplete || finishing}
-              className="mt-8 h-10 w-full rounded-md bg-pro-text-main px-6 text-sm font-bold text-white shadow-sm transition-all disabled:cursor-not-allowed disabled:opacity-35 dark:bg-pro-accent dark:text-white"
-            >
-              {finishing ? 'Opening Pluto…' : 'Start using Pluto'}
-            </button>
+              <button
+                type="button"
+                onClick={() => void finish()}
+                disabled={!readiness.canComplete || finishing}
+                className="mt-5 inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-pro-accent px-6 text-sm font-semibold text-pro-bg shadow-sm transition-[background-color,transform,opacity] duration-200 ease-out hover:bg-pro-accent/90 active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pro-bg disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-pro-accent"
+              >
+                {finishing ? 'Opening Pluto…' : 'Start using Pluto'}
+              </button>
+            </div>
           </section>
         )}
       </div>
     </main>
   );
 };
+
+const SetupPreviewRow = ({
+  number,
+  icon,
+  title,
+  detail,
+}: {
+  number: string;
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+}) => (
+  <li className="grid grid-cols-[2rem_2.25rem_1fr] items-center gap-3 px-7 py-4 sm:px-8">
+    <span className="font-mono text-[11px] tabular-nums text-pro-text-muted">
+      {number}
+    </span>
+    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-pro-bg text-pro-accent">
+      {icon}
+    </span>
+    <span className="min-w-0">
+      <span className="block text-sm font-semibold">{title}</span>
+      <span className="mt-0.5 block text-xs leading-5 text-pro-text-muted">
+        {detail}
+      </span>
+    </span>
+  </li>
+);
 
 const RequirementRow = ({
   icon,

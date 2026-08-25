@@ -85,9 +85,13 @@ describe('SetupWizard', () => {
     act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
     await flush();
 
-    expect(container.textContent).toContain('Meetings remembered, privately');
+    expect(container.textContent).toContain(
+      'Your meetings, remembered on this Mac.',
+    );
+    expect(container.textContent).toContain('Get ready to record');
+    expect(container.querySelectorAll('ol li')).toHaveLength(3);
     const start = [...container.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Set up Pluto'),
+      button.textContent?.includes('Continue setup'),
     );
     expect(start).toBeTruthy();
 
