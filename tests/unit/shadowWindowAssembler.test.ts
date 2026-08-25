@@ -29,6 +29,20 @@ const fiveSecondReceipts = (start = 0): ShadowReceipt[] =>
     }),
   );
 
+const driftingReceiptEnds = [
+  6.191, 11.232, 16.279, 21.319, 26.359, 31.36,
+];
+
+const driftingReceipts = (): ShadowReceipt[] =>
+  driftingReceiptEnds.map((endSec, index) =>
+    receipt({
+      sequence: index,
+      chunkStartSec: index === 0 ? 0 : driftingReceiptEnds[index - 1]!,
+      chunkEndSec: endSec,
+      repairAudioRelativePath: `meeting-1/repair/system-${index}.wav`,
+    }),
+  );
+
 describe('ShadowWindowAssembler', () => {
   it('accepts only 30-second windows', () => {
     expect(
@@ -114,15 +128,36 @@ describe('ShadowWindowAssembler', () => {
     ).toThrow('shadow_time_gap');
   });
 
-  it('never splits a receipt that crosses a logical window boundary', () => {
+  it('seals at the first receipt boundary beyond the target duration', () => {
     const assembler = new ShadowWindowAssembler({ windowSeconds: 30 });
-    assembler.add(receipt({ chunkStartSec: 5, chunkEndSec: 25 }));
+    const receipts = driftingReceipts();
+    const emitted = receipts.flatMap((entry) => assembler.add(entry));
 
-    expect(() =>
-      assembler.add(
-        receipt({ sequence: 1, chunkStartSec: 25, chunkEndSec: 36 }),
-      ),
-    ).toThrow('shadow_crosses_window_boundary');
+    expect(emitted).toEqual([
+      expect.objectContaining({
+        startSec: 0,
+        endSec: 31.36,
+        firstSequence: 0,
+        lastSequence: 5,
+        receipts,
+      }),
+    ]);
+    assembler.add(
+      receipt({
+        sequence: 6,
+        chunkStartSec: 31.36,
+        chunkEndSec: 36.4,
+        repairAudioRelativePath: 'meeting-1/repair/system-6.wav',
+      }),
+    );
+    expect(assembler.flush()).toMatchObject([
+      {
+        startSec: 31.36,
+        endSec: 36.4,
+        firstSequence: 6,
+        lastSequence: 6,
+      },
+    ]);
   });
 
   it('uses fixed nonzero window boundaries', () => {

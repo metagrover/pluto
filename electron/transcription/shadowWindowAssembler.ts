@@ -71,8 +71,9 @@ const sameIdentity = (left: ShadowIdentity, right: ShadowReceipt): boolean =>
   left.source === right.source;
 
 /**
- * Accumulates one durable source stream into fixed, sealed receipt windows.
- * It deliberately rejects discontinuities instead of attempting reconstruction.
+ * Accumulates one durable source stream into target-duration, receipt-aligned
+ * windows. It deliberately rejects discontinuities instead of attempting
+ * reconstruction.
  */
 export class ShadowWindowAssembler {
   private identity: ShadowIdentity | null = null;
@@ -87,13 +88,6 @@ export class ShadowWindowAssembler {
 
   add(receipt: ShadowReceipt): ShadowWindow[] {
     if (!receiptIsValid(receipt)) invalid();
-
-    const windowStart =
-      this.receipts[0]?.chunkStartSec ?? receipt.chunkStartSec;
-    const windowEnd = windowStart + this.options.windowSeconds;
-    if (receipt.chunkEndSec > windowEnd) {
-      throw new Error('shadow_crosses_window_boundary');
-    }
 
     if (this.identity && !sameIdentity(this.identity, receipt)) {
       throw new Error('shadow_identity_mismatch');
@@ -117,7 +111,11 @@ export class ShadowWindowAssembler {
     this.receipts.push(receipt);
     this.previousReceipt = receipt;
 
-    return receipt.chunkEndSec === windowEnd ? [this.seal(windowEnd)] : [];
+    const windowStart = this.receipts[0]!.chunkStartSec;
+    const windowDuration = receipt.chunkEndSec - windowStart;
+    return windowDuration >= this.options.windowSeconds
+      ? [this.seal(receipt.chunkEndSec)]
+      : [];
   }
 
   flush(): ShadowWindow[] {
