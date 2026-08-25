@@ -57,6 +57,28 @@ describe('AudioManager Parakeet EOU wiring', () => {
     );
   });
 
+  it('claims a synchronous start lock before asynchronous readiness', () => {
+    const startIndex = source.indexOf('const startSession = async () => {');
+    const guardIndex = source.indexOf('startInFlightRef.current', startIndex);
+    const claimIndex = source.indexOf(
+      'startInFlightRef.current = true',
+      guardIndex,
+    );
+    const readinessIndex = source.indexOf(
+      "'RECORDING_READINESS_STATUS'",
+      claimIndex,
+    );
+    const releaseIndex = source.indexOf(
+      'startInFlightRef.current = false',
+      readinessIndex,
+    );
+
+    expect(guardIndex).toBeGreaterThan(startIndex);
+    expect(claimIndex).toBeGreaterThan(guardIndex);
+    expect(claimIndex).toBeLessThan(readinessIndex);
+    expect(releaseIndex).toBeGreaterThan(readinessIndex);
+  });
+
   it('contains no recording-time MLX transcription machinery', () => {
     expect(source).not.toContain('LiveTranscriptionQueue');
     expect(source).not.toContain('resolveLiveChunkModel');

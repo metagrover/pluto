@@ -288,6 +288,7 @@ export const AudioManager = ({
   const isRecordingRef = useRef(false);
   const isProcessingRef = useRef(false);
   const stopInFlightRef = useRef(false);
+  const startInFlightRef = useRef(false);
   const currentMeetingIdRef = useRef<string | null>(null);
   const captureJournalStateRef = useRef<JournalManifestState | null>(null);
   const captureJournalRawChunksRef = useRef(
@@ -465,6 +466,7 @@ export const AudioManager = ({
 
   const startSession = async () => {
     if (
+      startInFlightRef.current ||
       isRecordingRef.current ||
       isProcessingRef.current ||
       stopInFlightRef.current
@@ -472,6 +474,7 @@ export const AudioManager = ({
       console.warn('[Pluto] Ignoring duplicate start request');
       return;
     }
+    startInFlightRef.current = true;
 
     try {
       const readiness = (await window.ipcRenderer.invoke(
@@ -1117,6 +1120,8 @@ export const AudioManager = ({
       stopInFlightRef.current = false;
       isRecordingRef.current = false;
       setIsRecording(false);
+    } finally {
+      startInFlightRef.current = false;
     }
   };
 
