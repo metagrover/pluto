@@ -562,6 +562,9 @@ export const MeetingView = ({
     userNotes: selectedMeeting.user_notes || '',
     editsMap,
   });
+  const pendingUserNotes = !notesDocument.hasAnalysis
+    ? selectedMeeting.user_notes?.trim()
+    : '';
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
@@ -1015,6 +1018,22 @@ export const MeetingView = ({
           <p className="-mt-4 text-xs font-semibold text-red-600">
             {regenerateNotesError}
           </p>
+        ) : null}
+
+        {pendingUserNotes ? (
+          <section
+            className="mb-7 rounded-xl border border-pro-border/70 bg-pro-hover/40 px-5 py-4"
+            data-meeting-artifact="user-notes"
+            data-state="processing"
+            aria-label="Your notes"
+          >
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-pro-text-muted">
+              Your notes
+            </p>
+            <p className="whitespace-pre-wrap text-[15px] leading-7 text-pro-text">
+              {pendingUserNotes}
+            </p>
+          </section>
         ) : null}
 
         {downstreamPresentation.state === 'loading' &&

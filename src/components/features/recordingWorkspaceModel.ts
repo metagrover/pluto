@@ -93,7 +93,7 @@ export const buildRecordingWorkspaceModel = (
           : transcriptWarning
             ? 'Your audio is recording, but live transcription is falling behind'
             : input.isStarting
-              ? 'Preparing local capture'
+              ? 'Preparing capture'
               : input.isProcessing
                 ? 'Finalizing notes. Keep Pluto open.'
                 : 'Capture is healthy',

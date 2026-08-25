@@ -23,7 +23,7 @@ describe('buildRecordingWorkspaceModel', () => {
 
     expect(model.status).toBe('starting');
     expect(model.elapsedLabel).toBe('00:00');
-    expect(model.statusMessage).toBe('Preparing local capture');
+    expect(model.statusMessage).toBe('Preparing capture');
   });
 
   it('keeps healthy capture calm while exposing transcript state', () => {

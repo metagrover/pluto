@@ -161,6 +161,7 @@ describe('App recording navigation', () => {
                     started_at: '2026-08-17T18:00:00.000Z',
                     transcript_status: 'validating',
                     finalization_status: 'finalized',
+                    user_notes: 'A note captured during the meeting.',
                     transcript_json: JSON.stringify({
                       lifecycleStatus: 'validating',
                       segments: [
@@ -255,7 +256,7 @@ describe('App recording navigation', () => {
     });
 
     expect(container.textContent).toContain('Starting recording');
-    expect(container.textContent).toContain('Preparing local capture');
+    expect(container.textContent).toContain('Preparing capture');
     expect(container.textContent).not.toContain('Finish recording');
 
     await act(async () => {
@@ -310,6 +311,9 @@ describe('App recording navigation', () => {
     });
 
     expect(container.textContent).toContain('Just stopped meeting');
+    expect(container.textContent).toContain(
+      'A note captured during the meeting.',
+    );
     expect(
       container.querySelector('[data-meeting-artifact="analysis"]'),
     ).not.toBeNull();
