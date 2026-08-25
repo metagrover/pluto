@@ -315,6 +315,16 @@ describe('App recording navigation', () => {
       'A note captured during the meeting.',
     );
     expect(
+      container
+        .querySelector('[data-meeting-page]')
+        ?.classList.contains('meeting-document--processing'),
+    ).toBe(true);
+    expect(
+      container
+        .querySelector('[data-meeting-artifact="user-notes"]')
+        ?.classList.contains('meeting-pending-notes'),
+    ).toBe(true);
+    expect(
       container.querySelector('[data-meeting-artifact="analysis"]'),
     ).not.toBeNull();
     expect(

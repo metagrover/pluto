@@ -220,15 +220,13 @@ export const MeetingAnalysisSkeleton = () => (
     data-meeting-artifact="analysis"
     data-state="loading"
     data-meeting-skeleton="analysis"
-    className="mx-auto flex min-h-[440px] w-full max-w-[760px] flex-col justify-start space-y-8 px-6 pb-16 pt-5 animate-pulse motion-reduce:animate-none md:px-8"
+    className="meeting-analysis-skeleton max-w-[760px] animate-pulse motion-reduce:animate-none"
   >
-    <p className="text-xs font-medium text-pro-text-muted/70">
-      Preparing notes
-    </p>
-    <div className="space-y-5">
-      <div className="h-4 w-5/6 rounded bg-pro-text-muted/10" />
-      <div className="h-4 w-3/5 rounded bg-pro-text-muted/10" />
-      <div className="h-4 w-4/5 rounded bg-pro-text-muted/10" />
+    <p className="meeting-analysis-skeleton__label">Preparing notes</p>
+    <div className="meeting-analysis-skeleton__lines">
+      <div className="h-3.5 w-5/6 rounded bg-pro-text-muted/10" />
+      <div className="h-3.5 w-3/5 rounded bg-pro-text-muted/10" />
+      <div className="h-3.5 w-4/5 rounded bg-pro-text-muted/10" />
     </div>
   </section>
 );
@@ -565,6 +563,8 @@ export const MeetingView = ({
   const pendingUserNotes = !notesDocument.hasAnalysis
     ? selectedMeeting.user_notes?.trim()
     : '';
+  const isMeetingProcessing =
+    downstreamPresentation.state === 'loading' && !notesDocument.hasAnalysis;
 
   const regenerateEnhancedNotes = async () => {
     if (isRegeneratingNotes) return;
@@ -777,7 +777,7 @@ export const MeetingView = ({
       data-meeting-page
       className={`meeting-document w-full ${
         transcriptVisible ? '' : 'meeting-document--transcript-collapsed'
-      }`}
+      } ${isMeetingProcessing ? 'meeting-document--processing' : ''}`}
     >
       <div className="meeting-notes-surface" aria-label="Notes">
         <header className="meeting-document-header">
@@ -1022,24 +1022,19 @@ export const MeetingView = ({
 
         {pendingUserNotes ? (
           <section
-            className="mb-7 rounded-xl border border-pro-border/70 bg-pro-hover/40 px-5 py-4"
+            className="meeting-pending-notes"
             data-meeting-artifact="user-notes"
             data-state="processing"
             aria-label="Your notes"
           >
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-pro-text-muted">
-              Your notes
-            </p>
-            <p className="whitespace-pre-wrap text-[15px] leading-7 text-pro-text">
-              {pendingUserNotes}
-            </p>
+            <div className="meeting-pending-notes__content">
+              <p className="meeting-pending-notes__label">Your notes</p>
+              <p className="meeting-pending-notes__body">{pendingUserNotes}</p>
+            </div>
           </section>
         ) : null}
 
-        {downstreamPresentation.state === 'loading' &&
-        !notesDocument.hasAnalysis ? (
-          <MeetingAnalysisSkeleton />
-        ) : null}
+        {isMeetingProcessing ? <MeetingAnalysisSkeleton /> : null}
         {downstreamPresentation.state === 'failed' &&
         !notesDocument.hasAnalysis ? (
           <MeetingAnalysisUnavailable />

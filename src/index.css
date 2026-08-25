@@ -295,6 +295,34 @@
     max-width: 100%;
     white-space: normal;
   }
+  .meeting-document--processing .meeting-document-header {
+    @apply pb-7 pt-14;
+  }
+  .meeting-document--processing .meeting-document-title {
+    @apply text-[34px] leading-[1.18];
+  }
+  .meeting-pending-notes {
+    @apply mx-auto w-full max-w-[760px] px-6 md:px-8;
+  }
+  .meeting-pending-notes__content {
+    @apply border-y py-6;
+    border-color: var(--notes-rule);
+  }
+  .meeting-pending-notes__label,
+  .meeting-analysis-skeleton__label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em];
+    color: var(--notes-muted);
+  }
+  .meeting-pending-notes__body {
+    @apply mt-3 max-w-[68ch] whitespace-pre-wrap text-[15px] leading-7;
+    color: var(--notes-ink);
+  }
+  .meeting-analysis-skeleton {
+    @apply mx-auto flex min-h-[300px] w-full max-w-[760px] flex-col px-6 pb-16 pt-8 md:px-8;
+  }
+  .meeting-analysis-skeleton__lines {
+    @apply mt-5 space-y-4;
+  }
   .meeting-document-actions {
     @apply relative flex min-h-10 items-center justify-end gap-1 z-50; -webkit-app-region: no-drag; pointer-events: auto !important;
   }
