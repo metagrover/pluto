@@ -1,4 +1,5 @@
 import Foundation
+import FluidAudio
 import ParakeetRuntimeCore
 @testable import ParakeetRuntimeEngine
 import XCTest
@@ -14,7 +15,7 @@ private actor FakeRevisionChecker: RepositoryRevisionChecking {
 private struct FakeBundleDownloader: FluidAudioModelBundleDownloading {
     let includeEou: Bool
 
-    func download(into stagingDirectory: URL) async throws {
+    func download(into stagingDirectory: URL, manifest _: ModelManifest) async throws {
         try Self.write("asr", to: stagingDirectory.appendingPathComponent(
             FluidAudioModelLayout.installedAsrDirectoryName,
             isDirectory: true
@@ -38,6 +39,33 @@ private struct FakeBundleDownloader: FluidAudioModelBundleDownloading {
 }
 
 final class FluidAudioModelInstallerTests: XCTestCase {
+    func testPinnedRevisionCheckTargetsTheImmutableRevisionEndpoint() throws {
+        let url = try XCTUnwrap(huggingFaceRevisionMetadataURL(
+            repository: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
+            revision: "aed02740059203c4a87495924f685de3722ae9ce"
+        ))
+        XCTAssertEqual(
+            url.absoluteString,
+            "https://huggingface.co/api/models/FluidInference/parakeet-tdt-0.6b-v3-coreml/revision/aed02740059203c4a87495924f685de3722ae9ce"
+        )
+    }
+
+    func testFluidAudioDownloadsResolveThePinnedRevisionInsteadOfMain() throws {
+        let repository = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+        let revision = "aed02740059203c4a87495924f685de3722ae9ce"
+        ModelRegistry.setPinnedRevision(revision, for: repository)
+        defer { ModelRegistry.setPinnedRevision(nil, for: repository) }
+
+        XCTAssertEqual(
+            try ModelRegistry.apiModels(repository, "tree/main/q8").absoluteString,
+            "https://huggingface.co/api/models/\(repository)/tree/\(revision)/q8"
+        )
+        XCTAssertEqual(
+            try ModelRegistry.resolveModel(repository, "q8/Encoder.mlmodelc/model.mil").absoluteString,
+            "https://huggingface.co/\(repository)/resolve/\(revision)/q8/Encoder.mlmodelc/model.mil"
+        )
+    }
+
     func testInstallerChecksEveryRevisionAndVerifiesCompleteBundle() async throws {
         let root = try makeRoot()
         let digests = try fixtureDigests(at: root.appendingPathComponent("reference"))

@@ -25,6 +25,7 @@ public enum ModelRegistry {
     // Mutable static for runtime configuration. nonisolated(unsafe) because it's
     // typically set once at startup before any concurrent access.
     nonisolated(unsafe) private static var _customBaseURL: String?
+    nonisolated(unsafe) private static var _pinnedRevisions: [String: String] = [:]
 
     /// Base registry URL (default: HuggingFace)
     /// Can be overridden programmatically to use a different model registry or mirror.
@@ -41,11 +42,29 @@ public enum ModelRegistry {
         }
     }
 
+    /// Pin model downloads for a repository to an immutable revision.
+    /// Passing nil restores FluidAudio's default `main` behavior.
+    public static func setPinnedRevision(_ revision: String?, for repoPath: String) {
+        if let revision {
+            _pinnedRevisions[repoPath] = revision
+        } else {
+            _pinnedRevisions.removeValue(forKey: repoPath)
+        }
+    }
+
+    private static func revision(for repoPath: String) -> String {
+        _pinnedRevisions[repoPath] ?? "main"
+    }
+
     // MARK: - URL Construction
 
     /// Construct API URL for listing model repository contents
     public static func apiModels(_ repoPath: String, _ apiPath: String) throws -> URL {
-        let urlString = "\(baseURL)/api/models/\(repoPath)/\(apiPath)"
+        let revisionPath = "tree/\(revision(for: repoPath))"
+        let resolvedAPIPath = apiPath == "tree/main"
+            ? revisionPath
+            : apiPath.replacingOccurrences(of: "tree/main/", with: "\(revisionPath)/")
+        let urlString = "\(baseURL)/api/models/\(repoPath)/\(resolvedAPIPath)"
         guard let url = URL(string: urlString) else {
             throw Error.invalidURL(urlString)
         }
@@ -54,7 +73,7 @@ public enum ModelRegistry {
 
     /// Construct download URL for a model file
     public static func resolveModel(_ repoPath: String, _ filePath: String) throws -> URL {
-        let urlString = "\(baseURL)/\(repoPath)/resolve/main/\(filePath)"
+        let urlString = "\(baseURL)/\(repoPath)/resolve/\(revision(for: repoPath))/\(filePath)"
         guard let url = URL(string: urlString) else {
             throw Error.invalidURL(urlString)
         }

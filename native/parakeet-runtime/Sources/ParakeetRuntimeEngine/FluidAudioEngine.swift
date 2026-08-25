@@ -34,18 +34,29 @@ protocol RepositoryRevisionChecking: Sendable {
 }
 
 protocol FluidAudioModelBundleDownloading: Sendable {
-    func download(into stagingDirectory: URL) async throws
+    func download(into stagingDirectory: URL, manifest: ModelManifest) async throws
+}
+
+func huggingFaceRevisionMetadataURL(repository: String, revision: String) -> URL? {
+    guard !repository.isEmpty, !revision.isEmpty else { return nil }
+    let encodedRepository = repository
+        .split(separator: "/", omittingEmptySubsequences: false)
+        .map { String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? "" }
+        .joined(separator: "/")
+    let encodedRevision = revision.addingPercentEncoding(
+        withAllowedCharacters: .urlPathAllowed
+    ) ?? ""
+    return URL(
+        string: "https://huggingface.co/api/models/\(encodedRepository)/revision/\(encodedRevision)"
+    )
 }
 
 private struct HuggingFaceRepositoryRevisionChecker: RepositoryRevisionChecking {
     func require(repository: String, revision: String) async throws {
-        guard !repository.isEmpty, !revision.isEmpty else {
-            throw RuntimeFailure.modelPreparationFailed
-        }
-        let encodedRepository = repository.addingPercentEncoding(
-            withAllowedCharacters: .urlPathAllowed
-        ) ?? ""
-        guard let url = URL(string: "https://huggingface.co/api/models/\(encodedRepository)") else {
+        guard let url = huggingFaceRevisionMetadataURL(
+            repository: repository,
+            revision: revision
+        ) else {
             throw RuntimeFailure.modelPreparationFailed
         }
         let (data, response) = try await URLSession.shared.data(from: url)
@@ -62,7 +73,22 @@ private struct HuggingFaceRepositoryRevisionChecker: RepositoryRevisionChecking 
 }
 
 private struct FluidAudioProductionBundleDownloader: FluidAudioModelBundleDownloading {
-    func download(into stagingDirectory: URL) async throws {
+    func download(into stagingDirectory: URL, manifest: ModelManifest) async throws {
+        ModelRegistry.setPinnedRevision(manifest.repositoryRevision, for: manifest.repository)
+        ModelRegistry.setPinnedRevision(
+            manifest.auxiliaryRepositoryRevision,
+            for: manifest.auxiliaryRepository
+        )
+        ModelRegistry.setPinnedRevision(
+            manifest.eouRepositoryRevision,
+            for: manifest.eouRepository
+        )
+        defer {
+            ModelRegistry.setPinnedRevision(nil, for: manifest.repository)
+            ModelRegistry.setPinnedRevision(nil, for: manifest.auxiliaryRepository)
+            ModelRegistry.setPinnedRevision(nil, for: manifest.eouRepository)
+        }
+
         let asrDirectory = stagingDirectory.appendingPathComponent(
             FluidAudioModelLayout.asrDirectoryName,
             isDirectory: true
@@ -113,7 +139,7 @@ public struct FluidAudioModelInstaller: ModelInstalling {
             repository: manifest.eouRepository,
             revision: manifest.eouRepositoryRevision
         )
-        try await downloader.download(into: stagingDirectory)
+        try await downloader.download(into: stagingDirectory, manifest: manifest)
         let ctcDirectory = stagingDirectory.appendingPathComponent(
             FluidAudioModelLayout.ctcDirectoryName,
             isDirectory: true
