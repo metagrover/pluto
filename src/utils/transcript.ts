@@ -13,7 +13,7 @@ interface TranscriptSegmentLike {
 }
 
 const MINIMUM_CONFIDENT_MIC_WORDS = 4;
-const MAXIMUM_CONFIDENT_REMOTE_OVERLAP = 0.5;
+const MINIMUM_REMOTE_DOMINANT_OVERLAP = 0.5;
 
 const finiteTime = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
@@ -133,9 +133,12 @@ export const applyTranscriptSpeakerPresentation = <
           return { ...segment, speaker: 'Speaker' } as T;
         }
         const remoteOverlap = coveredOverlapRatio(segment, remoteIntervals);
+        if (remoteOverlap >= MINIMUM_REMOTE_DOMINANT_OVERLAP) {
+          return { ...segment, speaker: 'Them' } as T;
+        }
         if (
           wordCount(segment.text) >= MINIMUM_CONFIDENT_MIC_WORDS &&
-          remoteOverlap < MAXIMUM_CONFIDENT_REMOTE_OVERLAP
+          remoteOverlap < MINIMUM_REMOTE_DOMINANT_OVERLAP
         ) {
           return segment;
         }

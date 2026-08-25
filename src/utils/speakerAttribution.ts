@@ -146,7 +146,7 @@ const activityCoverage = (
   return total;
 };
 
-const isDuplicatePair = (
+export const isCrossChannelDuplicatePair = (
   left: AttributionSegment,
   right: AttributionSegment,
 ): {
@@ -323,7 +323,7 @@ export const resolveCrossChannelDuplicates = <T extends AttributionSegment>(
       const me = segments[meIndex];
       const them = segments[themIndex];
 
-      const decision = isDuplicatePair(me, them);
+      const decision = isCrossChannelDuplicatePair(me, them);
       if (!decision.duplicate) continue;
 
       const score =
@@ -419,7 +419,7 @@ const isNearDuplicatePair = (
     return { nearDuplicate: false, overlapRatio, tokenSim: 0, prefixSim: 0 };
   }
 
-  const dup = isDuplicatePair(left, right);
+  const dup = isCrossChannelDuplicatePair(left, right);
   if (dup.duplicate) {
     return {
       nearDuplicate: false,
@@ -446,7 +446,7 @@ const isNearDuplicatePair = (
 
 /**
  * Greedy one-to-one collapse for cross-channel paraphrases / skewed boundaries
- * that miss strict {@link isDuplicatePair}. Run after {@link resolveCrossChannelDuplicates}.
+ * that miss strict {@link isCrossChannelDuplicatePair}. Run after {@link resolveCrossChannelDuplicates}.
  */
 export const resolveCrossChannelNearDuplicates = <T extends AttributionSegment>(
   segments: T[],

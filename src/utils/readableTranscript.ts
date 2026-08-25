@@ -1,3 +1,8 @@
+import {
+  type AttributionSegment,
+  isCrossChannelDuplicatePair,
+} from './speakerAttribution.ts';
+
 export type ReadableTranscriptSegment = {
   text?: unknown;
   speaker?: unknown;
@@ -12,6 +17,7 @@ export type TranscriptReadabilityStats = {
   totalTokenCount: number;
   exactDuplicateSegmentCount: number;
   embeddedFragmentCount: number;
+  crossChannelEchoCount: number;
 };
 
 const normalizedToken = (value: string): string =>
@@ -43,6 +49,58 @@ const normalizedSpeaker = (value: unknown): string =>
   typeof value === 'string' || typeof value === 'number'
     ? String(value).trim().toLocaleLowerCase('en')
     : '';
+
+const toAttributionSegment = (
+  segment: ReadableTranscriptSegment,
+): AttributionSegment | null => {
+  const startTime = finiteTime(segment.startTime);
+  const endTime = finiteTime(segment.endTime);
+  const text = typeof segment.text === 'string' ? segment.text.trim() : '';
+  const speaker =
+    typeof segment.speaker === 'string' ? segment.speaker.trim() : '';
+  return startTime !== null &&
+    endTime !== null &&
+    startTime >= 0 &&
+    endTime > startTime &&
+    text &&
+    speaker
+    ? { startTime, endTime, text, speaker }
+    : null;
+};
+
+const isCrossChannelMicEcho = (
+  segment: ReadableTranscriptSegment,
+  segments: ReadonlyArray<ReadableTranscriptSegment>,
+): boolean => {
+  if (normalizedSpeaker(segment.speaker) !== 'me') return false;
+  const mic = toAttributionSegment(segment);
+  if (!mic) return false;
+  const overlappingRemote = segments
+    .filter((candidate) => normalizedSpeaker(candidate.speaker) === 'them')
+    .map(toAttributionSegment)
+    .filter(
+      (remote): remote is AttributionSegment =>
+        remote !== null &&
+        remote.endTime > mic.startTime &&
+        remote.startTime < mic.endTime,
+    )
+    .sort((left, right) => left.startTime - right.startTime);
+  if (
+    overlappingRemote.some(
+      (remote) => isCrossChannelDuplicatePair(mic, remote).duplicate,
+    )
+  ) {
+    return true;
+  }
+  if (overlappingRemote.length < 2) return false;
+  const combinedRemote: AttributionSegment = {
+    speaker: 'Them',
+    startTime: overlappingRemote[0].startTime,
+    endTime: overlappingRemote.at(-1)?.endTime ?? overlappingRemote[0].endTime,
+    text: overlappingRemote.map((remote) => remote.text).join(' '),
+  };
+  return isCrossChannelDuplicatePair(mic, combinedRemote).duplicate;
+};
 
 const tokenCoverage = (query: string[], reference: string[]): number => {
   const queryTokens = new Set(query);
@@ -110,6 +168,7 @@ export const buildReadableTranscriptSegments = <
   let totalTokenCount = 0;
   let exactDuplicateSegmentCount = 0;
   let embeddedFragmentCount = 0;
+  let crossChannelEchoCount = 0;
 
   input.forEach((segment, index) => {
     if (!segment || typeof segment.text !== 'string') return;
@@ -130,6 +189,10 @@ export const buildReadableTranscriptSegments = <
     seenExact.add(exactKey);
 
     const text = cleanReadableText(segment.text);
+    if (isCrossChannelMicEcho({ ...segment, text }, input)) {
+      crossChannelEchoCount += 1;
+      return;
+    }
     if (isEmbeddedMicFragment({ ...segment, text }, input)) {
       embeddedFragmentCount += 1;
       return;
@@ -148,6 +211,7 @@ export const buildReadableTranscriptSegments = <
       totalTokenCount,
       exactDuplicateSegmentCount,
       embeddedFragmentCount,
+      crossChannelEchoCount,
     },
   };
 };
