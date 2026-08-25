@@ -30,14 +30,26 @@ describe('AudioManager Parakeet EOU wiring', () => {
     expect(finishIndex).toBeLessThan(captureStopIndex);
   });
 
-  it('materializes sealed system audio for canonical final transcription', () => {
+  it('materializes sealed mic and system audio on one canonical timeline', () => {
     const sealIndex = source.indexOf('sealCaptureJournalBeforeFinalization({');
-    const materializeIndex = source.indexOf(
+    const micMaterializeIndex = source.indexOf(
       "'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE'",
     );
-    const saveIndex = source.indexOf("'SAVE_MEETING'", materializeIndex);
-    expect(materializeIndex).toBeGreaterThan(sealIndex);
-    expect(saveIndex).toBeGreaterThan(materializeIndex);
+    const systemMaterializeIndex = source.indexOf(
+      "'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE'",
+      micMaterializeIndex + 1,
+    );
+    const saveIndex = source.indexOf("'SAVE_MEETING'", systemMaterializeIndex);
+    const materialization = source.slice(micMaterializeIndex, saveIndex);
+
+    expect(micMaterializeIndex).toBeGreaterThan(sealIndex);
+    expect(systemMaterializeIndex).toBeGreaterThan(micMaterializeIndex);
+    expect(materialization).toContain("source: 'mic'");
+    expect(materialization).toContain(
+      'if (rebuiltMicPath) primaryAudioPath = rebuiltMicPath',
+    );
+    expect(materialization).toContain("source: 'system'");
+    expect(saveIndex).toBeGreaterThan(systemMaterializeIndex);
   });
 
   it('keeps the active EOU session across ordinary AudioManager rerenders', () => {

@@ -10,6 +10,8 @@ type WordLocation = {
   wordIndex: number;
   token: string;
   at: number;
+  start: number;
+  end: number;
 };
 
 const normalizeToken = (word: string) =>
@@ -29,6 +31,8 @@ const flattenWords = (segments: AttributionSegment[]): WordLocation[] =>
               wordIndex,
               token,
               at: (word.start + word.end) / 2,
+              start: word.start,
+              end: word.end,
             },
           ]
         : [];
@@ -52,6 +56,23 @@ const segmentText = (segment: AttributionSegment): string =>
     .toLocaleLowerCase('en')
     .replace(/[^\p{L}\p{N}']+/gu, ' ')
     .trim();
+
+const coveredSeconds = (words: WordLocation[]): number => {
+  const sorted = [...words].sort((left, right) => left.start - right.start);
+  let total = 0;
+  let activeStart: number | null = null;
+  let activeEnd = 0;
+  for (const word of sorted) {
+    if (activeStart === null || word.start > activeEnd) {
+      if (activeStart !== null) total += activeEnd - activeStart;
+      activeStart = word.start;
+      activeEnd = word.end;
+    } else {
+      activeEnd = Math.max(activeEnd, word.end);
+    }
+  }
+  return activeStart === null ? total : total + activeEnd - activeStart;
+};
 
 const dedupeExactSegments = (segments: AttributionSegment[]) => {
   const seen = new Set<string>();
@@ -209,6 +230,11 @@ export const collapseCrossChannelWordBleed = (input: {
     micSegments,
     systemSegments: systemSourceSegments,
     droppedMicWordCount: droppedMicWords.size,
+    droppedMicSeconds: coveredSeconds(
+      micWords.filter((word) =>
+        droppedMicWords.has(`${word.segmentIndex}:${word.wordIndex}`),
+      ),
+    ),
     collapsedSequenceCount,
     reconciliation,
   };

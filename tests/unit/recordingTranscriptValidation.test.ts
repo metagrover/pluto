@@ -7,6 +7,20 @@ const rawSegment = (start: number, end: number, text: string) => ({
   text,
 });
 
+const timedRawSegment = (start: number, text: string) => {
+  const words = text.split(' ').map((word, index) => ({
+    word,
+    start: start + index,
+    end: start + index + 0.8,
+  }));
+  return {
+    start,
+    end: words.at(-1)?.end ?? start,
+    text,
+    words,
+  };
+};
+
 describe('runRecordingTranscriptValidation', () => {
   it('validates verified checkpoint segments without full-session transcription', async () => {
     const transcribe = vi.fn();
@@ -337,6 +351,43 @@ describe('runRecordingTranscriptValidation', () => {
     expect(result.status).toBe('needs_attention');
     expect(result.reasons).toContain('local_speech_unaccounted');
     expect(result.evidence.micActivitySeconds).toBe(60);
+  });
+
+  it('credits removed cross-channel pass-through as explained mic activity', async () => {
+    const duplicate = timedRawSegment(
+      0,
+      'shared remote speech should appear only once today',
+    );
+    const result = await runRecordingTranscriptValidation({
+      meetingId: 'aligned-cross-channel-pass-through',
+      recordingDurationSeconds: 8,
+      micAudioPath: '/synthetic/mic.wav',
+      mixAudioPath: '',
+      systemAudioPath: '/synthetic/system.wav',
+      provisionalSegments: [],
+      activityWindows: [
+        { speaker: 'Me', startTime: 0, endTime: 8 },
+        { speaker: 'Them', startTime: 0, endTime: 8 },
+      ],
+      canonicalMode: 'recovered_channels',
+      transcriptionScheduling: 'sequential_channels',
+      transcribe: async (_path, options) => ({
+        segments:
+          options.canonicalSource === 'mic' ||
+          options.canonicalSource === 'system'
+            ? [duplicate]
+            : [],
+        vad: { status: 'speech' as const, speechSeconds: 7.8 },
+      }),
+      probeDuration: async () => 8,
+    });
+
+    expect(result.status).toBe('validated');
+    expect(result.reasons).toEqual([]);
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0]?.speaker).toBe('Them');
+    expect(result.reconciliation.droppedMicWordCount).toBe(8);
+    expect(result.evidence.collapsedPassThroughSeconds).toBeCloseTo(6.4);
   });
 
   it('does not expose source paths or transcript text in integrity evidence', async () => {

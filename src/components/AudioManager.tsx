@@ -1547,11 +1547,25 @@ export const AudioManager = ({
 
       if (!currentMeetingIdRef.current) return; // Session aborted or never started
 
-      // Store a single full audio file for playback
-      const primaryBlob = micBlob; // Default to mic
-      if (primaryBlob && primaryBlob.size > 0) {
+      // Materialize both channels against the sealed meeting clock. The
+      // browser mic blob is only a fallback because concatenating its chunks
+      // can compress startup gaps and shift mic words ahead of System words.
+      try {
+        const rebuiltMicPath = await window.ipcRenderer.invoke(
+          'AUDIO_CAPTURE_JOURNAL_STITCH_SOURCE',
+          {
+            meetingId: stopSnapshot.meetingId,
+            source: 'mic',
+            outputTag: 'session-mic-rebuilt',
+          },
+        );
+        if (rebuiltMicPath) primaryAudioPath = rebuiltMicPath;
+      } catch (e) {
+        console.warn('[Pluto] Sealed mic audio materialization failed:', e);
+      }
+      if (!primaryAudioPath && micBlob && micBlob.size > 0) {
         try {
-          const buffer = await primaryBlob.arrayBuffer();
+          const buffer = await micBlob.arrayBuffer();
           const maybePath = await window.ipcRenderer.invoke(
             'AUDIO_SAVE_AND_CONVERT',
             buffer,

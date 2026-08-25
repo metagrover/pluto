@@ -186,11 +186,18 @@ export const reconcileCanonicalTranscript = <
       ? total + overlapSeconds(mic, duplicateSystem)
       : total;
   }, 0);
+  const seenCanonicalSegments = new Set<string>();
+  const segments = [...attributed, ...recoveredMicSegments]
+    .sort((left, right) => left.startTime - right.startTime)
+    .filter((segment) => {
+      const key = `${segment.speaker}|${segment.startTime}|${segment.endTime}|${normalizeText(segment.text)}`;
+      if (seenCanonicalSegments.has(key)) return false;
+      seenCanonicalSegments.add(key);
+      return true;
+    });
 
   return {
-    segments: [...attributed, ...recoveredMicSegments].sort(
-      (left, right) => left.startTime - right.startTime,
-    ),
+    segments,
     evidence: {
       collapsedPassThroughSeconds,
       unresolvedAmbiguousSeconds: 0,

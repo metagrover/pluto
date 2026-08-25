@@ -371,6 +371,7 @@ export const runRecordingTranscriptValidation = async (input: {
       : {
           micSegments: rawMicSegments,
           systemSegments: rawSystemSegments,
+          droppedMicSeconds: 0,
           reconciliation: emptyCrossChannelReconciliation(),
         };
   const micSegments = collapsedChannels.micSegments;
@@ -388,6 +389,9 @@ export const runRecordingTranscriptValidation = async (input: {
     provisionalSegments: input.provisionalSegments,
     activityWindows: input.activityWindows,
   });
+  const collapsedPassThroughSeconds =
+    reconciliation.evidence.collapsedPassThroughSeconds +
+    collapsedChannels.droppedMicSeconds;
   const micActivitySeconds = activitySeconds(input.activityWindows, 'Me');
   const systemActivitySeconds = activitySeconds(input.activityWindows, 'Them');
   const micSpeechSeconds = segmentSeconds(micSegments);
@@ -454,8 +458,7 @@ export const runRecordingTranscriptValidation = async (input: {
     remoteTranscriptCoveredSeconds: systemVadVerified
       ? asrConfirmedRemoteCoveredSeconds
       : candidateRemoteCoveredSeconds,
-    collapsedPassThroughSeconds:
-      reconciliation.evidence.collapsedPassThroughSeconds,
+    collapsedPassThroughSeconds,
     unresolvedAmbiguousSeconds:
       reconciliation.evidence.unresolvedAmbiguousSeconds,
     requiredSourcesSucceeded,
@@ -472,7 +475,7 @@ export const runRecordingTranscriptValidation = async (input: {
             0,
             micActivitySeconds -
               asrConfirmedLocalCoveredSeconds -
-              reconciliation.evidence.collapsedPassThroughSeconds,
+              collapsedPassThroughSeconds,
           )
         : Math.max(0, micActivitySeconds - candidateLocalCoveredSeconds),
     unexplainedSystemSeconds: systemNoSpeechVerified
@@ -486,8 +489,7 @@ export const runRecordingTranscriptValidation = async (input: {
     rejectedSystemCandidateSeconds: systemVadVerified
       ? Math.max(0, systemActivitySeconds - systemSpeechSeconds)
       : 0,
-    collapsedPassThroughSeconds:
-      reconciliation.evidence.collapsedPassThroughSeconds,
+    collapsedPassThroughSeconds,
     unresolvedAmbiguousSeconds:
       reconciliation.evidence.unresolvedAmbiguousSeconds,
   };

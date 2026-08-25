@@ -108,6 +108,26 @@ describe('transcriptIntegrity', () => {
     expect(result.segments[0].speaker).toBe('Them');
   });
 
+  it('emits one canonical row when identical short channel segments are relabeled to the same speaker', () => {
+    const duplicateMic = segment('Me', 18.48, 18.64, 'model');
+    const duplicateSystem = segment('Them', 18.48, 18.64, 'model');
+    const result = reconcileCanonicalTranscript({
+      mixedSegments: [duplicateMic, duplicateSystem],
+      micSegments: [duplicateMic],
+      systemSegments: [duplicateSystem],
+      provisionalSegments: [],
+      activityWindows: [{ speaker: 'Me', startTime: 18.48, endTime: 18.64 }],
+    });
+
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0]).toMatchObject({
+      speaker: 'Me',
+      startTime: 18.48,
+      endTime: 18.64,
+      text: 'model',
+    });
+  });
+
   it('keeps distinct local speech that overlaps a longer remote segment', () => {
     const result = reconcileCanonicalTranscript({
       mixedSegments: [segment('Unknown', 10, 20, 'Synthetic remote response')],
