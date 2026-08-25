@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { AttentionItem } from '../../electron/intelligence/intelligenceTypes';
 import type { Entity } from '../../src/api/knowledgeGraph';
 import { Dashboard } from '../../src/components/features/Dashboard';
 import { buildDashboardHomeModel } from '../../src/components/features/dashboardModel';
@@ -43,6 +44,30 @@ const makeAction = (overrides: Partial<Entity> = {}): Entity => ({
   domain_tag: 'work',
   created_at: '2026-04-25T10:00:00.000Z',
   updated_at: '2026-04-25T10:00:00.000Z',
+  ...overrides,
+});
+
+const makeAttentionItem = (
+  overrides: Partial<AttentionItem> = {},
+): AttentionItem => ({
+  id: 'attention-1',
+  dedupe_key: 'action_tracker:blocker:action-1',
+  kind: 'blocker',
+  severity: 'watch',
+  score: 0.8,
+  status: 'active',
+  title: 'Send the launch recap',
+  reason: 'Waiting on launch approval.',
+  source: 'action_tracker',
+  score_breakdown: null,
+  evidence: [],
+  related_entity_ids: ['action-1'],
+  related_stream_ids: [],
+  related_meeting_ids: [],
+  created_at: '2026-04-25T10:00:00.000Z',
+  updated_at: '2026-04-25T10:00:00.000Z',
+  last_seen_at: '2026-04-25T10:00:00.000Z',
+  resolved_at: null,
   ...overrides,
 });
 
@@ -90,6 +115,54 @@ afterEach(() => {
 });
 
 describe('Dashboard interactions', () => {
+  it('keeps secondary commitment actions in a keyboard-accessible menu', async () => {
+    const handleUpdateAttentionStatus = vi.fn(async () => {});
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: [makeMeeting()],
+      overdueActions: [
+        makeAction({
+          due_date: '2026-04-24T10:00:00.000Z',
+          metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+        }),
+      ],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [makeAttentionItem()],
+      workspace: null,
+      graphStats: null,
+    });
+    const { container, root } = renderDashboard({
+      model,
+      handleUpdateAttentionStatus,
+    });
+
+    const moreActions = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="More actions for Send the launch recap"]',
+    );
+    expect(moreActions?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+
+    await act(async () => moreActions?.click());
+    expect(moreActions?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector('[role="menu"]')).toBeTruthy();
+
+    await act(async () => {
+      Array.from(
+        container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+      )
+        .find((button) => button.textContent === 'Snooze blocker')
+        ?.click();
+    });
+    expect(handleUpdateAttentionStatus).toHaveBeenCalledWith(
+      'attention-1',
+      'snoozed',
+    );
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+
+    act(() => root.unmount());
+  });
+
   it('moves an accepted suggestion into commitments and acknowledges the transition', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);

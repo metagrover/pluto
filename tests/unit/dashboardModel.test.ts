@@ -1913,6 +1913,7 @@ describe('buildDashboardHomeModel', () => {
     expect(model.actionInsights.items[0]).toMatchObject({
       commitmentState: 'possible',
       sourceMeetingId: 'meeting-source',
+      sourceMeetingTitle: 'Launch Decision',
       basisLabel: 'Possible follow-up · From Launch Decision · Apr 29, 2026',
       sourceSynthesis: {
         overview: 'Indexing rollout is close, with launch risk around review.',

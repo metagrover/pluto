@@ -343,7 +343,7 @@ describe('Dashboard', () => {
     expect(
       markup.match(/data-testid="dashboard-commitment-row"/g) ?? [],
     ).toHaveLength(3);
-    expect(markup).toContain('Review 1 more');
+    expect(markup).toContain('View all commitments');
     expect(markup).not.toContain('No recent win surfaced yet');
     expect(markup).not.toContain('Current read');
     expect(markup).not.toContain('Memory in motion');
@@ -388,7 +388,8 @@ describe('Dashboard', () => {
     );
     expect(markup).not.toContain('You&#x27;re caught up');
     expect(markup).toContain('Suggestions');
-    expect(markup).toContain('Possible follow-ups from your meetings.');
+    expect(markup).toContain('Suggestions · 3 to review');
+    expect(markup).not.toContain('Possible follow-ups from your meetings.');
     expect(markup).toContain('Draft the launch checklist');
     expect(markup).toContain('Schedule the privacy review');
     expect(markup).toContain('Send the revised launch brief');
@@ -563,8 +564,7 @@ describe('Dashboard', () => {
 
     expect(markup).toContain('Blocker');
     expect(markup).toContain('Blocked by legal approval.');
-    expect(markup).toContain('Dismiss blocker');
-    expect(markup).toContain('Snooze blocker');
+    expect(markup).toContain('More actions for Finalize launch checklist');
     expect(markup).toContain('Due Apr 26 · Blocked by legal approval.');
     expect(markup).not.toContain('Due Apr 26 · Work');
   });
@@ -635,8 +635,13 @@ describe('Dashboard', () => {
     );
 
     expect(blockedMarkup).toContain('Resolve blocker');
-    expect(blockedMarkup).not.toContain('Mark complete');
-    expect(routineMarkup).toContain('Mark complete');
+    expect(blockedMarkup).toContain(
+      'aria-label="Resolve blocker: Finalize launch checklist"',
+    );
+    expect(routineMarkup).toContain(
+      'aria-label="Mark Ship privacy review complete"',
+    );
+    expect(routineMarkup).not.toContain('>Mark complete<');
     expect(routineMarkup).not.toContain('Resolve blocker');
   });
 
@@ -711,8 +716,8 @@ describe('Dashboard', () => {
     );
 
     expect(markup).toContain('Ship privacy review');
-    expect(markup).toContain('Due Apr 26 · Launch Review');
     expect(markup).not.toContain('Due Apr 26 · Work');
+    expect(markup).toContain('Due Apr 26 · Launch Review');
   });
 
   it('moves blocked project spotlight clutter out of the first viewport', () => {
@@ -883,7 +888,9 @@ describe('Dashboard', () => {
         handleCompleteTask={vi.fn(async () => {})}
       />,
     );
-    expect(markup.match(/Mark complete/g) ?? []).toHaveLength(2);
+    expect(
+      markup.match(/aria-label="Mark [^"]+ complete"/g) ?? [],
+    ).toHaveLength(2);
     expect(markup).not.toContain('Reopen');
   });
 
@@ -1143,10 +1150,9 @@ describe('Dashboard', () => {
     );
 
     expect(markup).toMatch(
-      /aria-label="Dismiss blocker: Ship privacy review"[^>]+focus-visible:outline-pro-accent/,
+      /aria-label="More actions for Ship privacy review"[^>]+aria-haspopup="menu"[^>]+focus-visible:outline-pro-accent/,
     );
-    expect(markup).toMatch(
-      /aria-label="Snooze blocker: Ship privacy review"[^>]+focus-visible:outline-pro-accent/,
-    );
+    expect(markup).not.toContain('Dismiss blocker');
+    expect(markup).not.toContain('Snooze blocker');
   });
 });

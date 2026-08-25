@@ -77,6 +77,7 @@ export interface DashboardActionInsightItem {
   statusLabel: string;
   basisLabel: string;
   sourceMeetingId: string | null;
+  sourceMeetingTitle: string | null;
   sourceSynthesis: DashboardCommitmentSourceSynthesis | null;
   canComplete: boolean;
   sourceLabel: string;
@@ -771,6 +772,7 @@ const actionToInsightItem = (
           : 'Possible follow-up · Owner and due date not confirmed'
         : `${dueLabel} · ${contextLabel ?? sourceLabel}`,
     sourceMeetingId,
+    sourceMeetingTitle: sourceMeeting?.title ?? null,
     sourceSynthesis: buildCommitmentSourceSynthesis(action, sourceMeeting),
     canComplete: commitmentState === 'confirmed',
     sourceLabel,

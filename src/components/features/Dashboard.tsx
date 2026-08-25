@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleDot,
   Loader2,
+  MoreHorizontal,
   PartyPopper,
   Sparkles,
 } from 'lucide-react';
@@ -64,11 +65,6 @@ const getActionInsightStatusTone = (item: DashboardActionInsightItem) => {
   }
   return 'bg-pro-accent/10 text-pro-accent';
 };
-
-const getActionInsightPrimaryLabel = (item: DashboardActionInsightItem) =>
-  item.attentionLabel === 'Blocker' && item.attentionStatus === 'active'
-    ? 'Resolve blocker'
-    : 'Mark complete';
 
 const getActionInsightPrimaryAriaLabel = (item: DashboardActionInsightItem) =>
   item.attentionLabel === 'Blocker' && item.attentionStatus === 'active'
@@ -417,6 +413,10 @@ export const Dashboard = ({
   const [recentlyAddedCommitmentId, setRecentlyAddedCommitmentId] = useState<
     string | null
   >(null);
+  const [openCommitmentMenuId, setOpenCommitmentMenuId] = useState<
+    string | null
+  >(null);
+  const openCommitmentMenuRef = useRef<HTMLDivElement>(null);
   const [celebration, setCelebration] = useState<
     'idle' | 'confetti' | 'reduced'
   >('idle');
@@ -442,6 +442,29 @@ export const Dashboard = ({
     );
     return () => window.clearTimeout(timeout);
   }, [recentlyAddedCommitmentId]);
+
+  useEffect(() => {
+    if (!openCommitmentMenuId) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !openCommitmentMenuRef.current?.contains(event.target)
+      ) {
+        setOpenCommitmentMenuId(null);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenCommitmentMenuId(null);
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [openCommitmentMenuId]);
 
   const finishSuggestionReview = (
     itemId: string,
@@ -654,7 +677,7 @@ export const Dashboard = ({
             <button
               type="button"
               onClick={() => setAddingCommitment((value) => !value)}
-              className="inline-flex min-h-8 items-center gap-2 rounded-md px-3 text-[11px] font-bold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              className="inline-flex min-h-9 items-center gap-2 rounded-md border border-pro-border/70 bg-pro-surface/55 px-3 text-[11px] font-semibold text-pro-text-main/70 transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
               <CalendarPlus className="h-4 w-4" /> Add commitment
             </button>
@@ -702,14 +725,26 @@ export const Dashboard = ({
                     item.attentionItemId &&
                       updatingTaskIds.has(item.attentionItemId),
                   );
-                const primaryLabel = getActionInsightPrimaryLabel(item);
                 const primaryAriaLabel = getActionInsightPrimaryAriaLabel(item);
+                const showStatus =
+                  recentlyAddedCommitmentId === item.id ||
+                  item.status !== 'active' ||
+                  item.attentionLabel === 'Blocker';
+                const hasSecondaryActions = Boolean(
+                  item.attentionItemId &&
+                    (item.dismissLabel || item.snoozeLabel),
+                );
+                const dueLabel = item.basisLabel.split(' · ')[0];
+                const hasDueDate = dueLabel !== 'No due date';
+                const basisLabel = item.sourceMeetingTitle
+                  ? `${hasDueDate ? `${dueLabel} · ` : ''}From ${item.sourceMeetingTitle}`
+                  : item.basisLabel.replace(/^No due date · /, '');
                 return (
                   <article
                     key={item.id}
                     data-testid="dashboard-commitment-row"
                     aria-busy={isUpdating}
-                    className="group py-4"
+                    className="group py-3.5"
                   >
                     <div className="flex items-start gap-3">
                       {item.canComplete ? (
@@ -718,48 +753,138 @@ export const Dashboard = ({
                           aria-label={primaryAriaLabel}
                           disabled={isUpdating}
                           onClick={() => handleCompleteTask(item.id)}
-                          className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-pro-border text-pro-text-muted transition-colors hover:border-pro-accent hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
+                          className="group/complete mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-pro-border text-pro-text-muted/55 transition-colors hover:border-pro-accent hover:bg-pro-accent/5 hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
                         >
                           {isUpdating ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           ) : (
-                            <Check className="h-3.5 w-3.5" />
+                            <Check className="h-3.5 w-3.5 opacity-0 transition-opacity group-hover/complete:opacity-100 group-focus-visible/complete:opacity-100 motion-reduce:transition-none" />
                           )}
                         </button>
                       ) : null}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-3">
-                          <h3 className="text-[14px] font-bold leading-5 text-pro-text-main">
+                          <h3 className="text-[13px] font-semibold leading-5 text-pro-text-main">
                             {item.title}
                           </h3>
-                          <span
-                            className={`shrink-0 rounded px-2 py-1 text-[9px] font-semibold ${getActionInsightStatusTone(item)}`}
-                          >
-                            {recentlyAddedCommitmentId === item.id
-                              ? 'Added'
-                              : item.statusLabel}
-                          </span>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {showStatus ? (
+                              <span
+                                role={
+                                  recentlyAddedCommitmentId === item.id
+                                    ? 'status'
+                                    : undefined
+                                }
+                                className={`rounded px-2 py-1 text-[9px] font-semibold ${recentlyAddedCommitmentId === item.id ? 'bg-pro-success/10 text-pro-success' : getActionInsightStatusTone(item)}`}
+                              >
+                                {recentlyAddedCommitmentId === item.id
+                                  ? 'Added'
+                                  : item.statusLabel}
+                              </span>
+                            ) : null}
+                            {hasSecondaryActions ? (
+                              <div
+                                ref={
+                                  openCommitmentMenuId === item.id
+                                    ? openCommitmentMenuRef
+                                    : undefined
+                                }
+                                className="relative"
+                              >
+                                <button
+                                  type="button"
+                                  aria-label={`More actions for ${item.title}`}
+                                  aria-haspopup="menu"
+                                  aria-expanded={
+                                    openCommitmentMenuId === item.id
+                                  }
+                                  disabled={isUpdating}
+                                  onClick={() =>
+                                    setOpenCommitmentMenuId((current) =>
+                                      current === item.id ? null : item.id,
+                                    )
+                                  }
+                                  className="flex h-7 w-7 items-center justify-center rounded-md text-pro-text-muted/55 transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                                >
+                                  <MoreHorizontal
+                                    className="h-4 w-4"
+                                    aria-hidden="true"
+                                  />
+                                </button>
+                                {openCommitmentMenuId === item.id ? (
+                                  <div
+                                    role="menu"
+                                    aria-label={`Actions for ${item.title}`}
+                                    className="absolute right-0 top-8 z-20 min-w-36 rounded-md border border-pro-border bg-pro-bg p-1 shadow-lg"
+                                  >
+                                    {item.dismissLabel ? (
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        disabled={isUpdating}
+                                        onClick={async () => {
+                                          await handleUpdateAttentionStatus(
+                                            item.attentionItemId!,
+                                            item.dismissLabel === 'Reopen'
+                                              ? 'active'
+                                              : 'dismissed',
+                                          );
+                                          setOpenCommitmentMenuId(null);
+                                        }}
+                                        className="flex min-h-9 w-full items-center rounded px-2 text-left text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                                      >
+                                        {item.dismissLabel}
+                                      </button>
+                                    ) : null}
+                                    {item.snoozeLabel ? (
+                                      <button
+                                        type="button"
+                                        role="menuitem"
+                                        disabled={isUpdating}
+                                        onClick={async () => {
+                                          await handleUpdateAttentionStatus(
+                                            item.attentionItemId!,
+                                            item.snoozeLabel === 'Reopen'
+                                              ? 'active'
+                                              : 'snoozed',
+                                          );
+                                          setOpenCommitmentMenuId(null);
+                                        }}
+                                        className="flex min-h-9 w-full items-center rounded px-2 text-left text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-50"
+                                      >
+                                        {item.snoozeLabel}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
-                        <p className="mt-1 text-[11px] font-medium leading-5 text-pro-text-muted">
-                          {item.basisLabel}
-                        </p>
+                        {item.sourceMeetingId ? (
+                          <button
+                            type="button"
+                            aria-label={`Open source meeting for ${item.title}`}
+                            onClick={() =>
+                              setSelectedMeetingId(item.sourceMeetingId)
+                            }
+                            className="mt-1 block max-w-full truncate text-left text-[11px] font-medium leading-5 text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                          >
+                            {basisLabel}
+                          </button>
+                        ) : (
+                          <p className="mt-1 truncate text-[11px] font-medium leading-5 text-pro-text-muted">
+                            {basisLabel}
+                          </p>
+                        )}
                         {item.attentionReason &&
                         item.attentionReason !== item.contextLabel ? (
                           <p className="mt-1 text-[11px] font-semibold leading-5 text-pro-urgent/85">
                             {item.attentionReason}
                           </p>
                         ) : null}
-                        <div className="mt-2 flex min-h-8 flex-wrap items-center gap-1 text-[10px] font-bold">
-                          {item.canComplete ? (
-                            <button
-                              type="button"
-                              disabled={isUpdating}
-                              onClick={() => handleCompleteTask(item.id)}
-                              className="min-h-8 rounded-lg px-2 text-pro-accent hover:bg-pro-accent/10 hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
-                            >
-                              {primaryLabel}
-                            </button>
-                          ) : (
+                        {!item.canComplete ? (
+                          <div className="mt-2">
                             <DashboardSuggestionReview
                               item={item}
                               isUpdating={isUpdating}
@@ -775,48 +900,8 @@ export const Dashboard = ({
                               setSelectedMeetingId={setSelectedMeetingId}
                               handleReviewCommitment={handleReviewCommitment}
                             />
-                          )}
-                          {item.canComplete &&
-                          item.attentionItemId &&
-                          item.dismissLabel ? (
-                            <button
-                              type="button"
-                              aria-label={`${item.dismissLabel}: ${item.title}`}
-                              disabled={isUpdating}
-                              onClick={() =>
-                                handleUpdateAttentionStatus(
-                                  item.attentionItemId!,
-                                  item.dismissLabel === 'Reopen'
-                                    ? 'active'
-                                    : 'dismissed',
-                                )
-                              }
-                              className="min-h-8 rounded-lg px-2 text-pro-text-main/60 hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
-                            >
-                              {item.dismissLabel}
-                            </button>
-                          ) : null}
-                          {item.canComplete &&
-                          item.attentionItemId &&
-                          item.snoozeLabel ? (
-                            <button
-                              type="button"
-                              aria-label={`${item.snoozeLabel}: ${item.title}`}
-                              disabled={isUpdating}
-                              onClick={() =>
-                                handleUpdateAttentionStatus(
-                                  item.attentionItemId!,
-                                  item.snoozeLabel === 'Reopen'
-                                    ? 'active'
-                                    : 'snoozed',
-                                )
-                              }
-                              className="min-h-8 rounded-lg px-2 text-pro-text-main/60 hover:bg-pro-warning/10 hover:text-pro-warning focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:opacity-50"
-                            >
-                              {item.snoozeLabel}
-                            </button>
-                          ) : null}
-                        </div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </article>
@@ -828,14 +913,10 @@ export const Dashboard = ({
               id="suggested-commitments"
               className="scroll-mt-6 border-b border-pro-border/60 py-5"
             >
-              <div className="mb-4">
-                <h3 className="text-[15px] font-semibold text-pro-text-main">
-                  Suggestions
-                </h3>
-                <p className="mt-1 text-[12px] font-medium leading-5 text-pro-text-muted">
-                  Possible follow-ups from your meetings.
-                </p>
-              </div>
+              <h3 className="mb-2 text-[13px] font-semibold text-pro-text-main">
+                Suggestions · {model.commitments.needsConfirmation.length} to
+                review
+              </h3>
               <div className="divide-y divide-pro-border/60">
                 {model.commitments.needsConfirmation.map((item) => {
                   const isUpdating = updatingTaskIds.has(item.id);
@@ -882,15 +963,22 @@ export const Dashboard = ({
               onClick={() => setActiveTab('projects')}
               className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-bold text-pro-text-muted hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
-              Review {hiddenCommitmentCount} more{' '}
-              <ChevronRight className="h-3.5 w-3.5" />
+              View all commitments <ChevronRight className="h-3.5 w-3.5" />
             </button>
           ) : null}
           {commitmentItems.length > 0 &&
           model.commitments.needsConfirmation.length ? (
-            <details className="mt-4 border-t border-pro-border/70 pt-4">
-              <summary className="cursor-pointer text-[11px] font-bold text-pro-text-muted hover:text-pro-text-main">
-                Suggestions ({model.commitments.needsConfirmation.length})
+            <details
+              open
+              className="group/suggestions mt-4 border-t border-pro-border/70 pt-4"
+            >
+              <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1.5 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  className="h-3.5 w-3.5 transition-transform duration-200 ease-out group-open/suggestions:rotate-90 motion-reduce:transition-none"
+                  aria-hidden="true"
+                />
+                Suggestions · {model.commitments.needsConfirmation.length} to
+                review
               </summary>
               <div className="mt-3 divide-y divide-pro-border/60">
                 {model.commitments.needsConfirmation.map((item) => (
