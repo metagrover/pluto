@@ -171,7 +171,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
           <ObservatoryPanel
             eyebrow="Your second brain for meetings"
             title={
-              <span className="block font-serif text-[0.84em] font-medium leading-[1.1] tracking-[-0.025em]">
+              <span className="block font-serif text-[0.84em] font-medium leading-[1.16] tracking-[-0.025em]">
                 Every conversation, remembered and understood.
               </span>
             }
