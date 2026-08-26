@@ -409,7 +409,7 @@ export const mergeRetrievalResultsByMeeting = (
 };
 
 const EXTRACTIVE_TEMPORAL_SUMMARY_QUERY =
-  /\b(?:summari[sz]e|summary|analy[sz]e|key takeaways?)\b|\bwhat (?:happened|was discussed)\b/i;
+  /\b(?:summari[sz]e|summary|recaps?|analy[sz]e|key takeaways?)\b|\bwhat (?:happened|was discussed)\b/i;
 const CONTEXTLESS_SUMMARY_TEXT =
   /\b(?:one|a|another|the)\s+(?:speaker|participant|attendee)\b|\b(?:an?|the)\s+(?:application|app|project|product|tool)\b/i;
 const GENERIC_MEETING_TITLE =

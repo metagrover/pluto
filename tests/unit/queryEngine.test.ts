@@ -325,5 +325,28 @@ describe('Query Engine', () => {
         'Recording review: The team found a twenty-second recording gap and assigned an audio capture investigation. [Source 1]',
       );
     });
+
+    it('treats recap requests as prepared-summary requests', () => {
+      expect(
+        buildExtractiveTemporalSummary("Give me a recap of today's meeting", [
+          {
+            meeting_id: 'current',
+            meeting_title: 'Recording review',
+            mid: null,
+            evidence_text:
+              '[Current meeting]: Recording review\n[Analysis]: The team found a twenty-second recording gap and assigned an audio capture investigation.',
+            score: 1,
+            score_breakdown: {
+              fts_rank: 0,
+              graph_proximity: 0,
+              recency_decay: 1,
+              mention_weight: 0,
+            },
+          },
+        ]),
+      ).toBe(
+        'Recording review: The team found a twenty-second recording gap and assigned an audio capture investigation. [Source 1]',
+      );
+    });
   });
 });
