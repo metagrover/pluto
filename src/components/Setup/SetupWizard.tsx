@@ -363,7 +363,7 @@ const ObservatoryPanel = ({
   description: string;
   footer: string;
 }) => (
-  <aside className="relative isolate flex min-h-[30rem] overflow-hidden bg-[oklch(0.225_0.035_258)] px-7 py-8 text-[oklch(0.955_0.01_85)] sm:px-12 sm:py-10 lg:min-h-full lg:px-14 lg:py-12 xl:px-20">
+  <aside className="relative isolate flex min-h-[30rem] overflow-hidden bg-[oklch(0.225_0.035_258)] px-7 py-8 text-[oklch(0.955_0.01_85)] sm:px-12 sm:py-10 lg:min-h-full lg:px-14 lg:pb-12 lg:pt-16 xl:px-20">
     <div
       aria-hidden="true"
       className="pointer-events-none absolute -right-48 top-[8%] h-[34rem] w-[34rem] rotate-[-18deg] rounded-[50%] border border-[oklch(0.76_0.09_85/0.17)]"
