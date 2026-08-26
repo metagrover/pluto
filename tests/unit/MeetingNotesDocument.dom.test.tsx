@@ -177,6 +177,48 @@ describe('MeetingNotesDocument', () => {
     ]);
     expect(container.textContent).not.toContain('Written by you');
     expect(container.querySelectorAll('article')).toHaveLength(1);
+    expect(
+      container.querySelector('[data-analysis-quality-notice]'),
+    ).toBeNull();
+  });
+
+  it('calmly discloses degraded analysis without hiding usable notes', async () => {
+    await act(async () =>
+      root.render(
+        <MeetingNotesDocument
+          meeting={{
+            ...meeting,
+            analysis_json: JSON.stringify({
+              analysis_schema_version: 3,
+              overview: 'A usable summary.',
+              topics: [],
+              all_action_items: [],
+              all_decisions: [],
+              meeting_type: 'one_on_one',
+              quality: {
+                format_pass: true,
+                retry_count: 0,
+                fallback_used: false,
+                issues: [
+                  'Meeting-wide consolidation was limited by local context capacity.',
+                ],
+              },
+            }),
+          }}
+          model={model}
+          transcriptSegments={transcript}
+          onDocumentChanged={vi.fn()}
+          onShowTranscript={vi.fn()}
+        />,
+      ),
+    );
+
+    const notice = container.querySelector('[data-analysis-quality-notice]');
+    expect(notice?.tagName).toBe('OUTPUT');
+    expect(notice?.textContent).toContain(
+      'Some details may be missing. Pluto kept only transcript-backed actions and decisions.',
+    );
+    expect(container.textContent).toContain('Documentation architecture');
   });
 
   it('keeps the note focused when source browsing is not explicitly opened', async () => {

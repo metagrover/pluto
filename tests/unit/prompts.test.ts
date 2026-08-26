@@ -128,6 +128,7 @@ describe('structured analysis extraction policy', () => {
       getStructuredAnalysisPrompt('Nira: Synthetic transcript.'),
       getTopicAnalysisPrompt('Synthetic topic', 'Nira: Synthetic transcript.'),
       getStructuredAnalysisRepairPrompt('Nira: Synthetic transcript.', '{}'),
+      getStructuredAnalysisEditorialPrompt('Nira: Synthetic transcript.', '{}'),
     ];
 
     for (const prompt of prompts) {
@@ -142,6 +143,15 @@ describe('structured analysis extraction policy', () => {
       expect(prompt).toContain('directly states the extracted claim');
       expect(prompt).toContain('name the distinctive system');
       expect(prompt).toContain('exact speaker label');
+      expect(prompt).toContain(
+        "Reuse the evidence clause's distinctive nouns and verbs",
+      );
+      expect(prompt).toContain(
+        'Tentative targets, forecasts, recommendations, and possible consequences',
+      );
+      expect(prompt).toContain(
+        'Never silently replace or expand an ambiguous internal term',
+      );
       expect(prompt).not.toContain('explicit and implied decisions');
       expect(prompt).not.toContain('when possible');
     }

@@ -1102,6 +1102,9 @@ describe('UnifiedLLMProvider', () => {
     expect(analysis.generation_metadata?.error_categories).toContain(
       'editorial_input_too_large',
     );
+    expect(analysis.quality.issues).toContain(
+      'Meeting-wide consolidation was limited by local context capacity.',
+    );
   });
 
   it('preserves grounded settled items when oversized input already has few topics', async () => {
@@ -1564,6 +1567,9 @@ describe('UnifiedLLMProvider', () => {
         'unsupported_action_item_owner',
         'unsupported_action_item_due',
       ]),
+    );
+    expect(analysis.quality.issues).toContain(
+      'Some generated actions or decisions could not be verified against transcript evidence and were omitted.',
     );
   });
 });

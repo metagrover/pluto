@@ -227,8 +227,73 @@ const editorialPromptFits = (prompt: string): boolean =>
     OLLAMA_EDITORIAL_OUTPUT_TOKENS <=
   OLLAMA_EDITORIAL_CONTEXT_TOKENS;
 
+const buildAnalysisQualityIssues = (
+  categories: AnalysisErrorCategory[],
+): string[] => {
+  const categorySet = new Set(categories);
+  const issues: string[] = [];
+  if (
+    [
+      'editorial_input_too_large',
+      'editorial_invalid_json',
+      'editorial_failed',
+    ].some((category) => categorySet.has(category as AnalysisErrorCategory))
+  ) {
+    issues.push(
+      'Meeting-wide consolidation was limited by local context capacity.',
+    );
+  }
+  if (
+    [
+      'unsupported_action_item',
+      'unsupported_decision',
+      'conflicting_rollups',
+      'editorial_dropped_settled_item',
+    ].some((category) => categorySet.has(category as AnalysisErrorCategory))
+  ) {
+    issues.push(
+      'Some generated actions or decisions could not be verified against transcript evidence and were omitted.',
+    );
+  }
+  return issues;
+};
+
 const HOUSEKEEPING_TOPIC =
   /\b(screen shar(?:e|ing)|introductions?|repository links?|link sharing|tool mechanics?)\b/i;
+const GENERIC_EMPTY_ANALYSIS =
+  /\bno substantive (?:discussion|discussions|outcome|outcomes|content|detail|details)\b/i;
+
+const isGenericEmptyAnalysisText = (value: string): boolean =>
+  GENERIC_EMPTY_ANALYSIS.test(value);
+
+const hasSubstantiveTopicContent = (topic: TopicSection): boolean =>
+  topic.decisions.length > 0 ||
+  topic.action_items.length > 0 ||
+  topic.open_questions.length > 0 ||
+  topic.key_points.some(
+    (point) =>
+      point.text.trim().length > 0 && !isGenericEmptyAnalysisText(point.text),
+  ) ||
+  (topic.summary.trim().length > 0 &&
+    !isGenericEmptyAnalysisText(topic.summary));
+
+const sanitizeGenericEmptyTopic = (topic: TopicSection): TopicSection => {
+  const keyPoints = topic.key_points.filter(
+    (point) => !isGenericEmptyAnalysisText(point.text),
+  );
+  if (!isGenericEmptyAnalysisText(topic.summary)) {
+    return keyPoints.length === topic.key_points.length
+      ? topic
+      : { ...topic, key_points: keyPoints };
+  }
+  const summary =
+    topic.decisions[0]?.text ||
+    topic.action_items[0]?.text ||
+    keyPoints[0]?.text ||
+    topic.open_questions[0] ||
+    topic.summary;
+  return { ...topic, summary, key_points: keyPoints };
+};
 
 export const collapseOversizedTopics = (
   topics: TopicSection[],
@@ -236,14 +301,16 @@ export const collapseOversizedTopics = (
 ): TopicSection[] => {
   const substantiveTopics = topics.filter(
     (topic) =>
-      !HOUSEKEEPING_TOPIC.test(topic.title) ||
+      (!HOUSEKEEPING_TOPIC.test(topic.title) &&
+        hasSubstantiveTopicContent(topic)) ||
       topic.decisions.length > 0 ||
       topic.action_items.length > 0,
   );
   const eligibleTopics =
     substantiveTopics.length > 0 ? substantiveTopics : topics;
-  if (eligibleTopics.length <= maxTopics) return eligibleTopics;
-  const clusters = eligibleTopics.map((topic, index) => ({
+  const sanitizedTopics = eligibleTopics.map(sanitizeGenericEmptyTopic);
+  if (sanitizedTopics.length <= maxTopics) return sanitizedTopics;
+  const clusters = sanitizedTopics.map((topic, index) => ({
     topics: [topic],
     index,
   }));
@@ -305,7 +372,10 @@ export const collapseOversizedTopics = (
         substantiveTopics.length > 0 ? substantiveTopics : ranked;
       const summaries = retainedTopics
         .map((topic) => topic.summary.trim())
-        .filter(Boolean)
+        .filter(
+          (summary) =>
+            summary.length > 0 && !isGenericEmptyAnalysisText(summary),
+        )
         .filter(
           (summary, index, values) =>
             values.findIndex(
@@ -320,15 +390,21 @@ export const collapseOversizedTopics = (
         if (summary && next.length > 360) break;
         summary = next.slice(0, 360);
       }
+      const settledSummary =
+        representative.decisions[0]?.text ||
+        representative.action_items[0]?.text ||
+        '';
       const ranges = cluster.topics
         .map((topic) => topic.transcript_range)
         .filter((range): range is [number, number] => Boolean(range));
       return {
         ...representative,
-        summary: summary || representative.summary,
+        summary: summary || settledSummary || representative.summary,
         key_points: mergeUniqueByKey(
           [],
-          retainedTopics.flatMap((topic) => topic.key_points),
+          retainedTopics
+            .flatMap((topic) => topic.key_points)
+            .filter((point) => !isGenericEmptyAnalysisText(point.text)),
           (item) => normalizeTranscriptEvidence(item.text),
         ).slice(0, 3),
         decisions: deduplicateExtractedItems(
@@ -969,6 +1045,12 @@ export class UnifiedLLMProvider implements LLMProvider {
         format_pass: true,
         retry_count: params.retryCount,
         fallback_used: false,
+        issues: [
+          ...new Set([
+            ...grounded.quality.issues,
+            ...buildAnalysisQualityIssues(params.errorCategories),
+          ]),
+        ],
       },
       generation_metadata: this.buildAnalysisMetadata(params.errorCategories),
     };
