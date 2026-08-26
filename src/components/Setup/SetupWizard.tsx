@@ -382,7 +382,7 @@ const ObservatoryPanel = ({
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[oklch(0.955_0.01_85)] shadow-sm">
           <Logo size={34} />
         </div>
-        <span className="font-serif text-xl font-medium leading-none tracking-[-0.02em]">
+        <span className="font-serif text-xl font-semibold leading-none tracking-[-0.02em]">
           Pluto
         </span>
       </div>
