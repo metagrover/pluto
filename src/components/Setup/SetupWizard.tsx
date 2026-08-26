@@ -171,12 +171,9 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
           <ObservatoryPanel
             eyebrow="Your second brain for meetings"
             title={
-              <>
-                <span className="block">Every conversation,</span>{' '}
-                <span className="mt-2 block font-serif text-[0.84em] font-medium leading-[1.04] tracking-[-0.025em]">
-                  remembered and understood.
-                </span>
-              </>
+              <span className="block font-serif font-medium leading-[1.04] tracking-[-0.025em]">
+                Every conversation, remembered and understood.
+              </span>
             }
             description="Pluto connects notes, decisions, people, and next steps so you can focus on the conversation. Transcription stays on this Mac."
             footer="Your audio and transcript stay under your control."
