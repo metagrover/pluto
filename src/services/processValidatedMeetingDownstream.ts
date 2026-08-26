@@ -11,7 +11,10 @@ import {
   runDownstreamStageBeforeDeadline,
   throwIfDownstreamStageAborted,
 } from './downstreamStageDeadline.ts';
-import { meetingTitleNeedsGeneration } from './retryMeetingTranscriptValidation.ts';
+import {
+  meetingTitleFromAnalysis,
+  meetingTitleNeedsGeneration,
+} from './retryMeetingTranscriptValidation.ts';
 
 type Invoke = (channel: string, ...args: unknown[]) => Promise<unknown>;
 
@@ -101,14 +104,12 @@ export const processValidatedMeetingDownstream = async (
         throwIfDownstreamStageAborted(signal);
         throwIfAnalysisFallback(generatedArtifacts.analysis);
 
-        const summaryForTitle = generatedArtifacts.markdown?.trim()
-          ? generatedArtifacts.markdown
-          : transcript;
-
+        const analysisTitle = meetingTitleFromAnalysis(
+          generatedArtifacts.analysis,
+        );
         const title = meetingTitleNeedsGeneration(meeting.title)
-          ? ((await invoke('GENERATE_TITLE', {
-              transcript: summaryForTitle,
-            })) as string)
+          ? (analysisTitle ??
+            ((await invoke('GENERATE_TITLE', { transcript })) as string))
           : meeting.title;
         throwIfDownstreamStageAborted(signal);
 

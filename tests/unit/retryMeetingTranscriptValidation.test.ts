@@ -382,7 +382,10 @@ describe('retryMeetingTranscriptValidation', () => {
         lifecycleStatus: 'validated',
         segments: [{ speaker: 'Me', text: 'Um Synthetic uh statement.' }],
       }),
-      analysis_json: JSON.stringify({ analysis_schema_version: 3 }),
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        topics: [{ title: 'Persisted Analysis Review' }],
+      }),
       mid_json: JSON.stringify({ mid_version: 1 }),
       downstream_processing_json: JSON.stringify({
         schemaVersion: 1,
@@ -392,7 +395,7 @@ describe('retryMeetingTranscriptValidation', () => {
     const invoke = vi.fn(async (channel: string, payload?: unknown) => {
       if (channel === 'GET_MEETING') return current;
       if (channel === 'CLAIM_DOWNSTREAM_PROCESSING') return true;
-      if (channel === 'GENERATE_TITLE') return 'Synthetic meeting';
+      if (channel === 'GENERATE_TITLE') return 'Meeting';
       if (channel === 'SAVE_MEETING') {
         current = { ...current, ...(payload as Record<string, unknown>) };
         return true;
@@ -406,10 +409,11 @@ describe('retryMeetingTranscriptValidation', () => {
     await expect(
       retryMeetingTranscriptValidation('synthetic-id', invoke),
     ).resolves.toEqual({ status: 'validated' });
-    expect(current.title).toBe('Synthetic meeting');
-    expect(invoke).toHaveBeenCalledWith('GENERATE_TITLE', {
-      transcript: 'Me: Synthetic statement.',
-    });
+    expect(current.title).toBe('Persisted Analysis Review');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_TITLE',
+      expect.anything(),
+    );
   });
 
   it('processes a newly validated meeting without transcribing it a second time', async () => {
@@ -447,9 +451,15 @@ describe('retryMeetingTranscriptValidation', () => {
         current = { ...current, ...(payload as Record<string, unknown>) };
         return true;
       }
-      if (channel === 'GENERATE_TITLE') return 'Synthetic meeting';
+      if (channel === 'GENERATE_TITLE') return 'Meeting';
       if (channel === 'GENERATE_ANALYSIS_V2') {
-        return { analysis: { analysis_schema_version: 3 }, signals: {} };
+        return {
+          analysis: {
+            analysis_schema_version: 3,
+            topics: [{ title: 'Validated Transcript Review' }],
+          },
+          signals: {},
+        };
       }
       if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
       if (channel === 'REFRESH_KNOWLEDGE_FOR_MEETING_NOW') {
@@ -469,6 +479,11 @@ describe('retryMeetingTranscriptValidation', () => {
       expect.anything(),
       expect.anything(),
     );
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_TITLE',
+      expect.anything(),
+    );
+    expect(current.title).toBe('Validated Transcript Review');
     expect(
       JSON.parse(String(current.downstream_processing_json)),
     ).toMatchObject({ state: 'complete' });
@@ -617,9 +632,16 @@ describe('retryMeetingTranscriptValidation', () => {
         current = { ...current, ...(payload as Record<string, unknown>) };
         return true;
       }
-      if (channel === 'GENERATE_TITLE') return 'Recovered meeting';
+      if (channel === 'GENERATE_TITLE') return 'Meeting';
       if (channel === 'GENERATE_ANALYSIS_V2') {
-        return { markdown: 'Synthetic analysis', analysis: {}, signals: {} };
+        return {
+          markdown: 'Synthetic analysis',
+          analysis: {
+            analysis_schema_version: 3,
+            topics: [{ title: 'Recovered Capture Review' }],
+          },
+          signals: {},
+        };
       }
       if (channel === 'EXTRACT_AND_PROCESS_ENTITIES') return { created: 0 };
       if (channel === 'TRANSCRIPTION_TRANSCRIBE_FINAL') {
@@ -639,6 +661,11 @@ describe('retryMeetingTranscriptValidation', () => {
     );
 
     expect(result.status).toBe('validated');
+    expect(invoke).not.toHaveBeenCalledWith(
+      'GENERATE_TITLE',
+      expect.anything(),
+    );
+    expect(current.title).toBe('Recovered Capture Review');
     expect(invoke).toHaveBeenCalledWith(
       'TRANSCRIPTION_TRANSCRIBE_FINAL',
       expect.objectContaining({

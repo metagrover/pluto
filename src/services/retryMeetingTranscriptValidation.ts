@@ -86,6 +86,26 @@ export const meetingTitleNeedsGeneration = (
   title: string | null | undefined,
 ): boolean => GENERIC_MEETING_TITLES.has((title || '').trim().toLowerCase());
 
+export const meetingTitleFromAnalysis = (analysis: unknown): string | null => {
+  if (!analysis || typeof analysis !== 'object') return null;
+  const topics = (analysis as { topics?: unknown }).topics;
+  if (!Array.isArray(topics)) return null;
+  for (const topic of topics) {
+    if (!topic || typeof topic !== 'object') continue;
+    const rawTitle = (topic as { title?: unknown }).title;
+    if (typeof rawTitle !== 'string') continue;
+    const title = rawTitle.trim();
+    if (
+      title.length > 0 &&
+      title.length < 100 &&
+      !meetingTitleNeedsGeneration(title)
+    ) {
+      return title;
+    }
+  }
+  return null;
+};
+
 const hasTranscriptText = (value: string | null | undefined): boolean => {
   if (!value) return false;
   try {
@@ -508,21 +528,22 @@ export const retryMeetingTranscriptValidation = async (
       let current = meeting;
       if (resumeStage === 'analysis') {
         current = await runDownstreamStage('analysis', async (signal) => {
-          let analysisMeeting = current;
-          if (meetingTitleNeedsGeneration(analysisMeeting.title)) {
-            const generatedTitle = (await invoke('GENERATE_TITLE', {
-              transcript,
-            })) as string;
-            throwIfDownstreamStageAborted(signal);
-            analysisMeeting = { ...analysisMeeting, title: generatedTitle };
-          }
           const artifacts = (await invoke('GENERATE_ANALYSIS_V2', {
             transcript,
-            userNotes: analysisMeeting.user_notes || '',
+            userNotes: current.user_notes || '',
             requestId: analysisRequestId,
           })) as { markdown?: string; analysis?: unknown; signals?: unknown };
           throwIfDownstreamStageAborted(signal);
           throwIfAnalysisFallback(artifacts.analysis);
+          let analysisMeeting = current;
+          if (meetingTitleNeedsGeneration(analysisMeeting.title)) {
+            const analysisTitle = meetingTitleFromAnalysis(artifacts.analysis);
+            const generatedTitle =
+              analysisTitle ??
+              ((await invoke('GENERATE_TITLE', { transcript })) as string);
+            throwIfDownstreamStageAborted(signal);
+            analysisMeeting = { ...analysisMeeting, title: generatedTitle };
+          }
           return {
             ...analysisMeeting,
             enhanced_notes: artifacts.markdown || '',
@@ -534,9 +555,17 @@ export const retryMeetingTranscriptValidation = async (
         downstreamStage = resumeStage;
       } else if (meetingTitleNeedsGeneration(current.title)) {
         current = await runDownstreamStage('analysis', async (signal) => {
-          const generatedTitle = (await invoke('GENERATE_TITLE', {
-            transcript,
-          })) as string;
+          let analysisTitle: string | null = null;
+          try {
+            analysisTitle = meetingTitleFromAnalysis(
+              JSON.parse(current.analysis_json || 'null'),
+            );
+          } catch {
+            analysisTitle = null;
+          }
+          const generatedTitle =
+            analysisTitle ??
+            ((await invoke('GENERATE_TITLE', { transcript })) as string);
           throwIfDownstreamStageAborted(signal);
           return { ...current, title: generatedTitle };
         });
@@ -1083,10 +1112,6 @@ export const retryMeetingTranscriptValidation = async (
     const { generatedTitle, artifacts } = await runDownstreamStage(
       'analysis',
       async (signal) => {
-        const title = meetingTitleNeedsGeneration(current.title)
-          ? ((await invoke('GENERATE_TITLE', { transcript })) as string)
-          : current.title;
-        throwIfDownstreamStageAborted(signal);
         const generatedArtifacts = (await invoke('GENERATE_ANALYSIS_V2', {
           transcript,
           userNotes: current.user_notes || '',
@@ -1094,6 +1119,14 @@ export const retryMeetingTranscriptValidation = async (
         })) as { markdown?: string; analysis?: unknown; signals?: unknown };
         throwIfDownstreamStageAborted(signal);
         throwIfAnalysisFallback(generatedArtifacts.analysis);
+        const analysisTitle = meetingTitleFromAnalysis(
+          generatedArtifacts.analysis,
+        );
+        const title = meetingTitleNeedsGeneration(current.title)
+          ? (analysisTitle ??
+            ((await invoke('GENERATE_TITLE', { transcript })) as string))
+          : current.title;
+        throwIfDownstreamStageAborted(signal);
         return { generatedTitle: title, artifacts: generatedArtifacts };
       },
     );

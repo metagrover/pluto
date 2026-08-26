@@ -24,8 +24,10 @@ describe('processValidatedMeetingDownstream', () => {
     } as Meeting;
     const channels: string[] = [];
     const analysis = vi.fn(async () => ({
-      markdown: 'summary',
-      analysis: { ok: true },
+      analysis: {
+        analysis_schema_version: 3,
+        topics: [{ title: 'Committed Transcript Review' }],
+      },
       signals: { ok: true },
     }));
     const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
@@ -38,7 +40,7 @@ describe('processValidatedMeetingDownstream', () => {
         };
         return true;
       }
-      if (channel === 'GENERATE_TITLE') return 'Generated title';
+      if (channel === 'GENERATE_TITLE') return 'Meeting';
       if (channel === 'GENERATE_ANALYSIS_V2') return analysis(args[0]);
       if (channel === 'SAVE_MEETING') {
         meeting = args[0] as Meeting;
@@ -65,6 +67,8 @@ describe('processValidatedMeetingDownstream', () => {
     expect(channels.some((channel) => channel.includes('TRANSCRIBE'))).toBe(
       false,
     );
+    expect(channels).not.toContain('GENERATE_TITLE');
+    expect(meeting.title).toBe('Committed Transcript Review');
     expect(
       JSON.parse(meeting.downstream_processing_json || '{}'),
     ).toMatchObject({ state: 'complete' });
