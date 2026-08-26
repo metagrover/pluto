@@ -360,11 +360,6 @@ const ObservatoryPanel = ({
       aria-hidden="true"
       className="pointer-events-none absolute -right-24 top-[26%] h-[19rem] w-[28rem] rotate-[20deg] rounded-[50%] border border-[oklch(0.78_0.025_258/0.11)]"
     />
-    <span
-      aria-hidden="true"
-      className="pointer-events-none absolute right-[18%] top-[34%] h-2.5 w-2.5 rounded-full bg-[oklch(0.76_0.09_85)] shadow-[0_0_0_5px_oklch(0.76_0.09_85/0.12)]"
-    />
-
     <div className="relative z-10 flex w-full flex-col">
       <div className="flex items-center gap-3.5">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[oklch(0.955_0.01_85)] shadow-sm">
