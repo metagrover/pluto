@@ -164,6 +164,24 @@ describe('Query Engine', () => {
         }),
       ).resolves.toMatchObject({ intent: 'comparative' });
     });
+
+    it('resolves today as a temporal range instead of an FTS keyword', async () => {
+      vi.mocked(dbModule.searchEntitiesWithMeetingContext).mockReturnValue([]);
+      const now = new Date(2026, 7, 25, 17, 30);
+
+      const result = await parseQuery("Summarize today's meetings", {
+        useModelClassification: false,
+        now,
+      });
+
+      expect(result.intent).toBe('temporal');
+      expect(result.keywords).not.toContain("today's");
+      expect(result.temporal_range).toMatchObject({
+        from: new Date(2026, 7, 25).toISOString(),
+        to: new Date(2026, 7, 26).toISOString(),
+        label: 'today',
+      });
+    });
   });
 
   describe('retrieveContext', () => {

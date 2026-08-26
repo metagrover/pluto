@@ -1,4 +1,10 @@
-import { ArrowRight, Brain, Square } from 'lucide-react';
+import {
+  ArrowRight,
+  ArrowUpRight,
+  Brain,
+  ChevronDown,
+  Square,
+} from 'lucide-react';
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -8,12 +14,15 @@ import type {
   AskPlutoAnswerDelta,
   AskPlutoConversationTurn,
   AskPlutoCurrentMeeting,
+  AskPlutoOutcome,
   AskPlutoQueryPhase,
   AskPlutoQueryResponse,
   AskPlutoQueryStatus,
+  AskPlutoRetrievalSummary,
+  ResolvedAskPlutoScope,
 } from '../../types/askPlutoQuery';
 import { Logo } from '../Brand/Logo';
-import { CitationCard, type CitationChain } from './CitationCard';
+import type { CitationChain } from './CitationCard';
 
 interface AskPlutoProps {
   onOpenMeeting: (id: string) => void;
@@ -32,7 +41,32 @@ interface Message {
   unsupportedClaimCount?: number;
   retryQuery?: string;
   evidenceState?: 'provisional' | 'processing' | 'failed' | 'completed';
+  outcome?: AskPlutoOutcome;
+  resolvedScope?: ResolvedAskPlutoScope;
+  retrievalSummary?: AskPlutoRetrievalSummary;
 }
+
+const groupCitationsByMeeting = (citations: CitationChain[]) => {
+  const groups = new Map<
+    string,
+    { meetingId: string; meetingTitle: string; citations: CitationChain[] }
+  >();
+
+  for (const citation of citations) {
+    const existing = groups.get(citation.meeting_id);
+    if (existing) {
+      existing.citations.push(citation);
+      continue;
+    }
+    groups.set(citation.meeting_id, {
+      meetingId: citation.meeting_id,
+      meetingTitle: citation.meeting_title || 'Untitled meeting',
+      citations: [citation],
+    });
+  }
+
+  return [...groups.values()];
+};
 
 export const AskPluto: React.FC<AskPlutoProps> = ({
   onOpenMeeting,
@@ -48,10 +82,9 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     useState<AskPlutoCurrentMeeting | null>(null);
   const [currentMeetingRequested, setCurrentMeetingRequested] = useState(false);
   const [comparisonMeetingCount, setComparisonMeetingCount] = useState(0);
+  const [scopeLabel, setScopeLabel] = useState<string | null>(null);
+  const [scopeMeetingCount, setScopeMeetingCount] = useState(0);
   const [modeOverride, setModeOverride] = useState<'auto' | 'deep'>('auto');
-  const [activeCitationKey, setActiveCitationKey] = useState<string | null>(
-    null,
-  );
   const [dynamicQueries, setDynamicQueries] = useState<string[]>([]);
   const [isLoadingQueries, setIsLoadingQueries] = useState(false);
 
@@ -93,6 +126,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           setRequestPhase(status.phase);
           if (status.currentMeeting) setCurrentMeeting(status.currentMeeting);
           setComparisonMeetingCount(status.comparisonMeetingCount || 0);
+          setScopeLabel(status.scopeLabel || null);
+          setScopeMeetingCount(status.scopeMeetingCount || 0);
         }
       },
     );
@@ -166,12 +201,13 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
     setRequestPhase('retrieving');
     setCurrentMeeting(null);
     setComparisonMeetingCount(0);
+    setScopeLabel(null);
+    setScopeMeetingCount(0);
     setCurrentMeetingRequested(
       /\b(current|latest|this)\s+meeting\b|\bcurrent recording\b|\blatest one\b/i.test(
         submitQuery,
       ),
     );
-    setActiveCitationKey(null);
     setMessages((prev) => [
       ...prev,
       { id: nextMessageId(), role: 'assistant', content: '', isLoading: true },
@@ -194,6 +230,13 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                     ),
                   ].slice(0, 8),
                 }
+              : {}),
+            ...(message.outcome ? { outcome: message.outcome } : {}),
+            ...(message.resolvedScope
+              ? { resolvedScope: message.resolvedScope }
+              : {}),
+            ...(message.retrievalSummary
+              ? { retrievalSummary: message.retrievalSummary }
               : {}),
           }));
         const response = await window.ipcRenderer.invoke<
@@ -241,6 +284,14 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                 : 'evidenceState' in response.currentMeeting
                   ? response.currentMeeting.evidenceState
                   : undefined,
+            outcome:
+              typeof response === 'string' ? undefined : response.outcome,
+            resolvedScope:
+              typeof response === 'string' ? undefined : response.resolvedScope,
+            retrievalSummary:
+              typeof response === 'string'
+                ? undefined
+                : response.retrievalSummary,
           });
           return newMsg;
         });
@@ -315,12 +366,16 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
           : 'Finding relevant meetings';
   const requestPhaseLabel =
     requestPhase === 'generating'
-      ? comparisonMeetingCount > 0
-        ? `Comparing with ${comparisonMeetingCount} earlier ${comparisonMeetingCount === 1 ? 'meeting' : 'meetings'}`
-        : 'Analyzing evidence'
+      ? scopeLabel && scopeMeetingCount > 0
+        ? `Analyzing ${scopeMeetingCount} ${scopeMeetingCount === 1 ? 'meeting' : 'meetings'} from ${scopeLabel}`
+        : comparisonMeetingCount > 0
+          ? `Comparing with ${comparisonMeetingCount} earlier ${comparisonMeetingCount === 1 ? 'meeting' : 'meetings'}`
+          : 'Analyzing evidence'
       : requestPhase === 'cancelling'
         ? 'Stopping'
-        : resolvedScopeLabel;
+        : scopeLabel && scopeMeetingCount > 0
+          ? `Reading ${scopeMeetingCount} ${scopeMeetingCount === 1 ? 'meeting' : 'meetings'} from ${scopeLabel}`
+          : resolvedScopeLabel;
 
   if (!visible) return null;
 
@@ -368,137 +423,197 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
               </div>
             </div>
           ) : (
-            messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                {msg.role === 'assistant' && (
-                  <div className="w-7 h-7 flex items-center justify-center shrink-0 mt-0.5">
-                    <Logo size={18} variant="default" />
-                  </div>
-                )}
+            messages.map((msg) => {
+              const citationGroups = groupCitationsByMeeting(
+                msg.citations ?? [],
+              );
+              return (
                 <div
-                  className={`flex flex-col gap-2 max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+                  key={msg.id}
+                  className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
+                  {msg.role === 'assistant' && (
+                    <div className="w-7 h-7 flex items-center justify-center shrink-0 mt-0.5">
+                      <Logo size={18} variant="default" />
+                    </div>
+                  )}
                   <div
-                    className={`px-5 py-3.5 text-[15px] leading-relaxed relative ${
+                    className={`flex flex-col gap-2 ${
                       msg.role === 'user'
-                        ? 'bg-black/5 dark:bg-white/10 text-pro-text-main rounded-2xl rounded-tr-sm'
-                        : 'bg-white dark:bg-[#202020] border border-black/5 dark:border-white/5 shadow-sm text-pro-text-main rounded-2xl rounded-tl-sm'
+                        ? 'max-w-[82%] items-end'
+                        : 'max-w-[92%] sm:max-w-[88%] items-start'
                     }`}
                   >
-                    {msg.isLoading ? (
-                      <div className="space-y-3 px-1">
-                        {msg.content ? (
-                          <div className="prose prose-invert prose-sm max-w-none [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {msg.content.replace(/\[Source\s+\d+\]/gi, '')}
-                            </ReactMarkdown>
-                          </div>
-                        ) : null}
-                        <div className="flex items-center gap-3 min-h-[22px]">
-                          {!msg.content ? (
-                            <div className="flex gap-1.5 opacity-60">
-                              <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce" />
-                              <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.2s]" />
-                              <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.4s]" />
+                    <div
+                      className={`text-[15px] relative ${
+                        msg.role === 'user'
+                          ? 'px-5 py-3.5 leading-relaxed bg-black/5 dark:bg-white/10 text-pro-text-main rounded-2xl rounded-tr-sm'
+                          : 'px-1 py-1 leading-7 text-pro-text-main'
+                      }`}
+                    >
+                      {msg.isLoading ? (
+                        <div className="space-y-3 px-1">
+                          {msg.content ? (
+                            <div className="prose prose-invert prose-sm max-w-none [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.content.replace(/\[Source\s+\d+\]/gi, '')}
+                              </ReactMarkdown>
                             </div>
                           ) : null}
-                          <span className="text-[13px] text-pro-text-muted">
-                            {requestPhaseLabel}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => void handleCancel()}
-                            disabled={requestPhase === 'cancelling'}
-                            className="inline-flex items-center gap-1 text-[12px] text-pro-text-muted hover:text-pro-text-main disabled:opacity-50"
-                          >
-                            <Square className="h-2.5 w-2.5 fill-current" />
-                            Stop
-                          </button>
+                          <div className="flex items-center gap-3 min-h-[22px]">
+                            {!msg.content ? (
+                              <div className="flex gap-1.5 opacity-60">
+                                <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.2s]" />
+                                <div className="w-1.5 h-1.5 rounded-full bg-pro-text-muted animate-bounce [animation-delay:-.4s]" />
+                              </div>
+                            ) : null}
+                            <span className="text-[13px] text-pro-text-muted">
+                              {requestPhaseLabel}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => void handleCancel()}
+                              disabled={requestPhase === 'cancelling'}
+                              className="inline-flex items-center gap-1 text-[12px] text-pro-text-muted hover:text-pro-text-main disabled:opacity-50"
+                            >
+                              <Square className="h-2.5 w-2.5 fill-current" />
+                              Stop
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:text-pro-text-main [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-pro-text-main [&_h3]:mt-3 [&_h3]:mb-1">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
-                    )}
+                      ) : (
+                        <div className="prose prose-invert prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:text-pro-text-main [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-pro-text-main [&_h3]:mt-3 [&_h3]:mb-1">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      )}
+                    </div>
+
+                    {msg.role === 'assistant' &&
+                      !msg.isLoading &&
+                      (msg.trustStatus ||
+                        msg.outcome === 'no_evidence' ||
+                        msg.outcome === 'partial') && (
+                        <div
+                          className={`px-1 text-[11px] font-medium ${
+                            msg.outcome === 'no_evidence'
+                              ? 'text-pro-text-muted'
+                              : msg.outcome === 'partial' ||
+                                  msg.trustStatus === 'needs_review'
+                                ? 'text-amber-600'
+                                : msg.trustStatus === 'inferred'
+                                  ? 'text-pro-accent'
+                                  : 'text-emerald-600'
+                          }`}
+                        >
+                          {msg.outcome === 'no_evidence'
+                            ? 'No matching evidence'
+                            : msg.outcome === 'partial'
+                              ? `Partial answer${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} unsupported ${msg.unsupportedClaimCount === 1 ? 'claim omitted' : 'claims omitted'}` : ''}`
+                              : msg.evidenceState === 'provisional'
+                                ? 'Provisional live answer'
+                                : msg.trustStatus === 'needs_review'
+                                  ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} unsupported ${msg.unsupportedClaimCount === 1 ? 'claim' : 'claims'}` : ''}`
+                                  : msg.trustStatus === 'inferred'
+                                    ? 'Supported synthesis'
+                                    : 'Grounded answer'}
+                        </div>
+                      )}
+
+                    {msg.role === 'assistant' &&
+                      !msg.isLoading &&
+                      msg.retryQuery && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void handleSubmit(undefined, msg.retryQuery)
+                          }
+                          className="px-1 text-[12px] font-medium text-pro-accent hover:text-pro-text-main"
+                        >
+                          Retry
+                        </button>
+                      )}
+
+                    {msg.role === 'assistant' &&
+                      !msg.isLoading &&
+                      msg.citations &&
+                      msg.citations.length > 0 && (
+                        <details className="group/source w-full pl-1">
+                          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-[12px] font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pro-accent/40 [&::-webkit-details-marker]:hidden">
+                            <span>
+                              {msg.citations.length}{' '}
+                              {msg.citations.length === 1
+                                ? 'source'
+                                : 'sources'}
+                            </span>
+                            <span className="text-pro-text-muted/50">·</span>
+                            <span className="font-normal">
+                              {citationGroups.length}{' '}
+                              {citationGroups.length === 1
+                                ? 'meeting'
+                                : 'meetings'}
+                            </span>
+                            <ChevronDown className="h-3.5 w-3.5 transition-transform duration-200 group-open/source:rotate-180" />
+                          </summary>
+
+                          <div className="mt-2 overflow-hidden rounded-xl border border-pro-border/50 bg-black/[0.015] dark:bg-white/[0.02] divide-y divide-pro-border/40">
+                            {citationGroups.map((group) => {
+                              const evidence = [
+                                ...new Set(
+                                  group.citations
+                                    .map((citation) => citation.evidence_span)
+                                    .filter((span): span is string =>
+                                      Boolean(span),
+                                    ),
+                                ),
+                              ].slice(0, 2);
+                              return (
+                                <div
+                                  key={group.meetingId}
+                                  className="px-3.5 py-3"
+                                >
+                                  <button
+                                    type="button"
+                                    aria-label={`Open ${group.meetingTitle}`}
+                                    onClick={() =>
+                                      onOpenMeeting(group.meetingId)
+                                    }
+                                    className="group/meeting flex w-full items-start justify-between gap-3 text-left"
+                                  >
+                                    <span className="min-w-0">
+                                      <span className="block truncate text-[12px] font-semibold text-pro-text-main">
+                                        {group.meetingTitle}
+                                      </span>
+                                      <span className="mt-0.5 block text-[11px] text-pro-text-muted">
+                                        {group.citations.length}{' '}
+                                        {group.citations.length === 1
+                                          ? 'reference'
+                                          : 'references'}
+                                      </span>
+                                    </span>
+                                    <ArrowUpRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-pro-text-muted/60 transition-colors group-hover/meeting:text-pro-accent" />
+                                  </button>
+                                  {evidence.length > 0 && (
+                                    <div className="mt-2 space-y-1.5 text-[11px] leading-relaxed text-pro-text-muted">
+                                      {evidence.map((span) => (
+                                        <p key={span} className="line-clamp-2">
+                                          “{span}”
+                                        </p>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </details>
+                      )}
                   </div>
-
-                  {msg.role === 'assistant' &&
-                    !msg.isLoading &&
-                    msg.trustStatus && (
-                      <div
-                        className={`px-1 text-[11px] font-medium ${
-                          msg.trustStatus === 'needs_review'
-                            ? 'text-amber-600'
-                            : msg.trustStatus === 'inferred'
-                              ? 'text-pro-accent'
-                              : 'text-emerald-600'
-                        }`}
-                      >
-                        {msg.evidenceState === 'provisional'
-                          ? 'Provisional live answer'
-                          : msg.trustStatus === 'needs_review'
-                            ? `Needs review${msg.unsupportedClaimCount ? ` · ${msg.unsupportedClaimCount} unsupported ${msg.unsupportedClaimCount === 1 ? 'claim' : 'claims'}` : ''}`
-                            : msg.trustStatus === 'inferred'
-                              ? 'Supported synthesis'
-                              : 'Grounded answer'}
-                      </div>
-                    )}
-
-                  {msg.role === 'assistant' &&
-                    !msg.isLoading &&
-                    msg.retryQuery && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void handleSubmit(undefined, msg.retryQuery)
-                        }
-                        className="px-1 text-[12px] font-medium text-pro-accent hover:text-pro-text-main"
-                      >
-                        Retry
-                      </button>
-                    )}
-
-                  {msg.role === 'assistant' &&
-                    !msg.isLoading &&
-                    msg.citations &&
-                    msg.citations.length > 0 && (
-                      <div className="w-full space-y-3 pl-1">
-                        <div className="flex items-center gap-3 text-[10px] font-medium text-pro-text-muted/50">
-                          <span>Evidence</span>
-                          <span className="h-px flex-1 bg-pro-border/30" />
-                          <span className="text-[#10B981]">
-                            {msg.citations.length} Found
-                          </span>
-                        </div>
-                        <div className="space-y-3">
-                          {msg.citations.map((cit) => {
-                            const citationKey = `${msg.id}-${cit.meeting_id}-${cit.claim}`;
-                            return (
-                              <CitationCard
-                                key={citationKey}
-                                citation={cit}
-                                isActive={activeCitationKey === citationKey}
-                                onClick={() =>
-                                  setActiveCitationKey(citationKey)
-                                }
-                                onNavigateToMeeting={() =>
-                                  onOpenMeeting(cit.meeting_id)
-                                }
-                              />
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
           <div ref={bottomRef} className="h-4 shrink-0" />
         </div>

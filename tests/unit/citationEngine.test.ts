@@ -4,6 +4,7 @@ import {
   auditAnswerGrounding,
   auditCitations,
   buildCitationChain,
+  buildSafeAnswerPresentation,
 } from '../../electron/intelligence/citationEngine';
 import type { RetrievalResult } from '../../electron/intelligence/intelligenceTypes';
 
@@ -449,6 +450,78 @@ describe('Citation Engine', () => {
         trustStatus: 'inferred',
         unsupportedClaimCount: 0,
       });
+    });
+  });
+
+  describe('buildSafeAnswerPresentation', () => {
+    it('treats a refusal as no evidence rather than a grounded answer', () => {
+      expect(
+        buildSafeAnswerPresentation(
+          "I couldn't find information about that in your meetings.",
+          [],
+        ),
+      ).toEqual({
+        answer: "I couldn't find information about that in your meetings.",
+        citations: [],
+        outcome: 'no_evidence',
+        trustStatus: undefined,
+        unsupportedClaimCount: 0,
+      });
+    });
+
+    it('removes unsupported prose and keeps verified claims as a partial answer', () => {
+      const citations = [
+        {
+          claim: 'Sam owns pricing approval.',
+          meeting_id: 'm1',
+          meeting_title: 'Pricing review',
+          evidence_span: 'Sam owns pricing approval.',
+          evidence_valid: true,
+          trust_status: 'grounded' as const,
+        },
+        {
+          claim: 'The launch moved to Friday.',
+          meeting_id: 'm2',
+          meeting_title: 'Launch review',
+          evidence_span: 'The launch is Tuesday.',
+          evidence_valid: false,
+          trust_status: 'needs_review' as const,
+        },
+      ];
+
+      expect(
+        buildSafeAnswerPresentation(
+          'Sam owns pricing approval. [Source 1] The launch moved to Friday. [Source 2]',
+          citations,
+        ),
+      ).toMatchObject({
+        answer: 'Sam owns pricing approval.',
+        citations: [citations[0]],
+        outcome: 'partial',
+        trustStatus: 'grounded',
+        unsupportedClaimCount: 1,
+      });
+    });
+
+    it('returns no evidence when every generated claim is unsupported', () => {
+      const result = buildSafeAnswerPresentation(
+        'Alex owns pricing approval. [Source 1]',
+        [
+          {
+            claim: 'Alex owns pricing approval.',
+            meeting_id: 'm1',
+            meeting_title: 'Pricing review',
+            evidence_span: 'Sam owns pricing approval.',
+            evidence_valid: false,
+            trust_status: 'needs_review',
+          },
+        ],
+      );
+
+      expect(result.outcome).toBe('no_evidence');
+      expect(result.answer).not.toContain('Alex');
+      expect(result.citations).toEqual([]);
+      expect(result.trustStatus).toBeUndefined();
     });
   });
 });

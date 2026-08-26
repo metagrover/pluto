@@ -11,6 +11,7 @@ import * as dbModule from '../db';
 // We import the llm provider factory
 import { getAllSettings, getProvider } from '../llm/factory';
 import { getIntentClassificationPrompt } from './queryPrompts';
+import { removeTemporalPhrase, resolveTemporalQuery } from './temporalScope';
 
 interface AnalysisPoint {
   text?: string;
@@ -183,13 +184,16 @@ export const parseQuery = async (
   options: {
     signal?: AbortSignal;
     useModelClassification?: boolean;
+    now?: Date;
   } = {},
 ): Promise<ParsedQuery> => {
   options.signal?.throwIfAborted();
   const lowerText = text.toLowerCase();
+  const temporalQuery = resolveTemporalQuery(text, options.now);
+  const keywordText = removeTemporalPhrase(text, temporalQuery);
 
   // Basic tokenization
-  const tokens = text.split(/[\s,.;:!?]+/).filter((w) => w.length > 2);
+  const tokens = keywordText.split(/[\s,.;:!?]+/).filter((w) => w.length > 2);
   // Basic keyword extraction (exclude stopwords)
   const stopwords = new Set([
     'what',
@@ -355,6 +359,8 @@ export const parseQuery = async (
     }
   }
 
+  if (temporalQuery && intent !== 'comparative') intent = 'temporal';
+
   // Entity extraction via FTS against keywords (more reliable than full query)
   const entitySearchStr = keywords
     .map((k) => `"${sanitizeForFts(k)}"`)
@@ -371,7 +377,13 @@ export const parseQuery = async (
     keywords,
     expanded_keywords,
     entity_mentions: entityMentions,
-    temporal_range: null,
+    temporal_range: temporalQuery
+      ? {
+          from: temporalQuery.range.fromInclusive,
+          to: temporalQuery.range.toExclusive,
+          label: temporalQuery.range.label,
+        }
+      : null,
     intent,
   };
 };

@@ -38,6 +38,38 @@ describe('getAskPlutoPrompt', () => {
     );
   });
 
+  it('keeps large temporal meeting sets inside the foreground context budget', () => {
+    const context = Array.from({ length: 20 }, (_, index) => ({
+      meeting_id: `meeting-${index}`,
+      meeting_title: `Meeting ${index}`,
+      mid: null,
+      evidence_text: `Evidence ${index} ${'detail '.repeat(800)}`,
+      score: 1,
+      score_breakdown: {
+        fts_rank: 1,
+        graph_proximity: 0,
+        recency_decay: 1,
+        mention_weight: 0,
+      },
+    }));
+
+    const prompt = getAskPlutoPrompt(
+      "Summarize today's meetings",
+      context,
+      'temporal',
+    );
+
+    expect(context.every((source) => prompt.includes(source.meeting_id))).toBe(
+      true,
+    );
+    expect(prompt.length).toBeLessThan(24_000);
+    expect(prompt).toContain('Write a readable chat response');
+    expect(prompt).toContain('use bullets only when they materially improve');
+    expect(prompt).not.toContain(
+      'Use markdown bullet points to list key items',
+    );
+  });
+
   it('includes user corrections as constraints rather than meeting evidence', () => {
     const prompt = getAskPlutoPrompt(
       'Who owns pricing approval?',

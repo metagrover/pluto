@@ -28,6 +28,14 @@ export const getAskPlutoPrompt = (
   priorTurns: Array<{ role: 'user' | 'assistant'; content: string }> = [],
   correctionGuidance = 'None',
 ): string => {
+  const largeScope = context.length > 6;
+  const evidenceBudget =
+    context.length === 1
+      ? 3600
+      : largeScope
+        ? Math.max(420, Math.floor(12_000 / context.length))
+        : 2400;
+  const structuredFieldBudget = largeScope ? 220 : 900;
   const contextStr =
     context.length === 0
       ? 'None'
@@ -38,21 +46,18 @@ export const getAskPlutoPrompt = (
               c.mid?.topics
                 ?.map((t) => t.name)
                 .join(', ')
-                .slice(0, 600) || 'None';
+                .slice(0, largeScope ? 180 : 600) || 'None';
             const decisions =
               c.mid?.decisions
                 ?.map((d) => d.description)
                 .join('; ')
-                .slice(0, 900) || 'None';
+                .slice(0, structuredFieldBudget) || 'None';
             const actions =
               c.mid?.action_items
                 ?.map((a) => a.description)
                 .join('; ')
-                .slice(0, 900) || 'None';
-            const evidence = c.evidence_text.slice(
-              0,
-              context.length === 1 ? 3600 : 2400,
-            );
+                .slice(0, structuredFieldBudget) || 'None';
+            const evidence = c.evidence_text.slice(0, evidenceBudget);
             return `[Source ${i + 1}] Meeting: "${title}" (ID: ${c.meeting_id})
 Evidence: ${evidence}
 Topics: ${topicNames}
@@ -64,7 +69,7 @@ Action Items: ${actions}`;
   const formatGuidance =
     intent === 'factual'
       ? 'Answer directly and specifically. Use exact names, numbers, and dates from the evidence.'
-      : 'Use markdown bullet points to list key items. Be specific — include participant names, decisions, and action items from the evidence.';
+      : 'Write a readable chat response in short paragraphs. For summaries, lead with a one-sentence synthesis, then use bullets only when they materially improve the clarity of distinct decisions or action items. Do not create one bullet per source or repeat the same point. Include participant names, decisions, and action items only when the evidence supports them.';
 
   const conversation = priorTurns.length
     ? priorTurns

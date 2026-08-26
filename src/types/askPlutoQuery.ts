@@ -15,6 +15,37 @@ export type AskPlutoEvidenceState =
   | 'failed'
   | 'completed';
 
+export type AskPlutoOutcome =
+  | 'answered'
+  | 'partial'
+  | 'no_evidence'
+  | 'unavailable'
+  | 'cancelled'
+  | 'failed';
+
+export interface AskPlutoTemporalRange {
+  fromInclusive: string;
+  toExclusive: string;
+  label: string;
+  timeZone: string;
+}
+
+export interface ResolvedAskPlutoScope {
+  kind: 'current' | 'meeting_ids' | 'temporal' | 'global';
+  meetingIds: string[];
+  temporalRange?: AskPlutoTemporalRange;
+  resolvedAt: string;
+  source: 'explicit' | 'inherited';
+}
+
+export interface AskPlutoRetrievalSummary {
+  matchedMeetingCount: number;
+  includedMeetingCount: number;
+  preparedEvidenceCount: number;
+  transcriptOnlyCount: number;
+  omittedMeetingCount: number;
+}
+
 export type AskPlutoCurrentMeeting =
   | {
       kind: 'active_recording';
@@ -42,6 +73,9 @@ export interface AskPlutoConversationTurn {
   role: 'user' | 'assistant';
   content: string;
   meetingIds?: string[];
+  outcome?: AskPlutoOutcome;
+  resolvedScope?: ResolvedAskPlutoScope;
+  retrievalSummary?: AskPlutoRetrievalSummary;
 }
 
 export interface AskPlutoActiveMeetingSnapshot {
@@ -66,6 +100,8 @@ export interface AskPlutoQueryStatus {
   currentMeeting?: AskPlutoCurrentMeeting;
   reasoningMode?: 'fast' | 'deep';
   comparisonMeetingCount?: number;
+  scopeLabel?: string;
+  scopeMeetingCount?: number;
 }
 
 export interface AskPlutoAnswerDelta {
@@ -81,4 +117,7 @@ export interface AskPlutoQueryResponse<Citation = unknown> {
   failureReason?: 'timeout' | 'provider_unavailable';
   trustStatus?: 'grounded' | 'inferred' | 'needs_review';
   unsupportedClaimCount?: number;
+  outcome?: AskPlutoOutcome;
+  resolvedScope?: ResolvedAskPlutoScope;
+  retrievalSummary?: AskPlutoRetrievalSummary;
 }

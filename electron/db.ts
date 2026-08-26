@@ -1062,6 +1062,12 @@ const initDb = () => {
   } catch (e) {
     console.warn('[DB] Knowledge note backfill failed:', e);
   }
+
+  try {
+    repairMeetingFtsIndex();
+  } catch (e) {
+    console.warn('[DB] Meeting search index repair failed:', e);
+  }
 };
 
 initDb();
@@ -1399,7 +1405,7 @@ export const upsertWorkingMemorySnapshot = (input: {
 /**
  * Meeting Management
  */
-const refreshMeetingFts = (meeting: PersistedMeeting) => {
+function refreshMeetingFts(meeting: PersistedMeeting) {
   const id = String(meeting.id);
   let transcriptText = '';
   try {
@@ -1441,22 +1447,82 @@ const refreshMeetingFts = (meeting: PersistedMeeting) => {
   }
 
   console.log(`[DB] Updating FTS index for meeting: ${id}`);
-  db.prepare(`
-    INSERT OR REPLACE INTO meetings_fts (title, transcript_text, enhanced_notes, user_notes,
-      mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    meeting.title,
-    transcriptText,
-    meeting.enhanced_notes || '',
-    meeting.user_notes || '',
-    midParticipants,
-    midTopics,
-    midDecisions,
-    midActionItems,
-    id,
+  db.transaction(() => {
+    db.prepare('DELETE FROM meetings_fts WHERE meeting_id = ?').run(id);
+    db.prepare(`
+      INSERT INTO meetings_fts (title, transcript_text, enhanced_notes, user_notes,
+        mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      meeting.title,
+      transcriptText,
+      meeting.enhanced_notes || '',
+      meeting.user_notes || '',
+      midParticipants,
+      midTopics,
+      midDecisions,
+      midActionItems,
+      id,
+    );
+  })();
+}
+
+export function getMeetingFtsIntegrity(): {
+  rowCount: number;
+  distinctMeetingCount: number;
+  duplicateRowCount: number;
+} {
+  const result = db
+    .prepare(
+      `SELECT COUNT(*) AS row_count,
+              COUNT(DISTINCT meeting_id) AS distinct_meeting_count
+       FROM meetings_fts`,
+    )
+    .get() as { row_count: number; distinct_meeting_count: number };
+  return {
+    rowCount: result.row_count,
+    distinctMeetingCount: result.distinct_meeting_count,
+    duplicateRowCount: result.row_count - result.distinct_meeting_count,
+  };
+}
+
+export function repairMeetingFtsIndex(options: { force?: boolean } = {}): {
+  rebuilt: boolean;
+  indexedMeetingCount: number;
+} {
+  const integrity = getMeetingFtsIntegrity();
+  const meetingCount = (
+    db.prepare('SELECT COUNT(*) AS count FROM meetings').get() as {
+      count: number;
+    }
+  ).count;
+  if (
+    !options.force &&
+    integrity.duplicateRowCount === 0 &&
+    integrity.distinctMeetingCount === meetingCount
+  ) {
+    return { rebuilt: false, indexedMeetingCount: meetingCount };
+  }
+
+  const meetings = db
+    .prepare('SELECT * FROM meetings')
+    .all() as PersistedMeeting[];
+  db.transaction(() => {
+    db.prepare('DELETE FROM meetings_fts').run();
+    for (const meeting of meetings) refreshMeetingFts(meeting);
+    const repaired = getMeetingFtsIntegrity();
+    if (
+      repaired.duplicateRowCount !== 0 ||
+      repaired.distinctMeetingCount !== meetings.length
+    ) {
+      throw new Error('meeting_fts_integrity_check_failed');
+    }
+  })();
+  console.log(
+    `[DB] Rebuilt meeting search index (${meetings.length} meetings)`,
   );
-};
+  return { rebuilt: true, indexedMeetingCount: meetings.length };
+}
 
 const saveMeetingTransaction = db.transaction((meeting: PersistedMeeting) => {
   // Ensure ID is a string
@@ -5680,51 +5746,11 @@ export const saveMeetingMid = (
     meetingId,
   );
 
-  // Update FTS with flattened MID fields
-  const participants = mid.participants.map((p) => p.name).join(', ');
-  const topics = mid.topics.map((t) => t.name).join(', ');
-  const decisions = mid.decisions.map((d) => d.description).join(', ');
-  const actionItems = mid.action_items.map((a) => a.description).join(', ');
-
-  // Check if FTS has MID columns (migration may not have run yet)
   try {
-    const ftsColumns = db
-      .prepare('PRAGMA table_info(meetings_fts)')
-      .all() as Array<{ name: string }>;
-    if (ftsColumns.some((col) => col.name === 'mid_participants')) {
-      // Get existing FTS row to preserve non-MID fields
-      const existing = db
-        .prepare(
-          'SELECT title, transcript_text, enhanced_notes, user_notes FROM meetings_fts WHERE meeting_id = ?',
-        )
-        .get(meetingId) as
-        | {
-            title: string;
-            transcript_text: string;
-            enhanced_notes: string;
-            user_notes: string;
-          }
-        | undefined;
-
-      if (existing) {
-        db.prepare(`
-          INSERT OR REPLACE INTO meetings_fts (
-            title, transcript_text, enhanced_notes, user_notes,
-            mid_participants, mid_topics, mid_decisions, mid_action_items, meeting_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          existing.title,
-          existing.transcript_text,
-          existing.enhanced_notes,
-          existing.user_notes,
-          participants,
-          topics,
-          decisions,
-          actionItems,
-          meetingId,
-        );
-      }
-    }
+    const meeting = db
+      .prepare('SELECT * FROM meetings WHERE id = ?')
+      .get(meetingId) as PersistedMeeting | undefined;
+    if (meeting) refreshMeetingFts(meeting);
   } catch (e) {
     console.warn('[DB] Failed to update MID FTS fields:', e);
   }
@@ -5851,21 +5877,28 @@ export const getTemporalMeetings = (range: { from?: string; to?: string }) => {
   if (range.from && range.to) {
     return db
       .prepare(
-        'SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ? AND started_at <= ?',
+        `SELECT * FROM meetings
+         WHERE COALESCE(started_at, created_at) >= ?
+           AND COALESCE(started_at, created_at) < ?
+         ORDER BY COALESCE(started_at, created_at) DESC, id DESC`,
       )
       .all(range.from, range.to) as PersistedMeeting[];
   }
   if (range.from) {
     return db
       .prepare(
-        'SELECT id, started_at, mid_json FROM meetings WHERE started_at >= ?',
+        `SELECT * FROM meetings
+         WHERE COALESCE(started_at, created_at) >= ?
+         ORDER BY COALESCE(started_at, created_at) DESC, id DESC`,
       )
       .all(range.from) as PersistedMeeting[];
   }
   if (range.to) {
     return db
       .prepare(
-        'SELECT id, started_at, mid_json FROM meetings WHERE started_at <= ?',
+        `SELECT * FROM meetings
+         WHERE COALESCE(started_at, created_at) < ?
+         ORDER BY COALESCE(started_at, created_at) DESC, id DESC`,
       )
       .all(range.to) as PersistedMeeting[];
   }

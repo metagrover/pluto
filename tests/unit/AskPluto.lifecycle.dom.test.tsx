@@ -168,6 +168,71 @@ describe('Ask Pluto request lifecycle', () => {
     expect(container.textContent).toContain('1 unsupported claim');
   });
 
+  it('presents citations as a collapsed source disclosure instead of meeting cards', async () => {
+    const onOpenMeeting = vi.fn();
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      if (channel === 'intelligence:query') {
+        return Promise.resolve({
+          status: 'answered',
+          answer: 'The team validated the live transcript flow.',
+          citations: [
+            {
+              claim: 'The team validated the live transcript flow.',
+              meeting_id: 'meeting-1',
+              meeting_title: 'Transcription review',
+              evidence_span: 'The live transcript should update.',
+              evidence_valid: true,
+              trust_status: 'grounded',
+            },
+          ],
+          trustStatus: 'grounded',
+        });
+      }
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={onOpenMeeting} />,
+      );
+    });
+    const input = container.querySelector('input') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )?.set?.call(input, 'What did we validate?');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector('form')
+        ?.dispatchEvent(
+          new Event('submit', { bubbles: true, cancelable: true }),
+        );
+    });
+
+    const disclosure = container.querySelector('details');
+    expect(disclosure?.open).toBe(false);
+    expect(disclosure?.querySelector('summary')?.textContent).toContain(
+      '1 source',
+    );
+    expect(container.textContent).not.toContain('Source Log');
+    expect(container.textContent).not.toContain('Claim');
+
+    const sourceButton = disclosure?.querySelector(
+      'button[aria-label="Open Transcription review"]',
+    ) as HTMLButtonElement;
+    await act(async () => sourceButton.click());
+    expect(onOpenMeeting).toHaveBeenCalledWith('meeting-1');
+  });
+
   it('labels answers from an active recording as provisional', async () => {
     const invoke = vi.fn((channel: string) => {
       if (channel === 'intelligence:suggested-queries')
@@ -273,5 +338,100 @@ describe('Ask Pluto request lifecycle', () => {
     expect(queryCalls).toHaveLength(2);
     expect(queryCalls[1][1]).toMatchObject({ query: 'Who owns the rollout?' });
     expect(container.textContent).toContain('Mira owns the rollout.');
+  });
+
+  it('keeps prior conversation text and structured scope after a no-evidence answer', async () => {
+    let attempts = 0;
+    const scope = {
+      kind: 'temporal' as const,
+      meetingIds: ['today-1'],
+      temporalRange: {
+        fromInclusive: '2026-08-25T07:00:00.000Z',
+        toExclusive: '2026-08-26T07:00:00.000Z',
+        label: 'today',
+        timeZone: 'America/Los_Angeles',
+      },
+      resolvedAt: '2026-08-26T00:36:00.000Z',
+      source: 'explicit' as const,
+    };
+    const retrievalSummary = {
+      matchedMeetingCount: 1,
+      includedMeetingCount: 1,
+      preparedEvidenceCount: 0,
+      transcriptOnlyCount: 1,
+      omittedMeetingCount: 0,
+    };
+    const invoke = vi.fn((channel: string) => {
+      if (channel === 'intelligence:suggested-queries')
+        return Promise.resolve([]);
+      if (channel === 'intelligence:query') {
+        attempts += 1;
+        return Promise.resolve(
+          attempts === 1
+            ? {
+                status: 'answered',
+                answer:
+                  "I couldn't find information about that in your meetings.",
+                citations: [],
+                outcome: 'no_evidence',
+                resolvedScope: scope,
+                retrievalSummary,
+              }
+            : {
+                status: 'answered',
+                answer: 'The previous request lacked supported evidence.',
+                citations: [],
+                outcome: 'answered',
+                resolvedScope: { ...scope, source: 'inherited' },
+                retrievalSummary,
+              },
+        );
+      }
+      return Promise.resolve(null);
+    });
+    Object.defineProperty(window, 'ipcRenderer', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => undefined) },
+    });
+    await act(async () => {
+      root.render(
+        <AskPluto visible onClose={vi.fn()} onOpenMeeting={vi.fn()} />,
+      );
+    });
+    const input = container.querySelector('input') as HTMLInputElement;
+    const submit = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value',
+        )?.set?.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        container
+          .querySelector('form')
+          ?.dispatchEvent(
+            new Event('submit', { bubbles: true, cancelable: true }),
+          );
+      });
+    };
+
+    await submit("Summarize today's meetings");
+    expect(container.textContent).toContain('No matching evidence');
+    await submit('What went wrong here?');
+
+    const queryCalls = invoke.mock.calls.filter(
+      ([channel]) => channel === 'intelligence:query',
+    );
+    expect(queryCalls[1][1].priorTurns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          outcome: 'no_evidence',
+          resolvedScope: scope,
+          retrievalSummary,
+        }),
+      ]),
+    );
   });
 });

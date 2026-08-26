@@ -21,9 +21,12 @@ import ffprobeStatic from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { parseMacMemoryPressureFreePercent } from '../src/services/finalTranscription/finalTranscriptionAdmission';
 import type {
+  AskPlutoConversationTurn,
   AskPlutoCurrentMeeting,
   AskPlutoQueryRequest,
   AskPlutoQueryStatus,
+  AskPlutoRetrievalSummary,
+  ResolvedAskPlutoScope,
 } from '../src/types/askPlutoQuery';
 import { createActiveCallDetector } from './activeCall/detector';
 import {
@@ -294,6 +297,12 @@ import {
   processExtractedEntities,
 } from './entityPipeline';
 import {
+  describePreviousConversationFailure,
+  inheritConversationScope,
+  isDiagnosticConversationFollowUp,
+  latestAssistantTurn,
+} from './intelligence/askPlutoConversation';
+import {
   detectExplicitAskPlutoCorrection,
   formatAskPlutoCorrectionsForPrompt,
   parseAskPlutoCorrectionRecords,
@@ -310,9 +319,9 @@ import {
 } from './intelligence/askPlutoReasoning';
 import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
 import {
-  auditAnswerGrounding,
   auditCitations,
   buildCitationChain,
+  buildSafeAnswerPresentation,
 } from './intelligence/citationEngine';
 import {
   queryReferencesCurrentMeeting,
@@ -2859,6 +2868,8 @@ app.whenReady().then(async () => {
             : currentMeeting;
       let reasoningMode: AskPlutoReasoningMode | undefined;
       let comparisonMeetingCount = 0;
+      let scopeLabel: string | undefined;
+      let scopeMeetingCount = 0;
       let retrievalStartedAt: number | undefined;
       let retrievalCompletedAt: number | undefined;
       let providerRequestedAt: number | undefined;
@@ -2873,6 +2884,8 @@ app.whenReady().then(async () => {
           currentMeeting: currentMeetingStatus,
           ...(reasoningMode ? { reasoningMode } : {}),
           ...(comparisonMeetingCount > 0 ? { comparisonMeetingCount } : {}),
+          ...(scopeLabel ? { scopeLabel } : {}),
+          ...(scopeMeetingCount > 0 ? { scopeMeetingCount } : {}),
         });
       };
 
@@ -2919,7 +2932,7 @@ app.whenReady().then(async () => {
 
         const currentMeetingRequested =
           queryReferencesCurrentMeeting(queryText);
-        const priorTurns =
+        const priorTurns: AskPlutoConversationTurn[] =
           typeof input === 'string' || !Array.isArray(input.priorTurns)
             ? []
             : input.priorTurns
@@ -2938,7 +2951,38 @@ app.whenReady().then(async () => {
                         .filter((id): id is string => typeof id === 'string')
                         .slice(0, 8)
                     : [],
+                  ...(turn.outcome ? { outcome: turn.outcome } : {}),
+                  ...(turn.resolvedScope
+                    ? { resolvedScope: turn.resolvedScope }
+                    : {}),
+                  ...(turn.retrievalSummary
+                    ? { retrievalSummary: turn.retrievalSummary }
+                    : {}),
                 }));
+        const inheritedScope = parsed.temporal_range
+          ? undefined
+          : inheritConversationScope(queryText, priorTurns);
+        const previousAssistantTurn = latestAssistantTurn(priorTurns);
+        if (
+          isDiagnosticConversationFollowUp(queryText) &&
+          previousAssistantTurn
+        ) {
+          const resolvedScope: ResolvedAskPlutoScope = inheritedScope || {
+            kind: 'global',
+            meetingIds: [],
+            resolvedAt: new Date().toISOString(),
+            source: 'inherited',
+          };
+          return {
+            status: 'answered' as const,
+            answer: describePreviousConversationFailure(previousAssistantTurn),
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            outcome: 'answered' as const,
+            resolvedScope,
+            retrievalSummary: previousAssistantTurn.retrievalSummary,
+          };
+        }
         const globalKnowledgeDoc = db.ensureGlobalKnowledgeDoc();
         const storedCorrections = parseAskPlutoCorrectionRecords(
           db.getKnowledgeCorrections(globalKnowledgeDoc.id),
@@ -2997,6 +3041,95 @@ app.whenReady().then(async () => {
           activeRecording?.meetingId === input.activeMeetingSnapshot?.meetingId
             ? input.activeMeetingSnapshot
             : undefined;
+        const explicitTemporalRange =
+          parsed.temporal_range?.from && parsed.temporal_range.to
+            ? {
+                fromInclusive: parsed.temporal_range.from,
+                toExclusive: parsed.temporal_range.to,
+                label: parsed.temporal_range.label || 'the selected period',
+                timeZone:
+                  Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
+              }
+            : undefined;
+        const temporalRange =
+          explicitTemporalRange || inheritedScope?.temporalRange;
+        const inheritedMeetingIds = inheritedScope?.meetingIds || [];
+        const temporalMeetings = temporalRange
+          ? inheritedScope?.kind === 'temporal' &&
+            !explicitTemporalRange &&
+            inheritedMeetingIds.length > 0
+            ? inheritedMeetingIds
+                .map(
+                  (meetingId) =>
+                    db.getMeeting(meetingId) as db.PersistedMeeting | undefined,
+                )
+                .filter((meeting): meeting is db.PersistedMeeting =>
+                  Boolean(meeting),
+                )
+            : (db.getTemporalMeetings({
+                from: temporalRange.fromInclusive,
+                to: temporalRange.toExclusive,
+              }) as db.PersistedMeeting[])
+          : [];
+        const temporalMeetingLimit = 24;
+        const includedTemporalMeetings = temporalMeetings.slice(
+          0,
+          temporalMeetingLimit,
+        );
+        const temporalRetrievalSummary: AskPlutoRetrievalSummary | undefined =
+          temporalRange
+            ? {
+                matchedMeetingCount: temporalMeetings.length,
+                includedMeetingCount: includedTemporalMeetings.length,
+                preparedEvidenceCount: includedTemporalMeetings.filter(
+                  (meeting) =>
+                    Boolean(
+                      meeting.analysis_json ||
+                        meeting.enhanced_notes ||
+                        meeting.user_notes ||
+                        meeting.mid_json,
+                    ),
+                ).length,
+                transcriptOnlyCount: includedTemporalMeetings.filter(
+                  (meeting) =>
+                    Boolean(meeting.transcript_json) &&
+                    !meeting.analysis_json &&
+                    !meeting.enhanced_notes &&
+                    !meeting.user_notes &&
+                    !meeting.mid_json,
+                ).length,
+                omittedMeetingCount:
+                  temporalMeetings.length - includedTemporalMeetings.length,
+              }
+            : undefined;
+        const temporalResolvedScope: ResolvedAskPlutoScope | undefined =
+          temporalRange
+            ? {
+                kind: 'temporal',
+                meetingIds: temporalMeetings.map((meeting) =>
+                  String(meeting.id),
+                ),
+                temporalRange,
+                resolvedAt: new Date().toISOString(),
+                source: explicitTemporalRange ? 'explicit' : 'inherited',
+              }
+            : undefined;
+        if (temporalRange) {
+          scopeLabel = temporalRange.label;
+          scopeMeetingCount = temporalMeetings.length;
+          sendStatus('retrieving');
+        }
+        if (temporalRange && temporalMeetings.length === 0) {
+          return {
+            status: 'answered' as const,
+            answer: `I couldn't find any meetings from ${temporalRange.label}.`,
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            outcome: 'no_evidence' as const,
+            resolvedScope: temporalResolvedScope,
+            retrievalSummary: temporalRetrievalSummary,
+          };
+        }
         if (currentMeetingRequested && currentMeeting.kind === 'none') {
           return {
             status: 'unavailable' as const,
@@ -3045,25 +3178,36 @@ app.whenReady().then(async () => {
               ? buildMeetingRetrievalResult(currentMeetingRow)
               : undefined
           : undefined;
-        const priorPinnedResults = queryReferencesPriorTurn(queryText)
-          ? [
-              ...new Set(
-                priorTurns
+        const temporalPinnedResults = includedTemporalMeetings.map((meeting) =>
+          buildMeetingRetrievalResult(
+            meeting,
+            `Meeting from ${temporalRange?.label || 'selected period'}`,
+          ),
+        );
+        const priorMeetingIds = [
+          ...new Set([
+            ...(inheritedScope?.meetingIds || []),
+            ...(queryReferencesPriorTurn(queryText)
+              ? priorTurns
                   .filter((turn) => turn.role === 'assistant')
-                  .flatMap((turn) => turn.meetingIds),
-              ),
-            ]
-              .map(
-                (meetingId) =>
-                  db.getMeeting(meetingId) as db.PersistedMeeting | undefined,
-              )
-              .filter((meeting): meeting is db.PersistedMeeting =>
-                Boolean(meeting),
-              )
-              .map((meeting) =>
-                buildMeetingRetrievalResult(meeting, 'Prior cited meeting'),
-              )
-          : [];
+                  .flatMap((turn) => turn.meetingIds || [])
+              : []),
+          ]),
+        ];
+        const priorPinnedResults =
+          priorMeetingIds.length > 0
+            ? [...priorMeetingIds]
+                .map(
+                  (meetingId) =>
+                    db.getMeeting(meetingId) as db.PersistedMeeting | undefined,
+                )
+                .filter((meeting): meeting is db.PersistedMeeting =>
+                  Boolean(meeting),
+                )
+                .map((meeting) =>
+                  buildMeetingRetrievalResult(meeting, 'Prior cited meeting'),
+                )
+            : [];
         const historicalCandidateLimit = currentMeetingRequested
           ? getCrossMeetingCandidateLimit(queryText, parsed.intent)
           : 0;
@@ -3076,6 +3220,9 @@ app.whenReady().then(async () => {
         comparisonMeetingCount = historicalPinnedResults.length;
         const pinnedResults = [
           ...(currentPinnedResult ? [currentPinnedResult] : []),
+          ...temporalPinnedResults.filter(
+            (result) => result.meeting_id !== currentPinnedResult?.meeting_id,
+          ),
           ...historicalPinnedResults,
           ...priorPinnedResults.filter(
             (result) =>
@@ -3104,8 +3251,9 @@ app.whenReady().then(async () => {
             currentMeetingRequested,
             historicalCandidateLimit,
           });
-        const context =
-          restrictToCurrentMeeting && currentPinnedResult
+        const context = temporalResolvedScope
+          ? pinnedResults
+          : restrictToCurrentMeeting && currentPinnedResult
             ? [currentPinnedResult]
             : restrictToPinnedCurrentComparison
               ? pinnedResults
@@ -3114,6 +3262,41 @@ app.whenReady().then(async () => {
                 : await retrieveContext(parsed, { pinnedResults });
         retrievalCompletedAt = Date.now();
         controller.signal.throwIfAborted();
+
+        const resolvedScope: ResolvedAskPlutoScope =
+          temporalResolvedScope ||
+          (currentMeetingRequested && currentMeeting.meetingId
+            ? {
+                kind: 'current',
+                meetingIds: [currentMeeting.meetingId],
+                resolvedAt: new Date().toISOString(),
+                source: 'explicit',
+              }
+            : inheritedScope || {
+                kind: context.length > 0 ? 'meeting_ids' : 'global',
+                meetingIds: context.map((result) => result.meeting_id),
+                resolvedAt: new Date().toISOString(),
+                source: 'explicit',
+              });
+        const retrievalSummary: AskPlutoRetrievalSummary =
+          temporalRetrievalSummary || {
+            matchedMeetingCount: context.length,
+            includedMeetingCount: context.length,
+            preparedEvidenceCount: context.length,
+            transcriptOnlyCount: 0,
+            omittedMeetingCount: 0,
+          };
+        if (context.length === 0) {
+          return {
+            status: 'answered' as const,
+            answer: "I couldn't find information about that in your meetings.",
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            outcome: 'no_evidence' as const,
+            resolvedScope,
+            retrievalSummary,
+          };
+        }
 
         console.log(
           `[Pluto] Retrieval complete (${Date.now() - startTime}ms), context items: ${context.length}`,
@@ -3152,11 +3335,14 @@ app.whenReady().then(async () => {
 
         const rawCitations = buildCitationChain(answerRaw, context);
         const auditedCitations = auditCitations(rawCitations, context);
-        const grounding = auditAnswerGrounding(answerRaw, auditedCitations);
-        const cleanAnswer = answerRaw
-          .replace(/\[Source\s+\d+\]/gi, '')
-          .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
-          .trim();
+        const presentation = buildSafeAnswerPresentation(
+          answerRaw,
+          auditedCitations,
+        );
+        const coverageLimited = retrievalSummary.omittedMeetingCount > 0;
+        const answer = coverageLimited
+          ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${presentation.answer}`
+          : presentation.answer;
 
         console.log(
           `[Pluto] Query complete. Total duration: ${Date.now() - startTime}ms`,
@@ -3164,10 +3350,16 @@ app.whenReady().then(async () => {
 
         return {
           status: 'answered' as const,
-          answer: cleanAnswer,
-          citations: auditedCitations,
+          answer,
+          citations: presentation.citations,
           currentMeeting: currentMeetingStatus,
-          ...grounding,
+          outcome: coverageLimited
+            ? ('partial' as const)
+            : presentation.outcome,
+          resolvedScope,
+          retrievalSummary,
+          trustStatus: presentation.trustStatus,
+          unsupportedClaimCount: presentation.unsupportedClaimCount,
         };
       })();
       const settled = generation.then(

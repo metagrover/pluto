@@ -92,7 +92,7 @@ export interface ParsedQuery {
   keywords: string[];
   expanded_keywords: string[];
   entity_mentions: string[];
-  temporal_range: { from?: string; to?: string } | null;
+  temporal_range: { from?: string; to?: string; label?: string } | null;
   intent:
     | 'factual'
     | 'temporal'

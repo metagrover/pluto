@@ -383,3 +383,80 @@ export const auditAnswerGrounding = (
     unsupportedClaimCount,
   };
 };
+
+export const buildSafeAnswerPresentation = (
+  answer: string,
+  citations: CitationChain[],
+): {
+  answer: string;
+  citations: CitationChain[];
+  outcome: 'answered' | 'partial' | 'no_evidence';
+  trustStatus: 'grounded' | 'inferred' | undefined;
+  unsupportedClaimCount: number;
+} => {
+  const cleanAnswer = answer
+    .replace(/\[Source\s+\d+\]/gi, '')
+    .replace(/<?\-?cite[^>]*>[\s\S]*?<\/cite>/gi, '')
+    .trim();
+  if (/^I couldn't find information/i.test(cleanAnswer)) {
+    return {
+      answer: cleanAnswer,
+      citations: [],
+      outcome: 'no_evidence',
+      trustStatus: undefined,
+      unsupportedClaimCount: 0,
+    };
+  }
+
+  const grounding = auditAnswerGrounding(answer, citations);
+  if (grounding.unsupportedClaimCount === 0) {
+    return {
+      answer: cleanAnswer,
+      citations,
+      outcome: 'answered',
+      trustStatus:
+        grounding.trustStatus === 'inferred' ? 'inferred' : 'grounded',
+      unsupportedClaimCount: 0,
+    };
+  }
+
+  const grouped = new Map<string, CitationChain[]>();
+  for (const citation of citations) {
+    const key = citation.claim.trim().toLowerCase();
+    const group = grouped.get(key) || [];
+    group.push(citation);
+    grouped.set(key, group);
+  }
+  const supportedGroups = [...grouped.values()].filter((group) => {
+    const meetings = new Set(group.map((citation) => citation.meeting_id));
+    return (
+      group.every((citation) => citation.evidence_valid) &&
+      (!COMPARATIVE_CLAIM_PATTERN.test(group[0].claim) || meetings.size >= 2)
+    );
+  });
+  const supportedCitations = supportedGroups.flat();
+  if (supportedCitations.length === 0) {
+    return {
+      answer:
+        "I found potentially relevant meeting material, but I couldn't verify a supported answer.",
+      citations: [],
+      outcome: 'no_evidence',
+      trustStatus: undefined,
+      unsupportedClaimCount: grounding.unsupportedClaimCount,
+    };
+  }
+
+  const supportedClaims = supportedGroups.map((group) => group[0].claim.trim());
+  const inferred = supportedGroups.some(
+    (group) =>
+      new Set(group.map((citation) => citation.meeting_id)).size >= 2 ||
+      group.some((citation) => citation.trust_status === 'inferred'),
+  );
+  return {
+    answer: supportedClaims.join(' '),
+    citations: supportedCitations,
+    outcome: 'partial',
+    trustStatus: inferred ? 'inferred' : 'grounded',
+    unsupportedClaimCount: grounding.unsupportedClaimCount,
+  };
+};
