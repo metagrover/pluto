@@ -5,6 +5,7 @@ import {
   auditCitations,
   buildCitationChain,
   buildSafeAnswerPresentation,
+  createValidatedAnswerStream,
 } from '../../electron/intelligence/citationEngine';
 import type { RetrievalResult } from '../../electron/intelligence/intelligenceTypes';
 
@@ -102,6 +103,56 @@ describe('Citation Engine', () => {
         'The launch moved from Tuesday to Friday.',
         'The launch moved from Tuesday to Friday.',
       ]);
+    });
+  });
+
+  describe('createValidatedAnswerStream', () => {
+    const sources = [
+      {
+        meeting_id: 'm1',
+        meeting_title: 'Launch review',
+        evidence_text: 'Sam owns launch signoff. The launch is Friday.',
+        mid: {
+          title: 'Launch review',
+          evidence_spans: [
+            { quote: 'Sam owns launch signoff.' },
+            { quote: 'The launch is Friday.' },
+          ],
+        },
+      },
+    ] as RetrievalResult[];
+
+    it('never exposes unsupported provider prose before the no-evidence result', () => {
+      const onDelta = vi.fn();
+      const stream = createValidatedAnswerStream(sources, onDelta);
+
+      stream.push('Sam approved a Monday launch. ');
+      stream.push('[Source 1]');
+      const presentation = stream.finalize(
+        'Sam approved a Monday launch. [Source 1]',
+      );
+
+      expect(onDelta).not.toHaveBeenCalled();
+      expect(stream.streamedAnswer).toBe('');
+      expect(presentation.outcome).toBe('no_evidence');
+    });
+
+    it('streams a supported claim only after its citation passes validation', () => {
+      const deltas: string[] = [];
+      const stream = createValidatedAnswerStream(sources, (delta) =>
+        deltas.push(delta),
+      );
+
+      stream.push('Sam owns launch signoff. ');
+      expect(deltas).toEqual([]);
+      stream.push('[Source 1]');
+
+      const presentation = stream.finalize(
+        'Sam owns launch signoff. [Source 1]',
+      );
+      expect(deltas.join('')).toBe('Sam owns launch signoff.');
+      expect(presentation.answer).toBe(deltas.join(''));
+      expect(presentation.outcome).toBe('answered');
     });
   });
 

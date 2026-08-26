@@ -460,3 +460,75 @@ export const buildSafeAnswerPresentation = (
     unsupportedClaimCount: grounding.unsupportedClaimCount,
   };
 };
+
+type SafeAnswerPresentation = ReturnType<typeof buildSafeAnswerPresentation>;
+
+/**
+ * Buffers provider tokens at the trust boundary and releases only claims that
+ * already have a complete, audited source reference. The final presentation
+ * remains authoritative, but it can no longer retract an unsupported raw draft
+ * that the renderer was allowed to present as an answer.
+ */
+export const createValidatedAnswerStream = (
+  sources: RetrievalResult[],
+  onDelta: (delta: string) => void,
+): {
+  push: (delta: string) => void;
+  finalize: (answer: string) => SafeAnswerPresentation;
+  readonly streamedAnswer: string;
+} => {
+  let rawAnswer = '';
+  let streamedAnswer = '';
+  let auditedReferenceCount = 0;
+
+  const emitSupportedExtension = (
+    presentation: SafeAnswerPresentation,
+  ): void => {
+    if (
+      presentation.outcome === 'no_evidence' ||
+      !presentation.answer.startsWith(streamedAnswer) ||
+      presentation.answer.length === streamedAnswer.length
+    ) {
+      return;
+    }
+    const delta = presentation.answer.slice(streamedAnswer.length);
+    streamedAnswer = presentation.answer;
+    onDelta(delta);
+  };
+
+  const auditCurrentAnswer = (): SafeAnswerPresentation => {
+    const citations = auditCitations(
+      buildCitationChain(rawAnswer, sources),
+      sources,
+    );
+    return buildSafeAnswerPresentation(rawAnswer, citations);
+  };
+
+  const push = (delta: string): void => {
+    if (!delta) return;
+    rawAnswer += delta;
+    const references = [...rawAnswer.matchAll(/\[Source\s+\d+\]/gi)];
+    if (references.length <= auditedReferenceCount) return;
+
+    const finalReference = references.at(-1);
+    const beforeReference = rawAnswer
+      .slice(0, finalReference?.index ?? rawAnswer.length)
+      .replace(/(?:\s*\[Source\s+\d+\])+\s*$/gi, '')
+      .trimEnd();
+    if (!/[.!?]$/.test(beforeReference)) return;
+
+    auditedReferenceCount = references.length;
+    emitSupportedExtension(auditCurrentAnswer());
+  };
+
+  return {
+    push,
+    finalize: (answer: string) => {
+      rawAnswer = answer;
+      return auditCurrentAnswer();
+    },
+    get streamedAnswer() {
+      return streamedAnswer;
+    },
+  };
+};

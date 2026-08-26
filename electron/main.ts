@@ -318,11 +318,7 @@ import {
   shouldRestrictToPriorConversationEvidence,
 } from './intelligence/askPlutoReasoning';
 import { syncActionTrackerAttentionQueue } from './intelligence/attentionSync';
-import {
-  auditCitations,
-  buildCitationChain,
-  buildSafeAnswerPresentation,
-} from './intelligence/citationEngine';
+import { createValidatedAnswerStream } from './intelligence/citationEngine';
 import {
   queryReferencesCurrentMeeting,
   resolveCurrentMeeting,
@@ -3316,13 +3312,9 @@ app.whenReady().then(async () => {
           `[Pluto] Generating answer via provider: ${provider.name} ...`,
         );
         providerRequestedAt = Date.now();
-        const answerRaw = await provider.answerAskPluto(prompt, {
-          signal: controller.signal,
-          mode: reasoningMode,
-          onStart: () => {
-            providerStartedAt ??= Date.now();
-          },
-          onToken: (delta) => {
+        const validatedAnswerStream = createValidatedAnswerStream(
+          context,
+          (delta) => {
             if (controller.signal.aborted || event.sender.isDestroyed()) return;
             firstTokenAt ??= Date.now();
             event.sender.send('intelligence:query:delta', {
@@ -3330,15 +3322,21 @@ app.whenReady().then(async () => {
               delta,
             });
           },
+        );
+        const answerRaw = await provider.answerAskPluto(prompt, {
+          signal: controller.signal,
+          mode: reasoningMode,
+          onStart: () => {
+            providerStartedAt ??= Date.now();
+          },
+          onToken: (delta) => {
+            if (controller.signal.aborted) return;
+            validatedAnswerStream.push(delta);
+          },
         });
         generationCompletedAt = Date.now();
 
-        const rawCitations = buildCitationChain(answerRaw, context);
-        const auditedCitations = auditCitations(rawCitations, context);
-        const presentation = buildSafeAnswerPresentation(
-          answerRaw,
-          auditedCitations,
-        );
+        const presentation = validatedAnswerStream.finalize(answerRaw);
         const coverageLimited = retrievalSummary.omittedMeetingCount > 0;
         const answer = coverageLimited
           ? `I found ${retrievalSummary.matchedMeetingCount} meetings, but this answer covers ${retrievalSummary.includedMeetingCount}. Narrow the time period for complete coverage.\n\n${presentation.answer}`
