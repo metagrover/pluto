@@ -29,12 +29,19 @@ export const getAskPlutoPrompt = (
   correctionGuidance = 'None',
 ): string => {
   const largeScope = context.length > 6;
+  const multiMeetingSynthesis =
+    context.length > 1 &&
+    /\b(?:summari[sz]e|recap|overview|breakdown|analy[sz]e)\b[\s\S]{0,60}\b(?:meetings|calls)\b/i.test(
+      query,
+    );
   const evidenceBudget =
     context.length === 1
       ? 2600
       : largeScope
         ? Math.max(240, Math.floor(6400 / context.length))
-        : 1800;
+        : multiMeetingSynthesis
+          ? 3000
+          : 1800;
   const structuredFieldBudget = largeScope ? 80 : 600;
   const contextStr =
     context.length === 0
@@ -69,10 +76,14 @@ ${details.join('\n')}`;
           })
           .join('\n\n---\n\n');
 
-  const formatGuidance =
-    intent === 'factual'
+  const formatGuidance = multiMeetingSynthesis
+    ? 'Write a rich, readable breakdown using one bullet for each meeting that has meaningful evidence. Start each bullet with the exact meeting title and occurrence date from that source, then explain its concrete topics, decisions, and follow-ups in 1-2 evidence-close sentences. Begin directly with the meeting bullets; do not spend output on an uncited overview.'
+    : intent === 'factual'
       ? 'Answer directly and specifically. Use exact names, numbers, and dates from the evidence.'
       : 'Write a readable chat response in short paragraphs. For summaries, lead with a one-sentence synthesis, then use bullets only when they materially improve the clarity of distinct decisions or action items. Do not create one bullet per source or repeat the same point. Include participant names, decisions, and action items only when the evidence supports them.';
+  const responseLimit = multiMeetingSynthesis
+    ? 'Cover each meeting that has meaningful evidence, using up to 260 words. Do not collapse a multi-meeting request into one or two generic points.'
+    : 'Return at most 2 concise supported points and stay under 90 words. Return fewer rather than inventing coverage.';
 
   const conversation = priorTurns.length
     ? priorTurns
@@ -95,7 +106,7 @@ RULES:
 6. User corrections are authoritative constraints on what the user says is wrong. Never cite a user correction as meeting evidence, and never use one to make an otherwise unsupported meeting claim look grounded.
 7. Keep each sentence to one independently verifiable claim. Split compound facts into separate sentences.
 8. Prefer wording already present in the evidence. A concise supported answer is better than a broader paraphrase the evidence cannot verify.
-9. Return at most 2 concise supported points and stay under 90 words. Return fewer rather than inventing coverage.
+9. ${responseLimit}
 10. Make every point self-contained: identify the meeting, project, product, person, or concrete topic needed to understand it. Omit contextless claims that rely on vague stand-ins such as "one speaker", "a participant", "an application", or "something".
 11. Do not add headings. For cross-meeting synthesis, cite the contributing sources on the synthesized sentence, but never cite a source that does not directly support part of that sentence.
 

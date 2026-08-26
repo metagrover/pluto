@@ -313,6 +313,7 @@ import {
   getCrossMeetingCandidateLimit,
   queryReferencesPriorTurn,
   resolveAskPlutoReasoningMode,
+  shouldIncludePriorConversation,
   shouldRestrictToCurrentMeetingEvidence,
   shouldRestrictToPinnedCurrentComparison,
   shouldRestrictToPriorConversationEvidence,
@@ -338,7 +339,9 @@ import {
   buildMeetingRetrievalResult,
   mergeRetrievalResultsByMeeting,
   parseQuery,
+  resolveExplicitMeetingScope,
   retrieveContext,
+  shouldUsePreparedExtractiveAnswer,
 } from './intelligence/queryEngine';
 import { getAskPlutoPrompt } from './intelligence/queryPrompts';
 import { generateSuggestedQueries } from './intelligence/suggestedQueries';
@@ -2907,6 +2910,10 @@ app.whenReady().then(async () => {
           signal: controller.signal,
           useModelClassification: false,
         });
+        const explicitMeetingScope = resolveExplicitMeetingScope(
+          queryText,
+          persistedMeetings,
+        );
         const requestedMode =
           typeof input !== 'string' &&
           (input.modeOverride === 'fast' || input.modeOverride === 'deep')
@@ -3049,8 +3056,9 @@ app.whenReady().then(async () => {
                   Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
               }
             : undefined;
-        const temporalRange =
-          explicitTemporalRange || inheritedScope?.temporalRange;
+        const temporalRange = explicitMeetingScope
+          ? undefined
+          : explicitTemporalRange || inheritedScope?.temporalRange;
         const inheritedMeetingIds = inheritedScope?.meetingIds || [];
         const temporalMeetings = temporalRange
           ? inheritedScope?.kind === 'temporal' &&
@@ -3112,6 +3120,48 @@ app.whenReady().then(async () => {
                 source: explicitTemporalRange ? 'explicit' : 'inherited',
               }
             : undefined;
+        const explicitlyScopedMeetings = explicitMeetingScope?.meetings || [];
+        const explicitRetrievalSummary: AskPlutoRetrievalSummary | undefined =
+          explicitMeetingScope
+            ? {
+                matchedMeetingCount: explicitlyScopedMeetings.length,
+                includedMeetingCount: explicitlyScopedMeetings.length,
+                preparedEvidenceCount: explicitlyScopedMeetings.filter(
+                  (meeting) =>
+                    Boolean(
+                      meeting.analysis_json ||
+                        meeting.enhanced_notes ||
+                        meeting.user_notes ||
+                        meeting.mid_json,
+                    ),
+                ).length,
+                transcriptOnlyCount: explicitlyScopedMeetings.filter(
+                  (meeting) =>
+                    Boolean(meeting.transcript_json) &&
+                    !meeting.analysis_json &&
+                    !meeting.enhanced_notes &&
+                    !meeting.user_notes &&
+                    !meeting.mid_json,
+                ).length,
+                omittedMeetingCount: 0,
+              }
+            : undefined;
+        const explicitResolvedScope: ResolvedAskPlutoScope | undefined =
+          explicitMeetingScope
+            ? {
+                kind: 'meeting_ids',
+                meetingIds: explicitlyScopedMeetings.map((meeting) =>
+                  String(meeting.id),
+                ),
+                resolvedAt: new Date().toISOString(),
+                source: 'explicit',
+              }
+            : undefined;
+        if (explicitMeetingScope) {
+          scopeLabel = explicitMeetingScope.label;
+          scopeMeetingCount = explicitlyScopedMeetings.length;
+          sendStatus('retrieving');
+        }
         if (temporalRange) {
           scopeLabel = temporalRange.label;
           scopeMeetingCount = temporalMeetings.length;
@@ -3126,6 +3176,17 @@ app.whenReady().then(async () => {
             outcome: 'no_evidence' as const,
             resolvedScope: temporalResolvedScope,
             retrievalSummary: temporalRetrievalSummary,
+          };
+        }
+        if (explicitMeetingScope && explicitlyScopedMeetings.length === 0) {
+          return {
+            status: 'answered' as const,
+            answer: "I couldn't find any recent meetings.",
+            citations: [],
+            currentMeeting: currentMeetingStatus,
+            outcome: 'no_evidence' as const,
+            resolvedScope: explicitResolvedScope,
+            retrievalSummary: explicitRetrievalSummary,
           };
         }
         if (currentMeetingRequested && currentMeeting.kind === 'none') {
@@ -3182,6 +3243,15 @@ app.whenReady().then(async () => {
             `Meeting from ${temporalRange?.label || 'selected period'}`,
           ),
         );
+        const explicitlyScopedPinnedResults = explicitlyScopedMeetings.map(
+          (meeting) =>
+            buildMeetingRetrievalResult(
+              meeting,
+              explicitMeetingScope?.kind === 'recent'
+                ? 'Recent meeting'
+                : 'Named meeting',
+            ),
+        );
         const priorMeetingIds = [
           ...new Set([
             ...(inheritedScope?.meetingIds || []),
@@ -3219,6 +3289,7 @@ app.whenReady().then(async () => {
         const pinnedResults = mergeRetrievalResultsByMeeting(
           currentPinnedResult ? [currentPinnedResult] : [],
           temporalPinnedResults,
+          explicitlyScopedPinnedResults,
           historicalPinnedResults,
           priorPinnedResults,
         );
@@ -3241,19 +3312,22 @@ app.whenReady().then(async () => {
             currentMeetingRequested,
             historicalCandidateLimit,
           });
-        const context = temporalResolvedScope
-          ? pinnedResults
-          : restrictToCurrentMeeting && currentPinnedResult
-            ? [currentPinnedResult]
-            : restrictToPinnedCurrentComparison
-              ? pinnedResults
-              : restrictToPriorConversation
-                ? priorPinnedResults
-                : await retrieveContext(parsed, { pinnedResults });
+        const context = explicitResolvedScope
+          ? explicitlyScopedPinnedResults
+          : temporalResolvedScope
+            ? pinnedResults
+            : restrictToCurrentMeeting && currentPinnedResult
+              ? [currentPinnedResult]
+              : restrictToPinnedCurrentComparison
+                ? pinnedResults
+                : restrictToPriorConversation
+                  ? priorPinnedResults
+                  : await retrieveContext(parsed, { pinnedResults });
         retrievalCompletedAt = Date.now();
         controller.signal.throwIfAborted();
 
         const resolvedScope: ResolvedAskPlutoScope =
+          explicitResolvedScope ||
           temporalResolvedScope ||
           (currentMeetingRequested && currentMeeting.meetingId
             ? {
@@ -3269,13 +3343,14 @@ app.whenReady().then(async () => {
                 source: 'explicit',
               });
         const retrievalSummary: AskPlutoRetrievalSummary =
-          temporalRetrievalSummary || {
-            matchedMeetingCount: context.length,
-            includedMeetingCount: context.length,
-            preparedEvidenceCount: context.length,
-            transcriptOnlyCount: 0,
-            omittedMeetingCount: 0,
-          };
+          explicitRetrievalSummary ||
+            temporalRetrievalSummary || {
+              matchedMeetingCount: context.length,
+              includedMeetingCount: context.length,
+              preparedEvidenceCount: context.length,
+              transcriptOnlyCount: 0,
+              omittedMeetingCount: 0,
+            };
         if (context.length === 0) {
           return {
             status: 'answered' as const,
@@ -3309,7 +3384,13 @@ app.whenReady().then(async () => {
           context,
         );
         let answerRaw: string;
-        if (extractiveAnswer) {
+        if (
+          extractiveAnswer &&
+          shouldUsePreparedExtractiveAnswer({
+            mode: reasoningMode,
+            contextCount: context.length,
+          })
+        ) {
           answerRaw = extractiveAnswer;
           validatedAnswerStream.push(answerRaw);
         } else {
@@ -3319,7 +3400,12 @@ app.whenReady().then(async () => {
             queryText,
             context,
             parsed.intent,
-            priorTurns,
+            shouldIncludePriorConversation(
+              queryText,
+              Boolean(explicitMeetingScope),
+            )
+              ? priorTurns
+              : [],
             formatAskPlutoCorrectionsForPrompt(relevantCorrections),
           );
           console.log(

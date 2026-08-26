@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as dbModule from '../../electron/db';
 import {
   buildExtractiveTemporalSummary,
+  buildMeetingRetrievalResult,
   mergeRetrievalResultsByMeeting,
   parseQuery,
+  resolveExplicitMeetingScope,
   retrieveContext,
+  shouldUsePreparedExtractiveAnswer,
 } from '../../electron/intelligence/queryEngine';
 import * as factoryModule from '../../electron/llm/factory';
 import type { LLMProvider, LLMSettings } from '../../electron/llm/provider';
@@ -348,5 +351,118 @@ describe('Query Engine', () => {
         'Recording review: The team found a twenty-second recording gap and assigned an audio capture investigation. [Source 1]',
       );
     });
+  });
+
+  describe('explicit meeting scope', () => {
+    const meetings = [
+      {
+        id: 'latest',
+        title: 'Weekly planning',
+        started_at: '2026-08-25T19:00:00.000Z',
+      },
+      {
+        id: 'diagnosis',
+        title: 'Live Transcript Diagnosis',
+        started_at: '2026-08-21T18:16:43.967Z',
+      },
+      {
+        id: 'older',
+        title: 'Architecture review',
+        started_at: '2026-08-20T18:00:00.000Z',
+      },
+    ] as dbModule.PersistedMeeting[];
+
+    it('pins a specifically named meeting instead of running a global search', () => {
+      expect(
+        resolveExplicitMeetingScope(
+          "What action items came out of Friday's Live Transcript Diagnosis?",
+          meetings,
+        ),
+      ).toMatchObject({
+        kind: 'named',
+        label: 'Live Transcript Diagnosis',
+        meetings: [{ id: 'diagnosis' }],
+      });
+    });
+
+    it('resolves recent meetings to a bounded newest-first scope', () => {
+      expect(
+        resolveExplicitMeetingScope(
+          'Show me a breakdown of my recent meetings please',
+          meetings,
+          2,
+        ),
+      ).toMatchObject({
+        kind: 'recent',
+        meetings: [{ id: 'latest' }, { id: 'diagnosis' }],
+      });
+    });
+
+    it('does not treat generic Meeting titles as explicit references', () => {
+      expect(
+        resolveExplicitMeetingScope('What was discussed in the meeting?', [
+          { id: 'generic', title: 'Meeting' } as dbModule.PersistedMeeting,
+        ]),
+      ).toBeNull();
+    });
+  });
+
+  it('includes structured action items and occurrence time in meeting evidence', () => {
+    const result = buildMeetingRetrievalResult({
+      id: 'diagnosis',
+      title: 'Live Transcript Diagnosis',
+      started_at: '2026-08-21T18:16:43.967Z',
+      analysis_json: JSON.stringify({
+        analysis_schema_version: 3,
+        overview: 'The team reviewed live transcription reliability.',
+        all_action_items: [
+          {
+            description:
+              'Select a suitable YouTube video and rerun the transcript analysis evaluation.',
+          },
+        ],
+      }),
+    } as dbModule.PersistedMeeting);
+
+    expect(result.evidence_text).toContain(
+      '[Occurred]: 2026-08-21T18:16:43.967Z',
+    );
+    expect(result.evidence_text).toContain(
+      '[Action items]: Select a suitable YouTube video and rerun the transcript analysis evaluation.',
+    );
+  });
+
+  it('samples substantive transcript passages across a long meeting', () => {
+    const segments = Array.from({ length: 60 }, (_, index) => ({
+      speaker: index % 2 === 0 ? 'Me' : 'Them',
+      text:
+        index < 20
+          ? `Opening discussion ${index} about cohort selection and advisor interactions.`
+          : index < 40
+            ? `Middle discussion ${index} about Snowflake signals and revenue data.`
+            : `Closing discussion ${index} about client follow-ups and advisor notifications.`,
+    }));
+    const result = buildMeetingRetrievalResult({
+      id: 'long-meeting',
+      title: 'Planning review',
+      transcript_json: JSON.stringify({ segments }),
+    } as dbModule.PersistedMeeting);
+
+    expect(result.evidence_text).toContain('Opening discussion');
+    expect(result.evidence_text).toContain('Middle discussion');
+    expect(result.evidence_text).toContain('Closing discussion');
+    expect(result.evidence_text).toContain('[Transcript excerpt 1/');
+  });
+
+  it('uses prepared extractive answers only for one-meeting Fast requests', () => {
+    expect(
+      shouldUsePreparedExtractiveAnswer({ mode: 'fast', contextCount: 1 }),
+    ).toBe(true);
+    expect(
+      shouldUsePreparedExtractiveAnswer({ mode: 'fast', contextCount: 3 }),
+    ).toBe(false);
+    expect(
+      shouldUsePreparedExtractiveAnswer({ mode: 'deep', contextCount: 1 }),
+    ).toBe(false);
   });
 });

@@ -63,7 +63,7 @@ describe('getAskPlutoPrompt', () => {
       true,
     );
     expect(prompt.length).toBeLessThan(12_000);
-    expect(prompt).toContain('Write a readable chat response');
+    expect(prompt).toContain('Write a rich, readable breakdown');
     expect(prompt).toContain(
       'Keep each sentence to one independently verifiable claim',
     );
@@ -71,7 +71,7 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).not.toContain('Topics: None');
     expect(prompt).not.toContain('Decisions: None');
     expect(prompt).not.toContain('Action Items: None');
-    expect(prompt).toContain('use bullets only when they materially improve');
+    expect(prompt).toContain('using one bullet for each meeting');
     expect(prompt).not.toContain(
       'Use markdown bullet points to list key items',
     );
@@ -105,6 +105,33 @@ describe('getAskPlutoPrompt', () => {
     expect(prompt).toContain('Make every point self-contained');
     expect(prompt).toContain('"an application"');
     expect(prompt).toContain('smallest set of directly supporting sources');
+  });
+
+  it('asks for a useful per-meeting breakdown when several meetings are in scope', () => {
+    const context = Array.from({ length: 3 }, (_, index) => ({
+      meeting_id: `meeting-${index}`,
+      meeting_title: `Review ${index}`,
+      mid: null,
+      evidence_text: `[Occurred]: 2026-08-2${index}\n[Transcript]: Project ${index} was reviewed.`,
+      score: 1,
+      score_breakdown: {
+        fts_rank: 0,
+        graph_proximity: 0,
+        recency_decay: 1,
+        mention_weight: 0,
+      },
+    }));
+
+    const prompt = getAskPlutoPrompt(
+      'Show me a breakdown of my recent meetings',
+      context,
+      'factual',
+    );
+
+    expect(prompt).toContain('Cover each meeting that has meaningful evidence');
+    expect(prompt).toContain('up to 260 words');
+    expect(prompt).toContain('do not spend output on an uncited overview');
+    expect(prompt).not.toContain('Return at most 2 concise supported points');
   });
 
   it('includes user corrections as constraints rather than meeting evidence', () => {

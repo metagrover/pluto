@@ -5,11 +5,18 @@ export type AskPlutoReasoningOverride = 'auto' | AskPlutoReasoningMode;
 
 const DEEP_REASONING_PATTERN =
   /\b(compare|comparison|changed?|difference|conflict|contradict|trend|pattern|risk|rationale|why|advise|advice|recommend|across meetings)\b/i;
+const MULTI_MEETING_SYNTHESIS_PATTERN =
+  /\b(?:summari[sz]e|recap|overview|breakdown|analy[sz]e)\b[\s\S]{0,60}\b(?:meetings|calls)\b/i;
 
 export const queryReferencesPriorTurn = (query: string): boolean =>
   /\b(it|that|those|them|previous|earlier|you said|you suggested|why)\b/i.test(
     query,
   );
+
+export const shouldIncludePriorConversation = (
+  query: string,
+  hasExplicitMeetingScope: boolean,
+): boolean => !hasExplicitMeetingScope || queryReferencesPriorTurn(query);
 
 export const getCrossMeetingCandidateLimit = (
   query: string,
@@ -65,5 +72,8 @@ export const resolveAskPlutoReasoningMode = ({
 }): AskPlutoReasoningMode => {
   if (override !== 'auto') return override;
   if (intent === 'comparative' || intent === 'exploratory') return 'deep';
-  return DEEP_REASONING_PATTERN.test(query) ? 'deep' : 'fast';
+  return DEEP_REASONING_PATTERN.test(query) ||
+    MULTI_MEETING_SYNTHESIS_PATTERN.test(query)
+    ? 'deep'
+    : 'fast';
 };

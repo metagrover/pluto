@@ -17,6 +17,13 @@ interface AnalysisPoint {
   text?: string;
 }
 
+interface AnalysisActionItem {
+  description?: string;
+  text?: string;
+  assignee?: string;
+  due_date?: string;
+}
+
 interface AnalysisTopic {
   title?: string;
   summary?: string;
@@ -28,6 +35,7 @@ interface V3AnalysisDocument {
   topics?: AnalysisTopic[];
   overview?: string;
   summary?: string;
+  all_action_items?: AnalysisActionItem[];
 }
 
 const parseMid = (value: unknown): MidFrontmatter | null => {
@@ -39,6 +47,59 @@ const parseMid = (value: unknown): MidFrontmatter | null => {
   }
 };
 
+const buildTranscriptEvidence = (
+  segments: Array<{ speaker?: unknown; text?: unknown }>,
+): string => {
+  const lines = segments
+    .map((segment) => {
+      const text = typeof segment.text === 'string' ? segment.text.trim() : '';
+      const speaker =
+        typeof segment.speaker === 'string' ? segment.speaker : 'Speaker';
+      return text ? `${speaker}: ${text}` : '';
+    })
+    .filter(Boolean);
+  if (lines.length === 0) return '';
+  if (lines.length <= 24) return `[Transcript]:\n${lines.join('\n')}`;
+
+  const passages: Array<{ index: number; text: string }> = [];
+  let passageLines: string[] = [];
+  let passageLength = 0;
+  for (const line of lines) {
+    passageLines.push(line);
+    passageLength += line.length;
+    if (passageLength >= 260 || passageLines.length >= 6) {
+      passages.push({ index: passages.length, text: passageLines.join(' ') });
+      passageLines = [];
+      passageLength = 0;
+    }
+  }
+  if (passageLines.length > 0) {
+    passages.push({ index: passages.length, text: passageLines.join(' ') });
+  }
+
+  const bucketCount = Math.min(6, passages.length);
+  const selected = Array.from({ length: bucketCount }, (_, bucketIndex) => {
+    const start = Math.floor((bucketIndex * passages.length) / bucketCount);
+    const end = Math.max(
+      start + 1,
+      Math.floor(((bucketIndex + 1) * passages.length) / bucketCount),
+    );
+    return passages
+      .slice(start, end)
+      .sort(
+        (left, right) =>
+          right.text.length - left.text.length || left.index - right.index,
+      )[0];
+  }).sort((left, right) => left.index - right.index);
+
+  return selected
+    .map(
+      (passage, index) =>
+        `[Transcript excerpt ${index + 1}/${selected.length}]: ${passage.text.slice(0, 420)}`,
+    )
+    .join('\n');
+};
+
 export const buildMeetingRetrievalResult = (
   meeting: dbModule.PersistedMeeting,
   label = 'Current meeting',
@@ -46,6 +107,8 @@ export const buildMeetingRetrievalResult = (
   const evidence: string[] = [
     `[${label}]: ${meeting.title || 'Untitled meeting'}`,
   ];
+  const occurredAt = meeting.started_at || meeting.created_at;
+  if (occurredAt) evidence.push(`[Occurred]: ${occurredAt}`);
   if (typeof meeting.analysis_json === 'string') {
     try {
       const analysis = JSON.parse(meeting.analysis_json) as V3AnalysisDocument;
@@ -58,6 +121,14 @@ export const buildMeetingRetrievalResult = (
           .join('\n');
       if (analysisText)
         evidence.push(`[Analysis]: ${analysisText.slice(0, 1800)}`);
+      const actionItems = (analysis.all_action_items || [])
+        .map((item) => item.description || item.text || '')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .join('; ');
+      if (actionItems) {
+        evidence.push(`[Action items]: ${actionItems.slice(0, 1200)}`);
+      }
     } catch {
       // Other evidence remains usable.
     }
@@ -71,19 +142,9 @@ export const buildMeetingRetrievalResult = (
       const transcript = JSON.parse(meeting.transcript_json) as {
         segments?: Array<{ speaker?: unknown; text?: unknown }>;
       };
-      const transcriptText = transcript.segments
-        ?.slice(-24)
-        .map((segment) => {
-          const text =
-            typeof segment.text === 'string' ? segment.text.trim() : '';
-          const speaker =
-            typeof segment.speaker === 'string' ? segment.speaker : 'Speaker';
-          return text ? `${speaker}: ${text}` : '';
-        })
-        .filter(Boolean)
-        .join('\n');
+      const transcriptText = buildTranscriptEvidence(transcript.segments || []);
       if (transcriptText) {
-        evidence.push(`[Transcript]:\n${transcriptText.slice(0, 2400)}`);
+        evidence.push(transcriptText.slice(0, 2800));
       }
     } catch {
       // Other evidence remains usable.
@@ -414,6 +475,64 @@ const CONTEXTLESS_SUMMARY_TEXT =
   /\b(?:one|a|another|the)\s+(?:speaker|participant|attendee)\b|\b(?:an?|the)\s+(?:application|app|project|product|tool)\b/i;
 const GENERIC_MEETING_TITLE =
   /^(?:meeting|untitled meeting|recovered recording)$/i;
+
+const normalizeScopeText = (value: string): string =>
+  value
+    .toLocaleLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+export const resolveExplicitMeetingScope = (
+  query: string,
+  meetings: dbModule.PersistedMeeting[],
+  recentLimit = 5,
+): {
+  kind: 'named' | 'recent';
+  label: string;
+  meetings: dbModule.PersistedMeeting[];
+} | null => {
+  const normalizedQuery = normalizeScopeText(query);
+  const namedMatch = meetings
+    .map((meeting) => ({
+      meeting,
+      normalizedTitle: normalizeScopeText(meeting.title || ''),
+    }))
+    .filter(
+      ({ meeting, normalizedTitle }) =>
+        normalizedTitle.length >= 8 &&
+        !GENERIC_MEETING_TITLE.test(meeting.title || '') &&
+        normalizedQuery.includes(normalizedTitle),
+    )
+    .sort(
+      (left, right) =>
+        right.normalizedTitle.length - left.normalizedTitle.length,
+    )[0];
+  if (namedMatch) {
+    return {
+      kind: 'named',
+      label: namedMatch.meeting.title || 'the named meeting',
+      meetings: [namedMatch.meeting],
+    };
+  }
+
+  if (!/\b(?:recent|latest)\s+(?:meetings|calls)\b/i.test(query)) {
+    return null;
+  }
+  return {
+    kind: 'recent',
+    label: 'your recent meetings',
+    meetings: meetings.slice(0, recentLimit),
+  };
+};
+
+export const shouldUsePreparedExtractiveAnswer = ({
+  mode,
+  contextCount,
+}: {
+  mode: 'fast' | 'deep' | undefined;
+  contextCount: number;
+}): boolean => mode === 'fast' && contextCount === 1;
 
 const extractPreparedAnalysis = (evidence: string): string | null => {
   const match = evidence.match(

@@ -392,6 +392,7 @@ export const auditCitations = (
     const directSupport = [
       citation.evidence_span || '',
       source?.meeting_title || source?.mid?.title || '',
+      source?.evidence_text || '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -414,6 +415,7 @@ export const auditCitations = (
             return [
               item.citation.evidence_span || '',
               itemSource?.meeting_title || itemSource?.mid?.title || '',
+              itemSource?.evidence_text || '',
             ];
           })
           .filter(Boolean)

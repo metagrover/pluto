@@ -1980,7 +1980,7 @@ export function calculateOllamaContextBudget(
       : task === 'askPluto'
         ? 192
         : task === 'askPlutoDeep'
-          ? 256
+          ? 512
           : task === 'analysisEditorial'
             ? OLLAMA_EDITORIAL_OUTPUT_TOKENS
             : task === 'knowledgeDoc' ||

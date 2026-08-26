@@ -4,6 +4,7 @@ import {
   getCrossMeetingCandidateLimit,
   queryReferencesPriorTurn,
   resolveAskPlutoReasoningMode,
+  shouldIncludePriorConversation,
   shouldRestrictToCurrentMeetingEvidence,
   shouldRestrictToPinnedCurrentComparison,
   shouldRestrictToPriorConversationEvidence,
@@ -34,6 +35,21 @@ describe('resolveAskPlutoReasoningMode', () => {
     ).toBe('deep');
   });
 
+  it('uses deep synthesis for multi-meeting summaries and breakdowns', () => {
+    expect(
+      resolveAskPlutoReasoningMode({
+        query: 'Show me a breakdown of my recent meetings',
+        intent: 'factual',
+      }),
+    ).toBe('deep');
+    expect(
+      resolveAskPlutoReasoningMode({
+        query: "Summarize today's meetings",
+        intent: 'temporal',
+      }),
+    ).toBe('deep');
+  });
+
   it('honors an explicit user override', () => {
     expect(
       resolveAskPlutoReasoningMode({
@@ -59,6 +75,21 @@ describe('resolveAskPlutoReasoningMode', () => {
     expect(
       queryReferencesPriorTurn('What did Riley decide about pricing?'),
     ).toBe(false);
+  });
+
+  it('keeps history for follow-ups but excludes it from a new explicit scope', () => {
+    expect(
+      shouldIncludePriorConversation(
+        "What action items came out of Friday's Live Transcript Diagnosis?",
+        true,
+      ),
+    ).toBe(false);
+    expect(shouldIncludePriorConversation('Why did that happen?', true)).toBe(
+      true,
+    );
+    expect(shouldIncludePriorConversation('Who owns pricing?', false)).toBe(
+      true,
+    );
   });
 
   it('selects bounded historical anchors for current-meeting comparisons', () => {

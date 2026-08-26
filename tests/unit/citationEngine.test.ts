@@ -513,6 +513,27 @@ describe('Citation Engine', () => {
       expect(audited[0].evidence_span).toContain('shared with the group');
     });
 
+    it('audits a meeting-level synthesis against the complete retrieved evidence', () => {
+      const context = [
+        {
+          meeting_id: 'm1',
+          meeting_title: 'Advisor review',
+          evidence_text: `[Transcript excerpt 1/2]: Snowflake signals and revenue data were reviewed.\n${'Unrelated implementation detail. '.repeat(15)}\n[Transcript excerpt 2/2]: Advisor notifications will guide client follow-ups.`,
+          mid: null,
+        },
+      ] as RetrievalResult[];
+
+      const audited = auditCitations(
+        buildCitationChain(
+          'Snowflake signals and revenue data will guide advisor notifications and client follow-ups. [Source 1]',
+          context,
+        ),
+        context,
+      );
+
+      expect(audited[0].evidence_valid).toBe(true);
+    });
+
     it('rejects evidence that reverses the claim with negation', () => {
       const context = [
         {
