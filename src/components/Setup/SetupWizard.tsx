@@ -184,7 +184,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
               <h2 className="font-serif text-[2.25rem] font-medium leading-[1.1] tracking-[-0.025em] sm:text-[2.5rem]">
                 Ready in three minutes.
               </h2>
-              <p className="mt-4 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
+              <p className="mt-2 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
                 One download. Two permissions.
               </p>
 
@@ -243,7 +243,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                   ? 'Everything is ready.'
                   : 'Getting Pluto ready.'}
               </h2>
-              <p className="mt-4 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
+              <p className="mt-2 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
                 Pluto checks each item automatically.
               </p>
 
