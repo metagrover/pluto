@@ -215,7 +215,17 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 className="font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em] sm:text-[2.25rem]"
               >
                 <span aria-hidden="true">
-                  Ready in <span className="italic">{typedSetupQualifier}</span>
+                  Ready in{' '}
+                  <span
+                    data-testid="setup-typewriter-qualifier"
+                    className={`italic transition-colors duration-200 ${
+                      showSetupCursor
+                        ? 'text-[oklch(0.52_0.015_258)]'
+                        : 'text-current'
+                    }`}
+                  >
+                    {typedSetupQualifier}
+                  </span>
                   {showSetupCursor && (
                     <span
                       data-testid="setup-typewriter-cursor"

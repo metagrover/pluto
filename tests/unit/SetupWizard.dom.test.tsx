@@ -95,12 +95,22 @@ describe('SetupWizard', () => {
     expect(
       container.querySelector('[data-testid="setup-typewriter-cursor"]'),
     ).toBeTruthy();
+    expect(
+      container
+        .querySelector('[data-testid="setup-typewriter-qualifier"]')
+        ?.classList.contains('text-[oklch(0.52_0.015_258)]'),
+    ).toBe(true);
 
     await act(async () => vi.advanceTimersByTime(400));
 
     expect(
       container.querySelector('[data-testid="setup-typewriter-cursor"]'),
     ).toBeFalsy();
+    expect(
+      container
+        .querySelector('[data-testid="setup-typewriter-qualifier"]')
+        ?.classList.contains('text-current'),
+    ).toBe(true);
   });
 
   it('prepares local recording requirements without Python or provider setup', async () => {
