@@ -1,7 +1,11 @@
 import Foundation
 
 public protocol ModelInstalling: Sendable {
-    func install(manifest: ModelManifest, into stagingDirectory: URL) async throws
+    func install(
+        manifest: ModelManifest,
+        into stagingDirectory: URL,
+        progressHandler: ModelPreparationProgressHandler?
+    ) async throws
 }
 
 public actor ModelStore {
@@ -23,7 +27,10 @@ public actor ModelStore {
         self.fileManager = fileManager
     }
 
-    public func prepare(manifest: ModelManifest) async throws -> URL {
+    public func prepare(
+        manifest: ModelManifest,
+        progressHandler: ModelPreparationProgressHandler? = nil
+    ) async throws -> URL {
         guard isSafeComponent(manifest.version) else {
             throw RuntimeFailure.modelPreparationFailed
         }
@@ -41,7 +48,11 @@ public actor ModelStore {
         do {
             try fileManager.createDirectory(at: versions, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
-            try await installer.install(manifest: manifest, into: staging)
+            try await installer.install(
+                manifest: manifest,
+                into: staging,
+                progressHandler: progressHandler
+            )
             guard directoryContainsFiles(staging) else {
                 throw RuntimeFailure.modelPreparationFailed
             }

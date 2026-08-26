@@ -577,6 +577,7 @@ export class ParakeetLiveClient {
   }
 
   private consumeEvent(event: NativeEvent): void {
+    if (event.event === 'prepare_progress') return;
     const state = this.streams.get(event.streamId);
     if (!state || !state.active) return;
     if (

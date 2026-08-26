@@ -8,7 +8,11 @@ private actor FakeModelInstaller: ModelInstalling {
     private(set) var installedVersions: [String] = []
     var shouldFail = false
 
-    func install(manifest: ModelManifest, into stagingDirectory: URL) async throws {
+    func install(
+        manifest: ModelManifest,
+        into stagingDirectory: URL,
+        progressHandler _: ModelPreparationProgressHandler?
+    ) async throws {
         installedVersions.append(manifest.version)
         if shouldFail { throw Failure.requested }
         try FileManager.default.createDirectory(

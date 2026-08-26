@@ -140,29 +140,6 @@ private enum ParakeetRuntimeMain {
         guard let arguments = Arguments(Array(CommandLine.arguments.dropFirst())) else {
             return
         }
-        let service: any ParakeetRuntimeServing
-        #if DEBUG
-            if arguments.testFixtureLive {
-                service = FixtureRuntimeService(
-                    liveConfigurationID: arguments.liveConfigurationID
-                )
-            } else {
-                service = ParakeetService(
-                    modelRoot: arguments.modelRoot,
-                    audioRoot: arguments.audioRoot,
-                    manifest: ProductionModelManifest.current,
-                    liveConfigurationID: arguments.liveConfigurationID
-                )
-            }
-        #else
-            service = ParakeetService(
-                modelRoot: arguments.modelRoot,
-                audioRoot: arguments.audioRoot,
-                manifest: ProductionModelManifest.current,
-                liveConfigurationID: arguments.liveConfigurationID
-            )
-        #endif
-        let router = RuntimeJSONLineRouter(service: service)
         let writer = RuntimeJSONLineWriter { data in
             data.withUnsafeBytes { bytes in
                 guard var cursor = bytes.baseAddress else { return }
@@ -175,6 +152,40 @@ private enum ParakeetRuntimeMain {
                 }
             }
         }
+        let progressSink: @Sendable (String, ModelPreparationProgress) -> Void = {
+            requestId, progress in
+            Task {
+                await writer.write(RuntimePreparationProgressEvent(
+                    requestId: requestId,
+                    progress: progress
+                ))
+            }
+        }
+        let service: any ParakeetRuntimeServing
+        #if DEBUG
+            if arguments.testFixtureLive {
+                service = FixtureRuntimeService(
+                    liveConfigurationID: arguments.liveConfigurationID
+                )
+            } else {
+                service = ParakeetService(
+                    modelRoot: arguments.modelRoot,
+                    audioRoot: arguments.audioRoot,
+                    manifest: ProductionModelManifest.current,
+                    liveConfigurationID: arguments.liveConfigurationID,
+                    preparationProgressSink: progressSink
+                )
+            }
+        #else
+            service = ParakeetService(
+                modelRoot: arguments.modelRoot,
+                audioRoot: arguments.audioRoot,
+                manifest: ProductionModelManifest.current,
+                liveConfigurationID: arguments.liveConfigurationID,
+                preparationProgressSink: progressSink
+            )
+        #endif
+        let router = RuntimeJSONLineRouter(service: service)
         let coordinator = RuntimeRequestCoordinator(router: router, writer: writer)
 
         var framer = BoundedJSONLineFramer()

@@ -25,21 +25,43 @@ describe('transcription startup boundary', () => {
     expect(main).not.toContain('await mlxPreview.health()');
   });
 
-  it('ensures a current native Parakeet runtime before starting development', () => {
+  it('ensures current native recording runtimes before starting development', () => {
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as {
       scripts?: Record<string, string>;
     };
-    const ensureScript = readFileSync(
+    const ensureParakeetScript = readFileSync(
       'scripts/ensure_parakeet_runtime.sh',
       'utf8',
     );
+    const ensureAudioCapScript = readFileSync(
+      'scripts/ensure_audio_cap_runtime.sh',
+      'utf8',
+    );
 
-    expect(packageJson.scripts?.predev).toBe('pnpm run ensure:parakeet');
+    expect(packageJson.scripts?.predev).toBe('pnpm run ensure:dev-runtime');
+    expect(packageJson.scripts?.['ensure:dev-runtime']).toBe(
+      'pnpm run ensure:sqlite-abi && pnpm run ensure:parakeet && pnpm run ensure:audio-cap',
+    );
+    expect(packageJson.scripts?.['ensure:sqlite-abi']).toBe(
+      'node scripts/ensure_sqlite_abi.mjs',
+    );
     expect(packageJson.scripts?.['ensure:parakeet']).toBe(
       './scripts/ensure_parakeet_runtime.sh',
     );
-    expect(ensureScript).toContain('-newer "${output}"');
-    expect(ensureScript).toContain('exec "${SCRIPT_DIR}/build_parakeet.sh"');
+    expect(packageJson.scripts?.['ensure:audio-cap']).toBe(
+      './scripts/ensure_audio_cap_runtime.sh',
+    );
+    expect(ensureParakeetScript).toContain('-newer "${output}"');
+    expect(ensureParakeetScript).toContain(
+      'exec "${SCRIPT_DIR}/build_parakeet.sh"',
+    );
+    expect(ensureAudioCapScript).toContain('-newer "${OUTPUT_PATH}"');
+    expect(ensureAudioCapScript).toContain(
+      'swiftc "${SOURCE_DIRECTORY}"/*.swift',
+    );
+    expect(ensureAudioCapScript).toContain(
+      'codesign --sign - --force "${OUTPUT_PATH}"',
+    );
   });
 
   it('excludes FluidAudio benchmark notes from Swift source discovery', () => {

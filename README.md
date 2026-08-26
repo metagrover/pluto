@@ -34,16 +34,13 @@ Intelligent meeting assistant and "second brain" application.
     pnpm run setup-python
     ```
 
-4.  **Build native audio tools (macOS)**
-    This builds the Swift binaries used for microphone + system audio capture.
-    ```bash
-    pnpm run build-native
-    ```
-
-5.  **Run the App**
+4.  **Run the App**
     ```bash
     pnpm run dev
     ```
+    Development startup builds any missing or stale native transcription and
+    audio-capture executables before launching Pluto. On first use, Pluto then
+    downloads and verifies its local transcription models in the setup screen.
 
 ### Contributor Verification
 

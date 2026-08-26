@@ -1,6 +1,8 @@
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 
+import { useModelDownloadProgress } from '../hooks/useModelDownloadProgress';
 import { Logo } from './Brand/Logo';
+import { ModelDownloadProgress } from './ModelDownloadProgress';
 
 type ReadinessStatus = {
   details: {
@@ -29,6 +31,7 @@ export const RuntimeReadinessGate = ({
   children,
 }: RuntimeReadinessGateProps) => {
   const [phase, setPhase] = useState<ReadinessPhase>('checking');
+  const modelDownloadProgress = useModelDownloadProgress();
 
   const verify = useCallback(async () => {
     setPhase('checking');
@@ -97,8 +100,14 @@ export const RuntimeReadinessGate = ({
               Try again
             </button>
           ) : (
-            <div className="mt-10 h-1 overflow-hidden rounded-full bg-pro-border">
-              <div className="h-full w-1/2 animate-pulse rounded-full bg-pro-accent" />
+            <div className="mt-10">
+              {phase === 'preparing' ? (
+                <ModelDownloadProgress progress={modelDownloadProgress} />
+              ) : (
+                <div className="h-1.5 overflow-hidden rounded-full bg-pro-border">
+                  <div className="h-full w-1/2 animate-pulse rounded-full bg-pro-accent" />
+                </div>
+              )}
             </div>
           )}
         </div>

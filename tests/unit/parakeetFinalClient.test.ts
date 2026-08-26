@@ -57,10 +57,47 @@ const prepared = (id: string) => ({
 });
 
 describe('ParakeetFinalClient', () => {
+  it('forwards only progress correlated to its active prepare request', async () => {
+    const child = new FakeChild();
+    const client = new ParakeetFinalClient({ paths, spawn: () => child });
+    const progress = vi.fn();
+    const ready = client.prepare(progress);
+    const requestId = String(child.writes[0].id);
+
+    child.respond({
+      schemaVersion: 1,
+      kind: 'event',
+      event: 'prepare_progress',
+      requestId: 'prepare-stale',
+      phase: 'downloading',
+      downloadedBytes: 1,
+      totalBytes: 10,
+    });
+    child.respond({
+      schemaVersion: 1,
+      kind: 'event',
+      event: 'prepare_progress',
+      requestId,
+      phase: 'downloading',
+      downloadedBytes: 4,
+      totalBytes: 10,
+    });
+    child.respond(prepared(requestId));
+
+    await ready;
+    expect(progress).toHaveBeenCalledTimes(1);
+    expect(progress).toHaveBeenCalledWith({
+      phase: 'downloading',
+      downloadedBytes: 4,
+      totalBytes: 10,
+    });
+  });
+
   it('starts one shared child and correlates preparation', async () => {
     const child = new FakeChild();
     const spawn = vi.fn(() => child);
     const client = new ParakeetFinalClient({ paths, spawn });
+    expect(client.getPreparedCapability()).toBeNull();
 
     const first = client.prepare();
     const second = client.prepare();
@@ -80,6 +117,11 @@ describe('ParakeetFinalClient', () => {
       modelBundleVersion: 'test-model-v1',
     });
     await expect(second).resolves.toEqual(await first);
+    expect(client.getPreparedCapability()).toMatchObject({
+      ready: true,
+      liveEngine: 'parakeet_eou_320ms',
+      modelVersion: 'test-model-v1',
+    });
   });
 
   it('reprepares a new runtime after idle unload before final transcription', async () => {
@@ -101,6 +143,7 @@ describe('ParakeetFinalClient', () => {
     await ready;
     await vi.advanceTimersByTimeAsync(1);
     expect(firstChild.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(client.getPreparedCapability()).toBeNull();
 
     const transcription = client.transcribe({
       meetingId: 'after-idle-unload',

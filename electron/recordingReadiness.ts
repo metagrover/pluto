@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import { systemPreferences } from 'electron';
 import type { TranscriptionRuntimeHealth } from '../src/services/transcription/contracts';
-import type { ParakeetFinalClient } from './transcription/parakeetFinalClient';
+import type {
+  ParakeetFinalClient,
+  ParakeetPreparationProgress,
+} from './transcription/parakeetFinalClient';
 
 export interface ReadinessStatus {
   ready: boolean;
@@ -22,11 +25,6 @@ type ReadinessOptions = {
   parakeetModelRoot: string;
   audiocapPath: string;
 };
-
-const verifiedCapabilities = new WeakMap<
-  ParakeetFinalClient,
-  Promise<TranscriptionRuntimeHealth>
->();
 
 const evaluateRecordingReadiness = (
   options: ReadinessOptions,
@@ -104,16 +102,12 @@ const evaluateRecordingReadiness = (
 
 const prepareParakeetCapability = async (
   client: ParakeetFinalClient | null,
+  onProgress?: (progress: ParakeetPreparationProgress) => void,
 ): Promise<TranscriptionRuntimeHealth | null> => {
   if (!client) return null;
-  const existing = verifiedCapabilities.get(client);
-  if (existing) return await existing;
-  const preparation = client.prepare();
-  verifiedCapabilities.set(client, preparation);
   try {
-    return await preparation;
+    return await client.prepare(onProgress);
   } catch (error) {
-    verifiedCapabilities.delete(client);
     console.error('[Readiness] Parakeet prepare failed:', error);
     return null;
   }
@@ -124,15 +118,17 @@ export async function getRecordingReadinessStatus(
 ): Promise<ReadinessStatus> {
   return evaluateRecordingReadiness(
     options,
-    await prepareParakeetCapability(options.parakeetFinalClient),
+    options.parakeetFinalClient?.getPreparedCapability() ?? null,
   );
 }
 
 export async function prepareRecordingReadiness(
   options: ReadinessOptions,
+  onProgress?: (progress: ParakeetPreparationProgress) => void,
 ): Promise<ReadinessStatus> {
   const capability = await prepareParakeetCapability(
     options.parakeetFinalClient,
+    onProgress,
   );
   return evaluateRecordingReadiness(options, capability);
 }

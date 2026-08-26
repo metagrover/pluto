@@ -913,12 +913,19 @@ app.whenReady().then(async () => {
     });
   });
 
-  ipcMain.handle('RECORDING_READINESS_PREPARE', async () => {
-    return await prepareRecordingReadiness({
-      parakeetFinalClient,
-      parakeetModelRoot,
-      audiocapPath: getAudioCapExecPath(),
-    });
+  ipcMain.handle('RECORDING_READINESS_PREPARE', async (event) => {
+    return await prepareRecordingReadiness(
+      {
+        parakeetFinalClient,
+        parakeetModelRoot,
+        audiocapPath: getAudioCapExecPath(),
+      },
+      (progress) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('RECORDING_READINESS_PROGRESS', progress);
+        }
+      },
+    );
   });
 
   ipcMain.handle(

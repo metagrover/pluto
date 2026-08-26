@@ -9,6 +9,7 @@ import type {
   TranscriptionWord,
 } from '../../src/services/transcription/contracts';
 import type {
+  NativePreparationProgressEvent,
   NativeProcessSpawn,
   NativeResponse,
 } from './nativeJsonLineProcess';
@@ -38,11 +39,23 @@ type NativeTranscription = {
 };
 
 type FinalLeaseReservation = { lease: ParakeetRuntimeLease } | { error: Error };
+export type ParakeetPreparationProgress = Pick<
+  NativePreparationProgressEvent,
+  'phase' | 'downloadedBytes' | 'totalBytes'
+>;
+type PreparationProgressListener = (
+  progress: ParakeetPreparationProgress,
+) => void;
 
 export class ParakeetFinalClient {
   private readonly runtimeHost: ParakeetRuntimeHost;
   private preparePromise: Promise<TranscriptionRuntimeHealth> | null = null;
-  private activePrepare: { id: string; settled: Promise<void> } | null = null;
+  private preparedCapability: TranscriptionRuntimeHealth | null = null;
+  private activePrepare: {
+    id: string;
+    settled: Promise<void>;
+    progressListeners: Set<PreparationProgressListener>;
+  } | null = null;
   private queue: Promise<void> = Promise.resolve();
   private nextID = 0;
 
@@ -68,19 +81,39 @@ export class ParakeetFinalClient {
       });
     this.runtimeHost.transport.onFailure(() => {
       this.preparePromise = null;
+      this.preparedCapability = null;
+    });
+    this.runtimeHost.transport.onEvent((event) => {
+      if (event.event !== 'prepare_progress') return;
+      const activePrepare = this.activePrepare;
+      if (!activePrepare || activePrepare.id !== event.requestId) return;
+      const progress = {
+        phase: event.phase,
+        downloadedBytes: event.downloadedBytes,
+        totalBytes: event.totalBytes,
+      };
+      for (const listener of activePrepare.progressListeners)
+        listener(progress);
     });
   }
 
-  prepare(): Promise<TranscriptionRuntimeHealth> {
+  getPreparedCapability(): TranscriptionRuntimeHealth | null {
+    return this.preparedCapability;
+  }
+
+  prepare(
+    onProgress?: PreparationProgressListener,
+  ): Promise<TranscriptionRuntimeHealth> {
     const lease = this.runtimeHost.tryAcquire('final');
-    if (lease) return this.prepareInLease(lease);
+    if (lease) return this.prepareInLease(lease, onProgress);
     return this.runtimeHost
       .acquire('final')
-      .then((nextLease) => this.prepareInLease(nextLease));
+      .then((nextLease) => this.prepareInLease(nextLease, onProgress));
   }
 
   private async prepareInLease(
     lease: Awaited<ReturnType<ParakeetRuntimeHost['acquire']>>,
+    onProgress?: PreparationProgressListener,
   ): Promise<TranscriptionRuntimeHealth> {
     let preempted = false;
     lease.setPreemptionHandler(async () => {
@@ -88,7 +121,7 @@ export class ParakeetFinalClient {
       await this.cancelAndSettleActivePrepare();
     });
     try {
-      const health = await this.prepareWithLease();
+      const health = await this.prepareWithLease(onProgress);
       if (preempted) throw new Error('parakeet_cancelled');
       return health;
     } finally {
@@ -96,7 +129,9 @@ export class ParakeetFinalClient {
     }
   }
 
-  private prepareWithLease(): Promise<TranscriptionRuntimeHealth> {
+  private prepareWithLease(
+    onProgress?: PreparationProgressListener,
+  ): Promise<TranscriptionRuntimeHealth> {
     if (!this.preparePromise) {
       const id = this.requestID('prepare');
       const nativeRequest = this.runtimeHost.transport.request({
@@ -111,6 +146,7 @@ export class ParakeetFinalClient {
           () => undefined,
           () => undefined,
         ),
+        progressListeners: new Set<PreparationProgressListener>(),
       };
       this.activePrepare = activePrepare;
       this.preparePromise = nativeRequest
@@ -120,7 +156,7 @@ export class ParakeetFinalClient {
           if (typeof modelVersion !== 'string' || modelVersion.length === 0) {
             throw new Error('parakeet_protocol_invalid');
           }
-          return {
+          const capability = {
             ready: true,
             engine: 'parakeet_coreml' as const,
             liveEngine: 'parakeet_eou_320ms' as const,
@@ -128,9 +164,12 @@ export class ParakeetFinalClient {
             providerVersion: 'FluidAudio-0.15.5',
             modelBundleVersion: modelVersion,
           };
+          this.preparedCapability = capability;
+          return capability;
         })
         .catch((error) => {
           this.preparePromise = null;
+          this.preparedCapability = null;
           throw error;
         })
         .finally(() => {
@@ -139,7 +178,13 @@ export class ParakeetFinalClient {
           }
         });
     }
-    return this.preparePromise;
+    const preparation = this.preparePromise;
+    const activePrepare = this.activePrepare;
+    if (!onProgress || !activePrepare) return preparation;
+    activePrepare.progressListeners.add(onProgress);
+    return preparation.finally(() => {
+      activePrepare.progressListeners.delete(onProgress);
+    });
   }
 
   transcribe(request: TranscriptionRequest): Promise<TranscriptionResult> {
@@ -178,6 +223,7 @@ export class ParakeetFinalClient {
 
   close(): void {
     this.preparePromise = null;
+    this.preparedCapability = null;
   }
 
   private async runTranscription(

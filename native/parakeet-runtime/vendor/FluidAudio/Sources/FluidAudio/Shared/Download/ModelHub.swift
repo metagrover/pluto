@@ -216,6 +216,41 @@ public enum ModelHub {
             configuration: nil)
     }
 
+    /// Returns the exact known bytes selected by the same pinned repository
+    /// filter used by ``download``. This performs tree listing only.
+    public static func requiredDownloadSize(
+        _ repo: Repo,
+        variant: String? = nil,
+        additionalModelNames: Set<String> = []
+    ) async throws -> Int64 {
+        try await requiredDownloadSize(
+            repo,
+            variant: variant,
+            additionalModelNames: additionalModelNames,
+            configuration: nil
+        )
+    }
+
+    static func requiredDownloadSize(
+        _ repo: Repo,
+        variant: String? = nil,
+        additionalModelNames: Set<String> = [],
+        configuration: URLSessionConfiguration?
+    ) async throws -> Int64 {
+        try ensureOnlineAllowed("requiredDownloadSize(\(repo.folderName))")
+        let listingSession = configuration.map { URLSession(configuration: $0) } ?? session
+        defer {
+            if configuration != nil { listingSession.finishTasksAndInvalidate() }
+        }
+        let selection = try await requiredRemoteFiles(
+            repo,
+            variant: variant,
+            additionalModelNames: additionalModelNames,
+            listingSession: listingSession
+        )
+        return selection.files.reduce(0) { $0 + Int64(max(0, $1.size)) }
+    }
+
     /// Internal seam: `configuration` overrides the session used for tree
     /// listing and per-file downloads so characterization tests can drive the
     /// full listing/filtering/download pipeline with a stub `URLProtocol`
@@ -239,90 +274,19 @@ public enum ModelHub {
         let repoPath = directory.appendingPathComponent(repo.folderName)
         try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
 
-        let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
-            .union(additionalModelNames)
-        let subPath = repo.subPath  // e.g., "160ms" for parakeetEou160
-
-        // Build patterns for filtering (relative to subPath if present)
-        var patterns: [String] = []
-        for model in requiredModels {
-            if let sub = subPath {
-                patterns.append("\(sub)/\(model)/")
-            } else {
-                patterns.append("\(model)/")
-            }
-        }
-
-        // File selection rules for repo downloads (subPath scoping, required-
-        // model patterns, metadata-extension allowances);
-        // DownloadFilterCharacterizationTests pins them.
-        let include: (String, Bool) -> Bool = { itemPath, isDirectory in
-            if isDirectory {
-                // For subPath repos, only process paths within the subPath
-                if let sub = subPath {
-                    return itemPath == sub || itemPath.hasPrefix("\(sub)/")
-                        || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
-                }
-                return patterns.isEmpty
-                    || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
-            }
-            // For subPath repos, only include files within the subPath
-            if let sub = subPath {
-                let isInSubPath = itemPath.hasPrefix("\(sub)/")
-                let matchesPattern =
-                    patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                let isMetadata =
-                    itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model") || itemPath.hasSuffix(".bin")
-                return isInSubPath && (matchesPattern || isMetadata)
-            }
-            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
-                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
-        }
-
         // Repo loads: download occupies 0-0.5, CoreML compile 0.5-1.0.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
 
-        // Start listing from subPath if specified, otherwise from root
         reporter.listing()
-        let treeFetch = HFTreeLister.fetch(using: listingSession)
-        var filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
-            repoRemotePath: repo.remotePath,
-            startingAt: subPath ?? "",
-            include: include,
-            fetch: treeFetch
+        let selection = try await requiredRemoteFiles(
+            repo,
+            variant: variant,
+            additionalModelNames: additionalModelNames,
+            listingSession: listingSession
         )
-
-        // Some subPath repos keep shared auxiliary files (e.g. vocab.json) at the
-        // repo *root* rather than inside the precision subdirectory — the bundled
-        // .mlmodelc dirs live under `q8/`, but the tokenizer vocab is shared across
-        // precisions and published once at the root. The subPath traversal above
-        // never visits the root, so those files are missed and the verify pass
-        // below throws `modelNotFound` (issue #649). For any required *file*
-        // (i.e. not an .mlmodelc/.mlpackage bundle) that the subPath sweep did not
-        // already collect, fall back to grabbing a matching root-level file.
-        if subPath != nil {
-            let collected = Set(filesToDownload.map { ($0.path as NSString).lastPathComponent })
-            let missingAux = requiredModels.filter { model in
-                !model.hasSuffix(".mlmodelc") && !model.hasSuffix(".mlpackage")
-                    && !collected.contains((model as NSString).lastPathComponent)
-            }
-            if !missingAux.isEmpty {
-                // Root-level pass only: directories are pruned; a root file is
-                // pulled when its name equals a missing required aux file's
-                // FULL name. Slash-containing required paths (e.g.
-                // voices/zf_001.bin) therefore never match a root file — a
-                // same-named root file would land at the wrong local path, so
-                // the loud modelNotFound from the verify pass is preferable.
-                let names = Set(missingAux)
-                filesToDownload += try await HFTreeLister.listTree(
-                    repoRemotePath: repo.remotePath,
-                    include: { itemPath, isDirectory in
-                        !isDirectory && names.contains((itemPath as NSString).lastPathComponent)
-                    },
-                    fetch: treeFetch
-                )
-            }
-        }
+        let requiredModels = selection.requiredModels
+        let subPath = selection.subPath
+        let filesToDownload = selection.files
 
         logger.info("Found \(filesToDownload.count) files to download")
 
@@ -378,6 +342,69 @@ public enum ModelHub {
         try ModelCache.verifyModelsPresent(at: repoPath, models: requiredModels)
 
         logger.info("Downloaded all required models for \(repo.folderName)")
+    }
+
+    private static func requiredRemoteFiles(
+        _ repo: Repo,
+        variant: String?,
+        additionalModelNames: Set<String>,
+        listingSession: URLSession
+    ) async throws -> (files: [RemoteFile], requiredModels: Set<String>, subPath: String?) {
+        let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
+            .union(additionalModelNames)
+        let subPath = repo.subPath
+        var patterns: [String] = []
+        for model in requiredModels {
+            if let subPath {
+                patterns.append("\(subPath)/\(model)/")
+            } else {
+                patterns.append("\(model)/")
+            }
+        }
+        let include: (String, Bool) -> Bool = { itemPath, isDirectory in
+            if isDirectory {
+                if let subPath {
+                    return itemPath == subPath || itemPath.hasPrefix("\(subPath)/")
+                        || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+                }
+                return patterns.isEmpty
+                    || patterns.contains { itemPath.hasPrefix($0) || $0.hasPrefix(itemPath + "/") }
+            }
+            if let subPath {
+                let isInSubPath = itemPath.hasPrefix("\(subPath)/")
+                let matchesPattern = patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                let isMetadata = itemPath.hasSuffix(".json") || itemPath.hasSuffix(".model")
+                    || itemPath.hasSuffix(".bin")
+                return isInSubPath && (matchesPattern || isMetadata)
+            }
+            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) }
+                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+        }
+        let treeFetch = HFTreeLister.fetch(using: listingSession)
+        var files = try await HFTreeLister.listTree(
+            repoRemotePath: repo.remotePath,
+            startingAt: subPath ?? "",
+            include: include,
+            fetch: treeFetch
+        )
+        if subPath != nil {
+            let collected = Set(files.map { ($0.path as NSString).lastPathComponent })
+            let missingAux = requiredModels.filter { model in
+                !model.hasSuffix(".mlmodelc") && !model.hasSuffix(".mlpackage")
+                    && !collected.contains((model as NSString).lastPathComponent)
+            }
+            if !missingAux.isEmpty {
+                let names = Set(missingAux)
+                files += try await HFTreeLister.listTree(
+                    repoRemotePath: repo.remotePath,
+                    include: { itemPath, isDirectory in
+                        !isDirectory && names.contains((itemPath as NSString).lastPathComponent)
+                    },
+                    fetch: treeFetch
+                )
+            }
+        }
+        return (files, requiredModels, subPath)
     }
 
     /// Download a specific subdirectory from a HuggingFace repository.
