@@ -181,55 +181,43 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
           <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
             <div className="w-full max-w-xl">
-              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[oklch(0.53_0.12_255)]">
-                First run · About three minutes
-              </p>
-              <h2 className="mt-4 text-[2rem] font-semibold leading-tight tracking-[-0.025em] sm:text-[2.25rem]">
-                Ready in three steps
+              <h2 className="font-serif text-[2.25rem] font-medium leading-[1.1] tracking-[-0.025em] sm:text-[2.5rem]">
+                Set up Pluto
               </h2>
-              <p className="mt-3 max-w-[46ch] text-[15px] leading-7 text-[oklch(0.53_0.018_258)]">
-                Install the local transcription model, then grant the two macOS
-                permissions Pluto needs to record.
+              <p className="mt-3 text-sm leading-6 text-[oklch(0.56_0.018_258)]">
+                Three steps, about three minutes.
               </p>
 
-              <ol className="mt-10 border-y border-[oklch(0.86_0.012_85)]">
+              <ol className="mt-9 border-y border-[oklch(0.86_0.012_85)]">
                 <SetupPreviewRow
-                  number="01"
                   icon={<Download size={19} />}
-                  title="Install local transcription"
-                  detail="Downloaded once and reused for future meetings"
+                  title="Local transcription"
+                  detail="Downloaded once and kept on this Mac"
                 />
                 <SetupPreviewRow
-                  number="02"
                   icon={<Mic size={19} />}
-                  title="Allow microphone access"
-                  detail="Captures your side of the conversation"
+                  title="Microphone access"
+                  detail="Records your voice"
                 />
                 <SetupPreviewRow
-                  number="03"
                   icon={<MonitorSpeaker size={19} />}
-                  title="Allow system audio access"
-                  detail="Captures everyone else in the meeting"
+                  title="System audio access"
+                  detail="Records everyone else"
                 />
               </ol>
 
-              <div className="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
-                <button
-                  type="button"
-                  onClick={() => void startSetup()}
-                  className="group inline-flex min-h-12 min-w-48 items-center justify-center gap-3 rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)]"
-                >
-                  Begin setup
-                  <ArrowRight
-                    size={16}
-                    aria-hidden="true"
-                    className="transition-transform duration-200 ease-out group-hover:translate-x-0.5"
-                  />
-                </button>
-                <p className="text-xs leading-5 text-[oklch(0.58_0.015_258)]">
-                  Permissions can be changed later.
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => void startSetup()}
+                className="group mt-8 inline-flex min-h-12 min-w-48 items-center justify-center gap-3 rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)]"
+              >
+                Begin setup
+                <ArrowRight
+                  size={16}
+                  aria-hidden="true"
+                  className="transition-transform duration-200 ease-out group-hover:translate-x-0.5"
+                />
+              </button>
             </div>
           </section>
         </div>
@@ -412,26 +400,23 @@ const ObservatoryPanel = ({
 );
 
 const SetupPreviewRow = ({
-  number,
   icon,
   title,
   detail,
 }: {
-  number: string;
   icon: React.ReactNode;
   title: string;
   detail: string;
 }) => (
-  <li className="grid grid-cols-[2.25rem_2.75rem_1fr] items-center gap-3 border-b border-[oklch(0.88_0.01_85)] py-5 last:border-b-0 sm:gap-4">
-    <span className="font-mono text-[11px] font-semibold tabular-nums text-[oklch(0.61_0.035_258)]">
-      {number}
-    </span>
-    <span className="flex h-10 w-10 items-center justify-center rounded-full border border-[oklch(0.84_0.025_85)] text-[oklch(0.53_0.12_255)]">
+  <li className="grid grid-cols-[2.5rem_1fr] items-center gap-4 border-b border-[oklch(0.88_0.01_85)] py-5 last:border-b-0">
+    <span className="flex h-10 w-10 items-center justify-center text-[oklch(0.53_0.12_255)]">
       {icon}
     </span>
     <span className="min-w-0">
-      <span className="block text-sm font-semibold">{title}</span>
-      <span className="mt-1 block text-xs leading-5 text-[oklch(0.56_0.018_258)]">
+      <span className="block text-[15px] font-semibold tracking-[-0.01em]">
+        {title}
+      </span>
+      <span className="mt-0.5 block text-[13px] leading-5 text-[oklch(0.56_0.018_258)]">
         {detail}
       </span>
     </span>

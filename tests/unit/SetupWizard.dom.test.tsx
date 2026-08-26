@@ -91,10 +91,10 @@ describe('SetupWizard', () => {
     expect(container.textContent).toContain(
       'notes, decisions, people, and next steps',
     );
-    expect(container.textContent).toContain('Ready in three steps');
-    expect(container.textContent).toContain('Install local transcription');
-    expect(container.textContent).toContain('Allow microphone access');
-    expect(container.textContent).toContain('Allow system audio access');
+    expect(container.textContent).toContain('Set up Pluto');
+    expect(container.textContent).toContain('Local transcription');
+    expect(container.textContent).toContain('Microphone access');
+    expect(container.textContent).toContain('System audio access');
     expect(container.querySelector('.drag-region')).toBeTruthy();
     expect(container.querySelectorAll('ol li')).toHaveLength(3);
     const start = [...container.querySelectorAll('button')].find((button) =>
