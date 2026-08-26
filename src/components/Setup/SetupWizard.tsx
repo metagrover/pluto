@@ -23,10 +23,10 @@ interface SetupWizardProps {
 
 const requirementTone = (ready: boolean, blocked = false) =>
   ready
-    ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700'
+    ? 'text-emerald-700'
     : blocked
-      ? 'border-rose-200 bg-rose-50/70 text-rose-700'
-      : 'border-pro-border bg-pro-surface text-pro-text-muted';
+      ? 'text-rose-700'
+      : 'text-[oklch(0.53_0.12_255)]';
 
 export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [step, setStep] = useState<1 | 2>(1);
@@ -181,7 +181,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
           <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
             <div className="w-full max-w-xl">
-              <h2 className="font-serif text-[2.5rem] font-medium leading-[1.08] tracking-[-0.03em] sm:text-[2.75rem]">
+              <h2 className="font-serif text-[2.25rem] font-medium leading-[1.1] tracking-[-0.025em] sm:text-[2.5rem]">
                 Ready in three minutes.
               </h2>
               <p className="mt-4 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
@@ -226,25 +226,24 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
           <ObservatoryPanel
             eyebrow="Recording setup"
             title={
-              readiness.status === 'ready'
-                ? 'Ready to record.'
-                : 'Preparing your local workspace.'
+              <span className="block font-serif text-[0.84em] font-medium leading-[1.16] tracking-[-0.025em]">
+                {readiness.status === 'ready'
+                  ? 'Ready to record.'
+                  : 'Preparing your local workspace.'}
+              </span>
             }
             description="Pluto keeps this screen current as each recording requirement becomes ready."
             footer="The transcription model is downloaded once."
           />
 
           <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
-            <div className="w-full max-w-2xl">
-              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[oklch(0.53_0.12_255)]">
-                Setup progress
-              </p>
-              <h2 className="mt-4 text-[2rem] font-semibold leading-tight tracking-[-0.025em]">
+            <div className="w-full max-w-xl">
+              <h2 className="font-serif text-[2.25rem] font-medium leading-[1.1] tracking-[-0.025em] sm:text-[2.5rem]">
                 {readiness.status === 'ready'
-                  ? 'Everything is ready'
-                  : 'Three recording requirements'}
+                  ? 'Everything is ready.'
+                  : 'Getting Pluto ready.'}
               </h2>
-              <p className="mt-3 text-sm leading-6 text-[oklch(0.53_0.018_258)]">
+              <p className="mt-4 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
                 Pluto checks each item automatically.
               </p>
 
@@ -282,7 +281,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 <RequirementRow
                   icon={<Mic size={20} />}
                   title="Microphone"
-                  detail="Captures your side of the conversation"
+                  detail="Records your voice"
                   state={requirements.microphone}
                   action={
                     requirements.microphone === 'blocked' ? (
@@ -299,7 +298,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 <RequirementRow
                   icon={<MonitorSpeaker size={20} />}
                   title="System audio"
-                  detail="Captures the other people in your meeting"
+                  detail="Records everyone else in the meeting"
                   state={requirements.systemAudio}
                   action={
                     requirements.systemAudio === 'blocked' ? (
@@ -328,7 +327,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 type="button"
                 onClick={() => void finish()}
                 disabled={!readiness.canComplete || finishing}
-                className="mt-8 inline-flex min-h-12 min-w-52 items-center justify-center rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform,opacity] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)] disabled:cursor-not-allowed disabled:opacity-30"
+                className="mt-8 inline-flex min-h-12 min-w-48 items-center justify-center rounded-lg bg-[oklch(0.25_0.035_258)] px-6 text-sm font-semibold tracking-[0.01em] text-[oklch(0.965_0.008_85)] shadow-sm transition-[background-color,transform,opacity] duration-200 ease-out hover:bg-[oklch(0.31_0.045_258)] active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.53_0.12_255)] focus-visible:ring-offset-2 focus-visible:ring-offset-[oklch(0.965_0.008_85)] disabled:cursor-not-allowed disabled:opacity-30"
               >
                 {finishing ? 'Opening Pluto…' : 'Start using Pluto'}
               </button>
@@ -436,15 +435,19 @@ const RequirementRow = ({
   const ready = state === 'ready' || state === 'granted';
   const blocked = state === 'error' || state === 'blocked';
   return (
-    <div className="flex min-h-24 items-center gap-4 px-6 py-5">
+    <div className="flex min-h-24 items-center gap-4 border-b border-[oklch(0.88_0.01_85)] py-5 last:border-b-0">
       <div
-        className={`flex h-8 w-11 shrink-0 items-center justify-center rounded-md border ${requirementTone(ready, blocked)}`}
+        className={`flex h-10 w-10 shrink-0 items-center justify-center ${requirementTone(ready, blocked)}`}
       >
         {ready ? <Check size={20} /> : icon}
       </div>
       <div className="min-w-0 flex-1">
-        <h2 className="text-sm font-bold">{title}</h2>
-        <p className="mt-1 text-xs leading-5 text-pro-text-muted">{detail}</p>
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em]">
+          {title}
+        </h2>
+        <p className="mt-0.5 text-[13px] leading-5 text-[oklch(0.56_0.018_258)]">
+          {detail}
+        </p>
         {(state === 'checking' || state === 'preparing') && (
           <div className="mt-3">
             {loadingIndicator ?? (
