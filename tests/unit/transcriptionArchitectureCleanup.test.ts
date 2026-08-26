@@ -43,7 +43,9 @@ describe('transcription architecture cleanup', () => {
   it('has no executable MLX transcription workflow', () => {
     expect(existsSync('electron/whisperx.ts')).toBe(false);
     expect(existsSync('python/whisperx_server.py')).toBe(false);
-    expect(existsSync('electron/transcription/mlxPreviewClient.ts')).toBe(false);
+    expect(existsSync('electron/transcription/mlxPreviewClient.ts')).toBe(
+      false,
+    );
     expect(existsSync('python/mlx_transcription_server.py')).toBe(false);
     expect(existsSync('python/mlx_transcription_server.spec')).toBe(false);
     expect(existsSync('python/requirements-mlx.txt')).toBe(false);

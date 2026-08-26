@@ -1,8 +1,6 @@
 export type TranscriptionPolicyRole = 'live_preview' | 'final_validation';
 
-export type TranscriptionEngine =
-  | 'parakeet_eou_320ms'
-  | 'parakeet_coreml';
+export type TranscriptionEngine = 'parakeet_eou_320ms' | 'parakeet_coreml';
 
 export type TranscriptionModel = 'parakeet-tdt-0.6b-v3';
 
