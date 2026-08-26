@@ -215,7 +215,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
                 className="font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em] sm:text-[2.25rem]"
               >
                 <span aria-hidden="true">
-                  Ready in {typedSetupQualifier}
+                  Ready in <span className="italic">{typedSetupQualifier}</span>
                   {showSetupCursor && (
                     <span
                       data-testid="setup-typewriter-cursor"
