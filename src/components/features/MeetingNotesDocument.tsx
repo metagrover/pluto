@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import TextareaAutosize from 'react-textarea-autosize';
 import remarkGfm from 'remark-gfm';
 import type { Meeting, TranscriptSegment } from '../../types';
+import { parseAnalysisDocumentV3Json } from '../../utils/analysisDocument';
 import type {
   MeetingNotesBlock,
   MeetingNotesDocumentModel,
@@ -850,6 +851,8 @@ export const MeetingNotesDocument = ({
     block.blockType === 'action' ||
     block.blockType === 'decision' ||
     (Boolean(block.path) && block.blockType !== 'paragraph');
+  const analysisQualityIssues =
+    parseAnalysisDocumentV3Json(meeting.analysis_json)?.quality.issues || [];
 
   return (
     <div className="meeting-document-workspace">
@@ -858,6 +861,15 @@ export const MeetingNotesDocument = ({
         <output className="meeting-document-save-row" aria-live="polite">
           <SaveStatus state={saveState} />
         </output>
+        {analysisQualityIssues.length > 0 ? (
+          <output
+            className="meeting-analysis-quality-notice"
+            data-analysis-quality-notice
+          >
+            Some details may be missing. Pluto kept only transcript-backed
+            actions and decisions.
+          </output>
+        ) : null}
         {model.sections
           .filter((s) => s.kind !== 'scratchpad')
           .map((section) => (

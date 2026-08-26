@@ -40,4 +40,55 @@ describe('analysis topic compaction', () => {
       collapsed.some((section) => section.title === 'Screen sharing'),
     ).toBe(false);
   });
+
+  it('drops generic empty-analysis output when substantive topics exist', () => {
+    const collapsed = collapseOversizedTopics([
+      topic(
+        'Conversion tracking',
+        'No substantive discussion or outcomes were recorded in the provided transcript slice. No substantive discussion or outcome was recorded in the provided transcript slice.',
+      ),
+      ...Array.from({ length: 6 }, (_, index) =>
+        topic(
+          `Substantive topic ${index + 1}`,
+          `A concrete outcome ${index + 1} was recorded.`,
+        ),
+      ),
+    ]);
+
+    expect(collapsed).toHaveLength(6);
+    expect(
+      collapsed.some((section) =>
+        /no substantive discussion/i.test(
+          `${section.summary} ${section.key_points.map((point) => point.text).join(' ')}`,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps grounded commitments even when a topic has a generic summary', () => {
+    const collapsed = collapseOversizedTopics([
+      {
+        ...topic(
+          'Implementation follow-up',
+          'No substantive discussion was recorded in the provided transcript slice.',
+        ),
+        action_items: [
+          {
+            text: 'Publish the implementation notes',
+            evidence: 'I will publish the implementation notes.',
+          },
+        ],
+      },
+      topic('Delivery state', 'The delivery remains on schedule.'),
+    ]);
+
+    expect(collapsed.flatMap((section) => section.action_items)).toContainEqual(
+      expect.objectContaining({ text: 'Publish the implementation notes' }),
+    );
+    expect(
+      collapsed.some((section) =>
+        /no substantive discussion/i.test(section.summary),
+      ),
+    ).toBe(false);
+  });
 });

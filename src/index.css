@@ -540,6 +540,16 @@
   .dark .meeting-edit-error {
     color: oklch(74% 0.13 25);
   }
+  .meeting-analysis-quality-notice {
+    @apply mb-7 mt-2 block max-w-[68ch] rounded-lg border px-3 py-2 text-[0.78rem] leading-5;
+    color: var(--notes-muted);
+    border-color: color-mix(in oklch, var(--notes-muted) 22%, transparent);
+    background: color-mix(
+      in oklch,
+      var(--notes-paper) 94%,
+      var(--notes-muted) 6%
+    );
+  }
   .meeting-notes-section {
     @apply scroll-mt-24 pb-7;
   }
