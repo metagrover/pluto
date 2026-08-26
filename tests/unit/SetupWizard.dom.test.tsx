@@ -91,10 +91,13 @@ describe('SetupWizard', () => {
     expect(container.textContent).toContain(
       'notes, decisions, people, and next steps',
     );
-    expect(container.textContent).toContain('Set up Pluto');
+    expect(container.textContent).toContain('Get Pluto ready.');
     expect(container.textContent).toContain('Local transcription');
     expect(container.textContent).toContain('Microphone access');
     expect(container.textContent).toContain('System audio access');
+    expect(container.textContent).toContain(
+      'Records everyone else in the meeting',
+    );
     expect(container.querySelector('.drag-region')).toBeTruthy();
     expect(container.querySelectorAll('ol li')).toHaveLength(3);
     const start = [...container.querySelectorAll('button')].find((button) =>
