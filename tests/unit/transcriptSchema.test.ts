@@ -24,20 +24,20 @@ describe('transcriptSchema', () => {
         postHydrationBleedPass: true,
         postHydrationBleedDroppedMe: 2,
         transcription: {
-          backend: 'mlx_preview',
+          backend: 'parakeet',
           preset: 'accuracy_first',
-          model: 'medium',
-          device: 'mlx',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
           computeType: 'float16',
           diarization: false,
           elapsedMs: 345,
           vocabularyTerms: ['Known Person'],
         },
         sessionFallbackTranscription: {
-          backend: 'mlx_preview',
+          backend: 'parakeet',
           preset: 'accuracy_first',
-          model: 'large-v3',
-          device: 'mlx',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
           computeType: 'float32',
           canonicalSource: 'mix',
           diarization: false,
@@ -71,10 +71,10 @@ describe('transcriptSchema', () => {
     expect(payload.canonicalSource).toBe('mix');
     expect(payload.postHydrationBleedPass).toBe(true);
     expect(payload.postHydrationBleedDroppedMe).toBe(2);
-    expect(payload.transcription?.backend).toBe('mlx_preview');
-    expect(payload.transcription?.model).toBe('medium');
+    expect(payload.transcription?.backend).toBe('parakeet');
+    expect(payload.transcription?.model).toBe('parakeet-tdt-0.6b-v3');
     expect(payload.transcription?.vocabularyTerms).toEqual(['Known Person']);
-    expect(payload.sessionFallbackTranscription?.backend).toBe('mlx_preview');
+    expect(payload.sessionFallbackTranscription?.backend).toBe('parakeet');
     expect(payload.sessionFallbackTranscription?.elapsedMs).toBe(1234);
     expect(payload.speakerAttribution).toEqual({
       source: 'diarization',

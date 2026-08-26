@@ -10,7 +10,7 @@ Pluto currently uses MLX Whisper for five-second live preview chunks and Parakee
 
 ## Decision
 
-Use independent Parakeet EOU sessions for causal microphone and System PCM as the only visible live recognizer. Require EOU readiness before recording, fail the live surface closed if EOU fails during capture, and keep durable capture running so sealed Parakeet TDT finalization remains canonical. Do not invoke MLX as startup or runtime fallback. Defer deleting MLX code and dependencies until the EOU path passes real-use gates.
+Use independent Parakeet EOU sessions for causal microphone and System PCM as the only visible live recognizer. Require EOU readiness before recording, fail the live surface closed if EOU fails during capture, and keep durable capture running so sealed Parakeet TDT finalization remains canonical. Do not invoke another recognizer as startup or runtime fallback. MLX retirement after real-use verification is recorded in [the follow-up ADR](./2026-08-25-retire-mlx-transcription.md).
 
 ## Alternatives
 
@@ -21,5 +21,4 @@ Use independent Parakeet EOU sessions for causal microphone and System PCM as th
 
 ## Consequences
 
-Recording startup now depends on verified EOU assets. Mid-recording recognition failure reduces live utility but cannot corrupt capture. Main/native protocol and packaging gain an EOU model contract. MLX code remains temporarily present but unreachable from recording transcription, and its complete removal becomes a separately verified follow-up.
-
+Recording startup now depends on verified EOU assets. Mid-recording recognition failure reduces live utility but cannot corrupt capture. Main/native protocol and packaging gain an EOU model contract. The former MLX runtime was removed after this path passed real-use verification.

@@ -95,13 +95,8 @@ pip install --upgrade pip "setuptools<82" wheel
 
 if [ -f "$PYTHON_DIR/requirements.txt" ]; then
     pip install -r "$PYTHON_DIR/requirements.txt"
-    pip install --no-deps -r "$PYTHON_DIR/requirements-mlx.txt"
 else
     echo "Warning: requirements.txt not found!"
 fi
-
-# 4. Install PyInstaller (dev only, for building)
-echo "Installing PyInstaller..."
-pip install pyinstaller
 
 echo "Python setup complete."

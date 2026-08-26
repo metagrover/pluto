@@ -16,7 +16,3 @@ numba
 scipy
 tiktoken
 sherpa-onnx==1.13.4
-# Pluto currently supports Apple Silicon Macs only.
-mlx
-# mlx-whisper is installed without its unused torch conversion dependency by
-# scripts/setup_python.sh. Runtime transcription uses pre-converted MLX models.

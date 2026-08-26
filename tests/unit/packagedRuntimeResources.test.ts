@@ -33,7 +33,6 @@ describe('packaged runtime resources', () => {
       'audiocap',
       'parakeet-runtime',
       'parakeet-resource-probe',
-      'mlx_transcription_server/mlx_transcription_server',
     ]) {
       expect(verifier).toContain(runtime);
     }
@@ -48,7 +47,6 @@ describe('packaged runtime resources', () => {
       'audiocap',
       'parakeet-runtime',
       'parakeet-resource-probe',
-      'mlx_transcription_server/mlx_transcription_server',
     ]) {
       const executable = path.join(binPath, relativePath);
       await mkdir(path.dirname(executable), { recursive: true });
@@ -62,6 +60,6 @@ describe('packaged runtime resources', () => {
         '--',
         appPath,
       ]),
-    ).resolves.toMatchObject({ stdout: 'Verified 5 packaged runtimes.\n' });
+    ).resolves.toMatchObject({ stdout: 'Verified 4 packaged runtimes.\n' });
   });
 });

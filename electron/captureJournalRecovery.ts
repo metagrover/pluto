@@ -116,7 +116,7 @@ const getAcceptedRecoveryCheckpointConfigKeys = (
 ): string[] => {
   const configs = [
     config,
-    ...(isMlxCheckpointConfig(config) &&
+    ...(isLegacyPreviewCheckpointConfig(config) &&
     (config.model === 'base' || config.model === 'tiny')
       ? [{ ...config, model: 'medium' }]
       : []),
@@ -128,12 +128,13 @@ const getAcceptedRecoveryCheckpointConfigKeys = (
   );
 };
 
-export const isMlxCheckpointConfig = (
+export const isLegacyPreviewCheckpointConfig = (
   config: Pick<
     RecoveryTranscriptionConfig,
     'backend' | 'device' | 'computeType'
   >,
 ): boolean =>
+  // Read-only compatibility for capture journals written before Parakeet.
   config.backend === 'mlx_preview' &&
   config.device === 'mlx' &&
   config.computeType === 'float16';
@@ -442,7 +443,7 @@ const repairV3TranscriptGaps = async (
       : null;
   if (!templateSidecar) return manifest;
   const targetConfig =
-    !isMlxCheckpointConfig(templateSidecar.transcriptionConfig) &&
+    !isLegacyPreviewCheckpointConfig(templateSidecar.transcriptionConfig) &&
     fallbackConfig
       ? fallbackConfig
       : templateSidecar.transcriptionConfig;

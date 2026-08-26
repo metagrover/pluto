@@ -237,29 +237,6 @@ describe('speaker attribution benchmark adapter', () => {
     },
   );
 
-  it('probes the Apple Silicon MLX installation deterministically', async () => {
-    const result = await runAdapter([
-      request('mlx-one', 'probe', 'apple-silicon-asr'),
-      request('mlx-two', 'probe', 'apple-silicon-asr'),
-    ]);
-
-    expect(result.responses).toHaveLength(2);
-    if (result.responses[0].error) {
-      expect(result.responses.map((response) => response.error.code)).toEqual([
-        'candidate_model_missing',
-        'candidate_model_missing',
-      ]);
-    } else {
-      expect(result.responses[1].output.runtime.models).toEqual(
-        result.responses[0].output.runtime.models,
-      );
-      expect(result.responses[0].output.runtime.models[0]).toMatchObject({
-        id: 'mlx-whisper',
-        version: expect.any(String),
-      });
-    }
-  });
-
   it('reports unavailable optional models without leaking paths or tracebacks', async () => {
     const missingPath = '/private/secret/model/does-not-exist';
     const result = await runAdapter([
@@ -363,53 +340,6 @@ describe('speaker attribution benchmark adapter', () => {
       expect(result.responses[1].output.diarization.turns).toEqual([
         { startTime: 0.25, endTime: 1.5, cluster: 'speaker_3' },
       ]);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('rejects malformed optional ASR output without leaking its contents', async () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'pluto-fake-mlx-'));
-    try {
-      writeFileSync(path.join(root, 'audio.wav'), 'synthetic');
-      writeFileSync(
-        path.join(root, 'mlx_whisper.py'),
-        "def transcribe(*args,**kwargs):\n if kwargs.get('path_or_hf_repo')=='bad-words': return {'segments':[{'start':0,'end':1,'text':'private transcript','words':'not-a-list'}]}\n return {'segments':[{'start':'not-time','end':1,'text':'private transcript'}]}\n",
-      );
-      const metadata = path.join(root, 'mlx_whisper-9.9.dist-info');
-      mkdirSync(metadata);
-      writeFileSync(
-        path.join(metadata, 'METADATA'),
-        'Metadata-Version: 2.1\nName: mlx-whisper\nVersion: 9.9\n',
-      );
-      const badTime = request(
-        'malformed-asr',
-        'transcribe',
-        'apple-silicon-asr',
-        { model: 'bad-time' },
-      );
-      const badWords = request(
-        'malformed-words',
-        'transcribe',
-        'apple-silicon-asr',
-        { model: 'bad-words' },
-      );
-      badTime.case.audio.mixedPath = path.join(root, 'audio.wav');
-      badWords.case.audio.mixedPath = path.join(root, 'audio.wav');
-
-      const result = await runAdapter([badTime, badWords], {
-        ...process.env,
-        PYTHONPATH: root,
-      });
-
-      expect(result.responses).toHaveLength(2);
-      for (const response of result.responses)
-        expect(response).toMatchObject({
-          error: { code: 'candidate_contract_mismatch' },
-        });
-      expect(result.stdout).not.toContain('private transcript');
-      expect(result.stdout).not.toContain(root);
-      expect(result.stdout).not.toContain('Traceback');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

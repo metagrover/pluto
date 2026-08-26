@@ -25,7 +25,7 @@ import {
   updateCaptureJournalActivityEvidence,
 } from '../../electron/captureJournal';
 import {
-  isMlxCheckpointConfig,
+  isLegacyPreviewCheckpointConfig,
   recoverInterruptedCaptureJournals,
   repairStoppingCaptureJournalTranscript,
   stitchSealedCaptureJournalSource,
@@ -147,14 +147,14 @@ describe('capture journal recovery', () => {
 
   it('rejects checkpoint metadata outside the fixed MLX preview contract', () => {
     expect(
-      isMlxCheckpointConfig({
+      isLegacyPreviewCheckpointConfig({
         backend: 'mlx_preview',
         device: 'obsolete_device',
         computeType: 'float16',
       }),
     ).toBe(false);
     expect(
-      isMlxCheckpointConfig({
+      isLegacyPreviewCheckpointConfig({
         backend: 'mlx_preview',
         device: 'mlx',
         computeType: 'float16',

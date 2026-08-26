@@ -15,7 +15,6 @@ const requiredExecutables = [
   'audiocap',
   'parakeet-runtime',
   'parakeet-resource-probe',
-  'mlx_transcription_server/mlx_transcription_server',
 ];
 
 for (const relativePath of requiredExecutables) {

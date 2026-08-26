@@ -1,11 +1,5 @@
 export type LiveSource = 'mic' | 'system';
 
-export type LiveEngineMode =
-  | 'mlx'
-  | 'system_shadow'
-  | 'dual_shadow'
-  | 'parakeet_primary';
-
 export type LiveCaptureSequence = number;
 
 export interface LiveStreamUpdate {

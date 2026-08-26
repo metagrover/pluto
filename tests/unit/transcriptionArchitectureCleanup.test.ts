@@ -40,25 +40,33 @@ describe('transcription architecture cleanup', () => {
     );
   });
 
-  it('uses descriptive MLX preview sidecar names only', () => {
+  it('has no executable MLX transcription workflow', () => {
     expect(existsSync('electron/whisperx.ts')).toBe(false);
     expect(existsSync('python/whisperx_server.py')).toBe(false);
-    expect(existsSync('electron/transcription/mlxPreviewClient.ts')).toBe(true);
-    expect(existsSync('python/mlx_transcription_server.py')).toBe(true);
-  });
+    expect(existsSync('electron/transcription/mlxPreviewClient.ts')).toBe(false);
+    expect(existsSync('python/mlx_transcription_server.py')).toBe(false);
+    expect(existsSync('python/mlx_transcription_server.spec')).toBe(false);
+    expect(existsSync('python/requirements-mlx.txt')).toBe(false);
+    expect(existsSync('electron/transcription.ts')).toBe(false);
 
-  it('keeps MLX unreachable from active recording and readiness modules', () => {
-    const activeModules = [
+    const executableSurfaces = [
+      'package.json',
       'electron/main.ts',
       'electron/recordingReadiness.ts',
       'src/App.tsx',
       'src/components/AudioManager.tsx',
+      'src/utils/transcriptionSettings.ts',
+      'src/services/transcription/contracts.ts',
+      'python/speaker_attribution_benchmark_adapter.py',
       'src/services/finalTranscription/runPersistedMeetingFinalTranscription.ts',
+      'scripts/setup_python.sh',
+      'scripts/verify_packaged_runtime.mjs',
+      'python/requirements.txt',
     ]
       .map(read)
       .join('\n');
-    expect(activeModules).not.toContain('mlxPreviewClient');
-    expect(activeModules).not.toContain('MLX_PREVIEW_');
-    expect(activeModules).not.toContain('mlxPreview.');
+    expect(executableSurfaces).not.toMatch(
+      /mlx[_-]?(?:preview|whisper|transcription)|requirements-mlx/iu,
+    );
   });
 });

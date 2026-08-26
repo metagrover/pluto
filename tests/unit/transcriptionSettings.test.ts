@@ -37,7 +37,6 @@ describe('transcription settings', () => {
   });
 
   it('normalizes backend and preset values', () => {
-    expect(resolveTranscriptionBackend('mlx_preview')).toBe('parakeet');
     expect(resolveTranscriptionBackend('obsolete')).toBe('parakeet');
     expect(resolveTranscriptionBackend('unknown')).toBe(
       DEFAULT_TRANSCRIPTION_SETTINGS.backend,

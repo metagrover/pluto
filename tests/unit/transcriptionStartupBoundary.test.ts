@@ -21,8 +21,6 @@ describe('transcription startup boundary', () => {
     expect(preparation).toBeGreaterThan(-1);
     expect(parakeetPrepare).toBeGreaterThan(preparation);
     expect(recovery).toBeGreaterThan(parakeetPrepare);
-    expect(main).not.toContain('await mlxPreview.setConfig({');
-    expect(main).not.toContain('await mlxPreview.health()');
   });
 
   it('ensures current native recording runtimes before starting development', () => {
@@ -75,15 +73,9 @@ describe('transcription startup boundary', () => {
     );
   });
 
-  it('keeps transcription runtime diagnostics generic and content-free', () => {
+  it('keeps transcription runtime diagnostics content-free', () => {
     const main = readFileSync('electron/main.ts', 'utf8');
-    const manager = readFileSync(
-      'electron/transcription/mlxPreviewClient.ts',
-      'utf8',
-    );
     expect(main).not.toContain('[Pluto] Transcribing file');
-    expect(main).not.toContain('[Pluto] MLX preview');
-    expect(manager).not.toContain('[MLX preview]');
-    expect(manager).toContain('[Transcription]');
+    expect(main).not.toContain('request.audioPath');
   });
 });

@@ -147,7 +147,6 @@ describe('App recording navigation', () => {
             if (key === 'transcription_language') return '';
             return null;
           }
-          if (channel === 'MLX_PREVIEW_HEALTH') return { status: 'ok' };
           if (channel === 'RECORDING_READINESS_STATUS') {
             return {
               details: {

@@ -217,10 +217,10 @@ describe('capture journal', () => {
       chunkStartSec: 0,
       chunkEndSec: 5,
       transcriptionConfig: {
-        backend: 'mlx_preview',
+        backend: 'parakeet',
         preset: 'balanced',
-        model: 'small',
-        device: 'mlx',
+        model: 'parakeet-tdt-0.6b-v3',
+        device: 'coreml',
         computeType: 'float16',
         languageMode: 'detected' as const,
         requestedLanguage: null,
@@ -283,7 +283,7 @@ describe('capture journal', () => {
       ...sidecar,
       transcriptionConfig: {
         ...sidecar.transcriptionConfig,
-        model: 'medium',
+        model: 'parakeet-tdt-0.6b-v3',
       },
       segments: [{ start: 0.1, end: 0.2, text: 'synthetic validation' }],
     };
@@ -403,10 +403,10 @@ describe('capture journal', () => {
     });
     const { receipt } = completed;
     const checkpointConfig = {
-      backend: 'mlx_preview',
+      backend: 'parakeet',
       preset: 'balanced',
-      model: 'small',
-      device: 'mlx',
+      model: 'parakeet-tdt-0.6b-v3',
+      device: 'coreml',
       computeType: 'float16',
       languageMode: 'detected' as const,
       requestedLanguage: null,

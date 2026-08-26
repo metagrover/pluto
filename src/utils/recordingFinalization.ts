@@ -2,7 +2,6 @@ import {
   type CaptureActivityEvidence,
   verifyCaptureActivityEvidence,
 } from './transcriptActivityEvidence.ts';
-import type { ResolvedBackendOptions } from './transcriptionBackendConfig.ts';
 import type { ResolvedTranscriptionSettings } from './transcriptionSettings.ts';
 
 export type RecordingStopSnapshot = {
@@ -25,12 +24,12 @@ export type SpeakerAttributionRetryPlan = {
     | 'retry-already-used'
     | 'no-stronger-policy'
     | 'retry-with-stronger-policy';
-  strongerOptions: ResolvedBackendOptions | null;
+  strongerOptions: null;
 };
 
 export const getStrongerSpeakerAttributionPolicy = (
   _settings: ResolvedTranscriptionSettings,
-): ResolvedBackendOptions | null => {
+): null => {
   return null;
 };
 

@@ -414,15 +414,8 @@ const createInvokeFallback =
       case 'GET_SETTING':
         result = getSetting(args[0]);
         break;
-      case 'MLX_PREVIEW_HEALTH':
-      case 'MLX_PREVIEW_CHECK_PYTHON':
-        result = { status: 'ok' };
-        break;
       case 'TRANSCRIPTION_PREPARE_FINAL':
-        result = { ready: true, engine: 'browser_preview' };
-        break;
-      case 'WHISPER_PREPARE_DIARIZATION_MODELS':
-        result = { ready: true };
+        result = { ready: true, engine: 'parakeet_coreml' };
         break;
       case 'GET_MEETINGS':
         result = meetingPreviewEnabled() ? previewTimelineMeetings : [];

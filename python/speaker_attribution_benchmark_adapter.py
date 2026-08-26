@@ -29,7 +29,6 @@ SCHEMA_VERSION = 1
 PIPELINE_VERSION = "speaker-attribution-adapter-v1"
 KNOWN_CANDIDATES = {
     "synthetic",
-    "apple-silicon-asr",
     "pyannote-community-1",
     "nemo-local",
     "sherpa-onnx",
@@ -174,13 +173,6 @@ def _identity(candidate_id: str, version: str) -> dict[str, str]:
 def _probe(candidate_id: str, config: dict[str, Any]) -> tuple[list[dict[str, str]], str]:
     if candidate_id == "synthetic":
         return [_identity("synthetic", "1")], _hardware()
-    if candidate_id == "apple-silicon-asr":
-        if platform.system() != "Darwin" or platform.machine() != "arm64":
-            raise CandidateError(
-                "candidate_unsupported_hardware",
-                "The Apple-Silicon candidate requires arm64 macOS.",
-            )
-        return [_identity("mlx-whisper", _package_version("mlx-whisper"))], _hardware()
     if candidate_id == "pyannote-community-1":
         if not _model_path(config):
             raise CandidateError("candidate_model_missing", "An explicit local model is required.")
@@ -206,74 +198,6 @@ def _safe_audio_path(request: dict[str, Any]) -> str:
             "candidate_contract_mismatch", "The local audio input is unavailable."
         )
     return str(path.resolve())
-
-
-def _normalize_transcript(result: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    if not isinstance(result, dict) or not isinstance(result.get("segments"), list):
-        raise CandidateError(
-            "candidate_contract_mismatch", "The ASR result has an invalid shape."
-        )
-
-    def timestamp(value: Any) -> float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise CandidateError(
-                "candidate_contract_mismatch", "The ASR result has invalid timestamps."
-            )
-        normalized = float(value)
-        if not math.isfinite(normalized) or normalized < 0:
-            raise CandidateError(
-                "candidate_contract_mismatch", "The ASR result has invalid timestamps."
-            )
-        return normalized
-
-    words: list[dict[str, Any]] = []
-    segments: list[dict[str, Any]] = []
-    for raw_segment in result["segments"]:
-        segment = _object(raw_segment, "ASR segment")
-        start = timestamp(segment.get("start"))
-        end = timestamp(segment.get("end"))
-        text = segment.get("text")
-        if end <= start or not isinstance(text, str):
-            raise CandidateError(
-                "candidate_contract_mismatch", "The ASR segment is invalid."
-            )
-        segments.append({"startTime": start, "endTime": end, "text": text})
-        raw_words = segment.get("words", [])
-        if not isinstance(raw_words, list):
-            raise CandidateError(
-                "candidate_contract_mismatch", "The ASR words have an invalid shape."
-            )
-        for raw_word in raw_words:
-            word = _object(raw_word, "ASR word")
-            word_start = timestamp(word.get("start"))
-            word_end = timestamp(word.get("end"))
-            word_text = word.get("word")
-            if word_end <= word_start or not isinstance(word_text, str):
-                raise CandidateError(
-                    "candidate_contract_mismatch", "The ASR word is invalid."
-                )
-            normalized = {
-                "startTime": word_start,
-                "endTime": word_end,
-                "text": word_text,
-            }
-            score = word.get("score")
-            if score is not None:
-                if (
-                    isinstance(score, bool)
-                    or not isinstance(score, (int, float))
-                    or not math.isfinite(float(score))
-                    or not 0 <= float(score) <= 1
-                ):
-                    raise CandidateError(
-                        "candidate_contract_mismatch",
-                        "The ASR word confidence is invalid.",
-                    )
-                normalized["confidence"] = float(score)
-            words.append(normalized)
-    segments.sort(key=lambda item: (item["startTime"], item["endTime"]))
-    words.sort(key=lambda item: (item["startTime"], item["endTime"]))
-    return words, segments
 
 
 def _load_nemo_config(model_path: str) -> dict[str, Any]:
@@ -319,18 +243,6 @@ def _parse_rttm(output_path: Path) -> list[dict[str, Any]]:
         )
     turns.sort(key=lambda item: (item["startTime"], item["endTime"]))
     return turns
-
-
-def _transcribe(candidate_id: str, request: dict[str, Any], config: dict[str, Any]) -> tuple[Any, Any, list[Any], str]:
-    model_name = str(config.get("model", "small"))
-    if candidate_id == "apple-silicon-asr":
-        models, hardware = _probe(candidate_id, config)
-        audio_path = _safe_audio_path(request)
-        mlx_whisper = importlib.import_module("mlx_whisper")
-        result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=model_name)
-        words, segments = _normalize_transcript(result)
-        return words, segments, models, hardware
-    raise CandidateError("candidate_contract_mismatch", "Candidate does not support transcription.")
 
 
 def _synthetic_output(request: dict[str, Any], config: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
@@ -514,8 +426,7 @@ def _handle(raw: Any) -> dict[str, Any]:
         words, segments, turns, models = _synthetic_output(request, config)
         hardware = _hardware()
     elif action == "transcribe":
-        words, segments, models, hardware = _transcribe(candidate_id, request, config)
-        turns = []
+        raise CandidateError("candidate_contract_mismatch", "Candidate does not support transcription.")
     else:
         words, segments, turns, hardware = _diarize(candidate_id, request, config)
         models, _ = _probe(candidate_id, config)

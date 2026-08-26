@@ -29,7 +29,7 @@ Intelligent meeting assistant and "second brain" application.
     This installs JavaScript dependencies only. Python and native capture tooling stay explicit so setup is easier to reason about.
 
 3.  **Set up Python Environment**
-    This installs MLX Whisper and local speaker-attribution dependencies into a local virtual environment. This may take a few minutes.
+    This installs optional local speaker-attribution benchmark dependencies into a local virtual environment. The app transcription runtime is native Parakeet and does not depend on Python.
     ```bash
     pnpm run setup-python
     ```
@@ -85,7 +85,7 @@ If permissions change, macOS requires a full app restart.
 
 ## 📦 Building for Production
 
-To create a DMG installer that includes the bundled Python environment (no client-side setup required):
+To create a DMG installer with the native capture and Parakeet runtimes:
 
 ```bash
 pnpm run build
@@ -96,6 +96,6 @@ The output DMG will be in `release/`.
 ## 🛠 Project Structure
 
 - `src/` - React/Electron source code
-- `python/` - Local MLX transcription and speaker-attribution server
+- `python/` - Optional local speaker-attribution and benchmark tooling
 - `scripts/` - Build and setup automation scripts
 - `resources/` - Assets and bundled binaries (built by `pnpm run build-native`)

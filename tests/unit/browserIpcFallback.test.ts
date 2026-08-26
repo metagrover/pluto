@@ -4,16 +4,13 @@ import { createBrowserIpcFallback } from '../../src/utils/browserIpcFallback';
 import { buildCaptureActivityEvidence } from '../../src/utils/transcriptActivityEvidence';
 
 describe('browser IPC capture journal fallback', () => {
-  it('reports browser-preview recording setup as ready', async () => {
+  it('reports Parakeet final transcription setup as ready', async () => {
     const ipc = createBrowserIpcFallback();
 
     await expect(ipc.invoke('TRANSCRIPTION_PREPARE_FINAL')).resolves.toEqual({
       ready: true,
-      engine: 'browser_preview',
+      engine: 'parakeet_coreml',
     });
-    await expect(
-      ipc.invoke('WHISPER_PREPARE_DIARIZATION_MODELS'),
-    ).resolves.toEqual({ ready: true });
     await expect(ipc.invoke('CHECK_SYSTEM_AUDIO_PERMISSION')).resolves.toBe(
       'granted',
     );

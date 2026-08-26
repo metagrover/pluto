@@ -1,25 +1,9 @@
-export type WhisperModel =
-  | 'tiny'
-  | 'base'
-  | 'small'
-  | 'medium'
-  | 'large-v2'
-  | 'large-v3';
-
-export type WhisperDevice = 'mlx';
-
-export type WhisperComputeType = 'float16';
-
-export type TranscriptionBackend = 'parakeet' | 'mlx_preview';
-
-export type TranscriptionPreset = 'balanced' | 'accuracy_first';
-
 export interface TranscriptionSettings {
-  backend?: TranscriptionBackend | null;
-  preset?: TranscriptionPreset | null;
-  model?: WhisperModel | null;
-  device?: WhisperDevice | null;
-  computeType?: WhisperComputeType | null;
+  backend?: string | null;
+  preset?: string | null;
+  model?: string | null;
+  device?: string | null;
+  computeType?: string | null;
   language?: string | null;
 }
 
@@ -44,20 +28,6 @@ export const DEFAULT_TRANSCRIPTION_SETTINGS: ResolvedTranscriptionSettings = {
   liveEngine: 'parakeet_eou_320ms',
   finalEngine: 'parakeet_coreml',
 };
-
-export const TRANSCRIPTION_BACKEND_LABELS: Record<
-  TranscriptionBackend,
-  string
-> = {
-  parakeet: 'Parakeet live and final',
-  mlx_preview: 'MLX live preview',
-};
-
-export const TRANSCRIPTION_PRESET_LABELS: Record<TranscriptionPreset, string> =
-  {
-    balanced: 'Balanced',
-    accuracy_first: 'Accuracy First',
-  };
 
 export const resolveTranscriptionLanguage = (_language?: string | null): 'en' =>
   'en';
@@ -86,10 +56,3 @@ export const resolveTranscriptionSettings = (
     finalEngine: 'parakeet_coreml',
   };
 };
-
-export const resolveLiveChunkModel = (model: WhisperModel): WhisperModel =>
-  model === 'tiny' ? 'tiny' : 'base';
-
-export const resolveLiveChunkComputeType = (
-  _computeType: WhisperComputeType,
-): WhisperComputeType => 'float16';

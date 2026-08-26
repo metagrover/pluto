@@ -1,11 +1,10 @@
 export type TranscriptionPolicyRole = 'live_preview' | 'final_validation';
 
 export type TranscriptionEngine =
-  | 'mlx_whisper'
   | 'parakeet_eou_320ms'
   | 'parakeet_coreml';
 
-export type TranscriptionModel = 'base' | 'parakeet-tdt-0.6b-v3';
+export type TranscriptionModel = 'parakeet-tdt-0.6b-v3';
 
 export type TranscriptionSource = 'mic' | 'system' | 'mix';
 

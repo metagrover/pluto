@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -58,30 +58,14 @@ import {
   transcribeJournalAlignedAudio,
 } from './recoveryTranscriptionAudio';
 import { saveMeetingWithParticipantSideEffects } from './saveMeetingIpc';
-import {
-  DUAL_SHADOW_TRIAL_EVIDENCE_DIGEST,
-  activateDualShadowTrial,
-  resolveDualShadowTrial,
-} from './transcription/dualShadowTrial';
-import { writeDualShadowTrialReport } from './transcription/dualShadowTrialReport';
 import { prepareFinalTranscriptionBeforeRecovery } from './transcription/finalTranscriptionStartup';
-import { LiveTranscriptionRolloutStore } from './transcription/liveTranscriptionRolloutStore';
 import { ParakeetEouClient } from './transcription/parakeetEouClient';
 import { ParakeetEouMeetingCoordinator } from './transcription/parakeetEouMeetingCoordinator';
 import { ParakeetFinalClient } from './transcription/parakeetFinalClient';
-import { ParakeetLiveClient } from './transcription/parakeetLiveClient';
-import {
-  ParakeetLiveMeetingCoordinator,
-  descendantPids,
-} from './transcription/parakeetLiveMeetingCoordinator';
 import {
   type ParakeetRuntimeHost,
   makeRuntimeHost,
 } from './transcription/parakeetRuntimeHost';
-import {
-  CachedMemoryPressureFreePercent,
-  selectShadowFreePercent,
-} from './transcription/shadowMemoryPressure';
 import { createActiveCallAlertController } from './windows/activeCallAlertWindow';
 
 if (ffmpegStatic) {
@@ -149,50 +133,6 @@ const probeAvailableMemory = async () => {
         availableMemoryBytes: Math.floor((os.totalmem() * percentage) / 100),
         memoryPressureFreePercent: percentage,
       };
-};
-
-const shadowMemoryPressure = new CachedMemoryPressureFreePercent(
-  probeMacMemoryPressureFreePercent,
-);
-
-const sampleOwnedRuntimeRss = ():
-  | { mlxRssBytes: number; parakeetRssBytes: number }
-  | undefined => {
-  const result = spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,rss=,command='], {
-    encoding: 'utf8',
-    timeout: 1_000,
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  if (result.status !== 0 || result.signal) return undefined;
-  const rows: Array<{
-    pid: number;
-    parentPid: number;
-    rssBytes: number;
-    command: string;
-  }> = [];
-  for (const line of result.stdout.split('\n')) {
-    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/u);
-    if (!match) continue;
-    const rssBytes = Number(match[3]) * 1024;
-    if (!Number.isFinite(rssBytes) || rssBytes < 0) return undefined;
-    rows.push({
-      pid: Number(match[1]),
-      parentPid: Number(match[2]),
-      rssBytes,
-      command: match[4],
-    });
-  }
-  const descendants = descendantPids(process.pid, rows);
-  let mlxRssBytes = 0;
-  let parakeetRssBytes = 0;
-  for (const row of rows) {
-    if (!descendants.has(row.pid)) continue;
-    if (row.command.includes('mlx_transcription_server'))
-      mlxRssBytes += row.rssBytes;
-    if (row.command.includes('parakeet-runtime'))
-      parakeetRssBytes += row.rssBytes;
-  }
-  return { mlxRssBytes, parakeetRssBytes };
 };
 
 // Note: We intentionally avoid Chromium loopback/screen-capture APIs to keep
@@ -442,7 +382,6 @@ let activeTranscriptionCount = 0;
 const activeTranscriptionMeetings = new Map<string, number>();
 let parakeetFinalClient: ParakeetFinalClient | null = null;
 let parakeetRuntimeHost: ParakeetRuntimeHost | null = null;
-let parakeetShadowCoordinator: ParakeetLiveMeetingCoordinator | null = null;
 let parakeetEouCoordinator: ParakeetEouMeetingCoordinator | null = null;
 let parakeetEouOwner: WebContents | null = null;
 let parakeetEouGeneration: number | null = null;
@@ -548,15 +487,11 @@ app.on('before-quit', async () => {
   parakeetEouCoordinator = null;
   parakeetEouOwner = null;
   parakeetEouGeneration = null;
-  await parakeetShadowCoordinator?.stop();
-  parakeetShadowCoordinator = null;
   parakeetRuntimeHost?.shutdown();
   parakeetRuntimeHost = null;
 });
 
 app.whenReady().then(async () => {
-  shadowMemoryPressure.refresh();
-  setInterval(() => shadowMemoryPressure.refresh(), 30_000).unref();
   // No desktop capture handlers: keep permissions to mic + system audio only.
 
   // Do not set DisplayMediaRequestHandler to avoid Screen Recording permission prompts.
@@ -585,27 +520,6 @@ app.whenReady().then(async () => {
     runtimeHost: parakeetRuntimeHost,
     diagnostic: (code) => console.warn(`[Pluto] ${code}`),
   });
-  const rolloutOwnerToken = randomUUID();
-  const dualShadowTrial = resolveDualShadowTrial({
-    isPackaged: app.isPackaged,
-    environment: process.env,
-  });
-  const rolloutStore = new LiveTranscriptionRolloutStore({
-    filePath: path.join(
-      app.getPath('userData'),
-      'live-transcription-rollout.json',
-    ),
-    ownerToken: rolloutOwnerToken,
-    approvedStageEvidenceDigests: dualShadowTrial.enabled
-      ? { dual_shadow: [DUAL_SHADOW_TRIAL_EVIDENCE_DIGEST] }
-      : {},
-  });
-  activateDualShadowTrial({
-    trial: dualShadowTrial,
-    store: rolloutStore,
-    ownerToken: rolloutOwnerToken,
-  });
-
   ipcMain.handle('GET_CAPTURE_COMPUTE_POLICY', async () => ({
     onBattery: powerMonitor.isOnBatteryPower(),
     thermalState: powerMonitor.getCurrentThermalState(),
@@ -1697,86 +1611,6 @@ app.whenReady().then(async () => {
         .save(outputPath);
     });
   };
-
-  parakeetShadowCoordinator = new ParakeetLiveMeetingCoordinator({
-    enabled: () => {
-      const state = rolloutStore.read();
-      return state.mode === 'parakeet' && state.stage === 'dual_shadow';
-    },
-    createClient: async () => {
-      if (!parakeetRuntimeHost) throw new Error('parakeet_runtime_unavailable');
-      const lease = await parakeetRuntimeHost.startRecordingLive();
-      const client = new ParakeetLiveClient({
-        runtimeHost: parakeetRuntimeHost,
-        runtimeLease: lease,
-        maxQueuedAppends: 2,
-      });
-      return {
-        open: (identity) => client.open(identity),
-        append: async ({ checksumSha256: _checksumSha256, ...request }) =>
-          await client.append(request),
-        flush: (identity) => client.flush(identity),
-        cancel: (identity) => client.cancel(identity),
-        close: async () => {
-          await client.close();
-          return 'exited' as const;
-        },
-      };
-    },
-    resolveRepairPath: (relativePath) => {
-      const root = path.resolve(getMeetingArtifactsRootDir());
-      const candidate = path.resolve(root, relativePath);
-      if (!candidate.startsWith(`${root}${path.sep}`))
-        throw new Error('parakeet_path_not_allowed');
-      return candidate;
-    },
-    sampleResources: () => {
-      const thermal = powerMonitor.getCurrentThermalState();
-      const owned = sampleOwnedRuntimeRss();
-      if (thermal === 'unknown' || !owned) return undefined;
-      return {
-        mlxRssBytes: owned.mlxRssBytes,
-        parakeetRssBytes: owned.parakeetRssBytes,
-        electronRssBytes: process.memoryUsage().rss,
-        freePercent: selectShadowFreePercent({
-          memoryPressureFreePercent: shadowMemoryPressure.current(),
-          osFreePercent: (os.freemem() / os.totalmem()) * 100,
-        }),
-        thermal,
-      };
-    },
-    rollback: async () => {
-      const state = rolloutStore.read();
-      return rolloutStore.rollback({
-        reason: 'watchdog',
-        engineEpoch: state.engineEpoch,
-        ownerToken: rolloutOwnerToken,
-      }).accepted;
-    },
-    stitchWindow: async ({ source, sequenceStart, segments }) =>
-      await stitchWavSegments({
-        segments: segments.map((segment) => ({
-          path: segment.path,
-          startSec: segment.startSec,
-          endSec: segment.endSec,
-          chunkIndex: segment.sequence,
-        })),
-        outputTag: `parakeet-shadow-${source}-${sequenceStart}`,
-      }),
-    removeTemporaryAudio: async (audioPath) => {
-      try {
-        await fs.promises.unlink(audioPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-    },
-    writeReport: async (report) => {
-      writeDualShadowTrialReport({
-        userDataPath: app.getPath('userData'),
-        report,
-      });
-    },
-  });
 
   ipcMain.handle(
     'AUDIO_STITCH_WAV_SEGMENTS',

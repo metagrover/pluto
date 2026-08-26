@@ -346,10 +346,10 @@ describe('recording finalization helpers', () => {
   it('does not vary the fixed preview policy for speaker attribution', () => {
     expect(
       getStrongerSpeakerAttributionPolicy({
-        backend: 'mlx_preview',
+        backend: 'parakeet',
         preset: 'balanced',
-        model: 'small',
-        device: 'mlx',
+        model: 'parakeet-tdt-0.6b-v3',
+        device: 'coreml',
         computeType: 'float16',
         language: 'en',
       }),
@@ -359,10 +359,10 @@ describe('recording finalization helpers', () => {
   it('does not request a stronger speaker-attribution policy when already strongest', () => {
     expect(
       getStrongerSpeakerAttributionPolicy({
-        backend: 'mlx_preview',
+        backend: 'parakeet',
         preset: 'accuracy_first',
-        model: 'large-v3',
-        device: 'mlx',
+        model: 'parakeet-tdt-0.6b-v3',
+        device: 'coreml',
         computeType: 'float16',
         language: 'en',
       }),
@@ -376,10 +376,10 @@ describe('recording finalization helpers', () => {
         mappingConfident: false,
         retryAlreadyUsed: false,
         settings: {
-          backend: 'mlx_preview',
+          backend: 'parakeet',
           preset: 'balanced',
-          model: 'small',
-          device: 'mlx',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
           computeType: 'float16',
           language: 'en',
         },
@@ -399,10 +399,10 @@ describe('recording finalization helpers', () => {
         retryAlreadyUsed: false,
         providerHasStrongerPolicy: false,
         settings: {
-          backend: 'mlx_preview',
+          backend: 'parakeet',
           preset: 'balanced',
-          model: 'small',
-          device: 'mlx',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
           computeType: 'float16',
           language: 'en',
         },
@@ -417,10 +417,10 @@ describe('recording finalization helpers', () => {
         mappingConfident: true,
         retryAlreadyUsed: false,
         settings: {
-          backend: 'mlx_preview',
+          backend: 'parakeet',
           preset: 'balanced',
-          model: 'small',
-          device: 'mlx',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
           computeType: 'float16',
           language: 'en',
         },
@@ -436,10 +436,10 @@ describe('recording finalization helpers', () => {
         mappingConfident: false,
         retryAlreadyUsed: true,
         settings: {
-          backend: 'mlx_preview',
+          backend: 'parakeet',
           preset: 'balanced',
-          model: 'small',
-          device: 'mlx',
+          model: 'parakeet-tdt-0.6b-v3',
+          device: 'coreml',
           computeType: 'float16',
           language: 'en',
         },
