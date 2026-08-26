@@ -2,7 +2,7 @@
 
 **Issue:** [#672](https://github.com/metagrover/pluto/issues/672)  
 **Generated:** 2026-08-26  
-**Status:** Approved direction; implementation pending  
+**Status:** Implemented in #672
 **Mode:** Product
 
 ## Problem statement
@@ -329,7 +329,6 @@ The reconciliation request is capped at 24 candidate clusters, up to 4 represent
 - Whether proposal review belongs directly in Meeting View or in a broader correction inbox.
 - When user-confirmed terms should become eligible for future transcription vocabulary, given its stricter false-bias risk.
 
-## Next step
+## Follow-up boundary
 
-Implement the prompt-contract and terminology-domain layers behind tests first, then run the bounded pass against representative saved meetings before adding confirmation UI or cross-meeting learning.
-
+Evaluate a confirmation UI or cross-meeting terminology memory only after proposal precision is measured across more saved meetings. The first release remains meeting-scoped and does not silently learn from unsupported guesses.

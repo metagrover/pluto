@@ -2,6 +2,7 @@ import type {
   ExtractionPriorityHints,
   InternalSignalDocument,
 } from './provider';
+import type { TerminologyCandidateCluster } from './terminologyReconciliation';
 
 /** @deprecated Use getStructuredAnalysisPrompt for v3 pipeline */
 export const getSummaryPrompt = (
@@ -554,6 +555,10 @@ Return JSON in this exact shape:
 // =============================================
 
 export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
+- Coverage: Every substantive transcript range must survive in a final topic or be omitted only because it is duplicate, small talk, or housekeeping. Generic absence prose is not content; when no supported content exists, return an empty payload instead of claiming that nothing happened.
+- Topic cohesion: each topic covers one coherent subject and outcome. Merge topics only when they concern the same subject and outcome; adjacency or shared participants are not sufficient. Split unrelated implementation, equipment, policy, or personal material.
+- Modality: generated language must not be stronger than the source speech act. Preserve targets, intentions, preferences, recommendations, predictions, conditions, and possible consequences as such in topics and the overview.
+- Commitments: Extract the evidence clause first, classify it second, and normalize it last. Preserve its subject, modal verb, negation, and condition. Compression must not introduce a stronger verb or a new object.
 - Settled decision: retain only when a participant explicitly agrees to, selects, approves, rejects, declares, or resolves a concrete path. An explicit rejection is itself a decision and must not be omitted; when a participant rejects one option and states what the group will keep or do, extract exactly one decision describing the accepted path using the wording of the resolving clause. Options, preferences, recommendations, predictions, and unresolved or conditional exploration are not decisions.
 - Generic rejection pattern: "We rejected option A. We will keep option B." produces exactly one decision whose text reuses "We will keep option B" and whose evidence quotes the resolving clause. Do not copy this example into output.
 - Committed action: retain only when a participant explicitly commits to concrete follow-through, accepts a request, receives an explicit assignment, or a mandated follow-up is clearly stated. Mentions of work, possible tasks, questions, suggestions, and hypothetical next steps are not actions.
@@ -708,6 +713,7 @@ export const getStructuredAnalysisEditorialPrompt = (
   draftAnalysisJson: string,
   userNotes?: string,
   template: MeetingNotesTemplate = 'auto',
+  terminologyContext = '',
 ): string => {
   const userNotesBlock = userNotes
     ? `\nUser notes (high-priority emphasis, not independent evidence):\n${userNotes}\n`
@@ -764,7 +770,7 @@ Editorial rules:
 - Preserve uncertainty, conditions, dates, numeric targets, and speaker ambiguity.
 - Rebuild the top-level action and decision arrays from the final topics.
 - Return the complete JSON object only. Do not include markdown or commentary.
-${userNotesBlock}
+${userNotesBlock}${terminologyContext ? `\n${terminologyContext}\n` : ''}
 Raw transcript:
 ${transcript}
 
@@ -783,6 +789,9 @@ Return valid JSON only in this exact shape:
 {
   "topics": [
     { "title": "Short descriptive title", "start_segment": 0, "end_segment": 15 }
+  ],
+  "terminology_candidates": [
+    { "raw_text": "exact transcript span", "segment_indexes": [0], "kind": "name | organization | product | acronym | domain_term", "reason": "variant | ambiguous | known_term_match | spoken_definition" }
   ]
 }
 
@@ -793,12 +802,49 @@ Rules:
 - If the meeting has a single topic throughout, return one topic covering all segments.
 - Keep titles concise and descriptive (3-8 words).
 - Do not invent topics. Only identify what's clearly discussed.
+- Return at most 6 terminology candidates. Candidates are hypotheses: include only unfamiliar proper names, organizations, products, acronyms, domain terms, or inconsistent variants whose spelling may matter to the notes.
+- Each candidate raw_text must be an exact span in every referenced transcript line. Do not include ordinary words, numbers, dates, URLs, negation, or speaker labels.
+- Do not propose a preferred spelling and do not reinterpret meaning in this pass.
 
 Return valid JSON only. No markdown fences, no commentary.
 
 Transcript:
 ${transcript}`;
 };
+
+export const getTerminologyReconciliationPrompt = (
+  candidates: TerminologyCandidateCluster[],
+  knownTerms: string[] = [],
+): string => `You are reconciling uncertain terminology for meeting notes.
+
+Correct spelling only. Do not reinterpret the meeting, expand an acronym without a spoken definition, or alter surrounding grammar. Model confidence is not independent evidence.
+
+Rules:
+- Prefer preserve_raw when the intended spelling is ambiguous.
+- Use apply only when confidence is high and the candidate has an independent signal: an exact known term, a spoken definition, consistent transcript variants, or multiple distinct contexts that strongly support one established spelling.
+- Do not change numbers, dates, negation, owners, deadlines, speaker labels, URLs, or ordinary words.
+- raw_forms must contain only forms supplied in the candidate cluster.
+- preferred_term must be null when no correction is sufficiently supported.
+- Return at most 24 proposals. Omit familiar terms whose supplied spelling is already credible; do not emit preserve_raw records merely to mirror every input candidate.
+
+Return valid JSON only in this exact shape:
+{
+  "proposals": [
+    {
+      "raw_forms": ["exact candidate form"],
+      "preferred_term": "supported spelling or null",
+      "confidence": "high | medium | low",
+      "signals": ["repeated_context | known_person | known_entity | spoken_definition | variant_consistency"],
+      "disposition": "apply | propose | preserve_raw"
+    }
+  ]
+}
+
+Known terms (context only; a matching spelling may be an independent signal):
+${JSON.stringify(knownTerms.slice(0, 24))}
+
+Candidate clusters:
+${JSON.stringify(candidates.slice(0, 24))}`;
 
 /**
  * Per-topic analysis prompt for multi-pass (Ollama) pipeline.
@@ -809,6 +855,7 @@ export const getTopicAnalysisPrompt = (
   transcriptSlice: string,
   userNotes?: string,
   template: MeetingNotesTemplate = 'auto',
+  terminologyContext = '',
 ): string => {
   const userNotesBlock = userNotes
     ? `\nUser Notes (incorporate relevant notes as emphasis, setting from_user_notes to true):\n${userNotes}\n`
@@ -859,7 +906,7 @@ Return valid JSON only in this exact shape:
 
 **Output Format:**
 Return valid JSON only. No markdown fences, no commentary.
-${userNotesBlock}
+${userNotesBlock}${terminologyContext ? `\n${terminologyContext}\n` : ''}
 Transcript slice:
 ${transcriptSlice}`;
 };

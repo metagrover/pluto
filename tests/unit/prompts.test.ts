@@ -9,8 +9,10 @@ import {
   getStructuredAnalysisRepairPrompt,
   getSummaryPrompt,
   getSummaryRepairPrompt,
+  getTerminologyReconciliationPrompt,
   getTitlePrompt,
   getTopicAnalysisPrompt,
+  getTopicSegmentationPrompt,
   getValueSignalsPrompt,
 } from '../../electron/llm/prompts';
 
@@ -157,6 +159,28 @@ describe('structured analysis extraction policy', () => {
     }
   });
 
+  it('shares a general-purpose coverage and fidelity contract across every analysis pass', () => {
+    const prompts = [
+      getStructuredAnalysisPrompt('Nira: Synthetic transcript.'),
+      getTopicAnalysisPrompt('Synthetic topic', 'Nira: Synthetic transcript.'),
+      getStructuredAnalysisRepairPrompt('Nira: Synthetic transcript.', '{}'),
+      getStructuredAnalysisEditorialPrompt('Nira: Synthetic transcript.', '{}'),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain('Every substantive transcript range');
+      expect(prompt).toContain('Generic absence prose is not content');
+      expect(prompt).toContain('same subject and outcome');
+      expect(prompt).toContain('adjacency or shared participants');
+      expect(prompt).toContain(
+        'must not be stronger than the source speech act',
+      );
+      expect(prompt).toContain('subject, modal verb, negation, and condition');
+      expect(prompt).toContain('Extract the evidence clause first');
+      expect(prompt).toContain('one coherent subject and outcome');
+    }
+  });
+
   it('extracts only evidence-backed positive events as recent wins', () => {
     const prompts = [
       getStructuredAnalysisPrompt('Me: We closed the Acme renewal.'),
@@ -211,6 +235,40 @@ describe('global structured analysis editor', () => {
     expect(prompt).toContain('Raw transcript');
     expect(prompt).toContain('Draft local analysis');
     expect(prompt).toContain('Access constraints matter most.');
+  });
+});
+
+describe('terminology reconciliation prompts', () => {
+  it('discovers bounded spelling candidates without treating them as corrections', () => {
+    const prompt = getTopicSegmentationPrompt(
+      'Speaker: The unfamiliar product name may be misspelled.',
+    );
+
+    expect(prompt).toContain('"terminology_candidates"');
+    expect(prompt).toContain('at most 6');
+    expect(prompt).toContain('Candidates are hypotheses');
+    expect(prompt).toContain('Do not propose a preferred spelling');
+  });
+
+  it('limits reconciliation to spelling and requires independent support', () => {
+    const prompt = getTerminologyReconciliationPrompt(
+      [
+        {
+          rawForms: ['Unfamiliar form'],
+          segmentIndexes: [2],
+          contexts: ['Speaker: Unfamiliar form appears here.'],
+          kind: 'organization',
+          reasons: ['ambiguous'],
+        },
+      ],
+      ['Known Organization'],
+    );
+
+    expect(prompt).toContain('Correct spelling only');
+    expect(prompt).toContain('Model confidence is not independent evidence');
+    expect(prompt).toContain('Do not change numbers, dates, negation');
+    expect(prompt).toContain('"proposals"');
+    expect(prompt).toContain('Known Organization');
   });
 });
 

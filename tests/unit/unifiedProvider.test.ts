@@ -119,6 +119,12 @@ describe('UnifiedLLMProvider', () => {
     vi.unstubAllGlobals();
   });
 
+  it('budgets enough output for the bounded terminology proposal list', () => {
+    expect(
+      calculateOllamaContextBudget('', 'terminologyReconciliation').num_predict,
+    ).toBe(2048);
+  });
+
   it('uses configured ollama model directly', async () => {
     let selectedModel = '';
     const fetchMock = installFetchMock((url, init) => {
@@ -584,6 +590,276 @@ describe('UnifiedLLMProvider', () => {
     expect(topicPrompts[1]).not.toContain('alpha-only detail');
     expect(segmentationTemperature).toBe(0.1);
     expect(topicTemperatures).toEqual([0.1, 0.1]);
+  });
+
+  it('reconciles bounded terminology once before local topic analysis', async () => {
+    const prompts: string[] = [];
+    installFetchMock((_url, init) => {
+      const prompt = String(parseRequestBody(init).prompt || '');
+      prompts.push(prompt);
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Contract review', start_segment: 0, end_segment: 8 },
+            ],
+            terminology_candidates: [
+              {
+                raw_text: 'Ovaltree',
+                segment_indexes: [0, 4],
+                kind: 'organization',
+                reason: 'known_term_match',
+              },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('reconciling uncertain terminology')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            proposals: [
+              {
+                raw_forms: ['Ovaltree'],
+                preferred_term: 'Ogletree',
+                confidence: 'high',
+                signals: ['known_entity'],
+                disposition: 'apply',
+              },
+            ],
+          }),
+        });
+      }
+      expect(prompt).toContain('Terminology for synthesis only:');
+      expect(prompt).toContain('Preferred term: "Ogletree"');
+      return jsonResponse({
+        response: JSON.stringify({
+          title: 'Contract review',
+          summary: 'Ogletree will review the contract.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      [
+        'Ayush: The Ovaltree contract needs review.',
+        'Deepak: We can send the documents.',
+        'Ayush: The review covers the new clause.',
+        'Deepak: The deadline is still tentative.',
+        'Ayush: Ovaltree has the current draft.',
+        'Deepak: Legal will provide context.',
+        'Ayush: No decision is needed today.',
+        'Deepak: The next step remains conditional.',
+        'Ayush: We should preserve that uncertainty.',
+      ].join('\n'),
+      undefined,
+      'auto',
+      { knownTerms: ['Ogletree'] },
+    );
+
+    expect(
+      prompts.filter((prompt) =>
+        prompt.includes('reconciling uncertain terminology'),
+      ),
+    ).toHaveLength(1);
+    expect(
+      prompts.findIndex((prompt) => prompt.includes('topic segmenter')),
+    ).toBeLessThan(
+      prompts.findIndex((prompt) =>
+        prompt.includes('reconciling uncertain terminology'),
+      ),
+    );
+    expect(
+      prompts.findIndex((prompt) =>
+        prompt.includes('reconciling uncertain terminology'),
+      ),
+    ).toBeLessThan(
+      prompts.findIndex((prompt) =>
+        prompt.includes('Terminology for synthesis only:'),
+      ),
+    );
+    expect(
+      analysis.generation_metadata?.terminology?.proposals[0],
+    ).toMatchObject({
+      preferredTerm: 'Ogletree',
+      status: 'applied',
+    });
+  });
+
+  it('continues with raw terminology when reconciliation JSON is invalid', async () => {
+    installFetchMock((_url, init) => {
+      const prompt = String(parseRequestBody(init).prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [{ title: 'Update', start_segment: 0, end_segment: 8 }],
+            terminology_candidates: [
+              {
+                raw_text: 'Unclearname',
+                segment_indexes: [0],
+                kind: 'name',
+                reason: 'ambiguous',
+              },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('reconciling uncertain terminology')) {
+        return jsonResponse({ response: '{}' });
+      }
+      expect(prompt).not.toContain('Terminology for synthesis only:');
+      return jsonResponse({
+        response: JSON.stringify({
+          title: 'Update',
+          summary: 'Unclearname remains the transcript wording.',
+          key_points: [],
+          decisions: [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      [
+        'Sam: Unclearname is involved.',
+        'Lee: Context one.',
+        'Sam: Context two.',
+        'Lee: Context three.',
+        'Sam: Context four.',
+        'Lee: Context five.',
+        'Sam: Context six.',
+        'Lee: Context seven.',
+        'Sam: Context eight.',
+      ].join('\n'),
+    );
+
+    expect(analysis.quality.fallback_used).toBe(false);
+    expect(analysis.generation_metadata?.terminology).toBeUndefined();
+    expect(analysis.generation_metadata?.error_categories).toContain(
+      'terminology_invalid_json',
+    );
+    expect(analysis.quality.issues).toContain(
+      'Terminology reconciliation was unavailable, so raw transcript wording was preserved.',
+    );
+  });
+
+  it('preserves an alias-backed settled item through editorial consolidation', async () => {
+    installFetchMock((_url, init) => {
+      const prompt = String(parseRequestBody(init).prompt || '');
+      if (prompt.includes('meeting topic segmenter')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            topics: [
+              { title: 'Selection', start_segment: 0, end_segment: 3 },
+              { title: 'Follow-up', start_segment: 4, end_segment: 8 },
+            ],
+            terminology_candidates: [
+              {
+                raw_text: 'Ovaltree',
+                segment_indexes: [0],
+                kind: 'organization',
+                reason: 'known_term_match',
+              },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('reconciling uncertain terminology')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            proposals: [
+              {
+                raw_forms: ['Ovaltree'],
+                preferred_term: 'Ogletree',
+                confidence: 'high',
+                signals: ['known_entity'],
+                disposition: 'apply',
+              },
+            ],
+          }),
+        });
+      }
+      if (prompt.includes('global meeting-notes editor')) {
+        return jsonResponse({
+          response: JSON.stringify({
+            overview: 'The selection and follow-up were covered.',
+            topics: [
+              {
+                title: 'Selection',
+                summary: 'Ogletree was selected.',
+                key_points: [],
+                decisions: [],
+                action_items: [],
+                open_questions: [],
+              },
+              {
+                title: 'Follow-up',
+                summary: 'The follow-up remains open.',
+                key_points: [],
+                decisions: [],
+                action_items: [],
+                open_questions: [],
+              },
+            ],
+            all_action_items: [],
+            all_decisions: [],
+            meeting_type: 'general',
+          }),
+        });
+      }
+      const isSelection = prompt.includes('We will use Ovaltree');
+      return jsonResponse({
+        response: JSON.stringify({
+          title: isSelection ? 'Selection' : 'Follow-up',
+          summary: isSelection
+            ? 'Ogletree was selected.'
+            : 'The follow-up remains open.',
+          key_points: [],
+          decisions: isSelection
+            ? [{ text: 'Use Ogletree', evidence: 'We will use Ovaltree.' }]
+            : [],
+          action_items: [],
+          open_questions: [],
+        }),
+      });
+    });
+
+    const provider = new UnifiedLLMProvider('ollama', {
+      ollama_model: 'qwen3.5:9b',
+    });
+    const analysis = await provider.generateStructuredAnalysis(
+      [
+        'Sam: We will use Ovaltree.',
+        'Lee: The choice is settled.',
+        'Sam: Context two.',
+        'Lee: Context three.',
+        'Sam: The follow-up is still open.',
+        'Lee: Context five.',
+        'Sam: Context six.',
+        'Lee: Context seven.',
+        'Sam: Context eight.',
+      ].join('\n'),
+      undefined,
+      'auto',
+      { knownTerms: ['Ogletree'] },
+    );
+
+    expect(analysis.all_decisions).toEqual([
+      expect.objectContaining({
+        text: 'Use Ogletree',
+        evidence: 'We will use Ovaltree.',
+      }),
+    ]);
   });
 
   it('covers transcript lines omitted between Ollama topic ranges exactly once', async () => {

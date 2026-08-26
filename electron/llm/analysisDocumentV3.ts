@@ -13,6 +13,7 @@ import type {
   AnalysisGenerationMetadata,
   AnalysisQualityV3,
   DecisionV3,
+  MeetingTerminologyArtifactV1,
   MeetingType,
   RecentWinV3,
   TopicPoint,
@@ -45,6 +46,73 @@ const parseErrorCategories = (value: unknown): AnalysisErrorCategory[] => {
   );
 };
 
+const parseTerminologyArtifact = (
+  raw: unknown,
+): MeetingTerminologyArtifactV1 | undefined => {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  if (
+    record.schemaVersion !== 1 ||
+    !asString(record.generatedAt) ||
+    !asString(record.provider) ||
+    !asString(record.model) ||
+    !asString(record.policyVersion) ||
+    !Array.isArray(record.proposals)
+  ) {
+    return undefined;
+  }
+  const proposals = record.proposals.flatMap((rawProposal) => {
+    if (!rawProposal || typeof rawProposal !== 'object') return [];
+    const proposal = rawProposal as Record<string, unknown>;
+    const confidence = asString(proposal.confidence);
+    const status = asString(proposal.status);
+    if (
+      !['high', 'medium', 'low'].includes(confidence) ||
+      !['applied', 'proposed', 'confirmed', 'rejected', 'preserved'].includes(
+        status,
+      )
+    ) {
+      return [];
+    }
+    return [
+      {
+        rawForms: asStringArray(proposal.rawForms),
+        preferredTerm:
+          typeof proposal.preferredTerm === 'string'
+            ? proposal.preferredTerm.trim() || null
+            : null,
+        segmentIndexes: Array.isArray(proposal.segmentIndexes)
+          ? proposal.segmentIndexes.filter(
+              (value): value is number =>
+                Number.isInteger(value) && Number(value) >= 0,
+            )
+          : [],
+        confidence:
+          confidence as MeetingTerminologyArtifactV1['proposals'][number]['confidence'],
+        signals: asStringArray(proposal.signals).filter((signal) =>
+          [
+            'repeated_context',
+            'known_person',
+            'known_entity',
+            'spoken_definition',
+            'variant_consistency',
+          ].includes(signal),
+        ) as MeetingTerminologyArtifactV1['proposals'][number]['signals'],
+        status:
+          status as MeetingTerminologyArtifactV1['proposals'][number]['status'],
+      },
+    ];
+  });
+  return {
+    schemaVersion: 1,
+    generatedAt: asString(record.generatedAt),
+    provider: asString(record.provider),
+    model: asString(record.model),
+    policyVersion: asString(record.policyVersion),
+    proposals,
+  };
+};
+
 const parseGenerationMetadata = (
   raw: unknown,
 ): AnalysisGenerationMetadata | undefined => {
@@ -65,6 +133,23 @@ const parseGenerationMetadata = (
     return undefined;
   }
 
+  const terminology = parseTerminologyArtifact(record.terminology);
+  const rawGenerationOptions =
+    record.generation_options && typeof record.generation_options === 'object'
+      ? (record.generation_options as Record<string, unknown>)
+      : null;
+  const generationOptions = rawGenerationOptions
+    ? {
+        ...(typeof rawGenerationOptions.structured_thinking === 'boolean'
+          ? {
+              structured_thinking: rawGenerationOptions.structured_thinking,
+            }
+          : {}),
+        ...(Number.isSafeInteger(rawGenerationOptions.seed)
+          ? { seed: rawGenerationOptions.seed as number }
+          : {}),
+      }
+    : null;
   return {
     provider: provider as AnalysisGenerationMetadata['provider'],
     model,
@@ -73,6 +158,10 @@ const parseGenerationMetadata = (
     prompt_version: promptVersion,
     generated_at: generatedAt,
     error_categories: parseErrorCategories(record.error_categories),
+    ...(generationOptions && Object.keys(generationOptions).length > 0
+      ? { generation_options: generationOptions }
+      : {}),
+    ...(terminology ? { terminology } : {}),
   };
 };
 

@@ -248,6 +248,40 @@ describe('analysis grounding', () => {
     expect(result.analysis.all_decisions).toHaveLength(1);
   });
 
+  it('uses applied term aliases for claim support while keeping raw evidence verbatim', () => {
+    const input = document();
+    input.topics[0].decisions = [
+      {
+        text: 'Use Ogletree',
+        evidence: 'We will use Ovaltree.',
+      },
+    ];
+
+    const result = groundAnalysisDocument(
+      input,
+      'Nira: We will use Ovaltree.',
+      { terminologyAliases: { Ogletree: ['Ovaltree'] } },
+    );
+
+    expect(result.analysis.all_decisions).toEqual([
+      expect.objectContaining({
+        text: 'Use Ogletree',
+        evidence: 'We will use Ovaltree.',
+      }),
+    ]);
+  });
+
+  it('uses applied term aliases when validating a key-point speaker', () => {
+    const input = document();
+    input.topics[0].key_points = [{ text: 'Use Ogletree', speaker: 'Nira' }];
+
+    const result = groundAnalysisDocument(input, 'Nira: Use Ovaltree.', {
+      terminologyAliases: { Ogletree: ['Ovaltree'] },
+    });
+
+    expect(result.analysis.topics[0].key_points[0].speaker).toBe('Nira');
+  });
+
   it('does not combine negation from one option with another option', () => {
     const input = document();
     input.topics[0].decisions = [

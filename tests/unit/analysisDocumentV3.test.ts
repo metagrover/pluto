@@ -154,6 +154,54 @@ describe('parseAnalysisDocumentV3', () => {
     expect(result?.generation_metadata).toEqual(validV3.generation_metadata);
   });
 
+  it('preserves bounded local generation options', () => {
+    const result = parseAnalysisDocumentV3(
+      JSON.stringify({
+        ...validV3,
+        generation_metadata: {
+          ...validV3.generation_metadata,
+          generation_options: { structured_thinking: false, seed: 42 },
+        },
+      }),
+    );
+
+    expect(result?.generation_metadata?.generation_options).toEqual({
+      structured_thinking: false,
+      seed: 42,
+    });
+  });
+
+  it('round-trips a valid meeting-scoped terminology artifact', () => {
+    const terminology = {
+      schemaVersion: 1 as const,
+      generatedAt: '2026-08-26T00:00:00.000Z',
+      provider: 'ollama',
+      model: 'qwen3.5:9b',
+      policyVersion: 'terminology-v1',
+      proposals: [
+        {
+          rawForms: ['Raw form'],
+          preferredTerm: 'Preferred Form',
+          segmentIndexes: [2, 7],
+          confidence: 'high' as const,
+          signals: ['known_entity' as const],
+          status: 'applied' as const,
+        },
+      ],
+    };
+    const result = parseAnalysisDocumentV3(
+      JSON.stringify({
+        ...validV3,
+        generation_metadata: {
+          ...validV3.generation_metadata,
+          terminology,
+        },
+      }),
+    );
+
+    expect(result?.generation_metadata?.terminology).toEqual(terminology);
+  });
+
   it('strips invalid topic points', () => {
     const withBadPoints = {
       ...validV3,

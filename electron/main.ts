@@ -2440,7 +2440,18 @@ app.whenReady().then(async () => {
           transcript,
           userNotes,
           template,
-          { signal: controller.signal },
+          {
+            signal: controller.signal,
+            knownTerms: db
+              .getAllEntities()
+              .filter(
+                (entity) =>
+                  entity.type === 'person' || entity.type === 'project',
+              )
+              .map((entity) => entity.name)
+              .filter(Boolean)
+              .slice(0, 24),
+          },
         );
         if (normalizedRequestId && analysis.quality.fallback_used) {
           throw new Error('analysis_generation_failed');

@@ -34,7 +34,41 @@ export type AnalysisErrorCategory =
   | 'editorial_invalid_json'
   | 'editorial_input_too_large'
   | 'editorial_dropped_settled_item'
-  | 'editorial_failed';
+  | 'editorial_failed'
+  | 'terminology_invalid_json'
+  | 'terminology_failed';
+
+export type TerminologyConfidence = 'high' | 'medium' | 'low';
+export type TerminologySignal =
+  | 'repeated_context'
+  | 'known_person'
+  | 'known_entity'
+  | 'spoken_definition'
+  | 'variant_consistency';
+export type TerminologyStatus =
+  | 'applied'
+  | 'proposed'
+  | 'confirmed'
+  | 'rejected'
+  | 'preserved';
+
+export interface MeetingTerminologyProposalV1 {
+  rawForms: string[];
+  preferredTerm: string | null;
+  segmentIndexes: number[];
+  confidence: TerminologyConfidence;
+  signals: TerminologySignal[];
+  status: TerminologyStatus;
+}
+
+export interface MeetingTerminologyArtifactV1 {
+  schemaVersion: 1;
+  generatedAt: string;
+  provider: string;
+  model: string;
+  policyVersion: string;
+  proposals: MeetingTerminologyProposalV1[];
+}
 
 export interface AnalysisQualityV3 {
   format_pass: boolean;
@@ -54,6 +88,7 @@ export interface AnalysisGenerationMetadata {
     structured_thinking?: boolean;
     seed?: number;
   };
+  terminology?: MeetingTerminologyArtifactV1;
 }
 
 export interface TopicPoint {

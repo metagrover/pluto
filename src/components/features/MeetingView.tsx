@@ -50,6 +50,7 @@ import {
 import { MeetingNotesDocument } from './MeetingNotesDocument';
 import { getDownstreamProcessingPresentation } from './downstreamProcessingPresentation';
 import type { MeetingActionItemCard } from './meetingActionItems';
+import { buildRegeneratedAnalysisPersistence } from './meetingAnalysisPersistence';
 import {
   type MeetingRegenerationFailurePresentation,
   resolveMeetingFailurePresentation,
@@ -718,6 +719,12 @@ export const MeetingView = ({
 
       await window.ipcRenderer.invoke('SAVE_MEETING', {
         ...selectedMeeting,
+        ...buildRegeneratedAnalysisPersistence(
+          selectedMeeting,
+          normalizedAnalysis.analysis_schema_version === 3
+            ? (normalizedAnalysis as AnalysisDocumentV3).generation_metadata
+            : undefined,
+        ),
         title:
           newTitle && newTitle !== 'Meeting' && newTitle !== 'New Meeting'
             ? newTitle
