@@ -208,6 +208,51 @@ describe('buildDashboardHomeModel', () => {
     expect(model.commitments.items).toHaveLength(3);
   });
 
+  it('honors the persisted daily priority order and keeps the rest in a backlog', () => {
+    const priorityMetadata = (rank: number) =>
+      JSON.stringify({
+        commitment_state: 'confirmed',
+        dashboard_daily_priority: { date: '2026-08-25', rank },
+      });
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      dateKey: '2026-08-25',
+      meetings: [],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({ id: 'backlog', name: 'Backlog item' }),
+        makeAction({
+          id: 'third',
+          name: 'Third priority',
+          metadata: priorityMetadata(2),
+        }),
+        makeAction({
+          id: 'first',
+          name: 'First priority',
+          metadata: priorityMetadata(0),
+        }),
+        makeAction({
+          id: 'second',
+          name: 'Second priority',
+          metadata: priorityMetadata(1),
+        }),
+      ],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.commitments.items.map((item) => item.id)).toEqual([
+      'first',
+      'second',
+      'third',
+    ]);
+    expect(model.commitments.backlog.map((item) => item.id)).toEqual([
+      'backlog',
+    ]);
+  });
+
   it('uses calm empty states when no attention item, commitment, or supported win exists', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
@@ -238,7 +283,7 @@ describe('buildDashboardHomeModel', () => {
     });
     expect(model.recentWin).toMatchObject({
       state: 'empty',
-      title: 'No recent win surfaced yet',
+      title: 'Your wins will show up here',
     });
   });
 
@@ -281,6 +326,8 @@ describe('buildDashboardHomeModel', () => {
               win: 'The launch blocker was resolved in the room.',
               why_it_counts:
                 'The notes record the decision and the owner accepted the next step.',
+              evidence:
+                'The launch blocker was resolved in the room and the owner accepted the next step.',
               source: 'Customer Launch Review',
             },
           }),
@@ -296,11 +343,39 @@ describe('buildDashboardHomeModel', () => {
 
     expect(model.recentWin).toEqual({
       state: 'populated',
+      kind: 'evidence',
       title: 'The launch blocker was resolved in the room.',
       whyItCounts:
         'The notes record the decision and the owner accepted the next step.',
       sourceLabel: 'Customer Launch Review',
       meetingId: 'meeting-win',
+    });
+  });
+
+  it('uses five recorded meetings only as an empty-state checkpoint', () => {
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      meetings: Array.from({ length: 5 }, (_, index) =>
+        makeMeeting({
+          id: `meeting-${index + 1}`,
+          analysis_json: JSON.stringify({
+            overview: 'A normal sync happened.',
+          }),
+        }),
+      ),
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+
+    expect(model.recentWin).toEqual({
+      state: 'empty',
+      title: 'Your wins will show up here',
+      detail:
+        'Pluto is looking for supported moments like praise, delivered work, closed business, and revenue won.',
     });
   });
 

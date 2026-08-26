@@ -1,14 +1,15 @@
 import {
+  ArrowDown,
   ArrowRight,
-  CalendarPlus,
+  ArrowUp,
   Check,
-  CheckCircle2,
   ChevronRight,
   CircleDot,
+  GripVertical,
   Loader2,
   MoreHorizontal,
   PartyPopper,
-  Sparkles,
+  Plus,
 } from 'lucide-react';
 import {
   useCallback,
@@ -20,15 +21,17 @@ import {
 } from 'react';
 import type { CSSProperties, FormEvent, RefObject } from 'react';
 
+import relaxedEmptyIllustration from '../../assets/illustrations/dashboard-relaxed-empty.webp';
+
 import type {
-  DashboardAction,
   DashboardActionInsightItem,
   DashboardHomeModel,
-  DashboardTopOfMindItem,
 } from './dashboardModel';
+import { getDashboardDateKey } from './dashboardModel';
 
 interface DashboardProps {
   model: DashboardHomeModel;
+  date?: Date;
   loading: boolean;
   isRecording: boolean;
   setSelectedMeetingId: (id: string | number | null) => void;
@@ -46,6 +49,11 @@ interface DashboardProps {
   handleCreateCommitment?: (
     text: string,
     dueDate: string | null,
+  ) => Promise<undefined | { id: string }>;
+  handleSetDailyCommitments?: (
+    orderedIds: string[],
+    previousIds: string[],
+    dateKey: string,
   ) => Promise<void>;
   handleUpdateAttentionStatus?: (
     attentionItemId: string,
@@ -247,15 +255,12 @@ export const buildDashboardConfettiPieces = () =>
     duration: `${900 + (index % 5) * 120}ms`,
   }));
 
-const getTopOfMindTone = (item: DashboardTopOfMindItem): string => {
-  if (item.trustState === 'weak')
-    return 'border-pro-warning/25 text-pro-warning';
-  if (item.trustState === 'stale')
-    return 'border-pro-warning/25 text-pro-warning';
-  if (item.trustState === 'directly supported')
-    return 'border-pro-accent/25 text-pro-accent';
-  return 'border-pro-border text-pro-text-muted';
-};
+export const formatDashboardDate = (date: Date): string =>
+  date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
 
 export interface CurrentReadClaimState {
   claimIdentity: string;
@@ -392,6 +397,7 @@ export const CurrentReadClaim = ({ claim }: { claim: string }) => {
 
 export const Dashboard = ({
   model,
+  date = new Date(),
   loading,
   isRecording,
   setSelectedMeetingId,
@@ -400,7 +406,8 @@ export const Dashboard = ({
   actionError,
   handleCompleteTask,
   handleReviewCommitment = async () => {},
-  handleCreateCommitment = async () => {},
+  handleCreateCommitment = async () => undefined,
+  handleSetDailyCommitments = async () => {},
   handleUpdateAttentionStatus = async () => {},
 }: DashboardProps) => {
   const [addingCommitment, setAddingCommitment] = useState(false);
@@ -410,6 +417,11 @@ export const Dashboard = ({
   const [reviewingSuggestionId, setReviewingSuggestionId] = useState<
     string | null
   >(null);
+  const suggestionIds = model.commitments.needsConfirmation.map(
+    (item) => item.id,
+  );
+  const suggestionIdsKey = suggestionIds.join('|');
+  const [suggestionQueueIds, setSuggestionQueueIds] = useState(suggestionIds);
   const [recentlyAddedCommitmentId, setRecentlyAddedCommitmentId] = useState<
     string | null
   >(null);
@@ -420,13 +432,17 @@ export const Dashboard = ({
   const [celebration, setCelebration] = useState<
     'idle' | 'confetti' | 'reduced'
   >('idle');
-
-  const runAction = (action: DashboardAction) => {
-    if (action.target === 'ask') return setActiveTab('chat');
-    if (action.target === 'meeting')
-      return setSelectedMeetingId(action.meetingId);
-    setActiveTab(action.target);
-  };
+  const initialCommitmentIds =
+    model.commitments.state === 'populated'
+      ? model.commitments.items.map((item) => item.id)
+      : [];
+  const [orderedCommitmentIds, setOrderedCommitmentIds] =
+    useState<string[]>(initialCommitmentIds);
+  const [draggedCommitmentId, setDraggedCommitmentId] = useState<string | null>(
+    null,
+  );
+  const [isSavingDailyOrder, setIsSavingDailyOrder] = useState(false);
+  const isSavingDailyOrderRef = useRef(false);
 
   useEffect(() => {
     if (celebration === 'idle') return;
@@ -466,6 +482,25 @@ export const Dashboard = ({
     };
   }, [openCommitmentMenuId]);
 
+  const modelCommitmentIds =
+    model.commitments.state === 'populated'
+      ? model.commitments.items.map((item) => item.id).join('|')
+      : '';
+  useEffect(() => {
+    setOrderedCommitmentIds(modelCommitmentIds.split('|').filter(Boolean));
+  }, [modelCommitmentIds]);
+
+  useEffect(() => {
+    setSuggestionQueueIds((previousIds) => {
+      if (suggestionIds.length === 0) return [];
+      const nextIds = [...previousIds];
+      for (const id of suggestionIds) {
+        if (!nextIds.includes(id)) nextIds.push(id);
+      }
+      return nextIds;
+    });
+  }, [suggestionIdsKey]);
+
   const finishSuggestionReview = (
     itemId: string,
     state: 'confirmed' | 'rejected',
@@ -481,10 +516,26 @@ export const Dashboard = ({
 
     setIsCreatingCommitment(true);
     try {
-      await handleCreateCommitment(text, commitmentDueDate || null);
+      const created = await handleCreateCommitment(
+        text,
+        commitmentDueDate || null,
+      );
       setCommitmentText('');
       setCommitmentDueDate('');
       setAddingCommitment(false);
+      if (created?.id) {
+        const nextIds = [created.id, ...orderedCommitmentIds].slice(0, 3);
+        try {
+          await handleSetDailyCommitments(
+            nextIds,
+            orderedCommitmentIds,
+            getDashboardDateKey(date),
+          );
+          setOrderedCommitmentIds(nextIds);
+        } catch {
+          // The commitment is already saved; App surfaces the ordering error.
+        }
+      }
     } finally {
       setIsCreatingCommitment(false);
     }
@@ -494,24 +545,77 @@ export const Dashboard = ({
     setCelebration(shouldUseReducedDashboardMotion() ? 'reduced' : 'confetti');
   };
 
-  const topOfMindItems =
-    model.topOfMind.state === 'populated' ? model.topOfMind.items : [];
   const recentWin = model.recentWin;
   const latestMeeting = model.latestMeeting;
   const hasSuggestedCommitments =
     model.commitments.needsConfirmation.length > 0;
-  const commitmentItems =
-    model.commitments.state === 'populated' ? model.commitments.items : [];
-  const hiddenCommitmentCount =
-    model.actionInsights.state === 'populated'
-      ? Math.max(
-          0,
-          model.actionInsights.allItems.filter(
-            (item) => item.commitmentState === 'confirmed',
-          ).length - commitmentItems.length,
-        )
-      : 0;
+  const currentSuggestion = model.commitments.needsConfirmation[0];
+  const currentSuggestionPosition = currentSuggestion
+    ? Math.max(1, suggestionQueueIds.indexOf(currentSuggestion.id) + 1)
+    : 0;
+  const suggestionQueueTotal = Math.max(
+    suggestionQueueIds.length,
+    suggestionIds.length,
+  );
+  const allCommitmentItems =
+    model.commitments.state === 'populated'
+      ? [...model.commitments.items, ...model.commitments.backlog]
+      : [];
+  const commitmentItems = orderedCommitmentIds
+    .map((id) => allCommitmentItems.find((item) => item.id === id))
+    .filter((item): item is DashboardActionInsightItem => Boolean(item));
+  const backlogItems = allCommitmentItems.filter(
+    (item) => !orderedCommitmentIds.includes(item.id),
+  );
   const confettiPieces = buildDashboardConfettiPieces();
+
+  const saveDailyOrder = async (nextIds: string[]) => {
+    if (isSavingDailyOrderRef.current) return;
+    isSavingDailyOrderRef.current = true;
+    setIsSavingDailyOrder(true);
+    const previousIds = orderedCommitmentIds;
+    setOrderedCommitmentIds(nextIds);
+    try {
+      await handleSetDailyCommitments(
+        nextIds,
+        previousIds,
+        getDashboardDateKey(date),
+      );
+    } catch {
+      setOrderedCommitmentIds(previousIds);
+    } finally {
+      isSavingDailyOrderRef.current = false;
+      setIsSavingDailyOrder(false);
+    }
+  };
+
+  const moveCommitment = (id: string, offset: -1 | 1) => {
+    const index = orderedCommitmentIds.indexOf(id);
+    const targetIndex = index + offset;
+    if (
+      index < 0 ||
+      targetIndex < 0 ||
+      targetIndex >= orderedCommitmentIds.length
+    )
+      return;
+    const nextIds = [...orderedCommitmentIds];
+    [nextIds[index], nextIds[targetIndex]] = [
+      nextIds[targetIndex],
+      nextIds[index],
+    ];
+    void saveDailyOrder(nextIds);
+  };
+
+  const dropCommitment = (targetId: string) => {
+    if (!draggedCommitmentId || draggedCommitmentId === targetId) return;
+    const nextIds = orderedCommitmentIds.filter(
+      (id) => id !== draggedCommitmentId,
+    );
+    const targetIndex = nextIds.indexOf(targetId);
+    nextIds.splice(targetIndex, 0, draggedCommitmentId);
+    setDraggedCommitmentId(null);
+    void saveDailyOrder(nextIds);
+  };
 
   if (loading) {
     return (
@@ -570,116 +674,47 @@ export const Dashboard = ({
         </output>
       ) : null}
 
-      <section className="border-b border-pro-border/70 pb-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-[11px] font-semibold text-pro-accent/80">
-              Daily briefing
-            </p>
-            <h1 className="mt-2 text-[28px] font-serif font-medium leading-tight text-pro-text-main">
-              Top of mind
-            </h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setActiveTab('chat')}
-              className="inline-flex min-h-8 items-center gap-2 rounded-md px-3 text-[12px] font-bold text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-            >
-              <Sparkles className="h-4 w-4" aria-hidden="true" /> Ask Pluto
-            </button>
-            {isRecording ? (
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-pro-success">
-                <CircleDot className="h-3 w-3" /> Recording
-              </span>
-            ) : null}
-          </div>
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-pro-border/70 pb-7">
+        <div>
+          <p className="text-[11px] font-medium tracking-[0.02em] text-pro-accent/80">
+            Daily briefing
+          </p>
+          <h1 className="mt-2 text-[34px] font-serif font-medium leading-tight text-pro-text-main sm:text-[38px]">
+            {formatDashboardDate(date)}
+          </h1>
         </div>
-
-        <div className="mt-6 grid gap-5 lg:grid-cols-3">
-          {topOfMindItems.length ? (
-            topOfMindItems.map((item) => (
-              <article
-                key={item.id}
-                data-testid="dashboard-top-of-mind-item"
-                className="min-h-[210px] border-t border-pro-border/70 pt-4"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span
-                    className={`rounded border px-2 py-1 text-[9px] font-semibold ${getTopOfMindTone(item)}`}
-                  >
-                    {item.trustState}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => runAction(item.action)}
-                    className="inline-flex min-h-8 items-center gap-1 text-[11px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-                  >
-                    {item.action.label} <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                <h2 className="mt-3 text-[16px] font-semibold leading-6 text-pro-text-main">
-                  {item.read}
-                </h2>
-                <p className="mt-2 text-[12px] font-medium leading-5 text-pro-text-muted">
-                  {item.whyNow}
-                </p>
-                {item.consequence ? (
-                  <p className="mt-2 text-[11px] font-semibold leading-5 text-pro-text-main/65">
-                    {item.consequence}
-                  </p>
-                ) : null}
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-semibold text-pro-text-muted/65">
-                  <span>{item.suggestedMove}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{item.evidenceLabel}</span>
-                </div>
-              </article>
-            ))
-          ) : (
-            <div className="border-t border-pro-border/70 py-6 lg:col-span-3">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-pro-success/10 text-pro-success">
-                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <div className="min-w-0">
-                  <h2 className="text-[17px] font-semibold leading-6 text-pro-text-main">
-                    {hasSuggestedCommitments
-                      ? 'Nothing urgent'
-                      : "You're caught up"}
-                  </h2>
-                  <p className="mt-1 max-w-[64ch] text-[13px] font-medium leading-[1.6] text-pro-text-muted">
-                    {hasSuggestedCommitments
-                      ? 'No blockers need attention. Review the next suggested commitment to stay ahead.'
-                      : 'No blockers or confirmed commitments need attention right now.'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      <div className="grid gap-8 pt-7 lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)] lg:gap-10">
-        <section aria-labelledby="commitments-title" className="min-w-0">
-          <div className="flex items-end justify-between gap-4 border-b border-pro-border/70 pb-3">
+        {isRecording ? (
+          <span className="mb-1 inline-flex items-center gap-1.5 text-[10px] font-semibold text-pro-success">
+            <CircleDot className="h-3 w-3" /> Recording
+          </span>
+        ) : null}
+      </header>
+      <div className="grid gap-8 pt-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)] lg:gap-12">
+        <section
+          id="todays-focus"
+          aria-labelledby="commitments-title"
+          className="min-w-0"
+        >
+          <div className="flex items-end justify-between gap-4 pb-3">
             <div>
-              <p className="text-[10px] font-semibold text-pro-text-muted/55">
-                What you own
+              <p className="text-[10px] font-medium text-pro-text-muted/60">
+                Pluto proposes, you decide
               </p>
               <h2
                 id="commitments-title"
-                className="mt-1 text-[22px] font-serif font-medium text-pro-text-main"
+                className="mt-1 text-[23px] font-serif font-medium text-pro-text-main"
               >
-                My commitments
+                Today&apos;s focus
               </h2>
             </div>
             <button
               type="button"
+              aria-label="Add a commitment"
+              title="Add a commitment"
               onClick={() => setAddingCommitment((value) => !value)}
-              className="inline-flex min-h-9 items-center gap-2 rounded-md border border-pro-border/70 bg-pro-surface/55 px-3 text-[11px] font-semibold text-pro-text-main/70 transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-pro-border/70 text-pro-text-muted transition-colors hover:border-pro-border hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
             >
-              <CalendarPlus className="h-4 w-4" /> Add commitment
+              <Plus className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
 
@@ -736,24 +771,48 @@ export const Dashboard = ({
                 );
                 const dueLabel = item.basisLabel.split(' · ')[0];
                 const hasDueDate = dueLabel !== 'No due date';
-                const basisLabel = item.sourceMeetingTitle
-                  ? `${hasDueDate ? `${dueLabel} · ` : ''}From ${item.sourceMeetingTitle}`
-                  : item.basisLabel.replace(/^No due date · /, '');
+                const contextLabel =
+                  item.sourceMeetingTitle ??
+                  (item.contextLabel !== item.attentionReason
+                    ? item.contextLabel
+                    : null);
+                const basisLabel = contextLabel
+                  ? `${hasDueDate ? `${dueLabel} · ` : ''}${item.sourceMeetingTitle ? 'From ' : ''}${contextLabel}`
+                  : hasDueDate
+                    ? dueLabel
+                    : '';
+                const priorityIndex = orderedCommitmentIds.indexOf(item.id);
                 return (
                   <article
                     key={item.id}
                     data-testid="dashboard-commitment-row"
                     aria-busy={isUpdating}
-                    className="group py-3.5"
+                    draggable={!isUpdating && !isSavingDailyOrder}
+                    onDragStart={(event) => {
+                      setDraggedCommitmentId(item.id);
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('text/plain', item.id);
+                    }}
+                    onDragEnd={() => setDraggedCommitmentId(null)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => dropCommitment(item.id)}
+                    className={`group py-4 transition-opacity ${draggedCommitmentId === item.id ? 'opacity-45' : ''}`}
                   >
-                    <div className="flex items-start gap-3">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="flex w-5 shrink-0 cursor-grab items-center justify-center self-center text-pro-text-muted/45 active:cursor-grabbing"
+                        title={`Drag ${item.title} to reorder`}
+                        aria-hidden="true"
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </span>
                       {item.canComplete ? (
                         <button
                           type="button"
                           aria-label={primaryAriaLabel}
                           disabled={isUpdating}
                           onClick={() => handleCompleteTask(item.id)}
-                          className="group/complete mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-pro-border text-pro-text-muted/55 transition-colors hover:border-pro-accent hover:bg-pro-accent/5 hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
+                          className="group/complete flex h-7 w-7 shrink-0 items-center justify-center self-center rounded-full border border-pro-border text-pro-text-muted/55 transition-colors hover:border-pro-accent hover:bg-pro-accent/5 hover:text-pro-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-60"
                         >
                           {isUpdating ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -764,10 +823,45 @@ export const Dashboard = ({
                       ) : null}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-3">
-                          <h3 className="text-[13px] font-semibold leading-5 text-pro-text-main">
+                          <h3 className="text-[14px] font-normal leading-5 text-pro-text-main">
                             {item.title}
                           </h3>
                           <div className="flex shrink-0 items-center gap-1.5">
+                            <div className="flex items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+                              <button
+                                type="button"
+                                aria-label={`Move ${item.title} up`}
+                                disabled={
+                                  isUpdating ||
+                                  isSavingDailyOrder ||
+                                  priorityIndex === 0
+                                }
+                                onClick={() => moveCommitment(item.id, -1)}
+                                className="flex h-7 w-7 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-25"
+                              >
+                                <ArrowUp
+                                  className="h-3.5 w-3.5"
+                                  aria-hidden="true"
+                                />
+                              </button>
+                              <button
+                                type="button"
+                                aria-label={`Move ${item.title} down`}
+                                disabled={
+                                  isUpdating ||
+                                  isSavingDailyOrder ||
+                                  priorityIndex ===
+                                    orderedCommitmentIds.length - 1
+                                }
+                                onClick={() => moveCommitment(item.id, 1)}
+                                className="flex h-7 w-7 items-center justify-center rounded-md text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:opacity-25"
+                              >
+                                <ArrowDown
+                                  className="h-3.5 w-3.5"
+                                  aria-hidden="true"
+                                />
+                              </button>
+                            </div>
                             {showStatus ? (
                               <span
                                 role={
@@ -872,13 +966,12 @@ export const Dashboard = ({
                           >
                             {basisLabel}
                           </button>
-                        ) : (
+                        ) : basisLabel ? (
                           <p className="mt-1 truncate text-[11px] font-medium leading-5 text-pro-text-muted">
                             {basisLabel}
                           </p>
-                        )}
-                        {item.attentionReason &&
-                        item.attentionReason !== item.contextLabel ? (
+                        ) : null}
+                        {item.attentionReason ? (
                           <p className="mt-1 text-[11px] font-semibold leading-5 text-pro-urgent/85">
                             {item.attentionReason}
                           </p>
@@ -908,44 +1001,25 @@ export const Dashboard = ({
                 );
               })}
             </div>
-          ) : model.commitments.needsConfirmation.length > 0 ? (
-            <div
-              id="suggested-commitments"
-              className="scroll-mt-6 border-b border-pro-border/60 py-5"
-            >
-              <h3 className="mb-2 text-[13px] font-semibold text-pro-text-main">
-                Suggestions · {model.commitments.needsConfirmation.length} to
-                review
-              </h3>
-              <div className="divide-y divide-pro-border/60">
-                {model.commitments.needsConfirmation.map((item) => {
-                  const isUpdating = updatingTaskIds.has(item.id);
-                  return (
-                    <DashboardSuggestionReview
-                      key={item.id}
-                      item={item}
-                      isUpdating={isUpdating}
-                      expanded={reviewingSuggestionId === item.id}
-                      onToggle={() =>
-                        setReviewingSuggestionId((current) =>
-                          current === item.id ? null : item.id,
-                        )
-                      }
-                      onDecisionComplete={(state) =>
-                        finishSuggestionReview(item.id, state)
-                      }
-                      setSelectedMeetingId={setSelectedMeetingId}
-                      handleReviewCommitment={handleReviewCommitment}
-                    />
-                  );
-                })}
-              </div>
-            </div>
           ) : (
-            <div className="py-7">
-              <p className="max-w-[58ch] text-[13px] font-medium leading-6 text-pro-text-muted">
-                Add a commitment here, or let Pluto surface one from a future
-                meeting.
+            <div
+              data-testid="daily-three-empty"
+              className="flex min-h-[390px] flex-col items-center justify-center px-6 py-10 text-center"
+            >
+              <img
+                src={relaxedEmptyIllustration}
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+                data-testid="daily-three-empty-illustration"
+                className="h-auto w-full max-w-[310px] select-none object-contain opacity-95 dark:invert dark:hue-rotate-180 dark:opacity-80"
+              />
+              <h3 className="mt-6 text-[19px] font-serif font-medium text-pro-text-main">
+                Nothing needs your attention
+              </h3>
+              <p className="mt-2 max-w-[42ch] text-[13px] font-normal leading-6 text-pro-text-muted">
+                Your day is open. Add something that matters, or let Pluto
+                propose priorities as your commitments take shape.
               </p>
             </div>
           )}
@@ -957,56 +1031,91 @@ export const Dashboard = ({
               {actionError}
             </p>
           ) : null}
-          {hiddenCommitmentCount > 0 ? (
-            <button
-              type="button"
-              onClick={() => setActiveTab('projects')}
-              className="mt-2 inline-flex min-h-8 items-center gap-1 text-[11px] font-bold text-pro-text-muted hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-            >
-              View all commitments <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
-          {commitmentItems.length > 0 &&
-          model.commitments.needsConfirmation.length ? (
-            <details
-              open
-              className="group/suggestions mt-4 border-t border-pro-border/70 pt-4"
-            >
-              <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1.5 text-[11px] font-semibold text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent [&::-webkit-details-marker]:hidden">
+          {backlogItems.length > 0 ? (
+            <details className="group/backlog mt-3 border-b border-pro-border/60 pb-3">
+              <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 text-[11px] font-medium text-pro-text-muted transition-colors hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent [&::-webkit-details-marker]:hidden">
                 <ChevronRight
-                  className="h-3.5 w-3.5 transition-transform duration-200 ease-out group-open/suggestions:rotate-90 motion-reduce:transition-none"
+                  className="h-3.5 w-3.5 transition-transform duration-200 ease-out group-open/backlog:rotate-90 motion-reduce:transition-none"
                   aria-hidden="true"
                 />
-                Suggestions · {model.commitments.needsConfirmation.length} to
-                review
+                Remaining commitments · {backlogItems.length}
               </summary>
-              <div className="mt-3 divide-y divide-pro-border/60">
-                {model.commitments.needsConfirmation.map((item) => (
-                  <DashboardSuggestionReview
+              <div className="divide-y divide-pro-border/50 pl-5">
+                {backlogItems.map((item) => (
+                  <div
                     key={item.id}
-                    item={item}
-                    isUpdating={updatingTaskIds.has(item.id)}
-                    expanded={reviewingSuggestionId === item.id}
-                    onToggle={() =>
-                      setReviewingSuggestionId((current) =>
-                        current === item.id ? null : item.id,
-                      )
-                    }
-                    onDecisionComplete={(state) =>
-                      finishSuggestionReview(item.id, state)
-                    }
-                    setSelectedMeetingId={setSelectedMeetingId}
-                    handleReviewCommitment={handleReviewCommitment}
-                  />
+                    className="flex items-center justify-between gap-4 py-3"
+                  >
+                    <span className="min-w-0 truncate text-[13px] font-normal text-pro-text-main/80">
+                      {item.title}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Add ${item.title} to today's three`}
+                      disabled={isSavingDailyOrder}
+                      onClick={() => {
+                        const nextIds =
+                          orderedCommitmentIds.length < 3
+                            ? [...orderedCommitmentIds, item.id]
+                            : [...orderedCommitmentIds.slice(0, 2), item.id];
+                        void saveDailyOrder(nextIds);
+                      }}
+                      className="shrink-0 rounded-md px-2 py-1.5 text-[11px] font-medium text-pro-text-muted transition-colors hover:bg-pro-surface hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-pro-accent disabled:cursor-wait disabled:opacity-50"
+                    >
+                      Prioritize
+                    </button>
+                  </div>
                 ))}
               </div>
             </details>
+          ) : null}
+          {hasSuggestedCommitments ? (
+            <section
+              id="suggested-commitments"
+              aria-labelledby="fresh-suggestion-title"
+              className="mt-6 border-t border-pro-border/70 pt-4"
+            >
+              <p
+                id="fresh-suggestion-title"
+                className="text-[10px] font-medium text-pro-text-muted/60"
+              >
+                Fresh suggestion
+                {suggestionQueueTotal > 1
+                  ? ` · ${currentSuggestionPosition} of ${suggestionQueueTotal}`
+                  : ''}
+              </p>
+              <DashboardSuggestionReview
+                item={model.commitments.needsConfirmation[0]}
+                isUpdating={updatingTaskIds.has(
+                  model.commitments.needsConfirmation[0].id,
+                )}
+                expanded={
+                  reviewingSuggestionId ===
+                  model.commitments.needsConfirmation[0].id
+                }
+                onToggle={() =>
+                  setReviewingSuggestionId((current) =>
+                    current === model.commitments.needsConfirmation[0].id
+                      ? null
+                      : model.commitments.needsConfirmation[0].id,
+                  )
+                }
+                onDecisionComplete={(state) =>
+                  finishSuggestionReview(
+                    model.commitments.needsConfirmation[0].id,
+                    state,
+                  )
+                }
+                setSelectedMeetingId={setSelectedMeetingId}
+                handleReviewCommitment={handleReviewCommitment}
+              />
+            </section>
           ) : null}
         </section>
 
         <aside className="min-w-0 space-y-8">
           <section aria-labelledby="recent-win-title">
-            <p className="text-[10px] font-semibold text-pro-text-muted/60">
+            <p className="text-[10px] font-medium text-pro-text-muted/60">
               {recentWin.state === 'populated' ? 'Evidence-backed' : 'Momentum'}
             </p>
             <h2
@@ -1015,31 +1124,38 @@ export const Dashboard = ({
             >
               Recent win
             </h2>
-            <div className="mt-4 border-t border-pro-border/70 pt-4">
+            <div className="mt-4 pt-4">
               {recentWin.state === 'populated' ? (
                 <>
-                  <h3 className="text-[15px] font-semibold leading-6 text-pro-text-main">
+                  <h3 className="text-[15px] font-medium leading-6 text-pro-text-main">
                     {recentWin.title}
                   </h3>
-                  <p className="mt-2 text-[13px] font-medium leading-[1.55] text-pro-text-muted">
+                  <p className="mt-2 text-[13px] font-normal leading-[1.55] text-pro-text-muted">
                     {recentWin.whyItCounts}
                   </p>
-                  <p className="mt-3 text-[10px] font-semibold text-pro-text-muted/65">
+                  <p className="mt-3 text-[10px] font-medium text-pro-text-muted/65">
                     Source: {recentWin.sourceLabel}
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedMeetingId(recentWin.meetingId)}
-                      className="inline-flex min-h-8 items-center gap-1 text-[12px] font-bold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
-                    >
-                      Open moment{' '}
-                      <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
+                    {recentWin.meetingId ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedMeetingId(recentWin.meetingId)
+                        }
+                        className="inline-flex min-h-8 items-center gap-1 text-[12px] font-semibold text-pro-accent hover:text-pro-text-main focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                      >
+                        Open moment{' '}
+                        <ArrowRight
+                          className="h-3.5 w-3.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={startCelebration}
-                      className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-[12px] font-bold text-pro-text-muted hover:bg-pro-success/10 hover:text-pro-success focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
+                      className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-[12px] font-semibold text-pro-text-muted hover:bg-pro-success/10 hover:text-pro-success focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pro-accent"
                     >
                       <PartyPopper className="h-3.5 w-3.5" aria-hidden="true" />{' '}
                       Celebrate
@@ -1052,12 +1168,11 @@ export const Dashboard = ({
                     <PartyPopper className="h-4 w-4" aria-hidden="true" />
                   </span>
                   <div>
-                    <h3 className="text-[14px] font-semibold leading-5 text-pro-text-main">
-                      Your wins will show up here
+                    <h3 className="text-[14px] font-normal leading-5 text-pro-text-muted">
+                      {recentWin.title}
                     </h3>
                     <p className="mt-1 text-[12px] font-medium leading-5 text-pro-text-muted">
-                      Pluto will surface meaningful outcomes here when your
-                      meetings support them.
+                      {recentWin.detail}
                     </p>
                   </div>
                 </div>
@@ -1075,7 +1190,7 @@ export const Dashboard = ({
               </p>
               <h2
                 id="continue-title"
-                className="mt-1 text-[16px] font-semibold leading-6 text-pro-text-main"
+                className="mt-1 text-[17px] font-serif font-normal leading-6 text-pro-text-main"
               >
                 Continue where you left off
               </h2>

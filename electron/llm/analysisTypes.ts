@@ -30,6 +30,7 @@ export type AnalysisErrorCategory =
   | 'unsupported_action_item'
   | 'unsupported_action_item_owner'
   | 'unsupported_action_item_due'
+  | 'unsupported_recent_win'
   | 'editorial_invalid_json'
   | 'editorial_input_too_large'
   | 'editorial_dropped_settled_item'
@@ -76,6 +77,12 @@ export interface ActionItemV3 {
   evidence?: string;
 }
 
+export interface RecentWinV3 {
+  win: string;
+  why_it_counts: string;
+  evidence: string;
+}
+
 export interface TopicSection {
   title: string;
   summary: string;
@@ -92,6 +99,7 @@ export interface AnalysisDocumentV3 {
   topics: TopicSection[];
   all_action_items: ActionItemV3[];
   all_decisions: DecisionV3[];
+  recent_win?: RecentWinV3;
   meeting_type: MeetingType;
   quality: AnalysisQualityV3;
   generation_metadata?: AnalysisGenerationMetadata;

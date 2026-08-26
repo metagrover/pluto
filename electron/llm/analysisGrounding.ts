@@ -3,6 +3,7 @@ import type {
   AnalysisDocumentV3,
   AnalysisErrorCategory,
   DecisionV3,
+  RecentWinV3,
 } from './analysisTypes';
 
 export const normalizeTranscriptEvidence = (value: string): string =>
@@ -475,6 +476,32 @@ const pushCategory = (
   if (!categories.includes(category)) categories.push(category);
 };
 
+const POSITIVE_OUTCOME_SIGNAL =
+  /\b(?:prais(?:e|ed|ing)|recogniz(?:e|ed|ing)|kudos|compliment(?:ed|s)?|great job|excellent work|impressed|delivered|shipped|launched|released|completed|finished|went live|hit (?:the )?(?:target|milestone|goal)|exceeded (?:the )?(?:target|goal)|resolved (?:the )?blocker|revenue|bookings?)\b|\b(?:closed|won|signed)\b.{0,60}\b(?:deal|account|contract|renewal|sale|customer)\b/i;
+
+const groundRecentWin = (
+  recentWin: RecentWinV3 | undefined,
+  transcript: string,
+): RecentWinV3 | undefined => {
+  if (!recentWin) return undefined;
+  const resolved = resolveTranscriptEvidence(
+    recentWin.evidence,
+    transcript,
+    recentWin.win,
+  );
+  if (
+    !resolved ||
+    claimSupportRatio(recentWin.win, resolved.evidence) <
+      MIN_PARTIAL_CLAIM_SUPPORT ||
+    claimSupportRatio(recentWin.why_it_counts, resolved.sourceLine) <
+      MIN_PARTIAL_CLAIM_SUPPORT ||
+    !POSITIVE_OUTCOME_SIGNAL.test(resolved.sourceLine)
+  ) {
+    return undefined;
+  }
+  return { ...recentWin, evidence: resolved.evidence };
+};
+
 export const groundAnalysisDocument = (
   analysis: AnalysisDocumentV3,
   transcript: string,
@@ -483,6 +510,10 @@ export const groundAnalysisDocument = (
   errorCategories: AnalysisErrorCategory[];
 } => {
   const errorCategories: AnalysisErrorCategory[] = [];
+  const recent_win = groundRecentWin(analysis.recent_win, transcript);
+  if (analysis.recent_win && !recent_win) {
+    pushCategory(errorCategories, 'unsupported_recent_win');
+  }
   const groundedTopics = analysis.topics.map((topic) => {
     const key_points = topic.key_points.map((point) => {
       if (!point.speaker) return point;
@@ -614,6 +645,7 @@ export const groundAnalysisDocument = (
       all_decisions: deduplicateByText(
         topics.flatMap((topic) => topic.decisions),
       ),
+      ...(recent_win ? { recent_win } : { recent_win: undefined }),
     },
     errorCategories,
   };

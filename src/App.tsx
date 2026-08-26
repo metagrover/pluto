@@ -29,6 +29,7 @@ import {
   persistDashboardAttentionStatus,
   persistDashboardCommitmentCreation,
   persistDashboardCommitmentReview,
+  persistDashboardPriorityOrder,
 } from './components/features/dashboardActionCompletion';
 import type {
   CaptureHealthState,
@@ -56,6 +57,7 @@ import { processValidatedMeetingDownstream } from './services/processValidatedMe
 import { retryMeetingTranscriptValidation } from './services/retryMeetingTranscriptValidation';
 
 import {
+  getEntity,
   searchEntities,
   updateActionCommitmentState,
   updateEntityStatus,
@@ -286,7 +288,7 @@ function App() {
     setDashboardActionError(null);
 
     try {
-      await persistDashboardCommitmentCreation(
+      return await persistDashboardCommitmentCreation(
         { text, dueDate },
         {
           upsertEntity,
@@ -297,6 +299,43 @@ function App() {
       console.error('Failed to add dashboard commitment', error);
       setDashboardActionError(DASHBOARD_COMMITMENT_CREATION_ERROR);
       throw error;
+    }
+  };
+
+  const handleSetDashboardDailyCommitments = async (
+    orderedIds: string[],
+    previousIds: string[],
+    dateKey: string,
+  ) => {
+    setDashboardActionError(null);
+    setUpdatingDashboardTaskIds((previous) => {
+      const next = new Set(previous);
+      for (const id of new Set([...orderedIds, ...previousIds])) next.add(id);
+      return next;
+    });
+
+    try {
+      await persistDashboardPriorityOrder(
+        { orderedIds, previousIds, dateKey },
+        {
+          getEntity,
+          upsertEntity,
+          refreshDashboard: dashboardHome.refresh,
+        },
+      );
+    } catch (error) {
+      console.error("Failed to update today's priorities", error);
+      setDashboardActionError(
+        "Could not save today's priority order. Try again.",
+      );
+      throw error;
+    } finally {
+      setUpdatingDashboardTaskIds((previous) => {
+        const next = new Set(previous);
+        for (const id of new Set([...orderedIds, ...previousIds]))
+          next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -923,7 +962,11 @@ function App() {
               : 'rounded-l-[2.5rem] border-l border-pro-border/10'
           }`}
         >
-          <div className="h-10 w-full shrink-0 drag-region bg-transparent z-50 pointer-events-auto" />
+          <div
+            className={`h-10 w-full shrink-0 drag-region z-50 pointer-events-auto ${
+              activeTab === 'chat' ? 'bg-pro-bg' : 'bg-transparent'
+            }`}
+          />
           <div
             ref={contentScrollRef}
             className={`flex-1 flex flex-col scroll-smooth relative ${
@@ -989,6 +1032,7 @@ function App() {
                 handleCompleteTask={handleCompleteTask}
                 handleReviewCommitment={handleReviewDashboardCommitment}
                 handleCreateCommitment={handleCreateDashboardCommitment}
+                handleSetDailyCommitments={handleSetDashboardDailyCommitments}
                 handleUpdateAttentionStatus={
                   handleUpdateDashboardAttentionStatus
                 }

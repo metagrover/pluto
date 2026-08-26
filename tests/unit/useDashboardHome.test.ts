@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createDashboardRefreshCoordinator,
   loadDashboardHomeData,
+  millisecondsUntilNextLocalDay,
   transitionDashboardRefreshState,
 } from '../../src/components/features/useDashboardHome';
 
@@ -24,6 +25,14 @@ const makeLoaders = () => ({
   getKnowledgeWorkspace: vi.fn(async () => null),
   listWorkingMemorySnapshots: vi.fn(async () => []),
   getKnowledgeGraphStats: vi.fn(async () => null),
+});
+
+describe('millisecondsUntilNextLocalDay', () => {
+  it('returns the remaining local time until midnight', () => {
+    expect(
+      millisecondsUntilNextLocalDay(new Date('2026-08-25T23:59:59.500')),
+    ).toBe(500);
+  });
 });
 
 describe('transitionDashboardRefreshState', () => {

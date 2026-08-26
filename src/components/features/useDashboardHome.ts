@@ -21,6 +21,7 @@ import type { Meeting } from '../../types';
 import {
   type DashboardHomeModel,
   buildDashboardHomeModel,
+  getDashboardDateKey,
 } from './dashboardModel';
 
 export interface DashboardHomeState {
@@ -73,9 +74,11 @@ interface UseDashboardHomeParams {
 
 const buildEmptyDashboardHomeModel = (
   params: UseDashboardHomeParams,
+  dateKey = getDashboardDateKey(),
 ): DashboardHomeModel =>
   buildDashboardHomeModel({
     ...params,
+    dateKey,
     overdueActions: [],
     staleActions: [],
     activeActions: [],
@@ -84,6 +87,12 @@ const buildEmptyDashboardHomeModel = (
     workingMemorySnapshots: [],
     graphStats: null,
   });
+
+export const millisecondsUntilNextLocalDay = (now = new Date()): number => {
+  const nextDay = new Date(now);
+  nextDay.setHours(24, 0, 0, 0);
+  return Math.max(1, nextDay.getTime() - now.getTime());
+};
 
 const loadOptional = async <T>(
   label: string,
@@ -193,16 +202,24 @@ export const useDashboardHome = ({
   isRecording,
   meetings,
 }: UseDashboardHomeParams): DashboardHomeState => {
+  const [dateKey, setDateKey] = useState(() => getDashboardDateKey());
   const [state, setState] = useState<
     DashboardHomeState & { hasResolvedData: boolean }
   >(() => ({
-    model: buildEmptyDashboardHomeModel({ isRecording, meetings }),
+    model: buildEmptyDashboardHomeModel({ isRecording, meetings }, dateKey),
     loading: true,
     refreshing: false,
     hasResolvedData: false,
     error: null,
     refresh: async () => {},
   }));
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDateKey(getDashboardDateKey());
+    }, millisecondsUntilNextLocalDay() + 50);
+    return () => window.clearTimeout(timeout);
+  }, [dateKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -231,6 +248,7 @@ export const useDashboardHome = ({
           model: buildDashboardHomeModel({
             isRecording,
             meetings,
+            dateKey,
             ...data,
           }),
           loading: false,
@@ -259,7 +277,7 @@ export const useDashboardHome = ({
     return () => {
       cancelled = true;
     };
-  }, [isRecording, meetings]);
+  }, [dateKey, isRecording, meetings]);
 
   return {
     model: state.model,

@@ -22,6 +22,8 @@ const makeMeeting = (overrides: Partial<Meeting> = {}): Meeting => ({
       win: 'The launch blocker was resolved in the room.',
       why_it_counts:
         'The notes record the decision and the owner accepted the next step.',
+      evidence:
+        'The launch blocker was resolved in the room and the owner accepted the next step.',
       source: 'Launch Review',
     },
   }),
@@ -240,7 +242,7 @@ describe('Dashboard interactions', () => {
       'action-1',
       'confirmed',
     );
-    expect(container.textContent).toContain('My commitments');
+    expect(container.textContent).toContain("Today's focus");
     expect(container.textContent).toContain('Send the launch recap');
     expect(container.textContent).toContain('Added');
     expect(
@@ -301,6 +303,8 @@ describe('Dashboard interactions', () => {
       'button[aria-label="Review suggestion: Assign the customer recap"]',
     );
     expect(firstReview?.getAttribute('aria-expanded')).toBe('false');
+    expect(secondReview).toBeNull();
+    expect(container.textContent).toContain('Fresh suggestion · 1 of 2');
     expect(
       container.querySelector(
         'button[aria-label="Open source meeting for Send the launch recap"]',
@@ -326,39 +330,109 @@ describe('Dashboard interactions', () => {
     await act(async () => synthesis?.click());
     expect(setSelectedMeetingId).toHaveBeenCalledWith('meeting-1');
 
-    await act(async () => secondReview?.click());
-    expect(firstReview?.getAttribute('aria-expanded')).toBe('false');
-    expect(secondReview?.getAttribute('aria-expanded')).toBe('true');
-    expect(
-      container.querySelector(
-        'button[aria-label="Open source meeting for Send the launch recap"]',
-      ),
-    ).toBeNull();
-    expect(
-      container.querySelector(
-        'button[aria-label="Open source meeting for Assign the customer recap"]',
-      )?.textContent,
-    ).toContain('The customer recap needs a final owner.');
-
     const addCommitment = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Add Assign the customer recap to commitments"]',
+      'button[aria-label="Add Send the launch recap to commitments"]',
     );
     await act(async () => addCommitment?.click());
     expect(handleReviewCommitment).toHaveBeenCalledWith(
-      'action-2',
+      'action-1',
       'confirmed',
     );
-    expect(secondReview?.getAttribute('aria-expanded')).toBe('false');
+    expect(firstReview?.getAttribute('aria-expanded')).toBe('false');
+
+    act(() => root.unmount());
+  });
+
+  it('advances suggestion progress as items are dismissed', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    let activeActions = [
+      makeAction({ id: 'action-1', name: 'Send the launch recap' }),
+      makeAction({ id: 'action-2', name: 'Assign the customer recap' }),
+      makeAction({ id: 'action-3', name: 'Draft the launch checklist' }),
+    ];
+    const buildModel = () =>
+      buildDashboardHomeModel({
+        isRecording: false,
+        meetings: [makeMeeting()],
+        overdueActions: [],
+        staleActions: [],
+        activeActions,
+        attentionAlerts: [],
+        workspace: null,
+        graphStats: null,
+      });
+    const handleReviewCommitment = vi.fn(async (taskId: string) => {
+      activeActions = activeActions.filter((action) => action.id !== taskId);
+      root.render(
+        <Dashboard
+          model={buildModel()}
+          loading={false}
+          isRecording={false}
+          setSelectedMeetingId={vi.fn()}
+          setActiveTab={vi.fn()}
+          updatingTaskIds={new Set()}
+          actionError={null}
+          handleCompleteTask={vi.fn(async () => {})}
+          handleReviewCommitment={handleReviewCommitment}
+        />,
+      );
+    });
+
+    act(() =>
+      root.render(
+        <Dashboard
+          model={buildModel()}
+          loading={false}
+          isRecording={false}
+          setSelectedMeetingId={vi.fn()}
+          setActiveTab={vi.fn()}
+          updatingTaskIds={new Set()}
+          actionError={null}
+          handleCompleteTask={vi.fn(async () => {})}
+          handleReviewCommitment={handleReviewCommitment}
+        />,
+      ),
+    );
+
+    const dismissCurrentSuggestion = async () => {
+      await act(async () => {
+        container
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label^="Review suggestion:"]',
+          )
+          ?.click();
+      });
+      await act(async () => {
+        container
+          .querySelector<HTMLButtonElement>(
+            'button[aria-label^="Dismiss suggestion:"]',
+          )
+          ?.click();
+      });
+    };
+
+    expect(container.textContent).toContain('Fresh suggestion · 1 of 3');
+    await dismissCurrentSuggestion();
+    expect(container.textContent).toContain('Fresh suggestion · 2 of 3');
+    await dismissCurrentSuggestion();
+    expect(container.textContent).toContain('Fresh suggestion · 3 of 3');
 
     act(() => root.unmount());
   });
 
   it('submits a user-authored commitment from the inline dashboard capture', async () => {
-    const handleCreateCommitment = vi.fn(async () => {});
-    const { container, root } = renderDashboard({ handleCreateCommitment });
+    const handleCreateCommitment = vi.fn(async () => ({ id: 'new-action' }));
+    const handleSetDailyCommitments = vi.fn(async () => {});
+    const { container, root } = renderDashboard({
+      date: new Date('2026-08-25T12:00:00'),
+      handleCreateCommitment,
+      handleSetDailyCommitments,
+    });
 
-    const addButton = Array.from(container.querySelectorAll('button')).find(
-      (button) => button.textContent?.includes('Add commitment'),
+    const addButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Add a commitment"]',
     );
     await act(async () => addButton?.click());
 
@@ -392,6 +466,138 @@ describe('Dashboard interactions', () => {
       'Send launch recap',
       '2026-04-30',
     );
+    expect(handleSetDailyCommitments).toHaveBeenCalledWith(
+      ['new-action'],
+      [],
+      '2026-08-25',
+    );
+
+    act(() => root.unmount());
+  });
+
+  it('clears a created commitment before a secondary priority-order failure', async () => {
+    const handleCreateCommitment = vi.fn(async () => ({ id: 'new-action' }));
+    const handleSetDailyCommitments = vi.fn(async () => {
+      throw new Error('priority write failed');
+    });
+    const { container, root } = renderDashboard({
+      date: new Date('2026-08-25T12:00:00'),
+      handleCreateCommitment,
+      handleSetDailyCommitments,
+    });
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Add a commitment"]',
+        )
+        ?.click();
+    });
+    const input = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Commitment"]',
+    );
+    const setInputValue = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    await act(async () => {
+      setInputValue?.call(input, 'Send launch recap');
+      input?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector('form')
+        ?.dispatchEvent(new SubmitEvent('submit', { bubbles: true }));
+    });
+
+    expect(handleCreateCommitment).toHaveBeenCalledTimes(1);
+    expect(
+      container.querySelector('input[aria-label="Commitment"]'),
+    ).toBeNull();
+
+    act(() => root.unmount());
+  });
+
+  it('anchors the briefing on the date and exposes an ordered daily three without Ask Pluto', async () => {
+    const handleSetDailyCommitments = vi.fn(async () => {});
+    const model = buildDashboardHomeModel({
+      isRecording: false,
+      dateKey: '2026-08-25',
+      meetings: [makeMeeting()],
+      overdueActions: [],
+      staleActions: [],
+      activeActions: [
+        makeAction({
+          id: 'first',
+          name: 'First priority',
+          metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+        }),
+        makeAction({
+          id: 'second',
+          name: 'Second priority',
+          metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+        }),
+      ],
+      attentionAlerts: [],
+      workspace: null,
+      graphStats: null,
+    });
+    const { container, root } = renderDashboard({
+      model,
+      date: new Date('2026-08-25T12:00:00'),
+      handleSetDailyCommitments,
+    });
+
+    expect(container.querySelector('h1')?.textContent).toBe(
+      'Tuesday, August 25',
+    );
+    expect(container.textContent).toContain("Today's focus");
+    expect(container.textContent).not.toContain('Ask Pluto');
+    expect(
+      container
+        .querySelector('[data-testid="dashboard-commitment-row"]')
+        ?.getAttribute('draggable'),
+    ).toBe('true');
+
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>(
+          'button[aria-label="Move Second priority up"]',
+        )
+        ?.click();
+    });
+
+    expect(handleSetDailyCommitments).toHaveBeenCalledWith(
+      ['second', 'first'],
+      ['first', 'second'],
+      '2026-08-25',
+    );
+    expect(
+      Array.from(
+        container.querySelectorAll('[data-testid="dashboard-commitment-row"]'),
+      ).map((row) => row.textContent),
+    ).toEqual([
+      expect.stringContaining('Second priority'),
+      expect.stringContaining('First priority'),
+    ]);
+
+    act(() => root.unmount());
+  });
+
+  it("puts the relaxed caught-up treatment inside Today's focus when it is empty", () => {
+    const { container, root } = renderDashboard();
+    const section = container.querySelector('#todays-focus');
+
+    expect(section?.textContent).toContain('Nothing needs your attention');
+    expect(
+      section?.querySelector('[data-testid="daily-three-empty"]'),
+    ).toBeTruthy();
+    const illustration = section?.querySelector<HTMLImageElement>(
+      '[data-testid="daily-three-empty-illustration"]',
+    );
+    expect(illustration?.getAttribute('alt')).toBe('');
+    expect(illustration?.getAttribute('aria-hidden')).toBe('true');
+    expect(container.textContent).not.toContain('Nothing urgent');
 
     act(() => root.unmount());
   });

@@ -565,6 +565,7 @@ export const STRUCTURED_EXTRACTION_POLICY = `Classification policy:
 - Write decision and action text as a bare verb phrase without conversational framing such as "we decided to", "the team will", or "I will". Keep deadlines in the due field rather than repeating them in action text.
 - Remove conversational framing from key points. Keep at most 4 unique, critical key points per topic. When a key point comes from one identifiable transcript turn, set speaker to that turn's exact speaker label; use null only for a synthesis across turns or genuinely unclear attribution.
 - Every retained decision and action must include a short verbatim transcript evidence slice that directly states the extracted claim, not merely a nearby agreement or rejection cue. Quote enough adjacent transcript lines to support the full claim when its subject and resolution are split across turns. If no exact evidence slice exists, omit the settled item.
+- Set \`recent_win\` only for a concrete positive event supported by a short verbatim transcript evidence slice: praise or recognition received, delivered work, a launch or milestone completed, closed business such as a deal, account, contract, renewal, or sale, revenue won, or a comparably specific success. Both \`win\` and \`why_it_counts\` must be directly supported by that evidence; do not infer unstated impact. Ordinary participation, meeting counts, app usage, plans, commitments, and expected future outcomes are not wins. Use null when no supported positive event exists.
 - Assignee, decider, due date, and rationale fields must be null unless the same evidence slice directly supports them.`;
 
 export type MeetingNotesTemplate =
@@ -641,6 +642,7 @@ Analyze this transcript${userNotes ? ' and user notes' : ''} and produce a JSON 
   ],
   "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title", "evidence": "required short verbatim quote from transcript"}],
   "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from transcript"}],
+  "recent_win": {"win": "concise positive outcome", "why_it_counts": "specific impact", "evidence": "required short verbatim quote from transcript"} or null,
   "meeting_type": "one_on_one | team_sync | brainstorm | presentation | general"
 }
 
@@ -745,6 +747,7 @@ Revise the draft local analysis into one coherent JSON object with this exact sc
   ],
   "all_action_items": [{"text": "task", "assignee": "Name or null", "due": "deadline or null", "topic": "parent topic title", "evidence": "required short verbatim quote from raw transcript"}],
   "all_decisions": [{"text": "decision", "decided_by": "Name or null", "rationale": "why or null", "evidence": "required short verbatim quote from raw transcript"}],
+  "recent_win": {"win": "concise positive outcome", "why_it_counts": "specific impact", "evidence": "required short verbatim quote from raw transcript"} or null,
   "meeting_type": "one_on_one | team_sync | brainstorm | presentation | general"
 }
 
@@ -837,6 +840,7 @@ Return valid JSON only in this exact shape:
   "action_items": [
     { "text": "task description", "assignee": "Name or null", "due": "deadline or null", "evidence": "required short verbatim quote from transcript" }
   ],
+  "recent_win": {"win": "concise positive outcome", "why_it_counts": "specific impact", "evidence": "required short verbatim quote from transcript"} or null,
   "open_questions": ["unresolved question"]
 }
 

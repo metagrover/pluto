@@ -56,6 +56,56 @@ const document = (): AnalysisDocumentV3 => ({
 });
 
 describe('analysis grounding', () => {
+  it('keeps a positive recent win only when its evidence is in the transcript', () => {
+    const input = document();
+    input.recent_win = {
+      win: 'Closed the Acme renewal',
+      why_it_counts: 'Closed an $80,000 renewal.',
+      evidence: 'We closed the Acme renewal for $80,000.',
+    };
+
+    const result = groundAnalysisDocument(
+      input,
+      'Me: We closed the Acme renewal for $80,000.',
+    );
+
+    expect(result.analysis.recent_win).toEqual(input.recent_win);
+  });
+
+  it('drops a supported win when its stated impact is unsupported', () => {
+    const input = document();
+    input.recent_win = {
+      win: 'Closed the Acme renewal',
+      why_it_counts: 'Protected $10 million in annual revenue.',
+      evidence: 'We closed the Acme renewal for $80,000.',
+    };
+
+    const result = groundAnalysisDocument(
+      input,
+      'Me: We closed the Acme renewal for $80,000.',
+    );
+
+    expect(result.analysis.recent_win).toBeUndefined();
+    expect(result.errorCategories).toContain('unsupported_recent_win');
+  });
+
+  it('drops a recent win that is merely a meeting-count milestone', () => {
+    const input = document();
+    input.recent_win = {
+      win: 'Recorded five meetings',
+      why_it_counts: 'The user has used Pluto five times.',
+      evidence: 'This is our fifth recorded meeting.',
+    };
+
+    const result = groundAnalysisDocument(
+      input,
+      'Me: This is our fifth recorded meeting.',
+    );
+
+    expect(result.analysis.recent_win).toBeUndefined();
+    expect(result.errorCategories).toContain('unsupported_recent_win');
+  });
+
   it('resolves exact evidence after bounded punctuation normalization', () => {
     expect(normalizeTranscriptEvidence('Agreed — staged!')).toBe(
       'agreed staged',

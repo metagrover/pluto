@@ -185,6 +185,7 @@ const makeMeetingWithSupportedWin = (): Meeting =>
       recent_win: {
         win: 'Privacy review is ready to close',
         why_it_counts: 'The team resolved the final approval question.',
+        evidence: 'The team resolved the final approval question.',
         source: 'Launch Review',
       },
     }),
@@ -291,7 +292,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Top of mind');
+    expect(markup).toContain('Today&#x27;s focus');
     expect(markup).not.toContain('id="dashboard-current-read-claim"');
     expect(markup).not.toContain(
       '&lt;review&gt;unbrokenunbrokenunbrokenunbroken',
@@ -300,7 +301,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Collapse current read');
   });
 
-  it('renders the approved first viewport with capped top-of-mind and commitments', () => {
+  it('renders the approved date-led first viewport with three daily priorities', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -333,23 +334,20 @@ describe('Dashboard', () => {
     );
 
     expect(markup).toContain('Daily briefing');
-    expect(markup).toContain('Top of mind');
-    expect(markup).toContain('My commitments');
+    expect(markup).toContain('Today&#x27;s focus');
     expect(markup).toContain('Continue where you left off');
-    expect(markup).toContain('Ask Pluto');
-    expect(
-      markup.match(/data-testid="dashboard-top-of-mind-item"/g) ?? [],
-    ).toHaveLength(3);
+    expect(markup).not.toContain('Ask Pluto');
+    expect(markup).not.toContain('dashboard-top-of-mind-item');
     expect(
       markup.match(/data-testid="dashboard-commitment-row"/g) ?? [],
     ).toHaveLength(3);
-    expect(markup).toContain('View all commitments');
+    expect(markup).toContain('Remaining commitments · 1');
     expect(markup).not.toContain('No recent win surfaced yet');
     expect(markup).not.toContain('Current read');
     expect(markup).not.toContain('Memory in motion');
   });
 
-  it('distinguishes nothing urgent from caught up when suggestions remain', () => {
+  it('keeps suggestions subordinate to the empty daily-three state', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -382,29 +380,21 @@ describe('Dashboard', () => {
 
     const markup = renderDashboard(model);
 
-    expect(markup).toContain('Nothing urgent');
-    expect(markup).toContain(
-      'No blockers need attention. Review the next suggested commitment to stay ahead.',
-    );
-    expect(markup).not.toContain('You&#x27;re caught up');
-    expect(markup).toContain('Suggestions');
-    expect(markup).toContain('Suggestions · 3 to review');
+    expect(markup).toContain('Nothing needs your attention');
+    expect(markup).toContain('Fresh suggestion · 1 of 3');
     expect(markup).not.toContain('Possible follow-ups from your meetings.');
     expect(markup).toContain('Draft the launch checklist');
-    expect(markup).toContain('Schedule the privacy review');
-    expect(markup).toContain('Send the revised launch brief');
     expect(markup.match(/aria-label="Review suggestion:/g) ?? []).toHaveLength(
-      3,
+      1,
     );
     expect(markup).toContain('data-testid="dashboard-suggestion-review"');
     expect(
       markup.match(/data-testid="dashboard-suggestion-review"/g) ?? [],
-    ).toHaveLength(3);
+    ).toHaveLength(1);
     expect(markup).not.toContain('more suggestions waiting');
     expect(markup).not.toContain('Review 1 suggestion');
     expect(markup).not.toContain('Confirm task');
     expect(markup).not.toContain('Not a task');
-    expect(markup).not.toContain('Nothing needs your attention.');
     expect(markup).toContain('Recent win');
     expect(markup).toContain('Your wins will show up here');
   });
@@ -455,7 +445,7 @@ describe('Dashboard', () => {
     expect(markup).toContain('Recent win');
     expect(markup).toContain('Your wins will show up here');
     expect(markup).toContain(
-      'Pluto will surface meaningful outcomes here when your meetings support them.',
+      'Record 5 meetings to give Pluto enough context to start looking for praise, delivered work, closed business, and revenue won.',
     );
   });
 
@@ -472,11 +462,11 @@ describe('Dashboard', () => {
   it('never replaces resolved attention copy with a refresh label', () => {
     const markup = renderDashboard(makeEmptyDashboardModel());
 
-    expect(markup).toContain('You&#x27;re caught up');
+    expect(markup).toContain('Nothing needs your attention');
     expect(markup).not.toContain('Refreshing');
   });
 
-  it('renders a blocker-specific homepage hero badge for blocker-backed follow-ups', () => {
+  it('keeps blocker evidence on its daily priority row without a competing hero', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [makeMeeting()],
@@ -515,11 +505,11 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('directly supported');
-    expect(markup).toContain('is blocked.');
     expect(markup).toContain('Finalize launch checklist');
-    expect(markup).not.toContain('1 overdue item');
-    expect(markup).toContain('Review blocker');
+    expect(markup).toContain('>Blocker<');
+    expect(markup).toContain('Blocked by legal approval.');
+    expect(markup).not.toContain('directly supported');
+    expect(markup).not.toContain('is blocked.');
   });
 
   it('renders blocker context on visible follow-up cards when the linked attention item carries it', () => {
@@ -565,7 +555,8 @@ describe('Dashboard', () => {
     expect(markup).toContain('Blocker');
     expect(markup).toContain('Blocked by legal approval.');
     expect(markup).toContain('More actions for Finalize launch checklist');
-    expect(markup).toContain('Due Apr 26 · Blocked by legal approval.');
+    expect(markup).toContain('Due Apr 26');
+    expect(markup).toContain('Blocked by legal approval.');
     expect(markup).not.toContain('Due Apr 26 · Work');
   });
 
@@ -745,7 +736,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('You&#x27;re caught up');
+    expect(markup).toContain('Nothing needs your attention');
     expect(markup).not.toContain('Blocked project signal');
     expect(markup).not.toContain('1 blocker · 2 dependencies');
   });
@@ -775,8 +766,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Top of mind');
-    expect(markup).toContain('My commitments');
+    expect(markup).toContain('Today&#x27;s focus');
     expect(markup).not.toContain('Blocked project signal');
     expect(markup).not.toContain('>Project signal<');
   });
@@ -815,7 +805,7 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('You&#x27;re caught up');
+    expect(markup).toContain('Nothing needs your attention');
     expect(markup).not.toContain('Blocked project signal');
     expect(markup).not.toContain('>Project signal<');
   });
@@ -854,7 +844,7 @@ describe('Dashboard', () => {
       />,
     );
     expect(markup).not.toContain('Review blockers');
-    expect(markup).toContain('Top of mind');
+    expect(markup).toContain('Today&#x27;s focus');
   });
 
   it('keeps completion-oriented labels for overdue and stale follow-up cards', () => {
@@ -1088,7 +1078,7 @@ describe('Dashboard', () => {
     expect(markup).not.toContain('Snooze blocker');
   });
 
-  it('renders top-of-mind items without a detached summary chip', () => {
+  it('renders priority status inline without a detached summary section', () => {
     const model = buildDashboardHomeModel({
       isRecording: false,
       meetings: [],
@@ -1113,7 +1103,9 @@ describe('Dashboard', () => {
       />,
     );
 
-    expect(markup).toContain('Ship privacy review is overdue.');
+    expect(markup).toContain('Ship privacy review');
+    expect(markup).toContain('>Overdue<');
+    expect(markup).not.toContain('Ship privacy review is overdue.');
     expect(markup).not.toContain('1 item surfaced');
     expect(markup).not.toContain('Only the highest-value signals');
   });

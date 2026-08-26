@@ -433,8 +433,8 @@ export const AskPluto: React.FC<AskPlutoProps> = ({
                   className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   {msg.role === 'assistant' && (
-                    <div className="w-7 h-7 flex items-center justify-center shrink-0 mt-0.5">
-                      <Logo size={18} variant="default" />
+                    <div className="relative top-1 w-8 h-8 rounded-full bg-[oklch(0.965_0.018_82)] dark:bg-[oklch(0.38_0.025_82)] flex items-center justify-center shrink-0">
+                      <Logo size={22} variant="default" />
                     </div>
                   )}
                   <div

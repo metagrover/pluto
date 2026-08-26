@@ -60,6 +60,43 @@ const validV3: AnalysisDocumentV3 = {
 };
 
 describe('parseAnalysisDocumentV3', () => {
+  it('preserves a structured recent win with verbatim evidence', () => {
+    const result = parseAnalysisDocumentV3(
+      JSON.stringify({
+        ...validV3,
+        recent_win: {
+          win: 'Closed the Acme renewal',
+          why_it_counts: 'The renewal protects recurring revenue.',
+          evidence: 'We closed the Acme renewal for $80,000.',
+        },
+      }),
+    );
+
+    expect(result?.recent_win).toEqual({
+      win: 'Closed the Acme renewal',
+      why_it_counts: 'The renewal protects recurring revenue.',
+      evidence: 'We closed the Acme renewal for $80,000.',
+    });
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { win: 'Closed renewal', why_it_counts: 'Revenue', evidence: '   ' },
+    { win: 42, why_it_counts: 'Revenue', evidence: 'Closed renewal' },
+  ])(
+    'omits a malformed recent win without rejecting the document',
+    (recentWin) => {
+      const result = parseAnalysisDocumentV3(
+        JSON.stringify({ ...validV3, recent_win: recentWin }),
+      );
+
+      expect(result).not.toBeNull();
+      expect(result?.recent_win).toBeUndefined();
+    },
+  );
+
   it('parses a valid v3 JSON string', () => {
     const result = parseAnalysisDocumentV3(JSON.stringify(validV3));
     expect(result).not.toBeNull();

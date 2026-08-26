@@ -6,6 +6,7 @@ import {
   persistDashboardAttentionStatus,
   persistDashboardCommitmentCreation,
   persistDashboardCommitmentReview,
+  persistDashboardPriorityOrder,
 } from '../../src/components/features/dashboardActionCompletion';
 
 describe('persistDashboardCommitmentReview', () => {
@@ -129,6 +130,143 @@ describe('persistDashboardCommitmentCreation', () => {
 
     expect(upsertEntity).not.toHaveBeenCalled();
     expect(refreshDashboard).not.toHaveBeenCalled();
+  });
+});
+
+describe('persistDashboardPriorityOrder', () => {
+  it('preserves entity metadata while ranking the daily three and clearing the displaced item', async () => {
+    const entities = new Map([
+      [
+        'action-1',
+        {
+          id: 'action-1',
+          type: 'action_item' as const,
+          name: 'First',
+          status: 'active' as const,
+          due_date: null,
+          assigned_to: null,
+          metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+        },
+      ],
+      [
+        'action-2',
+        {
+          id: 'action-2',
+          type: 'action_item' as const,
+          name: 'Second',
+          status: 'active' as const,
+          due_date: null,
+          assigned_to: null,
+          metadata: JSON.stringify({
+            commitment_state: 'confirmed',
+            source_meeting_id: 'meeting-1',
+          }),
+        },
+      ],
+      [
+        'action-3',
+        {
+          id: 'action-3',
+          type: 'action_item' as const,
+          name: 'Displaced',
+          status: 'active' as const,
+          due_date: null,
+          assigned_to: null,
+          metadata: JSON.stringify({
+            commitment_state: 'confirmed',
+            dashboard_daily_priority: { date: '2026-08-25', rank: 2 },
+          }),
+        },
+      ],
+    ]);
+    const upsertEntity = vi.fn(async () => ({ id: 'saved' }));
+    const refreshDashboard = vi.fn(async () => {});
+
+    await persistDashboardPriorityOrder(
+      {
+        orderedIds: ['action-2', 'action-1'],
+        previousIds: ['action-1', 'action-3'],
+        dateKey: '2026-08-25',
+      },
+      {
+        getEntity: vi.fn(async (id: string) => entities.get(id) as never),
+        upsertEntity: upsertEntity as never,
+        refreshDashboard,
+      },
+    );
+
+    expect(upsertEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'action-2',
+        metadata: expect.objectContaining({
+          source_meeting_id: 'meeting-1',
+          dashboard_daily_priority: { date: '2026-08-25', rank: 0 },
+        }),
+      }),
+    );
+    expect(upsertEntity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'action-1',
+        metadata: expect.objectContaining({
+          dashboard_daily_priority: { date: '2026-08-25', rank: 1 },
+        }),
+      }),
+    );
+    const displacedWrite = upsertEntity.mock.calls.find(
+      ([entity]) => entity.id === 'action-3',
+    )?.[0];
+    expect(displacedWrite?.metadata).not.toHaveProperty(
+      'dashboard_daily_priority',
+    );
+    expect(refreshDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes authoritative state when a priority write fails partway through', async () => {
+    const entities = new Map(
+      ['action-1', 'action-2'].map((id) => [
+        id,
+        {
+          id,
+          type: 'action_item' as const,
+          name: id,
+          status: 'active' as const,
+          due_date: null,
+          assigned_to: null,
+          metadata: JSON.stringify({ commitment_state: 'confirmed' }),
+        },
+      ]),
+    );
+    const writeFailure = new Error('second write failed');
+    const upsertEntity = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'action-1' })
+      .mockRejectedValueOnce(writeFailure)
+      .mockResolvedValueOnce({ id: 'action-1' });
+    const refreshDashboard = vi.fn(async () => {});
+
+    await expect(
+      persistDashboardPriorityOrder(
+        {
+          orderedIds: ['action-1', 'action-2'],
+          previousIds: ['action-2', 'action-1'],
+          dateKey: '2026-08-25',
+        },
+        {
+          getEntity: vi.fn(async (id: string) => entities.get(id) as never),
+          upsertEntity: upsertEntity as never,
+          refreshDashboard,
+        },
+      ),
+    ).rejects.toBe(writeFailure);
+
+    expect(upsertEntity).toHaveBeenCalledTimes(3);
+    expect(upsertEntity).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        id: 'action-2',
+        metadata: { commitment_state: 'confirmed' },
+      }),
+    );
+    expect(refreshDashboard).toHaveBeenCalledTimes(1);
   });
 });
 

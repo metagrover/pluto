@@ -88,6 +88,7 @@ export interface DashboardActionInsightItem {
   attentionStatus: AttentionItem['status'] | null;
   dismissLabel: 'Dismiss' | 'Dismiss blocker' | 'Reopen' | null;
   snoozeLabel: 'Snooze' | 'Snooze blocker' | 'Reopen' | null;
+  dailyPriorityRank: number | null;
 }
 
 export interface DashboardCommitmentSourceSynthesis {
@@ -149,12 +150,14 @@ export type DashboardCommitments =
       state: 'empty';
       summary: string;
       items: [];
+      backlog: DashboardActionInsightItem[];
       needsConfirmation: DashboardActionInsightItem[];
     }
   | {
       state: 'populated';
       summary: string;
       items: DashboardActionInsightItem[];
+      backlog: DashboardActionInsightItem[];
       needsConfirmation: DashboardActionInsightItem[];
     };
 
@@ -198,10 +201,11 @@ export type DashboardRecentWin =
     }
   | {
       state: 'populated';
+      kind: 'evidence';
       title: string;
       whyItCounts: string;
       sourceLabel: string;
-      meetingId: Meeting['id'];
+      meetingId: Meeting['id'] | null;
     };
 
 export type DashboardBriefingFocusKind =
@@ -219,6 +223,7 @@ export interface DashboardBriefingFocus {
 
 export interface DashboardHomeModelInput {
   isRecording: boolean;
+  dateKey?: string;
   meetings: Meeting[];
   overdueActions: Entity[];
   staleActions: Entity[];
@@ -279,6 +284,27 @@ interface KnowledgeDocStructuredSummary {
 const MAX_MEETING_DETAIL_LENGTH = 180;
 const MAX_ACTION_INSIGHT_ITEMS = 5;
 const MAX_DASHBOARD_BRIEFING_ITEMS = 3;
+
+export const getDashboardDateKey = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getDailyPriorityRank = (
+  metadata: Record<string, unknown>,
+  dateKey: string,
+): number | null => {
+  const priority = metadata.dashboard_daily_priority;
+  if (!priority || typeof priority !== 'object' || Array.isArray(priority)) {
+    return null;
+  }
+  const { date, rank } = priority as Record<string, unknown>;
+  return date === dateKey && Number.isInteger(rank) && Number(rank) >= 0
+    ? Number(rank)
+    : null;
+};
 
 const sortByNewestTimestamp = <T>(
   items: T[],
@@ -740,6 +766,7 @@ const actionToInsightItem = (
   contextLabel: string | null,
   linkedAttention: AttentionItem | null,
   sourceMeeting: Meeting | null,
+  dateKey: string,
 ): DashboardActionInsightItem => {
   const metadata = parseActionMetadata(action.metadata);
   const commitmentState =
@@ -800,6 +827,7 @@ const actionToInsightItem = (
             : linkedAttention.kind === 'blocker'
               ? 'Snooze blocker'
               : 'Snooze',
+    dailyPriorityRank: getDailyPriorityRank(metadata, dateKey),
   };
 };
 
@@ -887,6 +915,7 @@ const buildActionInsights = (
   staleActions: Entity[],
   activeActions: Entity[],
   attentionAlerts: AttentionItem[],
+  dateKey: string,
 ): DashboardActionInsights => {
   const prioritizedItems = [
     ...sortActions(overdueActions, (a, b) =>
@@ -908,6 +937,7 @@ const buildActionInsights = (
         contextLabel,
         linkedAttention,
         getPersistedSourceMeeting(action, meetings),
+        dateKey,
       );
     }),
     ...sortActions(staleActions, (a, b) =>
@@ -929,6 +959,7 @@ const buildActionInsights = (
         contextLabel,
         linkedAttention,
         getPersistedSourceMeeting(action, meetings),
+        dateKey,
       );
     }),
     ...sortActions(activeActions, (a, b) => {
@@ -955,6 +986,7 @@ const buildActionInsights = (
         contextLabel,
         linkedAttention,
         getPersistedSourceMeeting(action, meetings),
+        dateKey,
       );
     }),
   ];
@@ -1080,13 +1112,23 @@ const buildTopOfMind = (
 const buildDashboardCommitments = (
   actionInsights: DashboardActionInsights,
 ): DashboardCommitments => {
-  const items =
+  const confirmedItems =
     actionInsights.state === 'populated'
       ? actionInsights.allItems
           .filter((item) => item.commitmentState === 'confirmed')
-          .sort((a, b) => toTimestamp(b.reviewedAt) - toTimestamp(a.reviewedAt))
-          .slice(0, MAX_DASHBOARD_BRIEFING_ITEMS)
+          .sort((a, b) => {
+            if (a.dailyPriorityRank !== null || b.dailyPriorityRank !== null) {
+              if (a.dailyPriorityRank === null) return 1;
+              if (b.dailyPriorityRank === null) return -1;
+              if (a.dailyPriorityRank !== b.dailyPriorityRank) {
+                return a.dailyPriorityRank - b.dailyPriorityRank;
+              }
+            }
+            return toTimestamp(b.reviewedAt) - toTimestamp(a.reviewedAt);
+          })
       : [];
+  const items = confirmedItems.slice(0, MAX_DASHBOARD_BRIEFING_ITEMS);
+  const backlog = confirmedItems.slice(MAX_DASHBOARD_BRIEFING_ITEMS);
   const needsConfirmation =
     actionInsights.state === 'populated'
       ? actionInsights.allItems
@@ -1099,6 +1141,7 @@ const buildDashboardCommitments = (
       state: 'empty',
       summary: 'No confirmed commitments need attention',
       items: [],
+      backlog,
       needsConfirmation,
     };
   }
@@ -1107,6 +1150,7 @@ const buildDashboardCommitments = (
     state: 'populated',
     summary: `${pluralize(items.length, 'commitment')} shown`,
     items,
+    backlog,
     needsConfirmation,
   };
 };
@@ -1118,6 +1162,7 @@ interface MeetingAnalysisRecentWin {
 interface MeetingRecentWinPayload {
   win?: unknown;
   why_it_counts?: unknown;
+  evidence?: unknown;
   source?: unknown;
 }
 
@@ -1141,10 +1186,13 @@ const buildRecentWin = (meetings: Meeting[]): DashboardRecentWin => {
       typeof payload.why_it_counts === 'string'
         ? payload.why_it_counts.trim()
         : '';
-    if (!title || !whyItCounts) continue;
+    const evidence =
+      typeof payload.evidence === 'string' ? payload.evidence.trim() : '';
+    if (!title || !whyItCounts || !evidence) continue;
 
     return {
       state: 'populated',
+      kind: 'evidence',
       title,
       whyItCounts,
       sourceLabel:
@@ -1157,9 +1205,13 @@ const buildRecentWin = (meetings: Meeting[]): DashboardRecentWin => {
 
   return {
     state: 'empty',
-    title: 'No recent win surfaced yet',
+    title: 'Your wins will show up here',
     detail:
-      'Pluto will only show a win when the meeting record supports the moment.',
+      meetings.length >= 5
+        ? 'Pluto is looking for supported moments like praise, delivered work, closed business, and revenue won.'
+        : meetings.length > 0
+          ? `${meetings.length} of 5 meetings recorded. Pluto will then start looking for praise, delivered work, closed business, and revenue won.`
+          : 'Record 5 meetings to give Pluto enough context to start looking for praise, delivered work, closed business, and revenue won.',
   };
 };
 
@@ -1786,6 +1838,7 @@ export const buildDashboardHomeModel = (
     staleActions,
     activeActions,
     attentionAlerts,
+    input.dateKey ?? getDashboardDateKey(),
   );
   const topOfMind = buildTopOfMind(actionInsights);
   const commitments = buildDashboardCommitments(actionInsights);

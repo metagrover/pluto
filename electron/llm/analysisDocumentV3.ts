@@ -14,6 +14,7 @@ import type {
   AnalysisQualityV3,
   DecisionV3,
   MeetingType,
+  RecentWinV3,
   TopicPoint,
   TopicSection,
 } from './analysisTypes';
@@ -129,6 +130,16 @@ const parseActionItemV3 = (raw: unknown): ActionItemV3 | null => {
   return item;
 };
 
+export const parseRecentWinV3 = (raw: unknown): RecentWinV3 | undefined => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const win = asString(record.win);
+  const whyItCounts = asString(record.why_it_counts);
+  const evidence = asString(record.evidence);
+  if (!win || !whyItCounts || !evidence) return undefined;
+  return { win, why_it_counts: whyItCounts, evidence };
+};
+
 const parseTopicSection = (raw: unknown): TopicSection | null => {
   if (!raw || typeof raw !== 'object') return null;
   const record = raw as Record<string, unknown>;
@@ -228,6 +239,7 @@ export const parseAnalysisDocumentV3 = (
     : [];
 
   const meeting_type = parseMeetingType(parsed.meeting_type);
+  const recent_win = parseRecentWinV3(parsed.recent_win);
 
   const qualityRaw =
     parsed.quality && typeof parsed.quality === 'object'
@@ -248,6 +260,7 @@ export const parseAnalysisDocumentV3 = (
     topics,
     all_action_items,
     all_decisions,
+    ...(recent_win ? { recent_win } : {}),
     meeting_type,
     quality,
     generation_metadata: parseGenerationMetadata(parsed.generation_metadata),

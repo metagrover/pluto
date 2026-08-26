@@ -146,6 +146,28 @@ describe('structured analysis extraction policy', () => {
       expect(prompt).not.toContain('when possible');
     }
   });
+
+  it('extracts only evidence-backed positive events as recent wins', () => {
+    const prompts = [
+      getStructuredAnalysisPrompt('Me: We closed the Acme renewal.'),
+      getTopicAnalysisPrompt('Acme renewal', 'Me: We closed the Acme renewal.'),
+      getStructuredAnalysisEditorialPrompt(
+        'Me: We closed the Acme renewal.',
+        JSON.stringify({ overview: 'Renewal closed.', topics: [] }),
+      ),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain('recent_win');
+      expect(prompt).toContain('praise');
+      expect(prompt).toContain('delivered work');
+      expect(prompt).toContain('closed business');
+      expect(prompt).toContain('revenue');
+      expect(prompt).toContain('verbatim');
+      expect(prompt).toContain('do not infer unstated impact');
+      expect(prompt).not.toContain('five meetings');
+    }
+  });
 });
 
 describe('global structured analysis editor', () => {

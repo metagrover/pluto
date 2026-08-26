@@ -12,6 +12,7 @@ import {
 import {
   fallbackAnalysisDocumentV3,
   parseAnalysisDocumentV3,
+  parseRecentWinV3,
 } from './analysisDocumentV3';
 import {
   groundAnalysisDocument,
@@ -23,6 +24,7 @@ import type {
   AnalysisErrorCategory,
   AnalysisGenerationMetadata,
   DecisionV3,
+  RecentWinV3,
   TopicSection,
 } from './analysisTypes';
 import { createOllamaGenerationDeadline } from './ollamaGenerationDeadline';
@@ -180,7 +182,11 @@ const mergeEditorialWithGroundedLocal = (
   }
 
   return {
-    analysis: { ...editedDraft, topics },
+    analysis: {
+      ...editedDraft,
+      topics,
+      recent_win: editedDraft.recent_win ?? groundedLocal.recent_win,
+    },
     repairedSettledOmission,
   };
 };
@@ -358,6 +364,7 @@ const compactOversizedAnalysis = (
     ...buildDraftFromTopics(topics, analysis.meeting_type),
     overview: analysis.overview,
     quality: analysis.quality,
+    recent_win: analysis.recent_win,
   };
 };
 
@@ -588,6 +595,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     const topics: TopicSection[] = [];
     const rawActionItems: ActionItemV3[] = [];
     const rawDecisions: DecisionV3[] = [];
+    const recentWins: RecentWinV3[] = [];
 
     for (const win of windows) {
       const winTranscript = win.lines.join('\n');
@@ -801,6 +809,9 @@ export class UnifiedLLMProvider implements LLMProvider {
               )
             : [];
 
+          const recentWin = parseRecentWinV3(topicParsed.recent_win);
+          if (recentWin) recentWins.push(recentWin);
+
           topics.push({
             title: analyzedTitle,
             summary:
@@ -850,6 +861,7 @@ export class UnifiedLLMProvider implements LLMProvider {
     const localDraft = buildDraftFromTopics(draftTopics);
     localDraft.all_action_items = allActionItems;
     localDraft.all_decisions = allDecisions;
+    localDraft.recent_win = recentWins[0];
     let finalDraft = localDraft;
     if (draftTopics.length > 1) {
       try {
@@ -904,6 +916,8 @@ export class UnifiedLLMProvider implements LLMProvider {
         this.pushErrorCategory(errorCategories, 'editorial_failed');
       }
     }
+
+    finalDraft.recent_win ??= localDraft.recent_win;
 
     finalDraft = compactOversizedAnalysis(finalDraft);
 
