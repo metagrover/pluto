@@ -32,6 +32,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [hydrated, setHydrated] = useState(false);
   const [finishing, setFinishing] = useState(false);
+  const [typedSetupQualifier, setTypedSetupQualifier] = useState('');
   const [requirements, setRequirements] = useState<SetupReadinessInput>({
     transcription: 'checking',
     microphone: 'checking',
@@ -118,6 +119,25 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
     void Promise.all([prepareLocalModels(), checkReadiness()]);
   }, [checkReadiness, hydrated, prepareLocalModels, step]);
 
+  useEffect(() => {
+    if (!hydrated || step !== 1) return;
+
+    const qualifier = 'just ';
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setTypedSetupQualifier(qualifier);
+      return;
+    }
+
+    const timers = [...qualifier].map((_, index) =>
+      window.setTimeout(
+        () => setTypedSetupQualifier(qualifier.slice(0, index + 1)),
+        450 + index * 70,
+      ),
+    );
+
+    return () => timers.forEach((timer) => window.clearTimeout(timer));
+  }, [hydrated, step]);
+
   const startSetup = async () => {
     await window.ipcRenderer.invoke('SET_SETTING', {
       key: 'setup_step',
@@ -181,8 +201,13 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
           <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
             <div className="w-full max-w-xl">
-              <h2 className="font-serif text-[2.25rem] font-medium leading-[1.1] tracking-[-0.025em] sm:text-[2.5rem]">
-                Ready in three minutes.
+              <h2
+                aria-label="Ready in just three minutes."
+                className="font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em] sm:text-[2.25rem]"
+              >
+                <span aria-hidden="true">
+                  Ready in {typedSetupQualifier}three minutes.
+                </span>
               </h2>
               <p className="mt-2 text-[15px] leading-6 text-[oklch(0.56_0.018_258)]">
                 One download. Two permissions.
@@ -238,7 +263,7 @@ export const SetupWizard = ({ onComplete }: SetupWizardProps) => {
 
           <section className="flex min-h-[38rem] items-center px-7 py-12 sm:px-12 lg:px-16 xl:px-24">
             <div className="w-full max-w-xl">
-              <h2 className="font-serif text-[2.25rem] font-medium leading-[1.1] tracking-[-0.025em] sm:text-[2.5rem]">
+              <h2 className="font-serif text-[2rem] font-medium leading-[1.12] tracking-[-0.02em] sm:text-[2.25rem]">
                 {readiness.status === 'ready'
                   ? 'Everything is ready.'
                   : 'Getting Pluto ready.'}

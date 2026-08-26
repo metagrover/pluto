@@ -78,7 +78,20 @@ describe('SetupWizard', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it('types just into the setup promise after the initial load', async () => {
+    vi.useFakeTimers();
+    act(() => root.render(<SetupWizard onComplete={vi.fn()} />));
+    await flush();
+
+    expect(container.textContent).toContain('Ready in three minutes.');
+
+    await act(async () => vi.advanceTimersByTime(800));
+
+    expect(container.textContent).toContain('Ready in just three minutes.');
   });
 
   it('prepares local recording requirements without Python or provider setup', async () => {
